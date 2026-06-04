@@ -1,0 +1,19 @@
+# OS
+.DS_Store
+
+# BMAD install (regenerable via `npx bmad-method install`)
+_bmad/
+_bmad-output/
+
+# IDE skill mirrors (regenerable via `bash skills/sdlc/install.sh`)
+# .claude/ is already covered by the global gitignore.
+.agents/
+.opencode/
+.zencoder/
+
+# Empty/generated scaffolding
+design-artifacts/
+skills/reports/
+
+# Node
+node_modules/

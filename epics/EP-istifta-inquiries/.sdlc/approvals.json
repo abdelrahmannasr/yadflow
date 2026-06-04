@@ -1,0 +1,4 @@
+[
+  { "artifact": "epic.md", "step": "epic-review", "approver": "alice", "role": "owner", "status": "approved", "date": "2026-06-04" },
+  { "artifact": "epic.md", "step": "epic-review", "approver": "bob", "role": "reviewer", "status": "approved", "date": "2026-06-04" }
+]
