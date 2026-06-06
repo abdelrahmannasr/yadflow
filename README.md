@@ -41,6 +41,11 @@ Defaults: every step starts `human_approve`. The four **front** authoring steps 
 UI, stories) and their reviews are **locked** — they may not be set to `machine_advance` in this
 version. Front states never auto-advance.
 
+As of **Phase 4a** the `automation` dial is no longer inert: the orchestrator `sdlc-run` reads it and,
+for the safe **back** steps, advances on its own when a step is set to `machine_advance` (and has
+*earned* it — see "Run the back half on the dial" below). The engineer review and all four front
+states stay `human_approve` forever.
+
 ## Run the full front half by hand
 
 The front half walks **epic → review → architecture+contract → review → UI design → review → stories
@@ -147,10 +152,41 @@ The build half is walked end to end on the worked epic: story **S01** shipped (`
 three tasks in `build-log.json`), **S03** built across backend + mobile, and a `health` feature
 backfilled. The code repos are regenerable from `demo-repos/README.md`.
 
+## Run the back half on the dial (Phase 4a — automation, earned)
+
+Phase 4 is **automation, earned with evidence and reversible in one move**. Phase 4a makes the
+`automation` dial real and automates exactly the safest step — the check-gate advance. The engine is
+`sdlc-run`; the evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>.json`
+(the back steps with their dials, per repo) and `trust-log.json` (every run's verdict). See
+`docs/phase-4-build-plan.md`.
+
+- **Drive a story's back half:** `sdlc-run {story} {repo}` walks `spec → tasks → implement → checks`,
+  reading each step's dial. On `machine_advance` it advances on its own; on `human_approve` it stops
+  for a human; on any FAIL, scope overrun, or contract-surface touch it **halts and pulls in a human**.
+  It always stops at the engineer review (`sdlc-ship`), which is never automated.
+- **Read the trust log:** `sdlc-status {epic}` shows each back step's dial, status, and trust record —
+  runs, % `approved-unchanged`, and whether that clears the threshold (`automation.trust_threshold` in
+  `config.yaml`, default ≥5 runs and ≥80% unchanged). The engineer review records each run's verdict
+  (a diff merged as-authored is `approved-unchanged`; one edited first is `approved-with-edits`; a
+  failed one is `rejected`).
+- **Earn automation for a step:** once a step's trust record clears the threshold,
+  `sdlc-run action: set-dial step: checks to: machine_advance` flips it. The setter **refuses** if the
+  evidence is short, or for any front state / the engineer review. Reverting
+  (`to: human_approve`) is always allowed — automation is reversible in one move.
+- **Kill switch:** `sdlc-run action: kill` forces every step back to `human_approve` system-wide
+  instantly (no code change, no per-step edits); `sdlc-run action: unkill` restores earned automation.
+
+Phase 4a ships the engine + trust log and earns only `checks` (Step B). Automating `tasks` and the
+`implement → check` handoff (Steps C–D) is Phase 4b, earned with the trust evidence this phase
+collects.
+
 ## What's intentionally NOT built yet
 
-**Phase 4** only: end-first automation — moving the safe back steps toward `machine_advance` one at a
-time (tasks → implement → checks first), keeping front states human-authored; and, much later, the
-optional service layer (watch repos, run unattended, dashboards), built only when the CLI genuinely
-can't keep up, with git remaining the source of truth. See `docs/phase-3-build-plan.md` §"Then Phase 4"
-and `docs/claude-code-build-plan.md` §8.
+**Phase 4b:** automating the next two back steps — `tasks` generation advance and the
+`implement → check` handoff — each earned with trust-log evidence, with the scope guard and
+contract-surface halt always overriding the dial. **Front states and the engineer review stay
+human_approve, permanently.**
+
+**Phase 5 (conditional):** the optional service layer (watch repos, run earned-automation steps
+unattended, read-only dashboards), built only when the CLI genuinely can't keep up, with git remaining
+the source of truth. See `docs/phase-4-build-plan.md` §"Then Phase 5" and `docs/claude-code-build-plan.md` §8.

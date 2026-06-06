@@ -61,6 +61,13 @@ engineer-review rule is satisfied (Step 2). Then:
 - **Update the story state** — when **every** task in `specs/<story>/tasks.md` has a ship record, set
   the story frontmatter `status: shipped`; otherwise `status: in-build`. The chain
   **epic → story → task → PR → mergeCommit** is now traceable end to end.
+- **Finalize the trust verdict (Phase 4).** If this story has a `build-state/<story>.json` (it ran
+  through `sdlc-run`), the engineer **confirms or overrides** the provisional trust verdict that the
+  orchestrator derived for this run, and the final verdict is written to
+  `epics/<epic>/.sdlc/trust-log.json`. The human has the last word on the trust signal: a diff merged
+  as authored is `approved-unchanged`; one the engineer edited before merge is `approved-with-edits`;
+  a rejected one is `rejected`. This is the evidence that later earns a step its `machine_advance`
+  (it never weakens the merge gate — the engineer still owns the merge).
 
 ### Step 4 — Stop
 Report what shipped and the story's state. Do not advance anything else; the front-half `state.json`

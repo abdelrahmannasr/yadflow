@@ -348,7 +348,52 @@
   end), multi-repo (S03 in backend + mobile from one locked contract, bypass blocked per repo), and
   backfill (`sdlc-backfill` for an existing feature, human-approved, gated per touched feature).
 - **Nothing auto-advances** anywhere in Phase 3 — every gate is `human_approve`; AI review is advisory.
-  End-first automation (`machine_advance`) and the optional service layer remain Phase 4 (not built).
+  End-first automation (`machine_advance`) begins in Phase 4a (below); the optional service layer is
+  the conditional Phase 5.
+
+## Phase 4a decisions (automation — Steps A + B)
+
+> Phase 4 is split. **4a** makes the second dial real, records a trust log, and earns the single
+> safest automation (the check-gate advance). **4b** (automate `tasks` and the `implement → check`
+> handoff) is deferred, to be earned with the evidence 4a collects. Front states and the engineer
+> review stay `human_approve` forever.
+
+- **The dial is now read by an engine.** Before Phase 4 the `automation` dial was inert config. The
+  new orchestrator `sdlc-run` reads it and acts: for the back half (`spec → tasks → implement →
+  checks`) it advances on its own when a step is `machine_advance`, and stops for a human on
+  `human_approve`. There is no daemon — "the engine" is the harness running `sdlc-run`, which calls the
+  existing step skills (`sdlc-spec`, `sdlc-implement`, `sdlc-checks`) **unchanged** and owns only the
+  *advance decision* + the trust record.
+- **Back-half state is now dial-bearing.** Phase 3 recorded build progress only after the fact in
+  `build-log.json`. New per-story `.sdlc/build-state/<story-id>.json` (per repo) carries each back
+  step's `automation` dial / `locked` / `status`. `engineer-review` is present and `locked: true`.
+- **Trust log = the evidence base.** New append-only `.sdlc/trust-log.json` records one entry per step
+  run with a derived verdict (`rejected` on any check FAIL / scope overrun / contract touch;
+  `approved-with-edits` if a human edited the diff; else `approved-unchanged`). The engineer review in
+  `sdlc-ship` confirms/overrides the provisional verdict — a human always has the last word on trust.
+- **Earned per step, with evidence.** A step may be flipped to `machine_advance` only once its
+  trust-log slice clears `config.yaml` `automation.trust_threshold` (default `min_runs: 5`,
+  `min_approved_unchanged: 0.8`). `sdlc-run action: set-dial` enforces it and refuses front states /
+  `engineer-review` outright (`automation.locked_steps`).
+- **Demonstrated on the worked epic (artifact-level, with real data):**
+  - `trust-log.json` is seeded from the five real ships in `build-log.json` — each shipped task passed
+    the three gates and merged as authored, so each is one `checks` run with verdict
+    `approved-unchanged`. The slice computes **5 runs, 100% unchanged → clears the threshold**, so
+    `checks` is **earned**. `tasks`/`implement`/`spec` have **0 runs → not earned**, so `set-dial`
+    would refuse them (verified by computing the predicate).
+  - `build-state/EP-istifta-inquiries-S03.json` shows the multi-repo story (backend + mobile) with
+    `checks` flipped to `machine_advance` (earned) and `engineer-review` `locked`. **Step B** is thereby
+    realized: the next task on either repo auto-advances on a clean gate pass and stops at the human
+    engineer review.
+  - **Dial both ways / halt / locks / kill switch** are specified in `sdlc-run` and walked here: flip
+    `checks` back to `human_approve` → the run stops at checks (no code change, only the dial); a gate
+    FAIL / scope overrun / contract touch → halt, `blocked`, `rejected` trust entry, pull in a human; an
+    attempt to set `epic` or `engineer-review` to `machine_advance` → refused; `action: kill` forces
+    every effective dial to `human_approve` system-wide (one line in `config.yaml`), `unkill` restores.
+  - **Visibility:** `sdlc-status` now prints, per story-repo, the back-half chain with each step's dial
+    and status, the trust record (runs / % unchanged / earned-vs-gathering), and the kill-switch state.
+- **Config & JSON validated:** `config.yaml` `automation` block parses (YAML OK); `trust-log.json` and
+  `build-state/*.json` are valid JSON; the earned/not-earned math was computed against the threshold.
 
 ## License note (for any future commercial intent)
 

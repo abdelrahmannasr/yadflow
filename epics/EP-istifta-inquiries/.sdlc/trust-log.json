@@ -1,0 +1,11 @@
+{
+  "epic": "EP-istifta-inquiries",
+  "note": "Append-only trust ledger (Phase 4a). Each entry is one back-half step run. Seeded from the five real ships in build-log.json: every shipped task passed the three check gates and merged as authored, so each contributes one `checks` run with verdict approved-unchanged. ranBy: human because Phase 3 ran every advance by hand. This is the evidence base that earns a step its machine_advance (schema: ../../../skills/sdlc-author-epic/references/state-schema.md).",
+  "runs": [
+    { "story": "EP-istifta-inquiries-S01", "repo": "backend", "step": "checks", "automation": "human_approve", "verdict": "approved-unchanged", "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false }, "ranBy": "human", "date": "2026-06-06", "note": "T01 create-inquiry; gates pass; merged as authored" },
+    { "story": "EP-istifta-inquiries-S01", "repo": "backend", "step": "checks", "automation": "human_approve", "verdict": "approved-unchanged", "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false }, "ranBy": "human", "date": "2026-06-06", "note": "T03 server-owned-status" },
+    { "story": "EP-istifta-inquiries-S01", "repo": "backend", "step": "checks", "automation": "human_approve", "verdict": "approved-unchanged", "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false }, "ranBy": "human", "date": "2026-06-06", "note": "T02 validate-input" },
+    { "story": "EP-istifta-inquiries-S03", "repo": "backend", "step": "checks", "automation": "human_approve", "verdict": "approved-unchanged", "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false }, "ranBy": "human", "date": "2026-06-06", "note": "T01 queue-endpoint" },
+    { "story": "EP-istifta-inquiries-S03", "repo": "mobile", "step": "checks", "automation": "human_approve", "verdict": "approved-unchanged", "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false }, "ranBy": "human", "date": "2026-06-06", "note": "T01 queue-screen" }
+  ]
+}

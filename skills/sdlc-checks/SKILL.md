@@ -69,9 +69,17 @@ A non-zero exit is a FAIL. Summarize which gates passed and, for any failure, th
 (spec-link: add the `Task:` trailer / spec; contract-check: route back to the architecture gate and
 re-lock the contract; build/test/lint: fix the failing lint/test).
 
-### Step 4 — Stop (no auto-advance)
+### Step 4 — Report; the advance decision belongs to the dial (Phase 4)
 Report the gate results. Passing gates do **not** merge anything — the AI review (Step D/E) and the
-human engineer review (Step E) still own the merge. Do not edit the epic's `.sdlc/` state.
+human engineer review (Step E) still own the merge. This skill never edits the epic's `.sdlc/` state.
+
+- **Run standalone** (the Phase 3 default): **stop** here. A clean pass does not advance anything; a
+  human takes the next step.
+- **Run by the orchestrator** (`sdlc-run`, Phase 4): this skill still just reports PASS/FAIL — the
+  *advance decision* is the orchestrator's, read from the `checks` step's `automation` dial. On a clean
+  pass with `checks` earned to `machine_advance`, `sdlc-run` advances to `engineer-review` on its own;
+  on any FAIL it halts and pulls in a human (build plan §B). **What the gates check is unchanged** —
+  only who decides to proceed after a clean pass.
 
 ## Hard rules (build plan §C, Cross-cutting)
 
@@ -79,7 +87,9 @@ human engineer review (Step E) still own the merge. Do not edit the epic's `.sdl
 - **Contract surface is never widened from a code repo.** contract-check routes surface changes back
   to the architecture gate; only an updated, re-locked contract + `Contract-Change: yes` may pass.
 - **Tests must exercise behavior.** build/test/lint is not satisfied by empty or trivial tests.
-- **Nothing auto-advances.** Phase 3 runs the gates by hand or in CI; the human owns the merge.
+- **The gate never advances itself.** A FAIL always halts. A clean PASS advances only when the
+  orchestrator's `checks` dial is `machine_advance` (earned) — and only as far as the engineer review,
+  which is always human. Standalone, the gate still stops and the human owns the merge.
 
 ## Reference
 - Gate definitions, the canonical scripts, CI wiring, and the convention map: `references/check-gates.md`.

@@ -66,6 +66,12 @@ list, **flag and STOP** — do not silently widen the diff. Report the extra fil
 task's spec can be corrected (re-run `sdlc-spec` / re-scope the task) before implementing. A task whose
 declared files are wrong is a spec bug, not an implementation decision.
 
+This stop is a **scope overrun** — a halt condition that pulls in a human regardless of any automation
+dial. When this step is driven by the orchestrator (`sdlc-run`, Phase 4), the stop must be legible to
+it: mark the `implement` step `status: blocked` in `build-state/<story>.json` and surface
+`scope_overrun: true` so the run records a `rejected` trust entry and halts (it never advances past a
+boundary breach). The same applies to the Step 5 contract-surface stop (`contract_touch: true`).
+
 ### Step 5 — Contract-surface check (local pre-flight for Step C)
 Determine whether the diff touches the **locked contract surface** (the API/event/data-model shapes in
 `epics/<epic>/contract.md`'s `CONTRACT-SURFACE` block). Normal implementation **consumes** the
@@ -86,8 +92,10 @@ sibling tasks' work.
 ### Step 7 — Stop (no auto-advance)
 Report: the branch name, the files changed, how the change satisfies the task's acceptance criterion,
 the result of any test/smoke run, and that the next action is the **check gates** (Step C —
-`sdlc-checks`) then the PR and review (Steps D–E, not built yet). Do **not** open a PR, merge, or touch
-the epic's `.sdlc/` state. Step B ends at a committed task branch.
+`sdlc-checks`) then the PR and review (Steps D–E). Do **not** open a PR, merge, or hand-edit the epic's front-half `state.json`. Step
+B ends at a committed task branch. (When driven by `sdlc-run`, the orchestrator — not this skill —
+records the `implement` step's status and trust entry; this skill only signals success or a
+scope/contract halt.)
 
 ## Hard rules (build plan §B, Cross-cutting)
 

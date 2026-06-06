@@ -60,3 +60,24 @@ build:
     pack_flags: "--compress --include <globs> --include-logs --style markdown"   # one feature at a time; Secretlint by default
     spec_location: "specs/backfill/<feature>/spec.md"   # draft (verified: false) until a human approves
     gate_scope: touched-features   # block a change only until the features it touches have approved specs
+
+# Phase 4 (automation) — the SECOND dial made real. Until Phase 4 nothing read this dial; the
+# orchestrator (sdlc-run) now does. Governing rule: automation is EARNED per step, with trust-log
+# evidence, and is reversible in one move (phase-4-build-plan.md §"one principle"). Front states are
+# never listed in back_steps and can never be flipped — the engineer keeps authority over decisions.
+automation:
+  # The only steps that MAY be automated, safest-end first (phase-4-build-plan.md build order).
+  # Phase 4a ships the engine + earns `checks` (Step B). `tasks`/`implement` advance are Phase 4b.
+  back_steps: [spec, tasks, implement, checks]
+  default: human_approve            # every back step starts manual; machine_advance must be earned
+  # A back step is a CANDIDATE for machine_advance only once its trust-log slice clears this bar.
+  # "It seems fine" is not evidence (phase-4-build-plan.md §"Explicitly NOT").
+  trust_threshold:
+    min_runs: 5                     # at least this many recorded runs at the step
+    min_approved_unchanged: 0.8     # >= this fraction "approved-unchanged" over those runs
+  # Hard lock — the dial-setter REFUSES machine_advance for these, regardless of trust evidence.
+  # The four front authoring steps (already locked:true in state.json) + the human merge gate.
+  locked_steps: [epic, architecture, ui-design, stories, engineer-review]
+  # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
+  # system-wide, no per-step edits. One line, instantly reversible. Toggle via `sdlc-run action: kill`.
+  kill_switch: false

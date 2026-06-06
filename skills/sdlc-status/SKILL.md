@@ -1,6 +1,6 @@
 ---
 name: sdlc-status
-description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. Use when the user says "sdlc status", "where is epic EP-...", or "what is blocking the gate".'
+description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in the build half it also prints each back-half step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Use when the user says "sdlc status", "where is epic EP-...", "what is blocking the gate", or "show the trust record".'
 ---
 
 # SDLC — Status (read-only)
@@ -20,7 +20,10 @@ report all if the user asked for an overview).
 
 ### Step 2 — Read state
 Read `.sdlc/state.json`, `.sdlc/approvals.json`, `epic.md` frontmatter (for `repos`), and — if present
-— `.sdlc/contract-lock.json`. Do not modify them.
+— `.sdlc/contract-lock.json`. For the build half (Phase 4), also read — if present — every
+`.sdlc/build-state/<story-id>.json`, `.sdlc/trust-log.json`, and the `automation` block of
+`skills/sdlc/config.yaml` (`back_steps`, `trust_threshold`, `locked_steps`, `kill_switch`). Do not
+modify any of them.
 
 ### Step 3 — Report
 Print, in this order:
@@ -53,6 +56,19 @@ Print, in this order:
    (and, when at/after `architecture-review`, whether the current surface still matches it).
 5. **Stories** — if `stories/` has files, list each story `id` and its `repos` tags.
 6. **Files** — list the review records present under `reviews/` for the current artifact.
+7. **Build half (per story, per repo)** — if any `.sdlc/build-state/<story-id>.json` exists, then for
+   each such story and each of its repos print the back-half chain
+   `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
+   `automation` dial, and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
+   which back steps are automated and where a run is waiting.
+8. **Automation & trust** — print the system-wide **kill switch** state from `config.yaml`
+   `automation.kill_switch` (when `on`, note that every step is forced to `human_approve`). Then, for
+   each back-half step that has entries in `.sdlc/trust-log.json`, print its **trust record**: number
+   of runs, the fraction with `verdict == "approved-unchanged"`, and whether that clears
+   `automation.trust_threshold` (`min_runs`, `min_approved_unchanged`) — i.e. whether the step is
+   **earned** (eligible to be flipped to `machine_advance`) or still **gathering evidence**. Restate
+   the predicate (self-contained): `earned = runs >= min_runs AND unchanged/runs >= min_approved_unchanged`.
+   Never recommend flipping a locked step or a front state — those can never be `machine_advance`.
 
 ### Hard rule
 This skill is strictly read-only. If the user wants to comment, approve, or advance, point them to
