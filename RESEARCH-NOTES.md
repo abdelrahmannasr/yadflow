@@ -151,6 +151,38 @@
   Repomix is a CLI (and `npx impeccable detect` is the only other true subprocess); Spec Kit and
   Impeccable `document|extract|craft` remain harness slash-commands (Deviation 3).
 
+## Phase 3 decisions (build-half Step A)
+
+> Recorded 2026-06-06 while building Step A (`sdlc-spec`) — the Spec Kit handoff — on one repo
+> (`backend`), one story (`EP-istifta-inquiries-S01`). Per `docs/phase-3-build-plan.md` Step A is the
+> riskiest integration and is built/verified **alone** before Step B (`sdlc-implement`).
+
+- **Spec Kit command names confirmed for Step A** (DoD: "Command names recorded in
+  `RESEARCH-NOTES.md`"). The heavy ceremony runs **once per story per repo**, in order:
+  `/speckit.specify` → `/speckit.clarify` → `/speckit.plan` → `/speckit.analyze` →
+  `/speckit.checklist` → `/speckit.tasks`. `/speckit.constitution` (project bootstrap) and
+  `/speckit.implement` (the per-task build loop) are **deferred** — implement is Step B.
+
+- **Output locations** (restate §2): `specs/<feature-id>/spec.md` (+ `research.md`, `data-model.md`,
+  `contracts/`), `plan.md`, `tasks.md`; constitution `.specify/memory/constitution.md`. Step A adds one
+  non-Spec-Kit file, `specs/<feature-id>/link.md`, pointing back to the story.
+
+- **`{feature-id}` convention = the permanent story ID** (`EP-<slug>-S0N`), pinned over Spec Kit's
+  numbered auto-slug (which is unstable and would sever the downstream story link). `link.md` is the
+  crosswalk backstop if a Spec Kit version forces its own folder name.
+
+- **Installed-vs-degraded decision.** `sdlc-spec` drives `/speckit.*` when installed; when absent it
+  hand-authors the same files in Spec Kit's layout and records `speckit: not-installed` in `link.md`
+  (same graceful-degradation pattern as Impeccable in `sdlc-author-ui`). **Spec Kit is not installed in
+  this repo as of 2026-06-06**, so Step A was verified primarily via the **degraded** path. The files
+  match Spec Kit's layout so a later real run (or Step B) reads them unchanged.
+
+- **Code repos are separate git repos.** Code repos live as their own `.git` repos under
+  `demo-repos/<repo>/` (gitignored from the product repo, regenerable via `demo-repos/README.md`),
+  faithful to "per-repo specs in each code repo, contract singular in the product repo." Step A never
+  re-locks or widens the contract; it **quotes** the locked surface (`POST /inquiries`, `Inquiry`,
+  `InquiryStatus` for S01) and routes any gap back to the architecture gate.
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).

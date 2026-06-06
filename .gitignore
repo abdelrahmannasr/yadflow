@@ -11,6 +11,12 @@ _bmad-output/
 .opencode/
 .zencoder/
 
+# Throwaway demo code repos (Phase 3). Each demo-repos/<repo>/ is its OWN git repo
+# modeling a real separate code repo — never tracked by (or a submodule of) the product repo.
+# The explainer demo-repos/README.md IS tracked (negation below).
+demo-repos/*/
+!demo-repos/README.md
+
 # Empty/generated scaffolding
 design-artifacts/
 skills/reports/

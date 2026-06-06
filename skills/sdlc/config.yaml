@@ -28,3 +28,12 @@ defaults:
 review_gate:
   default_reviewers: 1          # non-owner reviewers required (in addition to 1 owner) => owner + 1 reviewer
   escalate_when: [contract, auth, payments]   # escalate to domain owners
+
+# Build half (Phase 3). Code repos are SEPARATE git repos (one .git each), not subfolders
+# of the product repo — faithful to "per-repo specs in each code repo, contract singular in the
+# product repo" (phase-3-build-plan.md, Cross-cutting). Documentation-as-config for sdlc-spec (Step A).
+build:
+  code_repos_root: "{project-root}/demo-repos"   # throwaway demo code repos for this build half
+  feature_id: story_id          # specs/<story-id>/ — pinned to the permanent story ID, not Spec Kit's auto-slug
+  spec_layout: speckit          # follow Spec Kit's native spec/plan/tasks layout
+  speckit_ceremony: [specify, clarify, plan, analyze, checklist, tasks]   # heavy run, once per story per repo
