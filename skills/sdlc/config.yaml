@@ -54,3 +54,9 @@ build:
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
   build_log: "epics/EP-<slug>/.sdlc/build-log.json"   # append-only ship ledger (back-half analogue of approvals.json)
   story_build_states: [in-build, shipped]   # in-build = some tasks shipped; shipped = all tasks in tasks.md shipped
+  # Backfill (sdlc-backfill) — specs for already-built features in an existing repo.
+  backfill:
+    tool: repomix                  # the one true CLI subprocess: `npx repomix@latest` (Phase 0 / RESEARCH-NOTES §3)
+    pack_flags: "--compress --include <globs> --include-logs --style markdown"   # one feature at a time; Secretlint by default
+    spec_location: "specs/backfill/<feature>/spec.md"   # draft (verified: false) until a human approves
+    gate_scope: touched-features   # block a change only until the features it touches have approved specs

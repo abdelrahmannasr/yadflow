@@ -314,6 +314,42 @@
   in Step C. So each code repo independently enforces the single locked contract; the shared surface
   cannot be widened from inside either repo.
 
+## Phase 3 decisions (build-half Step G — backfill)
+
+> Recorded 2026-06-06 while building Step G (`sdlc-backfill`) and backfilling one existing feature in
+> `demo-repos/backend`. Per `docs/phase-3-build-plan.md` §G.
+
+- **Repomix confirmed runnable as a CLI** — `npx repomix@latest` resolved to **v1.14.1** here (Node 20
+  engine warning, runs fine). Packed ONE feature with
+  `--compress --include "src/health/**" --include-logs --style markdown -o <out>.md`; **Secretlint ran
+  by default** ("No suspicious files detected"). 1 file, ~1.4k tokens — small and signal-dense, exactly
+  what the AI draft needs. (Degrade path documented if `npx repomix` is ever unavailable.)
+- **Draft, unverified until human-approved.** A pre-existing `src/health` feature (no spec) was
+  backfilled into `specs/backfill/health/spec.md` with a **"describe what exists, do not invent"**
+  prompt — hard-coded `status/checks` recorded as built, and the unknowns (no HTTP route for it in the
+  pack) marked `<!-- unverified: … -->` rather than guessed. Frontmatter `verified: false` until a human
+  approves (reusing `sdlc-review-gate`: owner + 1 reviewer), then `verified: true` + `status: approved`.
+- **Boundary: auto-propose, human-confirm.** The feature boundary (`src/<feature>/`) is proposed from
+  the convention and confirmed by a human before packing.
+- **Gated per touched feature (DoD).** `checks/backfill-check.sh` blocks a change touching a feature
+  whose backfill spec is not `verified: true` — and **only** that feature: a change to `src/health`
+  FAILED while its spec was unverified and PASSED after approval, while `src/inquiry` (forward-spec'd,
+  no backfill spec) was never blocked. Never the whole repo at once.
+
+## Phase 3 — done
+
+> All of Phase 3 (build half) is built and proven on the worked demo. The team can run the whole build
+> half by hand; `README.md` documents it.
+
+- **Steps A–G complete.** A `ready-for-build` story goes: spec (`sdlc-spec`, Spec Kit) → implement
+  (`sdlc-implement`, one atomic task = one branch) → check gates (`sdlc-checks`: spec-link,
+  contract-check, build/test/lint) → PR/MR template + risk routing (`sdlc-pr-template`) → AI review +
+  engineer review + ship (`sdlc-ship`, build-log + story state). Proven single-repo (S01 shipped end to
+  end), multi-repo (S03 in backend + mobile from one locked contract, bypass blocked per repo), and
+  backfill (`sdlc-backfill` for an existing feature, human-approved, gated per touched feature).
+- **Nothing auto-advances** anywhere in Phase 3 — every gate is `human_approve`; AI review is advisory.
+  End-first automation (`machine_advance`) and the optional service layer remain Phase 4 (not built).
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).
