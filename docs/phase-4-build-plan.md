@@ -104,3 +104,5 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 ## Then Phase 5 (preview, do not build unless needed)
 
 The optional service layer: a small, rebuildable read-index and/or a daemon that can watch repos and run earned-automation steps unattended (e.g. overnight), plus a read-only dashboard across features and projects. Built ONLY when the CLI genuinely can't keep up — and even then, git stays the source of truth and the service stays a rebuildable layer on top, never the system of record. Add it when a real bottleneck is measured, not before.
+
+The full trigger-gated preview — what must be **measured** before any of it is built, the hard rules it inherits, and the cheap instrumentation to add now so the decision is data-driven — is `docs/phase-5-build-plan.md`.
