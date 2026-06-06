@@ -1,0 +1,53 @@
+{
+  "epic": "EP-istifta-inquiries",
+  "ships": [
+    {
+      "story": "EP-istifta-inquiries-S01",
+      "task": "T01",
+      "repo": "backend",
+      "branch": "feat/EP-istifta-inquiries-S01-T01-create-inquiry",
+      "pr": "local-demo",
+      "mergeCommit": "06edb9e",
+      "gates": ["spec-link", "contract-check", "build-test-lint"],
+      "ai_review": "coderabbit (advisory)",
+      "engineer_review": [
+        { "approver": "amelia", "role": "owner" },
+        { "approver": "carol", "role": "reviewer" }
+      ],
+      "risk": "low",
+      "shippedAt": "2026-06-06"
+    },
+    {
+      "story": "EP-istifta-inquiries-S01",
+      "task": "T03",
+      "repo": "backend",
+      "branch": "feat/EP-istifta-inquiries-S01-T03-server-owned-status",
+      "pr": "local-demo",
+      "mergeCommit": "cab4949",
+      "gates": ["spec-link", "contract-check", "build-test-lint"],
+      "ai_review": "coderabbit (advisory)",
+      "engineer_review": [
+        { "approver": "amelia", "role": "owner" },
+        { "approver": "carol", "role": "reviewer" }
+      ],
+      "risk": "low",
+      "shippedAt": "2026-06-06"
+    },
+    {
+      "story": "EP-istifta-inquiries-S01",
+      "task": "T02",
+      "repo": "backend",
+      "branch": "feat/EP-istifta-inquiries-S01-T02-validate-input",
+      "pr": "local-demo",
+      "mergeCommit": "6553960",
+      "gates": ["spec-link", "contract-check", "build-test-lint"],
+      "ai_review": "coderabbit (advisory)",
+      "engineer_review": [
+        { "approver": "amelia", "role": "owner" },
+        { "approver": "carol", "role": "reviewer" }
+      ],
+      "risk": "low",
+      "shippedAt": "2026-06-06"
+    }
+  ]
+}

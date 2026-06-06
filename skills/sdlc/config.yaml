@@ -50,3 +50,7 @@ build:
     github: ".github/pull_request_template.md"
     gitlab: ".gitlab/merge_request_templates/Default.md"
   risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (sdlc-review-gate escalation)
+  # Step E (sdlc-ship) — AI review (advisory) + engineer review (the human gate) + ship.
+  ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
+  build_log: "epics/EP-<slug>/.sdlc/build-log.json"   # append-only ship ledger (back-half analogue of approvals.json)
+  story_build_states: [in-build, shipped]   # in-build = some tasks shipped; shipped = all tasks in tasks.md shipped

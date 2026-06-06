@@ -1,0 +1,19 @@
+# CodeRabbit — AI first-pass review (Phase 3 build plan §E).
+# Advisory only: a second set of eyes that COMMENTS on every PR. It never approves or merges — the
+# human engineer review (sdlc-review-gate discipline) owns that decision. See skills/sdlc-ship.
+language: en
+reviews:
+  request_changes_workflow: false   # never block the merge — the engineer review is the gate
+  high_level_summary: true
+  review_status: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "src/**"
+      instructions: >-
+        Check the diff against the task's spec under specs/<story>/; flag any change that leaves the
+        files the task declared, or that alters the contract surface without Contract-Change.
+chat:
+  auto_reply: true

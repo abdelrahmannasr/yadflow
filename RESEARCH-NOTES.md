@@ -264,6 +264,31 @@
   owners. (Bash note: the domain split uses a trailing newline so the last domain isn't dropped by
   `while read`; portable to macOS bash 3.2.)
 
+## Phase 3 decisions (build-half Step E)
+
+> Recorded 2026-06-06 while building Step E (`sdlc-ship`) — AI review + engineer review + ship — and
+> shipping story `EP-istifta-inquiries-S01` end to end. Per `docs/phase-3-build-plan.md` §E.
+
+- **Two sets of eyes.** AI review is **advisory** — CodeRabbit (`.coderabbit.yaml`, `request_changes_workflow: false`)
+  comments on every PR but never approves or merges. The **engineer review** is the authority: a human
+  reads the diff against the spec and records an approval with the same `human_approve` discipline as
+  the front gates, reusing `sdlc-review-gate`'s rule — base (owner + 1 reviewer), escalating to a
+  domain-owner per touched domain on high risk / contract / auth / payments (the Step D routing).
+- **Back-half state = files, like the front half.** Ship records go in
+  `epics/<epic>/.sdlc/build-log.json` (append-only — the analogue of `approvals.json`): one record per
+  shipped task with story/task/repo/branch/PR/mergeCommit/gates/ai_review/engineer_review/risk/date.
+  The story frontmatter `status` becomes `in-build` (some tasks shipped) then `shipped` (every task in
+  `tasks.md` shipped). The front-half `state.json` is left untouched at `ready-for-build`.
+- **Traceability proven both ways.** epic → story → `tasks.md` → `build-log.json` ship → `mergeCommit`,
+  and back: a merge commit's `Task:` trailer → story → epic. Verified on S01.
+- **Demonstrated (DoD).** AI review wired (advisory). S01 shipped **end to end**: T03 and T02 built via
+  the `sdlc-implement` loop and merged after their gates passed **pre-merge** (spec-link, contract-check,
+  build/test/lint all PASS) and an engineer review (amelia owner + carol reviewer, low risk → base
+  rule); T01 (already merged in the Step C demo) recorded too. All three tasks in `tasks.md` have ship
+  records, so S01 is `status: shipped`; `build-log.json` holds the full chain. Gates run **before** the
+  merge — checking them after merge gives an empty `master..HEAD` range (nothing to link), which is
+  expected, not a gate failure.
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).

@@ -1,7 +1,7 @@
 ---
 id: EP-istifta-inquiries-S01
 epic: EP-istifta-inquiries
-status: draft
+status: shipped
 repos: [backend]
 ---
 
