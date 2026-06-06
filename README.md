@@ -109,10 +109,48 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
   epics/EP-istifta-inquiries/contract.md | shasum -a 256
 ```
 
+## Run the full build half by hand (Phase 3)
+
+From a `ready-for-build` story, the **build half** turns one atomic task into shipped code through
+gates that protect production. Per-repo specs live in each code repo; the contract stays singular in
+the product repo. Code repos are **separate git repos** under `demo-repos/<repo>/` (gitignored;
+`demo-repos/README.md` explains regeneration). **Nothing auto-advances** — every gate is human-owned.
+
+1. **Spec** — `sdlc-spec` runs the heavy Spec Kit ceremony **once per story per repo**
+   (`specify`→`clarify`→`plan`→`analyze`→`checklist`→`tasks`), writing `specs/<story-id>/` and a
+   `link.md` back to the story (drives `/speckit.*` when installed, else degrades). It **quotes** the
+   locked contract; it never widens it.
+2. **Implement** — `sdlc-implement` (the `dev` step): one atomic task = one branch
+   (`feat/<story>-<task>-…`) = one PR. The diff stays inside the files the task declared; the commit
+   ends with a `Task:` trailer (and `Contract-Change: yes` only if the locked surface is touched).
+3. **Check gates** — `sdlc-checks` wires three CI gates (GitHub + GitLab) that must pass before merge:
+   **spec-link** (links a real story/spec), **contract-check** (a contract-surface change without
+   `Contract-Change` + a re-locked contract FAILS, routing back to the architecture gate),
+   **build/test/lint**. They fail closed on a bad base ref.
+4. **PR/MR template + risk routing** — `sdlc-pr-template` drops the platform-matched template with an
+   Impact & Risk block; `high` risk (or a contract/auth/payments surface) routes the review to domain
+   owners (`risk-route.sh`), the same escalation as the gate.
+5. **AI review → engineer review → ship** — `sdlc-ship`: CodeRabbit is an advisory first pass (never
+   the authority); a human engineer approves (owner + 1 reviewer, escalating to domain owners); on
+   merge the ship is recorded in `.sdlc/build-log.json` and the story state becomes `in-build` →
+   `shipped`. The epic → story → task → PR → mergeCommit chain is traceable both ways.
+
+**Multi-repo:** a story tagged `repos: [backend, mobile]` runs the above in each repo independently from
+the **one** locked contract; the contract-check blocks a surface bypass in either repo.
+
+**Backfill existing code:** `sdlc-backfill` packs one feature with **Repomix** (`npx repomix`, secret-scan
+by default), drafts an *unverified* spec ("describe what exists, do not invent"), a human approves it,
+and `backfill-check.sh` blocks a change to that feature until its spec is approved — gated per touched
+feature, never the whole repo.
+
+The build half is walked end to end on the worked epic: story **S01** shipped (`status: shipped`,
+three tasks in `build-log.json`), **S03** built across backend + mobile, and a `health` feature
+backfilled. The code repos are regenerable from `demo-repos/README.md`.
+
 ## What's intentionally NOT built yet
 
-Per the build plan's smallest-useful-first order, the **build half** (Phase 3) adds: Spec Kit per
-story per repo (`specify`→`clarify`→`plan`→`tasks`…), the `dev` implement step, check gates
-(build/test/lint + **contract-check** + spec-link), AI + engineer review, ship, the Repomix
-**backfill** step, PR/MR templates, and any move toward `machine_advance` (back states only, never the
-front). See `docs/phase-2-build-plan.md` §"Then Phase 3" and `docs/claude-code-build-plan.md` §8.
+**Phase 4** only: end-first automation — moving the safe back steps toward `machine_advance` one at a
+time (tasks → implement → checks first), keeping front states human-authored; and, much later, the
+optional service layer (watch repos, run unattended, dashboards), built only when the CLI genuinely
+can't keep up, with git remaining the source of truth. See `docs/phase-3-build-plan.md` §"Then Phase 4"
+and `docs/claude-code-build-plan.md` §8.
