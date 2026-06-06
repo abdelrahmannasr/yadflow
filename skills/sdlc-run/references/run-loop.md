@@ -80,14 +80,18 @@ finalizes the entry — a human always has the last word on the trust signal.
 `derive_verdict(signals)` — the same three-way shape for every back step:
 ```
 edited = human_edited_diff or human_edited_spec or task_rescoped
-if checks == "fail" or scope_overrun or contract_touch or artifact_discarded:   verdict = "rejected"
-elif edited:                                                                    verdict = "approved-with-edits"
-else:                                                                           verdict = "approved-unchanged"
+if checks == "fail" or scope_overrun or contract_touch:   verdict = "rejected"
+elif edited:                                              verdict = "approved-with-edits"
+else:                                                     verdict = "approved-unchanged"
 ```
+
+This is the **provisional** verdict from the recorded signals. The human gate that finalizes the entry
+may also override it to `rejected` — e.g. the human discards/regenerates the spec or the task list, or
+rejects the diff at the engineer review for a reason no signal captured. A human override always wins.
 
 Rationale: the trust log should count an output as fully trustworthy (`approved-unchanged`) only when
 the machine's work was accepted as-is. Any human correction is `approved-with-edits` (useful but not
-yet trustworthy enough to automate); any failure, boundary breach, or discarded artifact is `rejected`.
+yet trustworthy enough to automate); any failure or boundary breach is `rejected`.
 
 ## The trust threshold (when a step is earned)
 

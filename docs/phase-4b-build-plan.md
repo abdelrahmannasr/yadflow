@@ -73,9 +73,10 @@ machine self-grade.
 
 ## What gets built (small — the engine is already there)
 
-1. **Spec-review trust hook** — when a spec is approved/edited via `sdlc-review-gate` (or `sdlc-spec`'s
-   handoff), append a `spec` entry to `trust-log.json` with the derived verdict. (Edit:
-   `skills/sdlc-spec/SKILL.md` + a note in `sdlc-review-gate` references.)
+1. **Spec-review trust hook** — when the human accepts (or edits) the generated `specs/<story>/`,
+   append a `spec` entry to `trust-log.json` with the derived verdict. Implemented in `sdlc-spec`
+   Step 8 (the spec-acceptance point), so no separate review-gate skill is needed. (Edit:
+   `skills/sdlc-spec/SKILL.md`.)
 2. **Tasks-survived hook** — when `sdlc-implement` first consumes a task from `tasks.md`, append a
    `tasks` entry: `approved-unchanged` if the task's declared `Files:`/scope were used as generated,
    `approved-with-edits` if the human re-scoped it first. (Edit: `skills/sdlc-implement/SKILL.md`.)

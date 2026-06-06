@@ -1,6 +1,6 @@
 ---
 name: sdlc-implement
-description: 'Build-half Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). Never auto-advances — hands off to the check gates. Use when the user says "implement task <id>" or after a story is spec''d.'
+description: 'Build-half Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). The step never advances itself; it produces a committed branch and hands off to the check gates, which the orchestrator (sdlc-run) may auto-run once `implement` is earned to machine_advance (Phase 4b Step D) — the merge still needs the gates and the engineer review. Use when the user says "implement task <id>" or after a story is spec''d.'
 ---
 
 # SDLC — Implement Task (build-half Step B)
