@@ -24,6 +24,12 @@ touched domain). This step **never auto-advances**; it sets up the template and 
 - The Impact & Risk block reuses the conventions of earlier steps: the `Task: <story>-<task>` trailer
   (`sdlc-implement`), the contract surface (`sdlc-author-architecture` / contract-check), and the
   domain-owner escalation (`sdlc-review-gate`).
+- **PR/MR title.** One atomic task = one branch = one PR/MR, so the title **defaults to that task's
+  commit subject** and follows the same Conventional Commits style — `<type>: <lowercase imperative
+  description, no trailing period>`, proper nouns/acronyms keep their case (`config.yaml`
+  `build.pr_title_style`; see `CONTRIBUTING.md`). Because PRs are squash-merged, the title becomes the
+  merge commit subject — so it must be the clean, lowercase-after-the-type form, not `Fix: ...` or a
+  trailing period.
 
 ## Inputs
 

@@ -41,6 +41,11 @@ build:
   branch_convention: "feat/<story-id>-<task-id>-<short-slug>"   # e.g. feat/EP-istifta-inquiries-S01-T01-create-inquiry
   commit_task_trailer: "Task: <story-id>-<task-id>"             # final commit trailer; anchors the spec-link check (Step C)
   contract_change_trailer: "Contract-Change: yes"              # ONLY when the locked contract surface is touched (routes back to architecture gate)
+  # Commit subject + PR/MR title style (Conventional Commits — see CONTRIBUTING.md). PRs are squash-merged,
+  # so the title becomes the subject; both follow one rule. Type lowercase; description lowercase + imperative
+  # + no trailing period; proper nouns/acronyms keep their case.
+  commit_subject_style: "<type>: <lowercase imperative description, no trailing period>"   # types: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
+  pr_title_style: same_as_commit_subject                       # one atomic task = one branch = one PR/MR; title defaults to the task's commit subject
   # Step C (sdlc-checks) — the three CI gates that must pass before merge. CI-agnostic bash in checks/.
   gates: [spec-link, contract-check, build-test-lint]
   ci_platforms: [github, gitlab]   # both wired from skills/sdlc-checks/templates/; GitHub is this product repo's platform

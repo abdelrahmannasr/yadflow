@@ -29,6 +29,11 @@ Task: <story-id>-<task-id>
 [Contract-Change: yes]
 ```
 
+- The **`<type>` is lowercase** (`feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`,
+  `chore`, `revert`) and the **`<subject>` starts lowercase**, is **imperative**, and has **no trailing
+  period** — Conventional Commits (see `CONTRIBUTING.md` and `config.yaml` `build.commit_subject_style`).
+  Proper nouns/acronyms keep their case (`fix: refresh OAuth token`). e.g. `feat: add POST /inquiries
+  create path`, not `feat: Add POST /inquiries create path.`
 - The **final trailer is the task ID** (`Task: EP-istifta-inquiries-S01-T01`) — this is the anchor the
   spec-link check (§C) and the PR (§D) read to connect the diff to its spec and story.
 - `Contract-Change: yes` appears **only** when the diff alters the locked contract surface (see below).
