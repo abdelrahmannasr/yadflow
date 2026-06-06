@@ -208,6 +208,38 @@
   (server-owned). Committed on the task branch with the `Task:` trailer and no `Contract-Change`.
   The skill **stops at the committed branch** — no PR/merge/state change (gates are Step C, not built).
 
+## Phase 3 decisions (build-half Step C)
+
+> Recorded 2026-06-06 while building Step C (`sdlc-checks`) — the production-safety check gates — and
+> proving them on `demo-repos/backend` (story `EP-istifta-inquiries-S01`). Per
+> `docs/phase-3-build-plan.md` §C the gates are separate, simple CI checks that must pass before merge.
+
+- **Three gates, CI-agnostic bash** (canonical source: `skills/sdlc-checks/templates/checks/`):
+  - **spec-link** — fails unless the change carries a `Task: <story>-<task>` trailer whose `<story>`
+    resolves to `specs/<story>/link.md`. Anchors every diff to a real story/spec.
+  - **contract-check** — a diff touching the repo's contract slice (`specs/*/contracts/**`) must carry
+    `Contract-Change: yes` **and** (best-effort, when the product repo is reachable) `link.md` must pin
+    the **current** product `contract-lock.json` hash. Otherwise FAIL and route back to the architecture
+    gate. Enforces the Phase 2 rule that the shared surface is never widened from inside a code repo.
+  - **build/test/lint** — runs the repo's `npm run lint` / `build` / `test`; tests should exercise
+    behavior (intent — the gate runs the suite but cannot machine-enforce that it is non-trivial).
+  - **Fail closed.** spec-link and contract-check both hard-fail when the base ref can't be resolved
+    (shallow clone / wrong base), so a CI misconfiguration can never silently green-light a bypass.
+- **Platform = both** (per the Step A planning decision). GitHub Actions
+  (`.github/workflows/sdlc-checks.yml`) and GitLab CI (`.gitlab-ci.yml`) both invoke the same scripts;
+  GitHub is this product repo's platform, GitLab is the build plan's stated team CI. The check logic
+  lives in `checks/*.sh`, so the CI config is a thin invoker on either platform.
+- **Tooling confirmed.** `node --check` is a real, dependency-free syntax lint; `node --test` is Node
+  20+'s built-in runner (and exits 0 on zero tests — no false failures). The gate scripts avoid the
+  bash-4 `mapfile` builtin so they run on macOS bash 3.2 as well as CI's bash 4+.
+- **Demonstrated (DoD).** Good PR (task branch, `Task:` trailer, no surface change, passing tests) →
+  all three PASS. Bad PR A (code change, **no** `Task:` trailer) → spec-link FAILS. Bad PR B (edits
+  `specs/.../contracts/inquiries.md` to widen the surface, with a `Task:` trailer but **no**
+  `Contract-Change`) → spec-link passes, contract-check FAILS. The build/test/lint test was provided by
+  running the `sdlc-implement` loop for task **T03** (server-owned status: `test/inquiry.create.test.js`
+  exercising AC #1 + AC #3). T01 was merged into the backend's `master` by hand (Step E ship is not
+  built yet) so subsequent task PRs build on it — Phase 3 is run by hand; nothing auto-advances.
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).

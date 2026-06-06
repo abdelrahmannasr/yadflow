@@ -1,0 +1,32 @@
+# SDLC check gates (Phase 3 build plan §C). The team's GitLab CI runs the same three gates as
+# pipeline stages on every merge request; they must pass before merge. The gates are CI-agnostic
+# bash in checks/ — these stages just invoke them with the MR target as base.
+stages: [spec-link, contract-check, build-test-lint]
+
+default:
+  image: node:20
+
+.mr_only:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+variables:
+  GIT_DEPTH: "0"   # full history so the gates can diff against the target branch
+
+spec-link:
+  stage: spec-link
+  extends: .mr_only
+  script:
+    - bash checks/spec-link.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+contract-check:
+  stage: contract-check
+  extends: .mr_only
+  script:
+    - bash checks/contract-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+build-test-lint:
+  stage: build-test-lint
+  extends: .mr_only
+  script:
+    - bash checks/build-test-lint.sh

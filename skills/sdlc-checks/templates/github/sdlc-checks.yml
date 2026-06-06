@@ -1,0 +1,30 @@
+# SDLC check gates (Phase 3 build plan §C). The three gates run on every PR and must pass before
+# merge. They are CI-agnostic bash in checks/ — this workflow just invokes them with the PR base.
+name: sdlc-checks
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  spec-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/spec-link.sh "origin/${{ github.base_ref }}"
+
+  contract-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/contract-check.sh "origin/${{ github.base_ref }}"
+
+  build-test-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: bash checks/build-test-lint.sh

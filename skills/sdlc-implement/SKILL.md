@@ -11,8 +11,8 @@ reviewable diff on its own branch in the code repo. **One atomic task = one bran
 already ran once for the story.
 
 This step **never auto-advances**. When the task is implemented and committed, control passes to the
-**check gates** (Step C — spec-link, contract-check, build/test/lint; not built yet) and then human/AI
-review (Step E). Implementation here produces a branch + commit and stops.
+**check gates** (Step C — `sdlc-checks`: spec-link, contract-check, build/test/lint) and then human/AI
+review (Steps D–E, not built yet). Implementation here produces a branch + commit and stops.
 
 The implementing lens is **`dev`** (`bmad-agent-dev`, Amelia). The dev writes only what the task
 declares; it does not redesign, does not widen the contract, and does not pick up sibling tasks.
@@ -85,9 +85,9 @@ sibling tasks' work.
 
 ### Step 7 — Stop (no auto-advance)
 Report: the branch name, the files changed, how the change satisfies the task's acceptance criterion,
-the result of any test/smoke run, and that the next action is the **check gates** (Step C) then the PR
-and review (Steps D–E) — **not built yet**. Do **not** open a PR, merge, or touch the epic's
-`.sdlc/` state. Step B ends at a committed task branch.
+the result of any test/smoke run, and that the next action is the **check gates** (Step C —
+`sdlc-checks`) then the PR and review (Steps D–E, not built yet). Do **not** open a PR, merge, or touch
+the epic's `.sdlc/` state. Step B ends at a committed task branch.
 
 ## Hard rules (build plan §B, Cross-cutting)
 
