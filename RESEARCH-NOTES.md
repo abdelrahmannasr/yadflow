@@ -240,6 +240,30 @@
   exercising AC #1 + AC #3). T01 was merged into the backend's `master` by hand (Step E ship is not
   built yet) so subsequent task PRs build on it — Phase 3 is run by hand; nothing auto-advances.
 
+## Phase 3 decisions (build-half Step D)
+
+> Recorded 2026-06-06 while building Step D (`sdlc-pr-template`) — the PR/MR template + risk routing —
+> and proving it on `demo-repos/backend`. Per `docs/phase-3-build-plan.md` §D: drop only the matching
+> platform template, with an Impact & Risk block; `high` risk routes to domain owners.
+
+- **Platform-matched template.** `sdlc-pr-template` detects the platform and drops **only** the
+  matching template: GitHub → `.github/pull_request_template.md`; GitLab →
+  `.gitlab/merge_request_templates/Default.md`. Both canonical templates live under
+  `skills/sdlc-pr-template/templates/`. The demo repo is GitHub, so only the GitHub template was
+  committed there.
+- **Impact & Risk block** — every PR/MR states: domains/repos touched, contract-surface touched
+  (yes/no), risk level (`low | medium | high`), rollback plan. A checklist ties the PR to the Step C
+  gates (Task trailer, contract-check, build/test/lint, file-boundary).
+- **Risk routing reuses the gate's escalation.** `checks/risk-route.sh` reads the block and prints the
+  required reviewers: `low`/`medium` → base rule (owner + 1 reviewer); **`high` — or a touched
+  contract/auth/payments surface — → base rule plus one domain-owner approval per touched domain**,
+  identical to `sdlc-review-gate`. It is **advisory** (routes the human review; never approves/merges);
+  the approvals are recorded by the engineer review (Step E) through `sdlc-review-gate`.
+- **Demonstrated (DoD).** A high-risk PR body (`backend, mobile`) routed to **both** domain owners; a
+  low-risk PR used the base rule; a low-risk-but-contract-touched PR also escalated to both domain
+  owners. (Bash note: the domain split uses a trailing newline so the last domain isn't dropped by
+  `while read`; portable to macOS bash 3.2.)
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).

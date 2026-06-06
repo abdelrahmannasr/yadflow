@@ -45,3 +45,8 @@ build:
   gates: [spec-link, contract-check, build-test-lint]
   ci_platforms: [github, gitlab]   # both wired from skills/sdlc-checks/templates/; GitHub is this product repo's platform
   contract_surface_glob: "specs/*/contracts/**"   # the repo's quoted contract slice; a diff here needs Contract-Change + a re-locked contract
+  # Step D (sdlc-pr-template) — platform-matched PR/MR template + risk routing.
+  pr_templates:
+    github: ".github/pull_request_template.md"
+    gitlab: ".gitlab/merge_request_templates/Default.md"
+  risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (sdlc-review-gate escalation)
