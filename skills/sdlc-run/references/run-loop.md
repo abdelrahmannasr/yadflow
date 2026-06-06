@@ -61,28 +61,33 @@ per-step dial says. `engineer-review` and the four front states are covered by `
 
 ## Deriving signals & the provisional verdict
 
-`signals` are the raw facts of the run; the **provisional `verdict`** is derived from them. (The
-engineer review in `sdlc-ship` later confirms or overrides the verdict and finalizes the entry — a
-human always has the last word on the trust signal.)
+`signals` are the raw facts of the run; the **provisional `verdict`** is derived from them. The human
+gate for each step (the engineer review at `sdlc-ship` for `implement`; spec acceptance for `spec`;
+first-consume for `tasks`; the gate itself for `checks`) later confirms or overrides the verdict and
+finalizes the entry — a human always has the last word on the trust signal.
 
-`signals`:
-- `checks` — `pass` | `fail` | `n/a` (only `checks` runs the three gates; other steps are `n/a`).
-- `human_edited_diff` — `true` if a human changed the produced diff before it was accepted/merged.
+`signals` (only the relevant ones are set per step — see the table in
+`../sdlc-author-epic/references/state-schema.md`):
+- `checks` — `pass` | `fail` | `n/a` (only the `checks` step runs the three gates).
+- `human_edited_diff` — `true` if a human changed the produced **diff** before merge (`implement`).
+- `human_edited_spec` — `true` if a human edited the generated **spec/plan/tasks** before accepting (`spec`).
+- `task_rescoped` — `true` if a task's declared `Files:`/scope was edited before implementing (`tasks`).
 - `scope_overrun` — `true` if `sdlc-implement` stopped on the file-boundary rule (diff outside the
   task's declared files).
 - `contract_touch` — `true` if the diff touched the locked contract surface without an upstream
   re-lock (routes back to the architecture gate).
 
-`derive_verdict(signals)`:
+`derive_verdict(signals)` — the same three-way shape for every back step:
 ```
-if checks == "fail" or scope_overrun or contract_touch:   verdict = "rejected"
-elif human_edited_diff:                                    verdict = "approved-with-edits"
-else:                                                      verdict = "approved-unchanged"
+edited = human_edited_diff or human_edited_spec or task_rescoped
+if checks == "fail" or scope_overrun or contract_touch or artifact_discarded:   verdict = "rejected"
+elif edited:                                                                    verdict = "approved-with-edits"
+else:                                                                           verdict = "approved-unchanged"
 ```
 
 Rationale: the trust log should count an output as fully trustworthy (`approved-unchanged`) only when
 the machine's work was accepted as-is. Any human correction is `approved-with-edits` (useful but not
-yet trustworthy enough to automate); any failure or boundary breach is `rejected`.
+yet trustworthy enough to automate); any failure, boundary breach, or discarded artifact is `rejected`.
 
 ## The trust threshold (when a step is earned)
 

@@ -395,6 +395,41 @@
 - **Config & JSON validated:** `config.yaml` `automation` block parses (YAML OK); `trust-log.json` and
   `build-state/*.json` are valid JSON; the earned/not-earned math was computed against the threshold.
 
+## Phase 4b decisions (automation — Step D earned, Step C gated)
+
+> 4b earns the next back step the engine already supported. The big realization: `sdlc-run`'s loop,
+> `set-dial`, the threshold, locks, and kill switch (all from 4a) already cover `tasks`/`implement`
+> generically — so 4b is small. What 4a left out was the **trust signal for steps that don't emit a
+> gate** (`spec`/`tasks` produce documents, not pass/fail), and the **evidence** to earn them honestly.
+
+- **Two new trust hooks, each anchored to an existing human gate (never self-graded):**
+  - `spec` — verdict finalized when the human accepts `specs/<story>/`: untouched →
+    `approved-unchanged`; edited first → `approved-with-edits` (`human_edited_spec`); rejected/re-run →
+    `rejected`. Recorded by `sdlc-spec` Step 8 (only under `sdlc-run`).
+  - `tasks` — verdict finalized when `sdlc-implement` first consumes a task (the list "survived
+    contact"): implemented with declared `Files:`/scope as generated → `approved-unchanged`; re-scoped
+    first → `approved-with-edits` (`task_rescoped`); discarded → `rejected`. Recorded by
+    `sdlc-implement` Step 8.
+  - The verdict derivation is now the same three-way shape for every back step (run-loop.md):
+    `rejected` on any FAIL / scope overrun / contract touch / discarded artifact; `approved-with-edits`
+    if any `human_edited_*` / `task_rescoped`; else `approved-unchanged`.
+- **Step D (`implement → check` hand-off) earned — honestly.** The five real ships in `build-log.json`
+  are diffs that merged **as authored** → five `implement` runs, all `approved-unchanged`. That slice
+  computes **5 runs, 100% → clears the threshold**, exactly as `checks` did. So `implement` is flipped
+  to `machine_advance` on the demo story (`build-state/...-S03.json`), and `sdlc-run` auto-runs the
+  gates after a committed branch. The merge still needs the gates to pass AND the engineer review;
+  Step D removes only the manual "now run the gates" nudge.
+- **Step C (`tasks` advance) deliberately NOT earned.** `tasks`/`spec` have **zero** recorded runs and
+  **no historical signal to seed from** — unlike `implement`/`checks`, there is no faithful way to
+  manufacture their evidence. Per the one principle ("earned per step, with evidence; 'it seems fine'
+  is not evidence"), their dials stay `human_approve`. The hook + gate are built; the dial flips only
+  when genuine runs clear the threshold. Refusing to fabricate evidence is the point, not a gap.
+- **No engine change.** `sdlc-run`'s loop already walks `tasks`/`implement` and `set-dial` already
+  gates any back step on the threshold — verified, not rebuilt. Scope-overrun and contract-touch halts
+  (4a) still fire under an automated `implement → checks` run, overriding the dial.
+- **Validated:** `implement` slice = 5 runs / 100% → earned; `tasks`/`spec` = 0 runs → `set-dial`
+  refuses; `trust-log.json` and `build-state/*.json` are valid JSON.
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).

@@ -16,9 +16,11 @@ a failing check, ambiguity, a scope overrun, or a contract-surface touch stops t
 human regardless of any dial. The **front states and the engineer review never auto-advance** — they
 are not in `automation.back_steps` and `engineer-review` is `locked`.
 
-Phase 4a earns exactly one step: **`checks`** (Step B — the safest, because a gate's pass/fail was
-never human judgment). `tasks` and `implement` advance are Phase 4b; their dials exist but stay
-`human_approve` until earned.
+Earned so far: **`checks`** (Step B, Phase 4a — safest, a gate's pass/fail was never human judgment)
+and **`implement`** (Step D, Phase 4b — the `implement → check` hand-off; the scope/contract halts and
+the engineer review still gate the merge). **`tasks`** (Step C) and `spec` have their dials and trust
+hooks but stay `human_approve` until their own evidence clears the threshold — there is no historical
+signal to seed them from, so they are earned only on real runs.
 
 ## Conventions
 
