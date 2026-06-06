@@ -30,15 +30,22 @@ parameter, not a hardcoded human.
 
 ### Step 1 — Load state
 Read `.sdlc/state.json`. Find the `review+approve` step whose `artifact` matches the input (or the
-step named `currentStep` if it is a review step). Read `.sdlc/approvals.json`. Determine the
-**reviewer rule** for this step:
+step named `currentStep` if it is a review step). Read `.sdlc/approvals.json`. Read `epic.md` for the
+epic's `repos` (the **touched domains**). Determine the **reviewer rule** for this step:
 - **Base rule:** `owner + 1 reviewer` — at least one `owner` approval AND at least one distinct
   non-owner `reviewer` approval.
-- **Escalation:** if the step's `risk_tags` intersect `{contract, auth, payments}`, ALSO require at
-  least one `domain-owner` approval **per touched domain** (build plan §4, §5). The architecture
-  review carries `risk_tags: ["contract"]`, so it escalates by default.
-- For the **stories** review, the relevant domain engineer reviews the stories touching their repo:
-  treat each repo's engineer as a `domain-owner` for that repo's stories (build plan §4 step 8).
+- **Escalation option (risk-driven):** if the step's `risk_tags` intersect `{contract, auth,
+  payments}`, ALSO require at least one `domain-owner` approval **per touched domain** (build plan §4,
+  §5). For the **architecture+contract** review (`risk_tags: ["contract"]`), the touched domains are
+  the epic's `repos` — each repo's owner must sign off on the shared surface, so it escalates by
+  default.
+- **Per-repo routing option (stories):** for the **stories** review, the relevant domain engineer
+  reviews the stories touching their repo: treat each repo's engineer as a `domain-owner` for that
+  repo's stories. The touched domains are the **union of every story's `repos`** under `stories/`
+  (build plan §4 step 8). The `domain` field on each approval is the repo name.
+
+Escalation and per-repo routing are **options of this one gate**, selected by `risk_tags` and the
+touched `repos` — never a forked or copied gate.
 
 ### Step 2 — Dispatch on `action`
 
@@ -57,10 +64,10 @@ the rule above, and tell reviewers how to comment/approve. Set the step `status`
 - <comment>
 ```
 
-Then help the **owner address the comments** using the agent listed for this step (epic → `pm`,
-architecture → `architect`, ui-design → `ux-designer`, stories → `sm`-role skills
-`bmad-create-story`/`bmad-sprint-planning`). Update the authored artifact in place. Repeat
-comment→address rounds until reviewers are satisfied. **Commenting never advances the gate.**
+Then help the **owner address the comments** using the agent lens listed for this step (epic → `pm`;
+architecture → `architect`; ui-design → `ux-designer`; stories → `pm`, with `architect` for technical
+detail — there is **no `sm` agent**, Phase 0 Deviation 1). Update the authored artifact in place.
+Repeat comment→address rounds until reviewers are satisfied. **Commenting never advances the gate.**
 
 **`approve`** — Record an approval. Append to `.sdlc/approvals.json`:
 ```json
@@ -78,16 +85,23 @@ The step may advance **iff ALL hold**:
    ≥1 `owner` AND ≥`review_gate.default_reviewers` (1) distinct non-owner `reviewer`, AND — if the
    step is escalated — ≥1 `domain-owner` for each touched domain.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
-   newest `approved` record). If it changed, approvals are stale → return to `comment`.
+   newest `approved` record). If it changed, approvals are stale → return to `comment`. For the
+   **architecture+contract** review, also recompute the contract-surface hash (see
+   `../sdlc-author-architecture/references/contract-format.md`): if it no longer matches
+   `.sdlc/contract-lock.json`, the surface changed → approvals stale → return to `comment` and re-lock.
 
 If the predicate **fails**: report exactly which approvals are still missing and STOP. Do not modify
 `currentStep`.
 
 If the predicate **passes**:
 - Mark this review step `status: "done"`.
-- Set the **next** step `status` from `blocked` to `in_progress` (authoring) or `in_review`.
-- Set `currentStep` to that next step.
-- Write `state.json`. Report the advance and what the next authored artifact is.
+- If there **is** a next step in `steps[]`: set it `status` from `blocked` to `in_progress`
+  (authoring) or `in_review`, and set `currentStep` to that next step.
+- If this is the **last** step (`stories-review`, the final review): there is no further front step —
+  set `currentStep: "ready-for-build"` (the Phase 3 handoff sentinel; it is intentionally not a
+  `steps[]` entry). The front half is complete.
+- Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is
+  now `ready-for-build`).
 
 ### Hard rules (build plan §1, §5)
 - **Front steps never auto-advance.** Even with `assistance: heavy`, a human must record approval.

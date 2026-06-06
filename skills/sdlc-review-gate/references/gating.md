@@ -12,15 +12,28 @@ Let `A` = the set of `approved` records in `.sdlc/approvals.json` for this step.
 **Escalated pass** (step `risk_tags` ∩ `{contract, auth, payments}` ≠ ∅): base pass AND, for every
 touched `domain`, `|domainOwners[domain]| >= 1`.
 
-- Epic / UI / generic story reviews: base rule.
-- Architecture+contract review: escalated (`risk_tags: ["contract"]`) — needs owner + 1 reviewer +
-  the contract domain owner.
-- Stories review: each repo's engineer is the `domain-owner` for that repo's stories.
+**Touched domains** are resolved from files, not hardcoded:
+- Architecture+contract review: the touched domains are the epic's `repos` (every repo shares the
+  contract surface).
+- Stories review: the touched domains are the **union of every story's `repos`** under `stories/`.
+
+So one gate, two option-shapes:
+- Epic / UI reviews: base rule (no risk tags, no per-repo routing).
+- Architecture+contract review: escalated (`risk_tags: ["contract"]`) — owner + 1 reviewer + a
+  `domain-owner` for **each** repo in `epic.repos`. (A small team may have one engineer own several
+  repos — one person can supply several `domain-owner` records with different `domain` values.)
+- Stories review: per-repo routing — owner + 1 reviewer + a `domain-owner` (the repo's engineer) for
+  **each** repo that appears in any story's `repos`.
 
 ## Staleness
 An approval round is invalidated if the authored artifact was edited after the newest `approved`
 record's date/round. When that happens, drop back to `comment` — reviewers must re-approve the new
 content. This prevents "approve, then quietly change it" (build plan §5 spirit).
+
+For the architecture+contract review there is a second, content-based staleness check: recompute the
+SHA-256 of the contract-surface block and compare it to `.sdlc/contract-lock.json`. A mismatch means
+the locked surface changed even if the file's mtime looks fine — approvals are stale, re-lock and
+re-approve. (Hash recipe: `sdlc-author-architecture/references/contract-format.md`.)
 
 ## Worked example — epic gate
 

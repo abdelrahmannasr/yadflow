@@ -15,9 +15,12 @@ a scaffolded module that installs cleanly, and a working **team review gate** yo
 | `RESEARCH-NOTES.md` | Verified Phase 0 facts about BMAD, Spec Kit, Repomix, Impeccable + deviations. |
 | `skills/sdlc/` | Module source of truth (`config.yaml`, `module-help.csv`, `install.sh`). Survives BMAD updates. |
 | `skills/sdlc-author-epic/` | Front state 1: author an epic with AI assist, assign its `EP-<slug>` ID, seed state. |
-| `skills/sdlc-review-gate/` | The reusable **team review + approve gate** (the core piece). |
-| `skills/sdlc-status/` | Read-only view of an epic's state and what's blocking the gate. |
-| `epics/EP-istifta-inquiries/` | A worked demo epic that has been run through the gate. |
+| `skills/sdlc-author-architecture/` | Front state 3: author `architecture.md` + the locked `contract.md`; hash-lock the contract surface. |
+| `skills/sdlc-author-ui/` | Front state 5: author `ui-design.md` + `DESIGN.md` (Impeccable slash-commands, or graceful fallback). |
+| `skills/sdlc-author-stories/` | Front state 7: break the epic into repo-tagged stories with stable `EP-<slug>-S0N` IDs. |
+| `skills/sdlc-review-gate/` | The reusable **team review + approve gate** (used for all four reviews). |
+| `skills/sdlc-status/` | Read-only view of the full front-state chain and what's blocking the gate. |
+| `epics/EP-istifta-inquiries/` | A worked demo epic run through the **whole front half** (epic → … → ready-for-build). |
 
 ## Install (and re-install after a BMAD update)
 
@@ -38,63 +41,78 @@ Defaults: every step starts `human_approve`. The four **front** authoring steps 
 UI, stories) and their reviews are **locked** — they may not be set to `machine_advance` in this
 version. Front states never auto-advance.
 
-## Run the epic → review → approve loop by hand
+## Run the full front half by hand
 
-The loop is just files under `epics/EP-<slug>/`. The skills below guide you, but you can also edit
-the files directly — that's the point.
+The front half walks **epic → review → architecture+contract → review → UI design → review → stories
+→ review → `ready-for-build`**. It is all files under `epics/EP-<slug>/`. The skills below guide you,
+but you can also edit the files directly — that's the point.
 
-### 1. Author an epic
-Invoke **`sdlc-author-epic`** with a one-line idea. It:
-- shapes the idea (analyst lens) and writes `epic.md` (pm lens) from the standard template,
-- assigns the stable `EP-<slug>` ID (you never type IDs by hand),
-- seeds `.sdlc/state.json` (all steps `human_approve`, front steps locked) and an empty
-  `.sdlc/approvals.json`, and stops at the gate.
+Each authoring step is the same shape: an author skill produces an artifact, sets its step `done`,
+moves `currentStep` to the matching review, and **stops at the gate**. Then **`sdlc-review-gate`**
+(one gate, reused for all four reviews) takes `open → comment → approve → advance`.
 
-### 2. Review it
-Invoke **`sdlc-review-gate`** with `action: open`. Reviewers leave comments → they land in
-`reviews/<artifact>--<date>--comments.md`. The owner addresses them (pm-assisted) and edits
-`epic.md`. Repeat until reviewers are happy. **Commenting never advances the gate.**
+### Author steps
+1. **`sdlc-author-epic`** (state 1) → `epic.md`; assigns the stable `EP-<slug>` ID; seeds
+   `.sdlc/state.json` (all `human_approve`, front steps locked) + empty `.sdlc/approvals.json`.
+2. **`sdlc-author-architecture`** (state 3) → `architecture.md` + the locked `contract.md`; writes the
+   contract-surface SHA-256 to `.sdlc/contract-lock.json`.
+3. **`sdlc-author-ui`** (state 5) → `ui-design.md` + `DESIGN.md` (drives Impeccable
+   `document|extract|craft` slash-commands when installed; otherwise authors directly).
+4. **`sdlc-author-stories`** (state 7) → one file per story `stories/EP-<slug>-S0N.md`, each tagged
+   with the `repos` it implements.
 
-### 3. Approve it
-Each reviewer runs the gate with `action: approve` (name + role). Each approval is appended to
-`.sdlc/approvals.json` and reflected in `reviews/<artifact>--<date>--approved.md`.
+### The one gate (every review)
+Invoke **`sdlc-review-gate`**:
+- `action: open` — present the artifact; reviewers leave comments in
+  `reviews/<artifact>--<date>--comments.md`. The owner addresses them and edits the artifact in place.
+  **Commenting never advances.**
+- `action: approve` (name + role) — appended to `.sdlc/approvals.json` and reflected in
+  `reviews/<artifact>--<date>--approved.md`.
+- `action: advance` — advances **only if** the rule is satisfied; otherwise it names the missing
+  approval and stays put.
 
-**The gate rule:** `owner + 1 reviewer`. If the step touches the **contract, auth, or payments**
-(`risk_tags`), it escalates and also needs the relevant **domain owner**. (The architecture+contract
-review escalates by default.)
-
-### 4. Advance
-Run the gate with `action: advance`. It advances **only if** the rule is satisfied; otherwise it
-tells you exactly which approval is missing and stays put. On pass it marks the review step `done`,
-unblocks the next authoring step, and moves `currentStep`.
+**The gate rule, by review:**
+- **Base** (epic, UI): `owner + 1 reviewer`.
+- **Escalated** (architecture+contract — `risk_tags: ["contract"]`): base **plus a domain owner for
+  every repo in `epic.repos`**. The contract-surface hash must still match `.sdlc/contract-lock.json`
+  (a changed surface invalidates approvals).
+- **Per-repo** (stories): base **plus a domain owner (the repo's engineer) for every repo that appears
+  in any story's `repos`**.
 
 ### Check status anytime
-Invoke **`sdlc-status`** (read-only) to see the current step, every step's dials/status, and which
-approvals the active gate still needs.
+Invoke **`sdlc-status`** (read-only) to see the full 8-step chain, every step's dials/status, the
+contract lock, story repo tags, and which approvals the active gate still needs.
 
 ## Worked example (already in this repo)
 
-`epics/EP-istifta-inquiries/` shows a full pass:
-- `epic.md` authored from the template, ID assigned.
-- `reviews/epic--2026-06-04--comments.md` — reviewer *bob*'s comments + owner resolution.
-- Owner *alice* approved (owner) — gate **blocked** (0/1 reviewers).
-- Reviewer *bob* approved — gate **passed**; `state.json` advanced `currentStep` from `epic-review`
-  to `architecture`, with `epic-review: done` and `architecture: in_progress`.
-
-The committed files show the **post-advance** state (the gate has already passed): `currentStep`
-is `architecture` and `epic-review` is `done`. The "blocked" step above is the historical
-intermediate snapshot, not what you'll see on disk now.
+`epics/EP-istifta-inquiries/` shows the **whole front half** walked end to end:
+- `epic.md` authored + approved (epic gate, base rule) — 2026-06-04.
+- `architecture.md` + `contract.md` authored; contract surface hash-locked in
+  `.sdlc/contract-lock.json`. Architecture gate **escalated** (contract): owner *alice* + reviewer
+  *bob* + domain owners *carol* (backend) and *dave* (mobile).
+- `ui-design.md` + `DESIGN.md` authored (Impeccable not installed → graceful fallback). UI gate base
+  rule (alice + bob).
+- Five repo-tagged stories `stories/EP-istifta-inquiries-S01..S05.md`. Stories gate **per-repo**: base
+  rule + a domain owner for each touched repo (carol/backend, dave/mobile).
+- `state.json` now reads `currentStep: ready-for-build`, every front step `done` — the Phase 3
+  handoff point.
 
 Inspect it:
 ```bash
 cat epics/EP-istifta-inquiries/.sdlc/state.json
 cat epics/EP-istifta-inquiries/.sdlc/approvals.json
+cat epics/EP-istifta-inquiries/.sdlc/contract-lock.json
 ls  epics/EP-istifta-inquiries/reviews/
+ls  epics/EP-istifta-inquiries/stories/
+# re-verify the contract surface still matches its lock:
+awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
+  epics/EP-istifta-inquiries/contract.md | shasum -a 256
 ```
 
 ## What's intentionally NOT built yet
 
-Per the build plan's smallest-useful-first order, later iterations add: the Node CLI engine
-(`init`/`link`/`backfill`/`feature`/`check`), the multi-repo **contract check**, the Repomix
-**backfill** step, the Impeccable **UI design** step, PR/MR templates, and any move toward
-`machine_advance` (back states only, never the front). See `docs/claude-code-build-plan.md` §8.
+Per the build plan's smallest-useful-first order, the **build half** (Phase 3) adds: Spec Kit per
+story per repo (`specify`→`clarify`→`plan`→`tasks`…), the `dev` implement step, check gates
+(build/test/lint + **contract-check** + spec-link), AI + engineer review, ship, the Repomix
+**backfill** step, PR/MR templates, and any move toward `machine_advance` (back states only, never the
+front). See `docs/phase-2-build-plan.md` §"Then Phase 3" and `docs/claude-code-build-plan.md` §8.

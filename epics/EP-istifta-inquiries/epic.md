@@ -1,6 +1,6 @@
 ---
 id: EP-istifta-inquiries
-status: draft
+status: ready-for-build
 owner: alice
 technical_product_owner: winston
 repos: [backend, mobile]

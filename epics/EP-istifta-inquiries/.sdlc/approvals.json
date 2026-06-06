@@ -1,4 +1,17 @@
 [
   { "artifact": "epic.md", "step": "epic-review", "approver": "alice", "role": "owner", "status": "approved", "date": "2026-06-04" },
-  { "artifact": "epic.md", "step": "epic-review", "approver": "bob", "role": "reviewer", "status": "approved", "date": "2026-06-04" }
+  { "artifact": "epic.md", "step": "epic-review", "approver": "bob", "role": "reviewer", "status": "approved", "date": "2026-06-04" },
+
+  { "artifact": "architecture.md", "step": "architecture-review", "approver": "alice", "role": "owner", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "architecture.md", "step": "architecture-review", "approver": "bob", "role": "reviewer", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "architecture.md", "step": "architecture-review", "approver": "carol", "role": "domain-owner", "domain": "backend", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "architecture.md", "step": "architecture-review", "approver": "dave", "role": "domain-owner", "domain": "mobile", "status": "approved", "date": "2026-06-06" },
+
+  { "artifact": "ui-design.md", "step": "ui-design-review", "approver": "alice", "role": "owner", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "ui-design.md", "step": "ui-design-review", "approver": "bob", "role": "reviewer", "status": "approved", "date": "2026-06-06" },
+
+  { "artifact": "stories/", "step": "stories-review", "approver": "alice", "role": "owner", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "stories/", "step": "stories-review", "approver": "bob", "role": "reviewer", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "stories/", "step": "stories-review", "approver": "carol", "role": "domain-owner", "domain": "backend", "status": "approved", "date": "2026-06-06" },
+  { "artifact": "stories/", "step": "stories-review", "approver": "dave", "role": "domain-owner", "domain": "mobile", "status": "approved", "date": "2026-06-06" }
 ]

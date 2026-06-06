@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-SKILLS=(sdlc-author-epic sdlc-review-gate sdlc-status)
+SKILLS=(sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories sdlc-review-gate sdlc-status)
 
 echo "Installing sdlc module from $ROOT/skills ..."
 

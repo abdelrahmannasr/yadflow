@@ -1,15 +1,15 @@
 {
   "epicId": "EP-istifta-inquiries",
   "createdAt": "2026-06-04",
-  "currentStep": "architecture",
+  "currentStep": "ready-for-build",
   "steps": [
-    { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",      "risk_tags": [] },
-    { "id": "epic-review",         "type": "review+approve", "artifact": "epic.md",         "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "risk_tags": [] },
-    { "id": "architecture",        "type": "author",         "artifact": "architecture.md", "assistance": "review", "automation": "human_approve", "locked": true, "status": "in_progress", "risk_tags": [] },
-    { "id": "architecture-review", "type": "review+approve", "artifact": "architecture.md", "assistance": "review", "automation": "human_approve", "locked": true, "status": "blocked",   "risk_tags": ["contract"] },
-    { "id": "ui-design",           "type": "author",         "artifact": "ui-design.md",    "assistance": "review", "automation": "human_approve", "locked": true, "status": "blocked",   "risk_tags": [] },
-    { "id": "ui-design-review",    "type": "review+approve", "artifact": "ui-design.md",    "assistance": "review", "automation": "human_approve", "locked": true, "status": "blocked",   "risk_tags": [] },
-    { "id": "stories",             "type": "author",         "artifact": "stories/",        "assistance": "review", "automation": "human_approve", "locked": true, "status": "blocked",   "risk_tags": [] },
-    { "id": "stories-review",      "type": "review+approve", "artifact": "stories/",        "assistance": "review", "automation": "human_approve", "locked": true, "status": "blocked",   "risk_tags": [] }
+    { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] },
+    { "id": "epic-review",         "type": "review+approve", "artifact": "epic.md",         "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] },
+    { "id": "architecture",        "type": "author",         "artifact": "architecture.md", "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] },
+    { "id": "architecture-review", "type": "review+approve", "artifact": "architecture.md", "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": ["contract"] },
+    { "id": "ui-design",           "type": "author",         "artifact": "ui-design.md",    "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] },
+    { "id": "ui-design-review",    "type": "review+approve", "artifact": "ui-design.md",    "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] },
+    { "id": "stories",             "type": "author",         "artifact": "stories/",        "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] },
+    { "id": "stories-review",      "type": "review+approve", "artifact": "stories/",        "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",  "risk_tags": [] }
   ]
 }

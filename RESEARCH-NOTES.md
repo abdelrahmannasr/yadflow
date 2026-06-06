@@ -121,6 +121,36 @@
    orchestrate Spec Kit / Impeccable `document|extract|craft` by **driving the agent**, not by
    shelling out. (Relevant to later iterations; the first deliverable does not call these.)
 
+## Phase 2 decisions (front-half build)
+
+> Recorded 2026-06-06 while building front states 3/5/7 (`sdlc-author-architecture`,
+> `sdlc-author-ui`, `sdlc-author-stories`) and reusing the one gate for all four reviews.
+
+- **Contract representation = delimited surface block + SHA-256 lock.** `contract.md` wraps the shared
+  cross-repo surface (API / events / data model, charter altitude) between the exact markers
+  `<!-- CONTRACT-SURFACE:BEGIN -->` and `<!-- CONTRACT-SURFACE:END -->`. The SHA-256 of the bytes
+  **between** the markers is stored in `epics/EP-<slug>/.sdlc/contract-lock.json` as
+  `{ "artifact": "contract.md", "hash": "sha256:<hex>", "lockedAt": "<date>" }`. Recipe:
+  `awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' contract.md | shasum -a 256`.
+  **Verified 2026-06-06:** the hash round-trips (unchanged content → identical digest) and detects
+  drift (any edit inside the block changes the digest). This is what the Phase 3 contract-check will
+  diff against; a field-by-field structured diff is deferred to Phase 3. Full spec:
+  `skills/sdlc-author-architecture/references/contract-format.md`.
+
+- **Impeccable slash-command names confirmed** (already in §4, restated for the UI step): `/impeccable
+  document` → `/impeccable extract` → `/impeccable craft` (existing project); `/impeccable craft` →
+  `/impeccable extract` (new project). **Not installed in this repo as of 2026-06-06.** Decision:
+  `sdlc-author-ui` documents these slash-commands and **degrades gracefully** — when Impeccable is
+  absent the `ux-designer` lens authors `ui-design.md` + `DESIGN.md` directly and records
+  `impeccable: not-installed` in the artifact frontmatter. No `npx impeccable skills install` is run in
+  Phase 2 (tool install is out of the front-half scope).
+
+- **Repomix interface = true CLI subprocess** (confirmed, unchanged from §3): `npx repomix@latest
+  [flags]`, default output `repomix-output.xml`. It is **not** introduced in Phase 2 — backfill is
+  Phase 3+. Recorded here per the Phase 2 build-plan requirement to confirm CLI-vs-slash-command:
+  Repomix is a CLI (and `npx impeccable detect` is the only other true subprocess); Spec Kit and
+  Impeccable `document|extract|craft` remain harness slash-commands (Deviation 3).
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).
