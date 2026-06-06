@@ -109,14 +109,24 @@ base** that decides when a step is safe to automate (build plan Step A). One ent
 |-------|--------|---------|
 | `step` | a `back_steps` id | Which step this run is recorded against. |
 | `automation` | dial in force at run time | So the log shows whether the run was a manual or an automated advance. |
-| `verdict` | `approved-unchanged` \| `approved-with-edits` \| `rejected` | The trust signal. **Provisional verdict is derived** (below); the engineer review in `sdlc-ship` confirms or overrides it and finalizes the entry. |
-| `signals` | object | The raw inputs the provisional verdict was derived from. |
+| `verdict` | `approved-unchanged` \| `approved-with-edits` \| `rejected` | The trust signal. **Provisional verdict is derived** (below); the human gate for that step confirms or overrides it and finalizes the entry. |
+| `signals` | object | The raw inputs the provisional verdict was derived from. The fields present depend on the step (table below). |
 | `ranBy` | `machine` \| `human` | Whether the orchestrator advanced it or a human did. |
 
-**Deriving the provisional verdict** (build plan Step A / confirmed Phase 4 decision):
-- any check FAIL, scope overrun, or contract-surface touch → `rejected`;
-- merged after a human edited the diff → `approved-with-edits`;
-- merged as authored → `approved-unchanged`.
+**Per-step `signals` fields** (only the relevant ones are set; others may be omitted or `n/a`):
+
+| Step | Signals | Finalized at (the human gate) |
+|------|---------|-------------------------------|
+| `spec` | `human_edited_spec` | the human who accepts `specs/<story>/` (`sdlc-spec` Step 8) |
+| `tasks` | `task_rescoped` | first consume by `sdlc-implement` (Step 8) |
+| `implement` | `human_edited_diff`, `scope_overrun`, `contract_touch` | engineer review at `sdlc-ship` |
+| `checks` | `checks` (`pass`\|`fail`) | the gate run itself (objective) |
+
+**Deriving the provisional verdict** (build plan Step A; extended for `spec`/`tasks` in Phase 4b — the
+same three-way shape, anchored to each step's human gate, never self-graded):
+- any check FAIL, scope overrun, contract-surface touch, or a discarded/regenerated artifact → `rejected`;
+- accepted after a human edited the output (`human_edited_diff` / `human_edited_spec` / `task_rescoped`) → `approved-with-edits`;
+- accepted as produced → `approved-unchanged`.
 
 **Trust threshold** (from `config.yaml` `automation.trust_threshold`): a step is a candidate for
 `machine_advance` only when its slice of `trust-log.json` (same `step`, this story's repo or the

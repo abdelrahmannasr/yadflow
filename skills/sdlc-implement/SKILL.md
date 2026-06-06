@@ -1,6 +1,6 @@
 ---
 name: sdlc-implement
-description: 'Build-half Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). Never auto-advances — hands off to the check gates. Use when the user says "implement task <id>" or after a story is spec''d.'
+description: 'Build-half Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). The step never advances itself; it produces a committed branch and hands off to the check gates, which the orchestrator (sdlc-run) may auto-run once `implement` is earned to machine_advance (Phase 4b Step D) — the merge still needs the gates and the engineer review. Use when the user says "implement task <id>" or after a story is spec''d.'
 ---
 
 # SDLC — Implement Task (build-half Step B)
@@ -89,20 +89,42 @@ Stage only the declared files. Commit with the convention: a conventional subjec
 final `Task: <story>-<task>` trailer (plus `Contract-Change: yes` if Step 5 applies). Do not commit
 sibling tasks' work.
 
-### Step 7 — Stop (no auto-advance)
+### Step 7 — Report; the advance decision belongs to the dial (Phase 4)
 Report: the branch name, the files changed, how the change satisfies the task's acceptance criterion,
-the result of any test/smoke run, and that the next action is the **check gates** (Step C —
-`sdlc-checks`) then the PR and review (Steps D–E). Do **not** open a PR, merge, or hand-edit the epic's front-half `state.json`. Step
-B ends at a committed task branch. (When driven by `sdlc-run`, the orchestrator — not this skill —
-records the `implement` step's status and trust entry; this skill only signals success or a
-scope/contract halt.)
+the result of any test/smoke run, and the next action — the **check gates** (Step C — `sdlc-checks`)
+then the PR and review (Steps D–E). Do **not** open a PR, merge, or hand-edit the epic's front-half
+`state.json`. Step B ends at a committed task branch.
+
+- **Run standalone:** stop here; a human triggers the gates.
+- **Run by the orchestrator** (`sdlc-run`): this skill still just produces the committed branch and
+  signals success (or a scope/contract halt). The orchestrator records the `implement` step's status
+  and trust entry and, when `implement` is earned to `machine_advance` (Step D, Phase 4b), **auto-runs
+  the check gates** instead of waiting for a manual nudge. The diff still cannot merge without the
+  gates passing and the engineer review — Step D removes only the "now run the gates" hand-off.
+
+### Step 8 — Record the `tasks` trust signal on first consume (Phase 4b)
+Resolving a task from `tasks.md` (Step 1) is the moment the generated task list "survives contact" —
+the evidence that could later earn the `tasks` step a `machine_advance`. When driven by `sdlc-run`,
+finalize a `tasks` trust entry, anchored to what the human/dev actually did with the list:
+- the task is implemented with its declared `Files:`/scope **as generated** → `approved-unchanged`;
+- the task is **re-scoped** first (its `Files:`/boundary edited) → `approved-with-edits`
+  (signal `task_rescoped: true`);
+- the task list is discarded / regenerated → `rejected`.
+Append the entry to `epics/<epic>/.sdlc/trust-log.json` (schema:
+`../sdlc-author-epic/references/state-schema.md`). `tasks` stays `human_approve` until its slice clears
+the threshold — this only *gathers* evidence. (The `implement` step's own verdict is finalized later,
+at the engineer review in `sdlc-ship`: merged as authored → `approved-unchanged`; edited first →
+`approved-with-edits`; scope/contract/checks halt → `rejected`.)
 
 ## Hard rules (build plan §B, Cross-cutting)
 
 - **One atomic task = one branch = one PR/MR.** Never bundle tasks; never exceed the declared files.
 - **Light loop per task.** Do not re-run the heavy spec ceremony; that already ran once in Step A.
 - **Never widen the contract here.** Surface changes go back to the architecture gate (Step 5).
-- **Nothing auto-advances.** Step B stops at a committed branch; gates and review are separate steps.
+- **The step never advances itself.** A scope overrun or contract touch always halts. The
+  `implement → checks` hand-off advances only when the orchestrator's `implement` dial is
+  `machine_advance` (earned, Step D) — and never past the engineer review, which is always human.
+  Standalone, the step stops at a committed branch.
 
 ## Reference
 - Branch/commit conventions, the file-boundary rule, the Contract-Change rule: `references/implement-conventions.md`.

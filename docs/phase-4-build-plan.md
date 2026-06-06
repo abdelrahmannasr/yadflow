@@ -1,12 +1,13 @@
 # Phase 4 — Build Plan
 
-> **Status:** Split into **4a** (Steps A + B — make the dial real, trust log, automate the safest
-> step) and **4b** (Steps C + D — automate `tasks` advance and the `implement → check` handoff). 4a is
-> built: the `automation` dial is read by the orchestrator `sdlc-run`, every run is recorded in
-> `.sdlc/trust-log.json`, back-half state lives in `.sdlc/build-state/<story>.json`, the check-gate
-> advance is earned per the trust threshold, and the kill switch + front-state locks are enforced.
-> 4b is earned later with the trust evidence 4a collects. The most dangerous phase is taken one
-> earned step at a time.
+> **Status:** Split into **4a** (Steps A + B) and **4b** (Steps C + D). **4a + Step D are built;
+> Step C is gated.** The `automation` dial is read by the orchestrator `sdlc-run`; every run is
+> recorded in `.sdlc/trust-log.json`; back-half state lives in `.sdlc/build-state/<story>.json`. Earned
+> and demonstrated: `checks` (Step B) and `implement` → checks hand-off (Step D), each with 5 runs at
+> 100% approved-unchanged. `tasks` (Step C) and `spec` have their dials + trust hooks but stay
+> `human_approve` — they have no historical evidence to seed from and are earned only on genuine runs
+> (never fabricated). The kill switch + front-state/engineer-review locks are enforced throughout. See
+> `docs/phase-4b-build-plan.md`. The most dangerous phase is taken one earned step at a time.
 
 Builds on Phases 0–3 (research; module + gate; full front half; full build half shipping real code through check gates, reviews, multi-repo, and backfill).
 
@@ -46,11 +47,11 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 - A failing check still halts and pulls in a human. Nothing about *what* is checked changes — only that a clean pass no longer needs a manual nudge.
 - This is the safest possible first automation: the gate's decision was never human judgment to begin with.
 
-### Step C — Automate `tasks` generation advance   — Phase 4b (deferred)
+### Step C — Automate `tasks` generation advance   — Phase 4b (hook built; dial gated on evidence)
 - Once a story's plan is approved (a front-ish step, stays human), generating the atomic task list and advancing into the per-task loop can become `machine_advance`, because it is derived mechanically from an already-approved plan.
 - Trust log must support it first.
 
-### Step D — Automate the `implement` → check handoff   — Phase 4b (deferred)
+### Step D — Automate the `implement` → check handoff   — Phase 4b ✅
 - After `dev` produces a diff, automatically run it into the check gates rather than waiting for a human to trigger them.
 - The diff still cannot merge without the check gates passing AND the engineer review (Step E stays human in this version).
 - Scope guard stays hard: if the diff grows beyond the task's declared files, halt and pull in a human regardless of dial settings.
@@ -91,8 +92,12 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 - A scope overrun and a contract-surface touch are each shown halting an otherwise-automated run and pulling in a human.
 - `README.md` updated: how to read the trust log, how to earn automation for a step, how to use the kill switch.
 
-**Phase 4b (Steps C + D) — deferred:**
-- `tasks` and `implement → check` handoffs can run `machine_advance` on a project that has earned it (its trust slice clears the threshold), shown end to end on a demo story — using the trust evidence Phase 4a collects.
+**Phase 4b Step D — done:**
+- The `implement → check` hand-off runs `machine_advance` on a project that has earned it (`implement` trust slice clears the threshold — 5 runs, 100% unchanged, seeded honestly from the real ships), demonstrated on the demo story; a scope overrun and a contract-surface touch are each shown halting the otherwise-automated run.
+- `spec` and `tasks` trust hooks record a defined, human-anchored verdict, surfaced in `sdlc-status`.
+
+**Phase 4b Step C — gated (hook built, dial not flipped):**
+- `tasks` advance is built into the engine and its trust hook records evidence, but the dial stays `human_approve` until genuine `tasks`/`spec` runs clear the threshold — no evidence was fabricated to unlock it. It is enabled per project only on real runs (or left manual with the reason shown in `sdlc-status`).
 
 ---
 

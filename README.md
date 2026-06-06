@@ -152,13 +152,14 @@ The build half is walked end to end on the worked epic: story **S01** shipped (`
 three tasks in `build-log.json`), **S03** built across backend + mobile, and a `health` feature
 backfilled. The code repos are regenerable from `demo-repos/README.md`.
 
-## Run the back half on the dial (Phase 4a — automation, earned)
+## Run the back half on the dial (Phase 4 — automation, earned)
 
-Phase 4 is **automation, earned with evidence and reversible in one move**. Phase 4a makes the
-`automation` dial real and automates exactly the safest step — the check-gate advance. The engine is
-`sdlc-run`; the evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>.json`
-(the back steps with their dials, per repo) and `trust-log.json` (every run's verdict). See
-`docs/phase-4-build-plan.md`.
+Phase 4 is **automation, earned with evidence and reversible in one move**. Phase 4a made the
+`automation` dial real and earned the safest step (the check-gate advance); Phase 4b added the
+`implement → check` hand-off and the `spec`/`tasks` trust hooks. The engine is `sdlc-run`; the
+evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>.json` (the back steps
+with their dials, per repo) and `trust-log.json` (every run's verdict). See
+`docs/phase-4-build-plan.md` and `docs/phase-4b-build-plan.md`.
 
 - **Drive a story's back half:** `sdlc-run {story} {repo}` walks `spec → tasks → implement → checks`,
   reading each step's dial. On `machine_advance` it advances on its own; on `human_approve` it stops
@@ -176,16 +177,18 @@ Phase 4 is **automation, earned with evidence and reversible in one move**. Phas
 - **Kill switch:** `sdlc-run action: kill` forces every step back to `human_approve` system-wide
   instantly (no code change, no per-step edits); `sdlc-run action: unkill` restores earned automation.
 
-Phase 4a ships the engine + trust log and earns only `checks` (Step B). Automating `tasks` and the
-`implement → check` handoff (Steps C–D) is Phase 4b, earned with the trust evidence this phase
-collects.
+**Earned so far:** `checks` (Step B, Phase 4a) and `implement` (Step D, Phase 4b — the
+`implement → check` hand-off; the scope/contract halts and the engineer review still gate the merge).
+`tasks` (Step C) and `spec` have their dials + trust hooks but stay `human_approve` until their own
+runs clear the threshold — there is no historical signal to seed them from, so they are earned only on
+genuine runs (never fabricated). See `docs/phase-4b-build-plan.md`.
 
 ## What's intentionally NOT built yet
 
-**Phase 4b:** automating the next two back steps — `tasks` generation advance and the
-`implement → check` handoff — each earned with trust-log evidence, with the scope guard and
-contract-surface halt always overriding the dial. **Front states and the engineer review stay
-human_approve, permanently.**
+**Phase 4b Step C** (the remaining automation): `tasks` generation advance — gated until real
+`tasks`/`spec` trust evidence accrues. The hook that records that evidence is built; the dial flips
+only once the threshold is genuinely met. The scope guard and contract-surface halt always override
+the dial, and **front states and the engineer review stay `human_approve`, permanently.**
 
 **Phase 5 (conditional):** the optional service layer (watch repos, run earned-automation steps
 unattended, read-only dashboards), built only when the CLI genuinely can't keep up, with git remaining

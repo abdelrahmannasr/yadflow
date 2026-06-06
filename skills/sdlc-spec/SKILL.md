@@ -7,9 +7,11 @@ description: 'Build-half Step A of the gated SDLC. For one ready-for-build story
 
 **Goal:** Turn ONE `ready-for-build` story into a per-repo Spec Kit spec/plan/tasks inside that
 story's code repo. The heavy spec ceremony runs **once per story per repo**; the light
-tasks → implement loop is **Step B** (`sdlc-implement`, not built yet). This step **never
-auto-advances** and **never re-locks the contract** — the cross-repo surface is owned upstream by the
-architecture gate (build plan §A, Cross-cutting "Heavy spec once per story, light loop per task").
+tasks → implement loop is **Step B** (`sdlc-implement`). This step **never re-locks the contract** —
+the cross-repo surface is owned upstream by the architecture gate (build plan §A, Cross-cutting
+"Heavy spec once per story, light loop per task"). It does not advance the front-half state machine;
+when driven by the orchestrator (`sdlc-run`, Phase 4) it records a `spec`/`tasks` trust signal
+(Step 8) — but it never auto-advances a contract change or a front state.
 
 Spec Kit is driven as **harness slash-commands** (`/speckit.*`), not a subprocess CLI (Phase 0
 Deviation 3). When Spec Kit is not installed, the same files are hand-authored in Spec Kit's exact
@@ -83,11 +85,25 @@ frontmatter linking the spec back to the product repo: `story`, `epic`, `repo`, 
 in the code repo), `speckit` (`installed | not-installed`), `generated` (date). This `link.md` plus the
 spec folder is the authoritative record that this story's spec exists.
 
-### Step 7 — Stop (no auto-advance)
+### Step 7 — Stop (front-half state untouched)
 Report: the spec folder path, the files written, whether Spec Kit was used, the task count from
-`tasks.md`, and that the next action is **Step B — `sdlc-implement`** (NOT built yet). Do **not** edit
-the epic's `state.json`, `approvals.json`, or `contract-lock.json`. Step A is a generation step, not a
-gate.
+`tasks.md`, and that the next action is **Step B — `sdlc-implement`**. Do **not** edit the epic's
+`state.json`, `approvals.json`, or `contract-lock.json`. Step A is a generation step, not a front gate.
+
+### Step 8 — Record the `spec` trust signal (Phase 4b)
+When this step runs under the orchestrator (`sdlc-run`), the generated spec is a back-half run that the
+trust log measures (it is the evidence that could later earn the `spec` step a `machine_advance`). The
+verdict is **anchored to the human who accepts the spec**, never self-graded:
+- the human approves the generated `specs/<story>/` untouched → `approved-unchanged`;
+- the human edits the spec/plan/tasks before accepting → `approved-with-edits` (signal
+  `human_edited_spec: true`);
+- the spec is rejected or the ceremony re-run → `rejected`.
+`sdlc-run` records a provisional entry when the spec is generated; this acceptance finalizes it (same
+pattern as the engineer review finalizing `implement` at `sdlc-ship`). Append the finalized entry to
+`epics/<epic>/.sdlc/trust-log.json` (schema:
+`../sdlc-author-epic/references/state-schema.md`). **Run standalone, no trust entry is written** — the
+log measures orchestrated runs. `spec` stays `human_approve` until its slice clears the threshold;
+this step only *gathers* the evidence, it does not flip the dial.
 
 ## Hard rules (build plan §A, Cross-cutting)
 

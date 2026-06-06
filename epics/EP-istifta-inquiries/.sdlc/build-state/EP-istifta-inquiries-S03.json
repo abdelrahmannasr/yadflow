@@ -1,13 +1,13 @@
 {
   "story": "EP-istifta-inquiries-S03",
-  "note": "Phase 4a back-half state, per repo (schema: ../../../../skills/sdlc-author-epic/references/state-schema.md). S03 is multi-repo (backend + mobile), in-build: one task shipped per repo through Phase 3's manual gates. `checks` has been EARNED to machine_advance — its trust slice in trust-log.json is 5 runs, 100% approved-unchanged, clearing automation.trust_threshold (>=5 runs, >=0.8 unchanged). So the next task on either repo auto-advances on a clean gate pass, stopping at engineer-review (locked, human). `spec`/`tasks`/`implement` stay human_approve (Phase 4b earns their advance).",
+  "note": "Phase 4a/4b back-half state, per repo (schema: ../../../../skills/sdlc-author-epic/references/state-schema.md). S03 is multi-repo (backend + mobile), in-build: one task shipped per repo through Phase 3's manual gates. EARNED to machine_advance: `checks` (Step B, Phase 4a) and `implement` (Step D, Phase 4b) — each has 5 runs at 100% approved-unchanged in trust-log.json, clearing automation.trust_threshold (>=5 runs, >=0.8 unchanged). So the next task auto-advances implement -> checks on a clean run and stops at engineer-review (locked, human). `spec`/`tasks` stay human_approve: they have NO earned evidence yet (Step C, gated until real runs accrue).",
   "repos": {
     "backend": {
       "currentStep": "checks",
       "steps": [
         { "id": "spec",            "automation": "human_approve",   "locked": false, "status": "done" },
         { "id": "tasks",           "automation": "human_approve",   "locked": false, "status": "done" },
-        { "id": "implement",       "automation": "human_approve",   "locked": false, "status": "done" },
+        { "id": "implement",       "automation": "machine_advance", "locked": false, "status": "done" },
         { "id": "checks",          "automation": "machine_advance", "locked": false, "status": "done" },
         { "id": "engineer-review", "automation": "human_approve",   "locked": true,  "status": "done" }
       ]
@@ -17,7 +17,7 @@
       "steps": [
         { "id": "spec",            "automation": "human_approve",   "locked": false, "status": "done" },
         { "id": "tasks",           "automation": "human_approve",   "locked": false, "status": "done" },
-        { "id": "implement",       "automation": "human_approve",   "locked": false, "status": "done" },
+        { "id": "implement",       "automation": "machine_advance", "locked": false, "status": "done" },
         { "id": "checks",          "automation": "machine_advance", "locked": false, "status": "done" },
         { "id": "engineer-review", "automation": "human_approve",   "locked": true,  "status": "done" }
       ]
