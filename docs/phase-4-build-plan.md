@@ -80,16 +80,19 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 
 ---
 
-## Definition of done for Phase 4
+## Definition of done
 
+**Phase 4a (Steps A + B) — done:**
 - The `automation` dial actually changes engine behavior; flipping a step to `machine_advance` makes it advance without a human, and flipping it back restores the manual gate — with no code change.
 - A trust log records every step's runs and is surfaced in `sdlc-status`.
 - The check-gate advance (Step B) runs automatically on clean pass, halts on failure — demonstrated both ways.
-- `tasks` and `implement → check` handoffs can run `machine_advance` on a project that has earned it, shown end to end on the demo story.
-- The four front states are verified locked to `human_approve`; an attempt to set one to `machine_advance` is refused.
+- The four front states (and the engineer review) are verified locked to `human_approve`; an attempt to set one to `machine_advance` is refused, as is flipping a back step whose trust evidence is short.
 - Kill switch works: one command returns the whole system to manual, demonstrated.
 - A scope overrun and a contract-surface touch are each shown halting an otherwise-automated run and pulling in a human.
 - `README.md` updated: how to read the trust log, how to earn automation for a step, how to use the kill switch.
+
+**Phase 4b (Steps C + D) — deferred:**
+- `tasks` and `implement → check` handoffs can run `machine_advance` on a project that has earned it (its trust slice clears the threshold), shown end to end on a demo story — using the trust evidence Phase 4a collects.
 
 ---
 
