@@ -1,6 +1,6 @@
 ---
 name: sdlc-status
-description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in the build half it also prints each back-half step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Use when the user says "sdlc status", "where is epic EP-...", "what is blocking the gate", or "show the trust record".'
+description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in the build half it also prints each back-half step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "sdlc status", "where is epic EP-...", "what is blocking the gate", "show the trust record", or "fleet status".'
 ---
 
 # SDLC — Status (read-only)
@@ -69,6 +69,21 @@ Print, in this order:
    **earned** (eligible to be flipped to `machine_advance`) or still **gathering evidence**. Restate
    the predicate (self-contained): `earned = runs >= min_runs AND unchanged/runs >= min_approved_unchanged`.
    Never recommend flipping a locked step or a front state — those can never be `machine_advance`.
+
+   **Nudge-cost signal (Phase 5 instrumentation).** For each back step that is **earned but its dial
+   is still `human_approve`** (and it is not locked / not a front state), flag it:
+   `⚠ earned but manual — could be machine_advance`. This is the *nudge cost* the Phase 5 trigger
+   watches: automation that is proven safe but still hand-started. It is a read-only observation, not a
+   recommendation to flip — earning the evidence and flipping the dial stay deliberate human acts
+   (`sdlc-run action: set-dial`). See `docs/phase-5-build-plan.md` §"What to instrument now".
+
+9. **Fleet roll-up (overview only).** When the user asked for an overview, or more than one epic exists
+   under `{project-root}/epics/`, print a one-line-per-epic roll-up across the fleet: each epic's
+   `currentStep` (front gate) and, for stories in the build half, a count of back-half steps **waiting
+   at a human gate** and of steps flagged **earned-but-manual**. Close with fleet totals (epics at each
+   front gate; total earned-but-manual back steps). This is the *scale-of-read* signal the Phase 5
+   trigger watches — when this roll-up stops fitting in one glance, that is the measured bottleneck.
+   Still strictly read-only; it only scans the per-epic files.
 
 ### Hard rule
 This skill is strictly read-only. If the user wants to comment, approve, or advance, point them to

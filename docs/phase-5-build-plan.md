@@ -86,17 +86,26 @@ Three pieces, smallest-first; build only the one(s) the measurement justifies:
   Phase 5 was built wrong.
 - No build at all until the trigger above is measured.
 
-## What to instrument now (so the trigger is decidable later)
+## What to instrument now (so the trigger is decidable later) — built
 
-Cheap, file-only additions that make the "should we build Phase 5?" question answerable from data:
+Cheap, file-only signals that make the "should we build Phase 5?" question answerable from data. Both
+are **read-only and derived** — they add no new state file; `sdlc-status` computes them from the
+`trust-log.json` + `build-state/` files already on disk, so they cost nothing and are fully reversible:
 
-- In `sdlc-run`, when an **earned** step waits on a human to start it, note that wait (a counter/line
-  in `trust-log.json` or a sibling `automation-metrics.json`) — this directly measures "nudge cost".
-- In `sdlc-status`, surface a one-line **fleet roll-up** when multiple epics exist (count at each
-  gate) — this measures whether "scale of read" is becoming painful before a dashboard is needed.
+- **Nudge cost — built.** `sdlc-status` flags any back step that is **earned but still
+  `human_approve`** (`⚠ earned but manual — could be machine_advance`). That gap *is* the nudge cost:
+  automation proven safe but still hand-started. A sustained, growing set of these is the trigger's
+  "nudge cost" signal.
+- **Scale of read — built.** `sdlc-status` prints a **fleet roll-up** when multiple epics exist (or on
+  an overview request): one line per epic + fleet totals (epics at each gate; total earned-but-manual
+  back steps). When this roll-up stops fitting in one glance, that is the measured "scale of read"
+  bottleneck.
 
-These are small, reversible, and stay in git. They cost little and turn the Phase 5 decision from a
-gut call into a measured one — which is the entire point of how this system is built.
+These are the snapshot signals — enough to decide the trigger. If they show pressure, the **next**
+increment (still pre-service) is event-level logging of earned-step wait *time* (a sibling
+`automation-metrics.json`); only build that once the snapshot says it is needed. Everything stays in
+git, turning the Phase 5 decision from a gut call into a measured one — the entire point of how this
+system is built.
 
 ## Definition of done (only if/when Phase 5 is actually built)
 
