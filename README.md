@@ -19,8 +19,18 @@ a scaffolded module that installs cleanly, and a working **team review gate** yo
 | `skills/sdlc-author-ui/` | Front state 5: author `ui-design.md` + `DESIGN.md` (Impeccable slash-commands, or graceful fallback). |
 | `skills/sdlc-author-stories/` | Front state 7: break the epic into repo-tagged stories with stable `EP-<slug>-S0N` IDs. |
 | `skills/sdlc-review-gate/` | The reusable **team review + approve gate** (used for all four reviews). |
-| `skills/sdlc-status/` | Read-only view of the full front-state chain and what's blocking the gate. |
-| `epics/EP-istifta-inquiries/` | A worked demo epic run through the **whole front half** (epic → … → ready-for-build). |
+| `skills/sdlc-spec/` | Build Step A: run the Spec Kit ceremony once per story per repo → `specs/<story-id>/`. |
+| `skills/sdlc-implement/` | Build Step B: implement ONE atomic task as a small diff on its own branch. |
+| `skills/sdlc-checks/` | Build Step C: wire + run the three CI gates (spec-link, contract-check, build/test/lint). |
+| `skills/sdlc-pr-template/` | Build Step D: install the platform PR/MR template + risk routing. |
+| `skills/sdlc-ship/` | Build Step E: AI review (advisory) → engineer review → ship + record in the build log. |
+| `skills/sdlc-backfill/` | Generate a human-verified spec for already-built code (Repomix), gated per touched feature. |
+| `skills/sdlc-run/` | Phase 4 orchestrator: drive a story's back half on the `automation` dial; kill switch. |
+| `skills/sdlc-status/` | Read-only view: front chain, build-half dials, trust record, fleet roll-up. |
+| `epics/EP-istifta-inquiries/` | A worked demo epic run **end to end** (front half + build half + automation). |
+| `demo-repos/` | Throwaway code repos for the build half (separate git repos; regenerable — see `demo-repos/README.md`). |
+| `docs/` | The phased build plans (`phase-2`…`phase-5`) and the original workflow design. |
+| `CONTRIBUTING.md` | Commit & PR/MR title convention (Conventional Commits, lowercase after the type). |
 
 ## Install (and re-install after a BMAD update)
 
@@ -45,6 +55,63 @@ As of **Phase 4a** the `automation` dial is no longer inert: the orchestrator `s
 for the safe **back** steps, advances on its own when a step is set to `machine_advance` (and has
 *earned* it — see "Run the back half on the dial" below). The engineer review and all four front
 states stay `human_approve` forever.
+
+## Using the workflow end to end (all the steps, in order)
+
+This is the full path from nothing to shipped code. Each numbered step names the skill to invoke; the
+detailed sections below expand every phase. Invoke a skill by name in your agent/IDE (e.g. *“run
+`sdlc-author-epic`”*); state lives in files you can also edit directly.
+
+### 0 — One-time setup
+1. **Install the module:** `bash skills/sdlc/install.sh` (re-run after any BMAD update).
+2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
+   live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`.
+3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**
+   (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`), **CodeRabbit**
+   (advisory AI review).
+4. **Wire each code repo once:** `sdlc-checks repo:<repo> action: wire` (installs the CI gates) and
+   `sdlc-pr-template repo:<repo> action: wire` (installs the PR/MR template + risk routing).
+5. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type) —
+   see `CONTRIBUTING.md`.
+
+### A — Front half (human-authored, once per epic)
+Each author step writes its artifact, sets itself `done`, moves `currentStep` to its review, and
+**stops at the gate**. Advance every gate with **`sdlc-review-gate`** (`open → comment → approve →
+advance`). Details: **“Run the full front half by hand”** below.
+
+6. `sdlc-author-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (base rule).
+7. `sdlc-author-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
+8. `sdlc-author-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).
+9. `sdlc-author-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (**per-repo**).
+   → `state.json` reaches `currentStep: ready-for-build`.
+
+### B — Build half (per story, per repo)
+From a `ready-for-build` story, for **each** repo the story is tagged with. Details: **“Run the full
+build half by hand”** below.
+
+10. `sdlc-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks + `link.md`).
+11. `sdlc-implement story:<id> repo:<repo> task:<T0N>` → one atomic task = one branch = one commit
+    (repeat per task).
+12. `sdlc-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint must pass.
+13. Open the PR/MR (template already wired); `sdlc-pr-template repo:<repo> action: route` prints the
+    required reviewers from the Impact & Risk block.
+14. `sdlc-ship` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge, record
+    in `build-log.json`, update story status to `in-build`/`shipped`).
+    - **Multi-repo:** repeat 10–14 in each repo, all from the **one** locked contract.
+    - **Existing code:** `sdlc-backfill` first, to produce a human-verified spec for a built feature.
+
+### C — Automation (optional, earned over time)
+15. After a back step accumulates trust evidence, earn it:
+    `sdlc-run action: set-dial step:<step> to: machine_advance` (refused if evidence is short or for a
+    front state / the engineer review).
+16. Drive a story's back half on the dials: `sdlc-run story:<id> repo:<repo>` — it auto-advances
+    earned steps and stops for a human otherwise, always halting at the engineer review.
+17. **Kill switch any time:** `sdlc-run action: kill` (everything → manual) / `action: unkill`.
+Details: **“Run the back half on the dial”** below.
+
+### Any time
+- **`sdlc-status [EP-<slug>]`** — read-only: the front chain, each build step's dial + status, the
+  trust record, and (across epics) the fleet roll-up. Start here to see what's blocking.
 
 ## Run the full front half by hand
 
