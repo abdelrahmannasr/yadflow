@@ -192,4 +192,6 @@ the dial, and **front states and the engineer review stay `human_approve`, perma
 
 **Phase 5 (conditional):** the optional service layer (watch repos, run earned-automation steps
 unattended, read-only dashboards), built only when the CLI genuinely can't keep up, with git remaining
-the source of truth. See `docs/phase-4-build-plan.md` §"Then Phase 5" and `docs/claude-code-build-plan.md` §8.
+the source of truth. It is **trigger-gated** — `docs/phase-5-build-plan.md` is a preview that spells
+out what must be *measured* before any of it is built, the hard rules it inherits, and the cheap
+instrumentation to add now so the decision is data-driven. See also `docs/claude-code-build-plan.md` §8.
