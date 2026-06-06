@@ -48,6 +48,40 @@
       ],
       "risk": "low",
       "shippedAt": "2026-06-06"
+    },
+    {
+      "story": "EP-istifta-inquiries-S03",
+      "task": "T01",
+      "repo": "backend",
+      "branch": "feat/EP-istifta-inquiries-S03-T01-queue-endpoint",
+      "pr": "local-demo",
+      "mergeCommit": "5bd7e8d",
+      "gates": ["spec-link", "contract-check", "build-test-lint"],
+      "ai_review": "coderabbit (advisory)",
+      "engineer_review": [
+        { "approver": "amelia", "role": "owner" },
+        { "approver": "bob", "role": "reviewer" },
+        { "approver": "carol", "role": "domain-owner", "domain": "backend" }
+      ],
+      "risk": "high",
+      "shippedAt": "2026-06-06"
+    },
+    {
+      "story": "EP-istifta-inquiries-S03",
+      "task": "T01",
+      "repo": "mobile",
+      "branch": "feat/EP-istifta-inquiries-S03-T01-queue-screen",
+      "pr": "local-demo",
+      "mergeCommit": "691297e",
+      "gates": ["spec-link", "contract-check", "build-test-lint"],
+      "ai_review": "coderabbit (advisory)",
+      "engineer_review": [
+        { "approver": "amelia", "role": "owner" },
+        { "approver": "bob", "role": "reviewer" },
+        { "approver": "dave", "role": "domain-owner", "domain": "mobile" }
+      ],
+      "risk": "high",
+      "shippedAt": "2026-06-06"
     }
   ]
 }

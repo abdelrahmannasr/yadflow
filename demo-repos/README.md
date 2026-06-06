@@ -15,6 +15,14 @@ run. Only this README is version-controlled; the repos themselves are regenerabl
 
 - `backend/` — a deliberately thin Node backend, just believable enough to be a valid Spec Kit target.
   Step A (`sdlc-spec`) writes its spec under `backend/specs/<story-id>/`.
+- `mobile/` — a second thin repo, added for **Step F (multi-repo)**. A cross-repo story tagged
+  `repos: [backend, mobile]` (e.g. `EP-istifta-inquiries-S03`) is spec'd and built in **both** repos
+  independently, each pinning the **same** locked contract hash. Both carry the same gate scripts and
+  PR template, so the contract-check blocks a surface bypass in either repo.
+
+> Running the gates locally: these throwaway repos have **no remote**, so pass the base branch
+> explicitly — e.g. `bash checks/contract-check.sh master` (the scripts default to `origin/main` and
+> fail closed when it can't be resolved). Set `SDLC_BASE=master` to avoid repeating it.
 
 ## Regenerate `backend/`
 

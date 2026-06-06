@@ -1,7 +1,7 @@
 ---
 id: EP-istifta-inquiries-S03
 epic: EP-istifta-inquiries
-status: draft
+status: in-build
 repos: [backend, mobile]
 ---
 

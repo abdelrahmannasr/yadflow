@@ -289,6 +289,31 @@
   merge — checking them after merge gives an empty `master..HEAD` range (nothing to link), which is
   expected, not a gate failure.
 
+## Phase 3 decisions (build-half Step F)
+
+> Recorded 2026-06-06 while widening to multi-repo (Step F) on the cross-repo story
+> `EP-istifta-inquiries-S03` (`repos: [backend, mobile]`). Per `docs/phase-3-build-plan.md` §F: run
+> A–E in each repo independently, all derived from the one locked contract; prove a per-repo bypass is
+> blocked. **No new skill** — the existing skills already take a `repo` input.
+
+- **One contract, two repos.** A second throwaway repo `demo-repos/mobile/` (own git, gitignored) was
+  scaffolded with the **same** canonical gate scripts + PR template + `.coderabbit.yaml`. S03 was
+  spec'd (`sdlc-spec`) in **both** `backend` and `mobile` under the same story id; both `link.md` pin
+  the **identical** contract hash `sha256:4abbbbc5…`, equal to the product repo's
+  `contract-lock.json`. The backend slice implements the scholar endpoints; the mobile slice consumes
+  them — neither defines the surface.
+- **The pipeline runs per repo.** One atomic task (`S03-T01`) was implemented in each repo and the
+  three gates passed **pre-merge** in both (spec-link, contract-check, build/test/lint). Both ships are
+  recorded in `build-log.json` with the cross-repo escalation (`risk: high` → a domain-owner per repo:
+  `carol`/backend, `dave`/mobile — the Step D routing feeding the Step E engineer review). S03 is now
+  `status: in-build` (one of three tasks shipped per repo).
+- **Per-repo contract enforcement proven (DoD).** A bypass in the **mobile** repo — widening
+  `specs/EP-istifta-inquiries-S03/contracts/queue.md` with a `Task:` trailer but **no**
+  `Contract-Change` — was **blocked** by mobile's own contract-check (spec-link passed, contract-check
+  FAILED, routing back to the architecture gate). Backend's contract-check was already proven blocking
+  in Step C. So each code repo independently enforces the single locked contract; the shared surface
+  cannot be widened from inside either repo.
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).
