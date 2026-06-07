@@ -30,7 +30,7 @@ a scaffolded module that installs cleanly, and a working **team review gate** yo
 | `epics/EP-istifta-inquiries/` | A worked demo epic run **end to end** (front half + build half + automation). |
 | `demo-repos/` | Throwaway code repos for the build half (separate git repos; regenerable — see `demo-repos/README.md`). |
 | `docs/` | The phased build plans (`phase-2`…`phase-5`) and the original workflow design. |
-| `CONTRIBUTING.md` | Commit & PR/MR title convention (Conventional Commits, lowercase after the type). |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commit & PR/MR title convention (Conventional Commits, lowercase after the type). |
 
 ## Install (and re-install after a BMAD update)
 
@@ -72,7 +72,7 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
 4. **Wire each code repo once:** `sdlc-checks repo:<repo> action: wire` (installs the CI gates) and
    `sdlc-pr-template repo:<repo> action: wire` (installs the PR/MR template + risk routing).
 5. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type) —
-   see `CONTRIBUTING.md`.
+   see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### A — Front half (human-authored, once per epic)
 Each author step writes its artifact, sets itself `done`, moves `currentStep` to its review, and
