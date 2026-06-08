@@ -8,6 +8,81 @@ nothing hidden, no database.
 This repo is the **first deliverable** (see `docs/claude-code-build-plan.md` §10): verified research,
 a scaffolded module that installs cleanly, and a working **team review gate** you run by hand.
 
+## The workflow at a glance
+
+The whole lifecycle, from an empty project to shipped code. Setup is one-time; the **front half**
+is human-gated and runs once per epic in the product hub; the **build half** runs once per story
+per code repo; **automation** is opt-in and earned. `sdlc-status` reads it all; `sdlc-hub-bridge`
+mirrors front-half reviews to real PR/MRs.
+
+```mermaid
+flowchart TD
+    classDef gated fill:#fdebd0,stroke:#ca6f1e,color:#000
+    classDef earns fill:#d6eaf8,stroke:#2471a3,color:#000
+    classDef locked fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
+    classDef artifact fill:#fcf3cf,stroke:#b7950b,color:#000
+    classDef sentinel fill:#d5f5e3,stroke:#1e8449,color:#000
+
+    subgraph SETUP["0 · One-time setup (per project)"]
+      direction TB
+      inst["install.sh<br/>copy sdlc-* skills into IDE dirs"]
+      wire["wire each repo:<br/>sdlc-checks · sdlc-pr-template · sdlc-review-comments"]
+      conn["sdlc-connect-repos<br/>repos.json + cached code-map"]
+      phub["optional: hub on a platform<br/>detect-hub · roster"]
+      inst --> wire --> conn --> phub
+    end
+
+    subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
+      direction TB
+      an["sdlc-author-analysis<br/>optional → analysis.md"]:::artifact
+      ep["sdlc-author-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
+      ar["sdlc-author-architecture<br/>architecture.md + locked contract.md"]:::artifact
+      ui["sdlc-author-ui<br/>ui-design.md + DESIGN.md"]:::artifact
+      st["sdlc-author-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
+      gAn{{"gate · analysis"}}:::gated
+      gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
+      gAr{{"gate · architecture<br/>escalated: + repo domain owners"}}:::gated
+      gUi{{"gate · UI · base"}}:::gated
+      gSt{{"gate · stories<br/>per-repo domain owners"}}:::gated
+      rfb(["currentStep: ready-for-build"]):::sentinel
+      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
+    end
+
+    subgraph BUILD["B · Build half — per story, per code repo"]
+      direction TB
+      sp["sdlc-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
+      im["sdlc-implement<br/>1 task = 1 branch = 1 commit"]:::earns
+      ck["sdlc-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
+      prm["open PR/MR + sdlc-pr-template route"]
+      shp["sdlc-ship<br/>AI review (advisory)"]
+      eng{{"engineer review<br/>human · never automated"}}:::locked
+      merged(["merge → build-log.json"]):::sentinel
+      sp --> im --> ck --> prm --> shp --> eng --> merged
+    end
+
+    subgraph AUTO["C · Automation — earned & reversible"]
+      direction TB
+      run["sdlc-run<br/>reads automation dial + trust-log.json"]:::earns
+      kill["kill switch → everything human_approve"]
+      run --- kill
+    end
+
+    phub --> an
+    rfb --> sp
+    run -. drives earned back steps .-> im
+    bridge["sdlc-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
+    bridge -. syncs approvals .-> gEp
+    status["sdlc-status<br/>read-only view over all of it"]
+    status -. observes .-> FRONT
+    status -. observes .-> BUILD
+```
+
+**Legend.** <span>🟨</span> **artifact** = an author step writes a file and stops; <span>🟧</span>
+**gate** = a human review that must pass (`open → comment → approve → advance`); <span>🟦</span>
+**earns automation** = a back step that can be set to `machine_advance` once it proves itself;
+<span>⬜ dashed</span> **locked** = the engineer review and every front state, **permanently
+human**. Detailed walkthroughs for each phase follow below.
+
 ## What's here
 
 | Path | What it is |
@@ -157,6 +232,21 @@ With no repos connected the steps proceed exactly as before (greenfield-safe).
    with the `repos` it implements.
 
 ### The one gate (every review)
+
+Every review is the same loop — author writes, reviewers comment (which never advances), approvals
+accumulate, and only `advance` moves forward, and only when the rule is met:
+
+```mermaid
+flowchart LR
+    a["author writes<br/>artifact"] --> o["open<br/>show artifact"]
+    o --> c["comment<br/>reviewers leave notes"]
+    c -->|owner addresses,<br/>edits in place| c
+    c --> ap["approve<br/>name + role"]
+    ap --> adv{"advance?<br/>rule met?"}
+    adv -->|no — names who's missing| o
+    adv -->|yes| nxt(["next step"])
+```
+
 Invoke **`sdlc-review-gate`**:
 - `action: open` — present the artifact; reviewers leave comments in
   `reviews/<artifact>--<date>--comments.md`. The owner addresses them and edits the artifact in place.

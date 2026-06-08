@@ -5,7 +5,9 @@ one page before starting, read this one. The full reference is in `README.md`.
 
 ---
 
-## 1. The big picture: your four repos
+## 1. The big picture
+
+### Your four repos
 
 You will have **four separate git repos**, each with one job:
 
@@ -24,8 +26,96 @@ You will have **four separate git repos**, each with one job:
                        story in the product hub.
 ```
 
+```mermaid
+flowchart LR
+    classDef hub fill:#fcf3cf,stroke:#b7950b,color:#000
+    classDef code fill:#d6eaf8,stroke:#2471a3,color:#000
+    src["sdlc-workflow<br/>skills source"]
+    phub["product-hub<br/>epics · contracts · stories · state"]:::hub
+    r1["code-repo-1"]:::code
+    r2["code-repo-2"]:::code
+    r3["code-repo-3"]:::code
+    src -. install skills .-> phub
+    phub -- connect-repos:<br/>cache code-map --> r1
+    phub -- connect-repos:<br/>cache code-map --> r2
+    phub -- connect-repos:<br/>cache code-map --> r3
+    r1 -. specs & PRs link back .-> phub
+    r2 -. specs & PRs link back .-> phub
+    r3 -. specs & PRs link back .-> phub
+```
+
 **The handoff rule:** everything *up to and including the locked contract* lives in the **product hub**.
 Everything *from the spec onward* (specs, tasks, code) lives in each **code repo**.
+
+### The whole workflow, end to end
+
+Setup is one-time. The **front half** is human-gated and runs once per epic in the hub; the **build
+half** runs once per story per code repo; **automation** is opt-in and earned. `sdlc-status` reads it
+all; `sdlc-hub-bridge` mirrors front-half reviews to real PR/MRs on the hub.
+
+```mermaid
+flowchart TD
+    classDef gated fill:#fdebd0,stroke:#ca6f1e,color:#000
+    classDef earns fill:#d6eaf8,stroke:#2471a3,color:#000
+    classDef locked fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
+    classDef artifact fill:#fcf3cf,stroke:#b7950b,color:#000
+    classDef sentinel fill:#d5f5e3,stroke:#1e8449,color:#000
+
+    subgraph SETUP["0 · One-time setup (team lead, per project)"]
+      direction TB
+      inst["install skills<br/>+ wire each repo"]
+      conn["sdlc-connect-repos<br/>cache each repo's code-map"]
+      inst --> conn
+    end
+
+    subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
+      direction TB
+      an["sdlc-author-analysis<br/>optional → analysis.md"]:::artifact
+      ep["sdlc-author-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
+      ar["sdlc-author-architecture<br/>architecture.md + locked contract.md"]:::artifact
+      ui["sdlc-author-ui<br/>ui-design.md + DESIGN.md"]:::artifact
+      st["sdlc-author-stories<br/>repo-tagged stories"]:::artifact
+      gAn{{"gate · analysis"}}:::gated
+      gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
+      gAr{{"gate · architecture<br/>escalated: + repo owners"}}:::gated
+      gUi{{"gate · UI · base"}}:::gated
+      gSt{{"gate · stories<br/>per-repo owners"}}:::gated
+      rfb(["ready-for-build"]):::sentinel
+      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
+    end
+
+    subgraph BUILD["B · Build half — per story, per code repo"]
+      direction TB
+      sp["sdlc-spec<br/>→ specs/&lt;story&gt;/"]
+      im["sdlc-implement<br/>1 task = 1 branch = 1 commit"]:::earns
+      ck["sdlc-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
+      prm["open PR/MR + sdlc-pr-template route"]
+      eng{{"sdlc-ship · engineer review<br/>human · never automated"}}:::locked
+      merged(["merge → build-log.json"]):::sentinel
+      sp --> im --> ck --> prm --> eng --> merged
+    end
+
+    subgraph AUTO["C · Automation — earned & reversible"]
+      direction TB
+      run["sdlc-run<br/>automation dial + trust-log.json"]:::earns
+      kill["kill switch → all human_approve"]
+      run --- kill
+    end
+
+    conn --> an
+    rfb --> sp
+    run -. drives earned back steps .-> im
+    bridge["sdlc-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
+    bridge -. syncs approvals .-> gEp
+    status["sdlc-status — read-only view over all of it"]
+    status -. observes .-> FRONT
+    status -. observes .-> BUILD
+```
+
+**Legend.** 🟨 **artifact** = an author step writes a file and stops · 🟧 **gate** = a human review
+that must pass (`open → comment → approve → advance`) · 🟦 **earns automation** = a back step that
+can later auto-advance once it proves itself · ⬜ dashed **locked** = the engineer review and every
+front state, **permanently human**.
 
 ---
 
@@ -165,7 +255,19 @@ and the epic step does that analyst shaping inline. Each author step opens its o
 > `code-context:` frontmatter. If a repo's code has moved since you connected it, the step warns and
 > points you at `sdlc-connect-repos action: refresh`.
 
-**The gate, every time** (`sdlc-review-gate`):
+**The gate, every time** (`sdlc-review-gate`) — the same loop for all five reviews. Commenting never
+advances; only `advance` moves forward, and only when the rule is met:
+
+```mermaid
+flowchart LR
+    o["open<br/>show artifact"] --> c["comment<br/>reviewers leave notes"]
+    c -->|owner addresses,<br/>edits in place| c
+    c --> ap["approve<br/>name + role"]
+    ap --> adv{"advance?<br/>rule met?"}
+    adv -->|no — tells you<br/>who's missing| o
+    adv -->|yes| nxt(["next step"])
+```
+
 - `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the hub
   is on a platform (step 3d2), this also opens a review **PR/MR on the hub** for the artifact.
 - `action: approve` (name + role) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
