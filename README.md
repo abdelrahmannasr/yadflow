@@ -140,8 +140,9 @@ the first epic) are handed off to the Claude Code skills.
 
 > **Releases are automated.** A `feat:`/`fix:` commit merged to `main` triggers
 > [semantic-release](https://semantic-release.gitbook.io/): it computes the version from the
-> [Conventional Commits](CONTRIBUTING.md), updates `CHANGELOG.md`, and publishes to npm with build
-> provenance (tokenless OIDC). No manual `npm publish`.
+> [Conventional Commits](CONTRIBUTING.md), publishes to npm with build provenance (tokenless OIDC),
+> ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No manual `npm publish`. See
+> [`RELEASING.md`](RELEASING.md).
 
 ## The two dials (per step, build plan §2)
 
