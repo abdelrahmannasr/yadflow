@@ -12,13 +12,26 @@ steady state. This doc covers the one-time bootstrap and the ongoing flow.
 2. run `npx semantic-release`, which:
    - reads the [Conventional Commits](CONTRIBUTING.md) since the last release to pick the next version
      (`fix:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major),
-   - updates `CHANGELOG.md`,
+   - regenerates `CHANGELOG.md` and ships it **inside the npm tarball**,
    - **publishes to npm via tokenless Trusted Publishing (OIDC) with build provenance** — no `NPM_TOKEN`,
-   - commits `chore(release): <version> [skip ci]` back to `main` and cuts a GitHub release.
+   - pushes the `vX.Y.Z` git tag and cuts a GitHub release with the notes.
 
 Auth is the `id-token: write` permission in the workflow plus the npm trusted-publisher entry — there is
 no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs the Node 18/20/22 test matrix and a
 tarball-leak smoke on every PR.
+
+> **Note — no commit back to `main`.** The pipeline deliberately omits `@semantic-release/git`, so it
+> never pushes a `chore(release)` commit to `main`. That keeps it compatible with branch protection
+> (the required-review rule on `main` would otherwise reject the bot's push) and needs no PAT. The
+> consequence: `package.json`'s `version` field on `main` is **not** auto-bumped — git **tags** are the
+> source of truth, and the CLI reads its version from the `package.json` that semantic-release writes
+> into the published tarball. If you ever want the version/CHANGELOG committed back, add
+> `@semantic-release/git` plus a release PAT (or a branch-protection bypass) — the hardened path from
+> `abdelrahmannasr/wa-cloud-sdk`.
+
+Because `main` is protected with a required review, **merging each release PR needs an approval or an
+admin merge** (`gh pr merge --squash --admin`). The release workflow itself no longer touches `main`, so
+it is not blocked.
 
 ## One-time setup (already done once per package)
 
@@ -52,8 +65,8 @@ Save. From here on, CI publishes tokenlessly with provenance.
 ### C. GitHub repo permissions
 
 Repo → **Settings → Actions → General → Workflow permissions** → **Read and write permissions**, and
-check **Allow GitHub Actions to create and approve pull requests**. (Needed for the `chore(release)`
-commit and the GitHub release.)
+check **Allow GitHub Actions to create and approve pull requests**. (Needed for the git tag push and the
+GitHub release.) The source repo must also be **public** — npm provenance is rejected for private repos.
 
 ## Cutting a release (ongoing)
 
@@ -77,10 +90,12 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
 - **Release job fails at the npm step (`EINVALIDNPMTOKEN` / OIDC error):** the trusted publisher isn't
   registered for this package, or the workflow filename/repo in the npm config doesn't match. Re-check
   step B.
-- **Release commit can't be pushed to `main`:** workflow permissions aren't read/write (step C), or a
-  branch-protection rule blocks the default `GITHUB_TOKEN`. This repo's pipeline is the *lean* variant
-  (no signing key / PAT); if you later protect `main` with required signatures or required PRs, adopt the
-  hardened pipeline from `abdelrahmannasr/wa-cloud-sdk` (SSH signing + a release PAT).
+- **Publish rejected with `E422 … repository visibility: "private"`:** npm provenance only works for a
+  **public** source repo. Make the repo public, or set `publishConfig.provenance: false` to publish
+  without an attestation.
+- **PR won't merge ("review required"):** `main` is branch-protected with a required review. Approve the
+  PR, or admin-merge: `gh pr merge <n> --squash --admin`. The release workflow itself does not push to
+  `main`, so it is never blocked by this.
 - **No release was cut:** the merged commits were all non-releasing types (`docs:`, `chore:`, …). That's
   expected — only `feat`/`fix`/`perf`/breaking trigger a version.
 - **A `2FA` prompt blocks automated publish:** it shouldn't — OIDC trusted publishing satisfies the
