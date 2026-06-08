@@ -1,0 +1,10 @@
+{
+  "platform": "github",
+  "git_url": "https://github.com/abdelrahmannasr/sdlc-workflow.git",
+  "default_branch": "main",
+  "bridge_enabled": true,
+  "detectedAt": "2026-06-08",
+  "roster": [
+    { "login": "abdelrahmannasr", "name": "abdelrahman", "role": "owner" }
+  ]
+}

@@ -23,7 +23,9 @@ a scaffolded module that installs cleanly, and a working **team review gate** yo
 | `skills/sdlc-spec/` | Build Step A: run the Spec Kit ceremony once per story per repo → `specs/<story-id>/`. |
 | `skills/sdlc-implement/` | Build Step B: implement ONE atomic task as a small diff on its own branch. |
 | `skills/sdlc-checks/` | Build Step C: wire + run the three CI gates (spec-link, contract-check, build/test/lint). |
-| `skills/sdlc-pr-template/` | Build Step D: install the platform PR/MR template + risk routing. |
+| `skills/sdlc-pr-template/` | Build Step D: install the platform PR/MR template + risk routing (code repos **and** the hub). |
+| `skills/sdlc-review-comments/` | Install platform-matched PR/MR review-comment scaffolds (code repos and the hub). |
+| `skills/sdlc-hub-bridge/` | The templated PR/MR **review bridge**: open a review PR/MR on the hub and sync platform approvals/comments into the file ledger. |
 | `skills/sdlc-ship/` | Build Step E: AI review (advisory) → engineer review → ship + record in the build log. |
 | `skills/sdlc-backfill/` | Generate a human-verified spec for already-built code (Repomix), gated per touched feature. |
 | `skills/sdlc-run/` | Phase 4 orchestrator: drive a story's back half on the `automation` dial; kill switch. |
@@ -70,16 +72,22 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
 3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**
    (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`, used by
    `sdlc-connect-repos` and `sdlc-backfill`), **CodeRabbit** (advisory AI review).
-4. **Wire each code repo once:** `sdlc-checks repo:<repo> action: wire` (installs the CI gates) and
-   `sdlc-pr-template repo:<repo> action: wire` (installs the PR/MR template + risk routing).
+4. **Wire each code repo once:** `sdlc-checks repo:<repo> action: wire` (installs the CI gates —
+   *merges* with any existing CI, never clobbers), `sdlc-pr-template repo:<repo> action: wire` (PR/MR
+   template + risk routing), `sdlc-review-comments repo:<repo> action: wire` (review-comment scaffold).
 5. **Connect each code repo to the hub** (so the front phases see what's already built):
    `sdlc-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>`. It
    registers the repo in `.sdlc/repos.json` and caches a Repomix pack + a lightweight **code-map**
    (existing endpoints/events/data-models/modules, secret-scanned). Clones/fetches as the **local user**
    (SSH or credential helper; GitHub or GitLab; no stored tokens). Re-run for any new repo;
    `action: refresh` when a repo's code moves; `action: list` shows freshness. Greenfield → skip it.
-6. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type) —
-   see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+6. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
+   `sdlc-connect-repos action: detect-hub`, then `action: roster` once per reviewer (login → SDLC
+   name + role), and `sdlc-pr-template repo:hub action: wire` / `sdlc-review-comments repo:hub action:
+   wire` / `sdlc-checks repo:hub action: wire`. With no hub platform the front gate just runs file-only.
+7. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
+   human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
+   [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### A — Front half (human-authored, once per epic)
 Each author step writes its artifact, sets itself `done`, moves `currentStep` to its review, and
@@ -155,6 +163,9 @@ Invoke **`sdlc-review-gate`**:
   **Commenting never advances.**
 - `action: approve` (name + role) — appended to `.sdlc/approvals.json` and reflected in
   `reviews/<artifact>--<date>--approved.md`.
+- `action: sync` — **(when the hub is on a platform)** pull approvals/comments from the artifact's hub
+  review PR/MR (opened by `open` via `sdlc-hub-bridge`, using your own `gh`/`glab` — no stored tokens)
+  into the same ledger. The file ledger stays the source of truth; merging the PR does not advance.
 - `action: advance` — advances **only if** the rule is satisfied; otherwise it names the missing
   approval and stays put.
 

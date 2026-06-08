@@ -64,8 +64,55 @@ The gates run identically under either CI; the config just invokes the scripts w
 
 - **GitHub Actions** — `templates/github/sdlc-checks.yml` → `.github/workflows/sdlc-checks.yml`. Three
   jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/${{ github.base_ref }}` as base.
-- **GitLab CI** — `templates/gitlab/.gitlab-ci.yml` → repo-root `.gitlab-ci.yml`. Three stages run on
-  `merge_request_event` with `GIT_DEPTH: 0`, passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`.
+- **GitLab CI** — `templates/gitlab/sdlc-checks.gitlab-ci.yml` → `.gitlab/ci/sdlc-checks.yml`, pulled in
+  by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
+  passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`.
+
+## Sync with existing CI (merge, never clobber)
+
+`wire` is **additive**: it brings the SDLC gates into a repo that may already have CI, without ever
+editing a foreign CI file. The principle is "own a separate file; touch the foreign root only to add a
+one-line include".
+
+**GitHub.** Every workflow file runs independently, so the gates simply live in their own
+`sdlc-checks.yml`, identified by the first-line marker `# sdlc-managed: sdlc-checks`.
+- No file at our path → copy the template verbatim.
+- Our marked file already there → refresh it (no-op if identical).
+- A **foreign** workflow occupies the name → install as `sdlc-checks.gen.yml` instead and make the
+  display `name:` unique. We never merge jobs into, or edit, a foreign workflow.
+
+**GitLab.** Only one root `.gitlab-ci.yml` may exist, so the gates live in an **includable** fragment
+`.gitlab/ci/sdlc-checks.yml` (marker `# sdlc-managed-include: sdlc-checks`). Its jobs declare `needs: []`
+and **no `stage:`**, so they run in the default stage and a foreign root's `stages:` list can neither
+break nor reorder them; job names are `sdlc-`prefixed to avoid collisions.
+- No root `.gitlab-ci.yml` → write a minimal root (`gitlab-ci.include-root.yml`) that only `include:`s
+  the fragment.
+- Root exists → read its top-level `include:`; add the key if absent, append
+  `- local: '.gitlab/ci/sdlc-checks.yml'` if missing, no-op if already present. **Nothing else** in the
+  root is touched.
+- Root YAML cannot be parsed safely → **STOP** and print the include snippet for the human to paste.
+
+**package.json.** Only ADD a missing `lint`/`build`/`test` script; an existing one is never overwritten.
+
+**Idempotent.** The two markers plus the include-entry check make a re-run a no-op. This is how a repo
+that already had its own pipeline keeps it and still gains the three gates.
+
+## Wiring the hub (`repo: hub`)
+
+The product hub is itself a repo on a platform (recorded in `.sdlc/hub.json` by
+`sdlc-connect-repos action: detect-hub`). `wire repo: hub` targets `{project-root}` and uses the same
+merge-not-clobber logic, with a **hub-flavored gate set** appropriate to a "thinking" repo (it has no
+`specs/` or `package.json` build):
+- **owner-set** — every `epic.md` (and forward artifact) under `epics/EP-*/` carries an `owner`.
+- **contract-locked** — where an epic has a `contract.md`, its surface hash matches
+  `.sdlc/contract-lock.json` (reuse the recipe in
+  `../sdlc-author-architecture/references/contract-format.md`).
+- **approvals-present** — an epic at `ready-for-build` has the approvals its gate rule requires recorded
+  in `.sdlc/approvals.json` (the same predicate `sdlc-review-gate` enforces).
+
+These are advisory checks on the hub's own PRs (the front-half review PRs the bridge opens); they keep
+the hub's artifacts internally consistent. The hub never runs the code-repo `spec-link`/`build-test-lint`
+gates. Author the hub gate scripts under the hub's `checks/` following the same CI-agnostic-bash pattern.
 
 ## Running by hand (Phase 3 is manual)
 

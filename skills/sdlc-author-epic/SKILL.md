@@ -102,12 +102,16 @@ Notes:
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1.
 - Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
-  containing `[]`, and the `reviews/` directory.
+  and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
+  `[]`, and the `reviews/` directory. (`comments.json` is the machine-readable counterpart to the
+  `reviews/*--comments.md` markdown — `sdlc-review-gate` appends to it on every `comment`.)
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via
 `sdlc-review-gate`. **Never mark the epic-review step approved here** — only real reviewers do that
-through the gate. Front states do not auto-advance.
+through the gate. Front states do not auto-advance. When the hub has a platform, the gate opens a review
+PR on the hub (via `sdlc-hub-bridge`) and `sdlc-review-gate action: sync` pulls platform approvals/
+comments into the ledger; otherwise the review is recorded file-only.
 
 ## Reference
 - State schema and field meanings: `references/state-schema.md`.

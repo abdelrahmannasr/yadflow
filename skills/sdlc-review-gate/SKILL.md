@@ -16,15 +16,17 @@ parameter, not a hardcoded human.
 ## Conventions
 - `{project-root}` resolves from the project working directory.
 - Operate on one epic: `{project-root}/epics/EP-<slug>/`.
-- State files: `.sdlc/state.json`, `.sdlc/approvals.json`. Review records: `reviews/`.
+- State files: `.sdlc/state.json`, `.sdlc/approvals.json`, `.sdlc/comments.json`, and (when the bridge is
+  used) `.sdlc/hub-prs.json`. Review records: `reviews/`.
 - The artifact base name drops the extension (`epic.md` → `epic`; story `stories/...S01.md` → `stories-S01`).
 
 ## Inputs
 - `epic`: the `EP-<slug>` to operate on.
 - `artifact`: the file under the epic being reviewed (e.g. `epic.md`).
-- `action`: one of `open` | `comment` | `approve` | `advance` (default: `open`).
+- `action`: one of `open` | `comment` | `approve` | `sync` | `advance` (default: `open`).
 - For `comment` / `approve`: the reviewer name and role (`owner` | `reviewer` | `domain-owner`),
   and for domain owners the `domain` (repo/area). Ask if not provided.
+- `sync` needs no reviewer input — it reads the platform PR/MR review state (via `sdlc-hub-bridge`).
 
 ## On Activation
 
@@ -53,6 +55,13 @@ touched `repos` — never a forked or copied gate.
 the rule above, and tell reviewers how to comment/approve. Set the step `status` to `in_review` and
 `currentStep` to this step in `state.json` if not already. Do not advance.
 
+If `.sdlc/hub.json` has a non-null `platform`, `bridge_enabled: true`, `config.yaml` `hub.bridge: true`,
+and `gh`/`glab` is authenticated, **also open a review PR/MR on the hub** by invoking
+`sdlc-hub-bridge action: open` (epic + artifact). Record the PR in `epics/<epic>/.sdlc/hub-prs.json`
+(`{step, artifact, platform, number, url, branch, lastSyncedAt}`) and report the URL + required
+reviewers. Otherwise (no platform / disabled / no CLI) proceed **file-only** exactly as before — no
+error. Opening the PR records no approvals and never advances.
+
 **`comment`** — Capture reviewer feedback. Append/create a review file
 `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` with a heading per reviewer:
 
@@ -64,6 +73,14 @@ the rule above, and tell reviewers how to comment/approve. Set the step `status`
 - <comment>
 ```
 
+Also append a **machine-readable** participation record to `.sdlc/comments.json` (create as `[]` if
+absent — the markdown stays the human-readable record, this makes commenter names queryable, the
+counterpart to `approvals.json`):
+```json
+{ "artifact": "<artifact>", "step": "<step id>", "commenter": "<name>", "role": "<owner|reviewer|domain-owner>", "domain": "<optional>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
+```
+`round` increments each comment→address cycle for the artifact; upsert by `(step, commenter, round)`.
+
 Then help the **owner address the comments** using the agent lens listed for this step (epic → `pm`;
 architecture → `architect`; ui-design → `ux-designer`; stories → `pm`, with `architect` for technical
 detail — there is **no `sm` agent**, Phase 0 Deviation 1). Update the authored artifact in place.
@@ -73,9 +90,44 @@ Repeat comment→address rounds until reviewers are satisfied. **Commenting neve
 ```json
 { "artifact": "<artifact>", "step": "<step id>", "approver": "<name>", "role": "<owner|reviewer|domain-owner>", "domain": "<optional>", "status": "approved", "date": "<YYYY-MM-DD>" }
 ```
-Also write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` listing who has approved so
-far and who is still required. Then **re-evaluate the rule** (Step 3). Recording an approval does
-NOT itself advance — advancement is a separate, explicit check.
+Also write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named roster** with three
+sections, so every participant is attributable in one place:
+
+```markdown
+# Approval record — <artifact> — <YYYY-MM-DD>
+
+Reviewer rule in force: **<base | escalated | per-repo>** (<why — e.g. risk_tags / touched repos>).
+
+## Approved by
+- <name> — <role>[ (<domain>)] — approved <date>
+
+## Reviewed / commented by (participation, from comments.json)
+- <name> — <role> — <n> comment(s) across <r> round(s)
+
+## Still required to pass the gate
+- <missing owner/reviewer/domain-owner, or "none">
+
+Gate status: **<PASSED | BLOCKED>** — <reason>.
+```
+
+Then **re-evaluate the rule** (Step 3). Recording an approval does NOT itself advance — advancement is
+a separate, explicit check.
+
+**`sync`** — (the platform bridge input path) Pull the hub review PR/MR's review state into the ledger,
+then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/hub-prs.json` and use
+`sdlc-hub-bridge`'s read recipes (`../sdlc-hub-bridge/references/bridge.md`) to fetch reviews + comments
+via the local user's `gh`/`glab`. For each:
+- map the platform `login` → SDLC `name` + `role` via `.sdlc/hub.json`'s roster (a roster `name` equal
+  to a repo's `domain_owner` in `repos.json` becomes that repo's `domain-owner` for a touched domain;
+  an unmapped login is a plain `reviewer`, flagged, never promoted);
+- an `APPROVED` review / MR approval → append an `approved` record to `approvals.json` tagged
+  `"source": "bridge"`; a `COMMENTED`/`CHANGES_REQUESTED`/note → write to
+  `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` + `comments.json` (never an approval).
+**Idempotent:** upsert bridge approvals by `(step, approver, role, domain)`, supersede revoked ones, and
+key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
+`source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
+before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
+roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. `sync` itself never advances.
 
 **`advance`** — Run the gate predicate (Step 3). Only advance if it passes.
 
@@ -107,6 +159,11 @@ If the predicate **passes**:
 - **Front steps never auto-advance.** Even with `assistance: heavy`, a human must record approval.
 - A step `locked: true` may not be switched to `machine_advance`; refuse such a request.
 - The gate talks only through `.sdlc/` and `reviews/` files — never hidden state.
+- **The platform bridge is an input path only.** `open`/`sync` use the local user's own `gh`/`glab`
+  (no stored tokens), and the **file ledger remains the source of truth** — the Step 3 predicate is
+  unchanged whether approvals arrive manually or via `sync`. Merging the review PR does **not** advance
+  the step; only `advance` does. With no hub platform / no CLI, the gate runs file-only with no error.
 
 ## Reference
 - Gating details and worked example: `references/gating.md`.
+- The platform PR/MR bridge (`open`/`sync` mechanics, read recipes, roster): `../sdlc-hub-bridge/SKILL.md`.

@@ -66,6 +66,7 @@ Write `{project-root}/epics/EP-<slug>/ui-design.md` using EXACTLY this template:
 id: EP-<slug>
 artifact: ui-design
 status: draft
+owner: <inherit from epic.md owner>   # the epic owner carries through; not retyped
 repos: [<inherit from epic>]
 impeccable: <used | not-installed>
 code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # code-maps that informed component reuse (Step 2b)
@@ -94,7 +95,9 @@ In `state.json`: set `ui-design.status: "done"`, set `ui-design-review.status: "
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, and that the next
 action is **review** via `sdlc-review-gate` (base rule: owner + 1 reviewer). **Never record approval
-here.** Front states do not auto-advance.
+here.** Front states do not auto-advance. When the hub has a platform, the gate opens a review PR on the
+hub (via `sdlc-hub-bridge`) and `sdlc-review-gate action: sync` pulls platform approvals/comments into
+the ledger; otherwise the review is recorded file-only.
 
 ## Reference
 - Impeccable commands and the slash-command-vs-CLI deviation: `RESEARCH-NOTES.md` §4 + Deviation 3.

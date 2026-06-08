@@ -28,8 +28,9 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
 
 ## Inputs
 
-- `action` — `connect` | `refresh` | `list` | `disconnect` (default `connect`).
+- `action` — `connect` | `refresh` | `list` | `disconnect` | `detect-hub` | `roster` (default `connect`).
 - `repo` — the repo's short name (the key used in stories' `repos:` tag, e.g. `backend`).
+- `login`, `name`, `role` — for `roster` (set the hub's reviewer-roster mapping login → name → role).
 - `path` — local path to the code repo (relative to `{project-root}` or absolute). For local repos.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
 - `domain_owner` — the engineer who owns this repo's domain (drives per-repo review routing later).
@@ -110,6 +111,25 @@ the front phases will now load this repo's code-map. Nothing auto-advances; this
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo
   itself untouched**.
 
+## Hub detection + reviewer roster (the front-half review bridge)
+
+The hub is itself a git repo on a platform. These actions record that so the front-half review/comment/
+approval cycle can run through a real PR/MR on the hub (`sdlc-review-gate` + `sdlc-hub-bridge`). They
+write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — never an epic's state/approvals.
+
+- **`detect-hub`** — detect the hub's own platform and upsert `.sdlc/hub.json`. Run
+  `git remote get-url origin` **on the hub** and read the host with the SAME logic Step 1 uses for code
+  repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
+  `git_url`, `default_branch`, `detectedAt`, and `bridge_enabled: true` (preserve an existing roster).
+  Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
+- **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `role`
+  (`owner` | `reviewer`). Upsert by `login`. `domain-owner` is **not** set here — it is derived when a
+  roster `name` equals a repo's `domain_owner` in `repos.json` (see `references/hub-config.md`). An
+  unmapped login degrades to a plain `reviewer`, never auto-promoted to owner/domain-owner.
+
+If the hub has no remote (`platform: null`) or the bridge is disabled, the front-half gate runs
+file-only with no error — the bridge is purely additive.
+
 ## Live on-demand (the third context layer)
 The cached pack + map are the default. When a front phase needs an area not in the map, or a repo is
 stale, it may re-run Repomix **live**, scoped to that area:
@@ -129,6 +149,7 @@ Same CLI, invoked ad hoc — no registry write. Documented in `references/code-c
 
 ## Reference
 - Registry schema + freshness rule: `references/repos-registry.md`.
+- Hub config + reviewer roster (the review bridge): `references/hub-config.md`.
 - Repomix command, secret-scan, degrade path, the code-map prompt, and live on-demand:
   `references/code-context.md`.
 - The repomix discipline this reuses (one-feature-at-a-time variant): `../sdlc-backfill/references/backfill.md`.

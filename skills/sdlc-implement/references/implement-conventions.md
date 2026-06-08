@@ -27,6 +27,7 @@ for the same task.
 
 Task: <story-id>-<task-id>
 [Contract-Change: yes]
+[Co-Authored-By: <AI name> <email>]
 ```
 
 - The **`<type>` is lowercase** (`feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`,
@@ -34,10 +35,36 @@ Task: <story-id>-<task-id>
   period** — Conventional Commits (see `CONTRIBUTING.md` and `config.yaml` `build.commit_subject_style`).
   Proper nouns/acronyms keep their case (`fix: refresh OAuth token`). e.g. `feat: add POST /inquiries
   create path`, not `feat: Add POST /inquiries create path.`
-- The **final trailer is the task ID** (`Task: EP-istifta-inquiries-S01-T01`) — this is the anchor the
-  spec-link check (§C) and the PR (§D) read to connect the diff to its spec and story.
+- The **`Task:` trailer is required** (`Task: EP-istifta-inquiries-S01-T01`) — the anchor the spec-link
+  check (§C) and the PR (§D) read to connect the diff to its spec and story. It need not be the *last*
+  line: the spec-link gate finds it with git's native trailer parser
+  (`%(trailers:key=Task)`), which is order-independent. All trailers must sit in **one contiguous block**
+  in the last paragraph (no blank lines between them) so git parses them as trailers.
+- **Trailer order:** `Task:` → `Contract-Change:` (if any) → `Co-Authored-By:` (if any), last.
 - `Contract-Change: yes` appears **only** when the diff alters the locked contract surface (see below).
   Omit it for normal implementation.
+
+## Commit ownership & AI co-authors
+
+The **human git author owns the commit** (`config.yaml` `build.commit_owner: git_author`). When an AI
+tool assisted, record it **per commit** as a `Co-Authored-By` trailer — the AI is a co-author, **never**
+the author. The owner picks the tool from `config.yaml` `build.ai_coauthor.allowed`:
+
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: GitHub Copilot <copilot@users.noreply.github.com>
+Co-Authored-By: Cursor <noreply@cursor.com>
+Co-Authored-By: CodeRabbit <noreply@coderabbit.ai>
+```
+
+- Choose the entry whose `id` matches the tool that actually helped author the diff; add more than one
+  line if several did. CodeRabbit is a co-author only when it **contributed code**, not when it merely
+  reviewed (that is `ai_review` in `sdlc-ship`).
+- For a fully human-authored commit, pick `id: none` — i.e. **omit** the trailer. `ai_coauthor.required`
+  is `false`, so a missing trailer is valid and no gate fails on it.
+- `sdlc-implement` installs the `.gitmessage` template (`templates/.gitmessage`) and sets
+  `git config commit.template .gitmessage` in the repo, so these lines are pre-scaffolded (commented) for
+  the owner to uncomment.
 
 ## File-boundary rule (hard stop)
 
