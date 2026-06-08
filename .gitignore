@@ -17,6 +17,11 @@ _bmad-output/
 demo-repos/*/
 !demo-repos/README.md
 
+# Connected-repo code-context cache (sdlc-connect-repos). The registry (.sdlc/repos.json) and the
+# lightweight code-map.md per repo ARE tracked — they're small, reviewable, and the brain reads them.
+# The full Repomix pack.md is a large, regenerable artifact (recreate via `action: refresh`) — ignored.
+.sdlc/code-context/*/pack.md
+
 # Empty/generated scaffolding
 design-artifacts/
 skills/reports/

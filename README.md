@@ -18,6 +18,7 @@ a scaffolded module that installs cleanly, and a working **team review gate** yo
 | `skills/sdlc-author-architecture/` | Front state 3: author `architecture.md` + the locked `contract.md`; hash-lock the contract surface. |
 | `skills/sdlc-author-ui/` | Front state 5: author `ui-design.md` + `DESIGN.md` (Impeccable slash-commands, or graceful fallback). |
 | `skills/sdlc-author-stories/` | Front state 7: break the epic into repo-tagged stories with stable `EP-<slug>-S0N` IDs. |
+| `skills/sdlc-connect-repos/` | Connect code repos to the hub (GitHub/GitLab, local-user auth); cache a Repomix pack + **code-map** per repo so the front phases are code-aware. |
 | `skills/sdlc-review-gate/` | The reusable **team review + approve gate** (used for all four reviews). |
 | `skills/sdlc-spec/` | Build Step A: run the Spec Kit ceremony once per story per repo → `specs/<story-id>/`. |
 | `skills/sdlc-implement/` | Build Step B: implement ONE atomic task as a small diff on its own branch. |
@@ -67,11 +68,17 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
 2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
    live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`.
 3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**
-   (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`), **CodeRabbit**
-   (advisory AI review).
+   (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`, used by
+   `sdlc-connect-repos` and `sdlc-backfill`), **CodeRabbit** (advisory AI review).
 4. **Wire each code repo once:** `sdlc-checks repo:<repo> action: wire` (installs the CI gates) and
    `sdlc-pr-template repo:<repo> action: wire` (installs the PR/MR template + risk routing).
-5. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type) —
+5. **Connect each code repo to the hub** (so the front phases see what's already built):
+   `sdlc-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>`. It
+   registers the repo in `.sdlc/repos.json` and caches a Repomix pack + a lightweight **code-map**
+   (existing endpoints/events/data-models/modules, secret-scanned). Clones/fetches as the **local user**
+   (SSH or credential helper; GitHub or GitLab; no stored tokens). Re-run for any new repo;
+   `action: refresh` when a repo's code moves; `action: list` shows freshness. Greenfield → skip it.
+6. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type) —
    see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### A — Front half (human-authored, once per epic)
@@ -122,6 +129,14 @@ but you can also edit the files directly — that's the point.
 Each authoring step is the same shape: an author skill produces an artifact, sets its step `done`,
 moves `currentStep` to the matching review, and **stops at the gate**. Then **`sdlc-review-gate`**
 (one gate, reused for all four reviews) takes `open → comment → approve → advance`.
+
+**Code-aware (when repos are connected).** If you ran `sdlc-connect-repos` in setup, each author step
+first loads the connected repos' **code-maps** (from `.sdlc/code-context/<repo>/`) so it considers what
+already exists: the epic references existing behaviour, **the architecture cross-checks the contract
+surface against existing endpoints/events/entities before hash-locking it**, the UI reuses existing
+components, and stories anchor to real modules. Each artifact stamps what it read in its `code-context:`
+frontmatter; a repo that has moved since connect triggers a staleness warning (→ `action: refresh`).
+With no repos connected the steps proceed exactly as before (greenfield-safe).
 
 ### Author steps
 1. **`sdlc-author-epic`** (state 1) → `epic.md`; assigns the stable `EP-<slug>` ID; seeds

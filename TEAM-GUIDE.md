@@ -55,8 +55,8 @@ code repos):
 git clone <sdlc-workflow-url> && cd sdlc-workflow
 mkdir -p ~/.claude/skills
 for s in sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
-         sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks sdlc-pr-template \
-         sdlc-ship sdlc-backfill sdlc-run sdlc-status; do
+         sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
+         sdlc-pr-template sdlc-ship sdlc-backfill sdlc-run sdlc-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
 ```
@@ -74,9 +74,24 @@ sdlc-checks       repo:<repo> action: wire     # installs the CI gates
 sdlc-pr-template  repo:<repo> action: wire     # installs the PR/MR template + risk routing
 ```
 
-**e. Optional tools.** The workflow uses these if present and **degrades gracefully** (and records it)
+**e. Connect your code repos to the hub (so the brain knows what's already built).** From inside the
+hub, run once per code repo — and again any time you add a new one:
+
+```text
+sdlc-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>
+```
+
+This registers the repo in `.sdlc/repos.json` and caches an AI-readable picture of it (a Repomix pack +
+a lightweight **code-map** of its existing endpoints/events/data-models/modules, secret-scanned). The
+front-half steps then read that map so they don't re-design or contradict code that already exists.
+It clones/fetches as **you** (your own SSH key or git credential helper — GitHub *or* GitLab, no stored
+tokens). Greenfield with no code yet? Skip this — the brain just proceeds. When a repo's code moves,
+`sdlc-connect-repos action: refresh repo:<repo>`; to see freshness, `action: list`.
+
+**f. Optional tools.** The workflow uses these if present and **degrades gracefully** (and records it)
 if they're missing: **Spec Kit** (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix**
-(`npx repomix`), **CodeRabbit** (advisory AI review). You can start without any of them.
+(`npx repomix`, used by `sdlc-connect-repos` and `sdlc-backfill`), **CodeRabbit** (advisory AI review).
+You can start without any of them.
 
 ---
 
@@ -89,8 +104,8 @@ if they're missing: **Spec Kit** (`/speckit.*`), **Impeccable** (`/impeccable �
 git clone <sdlc-workflow-url> && cd sdlc-workflow
 mkdir -p ~/.claude/skills
 for s in sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
-         sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks sdlc-pr-template \
-         sdlc-ship sdlc-backfill sdlc-run sdlc-status; do
+         sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
+         sdlc-pr-template sdlc-ship sdlc-backfill sdlc-run sdlc-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
 ```
@@ -116,6 +131,13 @@ Do these in order. After each author step, the matching review opens and **waits
 | 4 | `sdlc-author-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
 
 When all four gates pass, the epic state reaches **`currentStep: ready-for-build`**. Now you can build.
+
+> **The brain is code-aware.** If you connected your code repos in setup (step 3e), each author step
+> first loads the connected repos' **code-maps** — so the epic references what exists, the architecture
+> **cross-checks the contract against existing endpoints/models before locking it**, the UI reuses
+> existing components, and stories anchor to real modules. Each artifact records what it read in its
+> `code-context:` frontmatter. If a repo's code has moved since you connected it, the step warns and
+> points you at `sdlc-connect-repos action: refresh`.
 
 **The gate, every time** (`sdlc-review-gate`):
 - `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.*
