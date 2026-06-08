@@ -1,8 +1,14 @@
 // The single source of truth for what a set-up SDLC project should contain.
 // Drives setup (install from), update (re-sync), and check (diff against).
 // Keep the skill list here in sync with skills/sdlc/install.sh.
+import { readFileSync } from 'node:fs';
 
-export const VERSION = '0.1.0';
+// Read the version from package.json (the one source of truth) so it always
+// tracks the semantic-release-managed version — never a hardcoded constant
+// that would drift after a release. package.json ships in the npm tarball and
+// sits at the package root, one level up from this cli/ dir.
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+export const VERSION = version;
 
 // The 16 hand-authored sdlc-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
