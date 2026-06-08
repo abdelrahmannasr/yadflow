@@ -1,0 +1,3 @@
+# The package.json `files` allowlist already restricts the tarball to
+# bin/ cli/ skills/. This drops the test file that lives inside cli/.
+cli/test.mjs

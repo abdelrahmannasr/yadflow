@@ -1,5 +1,9 @@
 # SDLC Workflow — gated, team, multi-repo SDLC on top of BMAD
 
+[![npm version](https://img.shields.io/npm/v/@abdelrahmannasr/sdlc-workflow?logo=npm)](https://www.npmjs.com/package/@abdelrahmannasr/sdlc-workflow)
+[![CI](https://github.com/abdelrahmannasr/sdlc-workflow/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelrahmannasr/sdlc-workflow/actions/workflows/ci.yml)
+[![provenance](https://img.shields.io/badge/npm-provenance-blue?logo=npm)](https://docs.npmjs.com/generating-provenance-statements)
+
 A custom BMAD module that turns BMAD from a solo tool into a **team, gated, file-driven SDLC
 engine**. Every step does its work, writes its output to a file, and **waits at a gate**. Who
 advances the gate (human now; machine later) is a per-step setting. All state lives in files —
@@ -110,15 +114,34 @@ human**. Detailed walkthroughs for each phase follow below.
 | `docs/` | The phased build plans (`phase-2`…`phase-5`) and the original workflow design. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commit & PR/MR title convention (Conventional Commits, lowercase after the type). |
 
-## Install (and re-install after a BMAD update)
+## Install (and re-install after an update)
+
+The fastest path is the bundled CLI — it drives the whole one-time setup step by step, and
+reconciles the project whenever the workflow changes:
 
 ```bash
-bash skills/sdlc/install.sh
+npx @abdelrahmannasr/sdlc-workflow setup     # guided first-run setup
+npx @abdelrahmannasr/sdlc-workflow check     # report what is missing / drifted / stale
+npx @abdelrahmannasr/sdlc-workflow check --fix   # fill what is missing, update what changed
+npx @abdelrahmannasr/sdlc-workflow update    # apply drift only (alias for check --fix --scope=changed)
 ```
 
-This copies the `sdlc-*` skills into the IDE skill dirs (`.claude/`, `.agents/`, `.zencoder/`,
-`.opencode/`) and registers the module under `_bmad/sdlc/`. The **source** stays in `skills/`, which
-a `bmad-method` update does not touch — so after any BMAD update, just re-run the script.
+`setup` installs the `sdlc-*` skills into the IDE skill dirs (`.claude/`, `.agents/`, `.zencoder/`,
+`.opencode/`), registers the module under `_bmad/sdlc/`, detects the hub platform, connects & wires
+each code repo, and stamps `.sdlc/cli-version.json`. `check` then keeps the project in sync as the
+workflow evolves — it diffs the project against the bundled manifest and only touches what changed.
+The deterministic file work runs automatically; the few AI-only steps (code-map generation, authoring
+the first epic) are handed off to the Claude Code skills.
+
+**Maintainers / no-CLI fallback:** the underlying copy is still a single script —
+`bash skills/sdlc/install.sh` — which the CLI's install step is a port of. The **source** stays in
+`skills/`, which a `bmad-method` update does not touch, so after any BMAD update just re-run the CLI
+(`… check --fix`) or the script.
+
+> **Releases are automated.** A `feat:`/`fix:` commit merged to `main` triggers
+> [semantic-release](https://semantic-release.gitbook.io/): it computes the version from the
+> [Conventional Commits](CONTRIBUTING.md), updates `CHANGELOG.md`, and publishes to npm with build
+> provenance (tokenless OIDC). No manual `npm publish`.
 
 ## The two dials (per step, build plan §2)
 
@@ -141,6 +164,12 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
 `sdlc-author-epic`”*); state lives in files you can also edit directly.
 
 ### 0 — One-time setup
+
+> **Shortcut:** `npx @abdelrahmannasr/sdlc-workflow setup` walks through steps 1, 4, 5 and 6 below
+> interactively (module install, hub detect + roster, connect repos, wire each repo). Run
+> `… check --fix` any time afterwards to reconcile. The manual steps below are the long-hand
+> equivalent and still work.
+
 1. **Install the module:** `bash skills/sdlc/install.sh` (re-run after any BMAD update).
 2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
    live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`.

@@ -138,8 +138,21 @@ first `sdlc-author-epic` run creates `epics/EP-<slug>/` and its state files for 
 
 **b. Make sure your 3 code repos exist.** Each is its own separate git repo (its own `.git`).
 
-**c. Install the skills at the user level** so they work in *every* repo on your machine (the hub and all
-code repos):
+**c. Install everything with the CLI.** From the product hub repo, run the guided setup — it installs the
+skills into the IDE dirs, detects the hub platform, connects your code repos, and wires each one (CI gates,
+PR/MR template, review-comment scaffold):
+
+```bash
+cd <product-hub-repo>
+npx @abdelrahmannasr/sdlc-workflow setup
+```
+
+> Re-run `npx @abdelrahmannasr/sdlc-workflow check --fix` after any workflow update — it reports what is
+> missing / drifted / stale and reconciles only what changed (it never re-asks for what you already
+> answered).
+
+<details>
+<summary>Manual fallback (no CLI)</summary>
 
 ```bash
 git clone <sdlc-workflow-url> && cd sdlc-workflow
@@ -152,7 +165,8 @@ for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-aut
 done
 ```
 
-> Re-run this block after you `git pull` updates into `sdlc-workflow`.
+Re-run this block after you `git pull` updates into `sdlc-workflow`.
+</details>
 >
 > **Alternative:** if you'd rather not have each person install, commit the `sdlc-*` skill folders into
 > the product hub repo itself (under `.claude/skills/`). Then anyone who clones the hub gets the skills

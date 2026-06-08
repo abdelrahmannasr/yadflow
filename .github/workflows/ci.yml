@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Pack smoke (tarball contents)
+        if: matrix.node-version == 22
+        run: |
+          files=$(npm pack --dry-run --json | node -e "const f=JSON.parse(require('fs').readFileSync(0)).flatMap(x=>x.files.map(y=>y.path)); console.log(f.join('\n'))")
+          echo "$files"
+          for leak in .sdlc/ demo-repos/ epics/ cli/test.mjs; do
+            if echo "$files" | grep -q "^$leak"; then echo "::error::tarball leaks $leak"; exit 1; fi
+          done
+          echo "$files" | grep -q '^bin/sdlc.mjs' || { echo "::error::bin missing"; exit 1; }
+          echo "$files" | grep -q '^skills/' || { echo "::error::skills missing"; exit 1; }

@@ -1,0 +1,52 @@
+{
+  "name": "@abdelrahmannasr/sdlc-workflow",
+  "version": "0.1.0",
+  "description": "Guided setup & maintenance CLI for the gated, team, multi-repo SDLC Workflow module.",
+  "type": "module",
+  "author": "AbdelRahman Nasr",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abdelrahmannasr/sdlc-workflow.git"
+  },
+  "homepage": "https://github.com/abdelrahmannasr/sdlc-workflow#readme",
+  "bugs": {
+    "url": "https://github.com/abdelrahmannasr/sdlc-workflow/issues"
+  },
+  "bin": {
+    "sdlc": "bin/sdlc.mjs"
+  },
+  "files": [
+    "bin/",
+    "cli/",
+    "!cli/test.mjs",
+    "skills/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "sdlc": "node bin/sdlc.mjs",
+    "test": "node --test cli/test.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "sdlc",
+    "bmad",
+    "workflow",
+    "cli",
+    "spec-driven-development"
+  ],
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "semantic-release": "^24.2.3"
+  }
+}
