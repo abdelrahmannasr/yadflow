@@ -1,6 +1,6 @@
 {
   "name": "@abdelrahmannasr/sdlc-workflow",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Guided setup & maintenance CLI for the gated, team, multi-repo SDLC Workflow module.",
   "type": "module",
   "author": "AbdelRahman Nasr",
