@@ -5,7 +5,8 @@ tasks, and shipped code. These are what the gates and checks rely on — a diff 
 traceable back to its task, story, and contract; one that doesn't will fail a gate.
 
 New to the workflow? Start with [`TEAM-GUIDE.md`](TEAM-GUIDE.md); the full reference is
-[`README.md`](README.md).
+[`README.md`](README.md). Publishing the `sdlc` CLI to npm is documented in
+[`RELEASING.md`](RELEASING.md).
 
 ---
 
