@@ -1,0 +1,17 @@
+# <type>: <subject — lowercase, imperative, no trailing period>
+#   types: feat fix docs refactor test perf build ci chore revert
+#
+# <body — what changed and why, 1–3 lines. Wrap at ~72 cols.>
+#
+# --- Trailers (keep them in ONE contiguous block below, no blank lines between) ---
+# Task: is REQUIRED — it anchors the spec-link gate. Order: Task -> Contract-Change -> Co-Authored-By.
+Task: <EP-slug-S0N-T0N>
+# Contract-Change: yes        # ONLY if this diff alters the locked contract surface (routes to architecture gate)
+#
+# Per-commit AI co-author (the HUMAN git author owns the commit; AI is only a co-author).
+# Uncomment the line for the tool that actually helped author this diff (add more than one if needed).
+# Leave all commented for a fully human-authored commit (id: none — the trailer is optional).
+# Co-Authored-By: Claude <noreply@anthropic.com>
+# Co-Authored-By: GitHub Copilot <copilot@users.noreply.github.com>
+# Co-Authored-By: Cursor <noreply@cursor.com>
+# Co-Authored-By: CodeRabbit <noreply@coderabbit.ai>

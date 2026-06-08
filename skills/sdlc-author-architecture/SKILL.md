@@ -58,6 +58,7 @@ Adopt the **architect** lens (`bmad-agent-architect`, Winston) and write
 id: EP-<slug>
 artifact: architecture
 status: draft
+owner: <inherit from epic.md owner>   # the epic owner carries through; not retyped
 repos: [<inherit from epic>]
 code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # code-maps cross-checked (Step 2b/4b)
 ---
@@ -160,7 +161,10 @@ real reviewers approve, through the gate.
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
 and that the next action is **review** via `sdlc-review-gate`. Note that this review **escalates**
 (risk tag `contract`): it needs owner + 1 reviewer **plus a domain owner for each touched repo**.
-**Never record approval here.** Front states do not auto-advance.
+**Never record approval here.** Front states do not auto-advance. When the hub has a platform, the gate
+opens a review PR on the hub (via `sdlc-hub-bridge`, labelled per touched repo) and
+`sdlc-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock
+invalidates prior platform approvals too. Otherwise the review is recorded file-only.
 
 ## Reference
 - Contract surface, altitude rule, and hashing recipe: `references/contract-format.md`.

@@ -24,9 +24,12 @@ declares; it does not redesign, does not widen the contract, and does not pick u
   `{project-root}/demo-repos/<repo>/` (`config.yaml` `build.code_repos_root`). Use absolute paths.
 - **Branch name:** `feat/<story-id>-<task-id>-<short-slug>` (e.g.
   `feat/EP-istifta-inquiries-S01-T01-create-inquiry`). Branched off the code repo's default branch.
-- **Commit message:** a conventional subject, body describing the change, and a **final trailer line
-  that is the task ID** (e.g. `Task: EP-istifta-inquiries-S01-T01`). Add `Contract-Change: yes` in the
-  body **only** if the diff touches the locked contract surface (see Step 5).
+- **Commit message:** a conventional subject, body describing the change, and a **required `Task:`
+  trailer** (e.g. `Task: EP-istifta-inquiries-S01-T01`) in the trailer block. Add `Contract-Change: yes`
+  **only** if the diff touches the locked contract surface (see Step 5), and a per-commit
+  `Co-Authored-By:` for any AI tool that helped author the diff (the human author owns the commit;
+  trailer order `Task:` → `Contract-Change:` → `Co-Authored-By:`). The skill installs a `.gitmessage`
+  template that scaffolds these (Step 2).
 - Speak in the configured `communication_language`; write code/comments in `document_output_language`.
 
 ## Inputs
@@ -48,6 +51,12 @@ STOP and point at `sdlc-spec`.
 Confirm `demo-repos/<repo>/` is its own git repo (`.git` present). From its default branch, create the
 task branch `feat/<story>-<task>-<short-slug>`. If a branch for this task already exists, reuse it
 rather than forking a second one (one task = one branch).
+
+**On the first implement in a repo, install the commit template** (idempotent): copy this skill's
+`templates/.gitmessage` to `<repo>/.gitmessage` and run `git -C <repo> config commit.template .gitmessage`
+so every commit is pre-scaffolded with the `Task:` trailer and the commented per-commit `Co-Authored-By:`
+choices (`config.yaml` `build.ai_coauthor.allowed`). Do the same at the hub root for hub commits. Skip if
+already configured.
 
 ### Step 3 — Read the spec inputs (do NOT re-derive the contract)
 Read the story's `spec.md`, `plan.md`, `data-model.md`, and `contracts/` for this task's context. The
@@ -86,8 +95,10 @@ A contract change means the diff alters the agreed cross-repo shape itself.
 
 ### Step 6 — Commit on the task branch
 Stage only the declared files. Commit with the convention: a conventional subject, a short body, and a
-final `Task: <story>-<task>` trailer (plus `Contract-Change: yes` if Step 5 applies). Do not commit
-sibling tasks' work.
+`Task: <story>-<task>` trailer (plus `Contract-Change: yes` if Step 5 applies). The human author owns the
+commit; if an AI tool helped author this diff, add its `Co-Authored-By:` line from
+`config.yaml` `build.ai_coauthor.allowed` (the `.gitmessage` template scaffolds the choices). Keep all
+trailers in one contiguous block. Do not commit sibling tasks' work.
 
 ### Step 7 — Report; the advance decision belongs to the dial (Phase 4)
 Report: the branch name, the files changed, how the change satisfies the task's acceptance criterion,

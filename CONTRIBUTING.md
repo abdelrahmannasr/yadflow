@@ -59,8 +59,8 @@ subject — they follow one rule.)
 
 ### Trailers (implementation commits)
 
-Implementation commits carry a **final trailer that is the task ID** — the anchor the spec-link gate and
-the PR read to connect the diff to its spec and story:
+Implementation commits carry a **`Task:` trailer** — the anchor the spec-link gate and the PR read to
+connect the diff to its spec and story — in a single contiguous trailer block:
 
 ```
 <type>: <subject>
@@ -69,12 +69,32 @@ the PR read to connect the diff to its spec and story:
 
 Task: <story-id>-<task-id>
 [Contract-Change: yes]
+[Co-Authored-By: <AI name> <email>]
 ```
 
 - `Task: <story-id>-<task-id>` (e.g. `Task: EP-istifta-inquiries-S01-T01`) is **required** — the
-  spec-link check looks for it.
+  spec-link check finds it with git's order-independent trailer parser, so it need not be the last line,
+  but all trailers must sit together in the last paragraph (no blank lines between them).
+- **Trailer order:** `Task:` → `Contract-Change:` (if any) → `Co-Authored-By:` (if any), last.
 - `Contract-Change: yes` appears **only** when the diff alters the locked contract surface (see below).
   Omit it for normal work.
+
+### Commit ownership & AI co-authors
+
+The **human git author owns every commit**; an assisting AI tool is recorded **per commit** as a
+`Co-Authored-By` trailer — never as the author. Pick the tool from the allowed list in
+`skills/sdlc/config.yaml` (`build.ai_coauthor.allowed`):
+
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: GitHub Copilot <copilot@users.noreply.github.com>
+Co-Authored-By: Cursor <noreply@cursor.com>
+Co-Authored-By: CodeRabbit <noreply@coderabbit.ai>
+```
+
+For a fully human-authored commit, choose `id: none` — omit the trailer (it is optional;
+`ai_coauthor.required` is `false`). `sdlc-implement` installs a `.gitmessage` template
+(`git config commit.template .gitmessage`) that pre-scaffolds these as commented lines to uncomment.
 
 ### How the SDLC workflow follows this
 

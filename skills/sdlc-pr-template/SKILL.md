@@ -21,6 +21,11 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   - `templates/gitlab/merge_request_templates/Default.md` → installs to
     `<repo>/.gitlab/merge_request_templates/Default.md`
   - `templates/checks/risk-route.sh` → installs to `<repo>/checks/risk-route.sh` (advisory routing helper)
+  - **Hub variants** (`repo: hub`) — front-half artifact-review PR/MR bodies:
+    `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
+    `templates/hub/gitlab/merge_request_templates/Default.md` →
+    `{project-root}/.gitlab/merge_request_templates/Default.md`. The hub body carries no `Task:` trailer
+    (hub PRs change artifacts, not code); its routing helper is `sdlc-hub-bridge`'s `hub-route.sh`.
 - The Impact & Risk block reuses the conventions of earlier steps: the `Task: <story>-<task>` trailer
   (`sdlc-implement`), the contract surface (`sdlc-author-architecture` / contract-check), and the
   domain-owner escalation (`sdlc-review-gate`).
@@ -33,25 +38,29 @@ touched domain). This step **never auto-advances**; it sets up the template and 
 
 ## Inputs
 
-- `repo`   — the code repo to add the template to (one of an epic's repos).
+- `repo`   — the code repo to add the template to (one of an epic's repos), or `hub` for the product hub.
 - `action` — `wire` (commit the matching template + helper) | `route` (print required reviewers from a
   PR body). Default `wire`.
 - `body`   — for `route`: a file holding the PR/MR description to evaluate.
 
 ## On Activation
 
-### Step 1 — Resolve the code repo and detect the platform
-Map `repo` → `{project-root}/demo-repos/<repo>/`. Detect the platform: a GitHub remote or `.github/`
-→ GitHub; a GitLab remote or `.gitlab/` → GitLab. If ambiguous, ask.
+### Step 1 — Resolve the repo and detect the platform
+Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path`). Detect the platform: a GitHub
+remote or `.github/` → GitHub; a GitLab remote or `.gitlab/` → GitLab. If ambiguous, ask. For
+`repo: hub`, the target is `{project-root}` itself and the platform comes from `.sdlc/hub.json`.
 
 ### Step 2 — `wire` (drop only the matching template)
 Copy from this skill's `templates/`:
 - GitHub → `templates/github/pull_request_template.md` to `<repo>/.github/pull_request_template.md`.
 - GitLab → `templates/gitlab/merge_request_templates/Default.md` to
   `<repo>/.gitlab/merge_request_templates/Default.md`.
-Drop **only the matching** template (drop both only if the repo genuinely uses both). Also install
-`templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`). Commit the template on the repo's
-default branch (shared infrastructure, not a task diff).
+- **`repo: hub`** → use the `templates/hub/<platform>/…` variants, installed into `{project-root}`'s own
+  `.github/`/`.gitlab/`. The hub's routing helper (`hub-route.sh`) is installed by `sdlc-hub-bridge`.
+Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also
+install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`). If the target already has a
+non-SDLC PR/MR template, do not clobber it — back it up / ask. Commit the template on the repo's default
+branch (shared infrastructure, not a task diff).
 
 ### Step 3 — `route` (show who must review)
 Run `bash checks/risk-route.sh <body>` to parse the PR description's Impact & Risk block and print the

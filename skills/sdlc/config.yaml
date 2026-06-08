@@ -46,6 +46,20 @@ build:
   # + no trailing period; proper nouns/acronyms keep their case.
   commit_subject_style: "<type>: <lowercase imperative description, no trailing period>"   # types: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
   pr_title_style: same_as_commit_subject                       # one atomic task = one branch = one PR/MR; title defaults to the task's commit subject
+  # Commit ownership + per-commit AI co-author (sdlc-implement installs the .gitmessage template).
+  # The human git author OWNS the commit; the assisting AI is recorded per-commit as a Co-Authored-By
+  # trailer, chosen by the owner from `ai_coauthor.allowed`. The AI is never the author. `none` is an
+  # explicit human-only choice. Trailer order is Task: -> Contract-Change: (if any) -> Co-Authored-By:.
+  commit_owner: git_author
+  ai_coauthor:
+    trailer: "Co-Authored-By"
+    required: false                  # the trailer is optional; owners pick `none` for human-only commits
+    allowed:
+      - { id: claude,     name: "Claude",             email: "noreply@anthropic.com" }
+      - { id: copilot,    name: "GitHub Copilot",     email: "copilot@users.noreply.github.com" }
+      - { id: cursor,     name: "Cursor",             email: "noreply@cursor.com" }
+      - { id: coderabbit, name: "CodeRabbit",         email: "noreply@coderabbit.ai" }
+      - { id: none,       name: "(no AI assistance)", email: "" }
   # Step C (sdlc-checks) — the three CI gates that must pass before merge. CI-agnostic bash in checks/.
   gates: [spec-link, contract-check, build-test-lint]
   ci_platforms: [github, gitlab]   # both wired from skills/sdlc-checks/templates/; GitHub is this product repo's platform
@@ -54,6 +68,9 @@ build:
   pr_templates:
     github: ".github/pull_request_template.md"
     gitlab: ".gitlab/merge_request_templates/Default.md"
+    hub:                                # front-half artifact-review PR/MR on the product hub (sdlc-pr-template repo:hub)
+      github: ".github/pull_request_template.md"
+      gitlab: ".gitlab/merge_request_templates/Default.md"
   risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (sdlc-review-gate escalation)
   # Step E (sdlc-ship) — AI review (advisory) + engineer review (the human gate) + ship.
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
@@ -82,6 +99,21 @@ code_context:
   # Auth: `sdlc-connect-repos` clones/fetches as the LOCAL user (SSH key or git credential helper),
   # works for both github and gitlab (and self-hosted), and stores NO tokens in the registry.
   platforms: [github, gitlab]
+
+# Hub platform + front-half review bridge (sdlc-connect-repos `detect-hub`; sdlc-review-gate + sdlc-hub-bridge).
+# The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
+# comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
+# approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `sdlc-review-gate action: sync`
+# pulls that state into the file ledger (approvals.json/reviews/*.md) and runs the UNCHANGED gate predicate.
+# The file ledger stays the source of truth. Degrades to the file-only gate when there is no platform / no CLI.
+hub:
+  config: "{project-root}/.sdlc/hub.json"             # hub platform + reviewer roster (committed, like repos.json)
+  pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"   # per-step review-PR record (sibling of approvals.json)
+  bridge: true                                         # master enable; false => file-only front gates everywhere
+  platforms: [github, gitlab]                          # detected from the hub's own `git remote get-url origin`
+  artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
+  # roster (in hub.json) maps a platform login -> sdlc name + role; domain-owners are DERIVED from
+  # repos.json (a roster name that equals a repo's domain_owner owns that repo's domain) — never duplicated.
 
 # Phase 4 (automation) — the SECOND dial made real. Until Phase 4 nothing read this dial; the
 # orchestrator (sdlc-run) now does. Governing rule: automation is EARNED per step, with trust-log

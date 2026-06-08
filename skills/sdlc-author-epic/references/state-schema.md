@@ -30,7 +30,27 @@ Each `steps[]` entry:
 Append-only ledger (an array). Each entry:
 
 ```json
-{ "artifact": "epic.md", "step": "epic-review", "approver": "<name>", "role": "owner|reviewer|domain-owner", "domain": "<repo-or-area, optional>", "status": "approved", "date": "<YYYY-MM-DD>" }
+{ "artifact": "epic.md", "step": "epic-review", "approver": "<name>", "role": "owner|reviewer|domain-owner", "domain": "<repo-or-area, optional>", "status": "approved", "date": "<YYYY-MM-DD>", "source": "<bridge, optional>" }
+```
+
+`source: "bridge"` marks an approval synced from a hub review PR/MR by `sdlc-review-gate action: sync`
+(via `sdlc-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`.
+
+## `comments.json`
+Append-only ledger (an array), the machine-readable counterpart to the `reviews/*--comments.md` markdown
+("who reviewed/commented", as `approvals.json` is "who approved"). Written by `sdlc-review-gate`'s
+`comment` action; feeds the `approved.md` participation roster, not the gate predicate. Each entry:
+
+```json
+{ "artifact": "epic.md", "step": "epic-review", "commenter": "<name>", "role": "owner|reviewer|domain-owner", "domain": "<optional>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
+```
+
+## `hub-prs.json`
+Present only when the front-half review runs through the platform bridge. Per review step, the review
+PR/MR opened on the hub (sibling of `approvals.json`, so the locked `state.json` step shape is untouched):
+
+```json
+{ "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab", "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": "<YYYY-MM-DD or null>" }
 ```
 
 ## `reviews/`

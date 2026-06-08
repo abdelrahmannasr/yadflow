@@ -48,6 +48,29 @@ re-approve. (Hash recipe: `sdlc-author-architecture/references/contract-format.m
 5. `action: advance` → `epic-review.status=done`, `architecture.status=in_progress`,
    `currentStep=architecture`. Gate reports the advance.
 
+## Participation record (comments.json)
+`approvals.json` answers "who approved"; `.sdlc/comments.json` answers "who reviewed/commented". The
+gate appends a record per commenter per round on every `comment` action (the machine-readable
+counterpart to the `reviews/*--comments.md` markdown). It does **not** feed the predicate — approvals
+alone decide the gate — but it makes the `approved.md` roster's "Reviewed / commented by" section
+attributable, and it is the same shape a future service or the platform bridge can write.
+
+## Platform-backed input (the bridge)
+When the hub has a platform (`.sdlc/hub.json`) and the bridge is enabled, reviewers can approve/comment
+on a real PR/MR instead of (or as well as) the skill recording it directly. `action: sync`
+(`sdlc-hub-bridge`) reads that platform state with the reviewer's own `gh`/`glab` and writes the **same**
+`approvals.json` / `comments.json` / `reviews/*.md` records the manual path writes — bridge approvals
+tagged `"source": "bridge"`. **The predicate above is unchanged**: it counts owner/reviewer/domain-owner
+approvals regardless of how they were recorded.
+
+- login → role via the roster; `domain-owner` derived when a roster `name` equals a repo's `domain_owner`
+  and that repo is a touched domain; an unmapped login is a plain `reviewer`, never promoted.
+- `sync` is idempotent (upsert by `(step, approver, role, domain)`; supersede revoked; key comments on
+  comment id) and never touches **manual** approvals.
+- The architecture+contract staleness rule applies to bridge approvals too: a re-lock discards bridge
+  approvals dated before the new lock.
+- No platform / no CLI → the gate runs file-only with no error. Detail: `../sdlc-hub-bridge/references/bridge.md`.
+
 ## Why this shape
 - Owner + 1 reviewer keeps review load low on a small team (design priority 2) while still requiring
   a second pair of eyes (priority 1, code quality / production safety).

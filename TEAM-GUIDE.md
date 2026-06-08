@@ -56,7 +56,8 @@ git clone <sdlc-workflow-url> && cd sdlc-workflow
 mkdir -p ~/.claude/skills
 for s in sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
          sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
-         sdlc-pr-template sdlc-ship sdlc-backfill sdlc-run sdlc-status; do
+         sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill \
+         sdlc-run sdlc-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
 ```
@@ -70,9 +71,29 @@ done
 **d. Wire each code repo once.** From inside the hub (or with the repo path), run for each of the 3 repos:
 
 ```text
-sdlc-checks       repo:<repo> action: wire     # installs the CI gates
-sdlc-pr-template  repo:<repo> action: wire     # installs the PR/MR template + risk routing
+sdlc-checks          repo:<repo> action: wire   # installs the CI gates (merges with existing CI, never clobbers)
+sdlc-pr-template     repo:<repo> action: wire   # installs the PR/MR template + risk routing
+sdlc-review-comments repo:<repo> action: wire   # installs the PR/MR review-comment scaffold
 ```
+
+> **Wiring is additive.** `sdlc-checks` detects any CI you already have and *merges* the gates in
+> (GitHub: a separate `sdlc-checks.yml`; GitLab: an `include:` of `.gitlab/ci/sdlc-checks.yml`) — it
+> never edits a foreign workflow. Re-running any `wire` is a no-op.
+
+**d2. Wire the product hub itself** (so the front-half review can run through real PRs on the hub):
+
+```text
+sdlc-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
+sdlc-connect-repos action: roster login:<gh-login> name:<sdlc-name> role:<owner|reviewer>   # once per reviewer
+sdlc-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
+sdlc-review-comments repo:hub action: wire                         # hub's review-comment scaffold
+sdlc-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
+```
+
+The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
+derived from each repo's `domain_owner` in `repos.json` (not retyped). With the hub on a platform, the
+front-half gate opens a review PR per artifact and `sdlc-review-gate action: sync` pulls approvals/
+comments back. No platform (or `bridge_enabled: false`)? The gate just runs file-only — skip d2.
 
 **e. Connect your code repos to the hub (so the brain knows what's already built).** From inside the
 hub, run once per code repo — and again any time you add a new one:
@@ -105,7 +126,8 @@ git clone <sdlc-workflow-url> && cd sdlc-workflow
 mkdir -p ~/.claude/skills
 for s in sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
          sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
-         sdlc-pr-template sdlc-ship sdlc-backfill sdlc-run sdlc-status; do
+         sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill \
+         sdlc-run sdlc-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
 ```
@@ -140,9 +162,12 @@ When all four gates pass, the epic state reaches **`currentStep: ready-for-build
 > points you at `sdlc-connect-repos action: refresh`.
 
 **The gate, every time** (`sdlc-review-gate`):
-- `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.*
-- `action: approve` (name + role) — recorded in `.sdlc/approvals.json`.
+- `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the hub
+  is on a platform (step 3d2), this also opens a review **PR/MR on the hub** for the artifact.
+- `action: approve` (name + role) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
+  the hub PR and you run `action: sync` to pull that platform state into the ledger.
 - `action: advance` — moves forward **only if** the rule is met; otherwise it tells you who's still missing.
+  (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
 
 ---
 
@@ -153,7 +178,9 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
 1. **Spec** — `sdlc-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks +
    `link.md` back to the story). It *quotes* the locked contract; it never widens it.
 2. **Implement** — `sdlc-implement story:<id> repo:<repo> task:<T0N>` → **one task = one branch = one
-   commit**. Repeat per task.
+   commit**. Repeat per task. The first run installs a `.gitmessage` commit template: the human author
+   owns the commit, with a required `Task:` trailer and an optional per-commit `Co-Authored-By:` for the
+   AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
 3. **Check** — `sdlc-checks repo:<repo> action: run` → the three gates must pass: spec-link,
    contract-check, build/test/lint.
 4. **Open the PR/MR** (the template is already wired) and run

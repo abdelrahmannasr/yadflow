@@ -63,6 +63,7 @@ template (see `references/story-schema.md`):
 id: EP-<slug>-S0N
 epic: EP-<slug>
 status: draft
+owner: <inherit from epic.md owner>   # the epic owner carries through; not retyped
 repos: [<subset of epic.repos this story implements>]
 code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # code-maps anchoring "Notes for build" (Step 2b)
 ---
@@ -89,7 +90,10 @@ In `state.json`: set `stories.status: "done"`, set `stories-review.status: "in_r
 Report: the story IDs created, the repos each touches, and that the next action is **review** via
 `sdlc-review-gate`. Note that this review routes **per-repo reviewers**: owner + 1 reviewer **plus**, for
 each repo appearing in any story's `repos`, a `domain-owner` approval for that repo. **Never record
-approval here.** Front states do not auto-advance.
+approval here.** Front states do not auto-advance. When the hub has a platform, the gate opens a review
+PR on the hub (via `sdlc-hub-bridge`, with a `domain:<repo>` label per touched repo) and
+`sdlc-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
+is recorded file-only.
 
 ## Reference
 - Story frontmatter and body template: `references/story-schema.md`.
