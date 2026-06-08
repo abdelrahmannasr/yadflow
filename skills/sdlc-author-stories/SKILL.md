@@ -28,6 +28,13 @@ Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only pro
 `currentStep == "stories"` and that step's `status == "in_progress"` (the UI review must already have
 passed). If not, stop and point the user at `sdlc-status` / the gate.
 
+### Step 1b — Open the authoring branch
+Open the stories authoring branch `stories/EP-<slug>` per the shared procedure
+(`../sdlc-author-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
+if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
+hub's default branch. Author and commit the story files under `stories/` on it. This is **distinct**
+from the bridge's `review/…` branch.
+
 ### Step 2 — Read inputs
 Read `epic.md` (scope, acceptance signals, `repos`), `architecture.md` (components by repo, flows),
 `contract.md` (the shared surface stories must honour), and `ui-design.md` (screens/flows). Stories

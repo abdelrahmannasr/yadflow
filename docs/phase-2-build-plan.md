@@ -15,6 +15,8 @@ Complete the **front states** (the human-authored, AI-assisted planning half) en
 
 By the end of Phase 2, a feature should walk: epic → review → architecture+contract → review → UI design → review → stories → review, with state advancing only on recorded approvals, and stories correctly tagged by repo.
 
+> **Later addition:** an **optional** `analysis → analysis-review` discovery step (`sdlc-author-analysis`) may now precede the epic. When run, it assigns the `EP-<slug>` ID and seeds the chain; when skipped, the epic step shapes the idea inline exactly as below. See `skills/sdlc-author-analysis/SKILL.md`.
+
 ---
 
 ## What to build, in order

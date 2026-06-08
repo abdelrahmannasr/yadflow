@@ -27,6 +27,13 @@ Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only pro
 `currentStep == "ui-design"` and that step's `status == "in_progress"` (the architecture review must
 already have passed). If not, stop and point the user at `sdlc-status` / the gate.
 
+### Step 1b — Open the authoring branch
+Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
+(`../sdlc-author-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
+if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
+hub's default branch. Author and commit `ui-design.md` / `DESIGN.md` on it. This is **distinct** from
+the bridge's `review/…` branch.
+
 ### Step 2 — Read inputs
 Read `epic.md` (user-level acceptance signals, scope) and `architecture.md` (flows, components by
 repo). The UI must cover the user-facing flows the architecture defines.

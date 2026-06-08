@@ -1,13 +1,15 @@
 ---
 name: sdlc-review-gate
-description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the owner + 1 reviewer rule (escalating to domain owners on contract/auth/payments), and advances the epic state ONLY when approval is recorded. Use when the user says "review the epic/architecture/UI/stories", "comment", "approve", or "advance the gate".'
+description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the owner + 1 reviewer rule (escalating to domain owners on contract/auth/payments), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories", "comment", "approve", or "advance the gate".'
 ---
 
 # SDLC — Team Review Gate (build plan §3 piece 2, §4, §5)
 
 **Goal:** One reusable step type that turns any authored artifact into a gated, human-approved
-review. Every `review+approve` step in the workflow (epic, architecture+contract, UI, stories) uses
-this exact gate. **No step advances until its review is approved** and recorded as a file.
+review. Every `review+approve` step in the workflow (the optional analysis, epic, architecture+contract,
+UI, stories) uses this exact gate. **No step advances until its review is approved** and recorded as a
+file. The `analysis-review` and `epic`/`ui-design` reviews use the **base** rule (owner + 1 reviewer);
+escalation applies only where `risk_tags` or per-repo routing call for it.
 
 This gate is **swappable and file-driven**: it talks only through files and never auto-advances a
 front step. It works the same whether a human or (later) a service triggers it — the trigger is a
@@ -81,9 +83,10 @@ counterpart to `approvals.json`):
 ```
 `round` increments each comment→address cycle for the artifact; upsert by `(step, commenter, round)`.
 
-Then help the **owner address the comments** using the agent lens listed for this step (epic → `pm`;
-architecture → `architect`; ui-design → `ux-designer`; stories → `pm`, with `architect` for technical
-detail — there is **no `sm` agent**, Phase 0 Deviation 1). Update the authored artifact in place.
+Then help the **owner address the comments** using the agent lens listed for this step
+(analysis → `analyst`; epic → `pm`; architecture → `architect`; ui-design → `ux-designer`;
+stories → `pm`, with `architect` for technical detail — there is **no `sm` agent**, Phase 0
+Deviation 1). Update the authored artifact in place.
 Repeat comment→address rounds until reviewers are satisfied. **Commenting never advances the gate.**
 
 **`approve`** — Record an approval. Append to `.sdlc/approvals.json`:

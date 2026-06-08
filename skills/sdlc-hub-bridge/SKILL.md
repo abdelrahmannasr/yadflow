@@ -1,6 +1,6 @@
 ---
 name: sdlc-hub-bridge
-description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (epic / architecture+contract / ui-design / stories), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that sdlc-review-gate uses to pull platform comments + approvals back into the file ledger. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", or it is invoked by sdlc-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that sdlc-review-gate uses to pull platform comments + approvals back into the file ledger. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", or it is invoked by sdlc-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
@@ -29,7 +29,7 @@ keeps platform mechanics out of the gate). `sdlc-review-gate` *calls* it; it nev
 ## Inputs
 
 - `epic`     — the `EP-<slug>` under review.
-- `artifact` — the artifact file (`epic.md` | `architecture.md` | `ui-design.md` | `stories/`).
+- `artifact` — the artifact file (`analysis.md` | `epic.md` | `architecture.md` | `ui-design.md` | `stories/`).
 - `action`   — `open` | `route` (default `route`). (`sync`'s ledger writes live in `sdlc-review-gate`;
   this skill provides the read recipes `sync` calls — see `references/bridge.md`.)
 

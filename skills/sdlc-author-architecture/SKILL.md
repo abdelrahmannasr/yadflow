@@ -27,6 +27,13 @@ Resolve the `EP-<slug>` (ask if not provided). Read `{project-root}/epics/EP-<sl
 Only proceed when `currentStep == "architecture"` and that step's `status == "in_progress"` (the epic
 review must already have passed). If not, stop and point the user at `sdlc-status` / the gate.
 
+### Step 1b — Open the authoring branch
+Open the architecture authoring branch `architecture/EP-<slug>` per the shared procedure
+(`../sdlc-author-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
+if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
+hub's default branch. Author and commit `architecture.md` / `contract.md` / `contract-lock.json` on it.
+This is **distinct** from the bridge's `review/…` branch.
+
 ### Step 2 — Read the epic as input context
 Read `epic.md`. Note `repos` (the touched domains), the goal, scope, and acceptance signals. The
 architecture must serve every repo listed in `repos`.

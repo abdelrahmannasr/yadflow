@@ -54,7 +54,7 @@ code repos):
 ```bash
 git clone <sdlc-workflow-url> && cd sdlc-workflow
 mkdir -p ~/.claude/skills
-for s in sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
+for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
          sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
          sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill \
          sdlc-run sdlc-status; do
@@ -124,7 +124,7 @@ You can start without any of them.
 ```bash
 git clone <sdlc-workflow-url> && cd sdlc-workflow
 mkdir -p ~/.claude/skills
-for s in sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
+for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
          sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
          sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill \
          sdlc-run sdlc-status; do
@@ -147,12 +147,16 @@ Do these in order. After each author step, the matching review opens and **waits
 
 | # | Run this | It produces | Then approve at |
 |---|----------|-------------|-----------------|
-| 1 | `sdlc-author-epic` | `epic.md` (assigns the `EP-<slug>` ID, seeds state) | epic review |
+| 0 *(optional)* | `sdlc-author-analysis` | `analysis.md` — the analyst's discovery brief (assigns the `EP-<slug>` ID, seeds state) | analysis review |
+| 1 | `sdlc-author-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
 | 2 | `sdlc-author-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
 | 3 | `sdlc-author-ui` | `ui-design.md` + `DESIGN.md` | UI review |
 | 4 | `sdlc-author-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
 
-When all four gates pass, the epic state reaches **`currentStep: ready-for-build`**. Now you can build.
+Step 0 is **optional**: run `sdlc-author-analysis` first for a dedicated, gated discovery pass; skip it
+and the epic step does that analyst shaping inline. Each author step opens its own branch
+(`<step>/EP-<slug>`) at the start. When all front gates pass, the epic state reaches
+**`currentStep: ready-for-build`**. Now you can build.
 
 > **The brain is code-aware.** If you connected your code repos in setup (step 3e), each author step
 > first loads the connected repos' **code-maps** — so the epic references what exists, the architecture

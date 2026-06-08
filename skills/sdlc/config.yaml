@@ -20,9 +20,13 @@ output_folder: "{project-root}/_bmad-output"
 defaults:
   assistance: review          # none | review | heavy
   automation: human_approve   # human_approve | machine_advance
-  # Front steps (epic, architecture, ui-design, stories) are locked to human_approve
-  # and may NOT be set to machine_advance in this version (build plan §1, §8.7).
+  # Front steps (analysis [optional], epic, architecture, ui-design, stories) are locked to
+  # human_approve and may NOT be set to machine_advance in this version (build plan §1, §8.7).
   front_steps_locked: true
+  # Each front authoring step opens its own branch at the start of the step (the <step> is the step id:
+  # analysis | epic | architecture | ui-design | stories). Git/greenfield-safe; distinct from the
+  # bridge's review branch (hub.artifact_branch). See sdlc-author-epic/references/state-schema.md.
+  front_authoring_branch: "<step>/EP-<slug>"
 
 # Team review gate defaults (build plan §3 piece 2, §4).
 review_gate:
@@ -130,8 +134,9 @@ automation:
     min_runs: 5                     # at least this many recorded runs at the step
     min_approved_unchanged: 0.8     # >= this fraction "approved-unchanged" over those runs
   # Hard lock — the dial-setter REFUSES machine_advance for these, regardless of trust evidence.
-  # The four front authoring steps (already locked:true in state.json) + the human merge gate.
-  locked_steps: [epic, architecture, ui-design, stories, engineer-review]
+  # The front authoring steps (already locked:true in state.json; analysis is optional) + the human
+  # merge gate.
+  locked_steps: [analysis, epic, architecture, ui-design, stories, engineer-review]
   # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
   # system-wide, no per-step edits. One line, instantly reversible. Toggle via `sdlc-run action: kill`.
   kill_switch: false

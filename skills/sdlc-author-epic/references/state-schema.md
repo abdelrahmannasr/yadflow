@@ -17,7 +17,40 @@ Each `steps[]` entry:
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `id` | `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review` | Step identity. |
+| `id` | `analysis`, `analysis-review`, `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review` | Step identity. |
+
+### Two valid chain shapes (analysis is optional)
+
+The `analysis` step (and its `analysis-review` gate) is **optional** — it exists only when the team
+ran `sdlc-author-analysis` before the epic. The entry-point skill (whichever runs first) is the one
+that assigns `EP-<slug>` and seeds `state.json` + the empty ledgers; the other skill detects an
+existing `state.json` and does **not** re-seed.
+
+- **With analysis** (10 steps — `sdlc-author-analysis` seeded the chain):
+  `analysis → analysis-review → epic → epic-review → architecture → architecture-review → ui-design →
+  ui-design-review → stories → stories-review`. Seeded `currentStep` is `analysis-review`; `epic`
+  starts `blocked`.
+- **Without analysis** (8 steps — `sdlc-author-epic` is the entry point, the default):
+  `epic → epic-review → … → stories-review`. Seeded `currentStep` is `epic-review`.
+
+After `stories-review` passes, `currentStep` becomes the `ready-for-build` sentinel either way.
+`analysis-review` carries no `risk_tags` (base rule: owner + 1 reviewer).
+
+### Authoring branches
+
+Each front **authoring** step opens its own git branch at the start of the step, named
+`<step>/EP-<slug>` where `<step>` ∈ `analysis | epic | architecture | ui-design | stories`
+(`config.yaml` `defaults.front_authoring_branch`). This is **distinct** from the review branch
+`review/EP-<slug>/<artifact-base>` that `sdlc-hub-bridge` opens later for the review PR/MR.
+
+The shared procedure (run once the `EP-<slug>` is known):
+1. **Git-safe / greenfield-safe:** if `{project-root}` is not a git work tree
+   (`git rev-parse --is-inside-work-tree` fails), skip branching with a note and author on the current
+   tree — no error.
+2. Branch name = `<step>/EP-<slug>`. If it already exists, check it out; otherwise create it from the
+   hub's default branch (`git checkout -b <step>/EP-<slug>`).
+3. Author and commit the step's artifact(s) on that branch. The bridge's `review/…` branch is created
+   separately at review time and is untouched by this step.
 | `type` | `author` \| `review+approve` | Authoring step or a team review gate. |
 | `artifact` | filename or folder | The file/folder this step produces or gates. |
 | `assistance` | `none` \| `review` \| `heavy` | Dial 1 — how much AI helps (build plan §2). |
