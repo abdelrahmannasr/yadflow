@@ -36,7 +36,9 @@ Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context
 `epic.repos`**, load the lightweight code-map `{project-root}/.sdlc/code-context/<repo>/code-map.md`
 **and**, because this phase locks the contract, the full pack `.../pack.md` when you need depth on the
 existing **endpoints, events, and data models**. This is the context that stops the architecture from
-re-defining or contradicting what is already built.
+re-defining or contradicting what is already built. (`pack.md` is **not committed** — if it is absent
+locally, regenerate it with `sdlc-connect-repos action: refresh repo:<repo>`; the committed `code-map.md`
+is always present.)
 
 - **Greenfield-safe:** if `repos.json` is absent/empty, note "no repos connected" and proceed — design
   from scratch as before.
