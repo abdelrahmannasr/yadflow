@@ -66,6 +66,23 @@ build:
     spec_location: "specs/backfill/<feature>/spec.md"   # draft (verified: false) until a human approves
     gate_scope: touched-features   # block a change only until the features it touches have approved specs
 
+# Code context (sdlc-connect-repos) — the front/"brain" phases are made code-aware. Code repos are
+# connected to the product hub once (or any time a new repo is added), and an AI-readable picture of
+# each is cached so epic/architecture/ui/stories consider what already exists in the code. The product
+# repo is the FRONT-PHASE TOOLCHAIN HUB: repomix (and Impeccable) are installed/run here and target the
+# connected code repos by path — code repos need no install for this. (The build-half CI gates are the
+# exception: they live INSIDE each code repo and run in that repo's CI — see build.gates above.)
+code_context:
+  registry: "{project-root}/.sdlc/repos.json"        # project-wide repo registry (NOT per-epic)
+  cache_dir: "{project-root}/.sdlc/code-context"      # per-repo pack.md + code-map.md live here
+  tools: [repomix, impeccable]                        # front-phase toolchain, installed in the product hub
+  pack_flags: "--compress --include-logs --style markdown"   # reuse backfill flags; Secretlint by default
+  staleness: head-sha                                 # stale when a repo's HEAD != registry syncedHead
+  load_in_front_phases: true                          # epic, architecture, ui-design, stories read the maps
+  # Auth: `sdlc-connect-repos` clones/fetches as the LOCAL user (SSH key or git credential helper),
+  # works for both github and gitlab (and self-hosted), and stores NO tokens in the registry.
+  platforms: [github, gitlab]
+
 # Phase 4 (automation) — the SECOND dial made real. Until Phase 4 nothing read this dial; the
 # orchestrator (sdlc-run) now does. Governing rule: automation is EARNED per step, with trust-log
 # evidence, and is reversible in one move (phase-4-build-plan.md §"one principle"). Front states are
