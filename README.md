@@ -93,6 +93,8 @@ human**. Detailed walkthroughs for each phase follow below.
 |------|-----------|
 | `RESEARCH-NOTES.md` | Verified Phase 0 facts about BMAD, Spec Kit, Repomix, Impeccable + deviations. |
 | `skills/sdlc/` | Module source of truth (`config.yaml`, `module-help.csv`, `install.sh`). Survives BMAD updates. |
+| `bin/`, `cli/` | The `sdlc` setup/update CLI (published to npm as `@abdelrahmannasr/sdlc-workflow`). |
+| `skills/sdlc-author-analysis/` | Optional front state 1: pressure-test the idea with the analyst into `analysis.md` (skippable). |
 | `skills/sdlc-author-epic/` | Front state 1: author an epic with AI assist, assign its `EP-<slug>` ID, seed state. |
 | `skills/sdlc-author-architecture/` | Front state 3: author `architecture.md` + the locked `contract.md`; hash-lock the contract surface. |
 | `skills/sdlc-author-ui/` | Front state 5: author `ui-design.md` + `DESIGN.md` (Impeccable slash-commands, or graceful fallback). |
@@ -114,24 +116,39 @@ human**. Detailed walkthroughs for each phase follow below.
 | `docs/` | The phased build plans (`phase-2`…`phase-5`) and the original workflow design. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commit & PR/MR title convention (Conventional Commits, lowercase after the type). |
 
-## Install (and re-install after an update)
+## The `sdlc` CLI (install, update, reconcile)
 
-The fastest path is the bundled CLI — it drives the whole one-time setup step by step, and
-reconciles the project whenever the workflow changes:
+The module ships a zero-dependency CLI, published to npm as
+[`@abdelrahmannasr/sdlc-workflow`](https://www.npmjs.com/package/@abdelrahmannasr/sdlc-workflow). Run it
+with `npx` from your **product hub** repo — no clone needed.
 
-```bash
-npx @abdelrahmannasr/sdlc-workflow setup     # guided first-run setup
-npx @abdelrahmannasr/sdlc-workflow check     # report what is missing / drifted / stale
-npx @abdelrahmannasr/sdlc-workflow check --fix   # fill what is missing, update what changed
-npx @abdelrahmannasr/sdlc-workflow update    # apply drift only (alias for check --fix --scope=changed)
-```
+| Command | What it does |
+|---------|--------------|
+| `npx @abdelrahmannasr/sdlc-workflow setup` | Guided first-run wizard (the steps below). |
+| `npx @abdelrahmannasr/sdlc-workflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) vs the bundled manifest. |
+| `npx @abdelrahmannasr/sdlc-workflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
+| `npx @abdelrahmannasr/sdlc-workflow update` | Apply drift only (alias for `check --fix --scope=changed`). |
+| `npx @abdelrahmannasr/sdlc-workflow --version` | Print the installed CLI version. |
 
-`setup` installs the `sdlc-*` skills into the IDE skill dirs (`.claude/`, `.agents/`, `.zencoder/`,
-`.opencode/`), registers the module under `_bmad/sdlc/`, detects the hub platform, connects & wires
-each code repo, and stamps `.sdlc/cli-version.json`. `check` then keeps the project in sync as the
-workflow evolves — it diffs the project against the bundled manifest and only touches what changed.
-The deterministic file work runs automatically; the few AI-only steps (code-map generation, authoring
-the first epic) are handed off to the Claude Code skills.
+Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies even unchanged files.
+
+### What `setup` walks you through (7 steps)
+
+1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
+2. **Install the module** — copy all 17 `sdlc-*` skills into the IDE skill dirs you pick
+   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
+3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
+4. **Connect code repos** — register each repo into `.sdlc/repos.json` and cache a Repomix pack.
+5. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
+6. **AI review** — optionally write `.coderabbit.yaml`.
+7. **Done** — stamp `.sdlc/cli-version.json` and hand off the AI-only steps (code-maps; first epic).
+
+The deterministic file work runs automatically; the AI-only steps are handed to the Claude Code skills
+with a printed next-action. Re-run `… check --fix` any time the workflow updates — it never re-asks for
+input you already gave.
+
+**Releases:** automated via semantic-release on merge to `main` (Conventional Commits → npm, with
+provenance). See [`RELEASING.md`](RELEASING.md).
 
 **Maintainers / no-CLI fallback:** the underlying copy is still a single script —
 `bash skills/sdlc/install.sh` — which the CLI's install step is a port of. The **source** stays in
@@ -143,6 +160,83 @@ the first epic) are handed off to the Claude Code skills.
 > [Conventional Commits](CONTRIBUTING.md), publishes to npm with build provenance (tokenless OIDC),
 > ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No manual `npm publish`. See
 > [`RELEASING.md`](RELEASING.md).
+
+## Agent skills (all 17)
+
+The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
+AI IDE (e.g. *“run `sdlc-author-epic`”*) to actually do the work. State lives in files you can also edit
+directly. Each skill stops at a gate and never auto-advances unless a step has *earned* automation.
+
+### Setup & code-awareness
+
+- **`sdlc-connect-repos`** — Connects code repos to the product hub so the front/"brain" phases are
+  code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into
+  `.sdlc/repos.json`, then caches an AI-readable picture of each — a compressed Repomix pack and a
+  lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Idempotent and
+  refreshable; staleness tracked by HEAD sha.
+
+### Front half — author the "thinking" (once per epic, human-gated)
+
+- **`sdlc-author-analysis`** — *Optional* front state 1. With the analyst, pressure-test a feature idea
+  and write the discovery brief into `analysis.md`. Assigns the `EP-<slug>` ID and seeds `.sdlc/` state
+  (the 10-step chain that puts analysis before epic). If skipped, the epic step does this shaping inline.
+- **`sdlc-author-epic`** — The epic front state. Shape the idea with the analyst (or read `analysis.md`
+  when it already ran), then write the epic with the pm into `epic.md`. The entry point when analysis is
+  skipped: assigns the `EP-<slug>` ID and seeds `.sdlc/` state.
+- **`sdlc-author-architecture`** — Front state 3. With the architect, author `architecture.md` and the
+  locked `contract.md` (the shared cross-repo surface), then hash-lock the contract surface into
+  `.sdlc/contract-lock.json`. Reads `epic.md`; escalates on the contract risk tag.
+- **`sdlc-author-ui`** — Front state 5. With the ux-designer, author `ui-design.md` and `DESIGN.md`,
+  driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring
+  directly when not. Reads epic + architecture.
+- **`sdlc-author-stories`** — Front state 7. With the pm, break the approved epic into user stories, each
+  tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
+  story under `stories/`. Reads epic + architecture + contract + UI.
+
+### The review gate (cross-cutting — used by every review)
+
+- **`sdlc-review-gate`** — The reusable team review + approve gate. Shares an authored artifact, records
+  reviewer comments and approvals as files, enforces the **owner + 1 reviewer** rule (escalating to
+  domain owners on contract/auth/payments), and advances the epic state **only** when approval is
+  recorded.
+- **`sdlc-hub-bridge`** — The templated PR/MR bridge for the front-half gate. When the hub has a platform
+  (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
+  provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
+  ledger. The file ledger stays the source of truth; degrades to a file-only gate with no platform.
+- **`sdlc-review-comments`** — Installs platform-matched PR/MR review-comment scaffolds so reviewers
+  leave structured, attributable feedback that maps cleanly into the file ledger.
+
+### Build half — turn stories into shipped code (once per story, per repo)
+
+- **`sdlc-spec`** — Step A. For one ready-for-build story and one of its repos, run the Spec Kit ceremony
+  once (specify → clarify → plan → analyze → checklist → tasks) → `specs/<story-id>/`. Drives `/speckit.*`
+  when installed; references the locked contract — never re-invents the surface.
+- **`sdlc-implement`** — Step B. With the dev lens, implement **one** atomic task as a small diff
+  (≤3 files) on its own branch. The diff stays inside the files the task declared (flag and STOP if it
+  would grow). Commit ends with the task ID; `Contract-Change: yes` only if it touches the locked
+  contract surface.
+- **`sdlc-checks`** — Step C, the production-safety gates. Wire and run three CI gates: **spec-link**
+  (every change links a real story/spec), **contract-check** (a contract-surface diff without a
+  re-locked contract FAILS), and **build/test/lint**. CI-agnostic bash for GitHub Actions and GitLab CI.
+- **`sdlc-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
+  an Impact & Risk block; high risk (or a contract/auth/payments surface) routes the review to domain
+  owners. Includes `risk-route.sh`.
+- **`sdlc-ship`** — Step E. AI review (CodeRabbit, advisory) → engineer review (the human gate, owner +
+  1 reviewer with the same escalation) → on merge, record the ship in the epic build-log and update the
+  story state so the epic → story → task → PR chain stays traceable.
+- **`sdlc-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
+  doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval
+  before it counts. A change is blocked only until the features it touches have approved specs.
+
+### Automation & status
+
+- **`sdlc-run`** — The Phase 4 orchestrator. Drives a story's back-half loop (spec → tasks → implement →
+  checks) on each step's automation dial, recording every run in the trust log. A clean `checks` pass
+  auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS for a
+  human. Also sets a step's dial (gated by trust evidence) and flips the system-wide kill switch.
+- **`sdlc-status`** — Read-only view of an epic: the current step, each step's dials (assistance/
+  automation) and status, which approvals are still required, per-story back-half trust records, the
+  kill-switch state, and a fleet roll-up across epics.
 
 ## The two dials (per step, build plan §2)
 

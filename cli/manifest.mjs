@@ -10,8 +10,9 @@ import { readFileSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = version;
 
-// The 16 hand-authored sdlc-* skills (mirrors skills/sdlc/install.sh).
+// The 17 hand-authored sdlc-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
+  'sdlc-author-analysis',
   'sdlc-author-epic',
   'sdlc-author-architecture',
   'sdlc-author-ui',

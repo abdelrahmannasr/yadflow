@@ -341,6 +341,11 @@ surfaces (`contract`, `auth`, `payments`):
   themselves. The engineer review and all four front steps are **never** automatable.
 - **Global "back to manual" switch:** `sdlc-run action: kill` forces every step to human approval
   instantly; `sdlc-run action: unkill` restores it.
+- **Keep the install in sync with the CLI** (run from the product hub):
+  - `npx @abdelrahmannasr/sdlc-workflow check` — report what's missing / drifted / stale (read-only).
+  - `npx @abdelrahmannasr/sdlc-workflow check --fix` — reconcile it (re-syncs skills + repo wiring).
+  - `npx @abdelrahmannasr/sdlc-workflow update` — apply drift only.
+  - `npx @abdelrahmannasr/sdlc-workflow --version` — the installed CLI version.
 
 ---
 
@@ -360,7 +365,35 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 
 ---
 
-## 10. Want more detail?
+## 10. The skills at a glance (what to invoke)
 
-- **`README.md`** — the complete reference for every phase, dial, and gate.
+The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
+descriptions are in [`README.md`](README.md) → *Agent skills (all 17)*.
+
+| Skill | When you reach for it |
+|-------|------------------------|
+| `sdlc-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
+| `sdlc-author-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
+| `sdlc-author-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
+| `sdlc-author-architecture` | Author `architecture.md` + the locked `contract.md`. |
+| `sdlc-author-ui` | Author `ui-design.md` + `DESIGN.md`. |
+| `sdlc-author-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
+| `sdlc-review-gate` | Review / comment / approve / advance **any** gate. |
+| `sdlc-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
+| `sdlc-review-comments` | Install the PR/MR review-comment scaffolds. |
+| `sdlc-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
+| `sdlc-implement` | Implement one atomic task as a small branch. |
+| `sdlc-checks` | Wire / run the three CI gates (spec-link, contract-check, build/test/lint). |
+| `sdlc-pr-template` | Install the platform PR/MR template + risk routing. |
+| `sdlc-ship` | AI review → engineer review → ship + record. |
+| `sdlc-backfill` | Spec already-built / legacy code so new work doesn't break it. |
+| `sdlc-run` | Drive the back half on the automation dial; kill switch. |
+| `sdlc-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
+
+---
+
+## 11. Want more detail?
+
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 17 skills.
+- **`RELEASING.md`** — how the `sdlc` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.
