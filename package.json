@@ -1,0 +1,29 @@
+{
+  "name": "@abdelrahmannasr/sdlc-workflow",
+  "version": "0.1.0",
+  "description": "Guided setup & maintenance CLI for the gated, team, multi-repo SDLC Workflow module.",
+  "type": "module",
+  "bin": {
+    "sdlc": "bin/sdlc.mjs"
+  },
+  "files": [
+    "bin/",
+    "cli/",
+    "skills/"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "sdlc": "node bin/sdlc.mjs",
+    "test": "node --test cli/"
+  },
+  "keywords": [
+    "sdlc",
+    "bmad",
+    "workflow",
+    "cli",
+    "spec-driven-development"
+  ],
+  "license": "MIT"
+}
