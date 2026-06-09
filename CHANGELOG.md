@@ -1,3 +1,25 @@
+# [1.1.0](https://github.com/abdelrahmannasr/sdlc-workflow/compare/v1.0.3...v1.1.0) (2026-06-09)
+
+
+### Features
+
+* PR-driven review gate + build-helper CLI commands ([#30](https://github.com/abdelrahmannasr/sdlc-workflow/issues/30)) ([cc43319](https://github.com/abdelrahmannasr/sdlc-workflow/commit/cc4331903b2052b9835b0a6e3f21e148c809914c))
+
+## [1.0.3](https://github.com/abdelrahmannasr/sdlc-workflow/compare/v1.0.2...v1.0.3) (2026-06-08)
+
+
+### Bug Fixes
+
+* install the missing analysis skill, and document the CLI + all 17 skills ([#29](https://github.com/abdelrahmannasr/sdlc-workflow/issues/29)) ([b968cbe](https://github.com/abdelrahmannasr/sdlc-workflow/commit/b968cbe0be0259746a332a10c5b79ffaf08a87be))
+
+## [1.0.2](https://github.com/abdelrahmannasr/sdlc-workflow/compare/v1.0.1...v1.0.2) (2026-06-08)
+
+
+### Bug Fixes
+
+* drop @semantic-release/git so release works under branch protection ([#28](https://github.com/abdelrahmannasr/sdlc-workflow/issues/28)) ([4911773](https://github.com/abdelrahmannasr/sdlc-workflow/commit/491177359e6d2af291375884be3f86b3ac359f97))
+* normalize package.json repository url ([#27](https://github.com/abdelrahmannasr/sdlc-workflow/issues/27)) ([1e8d93d](https://github.com/abdelrahmannasr/sdlc-workflow/commit/1e8d93d3c9cd5b89d3fa37f53cbfbe7f04126edb))
+
 ## [1.0.1](https://github.com/abdelrahmannasr/sdlc-workflow/compare/v1.0.0...v1.0.1) (2026-06-08)
 
 
