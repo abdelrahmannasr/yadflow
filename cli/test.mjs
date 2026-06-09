@@ -113,7 +113,7 @@ test('taskFromBranch derives the story-task id', () => {
 // ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
-const { gatePredicate } = await import('./epic-state.mjs');
+const { gatePredicate, artifactHash } = await import('./epic-state.mjs');
 
 const baseStep = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
 const escStep = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
@@ -160,7 +160,7 @@ test('gatePredicate: escalated step needs a domain-owner per touched repo', () =
 // ---------------------------------------------------------------------------------------------
 // `sdlc gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
-const { gateSync } = await import('./gate.mjs');
+const { gateSync, gateOpen, gateStatus } = await import('./gate.mjs');
 
 function scaffoldEpic() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-'));
@@ -259,7 +259,7 @@ test('gate sync: an approval keeps its hash when the platform proves no newer re
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gate sync: unresolved comment holds in-review (no advance)', async () => {
+test('gate sync: unresolved comment holds in-review (no advance) and is recorded in comments.json', async () => {
   const { T, ep } = scaffoldEpic();
   const withComment = { ...fullApproval, merged: false, threads: [{ id: 't1', resolved: false, login: 'bo', body: 'needs a version field' }] };
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => withComment });
@@ -267,6 +267,68 @@ test('gate sync: unresolved comment holds in-review (no advance)', async () => {
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'in_review');
   assert.equal(state.currentStep, 'architecture-review');
   assert.ok(fs.existsSync(path.join(ep, 'reviews/architecture--2026-06-09--comments.md')));
+  // ledger (not just the markdown side file) carries the participation record
+  const comments = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/comments.json')));
+  const rec = comments.find((cm) => cm.step === 'architecture-review' && cm.commenter === 'bob');
+  assert.ok(rec, 'comments.json has a record for bob');
+  assert.equal(rec.count, 1);
+  // re-sync same round does not duplicate
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => withComment });
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/comments.json')));
+  assert.equal(after.filter((cm) => cm.commenter === 'bob' && cm.round === rec.round).length, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('artifactHash(stories/) changes on a story edit, so a stories-review approval goes stale', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stories-'));
+  const dir = path.join(T, 'stories');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'EP-x-S01.md'), '---\nrepos: [backend]\n---\nstory one\n');
+  fs.writeFileSync(path.join(dir, 'EP-x-S02.md'), '---\nrepos: [mobile]\n---\nstory two\n');
+  const h1 = artifactHash(T, 'stories/');
+  assert.ok(h1 && h1.startsWith('sha256:'), 'stories/ now has a content hash (no longer null)');
+
+  const step = { id: 'stories-review', type: 'review+approve', artifact: 'stories/', risk_tags: [] };
+  const approvals = [
+    { step: 'stories-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: h1 },
+    { step: 'stories-review', status: 'approved', approver: 'bob', role: 'reviewer', artifactHash: h1 },
+    { step: 'stories-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: h1 },
+    { step: 'stories-review', status: 'approved', approver: 'dave', role: 'domain-owner', domain: 'mobile', artifactHash: h1 },
+  ];
+  assert.equal(gatePredicate({ step, approvals, currentHash: h1, touchedDomains: ['backend', 'mobile'], merged: true }).passed, true);
+
+  fs.appendFileSync(path.join(dir, 'EP-x-S01.md'), '\nnew acceptance criterion\n');
+  const h2 = artifactHash(T, 'stories/');
+  assert.notEqual(h2, h1, 'editing a story changes the stories hash');
+  const after = gatePredicate({ step, approvals, currentHash: h2, touchedDomains: ['backend', 'mobile'], merged: true });
+  assert.equal(after.passed, false);
+  assert.equal(after.staleDropped, 4, 'all four approvals revoked by the story edit');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate open without an artifact fails cleanly (no throw)', async () => {
+  const { T } = scaffoldEpic();
+  const prev = process.exitCode;
+  await assert.doesNotReject(gateOpen(T, { epic: 'EP-test', today: '2026-06-09' }));
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate status counts only non-stale approvals after an artifact change', async () => {
+  const { T, ep } = scaffoldEpic();
+  // record approvals bound to the current contract surface, not yet merged
+  const noTs = { ok: true, state: 'opened', merged: false, headOid: 'a',
+    reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bo', state: 'APPROVED' }, { login: 'ca', state: 'APPROVED' }], threads: [] };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => noTs });
+  // change the locked surface -> existing approvals become stale
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /z\n<!-- CONTRACT-SURFACE:END -->\n');
+  const lines = [];
+  const orig = console.log;
+  console.log = (s = '') => lines.push(String(s));
+  try { await gateStatus(T, { epic: 'EP-test' }); } finally { console.log = orig; }
+  const archLine = lines.find((l) => l.includes('architecture-review') && l.includes('approval'));
+  assert.match(archLine, /0 approval\(s\)/);
+  assert.match(archLine, /stale \(revoked\)/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

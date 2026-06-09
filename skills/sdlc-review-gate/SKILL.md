@@ -131,7 +131,9 @@ via the local user's `gh`/`glab`. For each:
 key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
 before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
-roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. `sync` itself never advances.
+roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. Under the PR-driven CLI (`sdlc
+gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
+(the merge is the human act); otherwise it records state and holds the step `in_review`.
 
 **`advance`** — Run the gate predicate (Step 3). Only advance if it passes.
 

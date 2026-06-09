@@ -133,7 +133,7 @@ file-only with no error — the bridge is purely additive.
 ## Live on-demand (the third context layer)
 The cached pack + map are the default. When a front phase needs an **area** not in the map, it may
 re-run Repomix **live**, scoped to that area:
-```
+```bash
 npx repomix@latest --compress --include "<area globs>" --style markdown -o -
 ```
 Same CLI, invoked ad hoc — no registry write. A **stale repo** (HEAD ≠ `syncedHead`) is different: the

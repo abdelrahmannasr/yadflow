@@ -38,13 +38,25 @@ export function contractSurfaceHash(epicDir) {
   return 'sha256:' + createHash('sha256').update(body.join('\n')).digest('hex');
 }
 
+// Deterministic fingerprint of the whole stories/ set: hash each story file, sort, combine. Lets an
+// edit to any story revoke prior stories-review approvals (the escalated, per-repo gate).
+export function storiesHash(epicDir) {
+  const dir = path.join(epicDir, 'stories');
+  if (!fs.existsSync(dir)) return null;
+  const parts = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort()
+    .map((f) => `${f}:${fileSha(path.join(dir, f))}`);
+  if (!parts.length) return null;
+  return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
+}
+
 // The content fingerprint an approval is bound to. For architecture the fingerprint is the locked
-// contract surface (a re-lock => stale); for every other artifact it is the file's bytes.
+// contract surface (a re-lock => stale); for stories it is the whole stories/ set; for every other
+// artifact it is the file's bytes.
 export function artifactHash(epicDir, artifact) {
-  if (artifactBase(artifact) === 'architecture') return contractSurfaceHash(epicDir);
-  const a = artifact.replace(/\/$/, '');
-  if (a === 'stories') return null; // a directory; story-level hashing is out of scope
-  return fileSha(path.join(epicDir, a));
+  const b = artifactBase(artifact);
+  if (b === 'architecture') return contractSurfaceHash(epicDir);
+  if (b === 'stories') return storiesHash(epicDir);
+  return fileSha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
 export function loadLedger(epicDir) {

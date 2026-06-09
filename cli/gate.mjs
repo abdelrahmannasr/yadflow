@@ -102,6 +102,23 @@ function writeComments(epicDir, base, today, blocking) {
   fs.writeFileSync(file, lines.join('\n') + '\n');
 }
 
+// Upsert machine-readable participation records into the comments ledger (the counterpart to the
+// markdown side file) so the ledger — not just reviews/*.md — reflects platform thread state. One
+// record per (step, commenter, round); `round` is the count of prior synced rounds for the step.
+function recordComments(comments, { artifact, stepId, today, roster, repos, blocking }) {
+  if (!blocking.length) return comments;
+  const byName = (login) => (roster.find((r) => r.login === login)?.name) || login || 'reviewer';
+  const roleOf = (login) => (roster.find((r) => r.login === login)?.role) || 'reviewer';
+  const round = (comments.filter((cm) => cm.step === stepId).reduce((m, cm) => Math.max(m, cm.round || 0), 0)) + 1;
+  const counts = new Map();
+  for (const t of blocking) counts.set(t.login, (counts.get(t.login) || 0) + 1);
+  const kept = comments.filter((cm) => !(cm.step === stepId && cm.round === round));
+  for (const [login, count] of counts) {
+    kept.push({ artifact, step: stepId, commenter: byName(login), role: roleOf(login), round, count, date: today });
+  }
+  return kept;
+}
+
 // ---- actions ------------------------------------------------------------------------------------
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr } = {}) {
@@ -136,10 +153,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     const unresolved = (pull.threads || []).filter((t) => !t.resolved);
     const threadsResolved = unresolved.length === 0 && changeRequested.length === 0;
-    writeComments(epicDir, base(pr.artifact), today, [
+    const blocking = [
       ...changeRequested.map((r) => ({ login: r.login, changesRequested: true })),
       ...unresolved,
-    ]);
+    ];
+    writeComments(epicDir, base(pr.artifact), today, blocking);
+    comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
 
     const pred = gatePredicate({
       step, approvals, currentHash: curHash, touchedDomains: domains,
@@ -196,8 +215,11 @@ export async function gateStatus(root, { epic } = {}) {
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
-    const n = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved').length;
-    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${n} approval(s)${isEscalated(s) ? ', escalated' : ''}`)}`);
+    const cur = artifactHash(epicDir, s.artifact);
+    const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !(a.artifactHash && cur && a.artifactHash !== cur));
+    const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && a.artifactHash && cur && a.artifactHash !== cur).length;
+    const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
+    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s)${tags}`)}`);
   }
 }
 
@@ -206,6 +228,7 @@ export async function gateOpen(root, { epic, artifact, today } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
+  if (!artifact) { fail('artifact is required: `sdlc gate open <epic> <artifact>`'); process.exitCode = 1; return; }
   const step = findReviewStep(ledger.state, artifact);
   if (!step) { fail(`no review step for ${artifact}`); process.exitCode = 1; return; }
   const b = base(artifact);

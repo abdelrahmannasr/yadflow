@@ -72,7 +72,7 @@ only when a phase needs depth (the architecture phase, primarily).
 When a front phase needs an area not captured in the code-map, it may re-pack that **slice** live,
 scoped to the area, without writing the cache:
 
-```
+```bash
 npx repomix@latest --compress --include "<area globs>" --style markdown -o -
 ```
 

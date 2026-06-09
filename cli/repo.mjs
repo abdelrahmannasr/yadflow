@@ -45,7 +45,7 @@ export async function runRepo(root, { action = 'list', name, today } = {}) {
       log(`  ${c.bold(repo.name)}`);
       if (packRepo(root, repo)) {
         repo.syncedHead = head;
-        repo.lastSyncedAt = today ?? repo.lastSyncedAt;
+        if (today) repo.lastSyncedAt = today;   // always stamp when a date is supplied (the CLI passes today)
         refreshed++;
       }
     }

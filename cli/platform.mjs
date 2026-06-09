@@ -61,21 +61,30 @@ function readPrGitHub(n, { cwd } = {}) {
   const reviews = rev.ok
     ? (JSON.parse(rev.stdout).latestReviews || []).map((x) => ({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt }))
     : [];
-  // Review-thread resolution via GraphQL (REST does not expose isResolved).
+  // Review-thread resolution via GraphQL (REST does not expose isResolved). Paginate so a PR with
+  // >100 threads is not mistakenly read as "all resolved".
   let threads = [];
   const nwo = run('gh', ['repo', 'view', '--json', 'owner,name'], { cwd });
   if (nwo.ok) {
     const { owner, name } = JSON.parse(nwo.stdout);
-    const q = `query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{author{login} body}}}}}}}`;
-    const g = run('gh', ['api', 'graphql', '-f', `query=${q}`, '-F', `o=${owner.login}`, '-F', `r=${name}`, '-F', `n=${n}`], { cwd });
-    if (g.ok) {
-      const nodes = JSON.parse(g.stdout)?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
-      threads = nodes.map((t, i) => ({
-        id: `thread-${i}`,
-        resolved: !!t.isResolved,
-        login: t.comments?.nodes?.[0]?.author?.login,
-        body: t.comments?.nodes?.[0]?.body,
-      }));
+    const q = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{author{login} body}}}}}}}`;
+    let cursor = null;
+    for (let guard = 0; guard < 50; guard++) {
+      const args = ['api', 'graphql', '-f', `query=${q}`, '-F', `o=${owner.login}`, '-F', `r=${name}`, '-F', `n=${n}`];
+      if (cursor) args.push('-F', `c=${cursor}`);
+      const g = run('gh', args, { cwd });
+      if (!g.ok) break;
+      const page = JSON.parse(g.stdout)?.data?.repository?.pullRequest?.reviewThreads;
+      for (const t of page?.nodes || []) {
+        threads.push({
+          id: `thread-${threads.length}`,
+          resolved: !!t.isResolved,
+          login: t.comments?.nodes?.[0]?.author?.login,
+          body: t.comments?.nodes?.[0]?.body,
+        });
+      }
+      if (!page?.pageInfo?.hasNextPage) break;
+      cursor = page.pageInfo.endCursor;
     }
   }
   return {

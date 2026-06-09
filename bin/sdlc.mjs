@@ -56,7 +56,7 @@ function parseArgs(argv) {
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
     else if (a.startsWith('--scope=')) o.scope = a.slice('--scope='.length);
-    else if (a === '-m' || a === '--message') o.message = takeValue(argv, ++i, '-m');
+    else if (a === '-m' || a === '--message') o.message = takeValue(argv, ++i, a);
     else if (VALUE_FLAGS.has(a)) o[a.replace(/^--/, '')] = takeValue(argv, ++i, a);
     else o._.push(a);
   }
