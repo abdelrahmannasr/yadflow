@@ -4,7 +4,7 @@
 // on the product hub.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
+import { c, log, ok, info, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, createPr } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
@@ -45,10 +45,11 @@ export async function runOpenPr(root, opts = {}) {
   const baseBranch = opts.base || meta?.default_branch || 'main';
   if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
 
-  // Push the branch (sets upstream) using the user's own auth.
+  // Push the branch (sets upstream) using the user's own auth. Abort on failure — creating a PR for a
+  // branch that is not on the remote just fails with a more confusing error.
   info(`pushing ${branch} …`);
   const push = run('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });
-  if (!push.ok) { warn(`git push failed — ${push.stderr.split('\n')[0] || 'unknown'} (continuing to PR create)`); }
+  if (!push.ok) { fail(`git push failed — ${push.stderr.split('\n')[0] || 'unknown'}`); process.exitCode = 1; return; }
 
   const task = opts.task || taskFromBranch(branch);
   const title = opts.title || run('git', ['log', '-1', '--format=%s'], { cwd: repoRoot }).stdout || `task ${task || branch}`;
