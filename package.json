@@ -1,7 +1,7 @@
 {
   "name": "@abdelrahmannasr/sdlc-workflow",
   "version": "1.0.1",
-  "description": "Guided setup & maintenance CLI for the gated, team, multi-repo SDLC Workflow module.",
+  "description": "Gated, team, multi-repo SDLC workflow: author → review → build with a PR-driven review gate and a zero-dependency CLI (setup, gate, commit, open-pr, repo). A BMAD module + 17 skills.",
   "type": "module",
   "author": "AbdelRahman Nasr",
   "license": "MIT",
