@@ -1,0 +1,21 @@
+# sdlc-managed-include: sdlc-checks
+# verified-commits gate for the PRODUCT HUB, as an INCLUDABLE fragment. Pulled into the hub's root
+# .gitlab-ci.yml via:
+#   include:
+#     - local: '.gitlab/ci/sdlc-verified-commits.yml'
+# Every MR (including the front-half review/EP-* MRs) must contain only commits whose signature the
+# platform marks Verified AND whose author email is a known identity (.sdlc/verified-authors).
+#
+# Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot
+# read the commit-signature API. The hub's SDLC_GATE_TOKEN (from the gate-sync wiring) also works:
+# set GITLAB_TOKEN: $SDLC_GATE_TOKEN in the job if you prefer one token.
+# Job name is sdlc-hub-prefixed so it can coexist with the code-repo fragment in one pipeline.
+sdlc-hub-verified-commits:
+  needs: []
+  image: node:20
+  variables:
+    GIT_DEPTH: "0" # full history so the gate can diff against the target branch
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - bash checks/verified-commits.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

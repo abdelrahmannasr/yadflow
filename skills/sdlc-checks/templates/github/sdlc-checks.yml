@@ -31,3 +31,15 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "20" }
       - run: bash checks/build-test-lint.sh
+
+  # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
+  verified-commits:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }} # read-only: gh api commits/<sha> for the Verified badge
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/verified-commits.sh "origin/${{ github.base_ref }}"

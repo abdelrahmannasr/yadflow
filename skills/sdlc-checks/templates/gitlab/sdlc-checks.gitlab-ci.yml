@@ -36,3 +36,12 @@ sdlc-build-test-lint:
   needs: []
   script:
     - bash checks/build-test-lint.sh
+
+# No unverified commits from unverified users: platform-Verified signature + allowlisted author.
+# Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot
+# read the commit-signature API. Without it the job FAILS closed with guidance.
+sdlc-verified-commits:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - bash checks/verified-commits.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
