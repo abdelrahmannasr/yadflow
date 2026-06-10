@@ -45,11 +45,13 @@ Stored at `epics/EP-<slug>/.sdlc/contract-lock.json`:
 
 ```bash
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-<slug>/contract.md | shasum -a 256
+  epics/EP-<slug>/contract.md | tr -d '\r' | shasum -a 256
 ```
 
 - `awk` emits every line strictly between the two markers (the `next` after BEGIN skips the BEGIN
   line; setting `f=0` on END stops before printing END).
+- `tr -d '\r'` normalizes CRLF line endings to LF before hashing — the same surface must hash
+  identically no matter which platform last saved the file (the CLI normalizes the same way).
 - `shasum -a 256` (BSD/macOS) or `sha256sum` (GNU/Linux) produce the same hex digest for identical
   bytes. Prefix the digest with `sha256:` when writing the lock file.
 - Round-trip property: hashing unchanged content twice yields the same digest; any edit inside the

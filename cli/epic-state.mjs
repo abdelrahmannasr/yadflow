@@ -4,10 +4,14 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import { readJSON, writeJSON, fileSha } from './lib.mjs';
+import { readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { epicFiles } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
+
+// Epic ids are EP-<slug> with [a-z0-9-] only — anything else (uppercase, dots, slashes) is
+// rejected before it can become a path segment under epics/.
+export const isValidEpicId = (epic) => /^EP-[a-z0-9-]+$/.test(epic || '');
 
 export const epicRoot = (root, epic) => path.join(root, 'epics', epic);
 
@@ -24,7 +28,7 @@ export function artifactBase(artifact) {
 // `review/EP-<slug>/<artifact-base>` -> { epic, base } — the branch convention `gate open` creates.
 // Null for any other branch: the guard CI uses to no-op on non-review branches.
 export function parseReviewBranch(branch = '') {
-  const m = branch.match(/^review\/(EP-[^/]+)\/(.+)$/);
+  const m = branch.match(/^review\/(EP-[a-z0-9-]+)\/(.+)$/);
   return m ? { epic: m[1], base: m[2] } : null;
 }
 
@@ -52,18 +56,22 @@ export function upsertHubPr(hubPrs = [], rec) {
 
 // SHA-256 of the contract surface block (architecture only). Mirrors
 // sdlc-author-architecture/references/contract-format.md (awk markers + sha256).
+// Line endings are normalized to LF so the same surface hashes identically across
+// platforms (a CRLF re-save must not revoke approvals). A BEGIN without an END is
+// malformed and yields null — never a silent hash of everything to end-of-file.
 export function contractSurfaceHash(epicDir) {
   const file = path.join(epicDir, 'contract.md');
   if (!fs.existsSync(file)) return null;
-  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const lines = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').split('\n');
   let inside = false;
+  let terminated = true;
   const body = [];
   for (const ln of lines) {
-    if (/CONTRACT-SURFACE:BEGIN/.test(ln)) { inside = true; continue; }
-    if (/CONTRACT-SURFACE:END/.test(ln)) { inside = false; continue; }
+    if (/CONTRACT-SURFACE:BEGIN/.test(ln)) { inside = true; terminated = false; continue; }
+    if (/CONTRACT-SURFACE:END/.test(ln)) { inside = false; terminated = true; continue; }
     if (inside) body.push(ln);
   }
-  if (!body.length) return null;
+  if (!terminated || !body.length) return null;
   return 'sha256:' + createHash('sha256').update(body.join('\n')).digest('hex');
 }
 
@@ -88,15 +96,35 @@ export function artifactHash(epicDir, artifact) {
   return fileSha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
+// Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger
+// silently treated as a default would be rewritten by the next sync, destroying the real data.
+const badShape = (file, what) => new Error(`${file}: ${what} — fix the file or restore it from git`);
+function requireArray(v, file) {
+  if (!Array.isArray(v)) throw badShape(file, 'expected a JSON array');
+  return v;
+}
+function validateState(state, file) {
+  if (state === null) return null; // missing state.json = epic not seeded yet, a normal state
+  if (typeof state !== 'object' || Array.isArray(state)) throw badShape(file, 'expected a JSON object');
+  if (!Array.isArray(state.steps) || !state.steps.length) throw badShape(file, 'expected a non-empty `steps` array');
+  for (const s of state.steps) {
+    if (!s || typeof s.id !== 'string' || typeof s.type !== 'string' || typeof s.status !== 'string') {
+      throw badShape(file, 'every step needs string `id`, `type` and `status`');
+    }
+  }
+  if (typeof state.currentStep !== 'string') throw badShape(file, 'expected a string `currentStep`');
+  return state;
+}
+
 export function loadLedger(epicDir) {
   const f = epicFiles(epicDir);
   return {
     files: f,
-    state: readJSON(f.state, null),
-    approvals: readJSON(f.approvals, []),
-    comments: readJSON(f.comments, []),
-    hubPrs: readJSON(f.hubPrs, []),
-    contractLock: readJSON(f.contractLock, null),
+    state: validateState(readJSONStrict(f.state, null), f.state),
+    approvals: requireArray(readJSONStrict(f.approvals, []), f.approvals),
+    comments: requireArray(readJSONStrict(f.comments, []), f.comments),
+    hubPrs: requireArray(readJSONStrict(f.hubPrs, []), f.hubPrs),
+    contractLock: readJSONStrict(f.contractLock, null),
   };
 }
 

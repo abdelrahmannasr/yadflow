@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, readJSON, writeJSON, run,
+  c, log, ok, info, warn, hand, fail, readJSONStrict, writeJSON, run,
 } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import {
@@ -48,9 +48,34 @@ export function touchedDomains(epicDir, step) {
 
 const ownerOf = (epicDir) => frontmatter(path.join(epicDir, 'epic.md')).owner || '<owner>';
 
+// A null architecture hash with a BEGIN marker present means the surface block is malformed
+// (no END, or empty) — approvals would not be hash-bound, so make that visible.
+function warnUnlockedContract(epicDir, artifact) {
+  if (artifactBase(artifact) !== 'architecture') return;
+  if (artifactHash(epicDir, artifact) !== null) return;
+  const f = path.join(epicDir, 'contract.md');
+  if (fs.existsSync(f) && /CONTRACT-SURFACE:BEGIN/.test(fs.readFileSync(f, 'utf8'))) {
+    warn('contract.md has CONTRACT-SURFACE:BEGIN without a matching END (or an empty block) — surface not locked, approvals will not be hash-bound');
+  }
+}
+
+// Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
+// every gate to file-only without anyone noticing, and a typo'd platform would read as "no bridge".
 function loadHub(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
-  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const hubFile = path.join(root, PROJECT_FILES.hubConfig);
+  const regFile = path.join(root, PROJECT_FILES.reposRegistry);
+  const hub = readJSONStrict(hubFile, null);
+  if (hub !== null) {
+    if (typeof hub !== 'object' || Array.isArray(hub)) throw new Error(`${hubFile}: expected a JSON object`);
+    if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
+      throw new Error(`${hubFile}: unknown platform '${hub.platform}' — expected github, gitlab, or null`);
+    }
+    if (hub.roster !== undefined && !Array.isArray(hub.roster)) {
+      throw new Error(`${hubFile}: expected \`roster\` to be an array`);
+    }
+  }
+  const registry = readJSONStrict(regFile, { repos: [] });
+  if (!Array.isArray(registry?.repos)) throw new Error(`${regFile}: expected a \`repos\` array`);
   return { hub, repos: registry.repos };
 }
 
@@ -148,6 +173,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
     if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (file-only)`); continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
+    warnUnlockedContract(epicDir, pr.artifact);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains });
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
 
@@ -211,7 +237,16 @@ export async function gateCi(root, { branch, pr, today, push = true, reader = re
   } else {
     const epicsDir = path.join(root, 'epics');
     for (const e of fs.existsSync(epicsDir) ? fs.readdirSync(epicsDir).sort() : []) {
-      const ledger = loadLedger(epicRoot(root, e));
+      // Sweep mode isolates per-epic failures: one corrupt ledger must not block the other epics'
+      // syncs in an unattended CI run. The run still exits non-zero so the bad file gets fixed.
+      let ledger;
+      try {
+        ledger = loadLedger(epicRoot(root, e));
+      } catch (err) {
+        warn(`${e}: ${err.message} — skipping this epic`);
+        process.exitCode = 1;
+        continue;
+      }
       if (!ledger.state) continue;
       for (const p of ledger.hubPrs || []) {
         const step = findReviewStep(ledger.state, p.artifact);
@@ -226,7 +261,16 @@ export async function gateCi(root, { branch, pr, today, push = true, reader = re
   const touched = new Set();
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
-    const ledger = loadLedger(epicDir);
+    // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.
+    let ledger;
+    try {
+      ledger = loadLedger(epicDir);
+    } catch (err) {
+      if (branch) throw err;
+      warn(`${job.epic}: ${err.message} — skipping this epic`);
+      process.exitCode = 1;
+      continue;
+    }
     if (!ledger.state) {
       warn(`${job.epic}: no epic state on ${target} — commit epics/${job.epic}/.sdlc to ${target} first`);
       continue;
@@ -253,9 +297,15 @@ export async function gateCi(root, { branch, pr, today, push = true, reader = re
     const fetched = job.branch ? git('fetch', 'origin', job.branch).ok : false;
     if (fetched) for (const p of overlay) git('checkout', 'FETCH_HEAD', '--', p);
 
+    let failed = false;
     try {
       const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader });
       synced += r.synced;
+    } catch (err) {
+      if (branch) throw err; // event mode: one epic — surface the failure
+      warn(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
+      process.exitCode = 1;
+      failed = true;
     } finally {
       // Drop the overlay — even when sync throws: only the ledger may reach the default branch via CI.
       if (fetched) {
@@ -265,6 +315,7 @@ export async function gateCi(root, { branch, pr, today, push = true, reader = re
         }
       }
     }
+    if (failed) continue; // a failed epic's partial state must not be committed by this run
     touched.add(job.epic);
   }
   if (!touched.size) return { synced };
@@ -346,6 +397,7 @@ export async function gateOpen(root, { epic, artifact, today } = {}) {
   const b = base(artifact);
   const branch = `review/${epic}/${b}`;
   const domains = touchedDomains(epicDir, step);
+  warnUnlockedContract(epicDir, artifact);
 
   // Mark in-review in the ledger regardless of platform (file-only still works).
   ledger.state = markInReview(ledger.state, step);

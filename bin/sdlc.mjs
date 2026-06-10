@@ -5,6 +5,7 @@ import { c, log, closePrompts } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi } from '../cli/gate.mjs';
+import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { runRepo } from '../cli/repo.mjs';
@@ -99,6 +100,8 @@ async function main() {
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
       if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, push: !o.noPush, today }); break; }
       if (!epic) { log(c.red('usage: sdlc gate <open|sync|comments|status|ci> <epic> [artifact]')); process.exitCode = 1; break; }
+      // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
+      if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       if (action === 'open') await gateOpen(o.dir, { epic, artifact, today });
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });

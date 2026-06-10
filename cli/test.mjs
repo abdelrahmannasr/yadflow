@@ -85,6 +85,52 @@ test('CLI --version matches manifest', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// lib.mjs — atomic writeJSON (a killed process must never leave a truncated ledger file)
+// ---------------------------------------------------------------------------------------------
+const { writeJSON } = await import('./lib.mjs');
+
+test('writeJSON round-trips with a trailing newline and leaves no tmp file', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-write-'));
+  const f = path.join(T, 'nested/state.json');
+  writeJSON(f, { a: 1 });
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "a": 1\n}\n');
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), ['state.json'], 'no .tmp sibling left behind');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeJSON goes through a sibling tmp file + rename (atomic on the same filesystem)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-write2-'));
+  const f = path.join(T, 'state.json');
+  const calls = [];
+  const orig = fs.renameSync;
+  fs.renameSync = (from, to) => { calls.push([from, to]); return orig(from, to); };
+  try { writeJSON(f, { a: 1 }); } finally { fs.renameSync = orig; }
+  assert.equal(calls.length, 1);
+  const [from, to] = calls[0];
+  assert.equal(to, f);
+  assert.equal(path.dirname(from), path.dirname(f), 'tmp file is a sibling of the target');
+  assert.match(path.basename(from), /^state\.json\..+\.tmp$/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeJSON failure leaves a pre-existing target intact and cleans up the tmp file', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-write3-'));
+  const f = path.join(T, 'state.json');
+  writeJSON(f, { good: true });
+  // serialization failure: nothing touches disk at all
+  const circular = {}; circular.self = circular;
+  assert.throws(() => writeJSON(f, circular), /circular/i);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "good": true\n}\n', 'target untouched');
+  // rename failure: tmp file is removed, target untouched
+  const orig = fs.renameSync;
+  fs.renameSync = () => { throw new Error('EPERM: simulated'); };
+  try { assert.throws(() => writeJSON(f, { bad: true }), /simulated/); } finally { fs.renameSync = orig; }
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "good": true\n}\n', 'target untouched after rename failure');
+  assert.deepEqual(fs.readdirSync(T), ['state.json'], 'tmp cleaned up');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // `sdlc commit` — message builder + branch-derived task
 // ---------------------------------------------------------------------------------------------
 const { buildCommitMessage, taskFromBranch } = await import('./commit.mjs');
@@ -312,6 +358,82 @@ test('artifactHash(stories/) changes on a story edit, so a stories-review approv
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------------------------------------------------
+// contractSurfaceHash — line-ending independence + malformed-block rejection
+// ---------------------------------------------------------------------------------------------
+test('contractSurfaceHash: CRLF and LF files with the same surface hash identically', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-crlf-'));
+  const lf = path.join(T, 'lf'); const crlf = path.join(T, 'crlf');
+  fs.mkdirSync(lf); fs.mkdirSync(crlf);
+  const content = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nGET /y\n<!-- CONTRACT-SURFACE:END -->\n';
+  fs.writeFileSync(path.join(lf, 'contract.md'), content);
+  fs.writeFileSync(path.join(crlf, 'contract.md'), content.replace(/\n/g, '\r\n'));
+  const h = surfHash(lf);
+  assert.ok(h?.startsWith('sha256:'));
+  assert.equal(surfHash(crlf), h, 'a CRLF re-save must not change the hash (no false revocations)');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contractSurfaceHash: BEGIN without END is malformed — null, never a hash to end-of-file', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-noend-'));
+  fs.writeFileSync(path.join(T, 'contract.md'),
+    '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n\n# Everything after, accidentally included before\n');
+  assert.equal(surfHash(T), null);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Ledger fail-fast — a corrupt or wrong-shape ledger file must abort, never default-and-rewrite
+// ---------------------------------------------------------------------------------------------
+const { loadLedger } = await import('./epic-state.mjs');
+
+test('a corrupt approvals.json aborts the sync with the file named — and is never rewritten', async () => {
+  const { T, ep } = scaffoldEpic();
+  const f = path.join(ep, '.sdlc/approvals.json');
+  fs.writeFileSync(f, '[{"step": "architecture-rev'); // truncated mid-write
+  await assert.rejects(
+    gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }),
+    /corrupt JSON in .*approvals\.json.*fix or delete/,
+  );
+  assert.equal(fs.readFileSync(f, 'utf8'), '[{"step": "architecture-rev', 'corrupt file left for recovery');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a wrong-shape state.json fails with the file named', () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ steps: 'oops' }));
+  assert.throws(() => loadLedger(ep), /state\.json: expected a non-empty `steps` array/);
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify([1, 2]));
+  assert.throws(() => loadLedger(ep), /state\.json: expected a JSON object/);
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    currentStep: 'x', steps: [{ id: 'x', type: 'author', status: 'done' }],
+  }));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify({ not: 'an array' }));
+  assert.throws(() => loadLedger(ep), /approvals\.json: expected a JSON array/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('an unknown hub platform fails fast instead of degrading to file-only', async () => {
+  const { T } = scaffoldEpic();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'bitbucket', roster: [] }));
+  await assert.rejects(
+    gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }),
+    /hub\.json: unknown platform 'bitbucket'/,
+  );
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('missing ledger files still default silently (a fresh epic is a normal state)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fresh-'));
+  const ledger = loadLedger(path.join(T, 'epics/EP-x'));
+  assert.equal(ledger.state, null);
+  assert.deepEqual(ledger.approvals, []);
+  assert.deepEqual(ledger.hubPrs, []);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate open without an artifact fails cleanly (no throw)', async () => {
   const { T } = scaffoldEpic();
   const prev = process.exitCode;
@@ -360,6 +482,76 @@ test('repo refresh rejects an unknown repo name', async () => {
   const r = await runRepo(T, { action: 'refresh', name: 'ghost' });
   assert.equal(r.refreshed, 0);
   process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// `sdlc setup` — registerRepo: only real git repos may enter the registry
+// ---------------------------------------------------------------------------------------------
+const { registerRepo } = await import('./setup.mjs');
+
+test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
+  const registry = { repos: [] };
+  assert.equal(registerRepo(T, registry, { name: 'ghost', rpath: 'nope/ghost' }), null);
+  fs.mkdirSync(path.join(T, 'plain'));
+  assert.equal(registerRepo(T, registry, { name: 'plain', rpath: 'plain' }), null);
+  assert.equal(registry.repos.length, 0);
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/repos.json')), 'no registry written for rejected repos');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerRepo rejects paths that resolve outside the project root', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-outside-'));
+  git(outside, 'init', '-q'); // a real git repo — still rejected, because it is outside
+  const registry = { repos: [] };
+  assert.equal(registerRepo(T, registry, { name: 'esc', rpath: '../' + path.basename(outside) }), null);
+  assert.equal(registerRepo(T, registry, { name: 'abs', rpath: outside }), null);
+  assert.equal(registry.repos.length, 0);
+  // the prefix trap: a sibling dir sharing the root's name prefix must not pass containment
+  const evil = `${T}-evil`;
+  fs.mkdirSync(evil);
+  git(evil, 'init', '-q');
+  assert.equal(registerRepo(T, registry, { name: 'evil', rpath: evil }), null);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(outside, { recursive: true, force: true });
+  fs.rmSync(evil, { recursive: true, force: true });
+});
+
+test('gate commands reject an invalid epic id before touching the filesystem', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-epicid-'));
+  for (const bad of ['../../etc', 'EP-Bad_Slug!', 'EP-../escape']) {
+    let code = 0, out = '';
+    try {
+      execFileSync('node', [path.join(ROOT, 'bin/sdlc.mjs'), 'gate', 'status', bad, '--dir', T], { stdio: 'pipe' });
+    } catch (e) {
+      code = e.status;
+      out = (e.stdout || '').toString() + (e.stderr || '').toString();
+    }
+    assert.equal(code, 1, `${bad} must be rejected`);
+    assert.match(out, /invalid epic id/);
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerRepo records a real repo; an unknown platform answer falls back to the detected one', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg2-'));
+  const real = path.join(T, 'real');
+  fs.mkdirSync(real);
+  git(real, 'init', '-q');
+  fs.writeFileSync(path.join(real, 'a.txt'), '1');
+  git(real, 'add', '-A');
+  git(real, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'init');
+  const head = git(real, 'rev-parse', 'HEAD').toString().trim();
+  const registry = { repos: [] };
+  const repo = registerRepo(T, registry, { name: 'real', rpath: 'real', platform: 'bitbucket', today: '2026-06-10' });
+  assert.ok(repo);
+  assert.equal(repo.platform, 'github', 'unknown platform falls back (no remote => github)');
+  assert.equal(repo.syncedHead, head);
+  assert.equal(repo.git_url, null, 'no origin remote recorded as null, not ""');
+  const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json')));
+  assert.equal(reg.repos.length, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -454,6 +646,9 @@ test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else',
   assert.equal(parseReviewBranch('feature/foo'), null);
   assert.equal(parseReviewBranch('review/notanepic'), null);
   assert.equal(parseReviewBranch('review/notanepic/epic'), null);
+  // the epic segment becomes a path under epics/ — only EP-[a-z0-9-]+ may pass
+  assert.equal(parseReviewBranch('review/EP-../epic'), null);
+  assert.equal(parseReviewBranch('review/EP-Bad_Slug/epic'), null);
 });
 
 test('artifactFromBase reverses artifactBase (single story maps to the stories/ set)', () => {
@@ -621,6 +816,30 @@ test('gate ci sweep: syncs every open review PR, one commit, holds the unapprove
   assert.equal(s2.steps.find((s) => s.id === 'epic-review').status, 'in_review', 'unapproved gate held');
   assert.equal(Number(git(T, 'rev-list', '--count', 'HEAD').toString().trim()), 2, 'one sweep commit');
   assert.match(git(T, 'log', '-1', '--format=%B').toString(), /scheduled gate sync \[skip ci\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci sweep: one corrupt epic is skipped (exit 1) while the rest still sync', async () => {
+  const { T, ep } = scaffoldEpic();
+  // a second epic with a truncated state.json — must not block EP-test's sync
+  const ep2 = path.join(T, 'epics/EP-two');
+  fs.mkdirSync(path.join(ep2, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep2, '.sdlc/state.json'), '{"currentStep": "epic-rev');
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.name', 'x');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+
+  const prev = process.exitCode;
+  await gateCi(T, { today: '2026-06-09', push: false, reader: () => fullApproval });
+  assert.equal(process.exitCode, 1, 'the corrupt epic surfaces as a failed run');
+  process.exitCode = prev;
+
+  const s1 = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(s1.currentStep, 'ui-design', 'the healthy epic still synced and advanced');
+  assert.equal(fs.readFileSync(path.join(ep2, '.sdlc/state.json'), 'utf8'),
+    '{"currentStep": "epic-rev', 'the corrupt file is left for recovery, never rewritten');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

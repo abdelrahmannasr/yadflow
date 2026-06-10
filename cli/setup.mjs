@@ -17,6 +17,47 @@ export function detectPlatform(remoteUrl = '') {
 }
 export const gitHead = (cwd) => run('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
 
+// Containment: every repo path must live inside the project root — the registry path is later
+// joined and executed against (repomix cwd, CI wiring), and even the read-only remote probe must
+// not run against an arbitrary outside path. The path.sep-suffixed compare avoids the
+// /proj vs /proj-evil prefix trap.
+export function insideRoot(root, rpath) {
+  const projectRoot = path.resolve(root);
+  const resolved = path.resolve(projectRoot, rpath);
+  return resolved === projectRoot || resolved.startsWith(projectRoot + path.sep);
+}
+
+// Validate + record one code repo into the registry (the testable half of the connect loop).
+// A path that is not a git repository is rejected and NOTHING is written — a registry entry with
+// syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
+export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', default_branch = 'main', today = null }) {
+  if (!insideRoot(root, rpath)) {
+    warn(`${rpath} resolves outside the project root — skipped`);
+    return null;
+  }
+  const repoRoot = path.resolve(root, rpath);
+  const head = gitHead(repoRoot);
+  if (head === null) { warn(`${rpath} is not a git repository (or has no commits) — skipped`); return null; }
+  const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot });
+  let plat = (platform || '').toLowerCase();
+  if (!['github', 'gitlab'].includes(plat)) {
+    const detected = detectPlatform(remote.ok ? remote.stdout : '') || 'github';
+    if (plat) warn(`unknown platform '${platform}' — using ${detected}`);
+    plat = detected;
+  }
+  const repo = {
+    name, path: rpath, git_url: (remote.ok && remote.stdout) || null, platform: plat, domain_owner, default_branch,
+    connectedAt: today, lastSyncedAt: today,
+    syncedHead: head,
+    contextPack: `.sdlc/code-context/${name}/pack.md`,
+    codeMap: `.sdlc/code-context/${name}/code-map.md`,
+    source: 'repomix',
+  };
+  registry.repos.push(repo);
+  writeJSON(path.join(root, PROJECT_FILES.reposRegistry), registry);
+  return repo;
+}
+
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
@@ -63,9 +104,14 @@ export async function runSetup(root, opts = {}) {
   if (exists(hubPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
     info('keeping existing .sdlc/hub.json');
   } else {
-    const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout;
-    let platform = detectPlatform(remote);
+    const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
+    if (!remote.ok && exists(path.join(root, '.git'))) info('no origin remote — platform detection skipped');
+    let platform = detectPlatform(remote.ok ? remote.stdout : '');
     platform = (await ask('Hub platform (github/gitlab/none)', platform || 'none')).toLowerCase();
+    if (!['github', 'gitlab', 'none'].includes(platform)) {
+      warn(`unknown platform '${platform}' — using none (file-only gate)`);
+      platform = 'none';
+    }
     const roster = [];
     if (await askYesNo('Add reviewers to the roster now?', true)) {
       for (;;) {
@@ -96,22 +142,14 @@ export async function runSetup(root, opts = {}) {
       if (!name) break;
       if (known.has(name)) { warn(`${name} already registered — skipping`); continue; }
       const rpath = await ask('    path (relative to project root)', `demo-repos/${name}`);
-      const repoRoot = path.resolve(root, rpath);
-      const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
-      const platform = (await ask('    platform (github/gitlab)', detectPlatform(remote) || 'github')).toLowerCase();
+      if (!insideRoot(root, rpath)) { warn(`${rpath} resolves outside the project root — skipped`); continue; }
+      const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
+      const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();
       const domain_owner = await ask('    domain owner', '');
       const default_branch = await ask('    default branch', 'main');
-      const repo = {
-        name, path: rpath, git_url: remote || null, platform, domain_owner, default_branch,
-        connectedAt: opts.today ?? null, lastSyncedAt: opts.today ?? null,
-        syncedHead: gitHead(repoRoot),
-        contextPack: `.sdlc/code-context/${name}/pack.md`,
-        codeMap: `.sdlc/code-context/${name}/code-map.md`,
-        source: 'repomix',
-      };
-      registry.repos.push(repo);
+      const repo = registerRepo(root, registry, { name, rpath, platform, domain_owner, default_branch, today: opts.today ?? null });
+      if (!repo) continue;
       known.add(name);
-      writeJSON(regPath, registry);
       ok(`registered ${name}`);
       packRepo(root, repo);
     }

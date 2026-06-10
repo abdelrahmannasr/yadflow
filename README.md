@@ -160,6 +160,11 @@ triggers `sdlc gate ci` in the hub's own CI: the ledger updates land directly on
 — no manual `sdlc gate sync` needed (it stays valid as the fallback). CI never approves and never merges;
 the human keeps the merge click. GitLab caveat: approvals are only picked up by the ~15-min scheduled
 sweep (GitLab fires no pipeline on approval) — details in `skills/sdlc-hub-bridge/references/bridge.md`.
+Concurrency caveat: on GitHub the workflow's `concurrency` group serializes runs repo-wide and every
+sync re-reads the full platform state, so racing reviewer events lose nothing. Outside that group —
+a manual `sdlc gate sync` racing CI, or GitLab pipelines — two simultaneous syncs serialize their
+*commits* via the rebase retry but each works from the state it read at start, so the rarer of two
+simultaneous advancements can be lost; the next event or scheduled sweep re-syncs and converges.
 
 ### What `setup` walks you through (7 steps)
 
