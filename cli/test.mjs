@@ -85,6 +85,52 @@ test('CLI --version matches manifest', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// lib.mjs — atomic writeJSON (a killed process must never leave a truncated ledger file)
+// ---------------------------------------------------------------------------------------------
+const { writeJSON } = await import('./lib.mjs');
+
+test('writeJSON round-trips with a trailing newline and leaves no tmp file', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-write-'));
+  const f = path.join(T, 'nested/state.json');
+  writeJSON(f, { a: 1 });
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "a": 1\n}\n');
+  assert.deepEqual(fs.readdirSync(path.dirname(f)), ['state.json'], 'no .tmp sibling left behind');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeJSON goes through a sibling tmp file + rename (atomic on the same filesystem)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-write2-'));
+  const f = path.join(T, 'state.json');
+  const calls = [];
+  const orig = fs.renameSync;
+  fs.renameSync = (from, to) => { calls.push([from, to]); return orig(from, to); };
+  try { writeJSON(f, { a: 1 }); } finally { fs.renameSync = orig; }
+  assert.equal(calls.length, 1);
+  const [from, to] = calls[0];
+  assert.equal(to, f);
+  assert.equal(path.dirname(from), path.dirname(f), 'tmp file is a sibling of the target');
+  assert.match(path.basename(from), /^state\.json\..+\.tmp$/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeJSON failure leaves a pre-existing target intact and cleans up the tmp file', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-write3-'));
+  const f = path.join(T, 'state.json');
+  writeJSON(f, { good: true });
+  // serialization failure: nothing touches disk at all
+  const circular = {}; circular.self = circular;
+  assert.throws(() => writeJSON(f, circular), /circular/i);
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "good": true\n}\n', 'target untouched');
+  // rename failure: tmp file is removed, target untouched
+  const orig = fs.renameSync;
+  fs.renameSync = () => { throw new Error('EPERM: simulated'); };
+  try { assert.throws(() => writeJSON(f, { bad: true }), /simulated/); } finally { fs.renameSync = orig; }
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "good": true\n}\n', 'target untouched after rename failure');
+  assert.deepEqual(fs.readdirSync(T), ['state.json'], 'tmp cleaned up');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // `sdlc commit` — message builder + branch-derived task
 // ---------------------------------------------------------------------------------------------
 const { buildCommitMessage, taskFromBranch } = await import('./commit.mjs');

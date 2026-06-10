@@ -100,9 +100,20 @@ export function readJSON(p, def = null) {
     return def;
   }
 }
+// Atomic: serialize first, write a sibling tmp file (same dir = same filesystem),
+// then rename over the target. A killed process can never leave a truncated ledger
+// file, and a failed rename never leaves a stray .tmp for `git add -A` to pick up.
 export function writeJSON(p, obj) {
+  const data = JSON.stringify(obj, null, 2) + '\n';
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(obj, null, 2) + '\n');
+  const tmp = `${p}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, data);
+  try {
+    fs.renameSync(tmp, p);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
 }
 
 // ---- subprocess ---------------------------------------------------------
