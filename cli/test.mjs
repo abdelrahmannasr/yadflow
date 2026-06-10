@@ -617,3 +617,22 @@ test('gate ci sweep: syncs every open review PR, one commit, holds the unapprove
   assert.match(git(T, 'log', '-1', '--format=%B').toString(), /scheduled gate sync \[skip ci\]/);
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('check --fix wires the hub gate-sync CI only when the bridge is enabled', async () => {
+  const { T } = scaffold();
+  // no hub.json -> no hub action
+  await reconcile(T, { fix: true });
+  assert.ok(!fs.existsSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml')), 'no hub.json => not wired');
+  // hub on github with the bridge -> wired + idempotent
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(fs.existsSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml')), 'hub workflow installed');
+  const again = await reconcile(T, { fix: false });
+  assert.equal(again.counts.missing, 0);
+  assert.equal(again.counts.outdated, 0);
+  // bridge disabled (either spelling) -> no action
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge: false, roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'disabled bridge => not wired');
+  fs.rmSync(T, { recursive: true, force: true });
+});

@@ -6,7 +6,7 @@ import {
   exists, asset, copyFile, readJSON, writeJSON,
 } from './lib.mjs';
 import { VERSION, IDE_FOLDER_TARGETS, IDE_OPENCODE_DIR, PROJECT_FILES } from './manifest.mjs';
-import { moduleActions, repoActions } from './plan.mjs';
+import { moduleActions, repoActions, hubActions } from './plan.mjs';
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
 
@@ -112,12 +112,18 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 5. Wire each connected repo
+  // 5. Wire each connected repo + the hub itself
   step(5, total, 'Wire connected repos (CI gates, PR template, comment scaffold)');
   if (registry.repos.length === 0) info('no repos to wire');
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
     applyActions(repoActions(root, repo), { force: true });
+  }
+  // the hub: event-driven gate-sync CI, so platform approvals/merges drive `sdlc gate ci`
+  const hubWiring = hubActions(root);
+  if (hubWiring.length) {
+    log(`  ${c.bold('hub')} ${c.dim('(gate-sync CI)')}`);
+    applyActions(hubWiring, { force: true });
   }
 
   // 6. Optional CodeRabbit
