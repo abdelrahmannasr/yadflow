@@ -6,7 +6,7 @@ import {
   c, log, ok, info, warn, hand, fail, readJSON, writeJSON, exists,
 } from './lib.mjs';
 import { VERSION, PROJECT_FILES } from './manifest.mjs';
-import { moduleActions, repoActions } from './plan.mjs';
+import { moduleActions, repoActions, hubActions } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 
 const MARK = { missing: c.red('missing'), outdated: c.yellow('outdated'), stale: c.yellow('stale'), ok: c.green('ok') };
@@ -22,8 +22,8 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
 
-  // --- deterministic file actions (module + every registered repo) ---
-  const actions = [...moduleActions(root)];
+  // --- deterministic file actions (module + hub CI + every registered repo) ---
+  const actions = [...moduleActions(root), ...hubActions(root)];
   for (const repo of registry.repos) actions.push(...repoActions(root, repo));
 
   // --- stale code-context (HEAD moved since last pack) ---

@@ -21,6 +21,35 @@ export function artifactBase(artifact) {
   return path.basename(a).replace(/\.md$/, '');
 }
 
+// `review/EP-<slug>/<artifact-base>` -> { epic, base } — the branch convention `gate open` creates.
+// Null for any other branch: the guard CI uses to no-op on non-review branches.
+export function parseReviewBranch(branch = '') {
+  const m = branch.match(/^review\/(EP-[^/]+)\/(.+)$/);
+  return m ? { epic: m[1], base: m[2] } : null;
+}
+
+// The reverse of artifactBase: an artifact-base back to the ledger's artifact path. A single-story
+// base (stories-S01) still maps to stories/ — the stories gate is ONE step over the whole set
+// (storiesHash fingerprints the directory), so any story branch syncs the same review step.
+export function artifactFromBase(base) {
+  if (base === 'stories' || /^stories-S\d+$/i.test(base)) return 'stories/';
+  return `${base}.md`;
+}
+
+// The files (relative to the epic dir) a review of this artifact covers — what `gate open` commits
+// on the review branch, and what the CI overlay checks out from the head ref (and never commits).
+// Architecture mirrors artifactHash(): the approval is bound to the locked contract surface too.
+export function artifactPaths(base) {
+  if (base === 'architecture') return ['architecture.md', 'contract.md', '.sdlc/contract-lock.json'];
+  if (base === 'stories') return ['stories'];
+  return [`${base}.md`];
+}
+
+// Replace-not-append upsert into hub-prs.json, keyed by artifact (one live review PR per artifact).
+export function upsertHubPr(hubPrs = [], rec) {
+  return [...hubPrs.filter((p) => p.artifact !== rec.artifact), rec];
+}
+
 // SHA-256 of the contract surface block (architecture only). Mirrors
 // sdlc-author-architecture/references/contract-format.md (awk markers + sha256).
 export function contractSurfaceHash(epicDir) {

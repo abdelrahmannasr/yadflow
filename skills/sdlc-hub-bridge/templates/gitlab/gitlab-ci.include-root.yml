@@ -1,0 +1,7 @@
+# SDLC gate sync — minimal root pipeline for the PRODUCT HUB.
+# Written by the sdlc-hub-bridge `wire` action ONLY when the hub has no existing root
+# `.gitlab-ci.yml`. The job itself lives in the included fragment so the same single source is
+# reused whether or not a root pipeline already exists. If a root later grows real jobs, they
+# coexist with the included sdlc-* job (which carries `needs: []` and no `stage:`).
+include:
+  - local: '.gitlab/ci/sdlc-gate-sync.yml'

@@ -172,6 +172,12 @@ Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rul
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and
 unblocks the next step. (Until those three hold, the step stays `in_review`.)
 
+`sync` can also be **event-driven**: when the hub is wired with the gate-sync CI (`sdlc-hub-bridge`
+`wire` action), every approval / change request / dismissal / merge on the review PR/MR triggers
+`sdlc gate ci` on the hub, which runs the same sync and commits the ledger updates directly to the
+hub's default branch (pull to see them locally). The predicate, the human merge, and manual
+`sdlc gate sync` are all unchanged — CI never approves and never merges.
+
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A front step advances only when a human merges the
   approved, fully-resolved review PR — there is no machine-driven advance. A step `locked: true` may not

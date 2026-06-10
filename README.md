@@ -132,6 +132,7 @@ with `npx` from your **product hub** repo — no clone needed.
 | `sdlc gate sync <epic> [artifact]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. |
 | `sdlc gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
 | `sdlc gate status <epic>` | Show each review step and its recorded approvals. |
+| `sdlc gate ci [--branch <head>] [--pr <n>]` | The CI entry the hub workflow calls on review/merge events: derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the hub default branch (sweep every open review PR when no `--branch`). |
 | `sdlc commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
 | `sdlc open-pr [--repo <name>]` | Open a code-repo **task** PR/MR from the repo's platform template (build half). |
 | `sdlc repo list` / `sdlc repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
@@ -152,6 +153,13 @@ per touched repo on escalated steps), every comment thread is resolved, and the 
 The merge click is the human approval act, so front steps still never `machine_advance`. Approvals are
 **revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. With no
 hub platform / no `gh`/`glab`, the gate degrades to file-only with no error.
+
+**Event-driven sync.** Wire the hub once (`sdlc check --fix` installs `.github/workflows/sdlc-gate-sync.yml`,
+or the GitLab fragment + schedule) and every **approval, change request, and merge** on a review PR/MR
+triggers `sdlc gate ci` in the hub's own CI: the ledger updates land directly on the hub's default branch
+— no manual `sdlc gate sync` needed (it stays valid as the fallback). CI never approves and never merges;
+the human keeps the merge click. GitLab caveat: approvals are only picked up by the ~15-min scheduled
+sweep (GitLab fires no pipeline on approval) — details in `skills/sdlc-hub-bridge/references/bridge.md`.
 
 ### What `setup` walks you through (7 steps)
 

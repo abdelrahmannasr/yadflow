@@ -1,0 +1,64 @@
+# sdlc-managed-include: sdlc-hub-bridge
+# Event-driven gate sync for the PRODUCT HUB, as an INCLUDABLE fragment. Pulled into the hub's
+# root .gitlab-ci.yml via:
+#   include:
+#     - local: '.gitlab/ci/sdlc-gate-sync.yml'
+# so wiring never edits the foreign root pipeline beyond that one include line. The job carries
+# `needs: []` and no `stage:` (same merge-safety as the sdlc-checks fragment).
+#
+# What it does: run `sdlc gate ci`, which maps MR approvals / change-request discussions / the
+# merge into the file ledger (epics/<epic>/.sdlc/*.json + reviews/*.md) and commits ONLY those
+# ledger files to the default branch. It never approves and never merges — the merge click remains
+# the human approval act.
+#
+# GitLab is the DEGRADED path, stated honestly: GitLab fires no pipeline on an approval alone.
+#   - MR events (open / push to the review branch) and the merge are picked up near-immediately.
+#   - Approvals are only seen by the SCHEDULED sweep. Create a pipeline schedule (one-time, cannot
+#     be committed as code): cron `*/15 * * * *` with variable SDLC_GATE_SYNC=true — so an approval
+#     can take up to ~15 minutes to reach the ledger. UI: CI/CD > Schedules, or:
+#       glab api projects/:id/pipeline_schedules -X POST \
+#         -f description='sdlc gate sync' -f ref=main -f cron='*/15 * * * *'
+#       glab api "projects/:id/pipeline_schedules/<id>/variables" -X POST \
+#         -f key=SDLC_GATE_SYNC -f value=true
+#
+# Token (the one documented bend of the bridge's no-stored-tokens rule): CI_JOB_TOKEN can neither
+# read the approvals API nor push to a protected branch. Create a PROJECT ACCESS TOKEN with
+# `read_api` + `write_repository` (role Developer+, allowed to push to the default branch) and
+# store it as a masked CI/CD variable SDLC_GATE_TOKEN. Without it the job fails visibly and
+# manual `sdlc gate sync` remains the fallback.
+variables:
+  GIT_DEPTH: "0" # full history: gate ci fetches the review branch and pushes the ledger
+
+sdlc-gate-sync:
+  needs: []
+  image: node:20
+  rules:
+    # MR-event path: fires on MR open / push to the review branch — NOT on approval (see header).
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^review\/EP-/
+    # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
+    # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\/EP-/
+    # Scheduled sweep: the only path that picks up approvals.
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"
+  script:
+    # Pinned glab binary (node:20 has no glab). Alternative: image registry.gitlab.com/gitlab-org/cli.
+    - GLAB_VERSION=1.55.0
+    - curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.deb" -o /tmp/glab.deb && dpkg -i /tmp/glab.deb
+    # The ledger lives on the default branch; gate ci overlays the artifact from the review branch itself.
+    - git fetch origin "$CI_DEFAULT_BRANCH"
+    - git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+    - git config user.name "sdlc-gate-sync" && git config user.email "sdlc-gate-sync@noreply.${CI_SERVER_HOST}"
+    - git remote set-url origin "https://oauth2:${SDLC_GATE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - export GITLAB_TOKEN="$SDLC_GATE_TOKEN" GITLAB_HOST="$CI_SERVER_URL"
+    - |
+      # Merge pushes have no CI_MERGE_REQUEST_IID — derive the just-merged review branch from the
+      # merge commit message so the merge advances in event mode; the scheduled sweep stays the
+      # catch-all (squash/FF merges whose message omits the branch land there).
+      REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE 'review/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
+      if [ -n "$CI_MERGE_REQUEST_IID" ]; then
+        npx -y -p @abdelrahmannasr/sdlc-workflow@1 sdlc gate ci --branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --pr "$CI_MERGE_REQUEST_IID"
+      elif [ -n "$REVIEW_BRANCH" ]; then
+        npx -y -p @abdelrahmannasr/sdlc-workflow@1 sdlc gate ci --branch "$REVIEW_BRANCH"
+      else
+        npx -y -p @abdelrahmannasr/sdlc-workflow@1 sdlc gate ci
+      fi

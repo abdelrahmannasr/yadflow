@@ -78,3 +78,59 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
   stamped hash ≠ the current hash is **dropped** — the reviewer must re-approve the changed artifact. A
   genuinely newer review (later `submittedAt`) re-stamps against the new hash. This is "revoke only when
   the artifact changed", not "revoke on any PR commit".
+
+## Event-driven sync (hub CI)
+
+The `wire` action (SKILL.md Step 4) installs a CI workflow on the hub so the platform events drive
+`sdlc gate ci` instead of waiting on a manual `sdlc gate sync`. The CLI entry is self-sufficient: it
+derives the epic + artifact from the `review/EP-<slug>/<artifact-base>` head branch and takes the PR/MR
+number from the event payload — it even upserts the `hub-prs.json` entry when the author never committed
+it, so the first CI commit converges the views. `sdlc gate ci` with no `--branch` sweeps every open
+review PR (the scheduled path).
+
+| Platform event | CI action |
+|---|---|
+| review submitted (approve / changes requested) or dismissed | `gate ci --branch <head> --pr <n>` → sync the ledger; the predicate may hold or pass |
+| PR/MR `synchronize` (new commits on the review branch) | same — promptly re-stamps/revokes approvals on artifact change |
+| PR/MR closed **and merged** (the human act) | same — predicate sees `merged: true` and advances the step |
+| GitLab schedule (`*/15 * * * *`, `SDLC_GATE_SYNC=true`) | `gate ci` sweep — the **only** GitLab path that sees a bare approval (≤ ~15 min latency) |
+
+**The overlay.** Pre-merge, the artifact under review exists only on the review branch, while the
+ledger lives on the default branch. `gate ci` checks out the default branch, fetches the head ref and
+overlays just the artifact paths (for architecture: `architecture.md` + `contract.md` +
+`.sdlc/contract-lock.json`; for stories: `stories/`) so `artifactHash` binds each approval to **what the
+reviewers actually approved** — then drops the overlay before committing. Only
+`epics/<epic>/.sdlc/*.json` + `reviews/*.md` are committed (message `chore(gate): … [skip ci]`); the
+artifact reaches the default branch exclusively via the human merge.
+
+**Loop prevention & races.** The GitHub triggers (`pull_request_review`, `pull_request`) cannot fire on
+a push to the default branch, `[skip ci]` guards every other workflow on both platforms, and a
+repo-wide concurrency group serializes runs; the ledger push retries with a rebase (ledger-only commits
+across epics touch disjoint files).
+
+**Tokens.**
+- GitHub: the ephemeral `github.token` with `contents: write` + `pull-requests: read` — nothing stored.
+- GitLab: a masked `SDLC_GATE_TOKEN` project access token (`read_api` + `write_repository`) — the one
+  documented bend of the no-stored-tokens rule; `CI_JOB_TOKEN` can neither read the approvals API nor
+  push.
+- Protected default branch (GitHub): prefer a ruleset bypass for Actions; else a fine-grained PAT as
+  `SDLC_GATE_TOKEN` passed to `actions/checkout`; else leave it — the run fails **visibly** and manual
+  `sdlc gate sync` remains the fallback. Never wire branch protection that couples the merge itself to
+  the gate.
+
+**Manual sync stays first-class.** `sdlc gate sync <epic> [artifact]` is unchanged and always valid —
+the CI is the same sync on a trigger, and the file ledger is still the source of truth.
+
+### Manual end-to-end verification (GitHub)
+
+1. On a scratch hub: `sdlc setup` (platform github, roster with a second account) → `sdlc check --fix`
+   installs `.github/workflows/sdlc-gate-sync.yml`; commit + push it.
+2. Author an epic → `sdlc gate open EP-x epic.md` → the review PR opens.
+3. Second account **approves** → the Actions run commits `approvals.json` to the default branch.
+4. Second account **requests changes** → the run records the blocking comment; `sdlc gate status EP-x`
+   (after `git pull`) shows the gate held.
+5. Resolve the thread, approve again, a human **merges** → the closed-event run advances `state.json`
+   (`epic-review: done`, `currentStep: architecture`).
+6. `git pull` locally — `sdlc gate status EP-x` matches the platform history.
+
+GitLab variant: same flow on an MR; a bare approval appears after the next schedule tick.

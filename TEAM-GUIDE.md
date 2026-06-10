@@ -192,12 +192,19 @@ sdlc-connect-repos action: roster login:<gh-login> name:<sdlc-name> role:<owner|
 sdlc-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
 sdlc-review-comments repo:hub action: wire                         # hub's review-comment scaffold
 sdlc-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
+sdlc-hub-bridge      action: wire                                  # event-driven gate sync (CI runs `sdlc gate ci` on approve/request-changes/merge)
 ```
 
 The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
 derived from each repo's `domain_owner` in `repos.json` (not retyped). With the hub on a platform, the
 front-half gate opens a review PR per artifact and `sdlc-review-gate action: sync` pulls approvals/
 comments back. No platform (or `bridge_enabled: false`)? The gate just runs file-only — skip d2.
+
+With the gate-sync CI wired, you usually don't run `sync` at all: every approval, change request, and
+merge on a review PR triggers it in the hub's CI, and the ledger update is committed straight to the
+hub's default branch (`git pull` to see it). CI never approves or merges — the merge click stays human.
+GitLab caveat: a bare approval is only picked up by the ~15-min scheduled sweep (one-time schedule +
+`SDLC_GATE_TOKEN`; recipe in the skill).
 
 **e. Connect your code repos to the hub (so the brain knows what's already built).** From inside the
 hub, run once per code repo — and again any time you add a new one:
@@ -288,6 +295,9 @@ flowchart LR
   the hub PR and you run `action: sync` to pull that platform state into the ledger.
 - `action: advance` — moves forward **only if** the rule is met; otherwise it tells you who's still missing.
   (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
+- With the hub's gate-sync CI wired (step 3d2), `sync` runs **automatically** on every platform
+  approval / change request / merge and commits the ledger to the hub's default branch — the same
+  predicate, just triggered by the event instead of a human command.
 
 ---
 

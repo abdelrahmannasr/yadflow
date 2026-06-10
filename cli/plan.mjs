@@ -6,7 +6,7 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON,
 } from './lib.mjs';
 import {
-  SKILLS, IDE_FOLDER_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, PROJECT_FILES,
+  SKILLS, IDE_FOLDER_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
 } from './manifest.mjs';
 
 // status: 'ok' | 'missing' | 'outdated'
@@ -69,5 +69,17 @@ export function repoActions(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
   return wiringFor(repo.platform).map((w) =>
     fileAction(repo.name, w.dest, asset(w.src), path.join(repoRoot, w.dest), { exec: !!w.exec }),
+  );
+}
+
+// Hub wiring (event-driven gate-sync CI on the product hub itself). Only when the hub has a
+// platform and the bridge is explicitly enabled — a file-only hub stays file-only, with no error.
+export function hubActions(root) {
+  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  // `bridge_enabled` is the canonical flag (the documented hub-config schema); older setup versions
+  // wrote `bridge` — accept an explicit true in either spelling, wire nothing otherwise.
+  if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
+  return (HUB_WIRING[hub.platform] || []).map((w) =>
+    fileAction('hub', w.dest, asset(w.src), path.join(root, w.dest)),
   );
 }

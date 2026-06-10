@@ -4,7 +4,7 @@ import { VERSION } from '../cli/manifest.mjs';
 import { c, log, closePrompts } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
-import { gateOpen, gateSync, gateComments, gateStatus } from '../cli/gate.mjs';
+import { gateOpen, gateSync, gateComments, gateStatus, gateCi } from '../cli/gate.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { runRepo } from '../cli/repo.mjs';
@@ -22,6 +22,9 @@ ${c.bold('Review gate (front half)')}
   sdlc gate sync <epic> [artifact]      Pull PR state -> ledger; advance on approved+resolved+merged
   sdlc gate comments <epic> [artifact]  Fetch unresolved review comments to address
   sdlc gate status <epic>               Show each review step + approvals
+  sdlc gate ci [--branch <head>] [--pr <n>]
+                        CI entry (hub workflow): derive epic/artifact from the review branch,
+                        sync, commit the ledger to the default branch (sweep all PRs if no --branch)
 
 ${c.bold('Build helpers')}
   sdlc commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
@@ -40,10 +43,13 @@ ${c.bold('Options')}
   --repo <name>         open-pr: target a registered repo by name
   --dry-run             commit: print the message, do not commit
   --force               commit: bypass the atomic-file guard / re-copy unchanged files
+  --branch <head>       gate ci: the review PR/MR head branch (review/EP-<slug>/<artifact>)
+  --pr <n>              gate ci: the PR/MR number from the CI event
+  --no-push             gate ci: commit the ledger but do not push
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -52,6 +58,7 @@ function parseArgs(argv) {
     if (a === '--fix') o.fix = true;
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
+    else if (a === '--no-push') o.noPush = true;
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
@@ -89,12 +96,14 @@ async function main() {
       break;
     case 'gate': {
       const [, action, epic, artifact] = o._;
-      if (!epic) { log(c.red('usage: sdlc gate <open|sync|comments|status> <epic> [artifact]')); process.exitCode = 1; break; }
+      // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
+      if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, push: !o.noPush, today }); break; }
+      if (!epic) { log(c.red('usage: sdlc gate <open|sync|comments|status|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       if (action === 'open') await gateOpen(o.dir, { epic, artifact, today });
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
-      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status)`)); process.exitCode = 1; }
+      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|ci)`)); process.exitCode = 1; }
       break;
     }
     case 'commit':

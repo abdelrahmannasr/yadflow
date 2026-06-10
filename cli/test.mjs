@@ -435,3 +435,221 @@ test('runCommit dry-run prints without committing', async () => {
   assert.throws(() => git(T, 'rev-parse', 'HEAD'));   // nothing committed
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------------------------
+// `sdlc gate ci` — event-driven sync: derive from the review branch, overlay, ledger-only commit
+// ---------------------------------------------------------------------------------------------
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash } = await import('./epic-state.mjs');
+const { gateCi } = await import('./gate.mjs');
+
+test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
+  assert.deepEqual(parseReviewBranch('review/EP-x/architecture'), { epic: 'EP-x', base: 'architecture' });
+  assert.deepEqual(parseReviewBranch('review/EP-istifta-inquiries/stories'), { epic: 'EP-istifta-inquiries', base: 'stories' });
+  assert.equal(parseReviewBranch('feature/foo'), null);
+  assert.equal(parseReviewBranch('review/notanepic'), null);
+  assert.equal(parseReviewBranch('review/notanepic/epic'), null);
+});
+
+test('artifactFromBase reverses artifactBase (single story maps to the stories/ set)', () => {
+  assert.equal(artifactFromBase('epic'), 'epic.md');
+  assert.equal(artifactFromBase('architecture'), 'architecture.md');
+  assert.equal(artifactFromBase('ui-design'), 'ui-design.md');
+  assert.equal(artifactFromBase('stories'), 'stories/');
+  assert.equal(artifactFromBase('stories-S01'), 'stories/');
+});
+
+test('artifactPaths covers what artifactHash fingerprints', () => {
+  assert.deepEqual(artifactPaths('architecture'), ['architecture.md', 'contract.md', '.sdlc/contract-lock.json']);
+  assert.deepEqual(artifactPaths('stories'), ['stories']);
+  assert.deepEqual(artifactPaths('epic'), ['epic.md']);
+});
+
+test('upsertHubPr replaces by artifact, never duplicates', () => {
+  const a = upsertHubPr([], { artifact: 'epic.md', number: 1 });
+  const b = upsertHubPr(a, { artifact: 'epic.md', number: 2 });
+  assert.equal(b.length, 1);
+  assert.equal(b[0].number, 2);
+  const c2 = upsertHubPr(b, { artifact: 'architecture.md', number: 3 });
+  assert.equal(c2.length, 2);
+});
+
+// A hub repo with a bare origin: main carries the epic scaffolding (NO hub-prs.json — the
+// wrinkle-1 case), the review branch carries the artifact edit, and a separate "CI" clone runs
+// `gate ci` the way the workflow does.
+const SEED_CONTRACT = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n';
+const BRANCH_CONTRACT = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n';
+function scaffoldCiHub() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ci-'));
+  const origin = path.join(T, 'origin.git');
+  fs.mkdirSync(origin);
+  git(origin, 'init', '-q', '--bare');
+  git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/trunk'); // a NON-main default proves gate ci derives the push target from the checkout
+  const author = path.join(T, 'author');
+  git(T, 'clone', '-q', origin, author);
+  git(author, 'config', 'user.email', 'a@b.c');
+  git(author, 'config', 'user.name', 'x');
+  fs.mkdirSync(path.join(author, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(author, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', // no default_branch — the `sdlc setup` hub.json shape; gate ci must derive it
+    roster: [
+      { login: 'al', name: 'alice', role: 'owner' },
+      { login: 'bo', name: 'bob', role: 'reviewer' },
+      { login: 'ca', name: 'carol', role: 'reviewer' },
+    ],
+  }));
+  fs.writeFileSync(path.join(author, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: 'demo/backend', domain_owner: 'carol', default_branch: 'main' }],
+  }));
+  const ep = path.join(author, 'epics/EP-test');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, 'epic.md'), '---\nid: EP-test\nowner: alice\nrepos: [backend]\n---\n');
+  fs.writeFileSync(path.join(ep, 'architecture.md'), '# arch\n');
+  fs.writeFileSync(path.join(ep, 'contract.md'), SEED_CONTRACT);
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-test', currentStep: 'architecture-review',
+    steps: [
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done', risk_tags: [] },
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review', risk_tags: ['contract'] },
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'blocked', risk_tags: [] },
+    ],
+  }));
+  git(author, 'add', '-A');
+  git(author, 'commit', '-q', '-m', 'seed');
+  git(author, 'branch', '-q', '-M', 'trunk');
+  git(author, 'push', '-q', 'origin', 'trunk');
+  // the review branch carries the artifact change reviewers approved
+  git(author, 'checkout', '-q', '-b', 'review/EP-test/architecture');
+  fs.writeFileSync(path.join(ep, 'contract.md'), BRANCH_CONTRACT);
+  git(author, 'add', '-A');
+  git(author, 'commit', '-q', '-m', 'review: architecture (EP-test)');
+  git(author, 'push', '-q', 'origin', 'review/EP-test/architecture');
+  git(author, 'checkout', '-q', 'trunk');
+  // the throwaway CI checkout, on the default branch, without the artifact edit
+  const ci = path.join(T, 'ci');
+  git(T, 'clone', '-q', origin, ci);
+  git(ci, 'config', 'user.email', 'sdlc-gate-sync@noreply');
+  git(ci, 'config', 'user.name', 'sdlc-gate-sync');
+  return { T, origin, author, ci };
+}
+const show = (cwd, ref) => git(cwd, 'show', ref).toString();
+
+test('gate ci: derives epic/artifact from the branch, syncs, commits ONLY the ledger to the default branch', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, today: '2026-06-09', reader: () => fullApproval });
+
+  git(author, 'fetch', '-q', 'origin');
+  // step advanced + hub-prs.json upserted from the event (it was never committed by the author)
+  const state = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/state.json'));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  assert.equal(state.currentStep, 'ui-design');
+  const hubPrs = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/hub-prs.json'));
+  assert.equal(hubPrs[0].number, 7);
+  // the approval is bound to the BRANCH contract surface (the overlay), not main's stale one
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hash-'));
+  fs.writeFileSync(path.join(tmp, 'contract.md'), BRANCH_CONTRACT);
+  const branchHash = contractSurfaceHash(tmp);
+  const approvals = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json'));
+  assert.ok(approvals.every((a) => a.artifactHash === branchHash), 'approvals bound to the reviewed content');
+  // the artifact itself never lands via CI — only via the human merge
+  assert.equal(show(author, 'origin/trunk:epics/EP-test/contract.md'), SEED_CONTRACT);
+  assert.equal(fs.readFileSync(path.join(ci, 'epics/EP-test/contract.md'), 'utf8'), SEED_CONTRACT, 'overlay dropped in the CI tree');
+  // loop guard rides on the commit
+  assert.match(git(author, 'log', '-1', '--format=%B', 'origin/trunk').toString(), /\[skip ci\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci: a rejected push rebases and retries (competing ledger commit lands too)', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  // a competing commit reaches the default branch after the CI clone was taken
+  fs.writeFileSync(path.join(author, 'NOTES.md'), 'competing\n');
+  git(author, 'add', '-A');
+  git(author, 'commit', '-q', '-m', 'competing');
+  git(author, 'push', '-q', 'origin', 'trunk');
+
+  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, today: '2026-06-09', reader: () => fullApproval });
+  git(author, 'fetch', '-q', 'origin');
+  const count = Number(git(author, 'rev-list', '--count', 'origin/trunk').toString().trim());
+  assert.equal(count, 3, 'seed + competing + sync all on trunk');
+  const state = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/state.json'));
+  assert.equal(state.currentStep, 'ui-design');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci: a non-review branch is a graceful no-op', async () => {
+  const { T, ci } = scaffoldCiHub();
+  const r = await gateCi(ci, { branch: 'feature/foo', pr: 1, today: '2026-06-09', reader: () => fullApproval });
+  assert.equal(r.synced, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate ci sweep: syncs every open review PR, one commit, holds the unapproved gate', async () => {
+  const { T, ep } = scaffoldEpic();
+  // second epic, base-rule gate over epic.md, held (no approvals on its PR)
+  const ep2 = path.join(T, 'epics/EP-two');
+  fs.mkdirSync(path.join(ep2, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep2, 'epic.md'), '---\nid: EP-two\nowner: alice\nrepos: [backend]\n---\n');
+  fs.writeFileSync(path.join(ep2, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-two', currentStep: 'epic-review',
+    steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'blocked', risk_tags: [] },
+    ],
+  }));
+  fs.writeFileSync(path.join(ep2, '.sdlc/hub-prs.json'), JSON.stringify([
+    { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 9, url: 'http://x/9', branch: 'review/EP-two/epic', lastSyncedAt: null },
+  ]));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.name', 'x');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+
+  const held = { ok: true, state: 'OPEN', merged: false, headOid: 'z', reviews: [], threads: [] };
+  const reader = (platform, n) => (n === 7 ? fullApproval : held);
+  await gateCi(T, { today: '2026-06-09', push: false, reader });
+
+  const s1 = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(s1.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  const s2 = JSON.parse(fs.readFileSync(path.join(ep2, '.sdlc/state.json')));
+  assert.equal(s2.steps.find((s) => s.id === 'epic-review').status, 'in_review', 'unapproved gate held');
+  assert.equal(Number(git(T, 'rev-list', '--count', 'HEAD').toString().trim()), 2, 'one sweep commit');
+  assert.match(git(T, 'log', '-1', '--format=%B').toString(), /scheduled gate sync \[skip ci\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('check --fix wires the hub gate-sync CI only when the bridge is enabled', async () => {
+  const { T } = scaffold();
+  // no hub.json -> no hub action
+  await reconcile(T, { fix: true });
+  assert.ok(!fs.existsSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml')), 'no hub.json => not wired');
+  // hub on github with the bridge -> wired + idempotent
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(fs.existsSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml')), 'hub workflow installed');
+  const again = await reconcile(T, { fix: false });
+  assert.equal(again.counts.missing, 0);
+  assert.equal(again.counts.outdated, 0);
+  // gitlab with the bridge -> fragment installed + idempotent
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'gitlab fragment installed');
+  const gl = await reconcile(T, { fix: false });
+  assert.equal(gl.counts.missing, 0);
+  assert.equal(gl.counts.outdated, 0);
+  // bridge disabled (either spelling) -> no action; an already-installed file is left alone
+  fs.rmSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml'));
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge: false, roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'disabled bridge => not wired');
+  // legacy `bridge: true` (older setup) still counts as an explicit enable
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'legacy bridge:true wires');
+  // platform set but NO enable flag in either spelling -> not wired (explicit-enable semantics)
+  fs.rmSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml'));
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [] }));
+  await reconcile(T, { fix: true });
+  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'missing flag => not wired');
+  fs.rmSync(T, { recursive: true, force: true });
+});

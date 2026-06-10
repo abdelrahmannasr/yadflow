@@ -1,6 +1,6 @@
 ---
 name: sdlc-hub-bridge
-description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that sdlc-review-gate uses to pull platform comments + approvals back into the file ledger. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", or it is invoked by sdlc-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that sdlc-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire event-driven sync on the hub: a CI workflow that runs `sdlc gate ci` whenever a reviewer approves / requests changes / a human merges, committing the ledger to the default branch. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by sdlc-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
@@ -30,8 +30,8 @@ keeps platform mechanics out of the gate). `sdlc-review-gate` *calls* it; it nev
 
 - `epic`     — the `EP-<slug>` under review.
 - `artifact` — the artifact file (`analysis.md` | `epic.md` | `architecture.md` | `ui-design.md` | `stories/`).
-- `action`   — `open` | `route` (default `route`). (`sync`'s ledger writes live in `sdlc-review-gate`;
-  this skill provides the read recipes `sync` calls — see `references/bridge.md`.)
+- `action`   — `open` | `route` | `wire` (default `route`). (`sync`'s ledger writes live in
+  `sdlc-review-gate`; this skill provides the read recipes `sync` calls — see `references/bridge.md`.)
 
 ## Preconditions (the bridge runs only when all hold)
 
@@ -70,6 +70,27 @@ Compute and print the required reviewers as above. Use `templates/checks/hub-rou
 PR/MR body's Impact & Risk block when given one; otherwise derive from `epic.repos` + the step's
 `risk_tags`. Advisory only — it routes the human review, it does not approve.
 
+### Step 4 — `wire` (event-driven sync on the hub)
+Install the hub CI that turns platform actions — a review **approval**, a **change request**, a review
+dismissal, or the human **merge** — into an automatic `sdlc gate ci` run that syncs the ledger and
+commits it to the hub's default branch. No more waiting on a manual `sdlc gate sync`; the manual command
+remains valid and is the fallback whenever CI cannot push.
+
+1. Run `sdlc check --fix` (the wiring is manifest-driven, like `sdlc-checks`): with a platform +
+   enabled bridge in `.sdlc/hub.json` it installs
+   - GitHub → `.github/workflows/sdlc-gate-sync.yml` (from `templates/github/sdlc-gate-sync.yml`)
+   - GitLab → `.gitlab/ci/sdlc-gate-sync.yml` (from `templates/gitlab/sdlc-gate-sync.gitlab-ci.yml`)
+2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes):
+   - add `include: - local: '.gitlab/ci/sdlc-gate-sync.yml'` to the root `.gitlab-ci.yml`, or write
+     `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists;
+   - create the 15-minute pipeline **schedule** (variable `SDLC_GATE_SYNC=true`) and the masked
+     `SDLC_GATE_TOKEN` project-access-token variable (`read_api` + `write_repository`). GitLab fires no
+     pipeline on an approval alone, so the schedule is the path that picks approvals up (≤ ~15 min
+     latency); MR events and the merge are near-immediate.
+3. Commit the workflow to the hub. GitHub needs nothing else — the ephemeral `github.token` reads the
+   PR and pushes the ledger. If the default branch is protected, see the workflow header for the
+   bypass / PAT options; until then the run fails visibly and manual `sdlc gate sync` still works.
+
 ## Hard rules
 
 - **Local-user auth only; store no tokens.** Reviewers use their own `gh`/`glab`.
@@ -79,6 +100,13 @@ PR/MR body's Impact & Risk block when given one; otherwise derive from `epic.rep
   step advances when a human **merges** the approved, fully-resolved review PR (the merge is that human
   act) — `sdlc gate sync` records the approvals + resolution + merged state and advances; unresolved
   comments or a changed artifact hold it `in_review`. The mechanical sync is the `sdlc gate` CLI.
+- **CI never approves and never merges.** The wired workflow only runs `gate ci` — the same sync +
+  unchanged predicate — and commits the **ledger files only** to the default branch; the artifact lands
+  on the default branch exclusively via the human merge. Front gates stay permanently human.
+- **The CI tokens are the one documented bend of "no stored tokens".** GitHub uses the platform's own
+  ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
+  project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so
+  when wiring, and scope it to `read_api` + `write_repository` only.
 - **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs file-only with no error.
 
 ## Reference

@@ -5,12 +5,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, readJSON, writeJSON,
+  c, log, ok, info, warn, hand, fail, readJSON, writeJSON, run,
 } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
-  advanceState, markInReview, isEscalated,
+  advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
+  artifactPaths, upsertHubPr,
 } from './epic-state.mjs';
 import { readPr, mapApprovers, createPr } from './platform.mjs';
 
@@ -185,6 +186,117 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
   return { synced };
 }
 
+// `sdlc gate ci` — the self-sufficient entry point hub CI calls on platform events (review
+// submitted/dismissed, PR synchronize, PR merged) and on the GitLab schedule. Event mode derives
+// epic/artifact from the `review/EP-<slug>/<base>` head branch (so it works even when the author
+// never committed hub-prs.json); sweep mode (no --branch) re-syncs every open review PR. Either way
+// it runs the unchanged gateSync, then commits ONLY the ledger files to the hub default branch —
+// the artifact itself lands on main via the human merge, never via CI.
+export async function gateCi(root, { branch, pr, today, push = true, reader = readPr } = {}) {
+  const { hub } = loadHub(root);
+  if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
+  const git = (...args) => run('git', args, { cwd: root });
+  // Push target: an explicit hub.default_branch wins; else the branch CI actually checked out (the
+  // workflow checks out the PR base / $CI_DEFAULT_BRANCH — hub.json from `sdlc setup` has no
+  // default_branch field, so the checkout is the truth); 'main' only as the last resort.
+  const head = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  const target = hub.default_branch || (head && head !== 'HEAD' ? head : 'main');
+
+  // Build the work list: one job per (epic, artifact) — from the event branch, or a full sweep.
+  const jobs = [];
+  if (branch) {
+    const parsed = parseReviewBranch(branch);
+    if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0 }; }
+    jobs.push({ epic: parsed.epic, base: parsed.base, artifact: artifactFromBase(parsed.base), branch, pr });
+  } else {
+    const epicsDir = path.join(root, 'epics');
+    for (const e of fs.existsSync(epicsDir) ? fs.readdirSync(epicsDir).sort() : []) {
+      const ledger = loadLedger(epicRoot(root, e));
+      if (!ledger.state) continue;
+      for (const p of ledger.hubPrs || []) {
+        const step = findReviewStep(ledger.state, p.artifact);
+        if (!step || step.status === 'done') continue;
+        jobs.push({ epic: e, base: base(p.artifact), artifact: p.artifact, branch: p.branch, pr: p.number });
+      }
+    }
+    if (!jobs.length) { info('no open review PRs to sync'); return { synced: 0 }; }
+  }
+
+  let synced = 0;
+  const touched = new Set();
+  for (const job of jobs) {
+    const epicDir = epicRoot(root, job.epic);
+    const ledger = loadLedger(epicDir);
+    if (!ledger.state) {
+      warn(`${job.epic}: no epic state on ${target} — commit epics/${job.epic}/.sdlc to ${target} first`);
+      continue;
+    }
+    const step = findReviewStep(ledger.state, job.artifact);
+    if (!step) { warn(`${job.epic}: no review step for ${job.artifact} — skipping`); continue; }
+
+    // The event may fire before the author ever committed hub-prs.json — build the entry from the
+    // event itself, so the first CI commit lands it on the default branch and the views converge.
+    const existing = (ledger.hubPrs || []).find((x) => x.artifact === job.artifact);
+    const number = Number(job.pr) || existing?.number || null;
+    if (!existing || existing.number !== number || existing.branch !== job.branch) {
+      ledger.hubPrs = upsertHubPr(ledger.hubPrs, {
+        step: step.id, artifact: job.artifact, platform: hub.platform, number,
+        url: existing?.url ?? null, branch: job.branch, lastSyncedAt: existing?.lastSyncedAt ?? null,
+      });
+      writeJSON(ledger.files.hubPrs, ledger.hubPrs);
+    }
+
+    // Overlay the artifact from the review branch so artifactHash binds approvals to what the
+    // reviewers actually approved (pre-merge, the default branch does not have it yet). A failed
+    // fetch (branch deleted after merge) is fine — the artifact already landed via the merge.
+    const overlay = artifactPaths(job.base).map((p) => path.join('epics', job.epic, p));
+    const fetched = job.branch ? git('fetch', 'origin', job.branch).ok : false;
+    if (fetched) for (const p of overlay) git('checkout', 'FETCH_HEAD', '--', p);
+
+    try {
+      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader });
+      synced += r.synced;
+    } finally {
+      // Drop the overlay — even when sync throws: only the ledger may reach the default branch via CI.
+      if (fetched) {
+        for (const p of overlay) {
+          git('checkout', 'HEAD', '--', p); // tracked files back to HEAD (no-op fail if not in HEAD)
+          git('clean', '-fd', '--', p);     // files new on the branch: remove
+        }
+      }
+    }
+    touched.add(job.epic);
+  }
+  if (!touched.size) return { synced };
+
+  // Commit the ledger only, then push with a rebase-retry (ledger commits across epics touch
+  // disjoint files; same-repo runs are serialized by the CI concurrency group).
+  for (const e of touched) {
+    // Separate adds: a pathspec with no match (reviews/ not created yet) must not abort the other.
+    git('add', '-A', '--', path.join('epics', e, '.sdlc'));
+    git('add', '-A', '--', path.join('epics', e, 'reviews'));
+  }
+  if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
+  const subject = branch
+    ? `chore(gate): sync ${jobs[0].epic}/${jobs[0].base} via CI [skip ci]`
+    : 'chore(gate): scheduled gate sync [skip ci]';
+  const cm = git('commit', '-m', subject);
+  if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
+  ok(`committed ledger update: ${c.dim(subject)}`);
+  if (!push) return { synced };
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (git('push', 'origin', `HEAD:${target}`).ok) { ok(`pushed ledger to origin/${target}`); return { synced }; }
+    if (attempt < 3) {
+      info(`push rejected — rebasing onto origin/${target} and retrying (${attempt}/3)`);
+      if (!git('pull', '--rebase', 'origin', target).ok) git('rebase', '--abort'); // never leave a wedged rebase
+    }
+  }
+  fail(`could not push the ledger to origin/${target} — protected branch? allow the CI actor to push (see sdlc-hub-bridge references/bridge.md) or run \`sdlc gate sync\` locally`);
+  process.exitCode = 1;
+  return { synced };
+}
+
 export async function gateComments(root, { epic, artifact, today, reader = readPr } = {}) {
   const { hub } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured — nothing to fetch'); return; }
@@ -249,8 +361,7 @@ export async function gateOpen(root, { epic, artifact, today } = {}) {
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'}); step is in_review file-only`); return; }
 
   const number = Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null;
-  ledger.hubPrs = (ledger.hubPrs || []).filter((p) => p.artifact !== artifact);
-  ledger.hubPrs.push({ step: step.id, artifact, platform: hub.platform, number, url: r.url, branch, lastSyncedAt: null });
+  ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number, url: r.url, branch, lastSyncedAt: null });
   writeJSON(ledger.files.hubPrs, ledger.hubPrs);
   ok(`opened ${r.url}`);
   hand(`reviewers approve/comment there; then run \`sdlc gate sync ${epic} ${artifact}\``);
