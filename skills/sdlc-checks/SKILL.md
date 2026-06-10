@@ -1,11 +1,11 @@
 ---
 name: sdlc-checks
-description: 'Build-half Step C of the gated SDLC — the production-safety check gates. Wire and run three CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), and build/test/lint. The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", or "set up CI checks" for a repo.'
+description: 'Build-half Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, and verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the hub and every repo). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
 # SDLC — Check Gates (build-half Step C)
 
-**Goal:** Install and run the three **check gates** that protect production for a code repo. They run
+**Goal:** Install and run the **check gates** that protect production for a code repo. They run
 in CI on every PR/MR and must pass before merge (build plan §C). Each is a small, separate check:
 
 1. **spec-link** — the change links a real story/spec: its commits carry a `Task: <story>-<task>`
@@ -16,6 +16,12 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    contract upstream, it **FAILS and routes back to the architecture gate**. The shared surface is
    never widened from inside a code repo (Phase 2 contract representation: delimited block + SHA-256 lock).
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
+4. **verified-commits** — no unverified commits from unverified users: every commit in the range must
+   carry a signature the platform marks **Verified** AND be authored by a known identity
+   (`.sdlc/verified-authors`, generated from the hub roster's `email` fields). Enforced on the
+   **product hub and every connected repo**; runs on PRs/MRs only, so the gate-sync bot's direct
+   ledger pushes are unaffected (never replace it with a default-branch push rule — see
+   `references/check-gates.md` §4).
 
 The gates are **CI-agnostic bash** in `checks/`; thin pipeline configs invoke them on GitHub Actions
 and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the skill or let CI run them;
@@ -29,7 +35,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   (`config.yaml` `build.code_repos_root`).
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
-  - `templates/checks/{spec-link,contract-check,build-test-lint}.sh`
+  - `templates/checks/{spec-link,contract-check,build-test-lint,verified-commits}.sh`
+  - `templates/github/sdlc-verified-commits.yml` + `templates/gitlab/sdlc-verified-commits.gitlab-ci.yml`
+    → the standalone hub-side verified-commits CI (installed by `sdlc check --fix` with the hub wiring)
   - `templates/github/sdlc-checks.yml` → installs to `.github/workflows/sdlc-checks.yml` (marked `# sdlc-managed: sdlc-checks`)
   - `templates/gitlab/sdlc-checks.gitlab-ci.yml` → includable fragment, installs to `.gitlab/ci/sdlc-checks.yml`
   - `templates/gitlab/gitlab-ci.include-root.yml` → minimal root written only when no root `.gitlab-ci.yml` exists

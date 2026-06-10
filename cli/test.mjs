@@ -653,3 +653,144 @@ test('check --fix wires the hub gate-sync CI only when the bridge is enabled', a
   assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'missing flag => not wired');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------------------------
+// verified-commits gate — author allowlist generation + the bash gate itself
+// ---------------------------------------------------------------------------------------------
+const { verifiedAuthorEmails, authorsActions } = await import('./plan.mjs');
+
+test('verifiedAuthorEmails: roster emails + verified_authors, lower-cased, deduped, sorted', () => {
+  const hub = {
+    roster: [
+      { login: 'al', name: 'alice', role: 'owner', email: 'Alice@Corp.io' },
+      { login: 'bo', name: 'bob', role: 'reviewer', emails: ['bob@corp.io', 'bob@users.noreply.github.com'] },
+      { login: 'ca', name: 'carol', role: 'reviewer' }, // no email — contributes nothing
+    ],
+    verified_authors: ['dev@corp.io', 'alice@corp.io'], // dupe of the roster email
+  };
+  assert.deepEqual(verifiedAuthorEmails(hub), [
+    'alice@corp.io', 'bob@corp.io', 'bob@users.noreply.github.com', 'dev@corp.io',
+  ]);
+  assert.deepEqual(verifiedAuthorEmails({ roster: [{ login: 'x', name: 'x', role: 'owner' }] }), []);
+  assert.deepEqual(verifiedAuthorEmails(null), []);
+});
+
+test('check --fix generates .sdlc/verified-authors in hub + repos only when emails exist', async () => {
+  const { T } = scaffold();
+  // no hub.json / no emails -> no allowlist anywhere
+  await reconcile(T, { fix: true });
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'no emails => no hub allowlist');
+
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', bridge_enabled: true,
+    roster: [{ login: 'al', name: 'alice', role: 'owner', email: 'alice@corp.io' }],
+    verified_authors: ['dev@corp.io'],
+  }));
+  await reconcile(T, { fix: true });
+  for (const f of ['.sdlc/verified-authors', 'demo/backend/.sdlc/verified-authors', 'demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/sdlc-verified-commits.yml']) {
+    assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
+  }
+  const list = fs.readFileSync(path.join(T, '.sdlc/verified-authors'), 'utf8');
+  assert.match(list, /alice@corp\.io\ndev@corp\.io\n$/);
+  assert.equal(list, fs.readFileSync(path.join(T, 'demo/backend/.sdlc/verified-authors'), 'utf8'), 'repo copy identical');
+
+  const again = await reconcile(T, { fix: false });
+  assert.equal(again.counts.missing, 0);
+  assert.equal(again.counts.outdated, 0);
+
+  // a hand-edited allowlist is drift-corrected back from hub.json
+  fs.appendFileSync(path.join(T, '.sdlc/verified-authors'), 'rogue@evil.io\n');
+  const drift = await reconcile(T, { fix: false });
+  assert.equal(drift.counts.outdated, 1, 'hand edit shows as outdated');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The gate script itself, against a real temp repo. No origin remote => the signature check is
+// SKIPPED with a warning, so this exercises the author-allowlist half hermetically.
+const GATE = path.join(ROOT, 'skills/sdlc-checks/templates/checks/verified-commits.sh');
+function scaffoldGateRepo() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-vc-'));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.name', 'alice');
+  git(T, 'config', 'user.email', 'alice@corp.io');
+  fs.writeFileSync(path.join(T, 'a.txt'), '1');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'feature');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
+  return T;
+}
+const runGate = (cwd, env = {}) => {
+  try {
+    const out = execFileSync('bash', [GATE, 'main'], { cwd, env: { ...process.env, ...env }, stdio: 'pipe' });
+    return { code: 0, out: out.toString() };
+  } catch (e) {
+    return { code: e.status, out: (e.stdout || '').toString() + (e.stderr || '').toString() };
+  }
+};
+
+test('verified-commits gate: allowlisted author passes; unknown author fails', () => {
+  const T = scaffoldGateRepo();
+  fs.writeFileSync(path.join(T, 'b.txt'), '2');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'by alice'); // .sdlc + b.txt authored by alice@corp.io
+  let r = runGate(T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /known identity/);
+  assert.match(r.out, /signature verification SKIPPED/);
+
+  fs.writeFileSync(path.join(T, 'c.txt'), '3');
+  git(T, 'add', '-A');
+  git(T, '-c', 'user.email=mallory@evil.io', '-c', 'user.name=mallory', 'commit', '-q', '-m', 'by mallory');
+  r = runGate(T);
+  assert.equal(r.code, 1, 'unknown author must fail the gate');
+  assert.match(r.out, /mallory@evil\.io.*unverified user/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('verified-commits gate: missing allowlist warns (not enforced); empty range passes', () => {
+  const T = scaffoldGateRepo();
+  fs.rmSync(path.join(T, '.sdlc/verified-authors'));
+  fs.writeFileSync(path.join(T, 'b.txt'), '2');
+  git(T, 'add', '-A');
+  git(T, '-c', 'user.email=anyone@anywhere.io', '-c', 'user.name=zz', 'commit', '-q', '-m', 'x');
+  let r = runGate(T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /author allowlist NOT enforced/);
+
+  git(T, 'checkout', '-q', 'main');
+  r = runGate(T);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /no commits in/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('verified-commits gate: unresolvable base fails closed', () => {
+  const T = scaffoldGateRepo();
+  try {
+    execFileSync('bash', [GATE, 'origin/nope'], { cwd: T, stdio: 'pipe' });
+    assert.fail('should exit non-zero');
+  } catch (e) {
+    assert.equal(e.status, 1);
+    assert.match(e.stdout.toString(), /base ref 'origin\/nope' not found/);
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('verified-commits gate: unknown SDLC_PLATFORM override fails closed; CRLF allowlist tolerated', () => {
+  const T = scaffoldGateRepo();
+  fs.writeFileSync(path.join(T, 'b.txt'), '2');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'by alice');
+  let r = runGate(T, { SDLC_PLATFORM: 'bogus' });
+  assert.equal(r.code, 1, 'unknown platform must fail closed');
+  assert.match(r.out, /unknown platform 'bogus'/);
+  // CRLF + padded allowlist still matches
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\r\n  ALICE@corp.io  \r\n');
+  r = runGate(T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /known identity/);
+  fs.rmSync(T, { recursive: true, force: true });
+});

@@ -103,7 +103,7 @@ human**. Detailed walkthroughs for each phase follow below.
 | `skills/sdlc-review-gate/` | The reusable **team review + approve gate** (used for all four reviews). |
 | `skills/sdlc-spec/` | Build Step A: run the Spec Kit ceremony once per story per repo → `specs/<story-id>/`. |
 | `skills/sdlc-implement/` | Build Step B: implement ONE atomic task as a small diff on its own branch. |
-| `skills/sdlc-checks/` | Build Step C: wire + run the three CI gates (spec-link, contract-check, build/test/lint). |
+| `skills/sdlc-checks/` | Build Step C: wire + run the CI gates (spec-link, contract-check, build/test/lint, verified-commits). |
 | `skills/sdlc-pr-template/` | Build Step D: install the platform PR/MR template + risk routing (code repos **and** the hub). |
 | `skills/sdlc-review-comments/` | Install platform-matched PR/MR review-comment scaffolds (code repos and the hub). |
 | `skills/sdlc-hub-bridge/` | The templated PR/MR **review bridge**: open a review PR/MR on the hub and sync platform approvals/comments into the file ledger. |
@@ -340,7 +340,8 @@ build half by hand”** below.
 11. `sdlc-implement story:<id> repo:<repo> task:<T0N>` → one atomic task = one branch = one commit
     (repeat per task). Commit by convention with **`sdlc commit --type <t> -m <subject> [--ai <tool>]`**
     (Task/Contract-Change/Co-Authored-By trailers, atomic-file guard).
-12. `sdlc-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint must pass.
+12. `sdlc-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, and
+    verified-commits (platform-Verified signature + roster-allowlisted author) must pass.
 13. Open the PR/MR from the wired template with **`sdlc open-pr --repo <repo> [--risk <level>]`**;
     `sdlc-pr-template repo:<repo> action: route` prints the required reviewers from the Impact & Risk block.
 14. `sdlc-ship` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge, record

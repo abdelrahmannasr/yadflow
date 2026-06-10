@@ -1,7 +1,7 @@
-# SDLC check gates (Phase 3 build plan §C). The team's GitLab CI runs the same three gates as
+# SDLC check gates (Phase 3 build plan §C). The team's GitLab CI runs the same gates as
 # pipeline stages on every merge request; they must pass before merge. The gates are CI-agnostic
 # bash in checks/ — these stages just invoke them with the MR target as base.
-stages: [spec-link, contract-check, build-test-lint]
+stages: [spec-link, contract-check, build-test-lint, verified-commits]
 
 default:
   image: node:20
@@ -30,3 +30,11 @@ build-test-lint:
   extends: .mr_only
   script:
     - bash checks/build-test-lint.sh
+
+# Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot
+# read the commit-signature API.
+verified-commits:
+  stage: verified-commits
+  extends: .mr_only
+  script:
+    - bash checks/verified-commits.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

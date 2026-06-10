@@ -311,8 +311,9 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    commit**. Repeat per task. The first run installs a `.gitmessage` commit template: the human author
    owns the commit, with a required `Task:` trailer and an optional per-commit `Co-Authored-By:` for the
    AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
-3. **Check** — `sdlc-checks repo:<repo> action: run` → the three gates must pass: spec-link,
-   contract-check, build/test/lint.
+3. **Check** — `sdlc-checks repo:<repo> action: run` → the gates must pass: spec-link,
+   contract-check, build/test/lint, and verified-commits (every commit signed with a
+   platform-Verified key and authored by a roster-known email — on the hub and every repo).
 4. **Open the PR/MR** (the template is already wired) and run
    `sdlc-pr-template repo:<repo> action: route` to print the required reviewers.
 5. **Ship** — `sdlc-ship` → AI review (advisory) → **engineer approval (a human)** → merge. The ship is
@@ -393,7 +394,7 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 17)*.
 | `sdlc-review-comments` | Install the PR/MR review-comment scaffolds. |
 | `sdlc-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `sdlc-implement` | Implement one atomic task as a small branch. |
-| `sdlc-checks` | Wire / run the three CI gates (spec-link, contract-check, build/test/lint). |
+| `sdlc-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits). |
 | `sdlc-pr-template` | Install the platform PR/MR template + risk routing. |
 | `sdlc-ship` | AI review → engineer review → ship + record. |
 | `sdlc-backfill` | Spec already-built / legacy code so new work doesn't break it. |

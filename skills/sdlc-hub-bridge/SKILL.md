@@ -80,6 +80,8 @@ remains valid and is the fallback whenever CI cannot push.
    enabled bridge in `.sdlc/hub.json` it installs
    - GitHub → `.github/workflows/sdlc-gate-sync.yml` (from `templates/github/sdlc-gate-sync.yml`)
    - GitLab → `.gitlab/ci/sdlc-gate-sync.yml` (from `templates/gitlab/sdlc-gate-sync.gitlab-ci.yml`)
+   - plus the hub-side **verified-commits** gate (`checks/verified-commits.sh` + its workflow/fragment,
+     owned by `sdlc-checks`) so review PRs accept only signed commits from roster-known authors
 2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes):
    - add `include: - local: '.gitlab/ci/sdlc-gate-sync.yml'` to the root `.gitlab-ci.yml`, or write
      `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists;
