@@ -358,6 +358,56 @@ test('artifactHash(stories/) changes on a story edit, so a stories-review approv
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------------------------------------------------
+// Ledger fail-fast — a corrupt or wrong-shape ledger file must abort, never default-and-rewrite
+// ---------------------------------------------------------------------------------------------
+const { loadLedger } = await import('./epic-state.mjs');
+
+test('a corrupt approvals.json aborts the sync with the file named — and is never rewritten', async () => {
+  const { T, ep } = scaffoldEpic();
+  const f = path.join(ep, '.sdlc/approvals.json');
+  fs.writeFileSync(f, '[{"step": "architecture-rev'); // truncated mid-write
+  await assert.rejects(
+    gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }),
+    /corrupt JSON in .*approvals\.json.*fix or delete/,
+  );
+  assert.equal(fs.readFileSync(f, 'utf8'), '[{"step": "architecture-rev', 'corrupt file left for recovery');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a wrong-shape state.json fails with the file named', () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ steps: 'oops' }));
+  assert.throws(() => loadLedger(ep), /state\.json: expected a non-empty `steps` array/);
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify([1, 2]));
+  assert.throws(() => loadLedger(ep), /state\.json: expected a JSON object/);
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    currentStep: 'x', steps: [{ id: 'x', type: 'author', status: 'done' }],
+  }));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify({ not: 'an array' }));
+  assert.throws(() => loadLedger(ep), /approvals\.json: expected a JSON array/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('an unknown hub platform fails fast instead of degrading to file-only', async () => {
+  const { T } = scaffoldEpic();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'bitbucket', roster: [] }));
+  await assert.rejects(
+    gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }),
+    /hub\.json: unknown platform 'bitbucket'/,
+  );
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('missing ledger files still default silently (a fresh epic is a normal state)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fresh-'));
+  const ledger = loadLedger(path.join(T, 'epics/EP-x'));
+  assert.equal(ledger.state, null);
+  assert.deepEqual(ledger.approvals, []);
+  assert.deepEqual(ledger.hubPrs, []);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate open without an artifact fails cleanly (no throw)', async () => {
   const { T } = scaffoldEpic();
   const prev = process.exitCode;

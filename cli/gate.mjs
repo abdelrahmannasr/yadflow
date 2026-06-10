@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, readJSON, writeJSON, run,
+  c, log, ok, info, warn, hand, fail, readJSONStrict, writeJSON, run,
 } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import {
@@ -48,9 +48,23 @@ export function touchedDomains(epicDir, step) {
 
 const ownerOf = (epicDir) => frontmatter(path.join(epicDir, 'epic.md')).owner || '<owner>';
 
+// Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
+// every gate to file-only without anyone noticing, and a typo'd platform would read as "no bridge".
 function loadHub(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
-  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const hubFile = path.join(root, PROJECT_FILES.hubConfig);
+  const regFile = path.join(root, PROJECT_FILES.reposRegistry);
+  const hub = readJSONStrict(hubFile, null);
+  if (hub !== null) {
+    if (typeof hub !== 'object' || Array.isArray(hub)) throw new Error(`${hubFile}: expected a JSON object`);
+    if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
+      throw new Error(`${hubFile}: unknown platform '${hub.platform}' — expected github, gitlab, or null`);
+    }
+    if (hub.roster !== undefined && !Array.isArray(hub.roster)) {
+      throw new Error(`${hubFile}: expected \`roster\` to be an array`);
+    }
+  }
+  const registry = readJSONStrict(regFile, { repos: [] });
+  if (!Array.isArray(registry?.repos)) throw new Error(`${regFile}: expected a \`repos\` array`);
   return { hub, repos: registry.repos };
 }
 

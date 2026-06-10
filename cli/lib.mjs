@@ -100,6 +100,17 @@ export function readJSON(p, def = null) {
     return def;
   }
 }
+// Strict variant for ledger files (the source of truth): a missing file is a normal state and
+// returns `def`, but a file that exists and fails to parse must throw — silently defaulting a
+// corrupt approvals.json to [] would let the next sync rewrite it and permanently lose approvals.
+export function readJSONStrict(p, def = null) {
+  if (!fs.existsSync(p)) return def;
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) {
+    throw new Error(`corrupt JSON in ${p}: ${e.message} — fix or delete the file`);
+  }
+}
 // Atomic: serialize first, write a sibling tmp file (same dir = same filesystem),
 // then rename over the target. A killed process can never leave a truncated ledger
 // file, and a failed rename never leaves a stray .tmp for `git add -A` to pick up.

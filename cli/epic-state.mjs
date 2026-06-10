@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import { readJSON, writeJSON, fileSha } from './lib.mjs';
+import { readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { epicFiles } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
@@ -88,15 +88,35 @@ export function artifactHash(epicDir, artifact) {
   return fileSha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
+// Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger
+// silently treated as a default would be rewritten by the next sync, destroying the real data.
+const badShape = (file, what) => new Error(`${file}: ${what} — fix the file or restore it from git`);
+function requireArray(v, file) {
+  if (!Array.isArray(v)) throw badShape(file, 'expected a JSON array');
+  return v;
+}
+function validateState(state, file) {
+  if (state === null) return null; // missing state.json = epic not seeded yet, a normal state
+  if (typeof state !== 'object' || Array.isArray(state)) throw badShape(file, 'expected a JSON object');
+  if (!Array.isArray(state.steps) || !state.steps.length) throw badShape(file, 'expected a non-empty `steps` array');
+  for (const s of state.steps) {
+    if (!s || typeof s.id !== 'string' || typeof s.type !== 'string' || typeof s.status !== 'string') {
+      throw badShape(file, 'every step needs string `id`, `type` and `status`');
+    }
+  }
+  if (typeof state.currentStep !== 'string') throw badShape(file, 'expected a string `currentStep`');
+  return state;
+}
+
 export function loadLedger(epicDir) {
   const f = epicFiles(epicDir);
   return {
     files: f,
-    state: readJSON(f.state, null),
-    approvals: readJSON(f.approvals, []),
-    comments: readJSON(f.comments, []),
-    hubPrs: readJSON(f.hubPrs, []),
-    contractLock: readJSON(f.contractLock, null),
+    state: validateState(readJSONStrict(f.state, null), f.state),
+    approvals: requireArray(readJSONStrict(f.approvals, []), f.approvals),
+    comments: requireArray(readJSONStrict(f.comments, []), f.comments),
+    hubPrs: requireArray(readJSONStrict(f.hubPrs, []), f.hubPrs),
+    contractLock: readJSONStrict(f.contractLock, null),
   };
 }
 
