@@ -52,13 +52,22 @@ case "$remote" in
   *gitlab*) platform=gitlab ;;
 esac
 platform="${SDLC_PLATFORM:-$platform}"
-if [ -z "$platform" ] || [ "$platform" = "none" ]; then
-  platform=""
-  echo "WARN [verified-commits]: no GitHub/GitLab remote — signature verification SKIPPED (the Verified badge is a platform concept)."
-fi
+case "$platform" in
+  github|gitlab) ;;
+  ""|none)
+    platform=""
+    echo "WARN [verified-commits]: no GitHub/GitLab remote — signature verification SKIPPED (the Verified badge is a platform concept)."
+    ;;
+  *)
+    # Fail closed: an unknown override must never let signature checks silently pass.
+    echo "FAIL [verified-commits]: unknown platform '${platform}' (SDLC_PLATFORM must be github|gitlab|none)."
+    exit 1
+    ;;
+esac
 
 # 0 when the platform marks the commit's signature verified.
 signature_verified() {
+  local sha v body
   sha="$1"
   case "$platform" in
     github)
@@ -75,6 +84,7 @@ signature_verified() {
       fi
       printf '%s' "$body" | grep -qE '"verification_status"[[:space:]]*:[[:space:]]*"verified"'
       ;;
+    *) return 1 ;; # unreachable (platform validated above) — keep the gate fail-closed regardless
   esac
 }
 
@@ -85,7 +95,9 @@ while IFS= read -r sha; do
   author="$(git log -1 --format=%ae "$sha" | tr '[:upper:]' '[:lower:]')"
 
   if [ "$authors_on" = 1 ]; then
-    if grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | tr '[:upper:]' '[:lower:]' | grep -qxF "$author"; then
+    # tolerate CRLF / stray surrounding whitespace in a hand-edited allowlist
+    if grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+        | tr '[:upper:]' '[:lower:]' | grep -qxF "$author"; then
       echo "PASS [verified-commits]: ${short} author <${author}> is a known identity"
     else
       echo "FAIL [verified-commits]: ${short} author <${author}> is not in ${ALLOWLIST} — unverified user."
