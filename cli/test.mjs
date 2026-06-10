@@ -778,3 +778,19 @@ test('verified-commits gate: unresolvable base fails closed', () => {
   }
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('verified-commits gate: unknown SDLC_PLATFORM override fails closed; CRLF allowlist tolerated', () => {
+  const T = scaffoldGateRepo();
+  fs.writeFileSync(path.join(T, 'b.txt'), '2');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'by alice');
+  let r = runGate(T, { SDLC_PLATFORM: 'bogus' });
+  assert.equal(r.code, 1, 'unknown platform must fail closed');
+  assert.match(r.out, /unknown platform 'bogus'/);
+  // CRLF + padded allowlist still matches
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\r\n  ALICE@corp.io  \r\n');
+  r = runGate(T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /known identity/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
