@@ -80,6 +80,7 @@ export const REPO_WIRING = {
     { src: 'skills/sdlc-checks/templates/checks/spec-link.sh', dest: 'checks/spec-link.sh', exec: true },
     { src: 'skills/sdlc-checks/templates/checks/contract-check.sh', dest: 'checks/contract-check.sh', exec: true },
     { src: 'skills/sdlc-checks/templates/checks/build-test-lint.sh', dest: 'checks/build-test-lint.sh', exec: true },
+    { src: 'skills/sdlc-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
     { src: 'skills/sdlc-pr-template/templates/checks/risk-route.sh', dest: 'checks/risk-route.sh', exec: true },
   ],
   github: [
@@ -99,15 +100,20 @@ export const wiringFor = (platform) => [
   ...(REPO_WIRING[platform] || []),
 ];
 
-// Hub wiring: the event-driven gate-sync CI installed on the PRODUCT HUB itself (dest is the
-// project root — the hub IS the root). Installed only when hub.json has a platform and the
-// bridge is enabled; reviewers' approvals / change requests / the merge then trigger
-// `sdlc gate ci` instead of waiting for a manual `sdlc gate sync`.
+// Hub wiring: CI installed on the PRODUCT HUB itself (dest is the project root — the hub IS the
+// root). Installed only when hub.json has a platform and the bridge is enabled. Carries the
+// event-driven gate sync (approvals/change requests/the merge trigger `sdlc gate ci`) and the
+// verified-commits gate (no unverified commits from unverified users reach merge on the hub).
 export const HUB_WIRING = {
+  common: [
+    { src: 'skills/sdlc-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
+  ],
   github: [
     { src: 'skills/sdlc-hub-bridge/templates/github/sdlc-gate-sync.yml', dest: '.github/workflows/sdlc-gate-sync.yml' },
+    { src: 'skills/sdlc-checks/templates/github/sdlc-verified-commits.yml', dest: '.github/workflows/sdlc-verified-commits.yml' },
   ],
   gitlab: [
     { src: 'skills/sdlc-hub-bridge/templates/gitlab/sdlc-gate-sync.gitlab-ci.yml', dest: '.gitlab/ci/sdlc-gate-sync.yml' },
+    { src: 'skills/sdlc-checks/templates/gitlab/sdlc-verified-commits.gitlab-ci.yml', dest: '.gitlab/ci/sdlc-verified-commits.yml' },
   ],
 };

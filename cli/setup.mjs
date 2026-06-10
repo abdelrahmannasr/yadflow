@@ -6,7 +6,7 @@ import {
   exists, asset, copyFile, readJSON, writeJSON,
 } from './lib.mjs';
 import { VERSION, IDE_FOLDER_TARGETS, IDE_OPENCODE_DIR, PROJECT_FILES } from './manifest.mjs';
-import { moduleActions, repoActions, hubActions } from './plan.mjs';
+import { moduleActions, repoActions, hubActions, authorsActions } from './plan.mjs';
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
 
@@ -73,7 +73,8 @@ export async function runSetup(root, opts = {}) {
         if (!login) break;
         const name = await ask('    sdlc name', login);
         const role = await ask('    role (owner/reviewer/domain-owner)', 'reviewer');
-        roster.push({ login, name, role });
+        const email = await ask('    commit email (verified-commits gate; blank to skip)', '');
+        roster.push({ login, name, role, ...(email ? { email } : {}) });
       }
     }
     const default_branch = platform === 'none' ? 'main' : await ask('Hub default branch', 'main');
@@ -126,9 +127,11 @@ export async function runSetup(root, opts = {}) {
   // the hub: event-driven gate-sync CI, so platform approvals/merges drive `sdlc gate ci`
   const hubWiring = hubActions(root);
   if (hubWiring.length) {
-    log(`  ${c.bold('hub')} ${c.dim('(gate-sync CI)')}`);
+    log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
     applyActions(hubWiring, { force: true });
   }
+  // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
+  applyActions(authorsActions(root, registry.repos), { force: true });
 
   // 6. Optional CodeRabbit
   step(6, total, 'AI review (CodeRabbit)');
