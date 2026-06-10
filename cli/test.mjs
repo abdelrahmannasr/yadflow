@@ -8,7 +8,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' });
+// Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
+// and semantic-release exports them during `npm publish` (prepublishOnly runs this suite) — test
+// commits must carry the identity each test sets, not the publisher's.
+const GIT_ENV = Object.fromEntries(
+  Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)),
+);
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
 
 function scaffold() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-test-'));
