@@ -52,18 +52,22 @@ export function upsertHubPr(hubPrs = [], rec) {
 
 // SHA-256 of the contract surface block (architecture only). Mirrors
 // sdlc-author-architecture/references/contract-format.md (awk markers + sha256).
+// Line endings are normalized to LF so the same surface hashes identically across
+// platforms (a CRLF re-save must not revoke approvals). A BEGIN without an END is
+// malformed and yields null — never a silent hash of everything to end-of-file.
 export function contractSurfaceHash(epicDir) {
   const file = path.join(epicDir, 'contract.md');
   if (!fs.existsSync(file)) return null;
-  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const lines = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n').split('\n');
   let inside = false;
+  let terminated = true;
   const body = [];
   for (const ln of lines) {
-    if (/CONTRACT-SURFACE:BEGIN/.test(ln)) { inside = true; continue; }
-    if (/CONTRACT-SURFACE:END/.test(ln)) { inside = false; continue; }
+    if (/CONTRACT-SURFACE:BEGIN/.test(ln)) { inside = true; terminated = false; continue; }
+    if (/CONTRACT-SURFACE:END/.test(ln)) { inside = false; terminated = true; continue; }
     if (inside) body.push(ln);
   }
-  if (!body.length) return null;
+  if (!terminated || !body.length) return null;
   return 'sha256:' + createHash('sha256').update(body.join('\n')).digest('hex');
 }
 

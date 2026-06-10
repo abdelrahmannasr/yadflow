@@ -359,6 +359,32 @@ test('artifactHash(stories/) changes on a story edit, so a stories-review approv
 });
 
 // ---------------------------------------------------------------------------------------------
+// contractSurfaceHash — line-ending independence + malformed-block rejection
+// ---------------------------------------------------------------------------------------------
+test('contractSurfaceHash: CRLF and LF files with the same surface hash identically', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-crlf-'));
+  const lf = path.join(T, 'lf'); const crlf = path.join(T, 'crlf');
+  fs.mkdirSync(lf); fs.mkdirSync(crlf);
+  const content = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nGET /y\n<!-- CONTRACT-SURFACE:END -->\n';
+  fs.writeFileSync(path.join(lf, 'contract.md'), content);
+  fs.writeFileSync(path.join(crlf, 'contract.md'), content.replace(/\n/g, '\r\n'));
+  const h = surfHash(lf);
+  assert.ok(h?.startsWith('sha256:'));
+  assert.equal(surfHash(crlf), h, 'a CRLF re-save must not change the hash (no false revocations)');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contractSurfaceHash: BEGIN without END is malformed — null, never a hash to end-of-file', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-noend-'));
+  fs.writeFileSync(path.join(T, 'contract.md'),
+    '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n\n# Everything after, accidentally included before\n');
+  assert.equal(surfHash(T), null);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Ledger fail-fast — a corrupt or wrong-shape ledger file must abort, never default-and-rewrite
 // ---------------------------------------------------------------------------------------------
 const { loadLedger } = await import('./epic-state.mjs');

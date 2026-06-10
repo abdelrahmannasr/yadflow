@@ -48,6 +48,17 @@ export function touchedDomains(epicDir, step) {
 
 const ownerOf = (epicDir) => frontmatter(path.join(epicDir, 'epic.md')).owner || '<owner>';
 
+// A null architecture hash with a BEGIN marker present means the surface block is malformed
+// (no END, or empty) — approvals would not be hash-bound, so make that visible.
+function warnUnlockedContract(epicDir, artifact) {
+  if (artifactBase(artifact) !== 'architecture') return;
+  if (artifactHash(epicDir, artifact) !== null) return;
+  const f = path.join(epicDir, 'contract.md');
+  if (fs.existsSync(f) && /CONTRACT-SURFACE:BEGIN/.test(fs.readFileSync(f, 'utf8'))) {
+    warn('contract.md has CONTRACT-SURFACE:BEGIN without a matching END (or an empty block) — surface not locked, approvals will not be hash-bound');
+  }
+}
+
 // Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
 // every gate to file-only without anyone noticing, and a typo'd platform would read as "no bridge".
 function loadHub(root) {
@@ -162,6 +173,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
     if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (file-only)`); continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
+    warnUnlockedContract(epicDir, pr.artifact);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains });
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
 
@@ -360,6 +372,7 @@ export async function gateOpen(root, { epic, artifact, today } = {}) {
   const b = base(artifact);
   const branch = `review/${epic}/${b}`;
   const domains = touchedDomains(epicDir, step);
+  warnUnlockedContract(epicDir, artifact);
 
   // Mark in-review in the ledger regardless of platform (file-only still works).
   ledger.state = markInReview(ledger.state, step);
