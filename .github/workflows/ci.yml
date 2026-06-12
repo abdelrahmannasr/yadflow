@@ -37,3 +37,22 @@ jobs:
           done
           echo "$files" | grep -q '^bin/yad.mjs' || { echo "::error::bin missing"; exit 1; }
           echo "$files" | grep -q '^skills/' || { echo "::error::skills missing"; exit 1; }
+
+  e2e:
+    name: e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # Packs the real tarball, installs it into a throwaway prefix, and drives the installed
+      # binary through setup -> check -> gate open/sync -> commit -> check gates (pass + fail).
+      - name: E2E against the packed tarball
+        run: npm run test:e2e

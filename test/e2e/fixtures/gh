@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Fake `gh` for the e2e harness — replays canned platform JSON so the gate cycle runs hermetically.
+# The review "happens" by flipping the phase file: pending (1 reviewer, PR open) -> approved
+# (owner + reviewer approved, PR merged). Mirrors the shapes cli/platform.mjs actually reads.
+set -euo pipefail
+phase="$(cat "${E2E_GH_PHASE_FILE:?E2E_GH_PHASE_FILE not set}")"
+
+case "${1:-} ${2:-}" in
+  "pr create")
+    echo "https://github.com/acme/hub/pull/7"
+    ;;
+  "pr view")
+    json=""
+    i=1
+    for a in "$@"; do
+      if [ "$a" = "--json" ]; then
+        j=$((i + 1))
+        json="${!j}"
+      fi
+      i=$((i + 1))
+    done
+    if [ "$json" = "latestReviews" ]; then
+      if [ "$phase" = "approved" ]; then
+        echo '{"latestReviews":[{"author":{"login":"alice"},"state":"APPROVED","submittedAt":"2026-06-13T10:00:00Z"},{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T10:01:00Z"}]}'
+      else
+        echo '{"latestReviews":[{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T09:00:00Z"}]}'
+      fi
+    else
+      if [ "$phase" = "approved" ]; then
+        echo '{"state":"MERGED","mergedAt":"2026-06-13T10:05:00Z","headRefOid":"deadbeef"}'
+      else
+        echo '{"state":"OPEN","mergedAt":null,"headRefOid":"deadbeef"}'
+      fi
+    fi
+    ;;
+  "repo view")
+    echo '{"owner":{"login":"acme"},"name":"hub"}'
+    ;;
+  "api graphql")
+    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'
+    ;;
+  *)
+    echo "fake gh: unhandled args: $*" >&2
+    exit 64
+    ;;
+esac
