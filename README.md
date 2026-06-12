@@ -3,6 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/yadflow?logo=npm)](https://www.npmjs.com/package/yadflow)
 [![CI](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml)
 [![provenance](https://img.shields.io/badge/npm-provenance-blue?logo=npm)](https://docs.npmjs.com/generating-provenance-statements)
+[![node](https://img.shields.io/node/v/yadflow?logo=node.js)](https://github.com/abdelrahmannasr/yadflow/blob/main/package.json)
+[![security policy](https://img.shields.io/badge/security-policy-brightgreen)](https://github.com/abdelrahmannasr/yadflow/blob/main/SECURITY.md)
 [![report](https://img.shields.io/badge/docs-Yadflow%20report-2471a3)](https://abdelrahmannasr.github.io/yadflow/)
 
 > 📖 **Start here: the [Yadflow Terminology & Workflow Structure Report](https://abdelrahmannasr.github.io/yadflow/)** —
