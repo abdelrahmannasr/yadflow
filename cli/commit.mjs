@@ -1,4 +1,4 @@
-// `sdlc commit` — commit by the SDLC conventions (CONTRIBUTING.md / config.yaml build).
+// `yad commit` — commit by the SDLC conventions (CONTRIBUTING.md / config.yaml build).
 // Subject is Conventional Commits; trailers are emitted in the fixed order
 // Task -> Contract-Change -> Co-Authored-By. The human git author OWNS the commit; the AI is only a
 // co-author (flagged with --ai, or `none` for human-only). An atomic-commit guard keeps diffs small.
@@ -36,7 +36,7 @@ export function taskFromBranch(branch = '') {
 }
 
 export async function runCommit(root, opts = {}) {
-  log(c.bold('\nsdlc commit'));
+  log(c.bold('\nyad commit'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
 
   const staged = run('git', ['diff', '--cached', '--name-only'], { cwd: root }).stdout.split('\n').filter(Boolean);
@@ -70,7 +70,7 @@ export async function runCommit(root, opts = {}) {
   return { message };
 }
 
-// installed by sdlc-implement, but offer it here too for convenience.
+// installed by yad-implement, but offer it here too for convenience.
 export function ensureGitMessage(repoRoot, templateSrc) {
   const dest = path.join(repoRoot, '.gitmessage');
   if (exists(dest)) return false;

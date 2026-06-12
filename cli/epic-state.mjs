@@ -55,7 +55,7 @@ export function upsertHubPr(hubPrs = [], rec) {
 }
 
 // SHA-256 of the contract surface block (architecture only). Mirrors
-// sdlc-author-architecture/references/contract-format.md (awk markers + sha256).
+// yad-architecture/references/contract-format.md (awk markers + sha256).
 // Line endings are normalized to LF so the same surface hashes identically across
 // platforms (a CRLF re-save must not revoke approvals). A BEGIN without an END is
 // malformed and yields null — never a silent hash of everything to end-of-file.
@@ -194,7 +194,7 @@ export function gatePredicate({
   };
 }
 
-// Advance the step in state.json once the predicate passes. Mirrors sdlc-review-gate Step 3:
+// Advance the step in state.json once the predicate passes. Mirrors yad-review-gate Step 3:
 // mark this review step done, unblock the next step, or set `ready-for-build` for the last one.
 export function advanceState(state, step) {
   const i = state.steps.findIndex((s) => s.id === step.id);

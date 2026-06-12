@@ -25,7 +25,7 @@ This is the riskiest integration. Get it working before anything else.
 - Create `link.md` (or frontmatter) pointing back to the story in the product repo.
 - Stop here and verify the files are correct before building Step B.
 
-### Step B — `sdlc-implement` (the `dev` step)
+### Step B — `yad-implement` (the `dev` step)
 - Agent: `dev` implements ONE atomic task as a small diff (≤3 files where possible).
 - One atomic task = one branch = one PR/MR, named per the conventions (`feat/EP-<slug>-S01-T03-...`).
 - The diff must stay inside the files the task's spec declared; flag and stop if it grows beyond them.
@@ -57,11 +57,11 @@ Build these as the CI checks that must pass before merge. Each is a separate, si
 
 ## Backfill (build after A–F, for existing-code projects)
 
-### Step G — `sdlc-backfill`
+### Step G — `yad-backfill`
 - For an existing repo with no specs, generate specs for already-built features so new work does not break them.
 - Confirm Repomix's interface first (CLI vs slash-command per Phase 0) and use it accordingly.
 - Pack one feature's files at a time (compress + git logs, secret-scan), feed to AI with a "describe what exists, do not invent" prompt, write a **draft** spec marked unverified.
-- Require human approval before the spec counts as real (reuse `sdlc-review-gate`).
+- Require human approval before the spec counts as real (reuse `yad-review-gate`).
 - Boundary detection: use the project's convention (e.g. NestJS module = feature) from the constitution where the code follows it; require a human to confirm the boundary where it does not. Auto-propose, human-confirm.
 - Gating: a new change is blocked only until the features **it touches** have approved specs — not the whole repo.
 
@@ -73,7 +73,7 @@ Build these as the CI checks that must pass before merge. Each is a separate, si
 - **Per-repo specs, shared contract.** Spec/plan/tasks live in each code repo; the contract stays singular in the product repo. Each PR links up to its story.
 - **Nothing auto-advances.** Every gate in this phase is `human_approve` (AI review is advisory, not an advance). Automation is the next phase.
 - **Tools via real interface.** Spec Kit + Impeccable as slash-commands; Repomix confirmed before use. No forking tool internals.
-- **Reuse the gate.** Backfill approval and engineer review reuse `sdlc-review-gate` where they are human approvals.
+- **Reuse the gate.** Backfill approval and engineer review reuse `yad-review-gate` where they are human approvals.
 
 ---
 
@@ -88,12 +88,12 @@ Build these as the CI checks that must pass before merge. Each is a separate, si
 ## Definition of done for Phase 3
 
 - Spec Kit runs as slash-commands on one repo/story; outputs and `link.md` verified. Command names recorded in `RESEARCH-NOTES.md`.
-- `sdlc-implement` produces one small PR/MR per atomic task, correctly named and linked.
+- `yad-implement` produces one small PR/MR per atomic task, correctly named and linked.
 - The check gates run in CI: spec-link, contract-check, build/test/lint — and a deliberately bad PR (no spec link; and a contract-surface change with no contract update) is shown to FAIL.
 - PR/MR template committed into the demo repo, platform-correct, with the Impact & Risk block; a `high` risk PR is shown routing to domain owners.
 - AI review wired; engineer review gate works; a story ships end to end and updates state.
 - Multi-repo proven: one story builds in two repos from one contract, and a contract bypass in one repo is blocked.
-- `sdlc-backfill` produces a human-approved draft spec for one existing feature, gated on touched features.
+- `yad-backfill` produces a human-approved draft spec for one existing feature, gated on touched features.
 - `README.md` updated so the team can run the full build half by hand.
 
 ---

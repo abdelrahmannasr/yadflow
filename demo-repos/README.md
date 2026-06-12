@@ -14,7 +14,7 @@ run. Only this README is version-controlled; the repos themselves are regenerabl
 ## What lives here
 
 - `backend/` — a deliberately thin Node backend, just believable enough to be a valid Spec Kit target.
-  Step A (`sdlc-spec`) writes its spec under `backend/specs/<story-id>/`.
+  Step A (`yad-spec`) writes its spec under `backend/specs/<story-id>/`.
 - `mobile/` — a second thin repo, added for **Step F (multi-repo)**. A cross-repo story tagged
   `repos: [backend, mobile]` (e.g. `EP-istifta-inquiries-S03`) is spec'd and built in **both** repos
   independently, each pinning the **same** locked contract hash. Both carry the same gate scripts and
@@ -40,5 +40,5 @@ printf '%s\n' '# Demo backend constitution (stub)' > .specify/memory/constitutio
 git add -A && git commit -qm "chore: scaffold throwaway demo backend"
 ```
 
-Then run Step A from the product repo: `sdlc-spec` with `epic`, `story`, `repo` to generate
+Then run Step A from the product repo: `yad-spec` with `epic`, `story`, `repo` to generate
 `backend/specs/<story-id>/` (spec/plan/tasks + `link.md`).

@@ -35,5 +35,5 @@ jobs:
           for leak in .sdlc/ demo-repos/ epics/ cli/test.mjs; do
             if echo "$files" | grep -q "^$leak"; then echo "::error::tarball leaks $leak"; exit 1; fi
           done
-          echo "$files" | grep -q '^bin/sdlc.mjs' || { echo "::error::bin missing"; exit 1; }
+          echo "$files" | grep -q '^bin/yad.mjs' || { echo "::error::bin missing"; exit 1; }
           echo "$files" | grep -q '^skills/' || { echo "::error::skills missing"; exit 1; }

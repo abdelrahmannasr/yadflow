@@ -1,7 +1,0 @@
-# SDLC check gates — minimal root pipeline.
-# Written by `sdlc-checks wire` ONLY when the repo has no existing root `.gitlab-ci.yml`.
-# The gates themselves live in the included fragment so the same single source is reused whether
-# or not a root pipeline already exists. If a root later grows real jobs, they coexist with the
-# included sdlc-* jobs (which carry `needs: []` and no `stage:`).
-include:
-  - local: '.gitlab/ci/sdlc-checks.yml'

@@ -1,6 +1,6 @@
-// `sdlc open-pr` — open a code-repo task PR/MR from the repo's platform template (build half).
+// `yad open-pr` — open a code-repo task PR/MR from the repo's platform template (build half).
 // Detects the platform, pushes the current branch, and creates the PR/MR with Summary / Story-task /
-// Impact & Risk prefilled. Distinct from `sdlc gate open`, which opens a front-half artifact-review PR
+// Impact & Risk prefilled. Distinct from `yad gate open`, which opens a front-half artifact-review PR
 // on the product hub.
 import path from 'node:path';
 import fs from 'node:fs';
@@ -33,7 +33,7 @@ function templateBody(repoRoot, platform, { task, risk, contract, domains }) {
 }
 
 export async function runOpenPr(root, opts = {}) {
-  log(c.bold('\nsdlc open-pr'));
+  log(c.bold('\nyad open-pr'));
   const { repoRoot, meta } = resolveRepo(root, opts);
   if (!exists(path.join(repoRoot, '.git'))) { fail(`not a git repo: ${repoRoot}`); process.exitCode = 1; return; }
 

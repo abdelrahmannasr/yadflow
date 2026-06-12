@@ -1,4 +1,4 @@
-// `sdlc check` (report) and `sdlc check --fix` (reconcile) — and `sdlc update`
+// `yad check` (report) and `yad check --fix` (reconcile) — and `yad update`
 // as a thin alias (--scope=changed). Inspects actual project state against the
 // manifest: missing setup, drifted files, stale code-context.
 import path from 'node:path';
@@ -59,7 +59,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   log(c.dim(`summary: ${counts.missing} missing, ${counts.outdated} outdated, ${counts.stale} stale, ${counts.ok} ok`));
 
   if (!fix) {
-    if (fixable.length || gaps.length) hand('run `sdlc check --fix` to reconcile (or `sdlc setup` for missing one-time setup).');
+    if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     return { counts, gaps, applied: 0 };
   }
 
@@ -78,6 +78,6 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const rec = readJSON(path.join(root, PROJECT_FILES.version), {});
   writeJSON(path.join(root, PROJECT_FILES.version), { ...rec, version: VERSION });
   applied ? ok(`reconciled ${applied} item(s)`) : info('nothing to fix');
-  if (gaps.length) hand('one-time setup still missing — run `sdlc setup`.');
+  if (gaps.length) hand('one-time setup still missing — run `yad setup`.');
   return { counts, gaps, applied };
 }

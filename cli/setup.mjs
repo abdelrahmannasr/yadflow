@@ -1,4 +1,4 @@
-// `sdlc setup` — the guided, idempotent first-run wizard.
+// `yad setup` — the guided, idempotent first-run wizard.
 import path from 'node:path';
 import fs from 'node:fs';
 import {
@@ -117,7 +117,7 @@ export async function runSetup(root, opts = {}) {
       for (;;) {
         const login = await ask('  reviewer platform login (blank to finish)', '');
         if (!login) break;
-        const name = await ask('    sdlc name', login);
+        const name = await ask('    yad name', login);
         const role = await ask('    role (owner/reviewer/domain-owner)', 'reviewer');
         const email = await ask('    commit email (verified-commits gate; blank to skip)', '');
         roster.push({ login, name, role, ...(email ? { email } : {}) });
@@ -162,7 +162,7 @@ export async function runSetup(root, opts = {}) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
     applyActions(repoActions(root, repo), { force: true });
   }
-  // the hub: event-driven gate-sync CI, so platform approvals/merges drive `sdlc gate ci`
+  // the hub: event-driven gate-sync CI, so platform approvals/merges drive `yad gate ci`
   const hubWiring = hubActions(root);
   if (hubWiring.length) {
     log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
@@ -188,10 +188,10 @@ export async function runSetup(root, opts = {}) {
   ok(`stamped ${PROJECT_FILES.version} (v${VERSION})`);
   log('');
   log(c.bold('Next — AI-only steps (run in Claude Code):'));
-  hand('generate code-maps: run `sdlc-connect-repos` for each connected repo');
-  hand('author your first epic: run `sdlc-author-epic`');
+  hand('generate code-maps: run `yad-connect-repos` for each connected repo');
+  hand('author your first epic: run `yad-epic`');
   log('');
-  log(c.dim('Re-run anytime: `sdlc check` (report) / `sdlc check --fix` (reconcile).'));
+  log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
 }
 
 // Deterministic repomix pack (code-map generation itself is an AI step, handed off).
@@ -202,7 +202,7 @@ export function packRepo(root, repo) {
   fs.mkdirSync(path.dirname(out), { recursive: true });
   info(`${repo.name}: packing with repomix …`);
   const r = run('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
-  if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in Claude Code (sdlc-connect-repos)`); return true; }
+  if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in Claude Code (yad-connect-repos)`); return true; }
   fail(`${repo.name}: repomix failed — ${r.stderr.split('\n')[0] || 'unknown error'}`);
   return false;
 }

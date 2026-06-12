@@ -1,4 +1,4 @@
-// `sdlc gate open|sync|comments|status` — the PR/MR-driven front-half review gate.
+// `yad gate open|sync|comments|status` — the PR/MR-driven front-half review gate.
 // The platform PR/MR is the review UI; this command syncs its state into the file ledger and, when
 // the gate passes (approvals satisfied + all comment threads resolved + PR merged), auto-advances the
 // step. The merge click is the human approval act, so front steps still never machine_advance.
@@ -159,7 +159,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
 
   let { approvals, comments, hubPrs, state } = ledger;
   const targets = hubPrs.filter((p) => !artifact || p.artifact === artifact);
-  if (!targets.length) { warn(`no open review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''} (run \`sdlc gate open\` first)`); return { synced: 0 }; }
+  if (!targets.length) { warn(`no open review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''} (run \`yad gate open\` first)`); return { synced: 0 }; }
 
   let synced = 0;
   for (const pr of targets) {
@@ -212,7 +212,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
   return { synced };
 }
 
-// `sdlc gate ci` — the self-sufficient entry point hub CI calls on platform events (review
+// `yad gate ci` — the self-sufficient entry point hub CI calls on platform events (review
 // submitted/dismissed, PR synchronize, PR merged) and on the GitLab schedule. Event mode derives
 // epic/artifact from the `review/EP-<slug>/<base>` head branch (so it works even when the author
 // never committed hub-prs.json); sweep mode (no --branch) re-syncs every open review PR. Either way
@@ -223,7 +223,7 @@ export async function gateCi(root, { branch, pr, today, push = true, reader = re
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
   const git = (...args) => run('git', args, { cwd: root });
   // Push target: an explicit hub.default_branch wins; else the branch CI actually checked out (the
-  // workflow checks out the PR base / $CI_DEFAULT_BRANCH — hub.json from `sdlc setup` has no
+  // workflow checks out the PR base / $CI_DEFAULT_BRANCH — hub.json from `yad setup` has no
   // default_branch field, so the checkout is the truth); 'main' only as the last resort.
   const head = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const target = hub.default_branch || (head && head !== 'HEAD' ? head : 'main');
@@ -343,7 +343,7 @@ export async function gateCi(root, { branch, pr, today, push = true, reader = re
       if (!git('pull', '--rebase', 'origin', target).ok) git('rebase', '--abort'); // never leave a wedged rebase
     }
   }
-  fail(`could not push the ledger to origin/${target} — protected branch? allow the CI actor to push (see sdlc-hub-bridge references/bridge.md) or run \`sdlc gate sync\` locally`);
+  fail(`could not push the ledger to origin/${target} — protected branch? allow the CI actor to push (see yad-hub-bridge references/bridge.md) or run \`yad gate sync\` locally`);
   process.exitCode = 1;
   return { synced };
 }
@@ -354,7 +354,7 @@ export async function gateComments(root, { epic, artifact, today, reader = readP
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const targets = (ledger.hubPrs || []).filter((p) => !artifact || p.artifact === artifact);
-  if (!targets.length) { warn('no review PR recorded — run `sdlc gate open` first'); return; }
+  if (!targets.length) { warn('no review PR recorded — run `yad gate open` first'); return; }
   for (const pr of targets) {
     const pull = reader(hub.platform, pr.number, { cwd: root });
     if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason}`); continue; }
@@ -391,7 +391,7 @@ export async function gateOpen(root, { epic, artifact, today } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
-  if (!artifact) { fail('artifact is required: `sdlc gate open <epic> <artifact>`'); process.exitCode = 1; return; }
+  if (!artifact) { fail('artifact is required: `yad gate open <epic> <artifact>`'); process.exitCode = 1; return; }
   const step = findReviewStep(ledger.state, artifact);
   if (!step) { fail(`no review step for ${artifact}`); process.exitCode = 1; return; }
   const b = base(artifact);
@@ -416,7 +416,7 @@ export async function gateOpen(root, { epic, artifact, today } = {}) {
   ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number, url: r.url, branch, lastSyncedAt: null });
   writeJSON(ledger.files.hubPrs, ledger.hubPrs);
   ok(`opened ${r.url}`);
-  hand(`reviewers approve/comment there; then run \`sdlc gate sync ${epic} ${artifact}\``);
+  hand(`reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
 }
 
 // ---- helpers ------------------------------------------------------------------------------------

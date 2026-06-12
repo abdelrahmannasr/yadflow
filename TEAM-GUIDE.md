@@ -53,8 +53,8 @@ Everything *from the spec onward* (specs, tasks, code) lives in each **code repo
 ### The whole workflow, end to end
 
 Setup is one-time. The **front half** is human-gated and runs once per epic in the hub; the **build
-half** runs once per story per code repo; **automation** is opt-in and earned. `sdlc-status` reads it
-all; `sdlc-hub-bridge` mirrors front-half reviews to real PR/MRs on the hub.
+half** runs once per story per code repo; **automation** is opt-in and earned. `yad-status` reads it
+all; `yad-hub-bridge` mirrors front-half reviews to real PR/MRs on the hub.
 
 ```mermaid
 flowchart TD
@@ -67,17 +67,17 @@ flowchart TD
     subgraph SETUP["0 · One-time setup (team lead, per project)"]
       direction TB
       inst["install skills<br/>+ wire each repo"]
-      conn["sdlc-connect-repos<br/>cache each repo's code-map"]
+      conn["yad-connect-repos<br/>cache each repo's code-map"]
       inst --> conn
     end
 
     subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
       direction TB
-      an["sdlc-author-analysis<br/>optional → analysis.md"]:::artifact
-      ep["sdlc-author-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
-      ar["sdlc-author-architecture<br/>architecture.md + locked contract.md"]:::artifact
-      ui["sdlc-author-ui<br/>ui-design.md + DESIGN.md"]:::artifact
-      st["sdlc-author-stories<br/>repo-tagged stories"]:::artifact
+      an["yad-analysis<br/>optional → analysis.md"]:::artifact
+      ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
+      ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
+      ui["yad-ui<br/>ui-design.md + DESIGN.md"]:::artifact
+      st["yad-stories<br/>repo-tagged stories"]:::artifact
       gAn{{"gate · analysis"}}:::gated
       gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
       gAr{{"gate · architecture<br/>escalated: + repo owners"}}:::gated
@@ -89,18 +89,18 @@ flowchart TD
 
     subgraph BUILD["B · Build half — per story, per code repo"]
       direction TB
-      sp["sdlc-spec<br/>→ specs/&lt;story&gt;/"]
-      im["sdlc-implement<br/>1 task = 1 branch = 1 commit"]:::earns
-      ck["sdlc-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
-      prm["open PR/MR + sdlc-pr-template route"]
-      eng{{"sdlc-ship · engineer review<br/>human · never automated"}}:::locked
+      sp["yad-spec<br/>→ specs/&lt;story&gt;/"]
+      im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
+      ck["yad-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
+      prm["open PR/MR + yad-pr-template route"]
+      eng{{"yad-ship · engineer review<br/>human · never automated"}}:::locked
       merged(["merge → build-log.json"]):::sentinel
       sp --> im --> ck --> prm --> eng --> merged
     end
 
     subgraph AUTO["C · Automation — earned & reversible"]
       direction TB
-      run["sdlc-run<br/>automation dial + trust-log.json"]:::earns
+      run["yad-run<br/>automation dial + trust-log.json"]:::earns
       kill["kill switch → all human_approve"]
       run --- kill
     end
@@ -108,9 +108,9 @@ flowchart TD
     conn --> an
     rfb --> sp
     run -. drives earned back steps .-> im
-    bridge["sdlc-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
+    bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
     bridge -. syncs approvals .-> gEp
-    status["sdlc-status — read-only view over all of it"]
+    status["yad-status — read-only view over all of it"]
     status -. observes .-> FRONT
     status -. observes .-> BUILD
 ```
@@ -137,7 +137,7 @@ Each step writes a file and then **stops at a gate**. A human moves it forward. 
 ## 3. One-time setup (the team lead does this once)
 
 **a. Create the product hub repo.** Just an empty git repo. You don't need to scaffold anything — the
-first `sdlc-author-epic` run creates `epics/EP-<slug>/` and its state files for you.
+first `yad-epic` run creates `epics/EP-<slug>/` and its state files for you.
 
 **b. Make sure your 3 code repos exist.** Each is its own separate git repo (its own `.git`).
 
@@ -160,47 +160,47 @@ npx yadflow setup
 ```bash
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
-for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
-         sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
-         sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill \
-         sdlc-run sdlc-status; do
+for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories \
+         yad-connect-repos yad-review-gate yad-spec yad-implement yad-checks \
+         yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
+         yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
 ```
 
-Re-run this block after you `git pull` updates into `sdlc-workflow`.
+Re-run this block after you `git pull` updates into `yadflow`.
 </details>
 >
-> **Alternative:** if you'd rather not have each person install, commit the `sdlc-*` skill folders into
+> **Alternative:** if you'd rather not have each person install, commit the `yad-*` skill folders into
 > the product hub repo itself (under `.claude/skills/`). Then anyone who clones the hub gets the skills
 > automatically. The user-level install above is the recommended default.
 
 **d. Wire each code repo once.** From inside the hub (or with the repo path), run for each of the 3 repos:
 
 ```text
-sdlc-checks          repo:<repo> action: wire   # installs the CI gates (merges with existing CI, never clobbers)
-sdlc-pr-template     repo:<repo> action: wire   # installs the PR/MR template + risk routing
-sdlc-review-comments repo:<repo> action: wire   # installs the PR/MR review-comment scaffold
+yad-checks          repo:<repo> action: wire   # installs the CI gates (merges with existing CI, never clobbers)
+yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + risk routing
+yad-review-comments repo:<repo> action: wire   # installs the PR/MR review-comment scaffold
 ```
 
-> **Wiring is additive.** `sdlc-checks` detects any CI you already have and *merges* the gates in
-> (GitHub: a separate `sdlc-checks.yml`; GitLab: an `include:` of `.gitlab/ci/sdlc-checks.yml`) — it
+> **Wiring is additive.** `yad-checks` detects any CI you already have and *merges* the gates in
+> (GitHub: a separate `yad-checks.yml`; GitLab: an `include:` of `.gitlab/ci/yad-checks.yml`) — it
 > never edits a foreign workflow. Re-running any `wire` is a no-op.
 
 **d2. Wire the product hub itself** (so the front-half review can run through real PRs on the hub):
 
 ```text
-sdlc-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
-sdlc-connect-repos action: roster login:<gh-login> name:<sdlc-name> role:<owner|reviewer>   # once per reviewer
-sdlc-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
-sdlc-review-comments repo:hub action: wire                         # hub's review-comment scaffold
-sdlc-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
-sdlc-hub-bridge      action: wire                                  # event-driven gate sync (CI runs `sdlc gate ci` on approve/request-changes/merge)
+yad-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
+yad-connect-repos action: roster login:<gh-login> name:<yad-name> role:<owner|reviewer>   # once per reviewer
+yad-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
+yad-review-comments repo:hub action: wire                         # hub's review-comment scaffold
+yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
+yad-hub-bridge      action: wire                                  # event-driven gate sync (CI runs `yad gate ci` on approve/request-changes/merge)
 ```
 
 The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
 derived from each repo's `domain_owner` in `repos.json` (not retyped). With the hub on a platform, the
-front-half gate opens a review PR per artifact and `sdlc-review-gate action: sync` pulls approvals/
+front-half gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
 comments back. No platform (or `bridge_enabled: false`)? The gate just runs file-only — skip d2.
 
 With the gate-sync CI wired, you usually don't run `sync` at all: every approval, change request, and
@@ -213,7 +213,7 @@ GitLab caveat: a bare approval is only picked up by the ~15-min scheduled sweep 
 hub, run once per code repo — and again any time you add a new one:
 
 ```text
-sdlc-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>
+yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>
 ```
 
 This registers the repo in `.sdlc/repos.json` and caches an AI-readable picture of it (a Repomix pack +
@@ -221,11 +221,11 @@ a lightweight **code-map** of its existing endpoints/events/data-models/modules,
 front-half steps then read that map so they don't re-design or contradict code that already exists.
 It clones/fetches as **you** (your own SSH key or git credential helper — GitHub *or* GitLab, no stored
 tokens). Greenfield with no code yet? Skip this — the brain just proceeds. When a repo's code moves,
-`sdlc-connect-repos action: refresh repo:<repo>`; to see freshness, `action: list`.
+`yad-connect-repos action: refresh repo:<repo>`; to see freshness, `action: list`.
 
 **f. Optional tools.** The workflow uses these if present and **degrades gracefully** (and records it)
 if they're missing: **Spec Kit** (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix**
-(`npx repomix`, used by `sdlc-connect-repos` and `sdlc-backfill`), **CodeRabbit** (advisory AI review).
+(`npx repomix`, used by `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review).
 You can start without any of them.
 
 ---
@@ -238,10 +238,10 @@ You can start without any of them.
 ```bash
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
-for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
-         sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
-         sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill \
-         sdlc-run sdlc-status; do
+for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories \
+         yad-connect-repos yad-review-gate yad-spec yad-implement yad-checks \
+         yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
+         yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
 ```
@@ -249,7 +249,7 @@ done
 3. That's it. Open Claude Code **in the product hub** to work on epics; open it **in a code repo** to
    build stories.
 
-To run a skill, just ask your agent by name — e.g. *"run `sdlc-author-epic`"*. All state is plain files
+To run a skill, just ask your agent by name — e.g. *"run `yad-epic`"*. All state is plain files
 you can also read and edit directly.
 
 ---
@@ -257,17 +257,17 @@ you can also read and edit directly.
 ## 5. Running an epic — the front half (in the product hub)
 
 Do these in order. After each author step, the matching review opens and **waits** — you clear it with
-`sdlc-review-gate` (`action: open → comment → approve → advance`).
+`yad-review-gate` (`action: open → comment → approve → advance`).
 
 | # | Run this | It produces | Then approve at |
 |---|----------|-------------|-----------------|
-| 0 *(optional)* | `sdlc-author-analysis` | `analysis.md` — the analyst's discovery brief (assigns the `EP-<slug>` ID, seeds state) | analysis review |
-| 1 | `sdlc-author-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
-| 2 | `sdlc-author-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
-| 3 | `sdlc-author-ui` | `ui-design.md` + `DESIGN.md` | UI review |
-| 4 | `sdlc-author-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
+| 0 *(optional)* | `yad-analysis` | `analysis.md` — the analyst's discovery brief (assigns the `EP-<slug>` ID, seeds state) | analysis review |
+| 1 | `yad-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
+| 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
+| 3 | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review |
+| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
 
-Step 0 is **optional**: run `sdlc-author-analysis` first for a dedicated, gated discovery pass; skip it
+Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discovery pass; skip it
 and the epic step does that analyst shaping inline. Each author step opens its own branch
 (`<step>/EP-<slug>`) at the start. When all front gates pass, the epic state reaches
 **`currentStep: ready-for-build`**. Now you can build.
@@ -277,9 +277,9 @@ and the epic step does that analyst shaping inline. Each author step opens its o
 > **cross-checks the contract against existing endpoints/models before locking it**, the UI reuses
 > existing components, and stories anchor to real modules. Each artifact records what it read in its
 > `code-context:` frontmatter. If a repo's code has moved since you connected it, the step warns and
-> points you at `sdlc-connect-repos action: refresh`.
+> points you at `yad-connect-repos action: refresh`.
 
-**The gate, every time** (`sdlc-review-gate`) — the same loop for all five reviews. Commenting never
+**The gate, every time** (`yad-review-gate`) — the same loop for all five reviews. Commenting never
 advances; only `advance` moves forward, and only when the rule is met:
 
 ```mermaid
@@ -308,24 +308,24 @@ flowchart LR
 
 From a `ready-for-build` story, do this **inside each code repo the story is tagged with**:
 
-1. **Spec** — `sdlc-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks +
+1. **Spec** — `yad-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks +
    `link.md` back to the story). It *quotes* the locked contract; it never widens it.
-2. **Implement** — `sdlc-implement story:<id> repo:<repo> task:<T0N>` → **one task = one branch = one
+2. **Implement** — `yad-implement story:<id> repo:<repo> task:<T0N>` → **one task = one branch = one
    commit**. Repeat per task. The first run installs a `.gitmessage` commit template: the human author
    owns the commit, with a required `Task:` trailer and an optional per-commit `Co-Authored-By:` for the
    AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
-3. **Check** — `sdlc-checks repo:<repo> action: run` → the gates must pass: spec-link,
+3. **Check** — `yad-checks repo:<repo> action: run` → the gates must pass: spec-link,
    contract-check, build/test/lint, and verified-commits (every commit signed with a
    platform-Verified key and authored by a roster-known email — on the hub and every repo).
 4. **Open the PR/MR** (the template is already wired) and run
-   `sdlc-pr-template repo:<repo> action: route` to print the required reviewers.
-5. **Ship** — `sdlc-ship` → AI review (advisory) → **engineer approval (a human)** → merge. The ship is
+   `yad-pr-template repo:<repo> action: route` to print the required reviewers.
+5. **Ship** — `yad-ship` → AI review (advisory) → **engineer approval (a human)** → merge. The ship is
    recorded in `build-log.json` and the story moves to `in-build` → `shipped`.
 
 **Multi-repo story?** A story tagged `repos: [backend, mobile]` just runs steps 1–5 in *each* repo,
 independently, all from the **one** locked contract.
 
-**Existing/legacy code?** Run `sdlc-backfill` first to produce a human-verified spec for the built
+**Existing/legacy code?** Run `yad-backfill` first to produce a human-verified spec for the built
 feature before changing it.
 
 ---
@@ -347,14 +347,14 @@ surfaces (`contract`, `auth`, `payments`):
 
 ## 8. Handy anytime
 
-- **See what's blocking:** `sdlc-status` (or `sdlc-status EP-<slug>`) — read-only view of the whole
+- **See what's blocking:** `yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start
   here when stuck.
-- **Automation is opt-in and earned.** You can ignore `sdlc-run` entirely at first — every step is
+- **Automation is opt-in and earned.** You can ignore `yad-run` entirely at first — every step is
   human-approved by default. Later, safe back-half steps can *earn* auto-advance once they prove
   themselves. The engineer review and all four front steps are **never** automatable.
-- **Global "back to manual" switch:** `sdlc-run action: kill` forces every step to human approval
-  instantly; `sdlc-run action: unkill` restores it.
+- **Global "back to manual" switch:** `yad-run action: kill` forces every step to human approval
+  instantly; `yad-run action: unkill` restores it.
 - **Keep the install in sync with the CLI** (run from the product hub):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).
@@ -386,28 +386,28 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 17)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
-| `sdlc-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
-| `sdlc-author-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
-| `sdlc-author-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
-| `sdlc-author-architecture` | Author `architecture.md` + the locked `contract.md`. |
-| `sdlc-author-ui` | Author `ui-design.md` + `DESIGN.md`. |
-| `sdlc-author-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
-| `sdlc-review-gate` | Review / comment / approve / advance **any** gate. |
-| `sdlc-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
-| `sdlc-review-comments` | Install the PR/MR review-comment scaffolds. |
-| `sdlc-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
-| `sdlc-implement` | Implement one atomic task as a small branch. |
-| `sdlc-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits). |
-| `sdlc-pr-template` | Install the platform PR/MR template + risk routing. |
-| `sdlc-ship` | AI review → engineer review → ship + record. |
-| `sdlc-backfill` | Spec already-built / legacy code so new work doesn't break it. |
-| `sdlc-run` | Drive the back half on the automation dial; kill switch. |
-| `sdlc-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
+| `yad-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
+| `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
+| `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
+| `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
+| `yad-ui` | Author `ui-design.md` + `DESIGN.md`. |
+| `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
+| `yad-review-gate` | Review / comment / approve / advance **any** gate. |
+| `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
+| `yad-review-comments` | Install the PR/MR review-comment scaffolds. |
+| `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
+| `yad-implement` | Implement one atomic task as a small branch. |
+| `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits). |
+| `yad-pr-template` | Install the platform PR/MR template + risk routing. |
+| `yad-ship` | AI review → engineer review → ship + record. |
+| `yad-backfill` | Spec already-built / legacy code so new work doesn't break it. |
+| `yad-run` | Drive the back half on the automation dial; kill switch. |
+| `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
 
 ---
 
 ## 11. Want more detail?
 
 - **`README.md`** — the complete reference for every phase, dial, gate, and all 17 skills.
-- **`RELEASING.md`** — how the `sdlc` CLI is published to npm.
+- **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

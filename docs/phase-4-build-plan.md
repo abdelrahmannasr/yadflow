@@ -1,7 +1,7 @@
 # Phase 4 — Build Plan
 
 > **Status:** Split into **4a** (Steps A + B) and **4b** (Steps C + D). **4a + Step D are built;
-> Step C is gated.** The `automation` dial is read by the orchestrator `sdlc-run`; every run is
+> Step C is gated.** The `automation` dial is read by the orchestrator `yad-run`; every run is
 > recorded in `.sdlc/trust-log.json`; back-half state lives in `.sdlc/build-state/<story>.json`. Earned
 > and demonstrated: `checks` (Step B) and `implement` → checks hand-off (Step D), each with 5 runs at
 > 100% approved-unchanged. `tasks` (Step C) and `spec` have their dials + trust hooks but stay
@@ -68,7 +68,7 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 - **Kill switch.** One command sets every step back to `human_approve` system-wide. If anything feels wrong, the whole pipeline reverts to fully manual instantly.
 - **Per-project, per-step dials.** Automation is set per project and per step, not globally. A mature project can automate more; a fragile or newly-onboarded one stays manual. Existing projects just brought in via backfill start fully manual.
 - **Halt-and-escalate beats guess.** Any automated step that hits ambiguity, a failing check, a scope overrun, or a contract-surface touch must halt and pull in a human, not proceed on a guess.
-- **The trust log is visible.** `sdlc-status` shows, per step, its dial setting and its recent trust record, so the team can see *why* a step is automated and reverse it with evidence.
+- **The trust log is visible.** `yad-status` shows, per step, its dial setting and its recent trust record, so the team can see *why* a step is automated and reverse it with evidence.
 
 ---
 
@@ -85,7 +85,7 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 
 **Phase 4a (Steps A + B) — done:**
 - The `automation` dial actually changes engine behavior; flipping a step to `machine_advance` makes it advance without a human, and flipping it back restores the manual gate — with no code change.
-- A trust log records every step's runs and is surfaced in `sdlc-status`.
+- A trust log records every step's runs and is surfaced in `yad-status`.
 - The check-gate advance (Step B) runs automatically on clean pass, halts on failure — demonstrated both ways.
 - The four front states (and the engineer review) are verified locked to `human_approve`; an attempt to set one to `machine_advance` is refused, as is flipping a back step whose trust evidence is short.
 - Kill switch works: one command returns the whole system to manual, demonstrated.
@@ -94,10 +94,10 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 
 **Phase 4b Step D — done:**
 - The `implement → check` hand-off runs `machine_advance` on a project that has earned it (`implement` trust slice clears the threshold — 5 runs, 100% unchanged, seeded honestly from the real ships), demonstrated on the demo story; a scope overrun and a contract-surface touch are each shown halting the otherwise-automated run.
-- `spec` and `tasks` trust hooks record a defined, human-anchored verdict, surfaced in `sdlc-status`.
+- `spec` and `tasks` trust hooks record a defined, human-anchored verdict, surfaced in `yad-status`.
 
 **Phase 4b Step C — gated (hook built, dial not flipped):**
-- `tasks` advance is built into the engine and its trust hook records evidence, but the dial stays `human_approve` until genuine `tasks`/`spec` runs clear the threshold — no evidence was fabricated to unlock it. It is enabled per project only on real runs (or left manual with the reason shown in `sdlc-status`).
+- `tasks` advance is built into the engine and its trust hook records evidence, but the dial stays `human_approve` until genuine `tasks`/`spec` runs clear the threshold — no evidence was fabricated to unlock it. It is enabled per project only on real runs (or left manual with the reason shown in `yad-status`).
 
 ---
 
@@ -105,4 +105,4 @@ End state: the back of the pipeline (e.g. tasks → implement → checks) can ru
 
 The optional service layer: a small, rebuildable read-index and/or a daemon that can watch repos and run earned-automation steps unattended (e.g. overnight), plus a read-only dashboard across features and projects. Built ONLY when the CLI genuinely can't keep up — and even then, git stays the source of truth and the service stays a rebuildable layer on top, never the system of record. Add it when a real bottleneck is measured, not before.
 
-The full trigger-gated build plan — its three independently-shipped parts, what must be **measured** before each is built, the hard rules they inherit, and the instrumentation already shipped in `sdlc-status` so the decision is data-driven — is `docs/phase-5-build-plan.md`.
+The full trigger-gated build plan — its three independently-shipped parts, what must be **measured** before each is built, the hard rules they inherit, and the instrumentation already shipped in `yad-status` so the decision is data-driven — is `docs/phase-5-build-plan.md`.
