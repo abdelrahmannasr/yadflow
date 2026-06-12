@@ -30,6 +30,12 @@ jobs:
       - name: Test
         run: npm test
 
+      # Threshold flags need Node >= 22.8 — gate on the 22 leg only. Floors, not targets:
+      # raise them as coverage grows, never lower them to make a change pass.
+      - name: Coverage gate (lines >= 70%, branches >= 70%)
+        if: matrix.node-version == 22
+        run: npm run coverage
+
       - name: Pack smoke (tarball contents)
         if: matrix.node-version == 22
         run: |
