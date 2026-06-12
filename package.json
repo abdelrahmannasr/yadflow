@@ -7,11 +7,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/abdelrahmannasr/sdlc-workflow.git"
+    "url": "git+https://github.com/abdelrahmannasr/yadflow.git"
   },
-  "homepage": "https://github.com/abdelrahmannasr/sdlc-workflow#readme",
+  "homepage": "https://github.com/abdelrahmannasr/yadflow#readme",
   "bugs": {
-    "url": "https://github.com/abdelrahmannasr/sdlc-workflow/issues"
+    "url": "https://github.com/abdelrahmannasr/yadflow/issues"
   },
   "bin": {
     "sdlc": "bin/sdlc.mjs"

@@ -167,8 +167,7 @@
     <h1>Yadflow — Terminology &amp; Structure Report</h1>
     <p><strong>Yadflow</strong> (<em>yahd-flow</em> — from <strong>يد</strong>, Arabic for “hand”) is the AI-driven SDLC
     where a human hand moves every gate. <em>AI builds. The hand decides.</em><br>
-    A plain-language guide to every term used in the project (npm: <code style="background:rgba(255,255,255,.15);color:#fff">yadflow</code>;
-    GitHub repo: <code style="background:rgba(255,255,255,.15);color:#fff">sdlc-workflow</code>),
+    A plain-language guide to every term used in the project (npm + GitHub: <code style="background:rgba(255,255,255,.15);color:#fff">yadflow</code>),
     plus the full workflow structure with diagrams — including how to run it on a brand-new (greenfield) project,
     an existing (brownfield) project, and a multi-repo product.</p>
   </div>
@@ -210,7 +209,7 @@
   <div class="diagram">
     <div class="flow-h" style="align-items:flex-start; gap:18px">
       <div class="flow-v" style="flex:1; min-width:220px">
-        <div class="node plain"><strong>sdlc-workflow</strong><small>the SKILLS SOURCE — you install the workflow from here and pull updates from here. No product work happens inside it.</small></div>
+        <div class="node plain"><strong>yadflow</strong><small>the SKILLS SOURCE — you install the workflow from here and pull updates from here. No product work happens inside it.</small></div>
       </div>
       <div class="arrow-h">➜</div>
       <div class="flow-v" style="flex:1; min-width:220px">
@@ -439,7 +438,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br><code>sdlc-workflow</code> itself — where the 17 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 17 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -1208,9 +1207,9 @@ sdlc repo refresh backend</code></pre>
     Generated 2026-06-12 from the project’s own docs: <code>README.md</code>, <code>TEAM-GUIDE.md</code>,
     and <code>docs/sdlc-workflow-plan.md</code> (incl. §8 “The three project types”).
     A worked end-to-end example lives in <code>epics/EP-istifta-inquiries/</code>.
-    Renamed <strong>Yadflow</strong> (npm: <code>yadflow</code>) at v1.4.0 — previously published as
-    <code>@abdelrahmannasr/sdlc-workflow</code>, now deprecated; the GitHub repo keeps its
-    <code>sdlc-workflow</code> name.
+    Renamed <strong>Yadflow</strong> at v1.4.0 — npm package previously <code>@abdelrahmannasr/sdlc-workflow</code>
+    (now deprecated), GitHub repo previously <code>sdlc-workflow</code> (old URLs redirect); both are now
+    <code>yadflow</code>.
   </footer>
 </section>
 
