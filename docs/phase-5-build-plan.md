@@ -13,8 +13,8 @@ Phase 5 is the **optional service layer**: a small hosted piece that can watch r
 Phase 5 has three parts that ship independently, each fixing a different bottleneck. **Build a part only when its bottleneck is measured** — and the two later parts only after Part 1 is in use. Do not build the whole phase as a unit, and do not build any part for an audience of one.
 
 - **Part 1 (read-index)** — build when there is a **measured read/parse bottleneck the CLI cannot fix**: e.g. CI spends meaningful time cloning and parsing the product repo on every run, and you have the numbers. This can be true with a single project.
-- **Part 2 (unattended runner)** — build when there is **earned automation with real value in running unattended**: Phase 4 produced steps trusted at `machine_advance`, and the *nudge-cost* signal (`sdlc-status`: earned-but-`human_approve` steps, and earned steps that could safely run overnight) is sustained and growing, not a one-off.
-- **Part 3 (dashboard)** — build when **more than one project actively uses the system**, so a cross-project view is actually used. The *scale-of-read* signal (`sdlc-status` fleet roll-up no longer fits in a glance) is the trigger.
+- **Part 2 (unattended runner)** — build when there is **earned automation with real value in running unattended**: Phase 4 produced steps trusted at `machine_advance`, and the *nudge-cost* signal (`yad-status`: earned-but-`human_approve` steps, and earned steps that could safely run overnight) is sustained and growing, not a one-off.
+- **Part 3 (dashboard)** — build when **more than one project actively uses the system**, so a cross-project view is actually used. The *scale-of-read* signal (`yad-status` fleet roll-up no longer fits in a glance) is the trigger.
 
 If none of these is measured, **stop. Do not build Phase 5.** Keep using the CLI. Re-check in a few months — and check the instrumentation, not your gut.
 
@@ -40,7 +40,7 @@ The cheapest, safest piece, and often the only one actually needed.
 - Stop here and use it. For many teams this is the whole of Phase 5.
 
 ### Part 2 — The unattended runner (only if the nudge-cost bottleneck is real)
-- A daemon that can execute **earned-automation** steps without a person present (e.g. run the trusted back-half on queued stories overnight). It is the *same* `sdlc-run` a human would invoke — a scheduler for already-approved automation, with no new decision logic.
+- A daemon that can execute **earned-automation** steps without a person present (e.g. run the trusted back-half on queued stories overnight). It is the *same* `yad-run` a human would invoke — a scheduler for already-approved automation, with no new decision logic.
 - It may ONLY advance steps already set to `machine_advance` for that project (Phase 4 rules fully apply). It may never advance a `human_approve` step, never a front state, never bypass the engineer review before merge.
 - Every safety mechanism from Phase 4 applies unchanged: scope guard, contract-surface halt, **halt-and-escalate over guessing — which means it stops and notifies a human**, never proceeds on a guess just because no one is watching — and the kill switch, which must stop the runner too.
 - The runner records what it did as files in git, same as a human-triggered run, so the trace is identical.
@@ -54,10 +54,10 @@ The cheapest, safest piece, and often the only one actually needed.
 
 ## What to instrument now (so the trigger is decidable later)
 
-This is **already built** in Phase 4b, so the Phase 5 decision is measured, not guessed. Both signals are **read-only and derived** — `sdlc-status` computes them from the `trust-log.json` + `build-state/` files already on disk, adding no new state file, costing nothing, and fully reversible:
+This is **already built** in Phase 4b, so the Phase 5 decision is measured, not guessed. Both signals are **read-only and derived** — `yad-status` computes them from the `trust-log.json` + `build-state/` files already on disk, adding no new state file, costing nothing, and fully reversible:
 
-- **Nudge cost (gates Part 2).** `sdlc-status` flags any back step that is **earned but still `human_approve`** (`⚠ earned but manual — could be machine_advance`). That gap is automation proven safe yet still hand-started. A sustained, growing set of these — especially steps that could safely run overnight — is the Part 2 trigger.
-- **Scale of read (gates Part 3).** `sdlc-status` prints a **fleet roll-up** across epics (one line per epic + fleet totals). When it stops fitting in one glance, that is the measured Part 3 bottleneck.
+- **Nudge cost (gates Part 2).** `yad-status` flags any back step that is **earned but still `human_approve`** (`⚠ earned but manual — could be machine_advance`). That gap is automation proven safe yet still hand-started. A sustained, growing set of these — especially steps that could safely run overnight — is the Part 2 trigger.
+- **Scale of read (gates Part 3).** `yad-status` prints a **fleet roll-up** across epics (one line per epic + fleet totals). When it stops fitting in one glance, that is the measured Part 3 bottleneck.
 - **Read/parse cost (gates Part 1).** Not yet instrumented because it lives in CI, not the SDLC files: record CI's clone+parse time of the product repo per run. When it is a meaningful, repeated cost, that is the Part 1 trigger. (If/when Part 2 pressure appears, the next pre-service increment is event-level logging of earned-step wait *time* in a sibling `automation-metrics.json` — build that only if the snapshot signals say it is needed.)
 
 These turn the Phase 5 decision from a gut call into a measured one — the entire point of how this system is built.

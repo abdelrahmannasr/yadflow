@@ -114,7 +114,7 @@
    provided by **skills**: `bmad-create-story`, `bmad-sprint-planning`, `bmad-dev-story`. Our story
    steps reference those skills, not a non-existent `sm` agent.
 2. **Custom module code lives in `{project-root}/skills/`**, not `_bmad/custom/`. `_bmad/custom/` is
-   config overrides only. We keep the `sdlc` module source in `skills/` and install copies into the
+   config overrides only. We keep the `yad` module source in `skills/` and install copies into the
    IDE skill dirs; re-running install restores them after a BMAD update.
 3. **Spec Kit and Impeccable are AI-harness slash-commands, not subprocess CLIs.** Only
    `npx repomix` and `npx impeccable detect` are true subprocesses. The future "glue" engine must
@@ -123,8 +123,8 @@
 
 ## Phase 2 decisions (front-half build)
 
-> Recorded 2026-06-06 while building front states 3/5/7 (`sdlc-author-architecture`,
-> `sdlc-author-ui`, `sdlc-author-stories`) and reusing the one gate for all four reviews.
+> Recorded 2026-06-06 while building front states 3/5/7 (`yad-architecture`,
+> `yad-ui`, `yad-stories`) and reusing the one gate for all four reviews.
 
 - **Contract representation = delimited surface block + SHA-256 lock.** `contract.md` wraps the shared
   cross-repo surface (API / events / data model, charter altitude) between the exact markers
@@ -135,12 +135,12 @@
   **Verified 2026-06-06:** the hash round-trips (unchanged content → identical digest) and detects
   drift (any edit inside the block changes the digest). This is what the Phase 3 contract-check will
   diff against; a field-by-field structured diff is deferred to Phase 3. Full spec:
-  `skills/sdlc-author-architecture/references/contract-format.md`.
+  `skills/yad-architecture/references/contract-format.md`.
 
 - **Impeccable slash-command names confirmed** (already in §4, restated for the UI step): `/impeccable
   document` → `/impeccable extract` → `/impeccable craft` (existing project); `/impeccable craft` →
   `/impeccable extract` (new project). **Not installed in this repo as of 2026-06-06.** Decision:
-  `sdlc-author-ui` documents these slash-commands and **degrades gracefully** — when Impeccable is
+  `yad-ui` documents these slash-commands and **degrades gracefully** — when Impeccable is
   absent the `ux-designer` lens authors `ui-design.md` + `DESIGN.md` directly and records
   `impeccable: not-installed` in the artifact frontmatter. No `npx impeccable skills install` is run in
   Phase 2 (tool install is out of the front-half scope).
@@ -153,9 +153,9 @@
 
 ## Phase 3 decisions (build-half Step A)
 
-> Recorded 2026-06-06 while building Step A (`sdlc-spec`) — the Spec Kit handoff — on one repo
+> Recorded 2026-06-06 while building Step A (`yad-spec`) — the Spec Kit handoff — on one repo
 > (`backend`), one story (`EP-istifta-inquiries-S01`). Per `docs/phase-3-build-plan.md` Step A is the
-> riskiest integration and is built/verified **alone** before Step B (`sdlc-implement`).
+> riskiest integration and is built/verified **alone** before Step B (`yad-implement`).
 
 - **Spec Kit command names confirmed for Step A** (DoD: "Command names recorded in
   `RESEARCH-NOTES.md`"). The heavy ceremony runs **once per story per repo**, in order:
@@ -171,9 +171,9 @@
   numbered auto-slug (which is unstable and would sever the downstream story link). `link.md` is the
   crosswalk backstop if a Spec Kit version forces its own folder name.
 
-- **Installed-vs-degraded decision.** `sdlc-spec` drives `/speckit.*` when installed; when absent it
+- **Installed-vs-degraded decision.** `yad-spec` drives `/speckit.*` when installed; when absent it
   hand-authors the same files in Spec Kit's layout and records `speckit: not-installed` in `link.md`
-  (same graceful-degradation pattern as Impeccable in `sdlc-author-ui`). **Spec Kit is not installed in
+  (same graceful-degradation pattern as Impeccable in `yad-ui`). **Spec Kit is not installed in
   this repo as of 2026-06-06**, so Step A was verified primarily via the **degraded** path. The files
   match Spec Kit's layout so a later real run (or Step B) reads them unchanged.
 
@@ -185,7 +185,7 @@
 
 ## Phase 3 decisions (build-half Step B)
 
-> Recorded 2026-06-06 while building Step B (`sdlc-implement`) — the `dev` step — and proving it on
+> Recorded 2026-06-06 while building Step B (`yad-implement`) — the `dev` step — and proving it on
 > one atomic task (`T01`) of `EP-istifta-inquiries-S01` in the separate `demo-repos/backend` repo.
 > Per `docs/phase-3-build-plan.md` §B: one atomic task = one branch = one PR/MR.
 
@@ -210,11 +210,11 @@
 
 ## Phase 3 decisions (build-half Step C)
 
-> Recorded 2026-06-06 while building Step C (`sdlc-checks`) — the production-safety check gates — and
+> Recorded 2026-06-06 while building Step C (`yad-checks`) — the production-safety check gates — and
 > proving them on `demo-repos/backend` (story `EP-istifta-inquiries-S01`). Per
 > `docs/phase-3-build-plan.md` §C the gates are separate, simple CI checks that must pass before merge.
 
-- **Three gates, CI-agnostic bash** (canonical source: `skills/sdlc-checks/templates/checks/`):
+- **Three gates, CI-agnostic bash** (canonical source: `skills/yad-checks/templates/checks/`):
   - **spec-link** — fails unless the change carries a `Task: <story>-<task>` trailer whose `<story>`
     resolves to `specs/<story>/link.md`. Anchors every diff to a real story/spec.
   - **contract-check** — a diff touching the repo's contract slice (`specs/*/contracts/**`) must carry
@@ -226,7 +226,7 @@
   - **Fail closed.** spec-link and contract-check both hard-fail when the base ref can't be resolved
     (shallow clone / wrong base), so a CI misconfiguration can never silently green-light a bypass.
 - **Platform = both** (per the Step A planning decision). GitHub Actions
-  (`.github/workflows/sdlc-checks.yml`) and GitLab CI (`.gitlab-ci.yml`) both invoke the same scripts;
+  (`.github/workflows/yad-checks.yml`) and GitLab CI (`.gitlab-ci.yml`) both invoke the same scripts;
   GitHub is this product repo's platform, GitLab is the build plan's stated team CI. The check logic
   lives in `checks/*.sh`, so the CI config is a thin invoker on either platform.
 - **Tooling confirmed.** `node --check` is a real, dependency-free syntax lint; `node --test` is Node
@@ -236,20 +236,20 @@
   all three PASS. Bad PR A (code change, **no** `Task:` trailer) → spec-link FAILS. Bad PR B (edits
   `specs/.../contracts/inquiries.md` to widen the surface, with a `Task:` trailer but **no**
   `Contract-Change`) → spec-link passes, contract-check FAILS. The build/test/lint test was provided by
-  running the `sdlc-implement` loop for task **T03** (server-owned status: `test/inquiry.create.test.js`
+  running the `yad-implement` loop for task **T03** (server-owned status: `test/inquiry.create.test.js`
   exercising AC #1 + AC #3). T01 was merged into the backend's `master` by hand (Step E ship is not
   built yet) so subsequent task PRs build on it — Phase 3 is run by hand; nothing auto-advances.
 
 ## Phase 3 decisions (build-half Step D)
 
-> Recorded 2026-06-06 while building Step D (`sdlc-pr-template`) — the PR/MR template + risk routing —
+> Recorded 2026-06-06 while building Step D (`yad-pr-template`) — the PR/MR template + risk routing —
 > and proving it on `demo-repos/backend`. Per `docs/phase-3-build-plan.md` §D: drop only the matching
 > platform template, with an Impact & Risk block; `high` risk routes to domain owners.
 
-- **Platform-matched template.** `sdlc-pr-template` detects the platform and drops **only** the
+- **Platform-matched template.** `yad-pr-template` detects the platform and drops **only** the
   matching template: GitHub → `.github/pull_request_template.md`; GitLab →
   `.gitlab/merge_request_templates/Default.md`. Both canonical templates live under
-  `skills/sdlc-pr-template/templates/`. The demo repo is GitHub, so only the GitHub template was
+  `skills/yad-pr-template/templates/`. The demo repo is GitHub, so only the GitHub template was
   committed there.
 - **Impact & Risk block** — every PR/MR states: domains/repos touched, contract-surface touched
   (yes/no), risk level (`low | medium | high`), rollback plan. A checklist ties the PR to the Step C
@@ -257,8 +257,8 @@
 - **Risk routing reuses the gate's escalation.** `checks/risk-route.sh` reads the block and prints the
   required reviewers: `low`/`medium` → base rule (owner + 1 reviewer); **`high` — or a touched
   contract/auth/payments surface — → base rule plus one domain-owner approval per touched domain**,
-  identical to `sdlc-review-gate`. It is **advisory** (routes the human review; never approves/merges);
-  the approvals are recorded by the engineer review (Step E) through `sdlc-review-gate`.
+  identical to `yad-review-gate`. It is **advisory** (routes the human review; never approves/merges);
+  the approvals are recorded by the engineer review (Step E) through `yad-review-gate`.
 - **Demonstrated (DoD).** A high-risk PR body (`backend, mobile`) routed to **both** domain owners; a
   low-risk PR used the base rule; a low-risk-but-contract-touched PR also escalated to both domain
   owners. (Bash note: the domain split uses a trailing newline so the last domain isn't dropped by
@@ -266,13 +266,13 @@
 
 ## Phase 3 decisions (build-half Step E)
 
-> Recorded 2026-06-06 while building Step E (`sdlc-ship`) — AI review + engineer review + ship — and
+> Recorded 2026-06-06 while building Step E (`yad-ship`) — AI review + engineer review + ship — and
 > shipping story `EP-istifta-inquiries-S01` end to end. Per `docs/phase-3-build-plan.md` §E.
 
 - **Two sets of eyes.** AI review is **advisory** — CodeRabbit (`.coderabbit.yaml`, `request_changes_workflow: false`)
   comments on every PR but never approves or merges. The **engineer review** is the authority: a human
   reads the diff against the spec and records an approval with the same `human_approve` discipline as
-  the front gates, reusing `sdlc-review-gate`'s rule — base (owner + 1 reviewer), escalating to a
+  the front gates, reusing `yad-review-gate`'s rule — base (owner + 1 reviewer), escalating to a
   domain-owner per touched domain on high risk / contract / auth / payments (the Step D routing).
 - **Back-half state = files, like the front half.** Ship records go in
   `epics/<epic>/.sdlc/build-log.json` (append-only — the analogue of `approvals.json`): one record per
@@ -282,7 +282,7 @@
 - **Traceability proven both ways.** epic → story → `tasks.md` → `build-log.json` ship → `mergeCommit`,
   and back: a merge commit's `Task:` trailer → story → epic. Verified on S01.
 - **Demonstrated (DoD).** AI review wired (advisory). S01 shipped **end to end**: T03 and T02 built via
-  the `sdlc-implement` loop and merged after their gates passed **pre-merge** (spec-link, contract-check,
+  the `yad-implement` loop and merged after their gates passed **pre-merge** (spec-link, contract-check,
   build/test/lint all PASS) and an engineer review (amelia owner + carol reviewer, low risk → base
   rule); T01 (already merged in the Step C demo) recorded too. All three tasks in `tasks.md` have ship
   records, so S01 is `status: shipped`; `build-log.json` holds the full chain. Gates run **before** the
@@ -298,7 +298,7 @@
 
 - **One contract, two repos.** A second throwaway repo `demo-repos/mobile/` (own git, gitignored) was
   scaffolded with the **same** canonical gate scripts + PR template + `.coderabbit.yaml`. S03 was
-  spec'd (`sdlc-spec`) in **both** `backend` and `mobile` under the same story id; both `link.md` pin
+  spec'd (`yad-spec`) in **both** `backend` and `mobile` under the same story id; both `link.md` pin
   the **identical** contract hash `sha256:4abbbbc5…`, equal to the product repo's
   `contract-lock.json`. The backend slice implements the scholar endpoints; the mobile slice consumes
   them — neither defines the surface.
@@ -316,7 +316,7 @@
 
 ## Phase 3 decisions (build-half Step G — backfill)
 
-> Recorded 2026-06-06 while building Step G (`sdlc-backfill`) and backfilling one existing feature in
+> Recorded 2026-06-06 while building Step G (`yad-backfill`) and backfilling one existing feature in
 > `demo-repos/backend`. Per `docs/phase-3-build-plan.md` §G.
 
 - **Repomix confirmed runnable as a CLI** — `npx repomix@latest` resolved to **v1.14.1** here (Node 20
@@ -328,7 +328,7 @@
   backfilled into `specs/backfill/health/spec.md` with a **"describe what exists, do not invent"**
   prompt — hard-coded `status/checks` recorded as built, and the unknowns (no HTTP route for it in the
   pack) marked `<!-- unverified: … -->` rather than guessed. Frontmatter `verified: false` until a human
-  approves (reusing `sdlc-review-gate`: owner + 1 reviewer), then `verified: true` + `status: approved`.
+  approves (reusing `yad-review-gate`: owner + 1 reviewer), then `verified: true` + `status: approved`.
 - **Boundary: auto-propose, human-confirm.** The feature boundary (`src/<feature>/`) is proposed from
   the convention and confirmed by a human before packing.
 - **Gated per touched feature (DoD).** `checks/backfill-check.sh` blocks a change touching a feature
@@ -341,12 +341,12 @@
 > All of Phase 3 (build half) is built and proven on the worked demo. The team can run the whole build
 > half by hand; `README.md` documents it.
 
-- **Steps A–G complete.** A `ready-for-build` story goes: spec (`sdlc-spec`, Spec Kit) → implement
-  (`sdlc-implement`, one atomic task = one branch) → check gates (`sdlc-checks`: spec-link,
-  contract-check, build/test/lint) → PR/MR template + risk routing (`sdlc-pr-template`) → AI review +
-  engineer review + ship (`sdlc-ship`, build-log + story state). Proven single-repo (S01 shipped end to
+- **Steps A–G complete.** A `ready-for-build` story goes: spec (`yad-spec`, Spec Kit) → implement
+  (`yad-implement`, one atomic task = one branch) → check gates (`yad-checks`: spec-link,
+  contract-check, build/test/lint) → PR/MR template + risk routing (`yad-pr-template`) → AI review +
+  engineer review + ship (`yad-ship`, build-log + story state). Proven single-repo (S01 shipped end to
   end), multi-repo (S03 in backend + mobile from one locked contract, bypass blocked per repo), and
-  backfill (`sdlc-backfill` for an existing feature, human-approved, gated per touched feature).
+  backfill (`yad-backfill` for an existing feature, human-approved, gated per touched feature).
 - **Nothing auto-advances** anywhere in Phase 3 — every gate is `human_approve`; AI review is advisory.
   End-first automation (`machine_advance`) begins in Phase 4a (below); the optional service layer is
   the conditional Phase 5.
@@ -359,10 +359,10 @@
 > review stay `human_approve` forever.
 
 - **The dial is now read by an engine.** Before Phase 4 the `automation` dial was inert config. The
-  new orchestrator `sdlc-run` reads it and acts: for the back half (`spec → tasks → implement →
+  new orchestrator `yad-run` reads it and acts: for the back half (`spec → tasks → implement →
   checks`) it advances on its own when a step is `machine_advance`, and stops for a human on
-  `human_approve`. There is no daemon — "the engine" is the harness running `sdlc-run`, which calls the
-  existing step skills (`sdlc-spec`, `sdlc-implement`, `sdlc-checks`) **unchanged** and owns only the
+  `human_approve`. There is no daemon — "the engine" is the harness running `yad-run`, which calls the
+  existing step skills (`yad-spec`, `yad-implement`, `yad-checks`) **unchanged** and owns only the
   *advance decision* + the trust record.
 - **Back-half state is now dial-bearing.** Phase 3 recorded build progress only after the fact in
   `build-log.json`. New per-story `.sdlc/build-state/<story-id>.json` (per repo) carries each back
@@ -370,10 +370,10 @@
 - **Trust log = the evidence base.** New append-only `.sdlc/trust-log.json` records one entry per step
   run with a derived verdict (`rejected` on any check FAIL / scope overrun / contract touch;
   `approved-with-edits` if a human edited the diff; else `approved-unchanged`). The engineer review in
-  `sdlc-ship` confirms/overrides the provisional verdict — a human always has the last word on trust.
+  `yad-ship` confirms/overrides the provisional verdict — a human always has the last word on trust.
 - **Earned per step, with evidence.** A step may be flipped to `machine_advance` only once its
   trust-log slice clears `config.yaml` `automation.trust_threshold` (default `min_runs: 5`,
-  `min_approved_unchanged: 0.8`). `sdlc-run action: set-dial` enforces it and refuses front states /
+  `min_approved_unchanged: 0.8`). `yad-run action: set-dial` enforces it and refuses front states /
   `engineer-review` outright (`automation.locked_steps`).
 - **Demonstrated on the worked epic (artifact-level, with real data):**
   - `trust-log.json` is seeded from the five real ships in `build-log.json` — each shipped task passed
@@ -385,19 +385,19 @@
     `checks` flipped to `machine_advance` (earned) and `engineer-review` `locked`. **Step B** is thereby
     realized: the next task on either repo auto-advances on a clean gate pass and stops at the human
     engineer review.
-  - **Dial both ways / halt / locks / kill switch** are specified in `sdlc-run` and walked here: flip
+  - **Dial both ways / halt / locks / kill switch** are specified in `yad-run` and walked here: flip
     `checks` back to `human_approve` → the run stops at checks (no code change, only the dial); a gate
     FAIL / scope overrun / contract touch → halt, `blocked`, `rejected` trust entry, pull in a human; an
     attempt to set `epic` or `engineer-review` to `machine_advance` → refused; `action: kill` forces
     every effective dial to `human_approve` system-wide (one line in `config.yaml`), `unkill` restores.
-  - **Visibility:** `sdlc-status` now prints, per story-repo, the back-half chain with each step's dial
+  - **Visibility:** `yad-status` now prints, per story-repo, the back-half chain with each step's dial
     and status, the trust record (runs / % unchanged / earned-vs-gathering), and the kill-switch state.
 - **Config & JSON validated:** `config.yaml` `automation` block parses (YAML OK); `trust-log.json` and
   `build-state/*.json` are valid JSON; the earned/not-earned math was computed against the threshold.
 
 ## Phase 4b decisions (automation — Step D earned, Step C gated)
 
-> 4b earns the next back step the engine already supported. The big realization: `sdlc-run`'s loop,
+> 4b earns the next back step the engine already supported. The big realization: `yad-run`'s loop,
 > `set-dial`, the threshold, locks, and kill switch (all from 4a) already cover `tasks`/`implement`
 > generically — so 4b is small. What 4a left out was the **trust signal for steps that don't emit a
 > gate** (`spec`/`tasks` produce documents, not pass/fail), and the **evidence** to earn them honestly.
@@ -405,18 +405,18 @@
 - **Two new trust hooks, each anchored to an existing human gate (never self-graded):**
   - `spec` — verdict finalized when the human accepts `specs/<story>/`: untouched →
     `approved-unchanged`; edited first → `approved-with-edits` (`human_edited_spec`); rejected/re-run →
-    `rejected`. Recorded by `sdlc-spec` Step 8 (only under `sdlc-run`).
-  - `tasks` — verdict finalized when `sdlc-implement` first consumes a task (the list "survived
+    `rejected`. Recorded by `yad-spec` Step 8 (only under `yad-run`).
+  - `tasks` — verdict finalized when `yad-implement` first consumes a task (the list "survived
     contact"): implemented with declared `Files:`/scope as generated → `approved-unchanged`; re-scoped
     first → `approved-with-edits` (`task_rescoped`); discarded → `rejected`. Recorded by
-    `sdlc-implement` Step 8.
+    `yad-implement` Step 8.
   - The verdict derivation is now the same three-way shape for every back step (run-loop.md):
     `rejected` on any FAIL / scope overrun / contract touch / discarded artifact; `approved-with-edits`
     if any `human_edited_*` / `task_rescoped`; else `approved-unchanged`.
 - **Step D (`implement → check` hand-off) earned — honestly.** The five real ships in `build-log.json`
   are diffs that merged **as authored** → five `implement` runs, all `approved-unchanged`. That slice
   computes **5 runs, 100% → clears the threshold**, exactly as `checks` did. So `implement` is flipped
-  to `machine_advance` on the demo story (`build-state/...-S03.json`), and `sdlc-run` auto-runs the
+  to `machine_advance` on the demo story (`build-state/...-S03.json`), and `yad-run` auto-runs the
   gates after a committed branch. The merge still needs the gates to pass AND the engineer review;
   Step D removes only the manual "now run the gates" nudge.
 - **Step C (`tasks` advance) deliberately NOT earned.** `tasks`/`spec` have **zero** recorded runs and
@@ -424,7 +424,7 @@
   manufacture their evidence. Per the one principle ("earned per step, with evidence; 'it seems fine'
   is not evidence"), their dials stay `human_approve`. The hook + gate are built; the dial flips only
   when genuine runs clear the threshold. Refusing to fabricate evidence is the point, not a gap.
-- **No engine change.** `sdlc-run`'s loop already walks `tasks`/`implement` and `set-dial` already
+- **No engine change.** `yad-run`'s loop already walks `tasks`/`implement` and `set-dial` already
   gates any back step on the threshold — verified, not rebuilt. Scope-overrun and contract-touch halts
   (4a) still fire under an automated `implement → checks` run, overriding the dial.
 - **Validated:** `implement` slice = 5 runs / 100% → earned; `tasks`/`spec` = 0 runs → `set-dial`

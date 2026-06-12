@@ -11,7 +11,7 @@ product_root: "{project-root}"
 epics_folder: "{project-root}/epics"
 
 # Core configuration values (inherited convention from _bmad/config.toml).
-project_name: sdlc-workflow
+project_name: yadflow
 communication_language: English
 document_output_language: English
 output_folder: "{project-root}/_bmad-output"
@@ -25,15 +25,15 @@ defaults:
   front_steps_locked: true
   # Each front authoring step opens its own branch at the start of the step (the <step> is the step id:
   # analysis | epic | architecture | ui-design | stories). Git/greenfield-safe; distinct from the
-  # bridge's review branch (hub.artifact_branch). See sdlc-author-epic/references/state-schema.md.
+  # bridge's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
   front_authoring_branch: "<step>/EP-<slug>"
 
 # Team review gate defaults (build plan §3 piece 2, §4).
 review_gate:
   default_reviewers: 1          # non-owner reviewers required (in addition to 1 owner) => owner + 1 reviewer
   escalate_when: [contract, auth, payments]   # escalate to domain owners
-  # PR-driven automation (the `sdlc gate` CLI). With a hub platform, the review rides the per-step
-  # PR/MR: `sdlc gate sync` maps platform reviews/threads into the file ledger and the step
+  # PR-driven automation (the `yad gate` CLI). With a hub platform, the review rides the per-step
+  # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
   # AUTO-ADVANCES on merge, once (a) the reviewer rule is met, (b) every comment thread is resolved,
   # and (c) the review PR/MR is merged. The merge is the human approval act, so front steps still never
   # machine_advance. The file ledger stays the source of truth; no platform / no gh|glab => file-only.
@@ -44,13 +44,13 @@ review_gate:
 
 # Build half (Phase 3). Code repos are SEPARATE git repos (one .git each), not subfolders
 # of the product repo — faithful to "per-repo specs in each code repo, contract singular in the
-# product repo" (phase-3-build-plan.md, Cross-cutting). Documentation-as-config for sdlc-spec (Step A).
+# product repo" (phase-3-build-plan.md, Cross-cutting). Documentation-as-config for yad-spec (Step A).
 build:
   code_repos_root: "{project-root}/demo-repos"   # throwaway demo code repos for this build half
   feature_id: story_id          # specs/<story-id>/ — pinned to the permanent story ID, not Spec Kit's auto-slug
   spec_layout: speckit          # follow Spec Kit's native spec/plan/tasks layout
   speckit_ceremony: [specify, clarify, plan, analyze, checklist, tasks]   # heavy run, once per story per repo
-  # Step B (sdlc-implement) — the light per-task loop. One atomic task = one branch = one PR/MR.
+  # Step B (yad-implement) — the light per-task loop. One atomic task = one branch = one PR/MR.
   branch_convention: "feat/<story-id>-<task-id>-<short-slug>"   # e.g. feat/EP-istifta-inquiries-S01-T01-create-inquiry
   commit_task_trailer: "Task: <story-id>-<task-id>"             # final commit trailer; anchors the spec-link check (Step C)
   contract_change_trailer: "Contract-Change: yes"              # ONLY when the locked contract surface is touched (routes back to architecture gate)
@@ -59,7 +59,7 @@ build:
   # + no trailing period; proper nouns/acronyms keep their case.
   commit_subject_style: "<type>: <lowercase imperative description, no trailing period>"   # types: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
   pr_title_style: same_as_commit_subject                       # one atomic task = one branch = one PR/MR; title defaults to the task's commit subject
-  # Commit ownership + per-commit AI co-author (sdlc-implement installs the .gitmessage template).
+  # Commit ownership + per-commit AI co-author (yad-implement installs the .gitmessage template).
   # The human git author OWNS the commit; the assisting AI is recorded per-commit as a Co-Authored-By
   # trailer, chosen by the owner from `ai_coauthor.allowed`. The AI is never the author. `none` is an
   # explicit human-only choice. Trailer order is Task: -> Contract-Change: (if any) -> Co-Authored-By:.
@@ -73,30 +73,30 @@ build:
       - { id: cursor,     name: "Cursor",             email: "noreply@cursor.com" }
       - { id: coderabbit, name: "CodeRabbit",         email: "noreply@coderabbit.ai" }
       - { id: none,       name: "(no AI assistance)", email: "" }
-  # Step C (sdlc-checks) — the three CI gates that must pass before merge. CI-agnostic bash in checks/.
+  # Step C (yad-checks) — the three CI gates that must pass before merge. CI-agnostic bash in checks/.
   gates: [spec-link, contract-check, build-test-lint]
-  ci_platforms: [github, gitlab]   # both wired from skills/sdlc-checks/templates/; GitHub is this product repo's platform
+  ci_platforms: [github, gitlab]   # both wired from skills/yad-checks/templates/; GitHub is this product repo's platform
   contract_surface_glob: "specs/*/contracts/**"   # the repo's quoted contract slice; a diff here needs Contract-Change + a re-locked contract
-  # Step D (sdlc-pr-template) — platform-matched PR/MR template + risk routing.
+  # Step D (yad-pr-template) — platform-matched PR/MR template + risk routing.
   pr_templates:
     github: ".github/pull_request_template.md"
     gitlab: ".gitlab/merge_request_templates/Default.md"
-    hub:                                # front-half artifact-review PR/MR on the product hub (sdlc-pr-template repo:hub)
+    hub:                                # front-half artifact-review PR/MR on the product hub (yad-pr-template repo:hub)
       github: ".github/pull_request_template.md"
       gitlab: ".gitlab/merge_request_templates/Default.md"
-  risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (sdlc-review-gate escalation)
-  # Step E (sdlc-ship) — AI review (advisory) + engineer review (the human gate) + ship.
+  risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (yad-review-gate escalation)
+  # Step E (yad-ship) — AI review (advisory) + engineer review (the human gate) + ship.
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
   build_log: "epics/EP-<slug>/.sdlc/build-log.json"   # append-only ship ledger (back-half analogue of approvals.json)
   story_build_states: [in-build, shipped]   # in-build = some tasks shipped; shipped = all tasks in tasks.md shipped
-  # Backfill (sdlc-backfill) — specs for already-built features in an existing repo.
+  # Backfill (yad-backfill) — specs for already-built features in an existing repo.
   backfill:
     tool: repomix                  # the one true CLI subprocess: `npx repomix@latest` (Phase 0 / RESEARCH-NOTES §3)
     pack_flags: "--compress --include <globs> --include-logs --style markdown"   # one feature at a time; Secretlint by default
     spec_location: "specs/backfill/<feature>/spec.md"   # draft (verified: false) until a human approves
     gate_scope: touched-features   # block a change only until the features it touches have approved specs
 
-# Code context (sdlc-connect-repos) — the front/"brain" phases are made code-aware. Code repos are
+# Code context (yad-connect-repos) — the front/"brain" phases are made code-aware. Code repos are
 # connected to the product hub once (or any time a new repo is added), and an AI-readable picture of
 # each is cached so epic/architecture/ui/stories consider what already exists in the code. The product
 # repo is the FRONT-PHASE TOOLCHAIN HUB: repomix (and Impeccable) are installed/run here and target the
@@ -110,18 +110,18 @@ code_context:
   staleness: head-sha                                 # stale when a repo's HEAD != registry syncedHead
   refresh: human                                      # a stale repo is a HUMAN decision: front-phase
                                                       # skills FLAG it and stop (pointing at
-                                                      # `sdlc repo refresh <repo>`) — they never silently
-                                                      # re-pack. `sdlc repo list` shows fresh/stale;
-                                                      # `sdlc repo refresh` and `sdlc check --fix` re-pack.
+                                                      # `yad repo refresh <repo>`) — they never silently
+                                                      # re-pack. `yad repo list` shows fresh/stale;
+                                                      # `yad repo refresh` and `yad check --fix` re-pack.
   load_in_front_phases: true                          # epic, architecture, ui-design, stories read the maps
-  # Auth: `sdlc-connect-repos` clones/fetches as the LOCAL user (SSH key or git credential helper),
+  # Auth: `yad-connect-repos` clones/fetches as the LOCAL user (SSH key or git credential helper),
   # works for both github and gitlab (and self-hosted), and stores NO tokens in the registry.
   platforms: [github, gitlab]
 
-# Hub platform + front-half review bridge (sdlc-connect-repos `detect-hub`; sdlc-review-gate + sdlc-hub-bridge).
+# Hub platform + front-half review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
 # The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
-# approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `sdlc-review-gate action: sync`
+# approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `yad-review-gate action: sync`
 # pulls that state into the file ledger (approvals.json/reviews/*.md) and runs the UNCHANGED gate predicate.
 # The file ledger stays the source of truth. Degrades to the file-only gate when there is no platform / no CLI.
 hub:
@@ -130,11 +130,11 @@ hub:
   bridge: true                                         # master enable; false => file-only front gates everywhere
   platforms: [github, gitlab]                          # detected from the hub's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
-  # roster (in hub.json) maps a platform login -> sdlc name + role; domain-owners are DERIVED from
+  # roster (in hub.json) maps a platform login -> yad name + role; domain-owners are DERIVED from
   # repos.json (a roster name that equals a repo's domain_owner owns that repo's domain) — never duplicated.
 
 # Phase 4 (automation) — the SECOND dial made real. Until Phase 4 nothing read this dial; the
-# orchestrator (sdlc-run) now does. Governing rule: automation is EARNED per step, with trust-log
+# orchestrator (yad-run) now does. Governing rule: automation is EARNED per step, with trust-log
 # evidence, and is reversible in one move (phase-4-build-plan.md §"one principle"). Front states are
 # never listed in back_steps and can never be flipped — the engineer keeps authority over decisions.
 automation:
@@ -152,5 +152,5 @@ automation:
   # merge gate.
   locked_steps: [analysis, epic, architecture, ui-design, stories, engineer-review]
   # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
-  # system-wide, no per-step edits. One line, instantly reversible. Toggle via `sdlc-run action: kill`.
+  # system-wide, no per-step edits. One line, instantly reversible. Toggle via `yad-run action: kill`.
   kill_switch: false

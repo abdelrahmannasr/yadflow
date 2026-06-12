@@ -1,7 +1,7 @@
 {
   "name": "yadflow",
   "version": "1.0.2",
-  "description": "Gated, team, multi-repo SDLC workflow: author → review → build with a PR-driven review gate and a zero-dependency CLI (setup, gate, commit, open-pr, repo). A BMAD module + 17 skills.",
+  "description": "Yadflow — the gated, team, multi-repo SDLC: author → review → build with a PR-driven review gate and a zero-dependency `yad` CLI (setup, gate, commit, open-pr, repo). A BMAD module + 17 yad-* skills.",
   "type": "module",
   "author": "AbdelRahman Nasr",
   "license": "MIT",
@@ -14,13 +14,14 @@
     "url": "https://github.com/abdelrahmannasr/yadflow/issues"
   },
   "bin": {
-    "sdlc": "bin/sdlc.mjs"
+    "yad": "bin/yad.mjs"
   },
   "files": [
     "bin/",
     "cli/",
     "!cli/test.mjs",
     "skills/",
+    "docs/index.html",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
@@ -33,12 +34,14 @@
     "provenance": true
   },
   "scripts": {
-    "sdlc": "node bin/sdlc.mjs",
+    "yad": "node bin/yad.mjs",
     "test": "node --test cli/test.mjs",
     "prepublishOnly": "npm test"
   },
   "keywords": [
     "sdlc",
+    "yad",
+    "yadflow",
     "bmad",
     "workflow",
     "cli",

@@ -1,5 +1,5 @@
-// `sdlc repo list|refresh` — connected-repo staleness as an explicit HUMAN decision.
-// Skill steps no longer silently repack a stale repo; they flag it and point here. (`sdlc check --fix`
+// `yad repo list|refresh` — connected-repo staleness as an explicit HUMAN decision.
+// Skill steps no longer silently repack a stale repo; they flag it and point here. (`yad check --fix`
 // still refreshes too — it is also human-invoked.)
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, writeJSON } from './lib.mjs';
@@ -20,7 +20,7 @@ function staleness(root, repo) {
 
 export async function runRepo(root, { action = 'list', name, today } = {}) {
   const { regPath, registry } = load(root);
-  if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `sdlc setup`'); return { repos: 0 }; }
+  if (!registry.repos.length) { warn('no repos registered (.sdlc/repos.json) — run `yad setup`'); return { repos: 0 }; }
 
   if (action === 'list') {
     log(c.bold('\nconnected repos'));
@@ -31,7 +31,7 @@ export async function runRepo(root, { action = 'list', name, today } = {}) {
       if (stale) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
       else ok(`${repo.name} ${c.dim('— fresh')}`);
     }
-    if (staleCount) hand(`refresh with \`sdlc repo refresh${registry.repos.length > 1 ? ' <name>' : ''}\` (or \`sdlc repo refresh\` for all)`);
+    if (staleCount) hand(`refresh with \`yad repo refresh${registry.repos.length > 1 ? ' <name>' : ''}\` (or \`yad repo refresh\` for all)`);
     return { repos: registry.repos.length, stale: staleCount };
   }
 
@@ -51,7 +51,7 @@ export async function runRepo(root, { action = 'list', name, today } = {}) {
     }
     writeJSON(regPath, registry);
     refreshed ? ok(`refreshed ${refreshed} repo(s)`) : info('nothing refreshed');
-    hand('regenerate the code-map in Claude Code (sdlc-connect-repos) — the pack is cached, the map is the AI step');
+    hand('regenerate the code-map in Claude Code (yad-connect-repos) — the pack is cached, the map is the AI step');
     return { refreshed };
   }
 

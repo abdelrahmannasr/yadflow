@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the hand-authored `sdlc` BMAD module into the IDE skill dirs.
+# Install the hand-authored `yad` BMAD module into the IDE skill dirs.
 #
 # Source of truth: {project-root}/skills/  (survives `bmad-method` updates).
 # This script copies the sdlc-* skills into the four IDE locations the BMAD installer uses,
@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-SKILLS=(sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories sdlc-connect-repos sdlc-spec sdlc-implement sdlc-checks sdlc-pr-template sdlc-review-comments sdlc-hub-bridge sdlc-ship sdlc-backfill sdlc-run sdlc-review-gate sdlc-status)
+SKILLS=(yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-connect-repos yad-spec yad-implement yad-checks yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill yad-run yad-review-gate yad-status)
 
 echo "Installing sdlc module from $ROOT/skills ..."
 

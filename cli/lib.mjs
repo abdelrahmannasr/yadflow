@@ -1,4 +1,4 @@
-// Shared helpers for the `sdlc` CLI. Node >=18 built-ins only — no dependencies.
+// Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';

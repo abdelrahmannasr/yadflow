@@ -1,4 +1,4 @@
-// `sdlc check` (report) and `sdlc check --fix` (reconcile) — and `sdlc update`
+// `yad check` (report) and `yad check --fix` (reconcile) — and `yad update`
 // as a thin alias (--scope=changed). Inspects actual project state against the
 // manifest: missing setup, drifted files, stale code-context.
 import path from 'node:path';
@@ -6,10 +6,13 @@ import {
   c, log, ok, info, warn, hand, fail, readJSON, writeJSON, exists,
 } from './lib.mjs';
 import { VERSION, PROJECT_FILES } from './manifest.mjs';
-import { moduleActions, repoActions, hubActions, authorsActions } from './plan.mjs';
+import {
+  moduleActions, repoActions, hubActions, authorsActions,
+  legacyModuleActions, legacyRepoActions, legacyHubActions,
+} from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 
-const MARK = { missing: c.red('missing'), outdated: c.yellow('outdated'), stale: c.yellow('stale'), ok: c.green('ok') };
+const MARK = { missing: c.red('missing'), outdated: c.yellow('outdated'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), ok: c.green('ok') };
 
 export async function reconcile(root, { fix = false, scope = 'all', force = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
@@ -22,9 +25,14 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
 
-  // --- deterministic file actions (module + hub CI + author allowlists + every registered repo) ---
-  const actions = [...moduleActions(root), ...hubActions(root), ...authorsActions(root, registry.repos)];
-  for (const repo of registry.repos) actions.push(...repoActions(root, repo));
+  // --- deterministic file actions (module + hub CI + author allowlists + every registered repo),
+  //     plus pre-2.0 sdlc-* -> yad-* migrations ('legacy': old name installed; rename in place) ---
+  const actions = [
+    ...moduleActions(root), ...legacyModuleActions(root),
+    ...hubActions(root), ...legacyHubActions(root),
+    ...authorsActions(root, registry.repos),
+  ];
+  for (const repo of registry.repos) actions.push(...repoActions(root, repo), ...legacyRepoActions(root, repo));
 
   // --- stale code-context (HEAD moved since last pack) ---
   const staleRepos = [];
@@ -42,7 +50,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (!byScope.has(a.scope)) byScope.set(a.scope, []);
     byScope.get(a.scope).push(a);
   }
-  const counts = { missing: 0, outdated: 0, stale: 0, ok: 0 };
+  const counts = { missing: 0, outdated: 0, stale: 0, legacy: 0, ok: 0 };
   for (const [scopeName, items] of byScope) {
     const notOk = items.filter((i) => i.status !== 'ok');
     items.forEach((i) => counts[i.status]++);
@@ -56,10 +64,10 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     a.status !== 'ok' && (scope === 'all' ? true : a.status !== 'missing'),
   );
   log('');
-  log(c.dim(`summary: ${counts.missing} missing, ${counts.outdated} outdated, ${counts.stale} stale, ${counts.ok} ok`));
+  log(c.dim(`summary: ${counts.missing} missing, ${counts.outdated} outdated, ${counts.stale} stale, ${counts.legacy} legacy, ${counts.ok} ok`));
 
   if (!fix) {
-    if (fixable.length || gaps.length) hand('run `sdlc check --fix` to reconcile (or `sdlc setup` for missing one-time setup).');
+    if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
     return { counts, gaps, applied: 0 };
   }
 
@@ -78,6 +86,6 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const rec = readJSON(path.join(root, PROJECT_FILES.version), {});
   writeJSON(path.join(root, PROJECT_FILES.version), { ...rec, version: VERSION });
   applied ? ok(`reconciled ${applied} item(s)`) : info('nothing to fix');
-  if (gaps.length) hand('one-time setup still missing — run `sdlc setup`.');
+  if (gaps.length) hand('one-time setup still missing — run `yad setup`.');
   return { counts, gaps, applied };
 }

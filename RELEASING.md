@@ -1,6 +1,6 @@
 # Releasing
 
-The `sdlc` CLI is published to npm as **`yadflow`**. Releases are **automated**
+The `yad` CLI is published to npm as **`yadflow`**. Releases are **automated**
 with [semantic-release](https://semantic-release.gitbook.io/): there is no manual `npm publish` in the
 steady state. This doc covers the one-time bootstrap and the ongoing flow.
 

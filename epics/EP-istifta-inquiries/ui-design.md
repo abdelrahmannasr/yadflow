@@ -7,7 +7,7 @@ impeccable: not-installed
 ---
 
 > Impeccable is not installed in this environment, so the `ux-designer` lens authored this design and
-> `DESIGN.md` directly (graceful degradation per `sdlc-author-ui`). When Impeccable is available, run
+> `DESIGN.md` directly (graceful degradation per `yad-ui`). When Impeccable is available, run
 > `/impeccable document → extract → craft` (existing project) to regenerate these from code.
 
 ## Screens & states

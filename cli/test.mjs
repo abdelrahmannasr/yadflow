@@ -1,4 +1,4 @@
-// Dependency-free tests for the sdlc CLI. Run: node --test cli/test.mjs
+// Dependency-free tests for the yad CLI. Run: node --test cli/test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -47,9 +47,9 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   assert.ok(r1.applied > 0, 'should apply missing items');
 
   for (const f of [
-    '.claude/skills/sdlc-author-epic/SKILL.md',
+    '.claude/skills/yad-epic/SKILL.md',
     '_bmad/sdlc/config.yaml',
-    'demo/backend/.github/workflows/sdlc-checks.yml',
+    'demo/backend/.github/workflows/yad-checks.yml',
     'demo/backend/checks/spec-link.sh',
     'demo/backend/.github/pull_request_template.md',
     '.sdlc/cli-version.json',
@@ -67,8 +67,8 @@ test('check detects exactly one missing, one outdated, one stale', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
 
-  fs.rmSync(path.join(T, 'demo/backend/.github/workflows/sdlc-checks.yml'));        // missing
-  fs.appendFileSync(path.join(T, '.claude/skills/sdlc-status/SKILL.md'), '\ndrift'); // outdated
+  fs.rmSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml'));        // missing
+  fs.appendFileSync(path.join(T, '.claude/skills/yad-status/SKILL.md'), '\ndrift'); // outdated
   git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'more'); // stale
 
   const r = await reconcile(T, { fix: false });
@@ -78,9 +78,87 @@ test('check detects exactly one missing, one outdated, one stale', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// `yad update` (scope=changed) must migrate a pre-2.0 install — old sdlc-* skill copies and
+// marker-owned sdlc-* CI files are replaced by the yad-* names even though the new copies are
+// technically "missing" (which scope=changed otherwise skips).
+test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+  await reconcile(T, { fix: true });
+
+  // Simulate the pre-2.0 state: skill installed under its old name, new name absent.
+  fs.rmSync(path.join(T, '.claude/skills/yad-epic'), { recursive: true });
+  fs.mkdirSync(path.join(T, '.claude/skills/sdlc-author-epic'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.claude/skills/sdlc-author-epic/SKILL.md'), '---\nname: sdlc-author-epic\n---\n');
+  fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.opencode/commands/sdlc-run.md'), '---\nname: sdlc-run\n---\n');
+  // Old wired CI files, first line carrying the old ownership marker.
+  fs.rmSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml'));
+  fs.writeFileSync(path.join(T, 'demo/backend/.github/workflows/sdlc-checks.yml'), '# sdlc-managed: sdlc-checks\nname: sdlc-checks\n');
+  fs.rmSync(path.join(T, '.github/workflows/yad-gate-sync.yml'));
+  fs.writeFileSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml'), '# sdlc-managed: sdlc-hub-bridge\nname: sdlc-gate-sync\n');
+
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(r.applied >= 4, 'legacy migrations applied under scope=changed');
+  for (const gone of [
+    '.claude/skills/sdlc-author-epic',
+    '.opencode/commands/sdlc-run.md',
+    'demo/backend/.github/workflows/sdlc-checks.yml',
+    '.github/workflows/sdlc-gate-sync.yml',
+  ]) assert.ok(!fs.existsSync(path.join(T, gone)), `old ${gone} removed`);
+  for (const there of [
+    '.claude/skills/yad-epic/SKILL.md',
+    '.opencode/commands/yad-run.md',
+    'demo/backend/.github/workflows/yad-checks.yml',
+    '.github/workflows/yad-gate-sync.yml',
+  ]) assert.ok(fs.existsSync(path.join(T, there)), `new ${there} installed`);
+
+  const again = await reconcile(T, { fix: false });
+  assert.equal(again.counts.legacy, 0, 'migration is idempotent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// GitLab fragments are referenced by path from the root .gitlab-ci.yml include (written by the
+// wire step) — migrating the fragment must rewrite that include too, or the pipeline hard-fails
+// on a `local file does not exist`. Also covers the old `# sdlc-managed-include` marker variant.
+test('gitlab migration rewrites the root .gitlab-ci.yml include to the new fragment', async () => {
+  const { T } = scaffold();
+  const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+  repos.repos[0].platform = 'gitlab';
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
+  await reconcile(T, { fix: true });
+
+  fs.rmSync(path.join(T, 'demo/backend/.gitlab/ci/yad-checks.yml'));
+  fs.writeFileSync(path.join(T, 'demo/backend/.gitlab/ci/sdlc-checks.yml'), '# sdlc-managed-include: sdlc-checks\nsdlc-spec-link: {}\n');
+  fs.writeFileSync(path.join(T, 'demo/backend/.gitlab-ci.yml'), "include:\n  - local: '.gitlab/ci/sdlc-checks.yml'\n");
+
+  await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(!fs.existsSync(path.join(T, 'demo/backend/.gitlab/ci/sdlc-checks.yml')), 'old fragment removed');
+  assert.ok(fs.existsSync(path.join(T, 'demo/backend/.gitlab/ci/yad-checks.yml')), 'new fragment installed');
+  const rootCi = fs.readFileSync(path.join(T, 'demo/backend/.gitlab-ci.yml'), 'utf8');
+  assert.ok(rootCi.includes('.gitlab/ci/yad-checks.yml'), 'include rewritten to new fragment');
+  assert.ok(!rootCi.includes('.gitlab/ci/sdlc-checks.yml'), 'no dangling include to the deleted fragment');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A file at an old wired path that we did NOT install (no `# sdlc-managed` first line) belongs
+// to the user — migration must leave it untouched.
+test('update leaves a user-authored file at an old wired path alone', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const userFile = path.join(T, 'demo/backend/.github/workflows/sdlc-checks.yml');
+  fs.writeFileSync(userFile, 'name: my-own-workflow\non: push\n');
+
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.equal(r.counts.legacy, 0, 'unowned file is not a legacy action');
+  assert.ok(fs.existsSync(userFile), 'user file untouched');
+  assert.equal(fs.readFileSync(userFile, 'utf8'), 'name: my-own-workflow\non: push\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('CLI --version matches manifest', () => {
   const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json')));
-  const out = execFileSync('node', [path.join(ROOT, 'bin/sdlc.mjs'), '--version']).toString().trim();
+  const out = execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), '--version']).toString().trim();
   assert.equal(out, version);
 });
 
@@ -131,7 +209,7 @@ test('writeJSON failure leaves a pre-existing target intact and cleans up the tm
 });
 
 // ---------------------------------------------------------------------------------------------
-// `sdlc commit` — message builder + branch-derived task
+// `yad commit` — message builder + branch-derived task
 // ---------------------------------------------------------------------------------------------
 const { buildCommitMessage, taskFromBranch } = await import('./commit.mjs');
 
@@ -210,7 +288,7 @@ test('gatePredicate: escalated step needs a domain-owner per touched repo', () =
 });
 
 // ---------------------------------------------------------------------------------------------
-// `sdlc gate sync` — platform state -> ledger -> advance (with an injected fake reader)
+// `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
 const { gateSync, gateOpen, gateStatus } = await import('./gate.mjs');
 
@@ -461,7 +539,7 @@ test('gate status counts only non-stale approvals after an artifact change', asy
 });
 
 // ---------------------------------------------------------------------------------------------
-// `sdlc repo list` — staleness as a human-visible flag
+// `yad repo list` — staleness as a human-visible flag
 // ---------------------------------------------------------------------------------------------
 const { runRepo } = await import('./repo.mjs');
 
@@ -486,7 +564,7 @@ test('repo refresh rejects an unknown repo name', async () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// `sdlc setup` — registerRepo: only real git repos may enter the registry
+// `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
 const { registerRepo } = await import('./setup.mjs');
 
@@ -524,7 +602,7 @@ test('gate commands reject an invalid epic id before touching the filesystem', (
   for (const bad of ['../../etc', 'EP-Bad_Slug!', 'EP-../escape']) {
     let code = 0, out = '';
     try {
-      execFileSync('node', [path.join(ROOT, 'bin/sdlc.mjs'), 'gate', 'status', bad, '--dir', T], { stdio: 'pipe' });
+      execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), 'gate', 'status', bad, '--dir', T], { stdio: 'pipe' });
     } catch (e) {
       code = e.status;
       out = (e.stdout || '').toString() + (e.stderr || '').toString();
@@ -590,7 +668,7 @@ test('mapApprovers only counts APPROVED and carries submittedAt', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// `sdlc commit` — end-to-end against a real temp git repo
+// `yad commit` — end-to-end against a real temp git repo
 // ---------------------------------------------------------------------------------------------
 const { runCommit } = await import('./commit.mjs');
 
@@ -635,7 +713,7 @@ test('runCommit dry-run prints without committing', async () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// `sdlc gate ci` — event-driven sync: derive from the review branch, overlay, ledger-only commit
+// `yad gate ci` — event-driven sync: derive from the review branch, overlay, ledger-only commit
 // ---------------------------------------------------------------------------------------------
 const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
@@ -691,7 +769,7 @@ function scaffoldCiHub() {
   git(author, 'config', 'user.name', 'x');
   fs.mkdirSync(path.join(author, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(author, '.sdlc/hub.json'), JSON.stringify({
-    platform: 'github', // no default_branch — the `sdlc setup` hub.json shape; gate ci must derive it
+    platform: 'github', // no default_branch — the `yad setup` hub.json shape; gate ci must derive it
     roster: [
       { login: 'al', name: 'alice', role: 'owner' },
       { login: 'bo', name: 'bob', role: 'reviewer' },
@@ -728,8 +806,8 @@ function scaffoldCiHub() {
   // the throwaway CI checkout, on the default branch, without the artifact edit
   const ci = path.join(T, 'ci');
   git(T, 'clone', '-q', origin, ci);
-  git(ci, 'config', 'user.email', 'sdlc-gate-sync@noreply');
-  git(ci, 'config', 'user.name', 'sdlc-gate-sync');
+  git(ci, 'config', 'user.email', 'yad-gate-sync@noreply');
+  git(ci, 'config', 'user.name', 'yad-gate-sync');
   return { T, origin, author, ci };
 }
 const show = (cwd, ref) => git(cwd, 'show', ref).toString();
@@ -847,35 +925,35 @@ test('check --fix wires the hub gate-sync CI only when the bridge is enabled', a
   const { T } = scaffold();
   // no hub.json -> no hub action
   await reconcile(T, { fix: true });
-  assert.ok(!fs.existsSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml')), 'no hub.json => not wired');
+  assert.ok(!fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'no hub.json => not wired');
   // hub on github with the bridge -> wired + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
-  assert.ok(fs.existsSync(path.join(T, '.github/workflows/sdlc-gate-sync.yml')), 'hub workflow installed');
+  assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'hub workflow installed');
   const again = await reconcile(T, { fix: false });
   assert.equal(again.counts.missing, 0);
   assert.equal(again.counts.outdated, 0);
   // gitlab with the bridge -> fragment installed + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
-  assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'gitlab fragment installed');
+  assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml')), 'gitlab fragment installed');
   const gl = await reconcile(T, { fix: false });
   assert.equal(gl.counts.missing, 0);
   assert.equal(gl.counts.outdated, 0);
   // bridge disabled (either spelling) -> no action; an already-installed file is left alone
-  fs.rmSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml'));
+  fs.rmSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml'));
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge: false, roster: [] }));
   await reconcile(T, { fix: true });
-  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'disabled bridge => not wired');
+  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml')), 'disabled bridge => not wired');
   // legacy `bridge: true` (older setup) still counts as an explicit enable
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge: true, roster: [] }));
   await reconcile(T, { fix: true });
-  assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'legacy bridge:true wires');
+  assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml')), 'legacy bridge:true wires');
   // platform set but NO enable flag in either spelling -> not wired (explicit-enable semantics)
-  fs.rmSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml'));
+  fs.rmSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml'));
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', roster: [] }));
   await reconcile(T, { fix: true });
-  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/sdlc-gate-sync.yml')), 'missing flag => not wired');
+  assert.ok(!fs.existsSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml')), 'missing flag => not wired');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -912,7 +990,7 @@ test('check --fix generates .sdlc/verified-authors in hub + repos only when emai
     verified_authors: ['dev@corp.io'],
   }));
   await reconcile(T, { fix: true });
-  for (const f of ['.sdlc/verified-authors', 'demo/backend/.sdlc/verified-authors', 'demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/sdlc-verified-commits.yml']) {
+  for (const f of ['.sdlc/verified-authors', 'demo/backend/.sdlc/verified-authors', 'demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/yad-verified-commits.yml']) {
     assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
   }
   const list = fs.readFileSync(path.join(T, '.sdlc/verified-authors'), 'utf8');
@@ -932,7 +1010,7 @@ test('check --fix generates .sdlc/verified-authors in hub + repos only when emai
 
 // The gate script itself, against a real temp repo. No origin remote => the signature check is
 // SKIPPED with a warning, so this exercises the author-allowlist half hermetically.
-const GATE = path.join(ROOT, 'skills/sdlc-checks/templates/checks/verified-commits.sh');
+const GATE = path.join(ROOT, 'skills/yad-checks/templates/checks/verified-commits.sh');
 function scaffoldGateRepo() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-vc-'));
   git(T, 'init', '-q');

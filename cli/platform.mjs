@@ -1,5 +1,5 @@
 // Platform adapter — the ONLY place that shells out to gh/glab. Read recipes mirror
-// skills/sdlc-hub-bridge/references/bridge.md. Everything runs as the local user (gh/glab own auth);
+// skills/yad-hub-bridge/references/bridge.md. Everything runs as the local user (gh/glab own auth);
 // no tokens are stored. Pure mapping fns (resolveLogin/mapApprovers) are exported for unit tests;
 // readPr is injectable so the gate can be tested with a fake.
 import { run, has } from './lib.mjs';
@@ -23,7 +23,7 @@ export function platformReady(platform) {
   return !!cli && has(cli);
 }
 
-// ---- login -> sdlc identity (roster + derived domain-owner) -------------------------------------
+// ---- login -> yad identity (roster + derived domain-owner) -------------------------------------
 // Returns the records this login's APPROVED review contributes. A roster reviewer who owns a touched
 // repo's domain contributes BOTH a base record and a domain-owner record (bridge.md "Login -> role").
 export function resolveLogin(login, roster = [], repos = [], touchedDomains = []) {
