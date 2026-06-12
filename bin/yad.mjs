@@ -9,6 +9,7 @@ import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { runRepo } from '../cli/repo.mjs';
+import { runDoctor } from '../cli/doctor.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -18,6 +19,8 @@ ${c.bold('Setup & maintenance')}
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
                        also migrates pre-2.0 sdlc-* installs to the yad-* names
+  yad doctor [--json]  Environment + state health: tools/auth, config files,
+                       repo paths, epic ledgers (exit 1 on any failure)
 
 ${c.bold('Review gate (front half)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
@@ -62,6 +65,7 @@ function parseArgs(argv) {
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--dry-run') o.dryRun = true;
+    else if (a === '--json') o.json = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
     else if (a.startsWith('--scope=')) o.scope = a.slice('--scope='.length);
@@ -95,6 +99,9 @@ async function main() {
       break;
     case 'update':
       await reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, today });
+      break;
+    case 'doctor':
+      await runDoctor(o.dir, { json: o.json });
       break;
     case 'gate': {
       const [, action, epic, artifact] = o._;
@@ -130,7 +137,10 @@ async function main() {
 
 main()
   .catch((err) => {
-    log(c.red(`\nyad failed: ${err?.message || err}`));
+    const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
+    log(c.red(`\nyad failed${code}: ${err?.message || err}`));
+    if (err?.hint) log(c.yellow(`  → ${err.hint}`));
+    if (code) log(c.dim('  (see README "Troubleshooting" for this code, or run `yad doctor`)'));
     process.exitCode = 1;
   })
   .finally(closePrompts);

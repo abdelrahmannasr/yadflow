@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { readJSONStrict, writeJSON, fileSha } from './lib.mjs';
+import { err } from './errors.mjs';
 import { epicFiles } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
@@ -98,7 +99,7 @@ export function artifactHash(epicDir, artifact) {
 
 // Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger
 // silently treated as a default would be rewritten by the next sync, destroying the real data.
-const badShape = (file, what) => new Error(`${file}: ${what} — fix the file or restore it from git`);
+const badShape = (file, what) => err('YAD-STATE-002', `${file}: ${what}`, 'fix the file or restore it from git');
 function requireArray(v, file) {
   if (!Array.isArray(v)) throw badShape(file, 'expected a JSON array');
   return v;

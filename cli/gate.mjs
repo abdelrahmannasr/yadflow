@@ -14,6 +14,7 @@ import {
   artifactPaths, upsertHubPr,
 } from './epic-state.mjs';
 import { readPr, mapApprovers, createPr } from './platform.mjs';
+import { err } from './errors.mjs';
 
 // ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------
 function frontmatter(file) {
@@ -66,16 +67,16 @@ function loadHub(root) {
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   const hub = readJSONStrict(hubFile, null);
   if (hub !== null) {
-    if (typeof hub !== 'object' || Array.isArray(hub)) throw new Error(`${hubFile}: expected a JSON object`);
+    if (typeof hub !== 'object' || Array.isArray(hub)) throw err('YAD-STATE-002', `${hubFile}: expected a JSON object`, 'fix the file or re-run `yad setup`');
     if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
-      throw new Error(`${hubFile}: unknown platform '${hub.platform}' — expected github, gitlab, or null`);
+      throw err('YAD-CFG-001', `${hubFile}: unknown platform '${hub.platform}'`, 'expected github, gitlab, or null — fix the file or re-run `yad setup`');
     }
     if (hub.roster !== undefined && !Array.isArray(hub.roster)) {
-      throw new Error(`${hubFile}: expected \`roster\` to be an array`);
+      throw err('YAD-STATE-002', `${hubFile}: expected \`roster\` to be an array`, 'fix the file or re-run `yad setup`');
     }
   }
   const registry = readJSONStrict(regFile, { repos: [] });
-  if (!Array.isArray(registry?.repos)) throw new Error(`${regFile}: expected a \`repos\` array`);
+  if (!Array.isArray(registry?.repos)) throw err('YAD-STATE-002', `${regFile}: expected a \`repos\` array`, 'fix the file or re-run `yad setup`');
   return { hub, repos: registry.repos };
 }
 

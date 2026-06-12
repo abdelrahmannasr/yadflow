@@ -76,6 +76,7 @@ with `npx` from your **product hub** repo — no clone needed.
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) vs the bundled manifest. |
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched). |
+| `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads. Exit 1 on any failure; `--json` for CI and bug reports. |
 | `yad gate open <epic> <artifact>` | Open the front-half **review PR/MR** for an artifact and mark the step `in_review`. |
 | `yad gate sync <epic> [artifact]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
@@ -142,6 +143,25 @@ provenance). See [`RELEASING.md`](RELEASING.md).
 > [Conventional Commits](CONTRIBUTING.md), publishes to npm with build provenance (tokenless OIDC),
 > ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No manual `npm publish`. See
 > [`RELEASING.md`](RELEASING.md).
+
+### Troubleshooting (`yad doctor` + error codes)
+
+When something is off, run `yad doctor` first — it checks the environment (git, gh/glab auth, node
+version), the project state (`.sdlc/*.json` parse and point at real repos), and every epic ledger,
+with a fix-it hint per finding. Failures carry stable, greppable codes, also printed by any failing
+`yad` command:
+
+| Code | Meaning | Fix |
+|------|---------|-----|
+| `YAD-ENV-001` | git is not installed or not on PATH | install git — every yad command needs it |
+| `YAD-ENV-002` | platform CLI (gh/glab) missing or not authenticated | install it / `gh auth login` — the gate degrades to file-only without it |
+| `YAD-ENV-003` | Node.js older than the supported range | install Node >= 18 |
+| `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
+| `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
+| `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo |
+| `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
+
+Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
 ## Agent skills (all 17)
 

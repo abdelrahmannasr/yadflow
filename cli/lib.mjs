@@ -1,5 +1,6 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
+import { err } from './errors.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -108,7 +109,7 @@ export function readJSONStrict(p, def = null) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch (e) {
-    throw new Error(`corrupt JSON in ${p}: ${e.message} — fix or delete the file`);
+    throw err('YAD-STATE-001', `corrupt JSON in ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
 }
 // Atomic: serialize first, write a sibling tmp file (same dir = same filesystem),

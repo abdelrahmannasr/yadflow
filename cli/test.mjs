@@ -473,7 +473,7 @@ test('a corrupt approvals.json aborts the sync with the file named — and is ne
   fs.writeFileSync(f, '[{"step": "architecture-rev'); // truncated mid-write
   await assert.rejects(
     gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }),
-    /corrupt JSON in .*approvals\.json.*fix or delete/,
+    (e) => /corrupt JSON in .*approvals\.json/.test(e.message) && e.code === 'YAD-STATE-001',
   );
   assert.equal(fs.readFileSync(f, 'utf8'), '[{"step": "architecture-rev', 'corrupt file left for recovery');
   fs.rmSync(T, { recursive: true, force: true });
@@ -1095,5 +1095,76 @@ test('verified-commits gate: unknown SDLC_PLATFORM override fails closed; CRLF a
   r = runGate(T);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /known identity/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---- yad doctor + structured error codes ---------------------------------------------------------
+const { runDoctor } = await import('./doctor.mjs');
+const { YadError } = await import('./errors.mjs');
+const { readJSONStrict } = await import('./lib.mjs');
+
+// runDoctor sets process.exitCode on failure — capture and restore so a failing-doctor test
+// does not fail the whole suite run.
+async function doctorOn(T) {
+  const before = process.exitCode;
+  try {
+    return await runDoctor(T, { json: true });
+  } finally {
+    process.exitCode = before;
+  }
+}
+
+test('doctor: healthy project has no failures (warnings allowed)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.equal(r.failed, 0, JSON.stringify(r.checks.filter((x) => x.status === 'fail')));
+  assert.ok(r.checks.some((x) => x.id === 'repo:backend' && x.status === 'ok'), 'backend repo healthy');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: corrupt repos.json fails with YAD-STATE-001', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), '{ corrupt');
+  const r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.status === 'fail' && /YAD-STATE-001/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: registered repo path gone fails with YAD-STATE-003', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.rmSync(path.join(T, 'demo/backend'), { recursive: true, force: true });
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'repo:backend' && x.status === 'fail' && /YAD-STATE-003/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: corrupt epic ledger fails with its code; missing state.json only warns', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.mkdirSync(path.join(T, 'epics/EP-bad/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-bad/.sdlc/state.json'), 'not json');
+  fs.mkdirSync(path.join(T, 'epics/EP-unseeded'), { recursive: true });
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'epic:EP-bad' && x.status === 'fail' && /YAD-STATE-001/.test(x.message)));
+  assert.ok(r.checks.some((x) => x.id === 'epic:EP-unseeded' && x.status === 'warn'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('errors: readJSONStrict throws a YadError with code + hint on corrupt JSON', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-err-'));
+  const p = path.join(T, 'x.json');
+  fs.writeFileSync(p, '{ nope');
+  try {
+    readJSONStrict(p);
+    assert.fail('should throw');
+  } catch (e) {
+    assert.ok(e instanceof YadError);
+    assert.equal(e.code, 'YAD-STATE-001');
+    assert.ok(e.hint, 'carries a recovery hint');
+  }
   fs.rmSync(T, { recursive: true, force: true });
 });

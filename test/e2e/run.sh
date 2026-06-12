@@ -115,11 +115,19 @@ jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").stat
 jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "Alice" && a.role === "owner" && a.status === "approved")'
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
 
+say "yad doctor is healthy on the fresh project"
+yad doctor --dir "$HUB" >/dev/null || die "doctor must pass on a healthy project"
+
 say "a corrupt ledger fails loudly (never silently defaulted)"
 cp "$EPIC/.sdlc/approvals.json" "$WORK/approvals.bak"
 echo '{ corrupt' > "$EPIC/.sdlc/approvals.json"
 if yad gate sync EP-e2e epic.md --dir "$HUB" >/dev/null 2>&1; then
   die "gate sync must fail on a corrupt approvals.json"
+fi
+DOCTOR_OUT="$(yad doctor --json --dir "$HUB" || true)"
+echo "$DOCTOR_OUT" | grep -q "YAD-STATE-001" || die "doctor must surface the corrupt ledger with YAD-STATE-001"
+if yad doctor --dir "$HUB" >/dev/null 2>&1; then
+  die "doctor must exit 1 while a ledger is corrupt"
 fi
 cp "$WORK/approvals.bak" "$EPIC/.sdlc/approvals.json"
 
