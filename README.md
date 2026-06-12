@@ -1,12 +1,11 @@
 # Yadflow — the gated, team, multi-repo SDLC on top of BMAD
 
 [![npm version](https://img.shields.io/npm/v/yadflow?logo=npm)](https://www.npmjs.com/package/yadflow)
-[![CI](https://github.com/abdelrahmannasr/sdlc-workflow/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelrahmannasr/sdlc-workflow/actions/workflows/ci.yml)
+[![CI](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml/badge.svg)](https://github.com/abdelrahmannasr/yadflow/actions/workflows/ci.yml)
 [![provenance](https://img.shields.io/badge/npm-provenance-blue?logo=npm)](https://docs.npmjs.com/generating-provenance-statements)
 
 **Yadflow** (*yahd-flow* — from **يد**, Arabic for "hand") is the AI-driven SDLC where a human hand
-moves every gate. *AI builds. The hand decides.* On npm as `yadflow`; the GitHub repo keeps its
-historical `sdlc-workflow` name.
+moves every gate. *AI builds. The hand decides.* On npm and GitHub as `yadflow`.
 
 A custom BMAD module that turns BMAD from a solo tool into a **team, gated, file-driven SDLC
 engine**. Every step does its work, writes its output to a file, and **waits at a gate**. Who

@@ -15,7 +15,7 @@ one page before starting, read this one. The full reference is in `README.md`.
 You will have **four separate git repos**, each with one job:
 
 ```
-  sdlc-workflow   ──►  the SKILLS SOURCE
+  yadflow         ──►  the SKILLS SOURCE
   (this repo)          You install the workflow skills from here, and pull updates from here.
                        No real product work happens inside it.
 
@@ -33,7 +33,7 @@ You will have **four separate git repos**, each with one job:
 flowchart LR
     classDef hub fill:#fcf3cf,stroke:#b7950b,color:#000
     classDef code fill:#d6eaf8,stroke:#2471a3,color:#000
-    src["sdlc-workflow<br/>skills source"]
+    src["yadflow<br/>skills source"]
     phub["product-hub<br/>epics · contracts · stories · state"]:::hub
     r1["code-repo-1"]:::code
     r2["code-repo-2"]:::code
@@ -158,7 +158,7 @@ npx yadflow setup
 <summary>Manual fallback (no CLI)</summary>
 
 ```bash
-git clone <sdlc-workflow-url> && cd sdlc-workflow
+git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
          sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \
@@ -236,7 +236,7 @@ You can start without any of them.
 2. Install the skills once (same block as step 3c above):
 
 ```bash
-git clone <sdlc-workflow-url> && cd sdlc-workflow
+git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in sdlc-author-analysis sdlc-author-epic sdlc-author-architecture sdlc-author-ui sdlc-author-stories \
          sdlc-connect-repos sdlc-review-gate sdlc-spec sdlc-implement sdlc-checks \

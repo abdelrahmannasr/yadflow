@@ -6,8 +6,8 @@ steady state. This doc covers the one-time bootstrap and the ongoing flow.
 
 > **Renamed at v1.4.0.** The package was previously published as `@abdelrahmannasr/sdlc-workflow`
 > (through v1.3.2); that scoped package is **deprecated** and points here. Same CLI, same repo —
-> the GitHub repo keeps its `sdlc-workflow` name. The trusted-publisher registration is per-package,
-> so `yadflow` needed its own bootstrap (steps A–B below).
+> the GitHub repo was renamed `sdlc-workflow` → `yadflow` (old URLs redirect). The trusted-publisher
+> registration is per-package, so `yadflow` needed its own bootstrap (steps A–B below).
 
 ## How it works
 
@@ -62,7 +62,7 @@ On **npmjs.com → the package page → Settings → Trusted Publisher → GitHu
 | Field | Value |
 |-------|-------|
 | Organization or user | `abdelrahmannasr` |
-| Repository | `sdlc-workflow` |
+| Repository | `yadflow` |
 | Workflow filename | `release.yml` *(filename only, not a path)* |
 | Environment | *(leave blank)* |
 

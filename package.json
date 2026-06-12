@@ -1,17 +1,17 @@
 {
   "name": "yadflow",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Gated, team, multi-repo SDLC workflow: author → review → build with a PR-driven review gate and a zero-dependency CLI (setup, gate, commit, open-pr, repo). A BMAD module + 17 skills.",
   "type": "module",
   "author": "AbdelRahman Nasr",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/abdelrahmannasr/sdlc-workflow.git"
+    "url": "git+https://github.com/abdelrahmannasr/yadflow.git"
   },
-  "homepage": "https://github.com/abdelrahmannasr/sdlc-workflow#readme",
+  "homepage": "https://github.com/abdelrahmannasr/yadflow#readme",
   "bugs": {
-    "url": "https://github.com/abdelrahmannasr/sdlc-workflow/issues"
+    "url": "https://github.com/abdelrahmannasr/yadflow/issues"
   },
   "bin": {
     "sdlc": "bin/sdlc.mjs"

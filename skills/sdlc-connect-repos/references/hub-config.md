@@ -16,7 +16,7 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
 ```json
 {
   "platform": "github",                                       // github | gitlab (from the hub's own remote host); null when local-only
-  "git_url": "https://github.com/abdelrahmannasr/sdlc-workflow.git",
+  "git_url": "https://github.com/abdelrahmannasr/yadflow.git",
   "default_branch": "main",
   "bridge_enabled": true,                                     // open review PRs/MRs on the hub for front-half reviews
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
