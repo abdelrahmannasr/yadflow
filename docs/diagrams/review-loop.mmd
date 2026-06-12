@@ -1,0 +1,8 @@
+flowchart LR
+    a["author writes<br/>artifact"] --> o["open<br/>raise review PR/MR"]
+    o --> c["comment<br/>reviewers leave notes"]
+    c -->|owner addresses,<br/>edits in place| c
+    c --> ap["approve<br/>+ resolve threads"]
+    ap --> adv{"rule met,<br/>threads resolved,<br/>merged?"}
+    adv -->|no — names who's missing| o
+    adv -->|yes| nxt(["next step"])

@@ -26,67 +26,8 @@ is human-gated and runs once per epic in the product hub; the **build half** run
 per code repo; **automation** is opt-in and earned. `yad-status` reads it all; `yad-hub-bridge`
 mirrors front-half reviews to real PR/MRs.
 
-```mermaid
-flowchart TD
-    classDef gated fill:#fdebd0,stroke:#ca6f1e,color:#000
-    classDef earns fill:#d6eaf8,stroke:#2471a3,color:#000
-    classDef locked fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
-    classDef artifact fill:#fcf3cf,stroke:#b7950b,color:#000
-    classDef sentinel fill:#d5f5e3,stroke:#1e8449,color:#000
-
-    subgraph SETUP["0 · One-time setup (per project)"]
-      direction TB
-      inst["install.sh<br/>copy yad-* skills into IDE dirs"]
-      wire["wire each repo:<br/>yad-checks · yad-pr-template · yad-review-comments"]
-      conn["yad-connect-repos<br/>repos.json + cached code-map"]
-      phub["optional: hub on a platform<br/>detect-hub · roster"]
-      inst --> wire --> conn --> phub
-    end
-
-    subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
-      direction TB
-      an["yad-analysis<br/>optional → analysis.md"]:::artifact
-      ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
-      ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
-      ui["yad-ui<br/>ui-design.md + DESIGN.md"]:::artifact
-      st["yad-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
-      gAn{{"gate · analysis"}}:::gated
-      gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
-      gAr{{"gate · architecture<br/>escalated: + repo domain owners"}}:::gated
-      gUi{{"gate · UI · base"}}:::gated
-      gSt{{"gate · stories<br/>per-repo domain owners"}}:::gated
-      rfb(["currentStep: ready-for-build"]):::sentinel
-      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
-    end
-
-    subgraph BUILD["B · Build half — per story, per code repo"]
-      direction TB
-      sp["yad-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
-      im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
-      ck["yad-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
-      prm["open PR/MR + yad-pr-template route"]
-      shp["yad-ship<br/>AI review (advisory)"]
-      eng{{"engineer review<br/>human · never automated"}}:::locked
-      merged(["merge → build-log.json"]):::sentinel
-      sp --> im --> ck --> prm --> shp --> eng --> merged
-    end
-
-    subgraph AUTO["C · Automation — earned & reversible"]
-      direction TB
-      run["yad-run<br/>reads automation dial + trust-log.json"]:::earns
-      kill["kill switch → everything human_approve"]
-      run --- kill
-    end
-
-    phub --> an
-    rfb --> sp
-    run -. drives earned back steps .-> im
-    bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
-    bridge -. syncs approvals .-> gEp
-    status["yad-status<br/>read-only view over all of it"]
-    status -. observes .-> FRONT
-    status -. observes .-> BUILD
-```
+<!-- Source: docs/diagrams/sdlc-overview.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
+![Yadflow SDLC overview — setup, human-gated front half, per-story build half, earned automation](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
 
 **Legend.** <span>🟨</span> **artifact** = an author step writes a file and stops; <span>🟧</span>
 **gate** = a human review that must pass (`open → comment → approve → advance`); <span>🟦</span>
@@ -413,16 +354,8 @@ accumulate, and the step moves forward only when the rule is met. **File-only** 
 `advance`; **PR-driven** (hub on a platform) ends when the approved, fully-resolved review PR is
 **merged**:
 
-```mermaid
-flowchart LR
-    a["author writes<br/>artifact"] --> o["open<br/>raise review PR/MR"]
-    o --> c["comment<br/>reviewers leave notes"]
-    c -->|owner addresses,<br/>edits in place| c
-    c --> ap["approve<br/>+ resolve threads"]
-    ap --> adv{"rule met,<br/>threads resolved,<br/>merged?"}
-    adv -->|no — names who's missing| o
-    adv -->|yes| nxt(["next step"])
-```
+<!-- Source: docs/diagrams/review-loop.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
+![Review gate loop — author, open, comment, approve, advance](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/review-loop.svg)
 
 **File-only** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
 `reviews/<artifact>--<date>--comments.md`), `approve` (name + role → `.sdlc/approvals.json`), and

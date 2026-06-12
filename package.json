@@ -36,6 +36,7 @@
   "scripts": {
     "yad": "node bin/yad.mjs",
     "test": "node --test cli/test.mjs",
+    "diagrams": "npx -y @mermaid-js/mermaid-cli -i docs/diagrams/sdlc-overview.mmd -o docs/diagrams/sdlc-overview.svg -b transparent && npx -y @mermaid-js/mermaid-cli -i docs/diagrams/review-loop.mmd -o docs/diagrams/review-loop.svg -b transparent",
     "prepublishOnly": "npm test"
   },
   "keywords": [

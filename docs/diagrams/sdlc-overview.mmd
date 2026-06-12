@@ -1,0 +1,59 @@
+flowchart TD
+    classDef gated fill:#fdebd0,stroke:#ca6f1e,color:#000
+    classDef earns fill:#d6eaf8,stroke:#2471a3,color:#000
+    classDef locked fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
+    classDef artifact fill:#fcf3cf,stroke:#b7950b,color:#000
+    classDef sentinel fill:#d5f5e3,stroke:#1e8449,color:#000
+
+    subgraph SETUP["0 · One-time setup (per project)"]
+      direction TB
+      inst["install.sh<br/>copy yad-* skills into IDE dirs"]
+      wire["wire each repo:<br/>yad-checks · yad-pr-template · yad-review-comments"]
+      conn["yad-connect-repos<br/>repos.json + cached code-map"]
+      phub["optional: hub on a platform<br/>detect-hub · roster"]
+      inst --> wire --> conn --> phub
+    end
+
+    subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
+      direction TB
+      an["yad-analysis<br/>optional → analysis.md"]:::artifact
+      ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
+      ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
+      ui["yad-ui<br/>ui-design.md + DESIGN.md"]:::artifact
+      st["yad-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
+      gAn{{"gate · analysis"}}:::gated
+      gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
+      gAr{{"gate · architecture<br/>escalated: + repo domain owners"}}:::gated
+      gUi{{"gate · UI · base"}}:::gated
+      gSt{{"gate · stories<br/>per-repo domain owners"}}:::gated
+      rfb(["currentStep: ready-for-build"]):::sentinel
+      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
+    end
+
+    subgraph BUILD["B · Build half — per story, per code repo"]
+      direction TB
+      sp["yad-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
+      im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
+      ck["yad-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
+      prm["open PR/MR + yad-pr-template route"]
+      shp["yad-ship<br/>AI review (advisory)"]
+      eng{{"engineer review<br/>human · never automated"}}:::locked
+      merged(["merge → build-log.json"]):::sentinel
+      sp --> im --> ck --> prm --> shp --> eng --> merged
+    end
+
+    subgraph AUTO["C · Automation — earned & reversible"]
+      direction TB
+      run["yad-run<br/>reads automation dial + trust-log.json"]:::earns
+      kill["kill switch → everything human_approve"]
+      run --- kill
+    end
+
+    phub --> an
+    rfb --> sp
+    run -. drives earned back steps .-> im
+    bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
+    bridge -. syncs approvals .-> gEp
+    status["yad-status<br/>read-only view over all of it"]
+    status -. observes .-> FRONT
+    status -. observes .-> BUILD
