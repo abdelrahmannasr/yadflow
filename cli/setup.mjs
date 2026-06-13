@@ -63,11 +63,16 @@ export function registerRepo(root, registry, { name, rpath, platform, domain_own
 // falls back to the primary adapter rather than being rejected — mirrors registerRepo's platform
 // fallback and the hub step. `none` is the explicit markdown-only choice.
 export function registerDesign(root, { tool, project_url = null, files = null, today = null } = {}) {
+  // Idempotent re-connect: carry the original first-connect date forward (the schema defines
+  // connectedAt as "first connect"); only lastSyncedAt moves. Mirrors repo.mjs refresh.
+  const designPath = path.join(root, PROJECT_FILES.designConfig);
+  const prev = readJSON(designPath, null);
+  const connectedAt = prev && prev.connectedAt ? prev.connectedAt : today;
   let t = (tool || '').toLowerCase();
   if (t === 'none' || t === '') {
     const off = { tool: 'none', provider: null, project_url: null, auth: 'user',
-      files: { web: null, mobile: null }, connectedAt: today, lastSyncedAt: today, source: 'unavailable' };
-    writeJSON(path.join(root, PROJECT_FILES.designConfig), off);
+      files: { web: null, mobile: null }, connectedAt, lastSyncedAt: today, source: 'unavailable' };
+    writeJSON(designPath, off);
     return off;
   }
   if (!DESIGN_TOOLS.includes(t)) { warn(`unknown design tool '${tool}' — using ${DESIGN_PRIMARY}`); t = DESIGN_PRIMARY; }
@@ -76,9 +81,9 @@ export function registerDesign(root, { tool, project_url = null, files = null, t
   const design = {
     tool: t, provider: null, project_url: project_url || null, auth: 'user',
     files: files || { web: null, mobile: null },
-    connectedAt: today, lastSyncedAt: today, source: null,
+    connectedAt, lastSyncedAt: today, source: null,
   };
-  writeJSON(path.join(root, PROJECT_FILES.designConfig), design);
+  writeJSON(designPath, design);
   return design;
 }
 

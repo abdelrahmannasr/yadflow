@@ -59,5 +59,6 @@ purely additive.
 ## Staleness / refresh
 
 A re-generated or designer-edited file is like a moved code repo: `yad-ui` **flags** a divergence and
-lets a human decide (re-run the step, or `yad design refresh`). It never silently overwrites a designer's
-frames — refreshing the design is a human decision, the same discipline as `code_context.refresh: human`.
+lets a human decide (re-run the step, or `yad-connect-design` action: refresh). It never silently
+overwrites a designer's frames — refreshing the design is a human decision, the same discipline as
+`code_context.refresh: human`.

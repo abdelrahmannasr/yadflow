@@ -650,6 +650,16 @@ test('registerDesign records a known tool with source unconfirmed (MCP detection
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('registerDesign: a re-connect preserves the original connectedAt, only lastSyncedAt moves', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-design3-'));
+  registerDesign(T, { tool: 'figma', today: '2026-06-13' });
+  const again = registerDesign(T, { tool: 'pencil', today: '2026-06-20' });
+  assert.equal(again.tool, 'pencil', 'tool switched in place');
+  assert.equal(again.connectedAt, '2026-06-13', 'first-connect date preserved');
+  assert.equal(again.lastSyncedAt, '2026-06-20', 'lastSyncedAt advanced');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('registerDesign: an unknown tool falls back to the primary; `none` is markdown-only', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-design2-'));
   const bad = registerDesign(T, { tool: 'sketch', today: '2026-06-13' });

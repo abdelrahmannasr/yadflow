@@ -81,7 +81,9 @@ export const IDE_OPENCODE_DIR = '.opencode/commands'; // <skill>.md (flat SKILL.
 export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
 
 // Supported design-tool adapters (mirrors skills/sdlc/config.yaml `design.tools`); `DESIGN_PRIMARY` is
-// the fallback when an unknown tool is named, and `none` is the explicit markdown-only choice.
+// the fallback `registerDesign`/setup use when an unknown tool is named, and `none` is the explicit
+// markdown-only choice. (doctor does NOT fall back — an unknown tool there is a hard YAD-CFG-002 fail,
+// mirroring how registerRepo falls back on platform while doctor fails on an unknown hub platform.)
 export const DESIGN_TOOLS = ['figma', 'pencil'];
 export const DESIGN_PRIMARY = 'figma';
 
