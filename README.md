@@ -321,10 +321,10 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
 
 ### 0 — One-time setup
 
-> **Shortcut:** `npx yadflow setup` walks through steps 1, 4, 5 and 6 below
-> interactively (module install, hub detect + roster, connect repos, wire each repo). Run
-> `… check --fix` any time afterwards to reconcile. The manual steps below are the long-hand
-> equivalent and still work.
+> **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, hub
+> detect + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
+> repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
+> long-hand equivalent and still work.
 
 1. **Install the module:** `bash skills/sdlc/install.sh` (re-run after any BMAD update).
 2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
@@ -344,11 +344,16 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
    (SSH or credential helper; GitHub or GitLab; no stored tokens). Re-run for any new repo. Freshness is a
    **human decision**: `yad repo list` shows fresh/stale, `yad repo refresh [name]` re-packs a moved repo
    (skills flag staleness and point here — they never silently re-pack). Greenfield → skip it.
-6. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
+6. **(Optional) Connect tools** so the matching steps do real work (each degrades gracefully and is
+   recorded if absent): `yad-connect-design action: connect` (Figma-first → `design.json`, lets
+   `yad-ui` materialize screens), `yad-connect-testing action: connect` (Playwright-first →
+   `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
+   (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
+7. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
    `yad-connect-repos action: detect-hub`, then `action: roster` once per reviewer (login → SDLC
    name + role), and `yad-pr-template repo:hub action: wire` / `yad-review-comments repo:hub action:
    wire` / `yad-checks repo:hub action: wire`. With no hub platform the front gate just runs file-only.
-7. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
+8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

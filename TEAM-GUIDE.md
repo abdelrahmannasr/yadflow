@@ -163,7 +163,7 @@ npx yadflow setup
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
+         yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
          yad-run yad-status; do
@@ -244,7 +244,7 @@ You can start without any of them.
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
+         yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
          yad-run yad-status; do

@@ -166,7 +166,7 @@ learning:
   records: "{project-root}/epics/EP-<slug>/.sdlc/learning-records.json"   # per-epic, per-member learning ledger (yad-learn)
   artifacts: "{project-root}/epics/EP-<slug>/learning/"   # rendered tutorial markdown (yad-learn)
   capabilities: { explain: chat, deep: deep_research, quiz: deep_question }   # yad-learn mode -> deeptutor capability
-  # Auth: `yad-connect-learning` uses the LOCAL user's own deeptutor config / MCP-session and stores NO
+  # Auth: `yad-connect-learning` uses the LOCAL user's own deeptutor CLI config/session and stores NO
   # tokens in the registry (kb name + sources are plain references, never credentials). Opt-in, never a gate.
   auth: user
 
