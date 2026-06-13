@@ -163,7 +163,8 @@ npx yadflow setup
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-connect-testing yad-review-gate yad-spec yad-implement yad-checks \
+         yad-connect-repos yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
+         yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
@@ -227,7 +228,9 @@ tokens). Greenfield with no code yet? Skip this — the brain just proceeds. Whe
 
 **f. Optional tools.** The workflow uses these if present and **degrades gracefully** (and records it)
 if they're missing: **Spec Kit** (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix**
-(`npx repomix`, used by `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review).
+(`npx repomix`, used by `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review),
+**DeepTutor** (`deeptutor`, the learning layer's tutor — used by `yad-connect-learning`/`yad-learn`,
+degrades to harness-native).
 You can start without any of them.
 
 ---
@@ -241,7 +244,8 @@ You can start without any of them.
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-connect-testing yad-review-gate yad-spec yad-implement yad-checks \
+         yad-connect-repos yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
+         yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
@@ -387,13 +391,15 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 10. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 20)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 22)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
 | `yad-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
 | `yad-connect-design` | Connect a design tool (Figma / pencil) so `yad-ui` can materialize the screens (setup). |
 | `yad-connect-testing` | Connect a testing tool (Playwright / cypress / pytest) so `yad-test-cases` can implement the automation (setup). |
+| `yad-connect-learning` | Connect a learning tool (DeepTutor) so `yad-learn` can tutor the team in context (setup). |
+| `yad-learn` | At any stage, learn a concept in the context of what's being built; records a team-skills ledger. Opt-in, never gates. |
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
 | `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
@@ -416,6 +422,6 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 20)*.
 
 ## 11. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 20 skills.
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 22 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.
