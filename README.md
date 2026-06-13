@@ -52,7 +52,7 @@ human**. Detailed walkthroughs for each phase follow below.
 | `skills/yad-test-cases/` | Front state 9: with the test architect author `test-cases.md`; implement the automation in the connected testing tool, or produce artifacts only. |
 | `skills/yad-connect-repos/` | Connect code repos to the hub (GitHub/GitLab, local-user auth); cache a Repomix pack + **code-map** per repo so the front phases are code-aware. |
 | `skills/yad-connect-learning/` | Connect a learning tool (DeepTutor-first, pluggable) — a CLI subprocess like Repomix; record `.sdlc/learning.json` + an optional grounded knowledge base. |
-| `skills/yad-learn/` | The cross-cutting **learning layer**: tutor any member, at any stage, in the context of what's being built; records a team-skills ledger. Opt-in, never gates. |
+| `skills/yad-learn/` | The cross-cutting **learning layer**: tutor any member, at any stage, in the context of what's being built; records a personal, local-only skills log (gitignored, never committed/pushed). Opt-in, never gates. |
 | `skills/yad-review-gate/` | The reusable **team review + approve gate** (used for all five reviews). |
 | `skills/yad-spec/` | Build Step A: run the Spec Kit ceremony once per story per repo → `specs/<story-id>/`. |
 | `skills/yad-implement/` | Build Step B: implement ONE atomic task as a small diff on its own branch. |
@@ -221,8 +221,9 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   contract surface"*. Routes the request to the connected learning tool (`.sdlc/learning.json`,
   DeepTutor-first) grounded in the project knowledge base, or degrades to **harness-native** tutoring
   (the harness model reading the artifacts) when nothing is connected — so it always works. Renders a
-  tutorial artifact and appends to a per-epic, per-member **learning ledger** so the team builds a
-  visible **skills record** (`yad-status` rolls it up). **Purely opt-in — it never blocks a gate** and
+  tutorial artifact and appends to a per-member **learning ledger** kept **local-only** (gitignored,
+  never committed or pushed — to the hub or any code repo) so it stays a private, personal **skills log**
+  (`yad-status` rolls up the local records). **Purely opt-in — it never blocks a gate** and
   never touches epic state, approvals, or the contract lock. *AI builds, the hand decides* — and now the
   hand can also learn, on demand, what it is deciding about.
 

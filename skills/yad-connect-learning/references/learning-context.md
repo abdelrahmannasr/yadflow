@@ -67,9 +67,9 @@ and captures `session_id` from the `done` event for the learning record.
 
 When `source: "harness-native"` (no CLI, or `tool: "none"`), `yad-learn` does **not** fail. It tutors
 using the **harness model itself**: it reads the scoped epic's `epic.md` / `architecture.md` /
-`contract.md` / code-maps and explains the concept grounded in them. The team-skills record is written
-identically (with `"tool": "harness-native"`), so the learning layer always works and always records —
-DeepTutor only adds knowledge-base grounding, deep research, and quizzes.
+`contract.md` / code-maps and explains the concept grounded in them. The local-only learning record is
+written identically (with `"tool": "harness-native"`), so the learning layer always works and always
+records — DeepTutor only adds knowledge-base grounding, deep research, and quizzes.
 
 ## Freshness
 

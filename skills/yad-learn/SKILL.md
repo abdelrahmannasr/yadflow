@@ -1,19 +1,26 @@
 ---
 name: yad-learn
-description: 'The cross-cutting learning layer: at ANY SDLC stage, a team member can ask to learn a concept and be tutored in the context of what the team is building. Routes the request to the connected learning tool (.sdlc/learning.json, DeepTutor-first) grounded in the project knowledge base, or degrades to harness-native tutoring (the harness model reading the artifacts) when no tool is connected. Renders a tutorial artifact and appends to the per-epic, per-member learning ledger so the team builds a visible skills record (yad-status rolls it up). Purely opt-in — it NEVER blocks a gate and never touches epic state, approvals, or the contract lock. Use when the user says "teach me <concept>", "learn about <concept>", or "yad-learn".'
+description: 'The cross-cutting learning layer: at ANY SDLC stage, a team member can ask to learn a concept and be tutored in the context of what the team is building. Routes the request to the connected learning tool (.sdlc/learning.json, DeepTutor-first) grounded in the project knowledge base, or degrades to harness-native tutoring (the harness model reading the artifacts) when no tool is connected. Renders a tutorial artifact and appends to a per-member learning ledger that is kept LOCAL-ONLY — gitignored, never committed or pushed to the product hub or any code repo — so it stays a private, personal skills log (yad-status rolls up the local records). Purely opt-in — it NEVER blocks a gate and never touches epic state, approvals, or the contract lock. Use when the user says "teach me <concept>", "learn about <concept>", or "yad-learn".'
 ---
 
 # SDLC — Learn (the cross-cutting tutor)
 
 **Goal:** At any SDLC stage, a team member can pause and ask to learn a concept — e.g. *"teach me why the
 architecture hash-locks the contract surface"* — and get tutored **in the context of this project**. The
-tutorial is rendered as an artifact and the request is recorded so the team builds a visible
-**skills record** (`yad-status` shows the roll-up). This makes the team's understanding — and therefore
-their **control over what is being built** — explicit.
+tutorial is rendered as an artifact and the request is recorded in a **personal, local skills log**
+(`yad-status` shows the roll-up of your local records). This makes a learner's own understanding — and
+therefore their **control over what is being built** — explicit, without ever exposing who-learned-what
+to the team.
+
+**Learning output is LOCAL-ONLY.** The records ledger and the rendered tutorials are personal artifacts:
+they are **gitignored and must never be committed or pushed** — not to the product hub and not to any
+code repo. The skill ensures the product hub's `.gitignore` lists these paths before it writes them. The
+only committed, shared learning file is the connection registry `.sdlc/learning.json` (no secrets, no
+personal data) — written by `yad-connect-learning`, not here.
 
 This is a **cross-cutting, opt-in** skill (like `yad-status`, it runs any time). It is **never a gate**:
 it does not move `currentStep`, never records an approval, and never touches `.sdlc/state.json`, the
-approvals ledger, or the contract lock. It writes only the learning ledger + tutorial artifacts.
+approvals ledger, or the contract lock. It writes only the local learning ledger + tutorial artifacts.
 
 ## Conventions
 
@@ -23,10 +30,23 @@ approvals ledger, or the contract lock. It writes only the learning ledger + tut
   `deeptutor` binary is absent) it degrades to **harness-native** tutoring — the harness model reads the
   scoped artifacts and explains the concept itself. Either way `yad-learn` always works and always
   records.
-- Per-epic learning records: `epics/EP-<slug>/.sdlc/learning-records.json` (append-only, the back-half
-  analogue of `approvals.json` for learning). Rendered tutorials: `epics/EP-<slug>/learning/`.
+- Per-epic learning records: `epics/EP-<slug>/.sdlc/learning-records.json` (append-only personal log).
+  Rendered tutorials: `epics/EP-<slug>/learning/`.
 - When no epic is scoped, records go to `.sdlc/learning-records.json` and tutorials to `.sdlc/learning/`
   (cross-project learning).
+- **Local-only, never committed.** All of the above paths are personal output. Before writing any of
+  them, ensure the **product hub's** `.gitignore` ignores learning output (idempotent — append only if
+  the lines are absent):
+  ```
+  # yadflow learning layer — personal, local-only (never commit or push)
+  .sdlc/learning-records.json
+  .sdlc/learning/
+  epics/*/.sdlc/learning-records.json
+  epics/*/learning/
+  ```
+  Never write learning output into a connected **code repo** — it lives only in the product hub, and only
+  on the local machine. `.sdlc/learning.json` (the connection registry) is the sole committed learning
+  file and is NOT ignored.
 - Speak in the configured `communication_language`; write tutorials in `document_output_language`.
 
 ## Inputs
@@ -63,9 +83,11 @@ Read `.sdlc/learning.json`:
 Keep the tutorial focused (usually < 600 words): explain the concept, then tie it to **one concrete
 example from this project** (an artifact line, a contract field, a story).
 
-### Step 2 — Render the tutorial artifact
-Write the tutorial to `epics/EP-<slug>/learning/<member>--<concept-slug>.md` (or `.sdlc/learning/` when
-no epic is scoped). Front-matter the file with `member`, `concept`, `stage`, `tool`, and `requestedAt`.
+### Step 2 — Render the tutorial artifact (local-only)
+First ensure the product hub's `.gitignore` lists the learning-output paths (see Conventions — append the
+block only if absent, so the artifacts can never be committed or pushed). Then write the tutorial to
+`epics/EP-<slug>/learning/<member>--<concept-slug>.md` (or `.sdlc/learning/` when no epic is scoped).
+Front-matter the file with `member`, `concept`, `stage`, `tool`, and `requestedAt`.
 
 ### Step 3 — Record in the learning ledger (append-only)
 Append to `epics/EP-<slug>/.sdlc/learning-records.json` (create the array if absent):
@@ -107,15 +129,18 @@ there is no approval and no gate. The learner runs `action: complete` (below) wh
   blocks any step. Learning is additive.
 - **Read-only except the learning ledger.** It writes only `learning-records.json` + tutorial artifacts;
   it never touches `state.json`, `approvals.json`, `comments.json`, or the contract lock.
+- **Local-only output.** The records ledger and tutorials are gitignored personal artifacts — never
+  commit or push them, and never write them into a code repo. Ensure the hub `.gitignore` covers them
+  before writing (see Conventions).
 - **Always works.** No DeepTutor / no connection → tutor harness-native. Never fail because a tool is
   absent.
 - **Grounded.** Prefer the project's own artifacts/kb; a generic answer with no project tie-in is a last
   resort, and say so when that happens.
 - **Attributable.** Every record names the `member` and `stage`, so the `yad-status` roll-up is a true
-  team-skills picture.
+  picture of the local learner's own skills log.
 
 ## Reference
 - Record schema, the mode→capability map, and the harness-native degrade path:
   `references/learning-state.md`.
 - The connection this consumes: `../yad-connect-learning/SKILL.md`.
-- The read-only roll-up: `../yad-status/SKILL.md` (the Team-skills section).
+- The read-only roll-up: `../yad-status/SKILL.md` (the local skills-log section).

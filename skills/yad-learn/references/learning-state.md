@@ -1,7 +1,7 @@
 # Learning state — record schema, capability map, degrade path
 
-How `yad-learn` records the team's learning, drives DeepTutor, and degrades. The records are the evidence
-base for the **team-skills roll-up** in `yad-status`.
+How `yad-learn` records a learner's own learning, drives DeepTutor, and degrades. The records are the
+evidence base for the **local skills-log roll-up** in `yad-status`.
 
 ## Location
 
@@ -10,6 +10,10 @@ base for the **team-skills roll-up** in `yad-status`.
 - Rendered tutorials: `epics/EP-<slug>/learning/<member>--<concept-slug>.md` (or `.sdlc/learning/`).
 
 (`config.yaml` `learning.records` and `learning.artifacts`.)
+
+**Local-only.** Every path above is personal output and is **gitignored — never committed or pushed**, to
+the product hub or any code repo. `yad-learn` ensures the hub `.gitignore` lists them before writing. The
+only committed learning file is the connection registry `.sdlc/learning.json`.
 
 ## Record schema
 
@@ -34,10 +38,11 @@ base for the **team-skills roll-up** in `yad-status`.
 
 - **Append-only.** `learn` pushes a new record. `complete` mutates the newest in-progress record matching
   `member` + `concept` (status → `learned`, set `completedAt`). Never rewrite history.
-- **Attributable.** `member` + `stage` are always set so the roll-up is a real team picture.
+- **Attributable.** `member` + `stage` are always set so the local roll-up is accurate.
 - **No secrets.** Records hold concept text + references only — never keys or raw tool output beyond the
   rendered tutorial.
-- **Commit the ledger + tutorials.** They are the team's skills evidence, small and reviewable.
+- **Never commit the ledger or tutorials.** They are personal, local-only artifacts: gitignored, never
+  committed or pushed (to the hub or a code repo). Only `.sdlc/learning.json` is committed.
 
 ## Mode → DeepTutor capability
 
@@ -67,4 +72,4 @@ deep research, and quizzes.
 ## Greenfield / no epic
 
 With no epic scoped, write to the cross-project ledger `.sdlc/learning-records.json` and tutorials to
-`.sdlc/learning/`. `yad-status` reads both the per-epic and cross-project ledgers for the roll-up.
+`.sdlc/learning/`. `yad-status` reads both the per-epic and cross-project ledgers for the local roll-up.

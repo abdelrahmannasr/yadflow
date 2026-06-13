@@ -764,10 +764,10 @@ yad-connect-learning action: disconnect</code></pre>
 
   <div class="skillcard" id="sk-learn">
     <h4><code>yad-learn</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The <strong>learning layer</strong>. At <em>any</em> SDLC stage a team member can ask to learn a concept and be tutored <em>in the context of what the team is building</em> — e.g. "teach me why the architecture hash-locks the contract surface." It routes to the connected learning tool (DeepTutor, grounded in the project knowledge base) or degrades to <strong>harness-native</strong> tutoring, renders a tutorial artifact, and appends to a per-member <strong>learning ledger</strong> so the team builds a visible skills record (<code>yad-status</code> rolls it up). <strong>Purely opt-in — it never blocks a gate</strong> and never touches epic state, approvals, or the contract lock.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The <strong>learning layer</strong>. At <em>any</em> SDLC stage a team member can ask to learn a concept and be tutored <em>in the context of what the team is building</em> — e.g. "teach me why the architecture hash-locks the contract surface." It routes to the connected learning tool (DeepTutor, grounded in the project knowledge base) or degrades to <strong>harness-native</strong> tutoring, renders a tutorial artifact, and appends to a per-member <strong>learning ledger</strong> kept <strong>local-only</strong> (gitignored — never committed or pushed, to the hub or any code repo) so it stays a private, personal skills log (<code>yad-status</code> rolls up the local records). <strong>Purely opt-in — it never blocks a gate</strong> and never touches epic state, approvals, or the contract lock.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Any time, from any stage:</div>
 <pre><code>run yad-learn — concept: "contract versioning" epic: EP-istifta-inquiries stage: architecture-review
-yad-learn action: list                           # the team-skills records for this epic
+yad-learn action: list                           # your local skills-log records for this epic
 yad-learn action: complete concept: "contract versioning"   # mark it learned</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Whenever a member wants to understand what is being built — to review a gate with confidence, onboard onto a domain, or grow a skill. It is additive and reversible: learning never gates the work.</div>
   </div>

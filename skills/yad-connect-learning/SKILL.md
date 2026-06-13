@@ -127,7 +127,10 @@ auto-advances; this is setup.
 - **Ground only committed, secret-scanned sources.** Feed the knowledge base from committed SDLC
   artifacts + the already-scanned code-maps — never raw repository contents.
 - **Describe the connection; do not tutor here.** This skill records *how to reach* the tool. The actual
-  tutoring + the team-skills records are produced by `yad-learn`, per request.
+  tutoring + the personal, local-only learning records are produced by `yad-learn`, per request.
+- **The registry is the only committed learning file.** `.sdlc/learning.json` is shared, reviewable
+  config (no secrets, no personal data). The records ledger and tutorials `yad-learn` writes are
+  local-only — gitignored, never committed or pushed.
 
 ## Reference
 - Registry schema + freshness rule: `references/learning-registry.md`.

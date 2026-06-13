@@ -22,6 +22,14 @@ demo-repos/*/
 # The full Repomix pack.md is a large, regenerable artifact (recreate via `action: refresh`) — ignored.
 .sdlc/code-context/*/pack.md
 
+# Learning layer (yad-learn) — personal, LOCAL-ONLY output. Never commit or push the records ledger or
+# the rendered tutorials, in this repo or any product hub. The connection registry .sdlc/learning.json
+# (no secrets, no personal data) IS tracked — it is the only committed learning file.
+.sdlc/learning-records.json
+.sdlc/learning/
+epics/*/.sdlc/learning-records.json
+epics/*/learning/
+
 # Empty/generated scaffolding
 design-artifacts/
 skills/reports/

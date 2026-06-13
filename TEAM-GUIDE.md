@@ -399,7 +399,7 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 22)*.
 | `yad-connect-design` | Connect a design tool (Figma / pencil) so `yad-ui` can materialize the screens (setup). |
 | `yad-connect-testing` | Connect a testing tool (Playwright / cypress / pytest) so `yad-test-cases` can implement the automation (setup). |
 | `yad-connect-learning` | Connect a learning tool (DeepTutor) so `yad-learn` can tutor the team in context (setup). |
-| `yad-learn` | At any stage, learn a concept in the context of what's being built; records a team-skills ledger. Opt-in, never gates. |
+| `yad-learn` | At any stage, learn a concept in the context of what's being built; records a personal, local-only skills log (gitignored, never committed/pushed). Opt-in, never gates. |
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
 | `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
