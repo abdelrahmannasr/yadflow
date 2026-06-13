@@ -86,6 +86,19 @@ PR/MR opened on the hub (sibling of `approvals.json`, so the locked `state.json`
 { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab", "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": "<YYYY-MM-DD or null>" }
 ```
 
+## `design-links.json`
+Present only when the `ui-design` step materialized the design in a connected design tool
+(`yad-connect-design` → `.sdlc/design.json`). Written by `yad-ui`, the machine-readable screen→frame map
+(sibling of `contract-lock.json`; the locked `state.json` step shape is untouched). The `ui-design` step
+chain is unchanged — this is an *output enrichment*, mirrored by the `design:` frontmatter block and the
+`## Design (<tool>)` section in `ui-design.md`. Absent when the step ran markdown-only (`design: none`).
+
+```json
+{ "tool": "figma", "fileUrl": "<url>", "generatedAt": "<YYYY-MM-DD>", "direction": "generated|linked",
+  "screens": [ { "name": "<screen>", "platform": "mobile|web", "nodeId": "<id>", "url": "<frame url>" } ],
+  "source": "<mcp id>" }
+```
+
 ## `reviews/`
 Human-readable review records, one file per round:
 `reviews/<artifact-base>--<YYYY-MM-DD>--<status>.md` where `status` ∈ `comments` | `approved`
