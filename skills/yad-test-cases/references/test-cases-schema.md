@@ -14,7 +14,7 @@ linkage is a sibling `test-links.json`.
 | `status` | `draft` \| `in_review` \| `approved` | Lifecycle within the test-cases gate. |
 | `owner` | name | Inherited from `epic.md` `owner` (the single source — not retyped). |
 | `repos` | subset of the epic's `repos` | Which repos the automation targets. |
-| `code-context` | `{ repos: [<name@sha>], loaded: <date> }` | Which connected-repo code-maps anchored the tests (Step 2b). `none` / `[]` when no repos are connected. |
+| `code-context` | `{ repos: [<name@sha>], loaded: <date> }` | Optional. Which connected-repo code-maps anchored the tests (Step 2b). The `@sha` (a repo's `syncedHead`) is recommended so freshness is recorded but may be omitted; the SKILL template shows the empty placeholder `{ repos: [], loaded: <date or none> }`. `none` / `[]` when no repos are connected. |
 | `testing` | `none` \| `{ tool, direction, suite, tests }` | The connected testing tool and what it produced (Step 3b). `none` when the step ran artifacts-only. |
 
 ## Body
