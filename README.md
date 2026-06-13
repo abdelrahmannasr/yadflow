@@ -72,6 +72,11 @@ The module ships a zero-dependency CLI, published to npm as
 [`yadflow`](https://www.npmjs.com/package/yadflow). Run it
 with `npx` from your **product hub** repo — no clone needed.
 
+> **Platform support.** Linux and macOS are first-class — the test suite, the bash check gates, and
+> the end-to-end harness all run on both in CI. The CLI shells out to `git` (and the bash gate
+> scripts), so on **Windows use [WSL](https://learn.microsoft.com/windows/wsl/)**; native PowerShell
+> is not yet supported. Requires **Node.js ≥ 18**.
+
 | Command | What it does |
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard (the steps below). |
