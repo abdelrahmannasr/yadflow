@@ -20,6 +20,7 @@ export const CODES = {
   'YAD-STATE-002': 'a ledger/config JSON file parses but has the wrong shape',
   'YAD-STATE-003': 'a registered repo path is missing or not a git repository',
   'YAD-CFG-001': 'hub.json names an unknown platform (expected github, gitlab, or null)',
+  'YAD-CFG-002': 'design.json names an unknown design tool (expected one of config.yaml design.tools, or none)',
 };
 
 export const err = (code, message, hint) => new YadError(code, message, hint);

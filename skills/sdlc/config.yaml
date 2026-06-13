@@ -118,6 +118,22 @@ code_context:
   # works for both github and gitlab (and self-hosted), and stores NO tokens in the registry.
   platforms: [github, gitlab]
 
+# Design tool (yad-connect-design) — the UI design step (yad-ui) materializes the actual feature design
+# (mobile screens / web pages) inside a connected design tool, alongside ui-design.md + DESIGN.md. The
+# tool is reached through its MCP (a harness MCP server, like Impeccable's slash-commands — NOT a CLI),
+# detected per provider and DEGRADING to markdown-only when absent. Figma-first but PLUGGABLE: a
+# design-tool adapter, like the github/gitlab platform adapter. Connection is one-per-project, recorded
+# at setup; the per-epic screen->frame map (design-links.json) is written by yad-ui per epic.
+design:
+  registry: "{project-root}/.sdlc/design.json"       # project-wide design connection (NOT per-epic)
+  tools: [figma, pencil]                              # supported adapters; an unknown tool falls back to `primary`
+  primary: figma                                      # the default/named provider
+  degrade: markdown-only                              # no tool / no MCP => yad-ui authors ui-design.md + DESIGN.md only
+  links: "{project-root}/epics/EP-<slug>/.sdlc/design-links.json"   # per-epic screen->frame map (yad-ui)
+  # Auth: `yad-connect-design` connects through the LOCAL user's own authenticated MCP session and stores
+  # NO tokens in the registry (project_url/files are plain references, never credentials).
+  auth: user
+
 # Hub platform + front-half review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
 # The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers

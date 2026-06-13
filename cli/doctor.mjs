@@ -5,7 +5,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, DESIGN_TOOLS } from './manifest.mjs';
 import { loadLedger, epicRoot } from './epic-state.mjs';
 import { gitHead } from './setup.mjs';
 import { cliFor } from './platform.mjs';
@@ -73,6 +73,26 @@ export function projectChecks(checks, root) {
         else check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
       }
     }
+  }
+
+  // design.json: parse + shape + tool + MCP confirmation (absent is the normal markdown-only default —
+  // pre-feature projects have none, so silence rather than warn when the file does not exist).
+  const designPath = path.join(root, PROJECT_FILES.designConfig);
+  if (exists(designPath)) {
+    let design = null, designBroken = false;
+    try {
+      design = readJSONStrict(designPath, null);
+    } catch (e) {
+      designBroken = true;
+      check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
+    }
+    if (designBroken) { /* reported above */ }
+    else if (typeof design !== 'object' || Array.isArray(design) || design === null) check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    else if (![...DESIGN_TOOLS, 'none', null, undefined].includes(design.tool)) check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig}: unknown design tool '${design.tool}' [YAD-CFG-002]`, `expected one of ${DESIGN_TOOLS.join(', ')}, or none`);
+    else if (!design.tool || design.tool === 'none') check(checks, 'design', 'project', 'ok', 'design: markdown-only');
+    else if (design.source && design.source !== 'unavailable') check(checks, 'design', 'project', 'ok', `design: ${design.tool} (${design.source})`);
+    else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} MCP unavailable — yad-ui runs markdown-only`, 'connect the MCP, then run `yad-connect-design` (action: refresh)');
+    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-design` in Claude Code to detect the MCP');
   }
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead

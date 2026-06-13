@@ -5,7 +5,7 @@ import {
   c, log, step, ok, info, warn, hand, fail, ask, askYesNo, run, has,
   exists, readJSON, writeJSON,
 } from './lib.mjs';
-import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES } from './manifest.mjs';
+import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY } from './manifest.mjs';
 import { moduleActions, repoActions, hubActions, authorsActions } from './plan.mjs';
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
@@ -58,6 +58,30 @@ export function registerRepo(root, registry, { name, rpath, platform, domain_own
   return repo;
 }
 
+// Record the project's design-tool connection into .sdlc/design.json (the deterministic half of the
+// connect loop; MCP detection itself is an AI step, handed off to `yad-connect-design`). An unknown tool
+// falls back to the primary adapter rather than being rejected — mirrors registerRepo's platform
+// fallback and the hub step. `none` is the explicit markdown-only choice.
+export function registerDesign(root, { tool, project_url = null, files = null, today = null } = {}) {
+  let t = (tool || '').toLowerCase();
+  if (t === 'none' || t === '') {
+    const off = { tool: 'none', provider: null, project_url: null, auth: 'user',
+      files: { web: null, mobile: null }, connectedAt: today, lastSyncedAt: today, source: 'unavailable' };
+    writeJSON(path.join(root, PROJECT_FILES.designConfig), off);
+    return off;
+  }
+  if (!DESIGN_TOOLS.includes(t)) { warn(`unknown design tool '${tool}' — using ${DESIGN_PRIMARY}`); t = DESIGN_PRIMARY; }
+  // source stays null until `yad-connect-design` detects the MCP in the harness (AI step). doctor reports
+  // a recorded-but-unconfirmed connection as a warning pointing at that skill.
+  const design = {
+    tool: t, provider: null, project_url: project_url || null, auth: 'user',
+    files: files || { web: null, mobile: null },
+    connectedAt: today, lastSyncedAt: today, source: null,
+  };
+  writeJSON(path.join(root, PROJECT_FILES.designConfig), design);
+  return design;
+}
+
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
@@ -71,7 +95,7 @@ function applyActions(actions, { force = false } = {}) {
 }
 
 export async function runSetup(root, opts = {}) {
-  const total = 7;
+  const total = 8;
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));
 
@@ -131,8 +155,26 @@ export async function runSetup(root, opts = {}) {
     ok(`wrote ${PROJECT_FILES.hubConfig} (${roster.length} reviewer(s))`);
   }
 
-  // 4. Connect code repos
-  step(4, total, 'Connect code repos');
+  // 4. Connect a design tool (Figma-first, pluggable; the UI step materializes the design here)
+  step(4, total, 'Connect a design tool (Figma / pencil / none)');
+  const designPath = path.join(root, PROJECT_FILES.designConfig);
+  if (exists(designPath) && !(await askYesNo('design.json exists — reconfigure?', false))) {
+    info('keeping existing .sdlc/design.json');
+  } else {
+    let tool = (await ask(`Design tool (${DESIGN_TOOLS.join('/')}/none)`, DESIGN_PRIMARY)).toLowerCase();
+    if (![...DESIGN_TOOLS, 'none'].includes(tool)) {
+      warn(`unknown design tool '${tool}' — using ${DESIGN_PRIMARY}`);
+      tool = DESIGN_PRIMARY;
+    }
+    const project_url = tool === 'none' ? null : (await ask('  project/file URL (blank to set later)', '')) || null;
+    registerDesign(root, { tool, project_url, today: opts.today ?? null });
+    ok(tool === 'none'
+      ? `wrote ${PROJECT_FILES.designConfig} (markdown-only)`
+      : `wrote ${PROJECT_FILES.designConfig} (${tool})`);
+  }
+
+  // 5. Connect code repos
+  step(5, total, 'Connect code repos');
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const registry = readJSON(regPath, { repos: [] });
   const known = new Set(registry.repos.map((r) => r.name));
@@ -155,8 +197,8 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 5. Wire each connected repo + the hub itself
-  step(5, total, 'Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
+  // 6. Wire each connected repo + the hub itself
+  step(6, total, 'Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
   if (registry.repos.length === 0) info('no repos to wire');
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
@@ -171,8 +213,8 @@ export async function runSetup(root, opts = {}) {
   // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
   applyActions(authorsActions(root, registry.repos), { force: true });
 
-  // 6. Optional CodeRabbit
-  step(6, total, 'AI review (CodeRabbit)');
+  // 7. Optional CodeRabbit
+  step(7, total, 'AI review (CodeRabbit)');
   for (const repo of registry.repos) {
     const cr = path.join(path.resolve(root, repo.path), '.coderabbit.yaml');
     if (exists(cr)) { info(`${repo.name}: .coderabbit.yaml present`); continue; }
@@ -182,13 +224,17 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 7. Summary + version stamp
-  step(7, total, 'Done');
+  // 8. Summary + version stamp
+  step(8, total, 'Done');
   writeJSON(path.join(root, PROJECT_FILES.version), { version: VERSION, ideTargets, updatedAt: opts.today ?? null });
   ok(`stamped ${PROJECT_FILES.version} (v${VERSION})`);
   log('');
   log(c.bold('Next — AI-only steps (run in Claude Code):'));
   hand('generate code-maps: run `yad-connect-repos` for each connected repo');
+  const design = readJSON(designPath, null);
+  if (design && design.tool && design.tool !== 'none') {
+    hand(`confirm the design tool: run \`yad-connect-design\` to detect the ${design.tool} MCP (or it degrades to markdown-only)`);
+  }
   hand('author your first epic: run `yad-epic`');
   log('');
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));

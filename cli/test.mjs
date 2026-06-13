@@ -566,7 +566,7 @@ test('repo refresh rejects an unknown repo name', async () => {
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
-const { registerRepo } = await import('./setup.mjs');
+const { registerRepo, registerDesign } = await import('./setup.mjs');
 
 test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
@@ -630,6 +630,34 @@ test('registerRepo records a real repo; an unknown platform answer falls back to
   assert.equal(repo.git_url, null, 'no origin remote recorded as null, not ""');
   const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json')));
   assert.equal(reg.repos.length, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad setup` — registerDesign: record the design-tool connection (deterministic half)
+// ---------------------------------------------------------------------------------------------
+test('registerDesign records a known tool with source unconfirmed (MCP detection is the AI step)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-design-'));
+  const d = registerDesign(T, { tool: 'figma', project_url: 'https://figma.com/files/project/1/x', today: '2026-06-13' });
+  assert.equal(d.tool, 'figma');
+  assert.equal(d.auth, 'user');
+  assert.equal(d.source, null, 'MCP not yet confirmed at setup time');
+  assert.equal(d.provider, null);
+  const onDisk = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json')));
+  assert.equal(onDisk.tool, 'figma');
+  assert.equal(onDisk.project_url, 'https://figma.com/files/project/1/x');
+  assert.ok(!JSON.stringify(onDisk).includes('token'), 'no token field — references only');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerDesign: an unknown tool falls back to the primary; `none` is markdown-only', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-design2-'));
+  const bad = registerDesign(T, { tool: 'sketch', today: '2026-06-13' });
+  assert.equal(bad.tool, 'figma', 'unknown tool falls back to the primary adapter');
+  const none = registerDesign(T, { tool: 'none', today: '2026-06-13' });
+  assert.equal(none.tool, 'none');
+  assert.equal(none.source, 'unavailable', 'none => deliberate markdown-only');
+  assert.equal(none.provider, null);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1185,6 +1213,42 @@ test('doctor: repo entry with no path fails (no silent fallback to project root)
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'ghost' }] }));
   const r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'repo:ghost' && x.status === 'fail' && /no `path`/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: design.json with a known tool + confirmed MCP is ok; unknown tool fails YAD-CFG-002', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // confirmed connection
+  fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'figma', source: 'figma-mcp' }));
+  let r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'ok' && /figma/.test(x.message)));
+  // none => markdown-only, still ok
+  fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'none', source: 'unavailable' }));
+  r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'ok' && /markdown-only/.test(x.message)));
+  // unknown tool => fail with the structured code
+  fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'sketch' }));
+  r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'fail' && /YAD-CFG-002/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: design.json recorded but MCP unconfirmed warns (points at yad-connect-design)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'figma', source: null }));
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'warn' && /not confirmed/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: absent design.json is silent (markdown-only is the normal default)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => x.id === 'design'), 'no design check emitted when the file is absent');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

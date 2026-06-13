@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = version;
 
-// The 17 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The 18 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
   'yad-analysis',
   'yad-epic',
@@ -18,6 +18,7 @@ export const SKILLS = [
   'yad-ui',
   'yad-stories',
   'yad-connect-repos',
+  'yad-connect-design',
   'yad-spec',
   'yad-implement',
   'yad-checks',
@@ -79,10 +80,16 @@ export const IDE_OPENCODE_DIR = '.opencode/commands'; // <skill>.md (flat SKILL.
 // Module registration files copied from skills/sdlc/ into _bmad/sdlc/.
 export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
 
+// Supported design-tool adapters (mirrors skills/sdlc/config.yaml `design.tools`); `DESIGN_PRIMARY` is
+// the fallback when an unknown tool is named, and `none` is the explicit markdown-only choice.
+export const DESIGN_TOOLS = ['figma', 'pencil'];
+export const DESIGN_PRIMARY = 'figma';
+
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
   reposRegistry: '.sdlc/repos.json',
   hubConfig: '.sdlc/hub.json',
+  designConfig: '.sdlc/design.json',
   version: '.sdlc/cli-version.json',
 };
 
