@@ -133,6 +133,9 @@ steps **locked**. Use this exact shape (see `references/state-schema.md`):
 Notes:
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1.
+- `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
+  when `stories-review` passes — at which point the epic is already `ready-for-build`, so the build half
+  runs alongside the tester. They never gate `ready-for-build` (see `references/state-schema.md`).
 - Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
   `[]`, and the `reviews/` directory. (`comments.json` is the machine-readable counterpart to the

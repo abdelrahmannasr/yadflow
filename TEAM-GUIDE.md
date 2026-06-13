@@ -268,12 +268,14 @@ Do these in order. After each author step, the matching review opens and **waits
 | 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
 | 3 | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review |
 | 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
-| 5 | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
+| 5 *(parallel)* | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
 
 Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discovery pass; skip it
 and the epic step does that analyst shaping inline. Each author step opens its own branch
-(`<step>/EP-<slug>`) at the start. When all front gates pass, the epic state reaches
-**`currentStep: ready-for-build`**. Now you can build.
+(`<step>/EP-<slug>`) at the start. When the **stories** gate (step 4) passes, the epic state reaches
+**`currentStep: ready-for-build`** — you can build **now**. Step 5 (`yad-test-cases`) is a **parallel,
+non-blocking** track: it opens at the same moment and the tester works it **alongside** the build half;
+its review never blocks building.
 
 > **The brain is code-aware.** If you connected your code repos in setup (step 3e), each author step
 > first loads the connected repos' **code-maps** — so the epic references what exists, the architecture

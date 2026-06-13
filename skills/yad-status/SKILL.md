@@ -32,11 +32,13 @@ Print, in this order:
    domains).
 2. **Steps table** — for every front step in `steps[]` order (10, or 12 when the optional analysis step
    was run): `id`, `type`, `status`, `assistance`, `automation`, `locked`, and `risk_tags`. Mark the
-   `currentStep` with `→`. The full front-state chain is `[analysis → analysis-review →] epic →
-   epic-review → architecture → architecture-review → ui-design → ui-design-review → stories →
-   stories-review → test-cases → test-cases-review` (then `ready-for-build`); the bracketed `analysis`
-   prefix is present only when `yad-analysis` seeded it. Always render exactly the steps present in
-   `steps[]`.
+   `currentStep` with `→`. The gating chain is `[analysis → analysis-review →] epic → epic-review →
+   architecture → architecture-review → ui-design → ui-design-review → stories → stories-review` →
+   **`ready-for-build`** (the bracketed `analysis` prefix is present only when `yad-analysis` seeded it).
+   `test-cases → test-cases-review` is a **parallel, non-blocking track**: it opens when `stories-review`
+   passes and runs alongside the build half, so when `currentStep` is `ready-for-build` the `test-cases`
+   step may still be `in_progress`/`in_review` — show its status, and note "parallel" so it is clear it
+   does not gate the build. Always render exactly the steps present in `steps[]`.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required
      domains), or **per-repo** for `stories-review` (list each repo needing sign-off),

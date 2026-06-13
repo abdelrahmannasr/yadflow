@@ -323,11 +323,9 @@
         <div class="arrow-v">▼</div>
         <div class="node gate">gate · stories review<small><strong>per-repo:</strong> base rule + the engineer of each touched repo</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node artifact"><strong>yad-test-cases</strong><small>with the test architect → <code>test-cases.md</code> + the automation tests in the connected testing tool (<code>test-links.json</code>)</small></div>
+        <div class="node sentinel"><strong>ready-for-build</strong><small>the gating front half is done — building can start (and <code>yad-test-cases</code> opens in parallel)</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node gate">gate · test-cases review<small>base rule</small></div>
-        <div class="arrow-v">▼</div>
-        <div class="node sentinel"><strong>ready-for-build</strong><small>the front half is done — building can start</small></div>
+        <div class="node artifact"><strong>yad-test-cases</strong> <em>(parallel · non-blocking)</em><small>opens when the stories gate passes and runs <strong>alongside the build half</strong> — with the test architect → <code>test-cases.md</code> + the automation tests in the connected testing tool (<code>test-links.json</code>) → its own base-rule review. Never blocks <code>ready-for-build</code>.</small></div>
       </div>
     </div>
 
@@ -448,7 +446,7 @@ each code repo/
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
   <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 20 skills live and where you pull updates from. No real product work happens inside it.</div>
-  <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories → test cases — each followed by a human review gate. Permanently human-approved.</div>
+  <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
   <div class="term"><strong>Assistance dial</strong><span class="badge b-core">core</span><br>A per-step setting for how much AI helps with the work: <code>none</code>, <code>review</code> (AI checks human work), or <code>heavy</code> (AI does the drafting, human directs).</div>
@@ -581,7 +579,7 @@ each code repo/
     <div class="flow-v">
       <div class="node plain"><strong>Setup</strong><small>install skills · create the hub repo · create empty code repos · wire each repo (CI gates + PR template) · <s>connect-repos</s> <em>skipped — nothing to map yet</em></small></div>
       <div class="arrow-v">▼</div>
-      <div class="node artifact"><strong>Front half</strong><small>(analysis) → epic → architecture + contract → UI (<code>craft</code> → <code>extract</code>) → stories → test cases — all human-gated</small></div>
+      <div class="node artifact"><strong>Front half</strong><small>(analysis) → epic → architecture + contract → UI (<code>craft</code> → <code>extract</code>) → stories — all human-gated; then test cases runs in parallel with the build half</small></div>
       <div class="arrow-v">▼</div>
       <div class="node"><strong>Build half</strong><small>spec → implement → checks → PR → ship, per story per repo — specs exist for 100% of the code from day one</small></div>
       <div class="arrow-v">▼</div>
@@ -788,7 +786,7 @@ yad-connect-testing action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-what">What</span> With the pm AI, slices the approved epic into user stories small enough to build — one file each under <code>stories/</code>, with stable IDs (<code>EP-&lt;slug&gt;-S01</code>…) and a <code>repos:</code> tag naming which code repos must implement each one. Reads epic + architecture + contract + UI as input.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the UI gate passes:</div>
 <pre><code>run yad-stories — epic: EP-istifta-inquiries</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> After the UI gate passes. Stops at the <strong>stories review gate</strong> (per-repo rule), then hands off to <code>yad-test-cases</code>.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> After the UI gate passes. Stops at the <strong>stories review gate</strong> (per-repo rule). When it passes the epic is <code>ready-for-build</code> — the build half can start, and <code>yad-test-cases</code> opens in parallel.</div>
   </div>
 
   <div class="skillcard" id="sk-test-cases">
@@ -796,7 +794,7 @@ yad-connect-testing action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-what">What</span> With the <strong>test architect</strong> AI (Murat), authors the risk-based test cases that cover the approved stories → <code>test-cases.md</code> (cases prioritised P0–P3, with story→case traceability). When a testing tool is connected (<code>yad-connect-testing</code>), it also <strong>implements the automation tests in that tool</strong> — generating them into the connected code repo(s) or linking an existing suite — and records the case→test map in <code>test-links.json</code>; otherwise it stays artifacts-only. Reads epic + architecture + contract + UI + stories as input.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the stories gate passes:</div>
 <pre><code>run yad-test-cases — epic: EP-istifta-inquiries</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> The last front-half author step. Stops at the <strong>test-cases review gate</strong> (base rule). When that gate passes, the epic is <code>ready-for-build</code>.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> A <strong>parallel, non-blocking</strong> track: it opens the moment the stories gate passes — the epic is already <code>ready-for-build</code>, so this runs <strong>alongside the build half</strong>, not before it. Stops at its own <strong>test-cases review gate</strong> (base rule); that review never blocks building.</div>
   </div>
 
   <h3>The review gate &amp; its plumbing (cross-cutting)</h3>

@@ -34,9 +34,24 @@ existing `state.json` and does **not** re-seed.
   `epic → epic-review → … → stories-review → test-cases → test-cases-review`. Seeded `currentStep` is
   `epic-review`.
 
-After `test-cases-review` passes, `currentStep` becomes the `ready-for-build` sentinel either way.
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
 owner + 1 reviewer).
+
+### `test-cases` is a parallel, non-blocking track
+
+`test-cases` (and its `test-cases-review` gate) sit in `steps[]` after `stories-review`, but they are a
+**parallel track that does not gate the build half**. When `stories-review` passes, `advanceState`:
+- sets `currentStep` to the **`ready-for-build`** sentinel — so the build half (`yad-spec` → … keyed off
+  `currentStep == "ready-for-build"`) can start **immediately**, and
+- opens `test-cases` (`blocked` → `in_progress`) so the tester can work **in parallel**.
+
+The `test-cases` track is therefore driven by its own step `status`, **not** by `currentStep`:
+`yad-test-cases` proceeds when `test-cases.status == "in_progress"`, and neither it nor the
+`test-cases-review` gate (`advanceState` / `markInReview`) ever moves `currentStep` away from
+`ready-for-build`. So implementation and test-case authoring run at the same time; the epic is
+`ready-for-build` the moment the **stories** gate passes, whether or not test cases are done. (For an old
+epic seeded before this step existed, `stories-review` → `ready-for-build` with no test-cases track —
+unchanged.)
 
 ### Authoring branches
 

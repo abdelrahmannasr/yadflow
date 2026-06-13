@@ -97,7 +97,9 @@ In `state.json`: set `stories.status: "done"`, set `stories-review.status: "in_r
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the story IDs created, the repos each touches, and that the next action is **review** via
 `yad-review-gate`. Note that this review routes **per-repo reviewers**: owner + 1 reviewer **plus**, for
-each repo appearing in any story's `repos`, a `domain-owner` approval for that repo. **Never record
+each repo appearing in any story's `repos`, a `domain-owner` approval for that repo. When this gate
+passes the epic becomes **`ready-for-build`** — the build half can start **and** the parallel
+**`test-cases`** track opens for the tester (`yad-test-cases`); the two run at the same time. **Never record
 approval here.** Front states do not auto-advance. When the hub has a platform, the gate opens a review
 PR on the hub (via `yad-hub-bridge`, with a `domain:<repo>` label per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review

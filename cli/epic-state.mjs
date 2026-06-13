@@ -197,9 +197,24 @@ export function gatePredicate({
 
 // Advance the step in state.json once the predicate passes. Mirrors yad-review-gate Step 3:
 // mark this review step done, unblock the next step, or set `ready-for-build` for the last one.
+//
+// `test-cases` is a PARALLEL, non-blocking track so the build half can start while the tester works:
+// approving `stories-review` makes the epic `ready-for-build` (the build half keys off this) AND opens
+// `test-cases` for the tester; completing `test-cases-review` never pulls `currentStep` back from
+// `ready-for-build`. Both rules degrade safely for an old chain that has no test-cases steps.
 export function advanceState(state, step) {
   const i = state.steps.findIndex((s) => s.id === step.id);
   state.steps[i] = { ...state.steps[i], status: 'done' };
+  if (step.id === 'stories-review') {
+    const tc = state.steps.find((s) => s.id === 'test-cases');
+    if (tc && tc.status === 'blocked') tc.status = 'in_progress';
+    state.currentStep = 'ready-for-build';
+    return state;
+  }
+  if (step.id === 'test-cases-review') {
+    state.currentStep = 'ready-for-build';
+    return state;
+  }
   const next = state.steps[i + 1];
   if (next) {
     next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
@@ -210,11 +225,13 @@ export function advanceState(state, step) {
   return state;
 }
 
-// Mark a step in-review (idempotent) and point currentStep at it.
+// Mark a step in-review (idempotent) and point currentStep at it — EXCEPT once the epic is
+// `ready-for-build`: the parallel `test-cases` track must not pull currentStep back (the build half
+// runs alongside the tester, and only the test-cases review is in flight at that point).
 export function markInReview(state, step) {
   const i = state.steps.findIndex((s) => s.id === step.id);
   if (state.steps[i].status !== 'done') state.steps[i].status = 'in_review';
-  state.currentStep = step.id;
+  if (state.currentStep !== 'ready-for-build') state.currentStep = step.id;
   return state;
 }
 

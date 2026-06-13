@@ -791,7 +791,7 @@ test('runCommit dry-run prints without committing', async () => {
 // ---------------------------------------------------------------------------------------------
 // `yad gate ci` — event-driven sync: derive from the review branch, overlay, ledger-only commit
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash, artifactBase, advanceState } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash, artifactBase, advanceState, markInReview } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -826,21 +826,7 @@ test('test-cases.md is a single-file artifact: base, reverse and paths use the d
   assert.deepEqual(artifactPaths('test-cases'), ['test-cases.md']);
 });
 
-test('advanceState: approving the final test-cases-review lands on ready-for-build', () => {
-  const state = {
-    epicId: 'EP-x', currentStep: 'test-cases-review',
-    steps: [
-      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
-      { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'done' },
-      { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'in_review' },
-    ],
-  };
-  advanceState(state, state.steps[2]);
-  assert.equal(state.steps[2].status, 'done');
-  assert.equal(state.currentStep, 'ready-for-build', 'no step after test-cases-review => ready-for-build');
-});
-
-test('advanceState: approving stories-review now unblocks test-cases (the new next step)', () => {
+test('advanceState: approving stories-review opens test-cases AND makes the epic ready-for-build (parallel)', () => {
   const state = {
     epicId: 'EP-x', currentStep: 'stories-review',
     steps: [
@@ -850,8 +836,36 @@ test('advanceState: approving stories-review now unblocks test-cases (the new ne
     ],
   };
   advanceState(state, state.steps[0]);
-  assert.equal(state.steps[1].status, 'in_progress', 'an author step unblocks to in_progress');
-  assert.equal(state.currentStep, 'test-cases');
+  // the build half keys off ready-for-build, so implementation can start immediately …
+  assert.equal(state.currentStep, 'ready-for-build', 'stories-review => ready-for-build (build unblocked)');
+  // … while the tester works the parallel test-cases track
+  assert.equal(state.steps[1].status, 'in_progress', 'test-cases opens in parallel');
+});
+
+test('advanceState: completing the parallel test-cases-review keeps the epic at ready-for-build', () => {
+  const state = {
+    epicId: 'EP-x', currentStep: 'ready-for-build',
+    steps: [
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+      { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'done' },
+      { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'in_review' },
+    ],
+  };
+  advanceState(state, state.steps[2]);
+  assert.equal(state.steps[2].status, 'done');
+  assert.equal(state.currentStep, 'ready-for-build', 'the parallel track never regresses currentStep');
+});
+
+test('markInReview: the parallel test-cases-review does not pull currentStep back from ready-for-build', () => {
+  const state = {
+    epicId: 'EP-x', currentStep: 'ready-for-build',
+    steps: [
+      { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'blocked' },
+    ],
+  };
+  markInReview(state, state.steps[0]);
+  assert.equal(state.steps[0].status, 'in_review', 'the step still goes in_review');
+  assert.equal(state.currentStep, 'ready-for-build', 'currentStep stays at ready-for-build (build keeps running)');
 });
 
 test('upsertHubPr replaces by artifact, never duplicates', () => {

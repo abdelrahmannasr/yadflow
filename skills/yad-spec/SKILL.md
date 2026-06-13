@@ -43,7 +43,9 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
 
 ### Step 1 — Resolve the story and check readiness
 Read `{project-root}/epics/<epic>/.sdlc/state.json`. Proceed only when
-`currentStep == "ready-for-build"` (the whole front half is `done`). Read the story file
+`currentStep == "ready-for-build"` (the gating front half — through the **stories** gate — is `done`).
+The **`test-cases` track may still be `in_progress`**: it is parallel and non-blocking, so the build
+half runs alongside it — its status does not affect readiness here. Read the story file
 `epics/<epic>/stories/<story>.md`; confirm `repo` is in its `repos`. If the epic is not ready, STOP
 and point the user at `yad-status`. **Do not mutate front-half state** — `ready-for-build` semantics
 stay intact.

@@ -23,7 +23,7 @@ flowchart TD
       ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
       ui["yad-ui<br/>ui-design.md + DESIGN.md + design tool screens"]:::artifact
       st["yad-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
-      tc["yad-test-cases<br/>test-cases.md + automation tests"]:::artifact
+      tc["yad-test-cases<br/>test-cases.md + automation tests<br/>(parallel · non-blocking)"]:::artifact
       gAn{{"gate · analysis"}}:::gated
       gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
       gAr{{"gate · architecture<br/>escalated: + repo domain owners"}}:::gated
@@ -31,7 +31,8 @@ flowchart TD
       gSt{{"gate · stories<br/>per-repo domain owners"}}:::gated
       gTc{{"gate · test cases · base"}}:::gated
       rfb(["currentStep: ready-for-build"]):::sentinel
-      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> tc --> gTc --> rfb
+      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
+      gSt -. opens in parallel .-> tc --> gTc
     end
 
     subgraph BUILD["B · Build half — per story, per code repo"]

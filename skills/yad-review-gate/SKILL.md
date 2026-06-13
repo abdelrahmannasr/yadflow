@@ -153,13 +153,16 @@ If the predicate **fails**: report exactly which approvals are still missing and
 
 If the predicate **passes**:
 - Mark this review step `status: "done"`.
-- If there **is** a next step in `steps[]`: set it `status` from `blocked` to `in_progress`
-  (authoring) or `in_review`, and set `currentStep` to that next step.
-- If this is the **last** step (`stories-review`, the final review): there is no further front step —
-  set `currentStep: "ready-for-build"` (the Phase 3 handoff sentinel; it is intentionally not a
-  `steps[]` entry). The front half is complete.
+- **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
+  handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track
+  (set its step `blocked` → `in_progress`). The build half can now start **and** the tester can work
+  `test-cases` at the same time.
+- **`test-cases-review`** is the parallel track's gate: mark it `done` but **leave `currentStep` at
+  `ready-for-build`** — completing test cases must never pull the epic back from the build half.
+- Any **other** review step: set the next step in `steps[]` from `blocked` to `in_progress` (authoring)
+  or `in_review`, and set `currentStep` to that next step.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is
-  now `ready-for-build`).
+  now `ready-for-build`, with `test-cases` running in parallel).
 
 ### PR-driven automation (the `yad gate` CLI)
 When the hub has a platform, the mechanical `open`/`sync`/`advance` is performed deterministically by the

@@ -1,15 +1,21 @@
 ---
 name: yad-test-cases
-description: 'Front state 9 of the gated SDLC. With the test architect (Murat), author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
+description: 'Front state 9 of the gated SDLC — a PARALLEL, non-blocking track. Opens when the stories gate passes (the epic is already ready-for-build, so the build half can start at the same time) and runs alongside implementation. With the test architect (Murat), author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
 ---
 
-# SDLC — Author Test Cases (front state 9)
+# SDLC — Author Test Cases (front state 9 — parallel, non-blocking)
 
 **Goal:** Produce a human-authored, AI-assisted `test-cases.md` for an approved epic — the risk-based
 test cases that cover the stories' acceptance criteria — **and**, when a testing tool is connected, the
 **actual automation tests** inside the connected code repo(s), linked back from the artifact. This is a
 **front state**: human-authored with AI assist, **never auto-advances**. When the test cases are
 drafted, control passes to `yad-review-gate` (base rule: owner + 1 reviewer).
+
+**This step does NOT block the build half.** It opens when the **stories** gate passes — at which point
+the epic is already `ready-for-build`, so implementation (`yad-spec` → `yad-implement` → …) can start
+**at the same time** the tester works here. The test-cases track is driven by its own step `status`
+(it opens to `in_progress` when `stories-review` passes) and its review **never moves `currentStep`
+away from `ready-for-build`**, so the two run in parallel.
 
 Test work is shaped by the **test architect** lens — **Murat** (`bmad-tea`), driving
 `bmad-testarch-test-design` for the cases and `bmad-testarch-automate` for the automation. The
@@ -29,10 +35,12 @@ the Markdown artifact only — the testing tool is additive, exactly like the de
 
 ## On Activation
 
-### Step 1 — Resolve the epic and check the gate
-Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only proceed when
-`currentStep == "test-cases"` and that step's `status == "in_progress"` (the stories review must
-already have passed). If not, stop and point the user at `yad-status` / the gate.
+### Step 1 — Resolve the epic and check the track
+Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only proceed when the
+**`test-cases` step's `status == "in_progress"`** — it opens when `stories-review` passes (the epic is
+already `ready-for-build` by then; `currentStep` stays there because this is a parallel track, so do
+**not** gate on `currentStep`). If `test-cases` is still `blocked`, the stories review has not passed —
+stop and point the user at `yad-status` / the gate.
 
 ### Step 1b — Open the authoring branch
 Open the test-cases authoring branch `test-cases/EP-<slug>` per the shared procedure
@@ -144,14 +152,16 @@ Keep the `## Automation (<tool>)` section of `test-cases.md` in step with this f
 degraded (`testing: none`), do **not** write `test-links.json`.
 
 ### Step 5 — Advance the authoring step (NOT the gate)
-In `state.json`: set `test-cases.status: "done"`, set `test-cases-review.status: "in_review"`, and set
-`currentStep: "test-cases-review"`. Write `state.json`. Do **not** touch `approvals.json`.
+In `state.json`: set `test-cases.status: "done"` and set `test-cases-review.status: "in_review"`. **Leave
+`currentStep` at `ready-for-build`** — this is the parallel track; moving `currentStep` would pull it
+back from the build half. Write `state.json`. Do **not** touch `approvals.json`.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the path to `test-cases.md`, the connected testing tool and what it produced (e.g. "Playwright —
-6 tests generated", the suite path + `test-links.json` path, or "no testing tool — artifacts-only"), and
-that the next action is **review** via `yad-review-gate` (base rule: owner + 1 reviewer). **Never record
-approval here.** Front states do not auto-advance. When the hub has a platform, the gate opens a review
+6 tests generated", the suite path + `test-links.json` path, or "no testing tool — artifacts-only"), that
+the build half may already be underway in parallel, and that the next action is **review** via
+`yad-review-gate` (base rule: owner + 1 reviewer). **Never record approval here.** Front states do not
+auto-advance. When the hub has a platform, the gate opens a review
 PR on the hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
 into the ledger; otherwise the review is recorded file-only.
 

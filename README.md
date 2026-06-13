@@ -221,11 +221,13 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
 - **`yad-stories`** — Front state 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI.
-- **`yad-test-cases`** — Front state 9. With the test architect (Murat), author `test-cases.md`
-  covering the approved stories (risk-based P0–P3 cases + story→case traceability). When a testing tool
-  is connected (`yad-connect-testing`), also **implements the automation tests** in the connected code
-  repo(s) (generate or link), recording the case→test map in `test-links.json`; degrades to
-  artifacts-only otherwise. Reads epic + architecture + contract + UI + stories.
+- **`yad-test-cases`** — Front state 9, a **parallel, non-blocking** track: it opens when the stories
+  gate passes (the epic is already `ready-for-build`, so the build half runs alongside it). With the
+  test architect (Murat), author `test-cases.md` covering the approved stories (risk-based P0–P3 cases +
+  story→case traceability). When a testing tool is connected (`yad-connect-testing`), also **implements
+  the automation tests** in the connected code repo(s) (generate or link), recording the case→test map in
+  `test-links.json`; degrades to artifacts-only otherwise. Reads epic + architecture + contract + UI +
+  stories.
 
 ### The review gate (cross-cutting — used by every review)
 
@@ -335,8 +337,10 @@ threads are resolved. Details: **“Run the full front half by hand”** below.
 7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
 8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).
 9. `yad-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (**per-repo**).
+   → `state.json` reaches `currentStep: ready-for-build` — **the build half can start now.**
 10. `yad-test-cases` → `test-cases.md` (+ automation tests when a testing tool is connected) → review (base rule).
-    → `state.json` reaches `currentStep: ready-for-build`.
+    **Parallel, non-blocking:** opens when the stories gate passes and runs alongside the build half; its
+    review never moves `currentStep` off `ready-for-build`.
 
 ### B — Build half (per story, per repo)
 From a `ready-for-build` story, for **each** repo the story is tagged with. Details: **“Run the full
@@ -371,8 +375,9 @@ Details: **“Run the back half on the dial”** below.
 ## Run the full front half by hand
 
 The front half walks **epic → review → architecture+contract → review → UI design → review → stories
-→ review → test cases → review → `ready-for-build`**. It is all files under `epics/EP-<slug>/`. The
-skills below guide you, but you can also edit the files directly — that's the point.
+→ review → `ready-for-build`**, then **test cases → review** runs as a **parallel, non-blocking track**
+alongside the build half. It is all files under `epics/EP-<slug>/`. The skills below guide you, but you
+can also edit the files directly — that's the point.
 
 Each authoring step is the same shape: an author skill produces an artifact, sets its step `done`,
 moves `currentStep` to the matching review, and **stops at the gate**. Then **`yad-review-gate`**

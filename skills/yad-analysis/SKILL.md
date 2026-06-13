@@ -118,6 +118,9 @@ Notes:
 - `analysis-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer).
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1.
+- `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
+  when `stories-review` passes — the epic is already `ready-for-build` by then, so the build half runs
+  alongside the tester (see `../yad-epic/references/state-schema.md`).
 - Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
   `[]`, and the `reviews/` directory.
