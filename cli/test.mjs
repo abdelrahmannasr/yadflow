@@ -1168,3 +1168,33 @@ test('errors: readJSONStrict throws a YadError with code + hint on corrupt JSON'
   }
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('doctor: non-array hub.roster fails (matches the gate shape check)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: 'oops' }));
+  const r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'hub' && x.status === 'fail' && /roster/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: repo entry with no path fails (no silent fallback to project root)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'ghost' }] }));
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'repo:ghost' && x.status === 'fail' && /no `path`/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate loadHub: an existing hub.json holding literal null is rejected (not treated as absent)', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), 'null');
+  await assert.rejects(
+    gateSync(T, { epic: 'EP-test', today: '2026-06-13' }),
+    (e) => e.code === 'YAD-STATE-002' && /contains `null`/.test(e.message),
+  );
+  assert.ok(ep);
+  fs.rmSync(T, { recursive: true, force: true });
+});

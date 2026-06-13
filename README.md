@@ -161,7 +161,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 | Code | Meaning | Fix |
 |------|---------|-----|
 | `YAD-ENV-001` | git is not installed or not on PATH | install git — every yad command needs it |
-| `YAD-ENV-002` | platform CLI (gh/glab) missing or not authenticated | install it / `gh auth login` — the gate degrades to file-only without it |
+| `YAD-ENV-002` | platform CLI (gh/glab) missing or not authenticated | install it and authenticate — `gh auth login` (GitHub) or `glab auth login` (GitLab); the gate degrades to file-only without it |
 | `YAD-ENV-003` | Node.js older than the supported range | install Node >= 18 |
 | `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |

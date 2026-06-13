@@ -16,9 +16,9 @@ body:
     attributes:
       label: "`yad doctor --json` output"
       description: >
-        Run `npx yadflow doctor --json` in the affected project and paste the output —
-        it contains no secrets (names, paths, and check results only) and answers most
-        environment questions up front.
+        Run `npx yadflow doctor --json` in the affected project and paste the output — it answers
+        most environment questions up front. It reports names, paths, and check results; please
+        review and redact anything sensitive (internal hostnames, private paths) before posting.
       render: json
     validations:
       required: true

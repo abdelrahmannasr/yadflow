@@ -61,6 +61,8 @@ export function projectChecks(checks, root) {
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
+    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a hub the gate would reject.
+    else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'file-only'}, ${(hub.roster || []).length} reviewer(s)`);
       // platform CLI + auth (best-effort; auth probing is the user's own session)
@@ -86,7 +88,10 @@ export function projectChecks(checks, root) {
   else if (!Array.isArray(registry?.repos)) check(checks, 'repos', 'project', 'fail', `${PROJECT_FILES.reposRegistry} has the wrong shape [YAD-STATE-002]`, 'expected a `repos` array');
   else {
     for (const repo of registry.repos) {
-      const repoRoot = path.resolve(root, repo.path || '');
+      // A missing/empty path must NOT fall back to the project root (which is itself a git repo and
+      // would read as "healthy") — an entry with no path is malformed.
+      if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (\`yad setup\`)'); continue; }
+      const repoRoot = path.resolve(root, repo.path);
       if (!exists(repoRoot)) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo'); continue; }
       const head = gitHead(repoRoot);
       if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} is not a git repository (or has no commits) [YAD-STATE-003]`, 'init/clone the repo, then re-connect it'); continue; }

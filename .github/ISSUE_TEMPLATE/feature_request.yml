@@ -22,5 +22,5 @@ body:
       label: Safety considerations
       description: >
         Yadflow's core promise is that humans own the decisions. Does this proposal move any
-        decision from a human to a machine? If so, what evidence would gate it (see the trust-log
-        model in the README)?
+        decision from a human to a machine? If so, what evidence would gate it (see the trust log
+        in the README)?

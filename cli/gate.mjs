@@ -65,7 +65,12 @@ function warnUnlockedContract(epicDir, artifact) {
 function loadHub(root) {
   const hubFile = path.join(root, PROJECT_FILES.hubConfig);
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
+  // Distinguish an ABSENT hub.json (null default → fine, file-only gate) from one that exists but
+  // holds literal `null` (malformed — must not silently downgrade to file-only).
   const hub = readJSONStrict(hubFile, null);
+  if (hub === null && fs.existsSync(hubFile)) {
+    throw err('YAD-STATE-002', `${hubFile}: contains \`null\` — expected a config object`, 'fix the file or re-run `yad setup`');
+  }
   if (hub !== null) {
     if (typeof hub !== 'object' || Array.isArray(hub)) throw err('YAD-STATE-002', `${hubFile}: expected a JSON object`, 'fix the file or re-run `yad setup`');
     if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
