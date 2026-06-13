@@ -30,12 +30,13 @@ Print, in this order:
 
 1. **Epic:** `epicId`, `status` from `epic.md` frontmatter, `currentStep`, and `repos` (the touched
    domains).
-2. **Steps table** — for every front step in `steps[]` order (8, or 10 when the optional analysis step
+2. **Steps table** — for every front step in `steps[]` order (10, or 12 when the optional analysis step
    was run): `id`, `type`, `status`, `assistance`, `automation`, `locked`, and `risk_tags`. Mark the
    `currentStep` with `→`. The full front-state chain is `[analysis → analysis-review →] epic →
    epic-review → architecture → architecture-review → ui-design → ui-design-review → stories →
-   stories-review` (then `ready-for-build`); the bracketed `analysis` prefix is present only when
-   `yad-analysis` seeded it. Always render exactly the steps present in `steps[]`.
+   stories-review → test-cases → test-cases-review` (then `ready-for-build`); the bracketed `analysis`
+   prefix is present only when `yad-analysis` seeded it. Always render exactly the steps present in
+   `steps[]`.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required
      domains), or **per-repo** for `stories-review` (list each repo needing sign-off),

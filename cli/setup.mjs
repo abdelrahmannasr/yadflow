@@ -5,7 +5,7 @@ import {
   c, log, step, ok, info, warn, hand, fail, ask, askYesNo, run, has,
   exists, readJSON, writeJSON,
 } from './lib.mjs';
-import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY } from './manifest.mjs';
+import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY } from './manifest.mjs';
 import { moduleActions, repoActions, hubActions, authorsActions } from './plan.mjs';
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
@@ -87,6 +87,34 @@ export function registerDesign(root, { tool, project_url = null, files = null, t
   return design;
 }
 
+// Record the project's testing-tool connection into .sdlc/testing.json (the deterministic half of the
+// connect loop; MCP detection itself is an AI step, handed off to `yad-connect-testing`). An unknown
+// tool falls back to the primary adapter rather than being rejected — mirrors registerDesign. `none` is
+// the explicit artifacts-only choice.
+export function registerTesting(root, { tool, project_url = null, suites = null, today = null } = {}) {
+  // Idempotent re-connect: carry the original first-connect date forward; only lastSyncedAt moves.
+  const testingPath = path.join(root, PROJECT_FILES.testingConfig);
+  const prev = readJSON(testingPath, null);
+  const connectedAt = prev && prev.connectedAt ? prev.connectedAt : today;
+  let t = (tool || '').toLowerCase();
+  if (t === 'none' || t === '') {
+    const off = { tool: 'none', provider: null, project_url: null, auth: 'user',
+      suites: {}, connectedAt, lastSyncedAt: today, source: 'unavailable' };
+    writeJSON(testingPath, off);
+    return off;
+  }
+  if (!TESTING_TOOLS.includes(t)) { warn(`unknown testing tool '${tool}' — using ${TESTING_PRIMARY}`); t = TESTING_PRIMARY; }
+  // source stays null until `yad-connect-testing` detects the MCP in the harness (AI step). doctor
+  // reports a recorded-but-unconfirmed connection as a warning pointing at that skill.
+  const testing = {
+    tool: t, provider: null, project_url: project_url || null, auth: 'user',
+    suites: suites || {},
+    connectedAt, lastSyncedAt: today, source: null,
+  };
+  writeJSON(testingPath, testing);
+  return testing;
+}
+
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
@@ -100,7 +128,7 @@ function applyActions(actions, { force = false } = {}) {
 }
 
 export async function runSetup(root, opts = {}) {
-  const total = 8;
+  const total = 9;
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));
 
@@ -178,8 +206,26 @@ export async function runSetup(root, opts = {}) {
       : `wrote ${PROJECT_FILES.designConfig} (${tool})`);
   }
 
-  // 5. Connect code repos
-  step(5, total, 'Connect code repos');
+  // 5. Connect a testing tool (Playwright-first, pluggable; the test-cases step implements automation here)
+  step(5, total, 'Connect a testing tool (playwright / cypress / pytest / none)');
+  const testingPath = path.join(root, PROJECT_FILES.testingConfig);
+  if (exists(testingPath) && !(await askYesNo('testing.json exists — reconfigure?', false))) {
+    info('keeping existing .sdlc/testing.json');
+  } else {
+    let tool = (await ask(`Testing tool (${TESTING_TOOLS.join('/')}/none)`, TESTING_PRIMARY)).toLowerCase();
+    if (![...TESTING_TOOLS, 'none'].includes(tool)) {
+      warn(`unknown testing tool '${tool}' — using ${TESTING_PRIMARY}`);
+      tool = TESTING_PRIMARY;
+    }
+    const project_url = tool === 'none' ? null : (await ask('  project/config reference (blank to set later)', '')) || null;
+    registerTesting(root, { tool, project_url, today: opts.today ?? null });
+    ok(tool === 'none'
+      ? `wrote ${PROJECT_FILES.testingConfig} (artifacts-only)`
+      : `wrote ${PROJECT_FILES.testingConfig} (${tool})`);
+  }
+
+  // 6. Connect code repos
+  step(6, total, 'Connect code repos');
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const registry = readJSON(regPath, { repos: [] });
   const known = new Set(registry.repos.map((r) => r.name));
@@ -202,8 +248,8 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 6. Wire each connected repo + the hub itself
-  step(6, total, 'Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
+  // 7. Wire each connected repo + the hub itself
+  step(7, total, 'Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
   if (registry.repos.length === 0) info('no repos to wire');
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
@@ -218,8 +264,8 @@ export async function runSetup(root, opts = {}) {
   // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
   applyActions(authorsActions(root, registry.repos), { force: true });
 
-  // 7. Optional CodeRabbit
-  step(7, total, 'AI review (CodeRabbit)');
+  // 8. Optional CodeRabbit
+  step(8, total, 'AI review (CodeRabbit)');
   for (const repo of registry.repos) {
     const cr = path.join(path.resolve(root, repo.path), '.coderabbit.yaml');
     if (exists(cr)) { info(`${repo.name}: .coderabbit.yaml present`); continue; }
@@ -229,8 +275,8 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 8. Summary + version stamp
-  step(8, total, 'Done');
+  // 9. Summary + version stamp
+  step(9, total, 'Done');
   writeJSON(path.join(root, PROJECT_FILES.version), { version: VERSION, ideTargets, updatedAt: opts.today ?? null });
   ok(`stamped ${PROJECT_FILES.version} (v${VERSION})`);
   log('');
@@ -239,6 +285,10 @@ export async function runSetup(root, opts = {}) {
   const design = readJSON(designPath, null);
   if (design && design.tool && design.tool !== 'none') {
     hand(`confirm the design tool: run \`yad-connect-design\` to detect the ${design.tool} MCP (or it degrades to markdown-only)`);
+  }
+  const testing = readJSON(testingPath, null);
+  if (testing && testing.tool && testing.tool !== 'none') {
+    hand(`confirm the testing tool: run \`yad-connect-testing\` to detect the ${testing.tool} MCP (or it degrades to artifacts-only)`);
   }
   hand('author your first epic: run `yad-epic`');
   log('');

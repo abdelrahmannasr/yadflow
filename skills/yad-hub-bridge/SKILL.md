@@ -1,6 +1,6 @@
 ---
 name: yad-hub-bridge
-description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire event-driven sync on the hub: a CI workflow that runs `yad gate ci` whenever a reviewer approves / requests changes / a human merges, committing the ledger to the default branch. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire event-driven sync on the hub: a CI workflow that runs `yad gate ci` whenever a reviewer approves / requests changes / a human merges, committing the ledger to the default branch. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
@@ -29,7 +29,7 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 ## Inputs
 
 - `epic`     — the `EP-<slug>` under review.
-- `artifact` — the artifact file (`analysis.md` | `epic.md` | `architecture.md` | `ui-design.md` | `stories/`).
+- `artifact` — the artifact file (`analysis.md` | `epic.md` | `architecture.md` | `ui-design.md` | `stories/` | `test-cases.md`).
 - `action`   — `open` | `route` | `wire` (default `route`). (`sync`'s ledger writes live in
   `yad-review-gate`; this skill provides the read recipes `sync` calls — see `references/bridge.md`.)
 

@@ -566,7 +566,7 @@ test('repo refresh rejects an unknown repo name', async () => {
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
-const { registerRepo, registerDesign } = await import('./setup.mjs');
+const { registerRepo, registerDesign, registerTesting } = await import('./setup.mjs');
 
 test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
@@ -672,6 +672,44 @@ test('registerDesign: an unknown tool falls back to the primary; `none` is markd
 });
 
 // ---------------------------------------------------------------------------------------------
+// `yad setup` — registerTesting: record the testing-tool connection (deterministic half)
+// ---------------------------------------------------------------------------------------------
+test('registerTesting records a known tool with source unconfirmed (MCP detection is the AI step)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-testing-'));
+  const t = registerTesting(T, { tool: 'playwright', project_url: 'tests/playwright.config.ts', today: '2026-06-13' });
+  assert.equal(t.tool, 'playwright');
+  assert.equal(t.auth, 'user');
+  assert.equal(t.source, null, 'MCP not yet confirmed at setup time');
+  assert.equal(t.provider, null);
+  const onDisk = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/testing.json')));
+  assert.equal(onDisk.tool, 'playwright');
+  assert.equal(onDisk.project_url, 'tests/playwright.config.ts');
+  assert.ok(!JSON.stringify(onDisk).includes('token'), 'no token field — references only');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerTesting: a re-connect preserves the original connectedAt, only lastSyncedAt moves', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-testing3-'));
+  registerTesting(T, { tool: 'playwright', today: '2026-06-13' });
+  const again = registerTesting(T, { tool: 'cypress', today: '2026-06-20' });
+  assert.equal(again.tool, 'cypress', 'tool switched in place');
+  assert.equal(again.connectedAt, '2026-06-13', 'first-connect date preserved');
+  assert.equal(again.lastSyncedAt, '2026-06-20', 'lastSyncedAt advanced');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerTesting: an unknown tool falls back to the primary; `none` is artifacts-only', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-testing2-'));
+  const bad = registerTesting(T, { tool: 'mocha', today: '2026-06-13' });
+  assert.equal(bad.tool, 'playwright', 'unknown tool falls back to the primary adapter');
+  const none = registerTesting(T, { tool: 'none', today: '2026-06-13' });
+  assert.equal(none.tool, 'none');
+  assert.equal(none.source, 'unavailable', 'none => deliberate artifacts-only');
+  assert.equal(none.provider, null);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
 const { detectPlatform, cliFor, resolveLogin, mapApprovers } = await import('./platform.mjs');
@@ -753,7 +791,7 @@ test('runCommit dry-run prints without committing', async () => {
 // ---------------------------------------------------------------------------------------------
 // `yad gate ci` — event-driven sync: derive from the review branch, overlay, ledger-only commit
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash, artifactBase, advanceState } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -779,6 +817,41 @@ test('artifactPaths covers what artifactHash fingerprints', () => {
   assert.deepEqual(artifactPaths('architecture'), ['architecture.md', 'contract.md', '.sdlc/contract-lock.json']);
   assert.deepEqual(artifactPaths('stories'), ['stories']);
   assert.deepEqual(artifactPaths('epic'), ['epic.md']);
+});
+
+test('test-cases.md is a single-file artifact: base, reverse and paths use the default branch', () => {
+  // The single-file decision — test-cases.md must NOT need the folder-special handling stories/ does.
+  assert.equal(artifactBase('test-cases.md'), 'test-cases');
+  assert.equal(artifactFromBase('test-cases'), 'test-cases.md');
+  assert.deepEqual(artifactPaths('test-cases'), ['test-cases.md']);
+});
+
+test('advanceState: approving the final test-cases-review lands on ready-for-build', () => {
+  const state = {
+    epicId: 'EP-x', currentStep: 'test-cases-review',
+    steps: [
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+      { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'done' },
+      { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'in_review' },
+    ],
+  };
+  advanceState(state, state.steps[2]);
+  assert.equal(state.steps[2].status, 'done');
+  assert.equal(state.currentStep, 'ready-for-build', 'no step after test-cases-review => ready-for-build');
+});
+
+test('advanceState: approving stories-review now unblocks test-cases (the new next step)', () => {
+  const state = {
+    epicId: 'EP-x', currentStep: 'stories-review',
+    steps: [
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'in_review' },
+      { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'blocked' },
+      { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'blocked' },
+    ],
+  };
+  advanceState(state, state.steps[0]);
+  assert.equal(state.steps[1].status, 'in_progress', 'an author step unblocks to in_progress');
+  assert.equal(state.currentStep, 'test-cases');
 });
 
 test('upsertHubPr replaces by artifact, never duplicates', () => {
@@ -1259,6 +1332,42 @@ test('doctor: absent design.json is silent (markdown-only is the normal default)
   await reconcile(T, { fix: true });
   const r = await doctorOn(T);
   assert.ok(!r.checks.some((x) => x.id === 'design'), 'no design check emitted when the file is absent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: testing.json with a known tool + confirmed MCP is ok; unknown tool fails YAD-CFG-003', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // confirmed connection
+  fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'playwright', source: 'playwright-mcp' }));
+  let r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'ok' && /playwright/.test(x.message)));
+  // none => artifacts-only, still ok
+  fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'none', source: 'unavailable' }));
+  r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'ok' && /artifacts-only/.test(x.message)));
+  // unknown tool => fail with the structured code
+  fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'mocha' }));
+  r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'fail' && /YAD-CFG-003/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: testing.json recorded but MCP unconfirmed warns (points at yad-connect-testing)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'playwright', source: null }));
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'warn' && /not confirmed/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: absent testing.json is silent (artifacts-only is the normal default)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => x.id === 'testing'), 'no testing check emitted when the file is absent');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

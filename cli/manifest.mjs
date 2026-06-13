@@ -10,15 +10,17 @@ import { readFileSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = version;
 
-// The 18 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The 20 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
   'yad-analysis',
   'yad-epic',
   'yad-architecture',
   'yad-ui',
   'yad-stories',
+  'yad-test-cases',
   'yad-connect-repos',
   'yad-connect-design',
+  'yad-connect-testing',
   'yad-spec',
   'yad-implement',
   'yad-checks',
@@ -87,11 +89,19 @@ export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
 export const DESIGN_TOOLS = ['figma', 'pencil'];
 export const DESIGN_PRIMARY = 'figma';
 
+// Supported testing-tool adapters (mirrors skills/sdlc/config.yaml `testing.tools`); `TESTING_PRIMARY`
+// is the fallback `registerTesting`/setup use when an unknown tool is named, and `none` is the explicit
+// artifacts-only choice. (doctor does NOT fall back — an unknown tool there is a hard YAD-CFG-003 fail,
+// mirroring the design-tool YAD-CFG-002.)
+export const TESTING_TOOLS = ['playwright', 'cypress', 'pytest'];
+export const TESTING_PRIMARY = 'playwright';
+
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
   reposRegistry: '.sdlc/repos.json',
   hubConfig: '.sdlc/hub.json',
   designConfig: '.sdlc/design.json',
+  testingConfig: '.sdlc/testing.json',
   version: '.sdlc/cli-version.json',
 };
 

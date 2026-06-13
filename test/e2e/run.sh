@@ -80,6 +80,10 @@ SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" || die "yad setup failed"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
 grep -q "alice@corp.io" "$HUB/.sdlc/verified-authors" || die "verified-authors not generated from roster"
 
+say "setup recorded the pluggable tool connections (design + testing)"
+jassert "$HUB/.sdlc/design.json" 'j.tool === "figma" && j.auth === "user" && j.source === null'
+jassert "$HUB/.sdlc/testing.json" 'j.tool === "playwright" && j.auth === "user" && j.source === null'
+
 say "yad check is clean after setup"
 CHECK_OUT="$(yad check --dir "$HUB")" || die "yad check failed"
 echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 outdated, 0 stale, 0 legacy" \

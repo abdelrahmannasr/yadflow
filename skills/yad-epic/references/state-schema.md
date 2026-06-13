@@ -17,7 +17,7 @@ Each `steps[]` entry:
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `id` | `analysis`, `analysis-review`, `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review` | Step identity. |
+| `id` | `analysis`, `analysis-review`, `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review`, `test-cases`, `test-cases-review` | Step identity. |
 
 ### Two valid chain shapes (analysis is optional)
 
@@ -26,20 +26,22 @@ ran `yad-analysis` before the epic. The entry-point skill (whichever runs first)
 that assigns `EP-<slug>` and seeds `state.json` + the empty ledgers; the other skill detects an
 existing `state.json` and does **not** re-seed.
 
-- **With analysis** (10 steps — `yad-analysis` seeded the chain):
+- **With analysis** (12 steps — `yad-analysis` seeded the chain):
   `analysis → analysis-review → epic → epic-review → architecture → architecture-review → ui-design →
-  ui-design-review → stories → stories-review`. Seeded `currentStep` is `analysis-review`; `epic`
-  starts `blocked`.
-- **Without analysis** (8 steps — `yad-epic` is the entry point, the default):
-  `epic → epic-review → … → stories-review`. Seeded `currentStep` is `epic-review`.
+  ui-design-review → stories → stories-review → test-cases → test-cases-review`. Seeded `currentStep`
+  is `analysis-review`; `epic` starts `blocked`.
+- **Without analysis** (10 steps — `yad-epic` is the entry point, the default):
+  `epic → epic-review → … → stories-review → test-cases → test-cases-review`. Seeded `currentStep` is
+  `epic-review`.
 
-After `stories-review` passes, `currentStep` becomes the `ready-for-build` sentinel either way.
-`analysis-review` carries no `risk_tags` (base rule: owner + 1 reviewer).
+After `test-cases-review` passes, `currentStep` becomes the `ready-for-build` sentinel either way.
+`analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
+owner + 1 reviewer).
 
 ### Authoring branches
 
 Each front **authoring** step opens its own git branch at the start of the step, named
-`<step>/EP-<slug>` where `<step>` ∈ `analysis | epic | architecture | ui-design | stories`
+`<step>/EP-<slug>` where `<step>` ∈ `analysis | epic | architecture | ui-design | stories | test-cases`
 (`config.yaml` `defaults.front_authoring_branch`). This is **distinct** from the review branch
 `review/EP-<slug>/<artifact-base>` that `yad-hub-bridge` opens later for the review PR/MR.
 
@@ -99,6 +101,20 @@ chain is unchanged — this is an *output enrichment*, mirrored by the `design:`
   "source": "<mcp id>" }
 ```
 
+## `test-links.json`
+Present only when the `test-cases` step materialized automation in a connected testing tool
+(`yad-connect-testing` → `.sdlc/testing.json`). Written by `yad-test-cases`, the machine-readable
+case→test map (sibling of `contract-lock.json` / `design-links.json`; the locked `state.json` step shape
+is untouched). The `test-cases` step chain is unchanged — this is an *output enrichment*, mirrored by the
+`testing:` frontmatter block and the `## Automation (<tool>)` section in `test-cases.md`. Absent when the
+step ran artifacts-only (`testing: none`).
+
+```json
+{ "tool": "playwright", "suite": "<url/path>", "generatedAt": "<YYYY-MM-DD>", "direction": "generated|linked",
+  "tests": [ { "case": "<id>", "story": "EP-<slug>-S0N", "repo": "<name>", "level": "unit|integration|e2e", "path": "<test path>", "url": "<url>" } ],
+  "source": "<mcp id>" }
+```
+
 ## `reviews/`
 Human-readable review records, one file per round:
 `reviews/<artifact-base>--<YYYY-MM-DD>--<status>.md` where `status` ∈ `comments` | `approved`
@@ -106,7 +122,7 @@ and `<artifact-base>` is the artifact without extension (e.g. `epic`, `architect
 
 ## Dial defaults & locks
 - Every step defaults to `automation: human_approve` (build plan §2).
-- The four authoring front steps and their reviews are `locked: true` — the engine refuses to set
+- The five authoring front steps and their reviews are `locked: true` — the engine refuses to set
   them to `machine_advance` in this version (build plan §1, §8.7). Only back states (build pipeline,
   steps 9–14) may move toward machine-advance in a later iteration.
 

@@ -20,12 +20,12 @@ output_folder: "{project-root}/_bmad-output"
 defaults:
   assistance: review          # none | review | heavy
   automation: human_approve   # human_approve | machine_advance
-  # Front steps (analysis [optional], epic, architecture, ui-design, stories) are locked to
+  # Front steps (analysis [optional], epic, architecture, ui-design, stories, test-cases) are locked to
   # human_approve and may NOT be set to machine_advance in this version (build plan §1, §8.7).
   front_steps_locked: true
   # Each front authoring step opens its own branch at the start of the step (the <step> is the step id:
-  # analysis | epic | architecture | ui-design | stories). Git/greenfield-safe; distinct from the
-  # bridge's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
+  # analysis | epic | architecture | ui-design | stories | test-cases). Git/greenfield-safe; distinct
+  # from the bridge's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
   front_authoring_branch: "<step>/EP-<slug>"
 
 # Team review gate defaults (build plan §3 piece 2, §4).
@@ -134,6 +134,22 @@ design:
   # NO tokens in the registry (project_url/files are plain references, never credentials).
   auth: user
 
+# Testing tool (yad-connect-testing) — the test-cases step (yad-test-cases) materializes the actual
+# automation tests inside a connected testing tool, alongside test-cases.md. The tool is reached through
+# its MCP (a harness MCP server, like the design tool — NOT a CLI), detected per provider and DEGRADING
+# to artifacts-only when absent. Playwright-first but PLUGGABLE: a testing-tool adapter, like the
+# design-tool adapter. Connection is one-per-project, recorded at setup; the per-epic case->test map
+# (test-links.json) is written by yad-test-cases per epic.
+testing:
+  registry: "{project-root}/.sdlc/testing.json"      # project-wide testing connection (NOT per-epic)
+  tools: [playwright, cypress, pytest]                # supported adapters; an unknown tool falls back to `primary`
+  primary: playwright                                 # the default/named provider
+  degrade: artifacts-only                             # no tool / no MCP => yad-test-cases authors test-cases.md only
+  links: "{project-root}/epics/EP-<slug>/.sdlc/test-links.json"   # per-epic case->test map (yad-test-cases)
+  # Auth: `yad-connect-testing` connects through the LOCAL user's own authenticated MCP session and stores
+  # NO tokens in the registry (project_url/suites are plain references, never credentials).
+  auth: user
+
 # Hub platform + front-half review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
 # The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
@@ -166,7 +182,7 @@ automation:
   # Hard lock — the dial-setter REFUSES machine_advance for these, regardless of trust evidence.
   # The front authoring steps (already locked:true in state.json; analysis is optional) + the human
   # merge gate.
-  locked_steps: [analysis, epic, architecture, ui-design, stories, engineer-review]
+  locked_steps: [analysis, epic, architecture, ui-design, stories, test-cases, engineer-review]
   # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
   # system-wide, no per-step edits. One line, instantly reversible. Toggle via `yad-run action: kill`.
   kill_switch: false

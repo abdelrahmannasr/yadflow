@@ -18,7 +18,7 @@ touched `domain`, `|domainOwners[domain]| >= 1`.
 - Stories review: the touched domains are the **union of every story's `repos`** under `stories/`.
 
 So one gate, two option-shapes:
-- Epic / UI reviews: base rule (no risk tags, no per-repo routing).
+- Epic / UI / test-cases reviews: base rule (no risk tags, no per-repo routing).
 - Architecture+contract review: escalated (`risk_tags: ["contract"]`) — owner + 1 reviewer + a
   `domain-owner` for **each** repo in `epic.repos`. (A small team may have one engineer own several
   repos — one person can supply several `domain-owner` records with different `domain` values.)

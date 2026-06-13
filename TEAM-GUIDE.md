@@ -78,13 +78,15 @@ flowchart TD
       ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
       ui["yad-ui<br/>ui-design.md + DESIGN.md"]:::artifact
       st["yad-stories<br/>repo-tagged stories"]:::artifact
+      tc["yad-test-cases<br/>test-cases.md + automation tests"]:::artifact
       gAn{{"gate · analysis"}}:::gated
       gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
       gAr{{"gate · architecture<br/>escalated: + repo owners"}}:::gated
       gUi{{"gate · UI · base"}}:::gated
       gSt{{"gate · stories<br/>per-repo owners"}}:::gated
+      gTc{{"gate · test cases · base"}}:::gated
       rfb(["ready-for-build"]):::sentinel
-      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
+      an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> tc --> gTc --> rfb
     end
 
     subgraph BUILD["B · Build half — per story, per code repo"]
@@ -160,8 +162,8 @@ npx yadflow setup
 ```bash
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
-for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories \
-         yad-connect-repos yad-review-gate yad-spec yad-implement yad-checks \
+for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
+         yad-connect-repos yad-connect-testing yad-review-gate yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
@@ -238,8 +240,8 @@ You can start without any of them.
 ```bash
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
-for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories \
-         yad-connect-repos yad-review-gate yad-spec yad-implement yad-checks \
+for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
+         yad-connect-repos yad-connect-testing yad-review-gate yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
@@ -266,6 +268,7 @@ Do these in order. After each author step, the matching review opens and **waits
 | 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
 | 3 | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review |
 | 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
+| 5 | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
 
 Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discovery pass; skip it
 and the epic step does that analyst shaping inline. Each author step opens its own branch
@@ -352,7 +355,7 @@ surfaces (`contract`, `auth`, `payments`):
   here when stuck.
 - **Automation is opt-in and earned.** You can ignore `yad-run` entirely at first — every step is
   human-approved by default. Later, safe back-half steps can *earn* auto-advance once they prove
-  themselves. The engineer review and all four front steps are **never** automatable.
+  themselves. The engineer review and all five front steps are **never** automatable.
 - **Global "back to manual" switch:** `yad-run action: kill` forces every step to human approval
   instantly; `yad-run action: unkill` restores it.
 - **Keep the install in sync with the CLI** (run from the product hub):
@@ -382,17 +385,19 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 10. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 18)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 20)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
 | `yad-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
 | `yad-connect-design` | Connect a design tool (Figma / pencil) so `yad-ui` can materialize the screens (setup). |
+| `yad-connect-testing` | Connect a testing tool (Playwright / cypress / pytest) so `yad-test-cases` can implement the automation (setup). |
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
 | `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
 | `yad-ui` | Author `ui-design.md` + `DESIGN.md`; materialize the screens in the connected design tool. |
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
+| `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
 | `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
 | `yad-review-comments` | Install the PR/MR review-comment scaffolds. |
@@ -409,6 +414,6 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 18)*.
 
 ## 11. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 18 skills.
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 20 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

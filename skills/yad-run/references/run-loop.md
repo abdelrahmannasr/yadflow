@@ -57,7 +57,7 @@ if step in cfg.locked_steps:       eff = "human_approve"
 ```
 
 So a kill switch, a `locked` flag, or membership in `locked_steps` forces a stop no matter what the
-per-step dial says. `engineer-review` and the four front states are covered by `locked` / `locked_steps`.
+per-step dial says. `engineer-review` and the five front states are covered by `locked` / `locked_steps`.
 
 ## Deriving signals & the provisional verdict
 
@@ -115,7 +115,7 @@ Reverting (`to: human_approve`) is never gated — automation must be reversible
 ## What stays human, always
 
 - `engineer-review` — the merge gate. `yad-run` always stops here and hands to `yad-ship`.
-- The four front states (`epic`, `architecture`, `ui-design`, `stories`) — not in `back_steps`, in
-  `locked_steps`; the dial-setter refuses them.
+- The five front states (`epic`, `architecture`, `ui-design`, `stories`, `test-cases`) — not in
+  `back_steps`, in `locked_steps`; the dial-setter refuses them.
 - Any contract-surface change — halts the loop and routes back to the architecture gate, regardless of
   the dial.
