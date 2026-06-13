@@ -284,7 +284,7 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 20 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 22 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> · <code>yad-review-comments</code> (CI gates, PR template, comment scaffold)</small></div>
         <div class="arrow-v">▼</div>
@@ -293,6 +293,8 @@
         <div class="node plain"><strong>Connect a design tool</strong><small><code>yad-connect-design</code> → <code>design.json</code> (Figma-first, pluggable) so <code>yad-ui</code> can materialize the screens <em>(optional — degrades to markdown-only)</em></small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Connect a testing tool</strong><small><code>yad-connect-testing</code> → <code>testing.json</code> (Playwright-first, pluggable) so <code>yad-test-cases</code> can implement the automation <em>(optional — degrades to artifacts-only)</em></small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node plain"><strong>Connect a learning tool</strong><small><code>yad-connect-learning</code> → <code>learning.json</code> (DeepTutor-first, pluggable) so the learning layer can tutor in context <em>(optional — degrades to harness-native)</em></small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Optional: hub on a platform</strong><small>detect GitHub/GitLab + reviewer roster, so reviews run on real PRs/MRs</small></div>
       </div>
@@ -445,7 +447,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 20 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 22 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -536,7 +538,7 @@ each code repo/
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 20 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 22 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>repo</code>).</div>
 
   <h3>People &amp; AI roles</h3>
@@ -679,7 +681,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 20 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 22 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -745,6 +747,29 @@ yad-connect-testing action: list                 # show the connection + whether
 yad-connect-testing action: refresh              # re-detect the MCP (after authenticating a session)
 yad-connect-testing action: disconnect</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup (the wizard records it), and again any time you switch testing tools. <strong>No testing tool? Skip it</strong> — <code>yad-test-cases</code> simply authors the test cases, exactly as before.</div>
+  </div>
+
+  <div class="skillcard" id="sk-connect-learning">
+    <h4><code>yad-connect-learning</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Connects a <strong>learning/tutoring tool</strong> to the product hub so the cross-cutting <strong>learning layer</strong> can tutor any team member, at any stage, in the context of what's being built. <strong>DeepTutor-first but pluggable.</strong> Unlike the design/testing tools, DeepTutor is a <strong>CLI subprocess</strong> (like Repomix's <code>npx</code>) — it ships no MCP — so this skill detects the <code>deeptutor</code> binary on PATH and optionally builds a project knowledge base from the SDLC artifacts + secret-scanned code-maps. It records the connection in <code>learning.json</code> — <strong>no tokens are ever stored</strong> — and degrades to <strong>harness-native</strong> tutoring when DeepTutor isn't installed.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> Run it in the product hub, once per project:</div>
+<pre><code>yad-connect-learning action: connect tool: deeptutor
+yad-connect-learning action: list                # show the connection + whether the CLI is available
+yad-connect-learning action: refresh             # re-detect the CLI + rebuild the knowledge base
+yad-connect-learning action: disconnect</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> During one-time setup (the wizard records it), and again any time you switch learning tools. <strong>No DeepTutor? Skip it</strong> — <code>yad-learn</code> still tutors using the harness model reading your artifacts.</div>
+  </div>
+
+  <h3>The learning layer — tutor any member, any stage (cross-cutting)</h3>
+
+  <div class="skillcard" id="sk-learn">
+    <h4><code>yad-learn</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The <strong>learning layer</strong>. At <em>any</em> SDLC stage a team member can ask to learn a concept and be tutored <em>in the context of what the team is building</em> — e.g. "teach me why the architecture hash-locks the contract surface." It routes to the connected learning tool (DeepTutor, grounded in the project knowledge base) or degrades to <strong>harness-native</strong> tutoring, renders a tutorial artifact, and appends to a per-member <strong>learning ledger</strong> kept <strong>local-only</strong> (gitignored — never committed or pushed, to the hub or any code repo) so it stays a private, personal skills log (<code>yad-status</code> rolls up the local records). <strong>Purely opt-in — it never blocks a gate</strong> and never touches epic state, approvals, or the contract lock.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> Any time, from any stage:</div>
+<pre><code>run yad-learn — concept: "contract versioning" epic: EP-istifta-inquiries stage: architecture-review
+yad-learn action: list                           # your local skills-log records for this epic
+yad-learn action: complete concept: "contract versioning"   # mark it learned</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Whenever a member wants to understand what is being built — to review a gate with confidence, onboard onto a domain, or grow a skill. It is additive and reversible: learning never gates the work.</div>
   </div>
 
   <h3>Front half — author the thinking (in the product hub)</h3>
@@ -923,7 +948,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Nine steps: preflight (git/node check), install all 20 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 22 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>

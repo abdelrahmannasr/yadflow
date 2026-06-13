@@ -1,7 +1,7 @@
 {
   "name": "yadflow",
   "version": "1.0.2",
-  "description": "Yadflow — the gated, team, multi-repo SDLC: author → review → build with a PR-driven review gate and a zero-dependency `yad` CLI (setup, gate, commit, open-pr, repo). A BMAD module + 17 yad-* skills.",
+  "description": "Yadflow — the gated, team, multi-repo SDLC: author → review → build with a PR-driven review gate and a zero-dependency `yad` CLI (setup, gate, commit, open-pr, repo). A BMAD module + 22 yad-* skills.",
   "type": "module",
   "author": "AbdelRahman Nasr",
   "license": "MIT",
@@ -50,7 +50,9 @@
     "bmad",
     "workflow",
     "cli",
-    "spec-driven-development"
+    "spec-driven-development",
+    "learning",
+    "deeptutor"
   ],
   "devDependencies": {
     "@eslint/js": "^9.39.4",

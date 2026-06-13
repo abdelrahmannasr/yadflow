@@ -51,6 +51,8 @@ human**. Detailed walkthroughs for each phase follow below.
 | `skills/yad-stories/` | Front state 7: break the epic into repo-tagged stories with stable `EP-<slug>-S0N` IDs. |
 | `skills/yad-test-cases/` | Front state 9: with the test architect author `test-cases.md`; implement the automation in the connected testing tool, or produce artifacts only. |
 | `skills/yad-connect-repos/` | Connect code repos to the hub (GitHub/GitLab, local-user auth); cache a Repomix pack + **code-map** per repo so the front phases are code-aware. |
+| `skills/yad-connect-learning/` | Connect a learning tool (DeepTutor-first, pluggable) — a CLI subprocess like Repomix; record `.sdlc/learning.json` + an optional grounded knowledge base. |
+| `skills/yad-learn/` | The cross-cutting **learning layer**: tutor any member, at any stage, in the context of what's being built; records a personal, local-only skills log (gitignored, never committed/pushed). Opt-in, never gates. |
 | `skills/yad-review-gate/` | The reusable **team review + approve gate** (used for all five reviews). |
 | `skills/yad-spec/` | Build Step A: run the Spec Kit ceremony once per story per repo → `specs/<story-id>/`. |
 | `skills/yad-implement/` | Build Step B: implement ONE atomic task as a small diff on its own branch. |
@@ -123,10 +125,10 @@ a manual `yad gate sync` racing CI, or GitLab pipelines — two simultaneous syn
 *commits* via the rebase retry but each works from the state it read at start, so the rarer of two
 simultaneous advancements can be lost; the next event or scheduled sweep re-syncs and converges.
 
-### What `setup` walks you through (9 steps)
+### What `setup` walks you through (10 steps)
 
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy all 20 `yad-*` skills into the IDE skill dirs you pick
+2. **Install the module** — copy all 22 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
 4. **Connect a design tool** — record the design tool (Figma / pencil / none) → `.sdlc/design.json` so
@@ -134,10 +136,13 @@ simultaneous advancements can be lost; the next event or scheduled sweep re-sync
 5. **Connect a testing tool** — record the testing tool (Playwright / cypress / pytest / none) →
    `.sdlc/testing.json` so the test-cases step can implement the automation; the MCP itself is confirmed
    later by `yad-connect-testing`.
-6. **Connect code repos** — register each repo into `.sdlc/repos.json` and cache a Repomix pack.
-7. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
-8. **AI review** — optionally write `.coderabbit.yaml`.
-9. **Done** — stamp `.sdlc/cli-version.json` and hand off the AI-only steps (code-maps; first epic).
+6. **Connect a learning tool** — record the learning tool (DeepTutor / none) → `.sdlc/learning.json` so
+   the learning layer can tutor the team; the CLI + knowledge base are confirmed later by
+   `yad-connect-learning`.
+7. **Connect code repos** — register each repo into `.sdlc/repos.json` and cache a Repomix pack.
+8. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
+9. **AI review** — optionally write `.coderabbit.yaml`.
+10. **Done** — stamp `.sdlc/cli-version.json` and hand off the AI-only steps (code-maps; first epic).
 
 The deterministic file work runs automatically; the AI-only steps are handed to the Claude Code skills
 with a printed next-action. Re-run `… check --fix` any time the workflow updates — it never re-asks for
@@ -175,10 +180,11 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
 | `YAD-CFG-002` | `design.json` names an unknown design tool | expected one of `config.yaml` `design.tools` (e.g. `figma`, `pencil`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`), or `none` — fix it or re-run `yad setup` |
+| `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 20)
+## Agent skills (all 22)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -201,6 +207,25 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   project/suite references in `.sdlc/testing.json` (local-user / MCP-session auth, no stored tokens),
   detecting the testing-tool MCP and degrading to artifacts-only when absent. Idempotent and
   refreshable; one connection per project.
+- **`yad-connect-learning`** — Connects a learning/tutoring tool (DeepTutor-first, pluggable) so the
+  cross-cutting learning layer can tutor any team member in the context of what's being built. Records
+  the tool + an optional grounded knowledge base in `.sdlc/learning.json` (local-user auth, no stored
+  tokens), detecting the **DeepTutor CLI on PATH** (a subprocess like Repomix — DeepTutor ships no MCP)
+  and degrading to **harness-native** tutoring when absent. Idempotent and refreshable; one connection
+  per project.
+
+### The learning layer (cross-cutting — any member, any stage)
+
+- **`yad-learn`** — At **any** SDLC stage, a team member can ask to learn a concept and be tutored *in
+  the context of what the team is building* — e.g. *"teach me why the architecture hash-locks the
+  contract surface"*. Routes the request to the connected learning tool (`.sdlc/learning.json`,
+  DeepTutor-first) grounded in the project knowledge base, or degrades to **harness-native** tutoring
+  (the harness model reading the artifacts) when nothing is connected — so it always works. Renders a
+  tutorial artifact and appends to a per-member **learning ledger** kept **local-only** (gitignored,
+  never committed or pushed — to the hub or any code repo) so it stays a private, personal **skills log**
+  (`yad-status` rolls up the local records). **Purely opt-in — it never blocks a gate** and
+  never touches epic state, approvals, or the contract lock. *AI builds, the hand decides* — and now the
+  hand can also learn, on demand, what it is deciding about.
 
 ### Front half — author the "thinking" (once per epic, human-gated)
 
@@ -297,17 +322,19 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
 
 ### 0 — One-time setup
 
-> **Shortcut:** `npx yadflow setup` walks through steps 1, 4, 5 and 6 below
-> interactively (module install, hub detect + roster, connect repos, wire each repo). Run
-> `… check --fix` any time afterwards to reconcile. The manual steps below are the long-hand
-> equivalent and still work.
+> **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, hub
+> detect + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
+> repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
+> long-hand equivalent and still work.
 
 1. **Install the module:** `bash skills/sdlc/install.sh` (re-run after any BMAD update).
 2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
    live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`.
 3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**
    (`/speckit.*`), **Impeccable** (`/impeccable …`), **Repomix** (`npx repomix`, used by
-   `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review).
+   `yad-connect-repos` and `yad-backfill`), **CodeRabbit** (advisory AI review), **DeepTutor**
+   (`deeptutor`, the learning layer's tutor — degrades to harness-native, used by `yad-connect-learning`
+   and `yad-learn`).
 4. **Wire each code repo once:** `yad-checks repo:<repo> action: wire` (installs the CI gates —
    *merges* with any existing CI, never clobbers), `yad-pr-template repo:<repo> action: wire` (PR/MR
    template + risk routing), `yad-review-comments repo:<repo> action: wire` (review-comment scaffold).
@@ -318,11 +345,16 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
    (SSH or credential helper; GitHub or GitLab; no stored tokens). Re-run for any new repo. Freshness is a
    **human decision**: `yad repo list` shows fresh/stale, `yad repo refresh [name]` re-packs a moved repo
    (skills flag staleness and point here — they never silently re-pack). Greenfield → skip it.
-6. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
+6. **(Optional) Connect tools** so the matching steps do real work (each degrades gracefully and is
+   recorded if absent): `yad-connect-design action: connect` (Figma-first → `design.json`, lets
+   `yad-ui` materialize screens), `yad-connect-testing action: connect` (Playwright-first →
+   `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
+   (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
+7. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
    `yad-connect-repos action: detect-hub`, then `action: roster` once per reviewer (login → SDLC
    name + role), and `yad-pr-template repo:hub action: wire` / `yad-review-comments repo:hub action:
    wire` / `yad-checks repo:hub action: wire`. With no hub platform the front gate just runs file-only.
-7. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
+8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

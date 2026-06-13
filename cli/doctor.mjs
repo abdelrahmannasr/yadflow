@@ -5,7 +5,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
 import { loadLedger, epicRoot } from './epic-state.mjs';
 import { gitHead } from './setup.mjs';
 import { cliFor } from './platform.mjs';
@@ -113,6 +113,28 @@ export function projectChecks(checks, root) {
     else if (testing.source && testing.source !== 'unavailable') check(checks, 'testing', 'project', 'ok', `testing: ${testing.tool} (${testing.source})`);
     else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} MCP unavailable — yad-test-cases runs artifacts-only`, 'connect the MCP, then run `yad-connect-testing` (action: refresh)');
     else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-testing` in Claude Code to detect the MCP');
+  }
+
+  // learning.json: parse + shape + tool + CLI confirmation (absent is the normal harness-native default —
+  // pre-feature projects have none, so silence rather than warn when the file does not exist). DeepTutor
+  // has no MCP, so `source` is deeptutor-cli (found on PATH) or harness-native (degraded).
+  const learningPath = path.join(root, PROJECT_FILES.learningConfig);
+  if (exists(learningPath)) {
+    let learning = null, learningBroken = false;
+    try {
+      learning = readJSONStrict(learningPath, null);
+    } catch (e) {
+      learningBroken = true;
+      check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
+    }
+    if (learningBroken) { /* reported above */ }
+    else if (typeof learning !== 'object' || Array.isArray(learning) || learning === null) check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    else if (learning.tool === 'none') check(checks, 'learning', 'project', 'ok', 'learning: harness-native');
+    else if (!LEARNING_TOOLS.includes(learning.tool)) check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown or missing learning tool '${learning.tool}' [YAD-CFG-004]`, `expected one of ${LEARNING_TOOLS.join(', ')}, or none`);
+    else if (learning.source === 'deeptutor-cli') check(checks, 'learning', 'project', 'ok', `learning: ${learning.tool} (${learning.source})`);
+    else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} CLI unavailable — yad-learn tutors harness-native`, 'install the deeptutor CLI, then run `yad-connect-learning` (action: refresh)');
+    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in Claude Code to detect the CLI');
+    else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
