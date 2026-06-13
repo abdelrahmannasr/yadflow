@@ -1329,6 +1329,11 @@ test('doctor: design.json with a known tool + confirmed MCP is ok; unknown tool 
   r = await doctorOn(T);
   assert.ok(!r.ok);
   assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'fail' && /YAD-CFG-002/.test(x.message)));
+  // missing tool (schema makes it mandatory) => fail, not silently treated as markdown-only
+  fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ source: 'unavailable' }));
+  r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'fail' && /YAD-CFG-002/.test(x.message)));
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1362,6 +1367,11 @@ test('doctor: testing.json with a known tool + confirmed MCP is ok; unknown tool
   assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'ok' && /artifacts-only/.test(x.message)));
   // unknown tool => fail with the structured code
   fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'mocha' }));
+  r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'fail' && /YAD-CFG-003/.test(x.message)));
+  // missing tool (schema makes it mandatory) => fail, not silently treated as artifacts-only
+  fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ source: 'unavailable' }));
   r = await doctorOn(T);
   assert.ok(!r.ok);
   assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'fail' && /YAD-CFG-003/.test(x.message)));

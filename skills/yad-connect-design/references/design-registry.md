@@ -27,8 +27,10 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
 
 ## Rules
 
-- **`tool`** selects the adapter; it MUST be one of `config.yaml` `design.tools` (or `none`). An unknown
-  tool falls back to `design.primary` with a warning — never silently accepted.
+- **`tool`** selects the adapter; it MUST be one of `config.yaml` `design.tools` (or `none`). At
+  **connect** time an unknown tool is normalized to `design.primary` with a warning (so the registry
+  never persists an unknown value); a registry hand-edited to an unknown or missing tool **fails
+  `doctor`** with `YAD-CFG-002` and must be fixed.
 - **Auth is never stored.** No Figma PAT, OAuth token, or any credential in the registry. `project_url`
   and `files` are plain references; `connect` reaches the tool through the user's authenticated MCP
   session.

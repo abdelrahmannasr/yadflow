@@ -20,7 +20,7 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
 
 - `{project-root}` resolves from the project working directory (the **product hub**).
 - The integration is **Playwright-first but pluggable** (`config.yaml` `testing.tools`): a testing-tool
-  *adapter*, like the `github`/`gitlab` platform adapter or the design-tool adapter. Playwright is the
+  *adapter*, like the GitHub/GitLab platform adapter or the design-tool adapter. Playwright is the
   primary provider; `cypress` and `pytest` are second providers; `none` → artifacts-only.
 - **The testing tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the
   same shape as the design tool's MCP, not Repomix's `npx`. The skill detects the MCP and degrades when

@@ -27,8 +27,10 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
 
 ## Rules
 
-- **`tool`** selects the adapter; it MUST be one of `config.yaml` `testing.tools` (or `none`). An
-  unknown tool falls back to `testing.primary` with a warning — never silently accepted.
+- **`tool`** selects the adapter; it MUST be one of `config.yaml` `testing.tools` (or `none`). At
+  **connect** time an unknown tool is normalized to `testing.primary` with a warning (so the registry
+  never persists an unknown value); a registry hand-edited to an unknown or missing tool **fails
+  `doctor`** with `YAD-CFG-003` and must be fixed.
 - **Auth is never stored.** No token, API key, or any credential in the registry. `project_url` and
   `suites` are plain references; `connect` reaches the tool through the user's authenticated MCP session.
 - **`connect` overwrites in place** — a project carries exactly one testing connection at a time;

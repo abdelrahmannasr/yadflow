@@ -20,7 +20,7 @@ markdown-only exactly as before.
 
 - `{project-root}` resolves from the project working directory (the **product hub**).
 - The integration is **Figma-first but pluggable** (`config.yaml` `design.tools`): a design-tool
-  *adapter*, like the `github`/`gitlab` platform adapter. Figma is the primary provider; `pencil`
+  *adapter*, like the GitHub/GitLab platform adapter. Figma is the primary provider; `pencil`
   (the `.pen` web/mobile editor) is a second, write-capable provider; `none` → markdown-only.
 - **The design tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the same
   shape as Impeccable's slash-commands, not Repomix's `npx`. The skill detects the MCP and degrades when
