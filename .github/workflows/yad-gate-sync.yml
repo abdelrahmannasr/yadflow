@@ -1,0 +1,63 @@
+# yad-managed: yad-hub-bridge
+# Event-driven gate sync for the PRODUCT HUB. When a reviewer approves, requests changes, or a
+# human merges a review/EP-* PR, this workflow runs `yad gate ci`, which maps the platform state
+# into the file ledger (epics/<epic>/.sdlc/*.json + reviews/*.md) and commits ONLY those ledger
+# files to the default branch. It never approves and never merges — the merge click remains the
+# human approval act; the gate predicate is the same one `yad gate sync` runs locally.
+#
+# Loop prevention: neither `pull_request_review` nor `pull_request` fires on a push to the default
+# branch, and the ledger commit carries [skip ci] to guard every other workflow.
+#
+# Protected default branch? The github.token push will fail (visibly — the run goes red and manual
+# `yad gate sync` still works). Options, in order of preference:
+#   a) add a ruleset bypass so GitHub Actions may push to the default branch, or
+#   b) store a fine-grained PAT as the SDLC_GATE_TOKEN secret and pass it to actions/checkout via
+#      `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }` — the one exception to the bridge's
+#      no-stored-tokens rule; see skills/yad-hub-bridge/references/bridge.md.
+name: yad-gate-sync
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request:
+    types: [closed, synchronize] # closed -> merged advance; synchronize -> prompt revoke-on-change
+
+permissions:
+  contents: write # push the ledger commit
+  pull-requests: read # gh pr view + reviewThreads GraphQL
+
+# Serialize runs repo-wide so ledger pushes never race; sync reads the FULL platform state each
+# time, so a queued superseded run loses nothing.
+concurrency:
+  group: yad-gate-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >
+      startsWith(github.event.pull_request.head.ref, 'review/EP-') &&
+      (github.event_name == 'pull_request_review' ||
+       github.event.action == 'synchronize' ||
+       github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Check out the BASE branch (not the PR merge ref): the ledger lives there, and `gate ci`
+      # overlays the artifact from the head ref itself so approvals bind to the reviewed content.
+      # A head branch auto-deleted on merge is fine: the event payload still carries head.ref (the
+      # string `gate ci` parses), and a failed fetch just skips the overlay — by then the artifact
+      # is already on the base branch via the merge.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Sync the gate ledger
+        run: |
+          git config user.name  "yad-gate-sync[bot]"
+          git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
+          npx -y -p yadflow@2 yad gate ci \
+            --branch "${{ github.event.pull_request.head.ref }}" \
+            --pr "${{ github.event.pull_request.number }}"
