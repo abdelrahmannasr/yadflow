@@ -1,3 +1,15 @@
+# [2.2.0](https://github.com/abdelrahmannasr/yadflow/compare/v2.1.0...v2.2.0) (2026-06-14)
+
+
+### Features
+
+* add parallel test-cases step with pluggable testing-tool connection ([#45](https://github.com/abdelrahmannasr/yadflow/issues/45)) ([19c282f](https://github.com/abdelrahmannasr/yadflow/commit/19c282f6bd737364bca122179b05de8ea94493a9))
+
+
+### Continuous Integration
+
+* wire the hub's gate-sync + verified-commits CI and stamp the CLI version ([#46](https://github.com/abdelrahmannasr/yadflow/issues/46)) ([c856398](https://github.com/abdelrahmannasr/yadflow/commit/c856398a213b17aebea9c46204dbf955b92ea9cf))
+
 # [1.1.0](https://github.com/abdelrahmannasr/sdlc-workflow/compare/v1.0.3...v1.1.0) (2026-06-09)
 
 
