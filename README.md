@@ -122,16 +122,18 @@ a manual `yad gate sync` racing CI, or GitLab pipelines — two simultaneous syn
 *commits* via the rebase retry but each works from the state it read at start, so the rarer of two
 simultaneous advancements can be lost; the next event or scheduled sweep re-syncs and converges.
 
-### What `setup` walks you through (7 steps)
+### What `setup` walks you through (8 steps)
 
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy all 17 `yad-*` skills into the IDE skill dirs you pick
+2. **Install the module** — copy all 18 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
-4. **Connect code repos** — register each repo into `.sdlc/repos.json` and cache a Repomix pack.
-5. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
-6. **AI review** — optionally write `.coderabbit.yaml`.
-7. **Done** — stamp `.sdlc/cli-version.json` and hand off the AI-only steps (code-maps; first epic).
+4. **Connect a design tool** — record the design tool (Figma / pencil / none) → `.sdlc/design.json` so
+   the UI step can materialize the design; the MCP itself is confirmed later by `yad-connect-design`.
+5. **Connect code repos** — register each repo into `.sdlc/repos.json` and cache a Repomix pack.
+6. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
+7. **AI review** — optionally write `.coderabbit.yaml`.
+8. **Done** — stamp `.sdlc/cli-version.json` and hand off the AI-only steps (code-maps; first epic).
 
 The deterministic file work runs automatically; the AI-only steps are handed to the Claude Code skills
 with a printed next-action. Re-run `… check --fix` any time the workflow updates — it never re-asks for
@@ -167,10 +169,11 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
 | `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
+| `YAD-CFG-002` | `design.json` names an unknown design tool | expected one of `config.yaml` `design.tools` (e.g. `figma`, `pencil`), or `none` — fix it or re-run `yad setup` |
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 17)
+## Agent skills (all 18)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -183,6 +186,11 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   `.sdlc/repos.json`, then caches an AI-readable picture of each — a compressed Repomix pack and a
   lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Idempotent and
   refreshable; staleness tracked by HEAD sha.
+- **`yad-connect-design`** — Connects a design tool (Figma-first, pluggable) so the UI step can
+  materialize the actual feature design (mobile screens / web pages) inside it, alongside the Markdown.
+  Records the tool + project/file references in `.sdlc/design.json` (local-user / MCP-session auth, no
+  stored tokens), detecting the design-tool MCP and degrading to markdown-only when absent. Idempotent
+  and refreshable; one connection per project.
 
 ### Front half — author the "thinking" (once per epic, human-gated)
 
@@ -197,7 +205,9 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   `.sdlc/contract-lock.json`. Reads `epic.md`; escalates on the contract risk tag.
 - **`yad-ui`** — Front state 5. With the ux-designer, author `ui-design.md` and `DESIGN.md`,
   driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring
-  directly when not. Reads epic + architecture.
+  directly when not. When a design tool is connected (`yad-connect-design`), also **materializes the
+  feature design** — mobile screens / web pages — in the tool (generate or link), recording the
+  screen→frame map in `design-links.json`; degrades to markdown-only otherwise. Reads epic + architecture.
 - **`yad-stories`** — Front state 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI.

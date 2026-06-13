@@ -382,15 +382,16 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 10. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 17)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 18)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
 | `yad-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
+| `yad-connect-design` | Connect a design tool (Figma / pencil) so `yad-ui` can materialize the screens (setup). |
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
 | `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
-| `yad-ui` | Author `ui-design.md` + `DESIGN.md`. |
+| `yad-ui` | Author `ui-design.md` + `DESIGN.md`; materialize the screens in the connected design tool. |
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
 | `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
@@ -408,6 +409,6 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 17)*.
 
 ## 11. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 17 skills.
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 18 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

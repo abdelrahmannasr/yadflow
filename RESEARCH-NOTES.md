@@ -106,6 +106,38 @@
   **`DESIGN.md`**. License **Apache-2.0** (builds on Anthropic's frontend-design skill).
   Source: https://github.com/pbakaus/impeccable.
 
+## 5. Design tool — Figma-first, pluggable (yad-connect-design + yad-ui)
+
+> Recorded 2026-06-13. The UI design step was reworked so its output is not Markdown-only: when a design
+> tool is connected, `yad-ui` materializes the **actual feature design** (mobile screens / web pages)
+> inside it, alongside `ui-design.md` + `DESIGN.md`.
+
+- **Connection is a setup-time concern, mirroring `yad-connect-repos`.** A new skill,
+  `yad-connect-design` (`connect | refresh | list | disconnect`), records the connection in the
+  project-wide `{project-root}/.sdlc/design.json` (sibling of `repos.json` / `hub.json`). `yad setup`
+  has a "Connect a design tool" step (`registerDesign`) that writes the deterministic half; MCP
+  detection is the AI step the skill performs.
+- **Figma-first but pluggable** (`config.yaml` `design.tools: [figma, pencil]`, `primary: figma`). It is
+  a design-tool *adapter*, like the `github`/`gitlab` platform adapter. An unknown tool falls back to
+  the primary (the `registerRepo`/hub fallback pattern). `pencil` (the `.pen` web/mobile editor MCP) is
+  a real, write-capable second provider; `none` is the explicit markdown-only choice.
+- **Reached through an MCP, not a CLI** — the Impeccable shape (harness server), not the Repomix shape
+  (`npx`). The skill detects the MCP and **degrades gracefully**: no tool / no MCP / `source: unavailable`
+  → `yad-ui` authors the Markdown only and records `design: none` in the frontmatter (the
+  `impeccable: not-installed` analogue). The design tool is purely additive; it never blocks the step.
+- **Both directions.** `yad-ui` *generates* screens into the tool when the provider is write-capable, or
+  *links* an existing human-made design and reads frames back. **Honest capability nuance:** a read-only
+  Figma Dev Mode MCP supports *link* only; *generate* needs a write-capable provider (html.to.design for
+  Figma, or `pencil`). `yad-ui` records which direction it used and never claims a screen it could not
+  produce.
+- **Linkage lives beside the artifacts.** `yad-ui` writes the machine-readable screen→frame map to
+  `epics/EP-<slug>/.sdlc/design-links.json` and a `## Design (<tool>)` section in `ui-design.md`. The
+  design itself lives in the tool; the hub keeps the links + the Markdown spec.
+- **No tokens.** `yad-connect-design` connects through the user's own authenticated MCP session;
+  `project_url`/`files` are plain references, never credentials — the same hard rule as
+  `yad-connect-repos`. New error code `YAD-CFG-002` (unknown design tool); `yad doctor` reports the
+  design connection (ok / markdown-only / MCP-unconfirmed / unavailable).
+
 ---
 
 ## Deviations from the build plan (build against the real behavior)
