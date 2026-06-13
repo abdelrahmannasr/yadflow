@@ -284,11 +284,13 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 17 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 18 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> · <code>yad-review-comments</code> (CI gates, PR template, comment scaffold)</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Connect code repos</strong><small><code>yad-connect-repos</code> → <code>repos.json</code> + a cached code-map per repo <em>(skip if greenfield)</em></small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node plain"><strong>Connect a design tool</strong><small><code>yad-connect-design</code> → <code>design.json</code> (Figma-first, pluggable) so <code>yad-ui</code> can materialize the screens <em>(optional — degrades to markdown-only)</em></small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Optional: hub on a platform</strong><small>detect GitHub/GitLab + reviewer roster, so reviews run on real PRs/MRs</small></div>
       </div>
@@ -311,7 +313,7 @@
         <div class="arrow-v">▼</div>
         <div class="node gate">gate · architecture review<small><strong>escalated:</strong> base rule + a domain owner for every repo in the epic</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node artifact"><strong>yad-ui</strong><small><code>ui-design.md</code> + <code>DESIGN.md</code></small></div>
+        <div class="node artifact"><strong>yad-ui</strong><small><code>ui-design.md</code> + <code>DESIGN.md</code> + the screens in the connected design tool (<code>design-links.json</code>)</small></div>
         <div class="arrow-v">▼</div>
         <div class="node gate">gate · UI review<small>base rule</small></div>
         <div class="arrow-v">▼</div>
@@ -367,11 +369,11 @@
     epic.md              the feature, agreed
     architecture.md      how it will be built
     contract.md          the LOCKED shared surface (APIs, events, data model)
-    ui-design.md         + DESIGN.md
+    ui-design.md         + DESIGN.md (+ the screens in the connected design tool)
     stories/             one file per story (EP-&lt;slug&gt;-S01.md …)
     reviews/             reviewer comments, per artifact
     .sdlc/               state.json · approvals.json · contract-lock.json
-                         build-state/ · trust-log.json · build-log.json
+                         design-links.json · build-state/ · trust-log.json · build-log.json
 
 each code repo/
   specs/&lt;story-id&gt;/      spec, plan, tasks (+ link.md back to the story)
@@ -438,7 +440,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 17 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 18 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -529,7 +531,7 @@ each code repo/
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 17 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 18 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>repo</code>).</div>
 
   <h3>People &amp; AI roles</h3>
@@ -672,7 +674,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 17 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 18 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -682,10 +684,11 @@ each code repo/
   <table>
     <tr><th>Skill</th><th>Half</th><th>One line</th></tr>
     <tr><td><a href="#sk-connect"><code>yad-connect-repos</code></a></td><td>Setup</td><td>Register a code repo with the hub + cache its code-map.</td></tr>
+    <tr><td><a href="#sk-connect-design"><code>yad-connect-design</code></a></td><td>Setup</td><td>Connect a design tool (Figma-first) so <code>yad-ui</code> can materialize the screens.</td></tr>
     <tr><td><a href="#sk-analysis"><code>yad-analysis</code></a></td><td>Front</td><td><em>(Optional)</em> pressure-test an idea into <code>analysis.md</code>.</td></tr>
     <tr><td><a href="#sk-epic"><code>yad-epic</code></a></td><td>Front</td><td>Start a feature: write <code>epic.md</code>, assign the ID.</td></tr>
     <tr><td><a href="#sk-arch"><code>yad-architecture</code></a></td><td>Front</td><td>Author <code>architecture.md</code> + the locked <code>contract.md</code>.</td></tr>
-    <tr><td><a href="#sk-ui"><code>yad-ui</code></a></td><td>Front</td><td>Author <code>ui-design.md</code> + <code>DESIGN.md</code>.</td></tr>
+    <tr><td><a href="#sk-ui"><code>yad-ui</code></a></td><td>Front</td><td>Author <code>ui-design.md</code> + <code>DESIGN.md</code>; materialize the screens in the connected design tool.</td></tr>
     <tr><td><a href="#sk-stories"><code>yad-stories</code></a></td><td>Front</td><td>Break the epic into repo-tagged stories.</td></tr>
     <tr><td><a href="#sk-gate"><code>yad-review-gate</code></a></td><td>Cross-cutting</td><td>Review / comment / approve / advance <strong>any</strong> gate.</td></tr>
     <tr><td><a href="#sk-bridge"><code>yad-hub-bridge</code></a></td><td>Cross-cutting</td><td>Run front-half reviews over real PRs/MRs and sync them back.</td></tr>
@@ -713,6 +716,17 @@ yad-connect-repos action: disconnect repo: backend
 yad-connect-repos action: detect-hub           # record the hub's GitHub/GitLab platform
 yad-connect-repos action: roster login: alice-gh name: alice role: owner   # once per reviewer</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup, and again any time you add a new code repo. Re-run <code>refresh</code> when a skill warns a repo is stale. <strong>Greenfield with no code yet? Skip it entirely</strong> — the brain proceeds without it.</div>
+  </div>
+
+  <div class="skillcard" id="sk-connect-design">
+    <h4><code>yad-connect-design</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Connects a <strong>design tool</strong> to the product hub so the UI step can materialize the <em>actual</em> feature design — mobile screens / web pages — inside it, alongside the Markdown. <strong>Figma-first but pluggable</strong> (a design-tool adapter; <code>pencil</code> is a second provider). It records the tool + project/file references in <code>design.json</code> through your own authenticated MCP session — <strong>no tokens are ever stored</strong> — and degrades to markdown-only when no design-tool MCP is available.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> Run it in the product hub, once per project:</div>
+<pre><code>yad-connect-design action: connect tool: figma project_url: https://figma.com/files/project/…
+yad-connect-design action: list                  # show the connection + whether the MCP is available
+yad-connect-design action: refresh               # re-detect the MCP (after authenticating a session)
+yad-connect-design action: disconnect</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> During one-time setup (the wizard records it), and again any time you switch design tools. <strong>No design tool? Skip it</strong> — <code>yad-ui</code> simply authors the Markdown, exactly as before.</div>
   </div>
 
   <h3>Front half — author the thinking (in the product hub)</h3>
@@ -743,7 +757,7 @@ yad-connect-repos action: roster login: alice-gh name: alice role: owner   # onc
 
   <div class="skillcard" id="sk-ui">
     <h4><code>yad-ui</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> With the ux-designer AI, authors the UI design for the epic: <code>ui-design.md</code> (this feature’s screens and flows) + <code>DESIGN.md</code> (the reusable design language). Drives Impeccable’s <code>document / extract / craft</code> commands when installed; writes the files directly when not (and records that).</div>
+    <div class="row"><span class="lbl lbl-what">What</span> With the ux-designer AI, authors the UI design for the epic: <code>ui-design.md</code> (this feature’s screens and flows) + <code>DESIGN.md</code> (the reusable design language). Drives Impeccable’s <code>document / extract / craft</code> commands when installed; writes the files directly when not (and records that). When a design tool is connected (<code>yad-connect-design</code>), it also <strong>materializes the screens in that tool</strong> — generating them from the spec or linking an existing design — and records the screen→frame map in <code>design-links.json</code>; otherwise it stays markdown-only.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the architecture gate passes:</div>
 <pre><code>run yad-ui — epic: EP-istifta-inquiries</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After architecture, before stories. Skip-able only if the epic genuinely has no UI. Stops at the <strong>UI review gate</strong> (base rule).</div>
@@ -883,7 +897,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Seven steps: preflight (git/node check), install all 17 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Eight steps: preflight (git/node check), install all 18 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>

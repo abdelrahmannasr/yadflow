@@ -10,8 +10,9 @@ flowchart TD
       inst["install.sh<br/>copy yad-* skills into IDE dirs"]
       wire["wire each repo:<br/>yad-checks · yad-pr-template · yad-review-comments"]
       conn["yad-connect-repos<br/>repos.json + cached code-map"]
+      cdes["yad-connect-design<br/>design.json · Figma-first, pluggable"]
       phub["optional: hub on a platform<br/>detect-hub · roster"]
-      inst --> wire --> conn --> phub
+      inst --> wire --> conn --> cdes --> phub
     end
 
     subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
@@ -19,7 +20,7 @@ flowchart TD
       an["yad-analysis<br/>optional → analysis.md"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
       ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
-      ui["yad-ui<br/>ui-design.md + DESIGN.md"]:::artifact
+      ui["yad-ui<br/>ui-design.md + DESIGN.md + design tool screens"]:::artifact
       st["yad-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
       gAn{{"gate · analysis"}}:::gated
       gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
