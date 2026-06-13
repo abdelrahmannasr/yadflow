@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = version;
 
-// The 20 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The 22 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
   'yad-analysis',
   'yad-epic',
@@ -21,6 +21,8 @@ export const SKILLS = [
   'yad-connect-repos',
   'yad-connect-design',
   'yad-connect-testing',
+  'yad-connect-learning',
+  'yad-learn',
   'yad-spec',
   'yad-implement',
   'yad-checks',
@@ -96,12 +98,22 @@ export const DESIGN_PRIMARY = 'figma';
 export const TESTING_TOOLS = ['playwright', 'cypress', 'pytest'];
 export const TESTING_PRIMARY = 'playwright';
 
+// Supported learning-tool adapters (mirrors skills/sdlc/config.yaml `learning.tools`); `LEARNING_PRIMARY`
+// is the fallback `registerLearning`/setup use when an unknown tool is named, and `none` is the explicit
+// harness-native choice (yad-learn tutors via the harness model when no tool is connected). DeepTutor is
+// a CLI subprocess (no MCP), so the connect skill detects the binary — not an MCP — but the registry +
+// degrade shape mirrors design/testing. (doctor does NOT fall back — an unknown tool there is a hard
+// YAD-CFG-004 fail, mirroring the design-tool YAD-CFG-002.)
+export const LEARNING_TOOLS = ['deeptutor'];
+export const LEARNING_PRIMARY = 'deeptutor';
+
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
   reposRegistry: '.sdlc/repos.json',
   hubConfig: '.sdlc/hub.json',
   designConfig: '.sdlc/design.json',
   testingConfig: '.sdlc/testing.json',
+  learningConfig: '.sdlc/learning.json',
   version: '.sdlc/cli-version.json',
 };
 

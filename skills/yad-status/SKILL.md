@@ -1,6 +1,6 @@
 ---
 name: yad-status
-description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in the build half it also prints each back-half step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", or "fleet status".'
+description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in the build half it also prints each back-half step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Also prints the cross-cutting Team-skills roll-up from the learning ledger (who learned what, by stage) so the team''s understanding of what is being built is visible. Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
 ---
 
 # SDLC — Status (read-only)
@@ -22,8 +22,10 @@ report all if the user asked for an overview).
 Read `.sdlc/state.json`, `.sdlc/approvals.json`, `epic.md` frontmatter (for `repos`), and — if present
 — `.sdlc/contract-lock.json`. For the build half (Phase 4), also read — if present — every
 `.sdlc/build-state/<story-id>.json`, `.sdlc/trust-log.json`, and the `automation` block of
-`skills/sdlc/config.yaml` (`back_steps`, `trust_threshold`, `locked_steps`, `kill_switch`). Do not
-modify any of them.
+`skills/sdlc/config.yaml` (`back_steps`, `trust_threshold`, `locked_steps`, `kill_switch`). For the
+cross-cutting learning layer, also read — if present — `.sdlc/learning-records.json` (the per-epic
+learning ledger) and the project-wide `{project-root}/.sdlc/learning-records.json`. Do not modify any of
+them.
 
 ### Step 3 — Report
 Print, in this order:
@@ -82,13 +84,26 @@ Print, in this order:
    recommendation to flip — earning the evidence and flipping the dial stay deliberate human acts
    (`yad-run action: set-dial`). See `docs/phase-5-build-plan.md` §"What to instrument now".
 
-9. **Fleet roll-up (overview only).** When the user asked for an overview, or more than one epic exists
-   under `{project-root}/epics/`, print a one-line-per-epic roll-up across the fleet: each epic's
-   `currentStep` (front gate) and, for stories in the build half, a count of back-half steps **waiting
-   at a human gate** and of steps flagged **earned-but-manual**. Close with fleet totals (epics at each
-   front gate; total earned-but-manual back steps). This is the *scale-of-read* signal the Phase 5
-   trigger watches — when this roll-up stops fitting in one glance, that is the measured bottleneck.
-   Still strictly read-only; it only scans the per-epic files.
+9. **Team skills (the learning layer).** If `.sdlc/learning-records.json` exists for the epic (or the
+   project-wide ledger does), print the cross-cutting **team-skills** roll-up from it — read-only. This
+   makes the team's understanding of what is being built explicit. Show:
+   - **By member:** each `member` with the concepts they have `learned` and those `in-progress` (count +
+     names), so it is clear who has built which skills.
+   - **By stage:** how many learning requests landed at each SDLC `stage` (e.g. `architecture-review: 3`),
+     so heavy-learning stages stand out.
+   - **Tool:** whether tutoring ran on `deeptutor` (grounded in the kb) or `harness-native`, per the
+     records' `tool` field.
+   This section is purely informational — learning is opt-in and never gates a step (it is produced by
+   `yad-learn`). If no learning ledger exists, omit the section silently (greenfield/learning not used).
+
+10. **Fleet roll-up (overview only).** When the user asked for an overview, or more than one epic exists
+    under `{project-root}/epics/`, print a one-line-per-epic roll-up across the fleet: each epic's
+    `currentStep` (front gate) and, for stories in the build half, a count of back-half steps **waiting
+    at a human gate** and of steps flagged **earned-but-manual**, plus a **team-skills** count (records
+    in `learning-records.json`: learned / in-progress). Close with fleet totals (epics at each front
+    gate; total earned-but-manual back steps; total concepts learned across the fleet). This is the
+    *scale-of-read* signal the Phase 5 trigger watches — when this roll-up stops fitting in one glance,
+    that is the measured bottleneck. Still strictly read-only; it only scans the per-epic files.
 
 ### Hard rule
 This skill is strictly read-only. If the user wants to comment, approve, or advance, point them to

@@ -566,7 +566,7 @@ test('repo refresh rejects an unknown repo name', async () => {
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
-const { registerRepo, registerDesign, registerTesting } = await import('./setup.mjs');
+const { registerRepo, registerDesign, registerTesting, registerLearning } = await import('./setup.mjs');
 
 test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
@@ -705,6 +705,45 @@ test('registerTesting: an unknown tool falls back to the primary; `none` is arti
   const none = registerTesting(T, { tool: 'none', today: '2026-06-13' });
   assert.equal(none.tool, 'none');
   assert.equal(none.source, 'unavailable', 'none => deliberate artifacts-only');
+  assert.equal(none.provider, null);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad setup` — registerLearning: record the learning-tool connection (deterministic half).
+// DeepTutor is a CLI (no MCP), so `source` stays null until yad-connect-learning detects it on PATH.
+// ---------------------------------------------------------------------------------------------
+test('registerLearning records a known tool with source unconfirmed (CLI detection is the AI step)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-learning-'));
+  const l = registerLearning(T, { tool: 'deeptutor', kb: 'yadflow-istifta', today: '2026-06-14' });
+  assert.equal(l.tool, 'deeptutor');
+  assert.equal(l.auth, 'user');
+  assert.equal(l.source, null, 'CLI not yet confirmed at setup time');
+  assert.equal(l.provider, null);
+  assert.equal(l.kb, 'yadflow-istifta', 'the kb reference round-trips');
+  const onDisk = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/learning.json')));
+  assert.equal(onDisk.tool, 'deeptutor');
+  assert.equal(onDisk.kb, 'yadflow-istifta');
+  assert.ok(!JSON.stringify(onDisk).includes('token'), 'no token field — references only');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerLearning: a re-connect preserves the original connectedAt, only lastSyncedAt moves', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-learning3-'));
+  registerLearning(T, { tool: 'deeptutor', today: '2026-06-14' });
+  const again = registerLearning(T, { tool: 'deeptutor', today: '2026-06-20' });
+  assert.equal(again.connectedAt, '2026-06-14', 'first-connect date preserved');
+  assert.equal(again.lastSyncedAt, '2026-06-20', 'lastSyncedAt advanced');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerLearning: an unknown tool falls back to the primary; `none` is harness-native', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-learning2-'));
+  const bad = registerLearning(T, { tool: 'khanmigo', today: '2026-06-14' });
+  assert.equal(bad.tool, 'deeptutor', 'unknown tool falls back to the primary adapter');
+  const none = registerLearning(T, { tool: 'none', today: '2026-06-14' });
+  assert.equal(none.tool, 'none');
+  assert.equal(none.source, 'harness-native', 'none => deliberate harness-native');
   assert.equal(none.provider, null);
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -1392,6 +1431,56 @@ test('doctor: absent testing.json is silent (artifacts-only is the normal defaul
   await reconcile(T, { fix: true });
   const r = await doctorOn(T);
   assert.ok(!r.checks.some((x) => x.id === 'testing'), 'no testing check emitted when the file is absent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: learning.json with a known tool + confirmed CLI is ok; unknown tool fails YAD-CFG-004', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // confirmed connection
+  fs.writeFileSync(path.join(T, '.sdlc/learning.json'), JSON.stringify({ tool: 'deeptutor', source: 'deeptutor-cli' }));
+  let r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'learning' && x.status === 'ok' && /deeptutor/.test(x.message)));
+  // none => harness-native, still ok
+  fs.writeFileSync(path.join(T, '.sdlc/learning.json'), JSON.stringify({ tool: 'none', source: 'harness-native' }));
+  r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'learning' && x.status === 'ok' && /harness-native/.test(x.message)));
+  // unknown tool => fail with the structured code
+  fs.writeFileSync(path.join(T, '.sdlc/learning.json'), JSON.stringify({ tool: 'khanmigo' }));
+  r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'learning' && x.status === 'fail' && /YAD-CFG-004/.test(x.message)));
+  // missing tool (schema makes it mandatory) => fail, not silently treated as harness-native
+  fs.writeFileSync(path.join(T, '.sdlc/learning.json'), JSON.stringify({ source: 'harness-native' }));
+  r = await doctorOn(T);
+  assert.ok(!r.ok);
+  assert.ok(r.checks.some((x) => x.id === 'learning' && x.status === 'fail' && /YAD-CFG-004/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: learning.json recorded but CLI unconfirmed warns (points at yad-connect-learning)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/learning.json'), JSON.stringify({ tool: 'deeptutor', source: null }));
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'learning' && x.status === 'warn' && /not confirmed/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: learning.json with source harness-native warns (CLI absent, yad-learn still tutors)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/learning.json'), JSON.stringify({ tool: 'deeptutor', source: 'harness-native' }));
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'learning' && x.status === 'warn' && /harness-native/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: absent learning.json is silent (harness-native is the normal default)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => x.id === 'learning'), 'no learning check emitted when the file is absent');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

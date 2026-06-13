@@ -150,6 +150,26 @@ testing:
   # NO tokens in the registry (project_url/suites are plain references, never credentials).
   auth: user
 
+# Learning tool (yad-connect-learning) — the cross-cutting LEARNING LAYER. At any SDLC stage a team member
+# can invoke `yad-learn` to be tutored on a concept IN THE CONTEXT of what is being built, and the request
+# is recorded so the team builds a visible skills record (surfaced read-only by yad-status). The tool is
+# DeepTutor (https://github.com/HKUDS/DeepTutor) — an Apache-2.0 Python CLI, reached as a SUBPROCESS like
+# Repomix's `npx` (it has NO MCP), NOT the MCP shape of the design/testing tools. DeepTutor-first but
+# PLUGGABLE: a learning-tool adapter. Connection is one-per-project, recorded at setup; the per-epic,
+# per-member learning ledger (learning-records.json) + rendered tutorials are written by yad-learn.
+learning:
+  registry: "{project-root}/.sdlc/learning.json"     # project-wide learning connection (NOT per-epic)
+  tools: [deeptutor]                                  # supported adapters; an unknown tool falls back to `primary`
+  primary: deeptutor                                  # the default/named provider
+  degrade: harness-native                             # no deeptutor CLI => yad-learn tutors via the harness model
+                                                      # reading the project artifacts directly (always works, never blocks)
+  records: "{project-root}/epics/EP-<slug>/.sdlc/learning-records.json"   # per-epic, per-member learning ledger (yad-learn)
+  artifacts: "{project-root}/epics/EP-<slug>/learning/"   # rendered tutorial markdown (yad-learn)
+  capabilities: { explain: chat, deep: deep_research, quiz: deep_question }   # yad-learn mode -> deeptutor capability
+  # Auth: `yad-connect-learning` uses the LOCAL user's own deeptutor config / MCP-session and stores NO
+  # tokens in the registry (kb name + sources are plain references, never credentials). Opt-in, never a gate.
+  auth: user
+
 # Hub platform + front-half review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
 # The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
