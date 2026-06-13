@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose an improvement to the workflow, the CLI, or a skill
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you hitting?
+      description: Describe the friction in your team's flow before proposing a mechanism.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What should yadflow do? Which step/skill/gate does it touch?
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety considerations
+      description: >
+        Yadflow's core promise is that humans own the decisions. Does this proposal move any
+        decision from a human to a machine? If so, what evidence would gate it (see the trust-log
+        model in the README)?

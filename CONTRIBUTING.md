@@ -6,7 +6,14 @@ traceable back to its task, story, and contract; one that doesn't will fail a ga
 
 New to the workflow? Start with [`TEAM-GUIDE.md`](TEAM-GUIDE.md); the full reference is
 [`README.md`](README.md). Publishing the `yad` CLI to npm is documented in
-[`RELEASING.md`](RELEASING.md).
+[`RELEASING.md`](RELEASING.md). All participation is governed by our
+[Code of Conduct](CODE_OF_CONDUCT.md); report vulnerabilities privately per
+[`SECURITY.md`](SECURITY.md).
+
+This repo **dogfoods its own conventions**: the PR template at
+[`.github/pull_request_template.md`](.github/pull_request_template.md) carries the same Impact & Risk
+block that `yad-pr-template` installs into your code repos. If you wouldn't ship a yadflow PR without
+it, neither do we.
 
 ---
 
@@ -154,6 +161,9 @@ Full detail: `skills/yad-implement/references/implement-conventions.md`.
 
 - Run the check gates: `yad-checks repo:<repo> action: run` (spec-link, contract-check, build/test/lint
   must pass).
+- Run the CLI suites: `npm test` (unit + bash gates) and `npm run test:e2e` (the installed tarball
+  end-to-end). New behavior needs tests — the coverage gate floors at 70% lines/branches.
+- `yad doctor` should be clean (or warnings-only) in any project you touched.
 - Make atomic commits — one logical change per commit.
 - Open the PR/MR with the wired template; let the engineer review (a human) be the merge gate.
 - Run `bash skills/sdlc/install.sh` after any BMAD update to re-sync the installed skill copies.

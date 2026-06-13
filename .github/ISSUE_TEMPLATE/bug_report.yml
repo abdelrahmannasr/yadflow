@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in the yad CLI, the skills, or the check gates misbehaves
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, what did you get?
+      placeholder: |
+        Ran `yad gate sync EP-x epic.md` and …
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`yad doctor --json` output"
+      description: >
+        Run `npx yadflow doctor --json` in the affected project and paste the output —
+        it contains no secrets (names, paths, and check results only) and answers most
+        environment questions up front.
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: yadflow version
+      description: "`npx yadflow --version`"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [GitHub, GitLab, file-only (no platform)]
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Logs, the failing gate's output, a minimal reproduction…
