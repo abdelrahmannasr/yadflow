@@ -35,5 +35,5 @@ yad-hub-pr-template:
   extends: .yad_hub_mr_only
   needs: []
   script:
-    - printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > /tmp/pr-body.md
-    - bash checks/pr-template.sh --profile hub /tmp/pr-body.md
+    - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
+    - bash checks/pr-template.sh --profile hub "$body"

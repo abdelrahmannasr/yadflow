@@ -40,11 +40,14 @@ jobs:
         with: { fetch-depth: 0 }
       - run: bash checks/commit-message.sh --profile code "origin/${{ github.base_ref }}"
 
+  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
   pr-title:
     runs-on: ubuntu-latest
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
     steps:
       - uses: actions/checkout@v4
-      - run: bash checks/pr-title.sh --profile code "${{ github.event.pull_request.title }}"
+      - run: bash checks/pr-title.sh --profile code "$PR_TITLE"
 
   pr-template:
     runs-on: ubuntu-latest
@@ -52,7 +55,9 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@v4
-      - run: printf '%s' "$PR_BODY" > /tmp/pr-body.md && bash checks/pr-template.sh --profile code /tmp/pr-body.md
+      - run: |
+          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
+          bash checks/pr-template.sh --profile code "$body"
 
   # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
   verified-commits:

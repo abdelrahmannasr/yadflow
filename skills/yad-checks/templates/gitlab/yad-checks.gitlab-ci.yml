@@ -62,8 +62,8 @@ yad-pr-template:
   extends: .sdlc_mr_only
   needs: []
   script:
-    - printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > /tmp/pr-body.md
-    - bash checks/pr-template.sh --profile code /tmp/pr-body.md
+    - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
+    - bash checks/pr-template.sh --profile code "$body"
 
 # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
 # Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot

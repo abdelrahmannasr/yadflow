@@ -16,11 +16,14 @@ jobs:
         with: { fetch-depth: 0 }
       - run: bash checks/commit-message.sh --profile hub "origin/${{ github.base_ref }}"
 
+  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
   pr-title:
     runs-on: ubuntu-latest
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
     steps:
       - uses: actions/checkout@v4
-      - run: bash checks/pr-title.sh --profile hub "${{ github.event.pull_request.title }}"
+      - run: bash checks/pr-title.sh --profile hub "$PR_TITLE"
 
   pr-template:
     runs-on: ubuntu-latest
@@ -28,4 +31,6 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@v4
-      - run: printf '%s' "$PR_BODY" > /tmp/pr-body.md && bash checks/pr-template.sh --profile hub /tmp/pr-body.md
+      - run: |
+          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
+          bash checks/pr-template.sh --profile hub "$body"
