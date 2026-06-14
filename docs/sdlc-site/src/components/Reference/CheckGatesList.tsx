@@ -1,9 +1,9 @@
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
-import { BULLMQ_JOBS } from '../../data/referenceData';
+import { CHECK_GATES } from '../../data/referenceData';
 
-export function BullMQJobsList() {
-  const jobs = useStakeholderFilter(BULLMQ_JOBS);
+export function CheckGatesList() {
+  const jobs = useStakeholderFilter(CHECK_GATES);
 
   if (jobs.length === 0) return null;
 

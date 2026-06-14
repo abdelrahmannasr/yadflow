@@ -12,7 +12,7 @@ export function HandlerLogicSnippet({ step }: HandlerLogicSnippetProps) {
 
   const code = `async ${functionName}(req) {
   // trigger: ${step.trigger}
-  // status: ${step.status} → ${step.bookingStatus}
+  // status: ${step.status} → ${step.stepState}
   ${step.messages.map((m) => `await this.emit('${m.type}', '${m.label}');`).join('\n  ')}
 }`;
 

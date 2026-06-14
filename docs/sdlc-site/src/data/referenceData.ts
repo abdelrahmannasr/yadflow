@@ -2,7 +2,7 @@ import type { StakeholderView } from './types';
 
 // Structured reference data for the yadflow SDLC-overview site. Shapes are kept
 // compatible with the vendored Reference components (which were re-labelled to
-// yadflow); the booking content was fully replaced.
+// yadflow); the reference content was fully replaced.
 
 interface Filterable {
   visibleTo: StakeholderView[];
@@ -45,10 +45,10 @@ export const DECISION_TREE: DecisionBranch[] = [
   },
 ];
 
-// ─── The two dials (per step) — rendered via the "UI States" tables ───
-// Reuses the UIState shape: state / endpoint / schemaValue / isTerminal.
+// ─── The two dials (per step) — rendered via the dial-state tables ───
+// Reuses the DialState shape: state / endpoint / schemaValue / isTerminal.
 
-export interface UIState extends Filterable {
+export interface DialState extends Filterable {
   state: string;
   endpoint: string;
   schemaValue: string;
@@ -57,7 +57,7 @@ export interface UIState extends Filterable {
 }
 
 // Assistance dial values.
-export const RIDER_UI_STATES: UIState[] = [
+export const ASSISTANCE_DIAL_STATES: DialState[] = [
   {
     state: 'none',
     endpoint: 'state.json · per step',
@@ -85,7 +85,7 @@ export const RIDER_UI_STATES: UIState[] = [
 ];
 
 // Automation dial values.
-export const DRIVER_UI_STATES: UIState[] = [
+export const AUTOMATION_DIAL_STATES: DialState[] = [
   {
     state: 'human_approve',
     endpoint: 'state.json · per step',
@@ -104,10 +104,10 @@ export const DRIVER_UI_STATES: UIState[] = [
   },
 ];
 
-// ─── Check gates (the CI gates) — rendered via the "jobs" list ───
-// Reuses BullMQJob shape: name / queue / timing / description / triggeredBy.
+// ─── Check gates (the CI gates) — rendered via the check-gates list ───
+// Reuses the CheckGate shape: name / queue / timing / description / triggeredBy.
 
-export interface BullMQJob extends Filterable {
+export interface CheckGate extends Filterable {
   name: string;
   queue: string;
   timing: string;
@@ -115,7 +115,7 @@ export interface BullMQJob extends Filterable {
   triggeredBy: string;
 }
 
-export const BULLMQ_JOBS: BullMQJob[] = [
+export const CHECK_GATES: CheckGate[] = [
   {
     name: 'spec-link',
     queue: 'yad-checks',
@@ -227,28 +227,28 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   },
 ];
 
-// ─── The yad CLI commands — rendered via the "deeplink actions" chips ───
-// Reuses DeeplinkAction shape: constant / value / target / category / description.
-// target 'rider' = setup/front commands · 'driver' = build/automation commands.
+// ─── The yad CLI commands — rendered via the CLI-command chips ───
+// Reuses the CliCommand shape: constant / value / target / category / description.
+// target 'setup' = setup/front commands · 'build' = build/automation commands.
 
-export interface DeeplinkAction extends Filterable {
+export interface CliCommand extends Filterable {
   constant: string;
   value: string;
-  target: 'rider' | 'driver';
+  target: 'setup' | 'build';
   category: string;
   description: string;
 }
 
-export const DEEPLINK_ACTIONS: DeeplinkAction[] = [
-  { constant: 'SETUP', value: 'yad setup', target: 'rider', category: 'setup', description: 'Guided first-run wizard: install the module, detect the hub, connect tools + repos.', visibleTo: ALL },
-  { constant: 'CHECK', value: 'yad check --fix', target: 'rider', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed.', visibleTo: ALL },
-  { constant: 'DOCTOR', value: 'yad doctor', target: 'rider', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI).', visibleTo: ALL },
-  { constant: 'GATE', value: 'yad gate open|sync', target: 'rider', category: 'front', description: 'Drive the front-half review PR/MR; sync approvals into the ledger and auto-advance on merge.', visibleTo: ALL },
-  { constant: 'COMMIT', value: 'yad commit', target: 'driver', category: 'build', description: 'Commit one staged atomic change by the conventions (subject + trailers + ≤3-file guard).', visibleTo: BUILD },
-  { constant: 'OPEN_PR', value: 'yad open-pr', target: 'driver', category: 'build', description: 'Open a code-repo task PR/MR from the committed platform template.', visibleTo: BUILD },
-  { constant: 'SHIP', value: 'yad ship', target: 'driver', category: 'build', description: 'Commit AND open the task PR/MR in one step (commit, then open-pr).', visibleTo: BUILD },
-  { constant: 'REPO', value: 'yad repo list|refresh', target: 'driver', category: 'build', description: 'List connected repos as fresh/stale and re-pack a stale one.', visibleTo: BUILD },
-  { constant: 'DOCS', value: 'yad docs', target: 'driver', category: 'automation', description: 'Build / deploy the generated documentation sites.', visibleTo: BUILD },
+export const CLI_COMMANDS: CliCommand[] = [
+  { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: install the module, detect the hub, connect tools + repos.', visibleTo: ALL },
+  { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed.', visibleTo: ALL },
+  { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI).', visibleTo: ALL },
+  { constant: 'GATE', value: 'yad gate open|sync', target: 'setup', category: 'front', description: 'Drive the front-half review PR/MR; sync approvals into the ledger and auto-advance on merge.', visibleTo: ALL },
+  { constant: 'COMMIT', value: 'yad commit', target: 'build', category: 'build', description: 'Commit one staged atomic change by the conventions (subject + trailers + ≤3-file guard).', visibleTo: BUILD },
+  { constant: 'OPEN_PR', value: 'yad open-pr', target: 'build', category: 'build', description: 'Open a code-repo task PR/MR from the committed platform template.', visibleTo: BUILD },
+  { constant: 'SHIP', value: 'yad ship', target: 'build', category: 'build', description: 'Commit AND open the task PR/MR in one step (commit, then open-pr).', visibleTo: BUILD },
+  { constant: 'REPO', value: 'yad repo list|refresh', target: 'build', category: 'build', description: 'List connected repos as fresh/stale and re-pack a stale one.', visibleTo: BUILD },
+  { constant: 'DOCS', value: 'yad docs', target: 'build', category: 'automation', description: 'Build / deploy the generated documentation sites.', visibleTo: BUILD },
 ];
 
 // ─── Error / status codes — rendered via the Troubleshooting accordion ───
@@ -309,21 +309,21 @@ export const ERROR_CODES: ErrorCode[] = [
 // ─── Phase → artifact mapping (reference display) ───
 
 export interface StatusMapping extends Filterable {
-  tripStatus: string;
-  bookingStatus: string;
+  step: string;
+  writes: string;
   category: string;
 }
 
 export const STATUS_MAPPINGS: StatusMapping[] = [
-  { tripStatus: 'analysis (optional)', bookingStatus: 'analysis.md', category: 'Front', visibleTo: ALL },
-  { tripStatus: 'epic', bookingStatus: 'epic.md', category: 'Front', visibleTo: ALL },
-  { tripStatus: 'architecture', bookingStatus: 'architecture.md · contract.md · contract-lock.json', category: 'Front', visibleTo: ALL },
-  { tripStatus: 'ui-design', bookingStatus: 'ui-design.md · DESIGN.md', category: 'Front', visibleTo: ALL },
-  { tripStatus: 'stories', bookingStatus: 'stories/EP-<slug>-S0N.md', category: 'Front', visibleTo: ALL },
-  { tripStatus: 'test-cases', bookingStatus: 'test-cases.md · test-links.json', category: 'Front (parallel)', visibleTo: ALL },
-  { tripStatus: 'spec', bookingStatus: 'specs/<story-id>/', category: 'Build', visibleTo: ALL },
-  { tripStatus: 'implement', bookingStatus: 'branch + commit (Task: trailer)', category: 'Build', visibleTo: ALL },
-  { tripStatus: 'checks', bookingStatus: 'checks/*.sh · yad-checks.yml', category: 'Build', visibleTo: ALL },
-  { tripStatus: 'engineer-review', bookingStatus: 'build-log.json', category: 'Build', visibleTo: ALL },
-  { tripStatus: 'run', bookingStatus: 'build-state/<story-id>.json · trust-log.json', category: 'Automation', visibleTo: ALL },
+  { step: 'analysis (optional)', writes: 'analysis.md', category: 'Front', visibleTo: ALL },
+  { step: 'epic', writes: 'epic.md', category: 'Front', visibleTo: ALL },
+  { step: 'architecture', writes: 'architecture.md · contract.md · contract-lock.json', category: 'Front', visibleTo: ALL },
+  { step: 'ui-design', writes: 'ui-design.md · DESIGN.md', category: 'Front', visibleTo: ALL },
+  { step: 'stories', writes: 'stories/EP-<slug>-S0N.md', category: 'Front', visibleTo: ALL },
+  { step: 'test-cases', writes: 'test-cases.md · test-links.json', category: 'Front (parallel)', visibleTo: ALL },
+  { step: 'spec', writes: 'specs/<story-id>/', category: 'Build', visibleTo: ALL },
+  { step: 'implement', writes: 'branch + commit (Task: trailer)', category: 'Build', visibleTo: ALL },
+  { step: 'checks', writes: 'checks/*.sh · yad-checks.yml', category: 'Build', visibleTo: ALL },
+  { step: 'engineer-review', writes: 'build-log.json', category: 'Build', visibleTo: ALL },
+  { step: 'run', writes: 'build-state/<story-id>.json · trust-log.json', category: 'Automation', visibleTo: ALL },
 ];

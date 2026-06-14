@@ -53,7 +53,7 @@ export const StepDetail: React.FC = () => {
           <DetailItem label="Status" value={step.status} highlight />
           <DetailItem
             label="Artifact"
-            value={step.bookingStatus}
+            value={step.stepState}
             highlight
           />
         </div>

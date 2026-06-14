@@ -185,7 +185,7 @@ export function SubPathDetailPage() {
                             color: 'var(--color-primary)',
                           }}
                         >
-                          {step.bookingStatus}
+                          {step.stepState}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-slate-400">

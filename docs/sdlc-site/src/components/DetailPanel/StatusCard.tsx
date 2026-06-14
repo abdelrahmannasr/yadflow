@@ -30,7 +30,7 @@ export function StatusCard({ step, stepIndex }: StatusCardProps) {
         <div className="h-3 w-3 rounded-full animate-pulse"
           style={{ backgroundColor: '#eab308' }}
         />
-        <h2 className="text-white text-lg font-bold font-display break-all">{step.bookingStatus}</h2>
+        <h2 className="text-white text-lg font-bold font-display break-all">{step.stepState}</h2>
       </div>
       <p className="text-slate-400 text-sm leading-relaxed">
         {step.description}

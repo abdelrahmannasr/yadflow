@@ -25,7 +25,7 @@ const FACTS = [
   'Staleness for code repos is tracked by HEAD sha and is a human decision: yad repo list / yad repo refresh.',
 ];
 
-export function DeploymentGuideSection() {
+export function ConnectorsSection() {
   return (
     <div className="space-y-5">
       <div

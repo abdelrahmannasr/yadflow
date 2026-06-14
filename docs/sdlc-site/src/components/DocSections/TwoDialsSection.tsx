@@ -44,7 +44,7 @@ const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[
   },
 ];
 
-export function MiddlewareChainSection() {
+export function TwoDialsSection() {
   return (
     <div className="space-y-5">
       {CHAINS.map((chain) => (

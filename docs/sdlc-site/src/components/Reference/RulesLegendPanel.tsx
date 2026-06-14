@@ -5,15 +5,15 @@ import { MESSAGE_COLORS } from '../../data/types';
 import { MESSAGE_TYPE_ICONS } from '../../utils/iconMap';
 import { StakeholderToggle } from './StakeholderToggle';
 import { DecisionTreeView } from './DecisionTreeView';
-import { RiderUIStatesTable } from './RiderUIStatesTable';
-import { DriverUIStatesTable } from './DriverUIStatesTable';
-import { BullMQJobsList } from './BullMQJobsList';
+import { AssistanceDialTable } from './AssistanceDialTable';
+import { AutomationDialTable } from './AutomationDialTable';
+import { CheckGatesList } from './CheckGatesList';
 import { FeatureFlagMatrix } from './FeatureFlagMatrix';
-import { DeeplinkActionsChips } from './DeeplinkActionsChips';
+import { CliCommandChips } from './CliCommandChips';
 import { TroubleshootingSection } from './TroubleshootingSection';
 
 // Who advances each step type — the locked vs earnable rule.
-const CANCELABILITY_RULES = [
+const STEP_ADVANCE_RULES = [
   { status: 'Setup & connectors', canCancel: 'Not gated', color: '#b7950b', dotColor: '#b7950b' },
   { status: 'Front states (epic … stories)', canCancel: 'Human (locked)', color: '#566573', dotColor: '#566573' },
   { status: 'Back steps (spec … checks)', canCancel: 'Earnable', color: '#1e8449', dotColor: '#1e8449' },
@@ -101,7 +101,7 @@ export function RulesLegendPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {CANCELABILITY_RULES.map((rule) => (
+                      {STEP_ADVANCE_RULES.map((rule) => (
                         <tr key={rule.status} className="border-t hover:bg-white/5 transition-colors"
                           style={{ borderColor: 'var(--color-border-default)' }}
                         >
@@ -173,19 +173,19 @@ export function RulesLegendPanel() {
               <DecisionTreeView />
 
               {/* Assistance Dial */}
-              <RiderUIStatesTable />
+              <AssistanceDialTable />
 
               {/* Automation Dial */}
-              <DriverUIStatesTable />
+              <AutomationDialTable />
 
               {/* Check Gates */}
-              <BullMQJobsList />
+              <CheckGatesList />
 
               {/* Feature Flags */}
               <FeatureFlagMatrix />
 
               {/* yad CLI */}
-              <DeeplinkActionsChips />
+              <CliCommandChips />
 
               {/* Troubleshooting */}
               <TroubleshootingSection />

@@ -1,9 +1,9 @@
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
-import { DRIVER_UI_STATES } from '../../data/referenceData';
+import { AUTOMATION_DIAL_STATES } from '../../data/referenceData';
 
-export function DriverUIStatesTable() {
-  const states = useStakeholderFilter(DRIVER_UI_STATES);
+export function AutomationDialTable() {
+  const states = useStakeholderFilter(AUTOMATION_DIAL_STATES);
 
   if (states.length === 0) return null;
 

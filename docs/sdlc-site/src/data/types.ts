@@ -65,7 +65,7 @@ export interface FlowStep {
   // "ready-for-build" / "merged" / "earned".
   status: string;
   // Reused as the .sdlc currentStep / artifact label for the step.
-  bookingStatus: string;
+  stepState: string;
   trigger: string;
   handler: string;
   messages: AnimatedMessage[];

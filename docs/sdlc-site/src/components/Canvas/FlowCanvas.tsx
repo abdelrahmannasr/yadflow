@@ -213,7 +213,7 @@ export const FlowCanvas: React.FC = () => {
             {currentStep.status}
           </div>
           <div className="mt-0.5 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-            {currentStep.bookingStatus}
+            {currentStep.stepState}
           </div>
         </div>
       )}

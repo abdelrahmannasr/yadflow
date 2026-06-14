@@ -15,7 +15,7 @@ const LOCK_FACTS = [
   'In CI, contract-check FAILS a diff that changes the surface without a Contract-Change trailer + a re-locked contract — and routes it back to the architecture gate.',
 ];
 
-export function StatusMachineSection() {
+export function ContractLockSection() {
   return (
     <div className="space-y-5">
       <div
@@ -61,12 +61,12 @@ export function StatusMachineSection() {
               const color = CATEGORY_COLORS[m.category] || '#64748b';
               return (
                 <tr
-                  key={m.tripStatus}
+                  key={m.step}
                   className="border-t hover:bg-white/5 transition-colors"
                   style={{ borderColor: 'var(--color-border-default)' }}
                 >
-                  <td className="px-4 py-2.5 font-mono text-xs text-slate-300">{m.tripStatus}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-slate-300">{m.bookingStatus}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-slate-300">{m.step}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs text-slate-300">{m.writes}</td>
                   <td className="px-4 py-2.5 text-right">
                     <span
                       className="text-[10px] font-medium px-2 py-0.5 rounded border"

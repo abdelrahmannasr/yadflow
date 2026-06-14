@@ -37,7 +37,7 @@ const KEY_FILES = [
   { label: 'trust-log.json', query: 'every back-half run\'s verdict — the evidence base for earning automation' },
 ];
 
-export function DataMigrationSection() {
+export function GlossarySection() {
   return (
     <div className="space-y-5">
       <div

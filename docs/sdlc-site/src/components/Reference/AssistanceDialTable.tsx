@@ -1,9 +1,9 @@
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
-import { RIDER_UI_STATES } from '../../data/referenceData';
+import { ASSISTANCE_DIAL_STATES } from '../../data/referenceData';
 
-export function RiderUIStatesTable() {
-  const states = useStakeholderFilter(RIDER_UI_STATES);
+export function AssistanceDialTable() {
+  const states = useStakeholderFilter(ASSISTANCE_DIAL_STATES);
 
   if (states.length === 0) return null;
 

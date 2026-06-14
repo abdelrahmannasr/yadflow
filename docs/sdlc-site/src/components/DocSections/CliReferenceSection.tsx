@@ -44,7 +44,7 @@ const FLAGS = [
 
 const LEVEL_COLORS: Record<string, string> = { high: '#ca6f1e', medium: '#b7950b', low: '#1e8449' };
 
-export function PMRoadmapSection() {
+export function CliReferenceSection() {
   return (
     <div className="space-y-5">
       {GROUPS.map((phase) => (

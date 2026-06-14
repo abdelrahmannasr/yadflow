@@ -1,14 +1,14 @@
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
-import { DEEPLINK_ACTIONS } from '../../data/referenceData';
+import { CLI_COMMANDS } from '../../data/referenceData';
 
-export function DeeplinkActionsChips() {
-  const actions = useStakeholderFilter(DEEPLINK_ACTIONS);
+export function CliCommandChips() {
+  const actions = useStakeholderFilter(CLI_COMMANDS);
 
   if (actions.length === 0) return null;
 
-  const riderActions = actions.filter((a) => a.target === 'rider');
-  const driverActions = actions.filter((a) => a.target === 'driver');
+  const setupCommands = actions.filter((a) => a.target === 'setup');
+  const buildCommands = actions.filter((a) => a.target === 'build');
 
   return (
     <section>
@@ -17,13 +17,13 @@ export function DeeplinkActionsChips() {
         <h3 className="text-slate-100 text-lg font-bold font-display">The yad CLI</h3>
       </div>
 
-      {riderActions.length > 0 && (
+      {setupCommands.length > 0 && (
         <div className="mb-3">
           <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 block">
-            Setup &amp; Front ({riderActions.length})
+            Setup &amp; Front ({setupCommands.length})
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {riderActions.map((action) => (
+            {setupCommands.map((action) => (
               <span
                 key={action.value}
                 className="px-2.5 py-1.5 rounded-md text-xs font-mono border cursor-default hover:bg-white/5 transition-colors"
@@ -41,13 +41,13 @@ export function DeeplinkActionsChips() {
         </div>
       )}
 
-      {driverActions.length > 0 && (
+      {buildCommands.length > 0 && (
         <div>
           <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 block">
-            Build &amp; Automation ({driverActions.length})
+            Build &amp; Automation ({buildCommands.length})
           </span>
           <div className="flex flex-wrap gap-1.5">
-            {driverActions.map((action) => (
+            {buildCommands.map((action) => (
               <span
                 key={action.value}
                 className="px-2.5 py-1.5 rounded-md text-xs font-mono border cursor-default hover:bg-white/5 transition-colors"

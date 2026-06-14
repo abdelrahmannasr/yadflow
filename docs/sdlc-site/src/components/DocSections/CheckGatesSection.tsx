@@ -36,7 +36,7 @@ const GATE_GROUPS = [
   },
 ];
 
-export function SecuritySection() {
+export function CheckGatesSection() {
   return (
     <div className="space-y-4">
       {GATE_GROUPS.map((layer) => (

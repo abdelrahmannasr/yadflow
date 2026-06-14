@@ -35,7 +35,7 @@ const LEDGER = [
   { file: '.sdlc/state.json', note: 'currentStep advances only when the rule is met' },
 ];
 
-export function ApiReferenceSection() {
+export function ReviewGateSection() {
   return (
     <div className="space-y-4">
       <div

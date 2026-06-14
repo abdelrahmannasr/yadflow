@@ -224,7 +224,7 @@ export const StepList = () => {
                           <span className="text-xs font-medium">{step.actor}</span>
                         </div>
                         <Icon name="arrow_forward" size={12} className="text-slate-500" />
-                        <span className="text-xs text-slate-400 font-medium break-all">{step.bookingStatus}</span>
+                        <span className="text-xs text-slate-400 font-medium break-all">{step.stepState}</span>
                       </div>
                     </div>
                   </motion.div>

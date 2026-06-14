@@ -10,7 +10,7 @@ export function RequestPayloadPreview({ step }: RequestPayloadPreviewProps) {
     step_id: step.id,
     actor: step.actor,
     status: step.status,
-    artifact: step.bookingStatus,
+    artifact: step.stepState,
     trigger: step.trigger,
     active_components: step.activeComponents,
     messages: step.messages.map((m) => ({
