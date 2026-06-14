@@ -118,6 +118,29 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// `yad setup` now migrates a pre-2.0 install too (project IDE targets + the opt-in global
+// ~/.claude/skills pass). Both reuse legacyModuleActions; the global pass calls it as
+// legacyModuleActions(os.homedir(), ['.claude']) so an old skill at <root>/.claude/skills/<old>
+// is removed and its yad-* rename installed. This drives that helper directly (the same way
+// setup's applyActions does) to avoid the interactive runSetup prompts.
+const { legacyModuleActions } = await import('./plan.mjs');
+test('setup migration: legacyModuleActions renames <root>/.claude/skills/sdlc-* to yad-*', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-setup-legacy-'));
+  fs.mkdirSync(path.join(T, '.claude/skills/sdlc-author-epic'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.claude/skills/sdlc-author-epic/SKILL.md'), '---\nname: sdlc-author-epic\n---\n');
+
+  const actions = legacyModuleActions(T, ['.claude']);
+  assert.ok(actions.length >= 1, 'detects the legacy skill');
+  for (const a of actions) a.apply(); // setup applies these with { force: true } — every action runs
+
+  assert.ok(!fs.existsSync(path.join(T, '.claude/skills/sdlc-author-epic')), 'old sdlc-* removed');
+  assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')), 'yad-* rename installed');
+
+  // Idempotent: a clean tree yields no further legacy actions.
+  assert.equal(legacyModuleActions(T, ['.claude']).length, 0, 'migration is idempotent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // GitLab fragments are referenced by path from the root .gitlab-ci.yml include (written by the
 // wire step) — migrating the fragment must rewrite that include too, or the pipeline hard-fails
 // on a `local file does not exist`. Also covers the old `# sdlc-managed-include` marker variant.
