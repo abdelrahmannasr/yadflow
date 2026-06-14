@@ -13,7 +13,7 @@ import {
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   artifactPaths, upsertHubPr,
 } from './epic-state.mjs';
-import { readPr, mapApprovers, createPr } from './platform.mjs';
+import { readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin } from './platform.mjs';
 import { err } from './errors.mjs';
 
 // ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------
@@ -412,10 +412,15 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   if (!hub?.platform) { warn('no hub platform — marked in_review file-only (no PR opened)'); ok(`${step.id} → in_review`); return; }
 
   const body = fillHubTemplate({ epic, artifact, step, owner: ownerOf(epicDir), domains });
-  const reviewers = (hub.roster || []).filter((r) => r.role !== 'owner').map((r) => r.login);
+  // Assignee = whoever opens the review PR (the committer); reviewers = the hub's reviewers +
+  // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
+  // to review their own artifact). Scope is the hub plus every touched domain.
+  const committer = resolveCommitterLogin(root, hub.roster || []);
+  const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer });
+  const assignees = committer ? [committer] : [];
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
-  const r = createPr(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, labels, cwd: root });
+  const r = createPr(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'}); step is in_review file-only`); return; }
 
   const number = Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null;

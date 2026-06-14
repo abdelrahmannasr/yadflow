@@ -30,10 +30,13 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
 
 - `action` — `connect` | `refresh` | `list` | `disconnect` | `detect-hub` | `roster` (default `connect`).
 - `repo` — the repo's short name (the key used in stories' `repos:` tag, e.g. `backend`).
-- `login`, `name`, `role` — for `roster` (set the hub's reviewer-roster mapping login → name → role).
+- `login`, `name`, `email`, `roles` — for `roster` (map login → name + commit email + the per-scope
+  `roles` map, e.g. `roles: hub=owner,reviewer backend=domain-owner`). Validate the login against the
+  hub (`gh api users/<login>` / `glab api users?username=`); a miss is flagged `unverified` (warn-only).
 - `path` — local path to the code repo (relative to `{project-root}` or absolute). For local repos.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
-- `domain_owner` — the engineer who owns this repo's domain (drives per-repo review routing later).
+- `domain_owners` — the engineer(s) who own this repo's domain (a repo may have several; drives per-repo
+  review routing). Each name is also written into that person's `roles[<repo>]` map in `hub.json`.
 
 ## On Activation
 
@@ -83,7 +86,8 @@ HEAD sha as `syncedHead` (this drives staleness):
       "path": "<path rel. to project-root>",
       "git_url": "<url or null>",
       "platform": "github|gitlab|null",
-      "domain_owner": "<owner or null>",
+      "domain_owners": ["<owner>", "…"],
+      "domain_owner": "<domain_owners[0] — legacy mirror>",
       "default_branch": "<branch>",
       "connectedAt": "<YYYY-MM-DD>",
       "lastSyncedAt": "<YYYY-MM-DD>",
@@ -122,10 +126,13 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
   `git_url`, `default_branch`, `detectedAt`, and `bridge_enabled: true` (preserve an existing roster).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
-- **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `role`
-  (`owner` | `reviewer`). Upsert by `login`. `domain-owner` is **not** set here — it is derived when a
-  roster `name` equals a repo's `domain_owner` in `repos.json` (see `references/hub-config.md`). An
-  unmapped login degrades to a plain `reviewer`, never auto-promoted to owner/domain-owner.
+- **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `email` + a per-scope
+  `roles` map (`roles: { hub: ["owner","reviewer"], <repo>: ["domain-owner", …] }`). Upsert by `login`;
+  a person may hold several roles across several scopes, and a repo several people per role. Validate the
+  `login` against the hub (warn-only; flag `unverified` on a miss). `domain-owner` is written into
+  `roles[<repo>]` (and still **derived** as a fallback when a roster `name` equals a repo's
+  `domain_owner`/`domain_owners` in `repos.json` — see `references/hub-config.md`). An unmapped login
+  degrades to a plain `reviewer`, never auto-promoted to owner/domain-owner.
 
 If the hub has no remote (`platform: null`) or the bridge is disabled, the front-half gate runs
 file-only with no error — the bridge is purely additive.

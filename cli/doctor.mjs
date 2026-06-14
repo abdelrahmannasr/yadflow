@@ -8,7 +8,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSO
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
 import { loadLedger, epicRoot } from './epic-state.mjs';
 import { gitHead } from './setup.mjs';
-import { cliFor } from './platform.mjs';
+import { cliFor, validateLogin } from './platform.mjs';
 
 const MIN_NODE = 18;
 
@@ -70,7 +70,18 @@ export function projectChecks(checks, root) {
       if (cli) {
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to file-only without it`);
         else if (!run(cli, ['auth', 'status']).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated [YAD-ENV-002]`, `run \`${cli} auth login\``);
-        else check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
+        else {
+          check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
+          // Re-validate each roster login against the hub (warn-only). Skips when a login is already
+          // flagged unverified by setup; reports any that no longer resolve.
+          const bad = [];
+          for (const e of hub.roster || []) {
+            const v = validateLogin(hub.platform, e.login);
+            if (v.checked && !v.exists) bad.push(e.login);
+          }
+          if (bad.length) check(checks, 'roster', 'project', 'warn', `roster login(s) not found on ${hub.platform}: ${bad.join(', ')}`, 'fix the login or re-run `yad setup` (they cannot satisfy a gate)');
+          else check(checks, 'roster', 'project', 'ok', `roster: ${(hub.roster || []).length} member(s) validated on ${hub.platform}`);
+        }
       }
     }
   }
