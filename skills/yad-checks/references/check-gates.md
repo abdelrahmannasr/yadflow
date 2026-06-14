@@ -12,6 +12,9 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
 | build/test/lint | the repo's `npm run lint` / `npm run build` / `npm test` | the repo |
 | verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | hub roster `email` fields (`yad check --fix` generates the allowlist) |
+| commit-message | each non-merge commit's subject + trailer block | `yad-commit` / `CONTRIBUTING.md` (`config.yaml build.commit_subject_style`) |
+| pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
+| pr-template | the PR/MR body (from the CI event payload) | `yad-pr-template` (the committed PR/MR template) |
 
 ## 1. spec-link (`templates/checks/spec-link.sh`)
 
@@ -84,16 +87,54 @@ Note the deliberate split with the gate-sync bot: this gate runs on **PRs/MRs on
 not subject to it. Do **not** replace it with a platform-level "reject unsigned pushes" rule on the
 default branch — that would break the event-driven gate sync (and GitLab push rules are Premium-only).
 
+## 5. commit-message (`templates/checks/commit-message.sh`)
+
+The commit *pattern* gate (the presence-only `Task:` check is spec-link's; this checks SHAPE). For each
+non-merge commit in `<base>..HEAD`:
+
+- **Subject** must be `<type>: <description>` with `<type>` a known Conventional-Commits type
+  (`feat|fix|docs|refactor|test|perf|build|ci|chore|revert` — keep in sync with `cli/manifest.mjs`
+  `COMMIT_TYPES`) and **no trailing period** — mirroring `cli/commit.mjs` `buildCommitMessage`.
+- **Trailers**, when present, appear in the fixed order `Task → Contract-Change → Co-Authored-By`.
+- Merge/squash commits (2+ parents) are skipped — their platform-generated subjects are not authored.
+- **Profiles** (`--profile code|hub`): the subject rule is identical on both; the gate never requires
+  the `Task:` trailer (spec-link owns that on code repos; hub commits are not task-scoped).
+- **Fails closed** when `<base>` can't be resolved.
+
+## 6. pr-title (`templates/checks/pr-title.sh`)
+
+The PR/MR title must follow the convention for the repo kind (title passed as the arg, injected by CI
+from the event payload):
+
+- `--profile code` (default) → a Conventional-Commits subject `<type>: <description>`, no trailing
+  period (`config.yaml build.pr_title_style: same_as_commit_subject` — one task = one PR, the title is
+  the squash-merge subject).
+- `--profile hub` → a front-half artifact-review title `review: <artifact> (EP-<slug>)`, the shape
+  `yad gate open` creates.
+
+## 7. pr-template (`templates/checks/pr-template.sh`)
+
+The PR/MR body must actually USE the committed template (body passed as a file, injected by CI) — this
+catches a free-form description that bypassed it:
+
+- `--profile code` (default) → requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled
+  `Risk level:` (`low|medium|high`).
+- `--profile hub` → requires `## Artifact under review`, `## Impact & Risk (front-half)`, `## Checklist`,
+  and a `Risk tags:` line.
+
 ## CI wiring (both platforms)
 
 The gates run identically under either CI; the config just invokes the scripts with the PR/MR base.
 
 - **GitHub Actions** — `templates/github/yad-checks.yml` → `.github/workflows/yad-checks.yml`. The
   jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/${{ github.base_ref }}` as base
-  (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup).
+  (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The pattern jobs
+  read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
+  and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
-  passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`.
+  passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`
+  and `$CI_MERGE_REQUEST_DESCRIPTION`. All `--profile code`.
 
 ## Sync with existing CI (merge, never clobber)
 
@@ -148,6 +189,14 @@ plus a standalone workflow (`templates/github/yad-verified-commits.yml` →
 its one include line) whenever `.sdlc/hub.json` has a platform with the bridge enabled. So the
 front-half review PRs are held to the same rule as code-repo PRs: signed, known authors only.
 
+The hub **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
+`--profile hub`, so the front-half review PRs follow the hub conventions — Conventional-Commits commit
+subjects, a `review: <artifact> (EP-<slug>)` title, and a body that uses the hub artifact-review
+template. `yad check --fix` installs the same `checks/*.sh` scripts plus a standalone hub workflow
+(`templates/github/yad-hub-checks.yml` → `.github/workflows/yad-hub-checks.yml`, or the GitLab fragment
+`templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
+line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
+
 ## Running by hand (Phase 3 is manual)
 
 From inside the code repo, against the PR/MR base (e.g. `master`):
@@ -157,6 +206,9 @@ bash checks/spec-link.sh master
 bash checks/contract-check.sh master
 bash checks/build-test-lint.sh
 bash checks/verified-commits.sh master   # uses your own gh/glab auth for the signature lookup
+bash checks/commit-message.sh --profile code master
+bash checks/pr-title.sh --profile code "feat: add the inquiry endpoint"
+bash checks/pr-template.sh --profile code .github/pull_request_template.md
 ```
 
 ## Proven behavior (demo: `demo-repos/backend`, story EP-istifta-inquiries-S01)
