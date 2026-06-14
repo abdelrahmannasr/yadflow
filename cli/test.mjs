@@ -278,6 +278,48 @@ test('taskFromBranch derives the story-task id', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// runShip — orchestration only (commit then open-pr); the PR step must NOT run without a commit
+// ---------------------------------------------------------------------------------------------
+const { runShip } = await import('./ship.mjs');
+
+// A standalone code repo with a staged atomic change on a task branch (no remote — open-pr would
+// push, which we never reach in these guard tests).
+function scaffoldStaged() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ship-'));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.name', 'x');
+  fs.writeFileSync(path.join(T, 'seed.txt'), '0');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'feat/EP-demo-S01-T01-x');
+  return T;
+}
+
+test('runShip --dry-run builds the message and never opens a PR', async () => {
+  const prev = process.exitCode;
+  const T = scaffoldStaged();
+  fs.writeFileSync(path.join(T, 'a.txt'), '1');
+  git(T, 'add', '-A');
+  const r = await runShip(T, { type: 'feat', message: 'add a thing', ai: 'none', dryRun: true });
+  assert.match(r.message, /^feat: add a thing/);
+  assert.ok(!r.url, 'no PR opened on a dry run');
+  process.exitCode = prev; // dry run does not set it, but keep the suite clean
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runShip aborts the PR step when the commit does not land (nothing staged)', async () => {
+  const prev = process.exitCode;
+  const T = scaffoldStaged(); // nothing staged this time
+  const r = await runShip(T, { type: 'feat', message: 'add a thing' });
+  assert.ok(!r || !r.url, 'no PR opened when the commit fails');
+  assert.ok(process.exitCode, 'commit failure sets a non-zero exit code');
+  process.exitCode = prev; // restore so the failed-commit signal does not leak to the runner
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
 const { gatePredicate, artifactHash } = await import('./epic-state.mjs');
