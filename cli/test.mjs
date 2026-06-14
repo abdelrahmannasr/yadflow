@@ -164,6 +164,20 @@ test('gitlab migration rewrites the root .gitlab-ci.yml include to the new fragm
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// Every GitLab fragment that runs a docker-image job must carry `tags: [$YAD_RUNNER_TAGS]` so a
+// tag-locked instance can route it (issue #50). Guards against a future revert dropping the tag.
+test('gitlab fragments declare tags: [$YAD_RUNNER_TAGS] on their docker jobs', () => {
+  for (const rel of [
+    'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml',
+    'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml',
+    'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml',
+  ]) {
+    const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    assert.ok(/^\s*image:/m.test(txt), `${rel}: expected an image: job`);
+    assert.ok(txt.includes('tags: [$YAD_RUNNER_TAGS]'), `${rel}: missing tags: [$YAD_RUNNER_TAGS]`);
+  }
+});
+
 // A file at an old wired path that we did NOT install (no `# sdlc-managed` first line) belongs
 // to the user — migration must leave it untouched.
 test('update leaves a user-authored file at an old wired path alone', async () => {
@@ -1307,6 +1321,26 @@ test('doctor: healthy project has no failures (warnings allowed)', async () => {
   const r = await doctorOn(T);
   assert.equal(r.failed, 0, JSON.stringify(r.checks.filter((x) => x.status === 'fail')));
   assert.ok(r.checks.some((x) => x.id === 'repo:backend' && x.status === 'ok'), 'backend repo healthy');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: untagged GitLab fragment warns with YAD-CI-001; tagged is silent', async () => {
+  const { T } = scaffold();
+  const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+  repos.repos[0].platform = 'gitlab';
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+
+  // Freshly wired fragments carry tags: no YAD-CI-001.
+  let r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => /YAD-CI-001/.test(x.message)), 'tagged fragments must not warn');
+
+  // Strip the tags line from the repo fragment (an old install / hand-reverted sync) -> warn.
+  const frag = path.join(T, 'demo/backend/.gitlab/ci/yad-checks.yml');
+  fs.writeFileSync(frag, fs.readFileSync(frag, 'utf8').replace(/^\s*tags: \[\$YAD_RUNNER_TAGS\]\n/m, ''));
+  r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'ci-tags:backend' && x.status === 'warn' && /YAD-CI-001/.test(x.message)), 'untagged repo fragment must warn');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

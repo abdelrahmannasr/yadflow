@@ -88,6 +88,13 @@ Copy from this skill's `templates/`:
     human to paste (graceful degradation — never guess-edit a pipeline you cannot parse).
   - The legacy standalone `templates/gitlab/.gitlab-ci.yml` is retained only for a clean greenfield repo
     that prefers a single self-contained file; the include path above is the default.
+  - **Tag-locked runners** (`run_untagged: false`, common on self-hosted): the fragment's jobs run a
+    docker image, so set a `YAD_RUNNER_TAGS` CI/CD variable (e.g. `dind_runner`) to route them — the
+    `default:` block emits `tags: [$YAD_RUNNER_TAGS]`. When unset, current GitLab (≥15) drops the
+    empty-expanded tag so the jobs run untagged (gitlab.com shared runners); older versions may
+    strand them `pending`, in which case set the variable to a real tag. The variable lives in
+    project settings, so it survives every `yad` sync. Single value only — `tags: [$VAR]` is one tag
+    equal to the whole variable, not a comma-split.
 
 - Ensure `<repo>/package.json` defines `lint`, `build`, `test` scripts (see `references/check-gates.md`
   for the canonical scripts). **Only ADD a missing script; never overwrite an existing one.**

@@ -11,6 +11,14 @@
 # colliding with the host project's own job names.
 default:
   image: node:20
+  # Runner selection. These jobs need a docker/dind executor; on instances whose runners are all
+  # tag-locked (run_untagged: false) an untagged image job never starts. Set the YAD_RUNNER_TAGS
+  # CI/CD variable (Settings → CI/CD → Variables, e.g. `dind_runner`) to route them — it lives in
+  # project settings, so it survives every `yad` sync. When unset, current GitLab (>=15) drops the
+  # empty-expanded tag so the job runs untagged (gitlab.com shared runners); some older versions
+  # instead strand it `pending` — if so, set the variable to a real tag. Single value only:
+  # `tags: [$VAR]` is one tag equal to the whole variable, not a comma-split.
+  tags: [$YAD_RUNNER_TAGS]
 
 .sdlc_mr_only:
   rules:
