@@ -398,11 +398,13 @@ build half by hand”** below.
     (repeat per task). Commit by convention with **`yad commit --type <t> -m <subject> [--ai <tool>]`**
     (Task/Contract-Change/Co-Authored-By trailers, atomic-file guard).
 12. `yad-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, verified-commits
-    (platform-Verified signature + roster-allowlisted author), and the pattern gates commit-message /
-    pr-title / pr-template must pass.
+    (platform-Verified signature + roster-allowlisted author), and commit-message must pass. (The
+    `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
+    step 13.)
 13. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or do
-    12+13 in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**);
-    `yad-pr-template repo:<repo> action: route` prints the required reviewers from the Impact & Risk block.
+    12+13 in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR's CI now also
+    runs the `pr-title` and `pr-template` gates; `yad-pr-template repo:<repo> action: route` prints the
+    required reviewers from the Impact & Risk block.
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`).
     - **Multi-repo:** repeat 10–14 in each repo, all from the **one** locked contract.

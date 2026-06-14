@@ -94,7 +94,7 @@ flowchart TD
       sp["yad-spec<br/>→ specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
       ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template"]:::earns
-      prm["yad-ship: commit + open PR/MR (yad-pr-template route)"]
+      prm["yad-ship: commit + open PR/MR"]
       eng{{"yad-engineer-review<br/>human · never automated"}}:::locked
       merged(["merge → build-log.json"]):::sentinel
       sp --> im --> ck --> prm --> eng --> merged
