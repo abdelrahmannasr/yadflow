@@ -65,8 +65,9 @@ A missing `docs-build.json` (a site never generated) counts as **stale → needs
 - **`wire`** — commit the CI workflow (Step 4) that automates the check + rebuild.
 
 ### Step 4 — `wire`: the CI auto-rebuild workflow
-Commit the platform-matched workflow (GitHub `.github/workflows/yad-docs.yml`, or a `pages` job in
-`.gitlab-ci.yml`), CI-agnostic in spirit like the `yad-checks` gates:
+Commit the platform-matched workflow (GitHub `.github/workflows/yad-docs.yml`, or a GitLab `pages` job at
+`.gitlab/ci/yad-docs.yml` that must be `include:`d from the root `.gitlab-ci.yml` —
+`include: { local: .gitlab/ci/yad-docs.yml }`, the same fragment+include shape as the `yad-checks` gates):
 - on push, run **`yad docs sync --check`**; on detected staleness, **rebuild + deploy** the affected
   site(s);
 - carry **`[skip ci]`** on any commit the workflow itself makes (the regenerated source / manifest) and

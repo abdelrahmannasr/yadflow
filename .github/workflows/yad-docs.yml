@@ -22,14 +22,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Build the overview site
+      - name: Build the overview + per-epic sites into ./public
         run: |
-          if [ -d docs/sdlc-site ]; then
-            cd docs/sdlc-site && npm ci && npm run build
-          fi
+          mkdir -p public
+          if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && cp -r docs/sdlc-site/dist/. public/; fi
+          for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/sdlc-site/dist
+          path: public
       - id: deployment
         uses: actions/deploy-pages@v4

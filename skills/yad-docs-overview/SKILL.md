@@ -79,15 +79,17 @@ Write `docs/sdlc-site/.docs-build.json` — `yad-docs-sync` compares against it:
 {
   "builtAt": "<YYYY-MM-DD>",
   "theme": "yadflow-brand",
-  "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd + skill count>",
+  "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd>",
   "skillCount": <number of yad-* skills>,
   "deployUrl": "<url or null>",
-  "templateVersion": "<shell template version>"
+  "templateVersion": "<shell template version = the yad CLI version>"
 }
 ```
 
-The overview's freshness inputs are the **config + manifest + diagram + skill count**, not per-epic
-artifacts/repo heads.
+The overview's freshness inputs are the **config + manifest + diagram** (plus the `templateVersion`, so a
+doc-shell upgrade triggers a rebuild). `skillCount` rides along in the manifest as an informational field
+— it is **not** a separate hash input, since `module-help.csv` already moves whenever the skill set does.
+Not per-epic artifacts/repo heads.
 
 ### Step 5 — Supersede `docs/index.html` (one release)
 Turn `docs/index.html` into a **thin redirect** to `docs/sdlc-site/` (e.g. a `<meta http-equiv="refresh">`

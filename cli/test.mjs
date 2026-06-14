@@ -1725,6 +1725,9 @@ test('siteBasePath nests per-epic under the project base; overview is the base r
   assert.equal(siteBasePath({ basePath: '/yadflow/' }, { epic: 'EP-foo' }), '/yadflow/epics/EP-foo/');
   assert.equal(siteBasePath({ basePath: '/' }, { epic: 'EP-foo' }), '/epics/EP-foo/');
   assert.equal(siteBasePath({}, { overview: true }), '/');
+  // a basePath WITHOUT a trailing slash must not double-slash or drop the join
+  assert.equal(siteBasePath({ basePath: '/foo' }, { epic: 'EP-x' }), '/foo/epics/EP-x/');
+  assert.equal(siteBasePath({ basePath: '/foo' }, { overview: true }), '/foo/');
 });
 
 test('siteDir / manifestPath resolve per-epic vs overview locations', () => {
@@ -1779,11 +1782,17 @@ test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop
   assert.match(gh, /deploy-pages@v4/);
   assert.match(gh, /concurrency:/);                 // deploy-loop guard
   assert.match(gh, /# yad-managed/);
+  // both the overview AND per-epic sites are assembled into ./public (epics nested under epics/<id>/)
+  assert.match(gh, /docs\/sdlc-site/);
+  assert.match(gh, /epics\/\*\/docs-site/);
+  assert.match(gh, /public\/epics\/\$id/);
+  assert.match(gh, /path: public/);
   assert.equal(pagesWorkflowPath('github'), '.github/workflows/yad-docs.yml');
   const gl = pagesWorkflow('gitlab');
   assert.match(gl, /^pages:/m);
   assert.match(gl, /artifacts:/);
-  assert.equal(pagesWorkflowPath('gitlab'), '.gitlab-ci-pages.yml');
+  assert.match(gl, /epics\/\*\/docs-site/);         // GitLab publishes per-epic sites too
+  assert.equal(pagesWorkflowPath('gitlab'), '.gitlab/ci/yad-docs.yml');
 });
 
 test('runDocs: list/sync/wire orchestrate over generated sites and install the Pages CI', async () => {
@@ -1809,6 +1818,10 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
   const wired = await runDocs(T, { action: 'sync', sync: 'wire' });
   assert.equal(wired.wired, '.github/workflows/yad-docs.yml');
   assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-docs.yml')), 'Pages workflow written');
+
+  // build degrades (does not throw) when a targeted site has not been generated yet
+  const builtMissing = await runDocs(T, { action: 'build', epic: 'EP-nope' });
+  assert.equal(builtMissing.built, 0, 'build of a non-generated site yields nothing, no throw');
 
   const before = process.exitCode;
   await runDocs(T, { action: 'bogus' });

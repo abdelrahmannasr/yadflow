@@ -26,7 +26,7 @@ the current inputs, or its shell template is out of date. This mirrors the `repo
 {
   "builtAt": "<YYYY-MM-DD>",
   "theme": "yadflow-brand",
-  "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd + skill count>",
+  "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd>",
   "skillCount": <number of yad-* skills>,
   "deployUrl": "<url or null>",
   "templateVersion": "<shell template version>"
@@ -38,7 +38,7 @@ the current inputs, or its shell template is out of date. This mirrors the `repo
 | Target | `artifactHash` inputs | head inputs |
 |--------|-----------------------|-------------|
 | **per-epic** | `epic.md` + `architecture.md` + `contract.md` **CONTRACT-SURFACE only** + `ui-design.md` + **each** `stories/*.md` (concatenated in stable story-id order, hashed sha256) | `repoHeads`: `git -C <path> rev-parse HEAD` for each repo in `epic.repos` |
-| **overview** | `skills/sdlc/config.yaml` + `skills/sdlc/module-help.csv` + `docs/diagrams/sdlc-overview.mmd` + the `skillCount` (count of `yad-*` skills), concatenated in that order, hashed sha256 | — (no repos) |
+| **overview** | `skills/sdlc/config.yaml` + `skills/sdlc/module-help.csv` + `docs/diagrams/sdlc-overview.mmd`, concatenated in that order, hashed sha256 (`skillCount` is an informational manifest field, not a hash input — `module-help.csv` already moves when the skill set does) | — (no repos) |
 
 Because `yad-docs` generates `src/data/*.ts` **deterministically** (stable-ID sort, fixed key order, no
 embedded timestamps), an unchanged input set re-hashes identically — so a hash move means a *real*
@@ -54,9 +54,9 @@ A site is **stale** when ANY holds:
    <old>→<new>`). **Identical to the `repos.json` `syncedHead` staleness rule** — and, as there, a stale
    repo is *flagged*, never auto-refreshed: the `code-context` itself is refreshed by a human via
    `yad repo refresh`, and the docs are regenerated only on an explicit `refresh`/CI decision;
-3. (overview) `config.yaml` / `module-help.csv` / the `.mmd` / `skillCount` moved — the pipeline changed
-   (this is what enforces "the overview regenerates whenever the workflow definition or skill count
-   changes");
+3. (overview) `config.yaml` / `module-help.csv` / the `.mmd` moved — the pipeline changed (this is what
+   enforces "the overview regenerates whenever the workflow definition or skill set changes"); or the
+   `templateVersion` (the yad CLI version) advanced — the doc shell upgraded;
 4. manifest `templateVersion` < the current shell template version — the `templates/app/` shell was
    upgraded, so every site should re-copy it;
 5. the `docs-build.json` is **missing** — the site was never generated (treat as stale → generate).
@@ -66,7 +66,8 @@ SDLC step (docs are never a gate).
 
 ## CI loop-prevention note
 
-The `wire` workflow (`.github/workflows/yad-docs.yml` or a `pages` job in `.gitlab-ci.yml`) runs
+The `wire` workflow (`.github/workflows/yad-docs.yml`, or the GitLab `pages` job at
+`.gitlab/ci/yad-docs.yml` included from the root `.gitlab-ci.yml`) runs
 `yad docs sync --check` on push and rebuilds + deploys on staleness. Because the rebuild **commits** the
 regenerated `src/data/*.ts` + refreshed `docs-build.json`, that commit would re-trigger the same workflow
 — a deploy loop. Two guards, both mandatory:

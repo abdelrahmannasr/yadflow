@@ -12,7 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { c, log, ok, info, warn, hand, fail, readJSON, run, has, exists } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { PROJECT_FILES, VERSION } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
 import { contractSurfaceHash } from './epic-state.mjs';
@@ -112,19 +112,27 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, templateVers
 }
 
 // ---- pure: the Pages CI workflow (committed by `yad docs sync --wire`) ---------------------------
-// GitHub Actions deploy-pages, or a GitLab `pages` job. Both build every generated *-site/ under the
-// repo and publish. `[skip ci]` + a concurrency group prevent the deploy commit from retriggering.
+// GitHub Actions deploy-pages, or a GitLab `pages` job. Both assemble a single `public/` tree: the
+// overview at the root and every per-epic site under `epics/<id>/` — matching siteBasePath's nesting
+// (overview at `<base>/`, epics at `<base>/epics/EP-<slug>/`). A concurrency group prevents the
+// deploy from retriggering. The shared shell script keeps the two platforms byte-for-byte aligned.
+const BUILD_PUBLIC = [
+  'mkdir -p public',
+  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && cp -r docs/sdlc-site/dist/. public/; fi',
+  'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done',
+];
 export function pagesWorkflow(platform) {
   if (platform === 'gitlab') {
-    return `# yad-managed — built by \`yad docs sync --wire\`. Edit the skill, not this file.
+    return `# yad-managed — built by \`yad docs sync --wire\`. include it from .gitlab-ci.yml:
+#   include: { local: .gitlab/ci/yad-docs.yml }
+# Edit the skill, not this file.
 pages:
   stage: deploy
   image: node:20
   rules:
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
   script:
-    - 'for d in $(find . -type d -name docs-site -o -type d -path "*/sdlc-site" | sort -u); do (cd "$d" && npm ci && npm run build); done'
-    - 'mkdir -p public && cp -r docs/sdlc-site/dist/* public/ 2>/dev/null || true'
+${BUILD_PUBLIC.map((l) => `    - '${l.replace(/'/g, "'\\''")}'`).join('\n')}
   artifacts:
     paths: [public]
   resource_group: pages
@@ -154,21 +162,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Build the overview site
+      - name: Build the overview + per-epic sites into ./public
         run: |
-          if [ -d docs/sdlc-site ]; then
-            cd docs/sdlc-site && npm ci && npm run build
-          fi
+${BUILD_PUBLIC.map((l) => `          ${l}`).join('\n')}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/sdlc-site/dist
+          path: public
       - id: deployment
         uses: actions/deploy-pages@v4
 `;
 }
 export function pagesWorkflowPath(platform) {
-  return platform === 'gitlab' ? '.gitlab-ci-pages.yml' : '.github/workflows/yad-docs.yml';
+  return platform === 'gitlab' ? '.gitlab/ci/yad-docs.yml' : '.github/workflows/yad-docs.yml';
 }
 
 // ---- build (subprocess) -------------------------------------------------------------------------
@@ -261,7 +267,7 @@ function freshness(root, t, registry) {
     // The overview is generated from the project pipeline definition, not an epic's artifacts.
     const files = ['skills/sdlc/config.yaml', 'skills/sdlc/module-help.csv', 'docs/diagrams/sdlc-overview.mmd']
       .map((f) => path.join(root, f)).filter(exists);
-    return docsStale(manifest, { artifactHash: docsArtifactHash(files) });
+    return docsStale(manifest, { artifactHash: docsArtifactHash(files), templateVersion: VERSION });
   }
   const epicMeta = readJSON(path.join(root, 'epics', t.epic, '.sdlc/state.json'), {});
   const repos = epicMeta.repos || [];
@@ -269,6 +275,7 @@ function freshness(root, t, registry) {
   return docsStale(manifest, {
     artifactHash: docsArtifactHash(docsArtifactFiles(root, t.epic), surface || ''),
     repoHeads: repoHeadsFor(root, repos, registry),
+    templateVersion: VERSION,
   });
 }
 function reportFreshness(root, t) {
@@ -285,6 +292,7 @@ function wirePages(root, docs) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, pagesWorkflow(platform));
   ok(`wired ${rel} ${c.dim(`(${platform} Pages)`)}`);
-  hand('commit it; the workflow rebuilds + publishes the docs on push to the default branch');
+  if (platform === 'gitlab') hand(`include it from .gitlab-ci.yml:  include: { local: ${rel} }`);
+  else hand('commit it; set the repo Pages source to "GitHub Actions" so it publishes on push');
   return { wired: rel };
 }
