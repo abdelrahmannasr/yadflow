@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = version;
 
-// The 22 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The 25 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
   'yad-analysis',
   'yad-epic',
@@ -29,7 +29,10 @@ export const SKILLS = [
   'yad-pr-template',
   'yad-review-comments',
   'yad-hub-bridge',
+  'yad-commit',
+  'yad-open-pr',
   'yad-ship',
+  'yad-engineer-review',
   'yad-backfill',
   'yad-run',
   'yad-review-gate',
@@ -51,7 +54,11 @@ export const LEGACY_SKILLS = {
   'yad-pr-template': 'sdlc-pr-template',
   'yad-review-comments': 'sdlc-review-comments',
   'yad-hub-bridge': 'sdlc-hub-bridge',
-  'yad-ship': 'sdlc-ship',
+  // Step E ("ship") was renamed to yad-engineer-review (the yad-ship name now belongs to the new
+  // commit+open-PR combined skill). Pre-2.0 installs carry sdlc-ship → migrate it to yad-engineer-review.
+  // A 2.x install carrying yad-ship-as-Step-E is simply overwritten with the new combined content on
+  // `yad update` (same name, fresh copy), and yad-engineer-review is installed as a new skill.
+  'yad-engineer-review': 'sdlc-ship',
   'yad-backfill': 'sdlc-backfill',
   'yad-run': 'sdlc-run',
   'yad-review-gate': 'sdlc-review-gate',
@@ -153,7 +160,10 @@ export const REPO_WIRING = {
     { src: 'skills/yad-checks/templates/checks/contract-check.sh', dest: 'checks/contract-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/build-test-lint.sh', dest: 'checks/build-test-lint.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
+    { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/risk-route.sh', dest: 'checks/risk-route.sh', exec: true },
+    { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
+    { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },
   ],
   github: [
     { src: 'skills/yad-checks/templates/github/yad-checks.yml', dest: '.github/workflows/yad-checks.yml' },
@@ -179,13 +189,19 @@ export const wiringFor = (platform) => [
 export const HUB_WIRING = {
   common: [
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
+    // Pattern gates run on the hub too (profile: hub) — commit subject + PR title + PR body.
+    { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
+    { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
+    { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },
   ],
   github: [
     { src: 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/github/yad-verified-commits.yml', dest: '.github/workflows/yad-verified-commits.yml' },
+    { src: 'skills/yad-checks/templates/github/yad-hub-checks.yml', dest: '.github/workflows/yad-hub-checks.yml' },
   ],
   gitlab: [
     { src: 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml', dest: '.gitlab/ci/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml', dest: '.gitlab/ci/yad-verified-commits.yml' },
+    { src: 'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml', dest: '.gitlab/ci/yad-hub-checks.yml' },
   ],
 };

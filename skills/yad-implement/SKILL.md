@@ -124,7 +124,7 @@ finalize a `tasks` trust entry, anchored to what the human/dev actually did with
 Append the entry to `epics/<epic>/.sdlc/trust-log.json` (schema:
 `../yad-epic/references/state-schema.md`). `tasks` stays `human_approve` until its slice clears
 the threshold — this only *gathers* evidence. (The `implement` step's own verdict is finalized later,
-at the engineer review in `yad-ship`: merged as authored → `approved-unchanged`; edited first →
+at the engineer review in `yad-engineer-review`: merged as authored → `approved-unchanged`; edited first →
 `approved-with-edits`; scope/contract/checks halt → `rejected`.)
 
 ## Hard rules (build plan §B, Cross-cutting)

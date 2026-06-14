@@ -1,0 +1,39 @@
+# yad-managed-include: yad-checks
+# Pattern gates for the PRODUCT HUB, as an INCLUDABLE fragment. Pulled into the hub's root
+# .gitlab-ci.yml via:
+#   include:
+#     - local: '.gitlab/ci/yad-hub-checks.yml'
+# Every MR (including the front-half review/EP-* MRs) must follow the hub conventions — a
+# Conventional-Commits commit subject, a `review: <artifact> (EP-<slug>)` MR title, and an MR body
+# that uses the hub artifact-review template. They run with `--profile hub`.
+# Job names are yad-hub-prefixed so they coexist with any code-repo fragment in one pipeline; jobs use
+# `needs: []` and no `stage:` so a foreign `stages:` list can neither break nor reorder them.
+default:
+  image: node:20
+  tags: [$YAD_RUNNER_TAGS]
+
+.yad_hub_mr_only:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+variables:
+  GIT_DEPTH: "0"   # full history so the commit gate can diff against the target branch
+
+yad-hub-commit-message:
+  extends: .yad_hub_mr_only
+  needs: []
+  script:
+    - bash checks/commit-message.sh --profile hub "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+yad-hub-pr-title:
+  extends: .yad_hub_mr_only
+  needs: []
+  script:
+    - bash checks/pr-title.sh --profile hub "$CI_MERGE_REQUEST_TITLE"
+
+yad-hub-pr-template:
+  extends: .yad_hub_mr_only
+  needs: []
+  script:
+    - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
+    - bash checks/pr-template.sh --profile hub "$body"

@@ -45,6 +45,26 @@ yad-build-test-lint:
   script:
     - bash checks/build-test-lint.sh
 
+# Pattern gates: commit subject + MR title + MR body all follow the convention (profile: code).
+yad-commit-message:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - bash checks/commit-message.sh --profile code "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+yad-pr-title:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - bash checks/pr-title.sh --profile code "$CI_MERGE_REQUEST_TITLE"
+
+yad-pr-template:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
+    - bash checks/pr-template.sh --profile code "$body"
+
 # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
 # Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot
 # read the commit-signature API. Without it the job FAILS closed with guidance.

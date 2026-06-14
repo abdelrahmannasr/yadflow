@@ -32,6 +32,33 @@ jobs:
         with: { node-version: "20" }
       - run: bash checks/build-test-lint.sh
 
+  # Pattern gates: commit subject + PR title + PR body all follow the convention (profile: code).
+  commit-message:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/commit-message.sh --profile code "origin/${{ github.base_ref }}"
+
+  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
+  pr-title:
+    runs-on: ubuntu-latest
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash checks/pr-title.sh --profile code "$PR_TITLE"
+
+  pr-template:
+    runs-on: ubuntu-latest
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
+          bash checks/pr-template.sh --profile code "$body"
+
   # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
   verified-commits:
     runs-on: ubuntu-latest

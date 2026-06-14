@@ -288,3 +288,110 @@ test('risk-route: missing body file exits 2 (usage error)', () => {
   assert.match(r.out, /file not found/);
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---------- commit-message.sh ----------
+const COMMIT_MSG = path.join(CHECKS, 'commit-message.sh');
+
+test('commit-message gate: conventional subject + ordered trailers passes', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: add the inquiry endpoint\n\nTask: EP-demo-S01-T01\nCo-Authored-By: Claude <noreply@anthropic.com>', { 'a.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['--profile', 'code', 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS \[commit-message\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: scoped + breaking-change subjects pass (CONTRIBUTING allows them)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat(api): add thing', { 'a.js': 'x' });
+  commit(T, 'feat(yad-run)!: change the dial schema', { 'b.js': 'x' });
+  commit(T, 'fix!: drop the legacy path', { 'c.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: a body line starting with a trailer key does not trip the order check', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: add thing\n\nContract-Change: discussed below, none here\n\nTask: EP-demo-S01-T01', { 'a.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 0, r.out); // only the real trailer block (Task:) is parsed, not the prose line
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: unknown type fails', () => {
+  const T = scaffoldRepo();
+  commit(T, 'wip: half a thing', { 'a.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /is not '<type>/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: trailing period on the subject fails', () => {
+  const T = scaffoldRepo();
+  commit(T, 'fix: handle null user.', { 'a.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /must not end with a period/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: trailers out of order fail', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: add thing\n\nContract-Change: yes\nTask: EP-demo-S01-T01', { 'a.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /trailers out of order/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: unresolvable base fails closed', () => {
+  const T = scaffoldRepo();
+  const r = runGate(COMMIT_MSG, T, ['origin/nope']);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /base ref .* not found/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------- pr-title.sh ----------
+const PR_TITLE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-title.sh');
+
+test('pr-title gate: conventional code title passes; trailing period fails', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add the inquiry endpoint']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat(api)!: drop legacy']).code, 0); // scope + breaking
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add it.']).code, 1);
+  assert.equal(runGate(PR_TITLE, T, ['Add it']).code, 1); // no type, default profile
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-title gate: hub review title passes; a code title fails under hub', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'review: architecture.md (EP-demo)']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'feat: nope']).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------- pr-template.sh ----------
+const PR_TEMPLATE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+const CODE_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/github/pull_request_template.md');
+const HUB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/hub/github/pull_request_template.md');
+
+test('pr-template gate: the real code template passes; a stripped body fails', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'code', CODE_TPL]).code, 0);
+  const stripped = body(T, 'just some freeform text');
+  const r = runGate(PR_TEMPLATE, T, ['--profile', 'code', stripped]);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /does not use the template/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-template gate: the real hub template passes under --profile hub', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
+  // a missing file is a hard fail
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', path.join(T, 'nope.md')]).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});

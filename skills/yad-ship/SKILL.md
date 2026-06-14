@@ -1,86 +1,64 @@
 ---
 name: yad-ship
-description: 'Build-half Step E of the gated SDLC — AI review, engineer review, then ship. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same human_approve discipline as the front gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "ship this task", "record the engineer review", or "wire the AI review".'
+description: 'Build-half helper of the gated SDLC — commit AND open the task PR/MR in one step. A thin orchestration over yad-commit then yad-open-pr: commit the staged atomic change by the conventions (Conventional-Commits subject, Task → Contract-Change → Co-Authored-By trailers, --ai footer, ≤3-file atomic guard), then push the branch and open the PR/MR from the committed template with the roster auto-assigned. The PR step runs ONLY if the commit lands (a failed commit, tripped guard, or --dry-run stops before pushing). Drives the `yad ship` CLI; never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR". (For the engineer review + merge, use yad-engineer-review.)'
 ---
 
-# SDLC — Review & Ship (build-half Step E)
+# SDLC — Commit + Open PR/MR (build-half helper)
 
-**Goal:** Take a task PR/MR that has passed the **check gates** (Step C) through two sets of eyes and
-out to production: an **AI first-pass** (advisory) and a **human engineer review** (the authority),
-then **ship** — merge, record the ship, and update the story state. This is the last build-half step
-(build plan §E). It is a **human gate**, the same `human_approve` discipline as the front states:
-**nothing auto-advances**; the engineer owns the merge.
+**Goal:** Do the two routine build-half hand-actions for ONE atomic task in a single step — **commit by
+convention, then open the task PR/MR** — so an implemented diff becomes a reviewable PR/MR without two
+separate invocations. It is a thin wrapper over `yad-commit` and `yad-open-pr`; it holds no logic of
+its own and **never merges**. The engineer review + merge are Step E (`yad-engineer-review`).
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory — the **product** repo (the source of
-  truth: it holds the story and the build ledger).
-- Code repos are separate git repos under `{project-root}/demo-repos/<repo>/`.
-- The build ledger is `{project-root}/epics/<epic>/.sdlc/build-log.json` (append-only).
-- The engineer-review rule reuses `yad-review-gate`: base = at least one `owner` AND one distinct
-  `reviewer`; **escalated** (the PR's Impact & Risk is `high`, or it touches contract/auth/payments) =
-  base PLUS one `domain-owner` per touched domain — the same routing `yad-pr-template`'s
-  `risk-route.sh` prints.
-- AI review wiring: `templates/.coderabbit.yaml` → `<repo>/.coderabbit.yaml`.
+- Run **inside the code repo** under `{project-root}/demo-repos/<repo>/` (or `--repo <name>`), on the
+  task branch with the atomic change **already staged** (`git add`).
+- Inherits every convention of the two steps it wraps:
+  - Commit: subject `<type>: <lowercase imperative, no trailing period>`, fixed trailer order
+    `Task → Contract-Change → Co-Authored-By`, the `--ai` co-author footer, the ≤3-file atomic guard
+    (`../yad-commit/SKILL.md`).
+  - PR/MR: pushed branch, the committed template prefilled, title defaulting to the commit subject,
+    roster auto-assign, risk routing (`../yad-open-pr/SKILL.md`).
+- **Order matters:** the PR/MR is opened **only if the commit lands**. A failed commit, a tripped
+  atomic guard, or `--dry-run` stops the step before anything is pushed.
 
 ## Inputs
 
-- `epic` / `story` / `task` / `repo` — the PR under review (the task branch `feat/<story>-<task>-…`).
-- `action` — `ai-review` | `approve` | `ship` (default `ai-review`).
-- For `approve`: the reviewer `name` and `role` (`owner` | `reviewer` | `domain-owner`), and for a
-  domain owner the `domain`.
+- `type` / `message` — the commit type + subject (required), `--type <t> -m "<subject>"`.
+- `ai`              — co-author footer: `claude|copilot|cursor|coderabbit|none` (default `none`).
+- `task`           — Task trailer (optional; derived from the branch when omitted).
+- `contractChange` — flag; marks the contract surface touched (commit trailer + PR escalation).
+- `repo` / `risk` / `base` / `platform` / `title` — PR/MR options (see `yad-open-pr`).
 
 ## On Activation
 
-### Step 1 — `ai-review` (advisory first pass)
-Ensure the AI reviewer is wired: copy `templates/.coderabbit.yaml` to `<repo>/.coderabbit.yaml` (commit
-on the default branch if missing). CodeRabbit reviews each PR automatically and posts comments — it is
-a **second set of eyes, never the authority**: it cannot approve or merge. Where CodeRabbit can't run
-(no remote), run an equivalent AI first-pass by hand and capture its notes. Record that the AI review
-ran; surface its findings to the engineer. Do **not** treat AI approval as a gate.
+### Step 1 — Confirm the staged atomic change
+Confirm you are on the task branch (not the default branch) and the atomic change is staged within its
+file boundary. Preview the commit with `--dry-run` if unsure.
 
-### Step 2 — `approve` (the engineer review — the human gate)
-A human engineer reads the diff **against the spec** (`specs/<story>/`) and the acceptance criteria,
-and records an approval. Determine the rule from the PR's Impact & Risk block (run
-`../yad-pr-template/templates/checks/risk-route.sh` on the PR body): base, or escalated to a
-domain-owner per touched domain. Record each approval; re-evaluate whether the rule is satisfied.
-Recording an approval does **not** ship — shipping is a separate, explicit step. Front-half discipline:
-the gate talks only through files; refuse to treat AI review as a human approval.
+### Step 2 — Commit + open in one step
+Run from the repo root:
+```
+yad ship --type <type> -m "<subject>" [--ai <id>] [--task <id>] [--contract-change] \
+         [--repo <name>] [--risk <level>] [--title "<subject>"]
+```
+The CLI runs `yad commit` and, only if it succeeds, `yad open-pr` — committing the change, pushing the
+branch, and opening the PR/MR with the template prefilled and reviewers auto-assigned.
 
-### Step 3 — `ship` (merge + record + update state)
-Ship **iff ALL hold**: the check gates pass (Step C), the AI review has run (advisory), and the
-engineer-review rule is satisfied (Step 2). Then:
-- **Merge** the task branch into the repo's default branch (the human performs/authorises the merge).
-- **Record the ship** — append to `epics/<epic>/.sdlc/build-log.json`:
-  ```json
-  { "story": "<story>", "task": "<task>", "repo": "<repo>", "branch": "feat/<story>-<task>-…",
-    "pr": "<url|#>", "mergeCommit": "<sha>", "gates": ["spec-link","contract-check","build-test-lint"],
-    "ai_review": "coderabbit (advisory)", "engineer_review": [{"approver":"<name>","role":"<role>","domain":"<opt>"}],
-    "risk": "<low|medium|high>", "shippedAt": "<YYYY-MM-DD>" }
-  ```
-- **Update the story state** — when **every** task in `specs/<story>/tasks.md` has a ship record, set
-  the story frontmatter `status: shipped`; otherwise `status: in-build`. The chain
-  **epic → story → task → PR → mergeCommit** is now traceable end to end.
-- **Finalize the trust verdict (Phase 4).** If this story has a `build-state/<story>.json` (it ran
-  through `yad-run`), the engineer **confirms or overrides** the provisional trust verdict that the
-  orchestrator derived for this run, and the final verdict is written to
-  `epics/<epic>/.sdlc/trust-log.json`. The human has the last word on the trust signal: a diff merged
-  as authored is `approved-unchanged`; one the engineer edited before merge is `approved-with-edits`;
-  a rejected one is `rejected`. This is the evidence that later earns a step its `machine_advance`
-  (it never weakens the merge gate — the engineer still owns the merge).
+### Step 3 — Route + stop (no merge)
+On `high` risk or a contract touch, run `bash checks/risk-route.sh <pr-body>` for the required
+domain-owner reviewers. Report the commit + the PR/MR URL. The PR now runs the check gates (Step C);
+the engineer review and merge are Step E (`yad-engineer-review`).
 
-### Step 4 — Stop
-Report what shipped and the story's state. Do not advance anything else; the front-half `state.json`
-stays as it was (`ready-for-build`). The build half is recorded in `build-log.json` + the story status.
+## Hard rules
 
-## Hard rules (build plan §E, Cross-cutting)
-
-- **AI review is advisory, never the authority.** Only a human engineer approval counts toward the gate.
-- **High risk routes to domain owners** — the same escalation as `yad-review-gate` / `risk-route.sh`.
-- **Ship only after gates + engineer review.** No gate skipped; the human owns the merge.
-- **Nothing auto-advances.** Step E records human decisions in files; it never machine-advances.
+- **One staged atomic task = one commit = one PR/MR.** Never bundle; never open from the default branch.
+- **No PR without a landed commit.** A failed/`--dry-run` commit stops the step before pushing.
+- **High risk routes to domain owners** — the same escalation as the gate.
+- **Shipping here never merges.** The human owns the merge in `yad-engineer-review`.
 
 ## Reference
-- The build ledger + story-state rules: `references/ship-and-record.md`.
-- The escalation reused: `../yad-review-gate/SKILL.md`; the routing helper: `../yad-pr-template/`.
-- The gates that must pass first: `../yad-checks/references/check-gates.md`.
+- The two steps this wraps: `../yad-commit/SKILL.md` and `../yad-open-pr/SKILL.md`.
+- The gates the PR must pass: `../yad-checks/references/check-gates.md`.
+- The engineer review + merge that follow: `../yad-engineer-review/SKILL.md`.

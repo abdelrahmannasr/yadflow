@@ -40,12 +40,13 @@ flowchart TD
       direction TB
       sp["yad-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
-      ck["yad-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
-      prm["open PR/MR + yad-pr-template route"]
-      shp["yad-ship<br/>AI review (advisory)"]
+      shp["yad-ship<br/>yad-commit + yad-open-pr"]
+      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template"]:::earns
+      prm["yad-pr-template route<br/>required reviewers"]
+      air["yad-engineer-review<br/>AI review (advisory)"]
       eng{{"engineer review<br/>human · never automated"}}:::locked
       merged(["merge → build-log.json"]):::sentinel
-      sp --> im --> ck --> prm --> shp --> eng --> merged
+      sp --> im --> shp --> ck --> prm --> air --> eng --> merged
     end
 
     subgraph AUTO["C · Automation — earned & reversible"]

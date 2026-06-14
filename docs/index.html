@@ -284,7 +284,7 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 22 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 25 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> · <code>yad-review-comments</code> (CI gates, PR template, comment scaffold)</small></div>
         <div class="arrow-v">▼</div>
@@ -344,7 +344,7 @@
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Open PR/MR</strong><small>from the wired template; risk routing picks the required reviewers</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>yad-ship: AI review</strong><small>CodeRabbit first pass — advisory only, never the authority</small></div>
+        <div class="node plain"><strong>yad-engineer-review: AI review</strong><small>CodeRabbit first pass — advisory only, never the authority</small></div>
         <div class="arrow-v">▼</div>
         <div class="node locked"><strong>Engineer review</strong><small>a human reads the diff against the spec — <strong>never automated</strong></small></div>
         <div class="arrow-v">▼</div>
@@ -447,7 +447,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 22 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 25 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -509,6 +509,9 @@ each code repo/
   <div class="term"><strong>Contract-check</strong><span class="badge b-build">build</span><br>CI gate #2: a diff that changes the contract surface without declaring <code>Contract-Change: yes</code> <em>and</em> an updated, re-locked contract <strong>fails</strong> — routing the change back up to the architecture gate. This is how the contract stays honest.</div>
   <div class="term"><strong>Build/test/lint gate</strong><span class="badge b-build">build</span><br>CI gate #3: the ordinary safety net — the project must build, its tests must pass, lint must be clean.</div>
   <div class="term"><strong>Verified-commits gate</strong><span class="badge b-build">build</span><br>CI gate #4: every commit must carry a platform-verified signature and be authored by a roster-known email — rejecting unverified commits from unknown users, on the hub and every repo.</div>
+  <div class="term"><strong>Commit-message gate</strong><span class="badge b-build">build</span><br>CI gate #5: every commit subject must follow Conventional Commits (<code>&lt;type&gt;: …</code>, no trailing period) and its trailers must be ordered <code>Task → Contract-Change → Co-Authored-By</code>. Profile-aware (code|hub).</div>
+  <div class="term"><strong>PR-title gate</strong><span class="badge b-build">build</span><br>CI gate #6: the PR/MR title must follow the convention — a Conventional-Commits subject on code repos, a <code>review: &lt;artifact&gt; (EP-&lt;slug&gt;)</code> title on the hub.</div>
+  <div class="term"><strong>PR-template gate</strong><span class="badge b-build">build</span><br>CI gate #7: the PR/MR body must actually use the committed template (its required sections present + the risk field filled), so the review and routing have their inputs. Profile-aware (code|hub).</div>
   <div class="term"><strong><code>Task:</code> trailer</strong><span class="badge b-build">build</span><br>A line at the end of every commit message naming the story + task it implements (e.g. <code>Task: EP-istifta-inquiries-S01-T03</code>). What the spec-link check verifies.</div>
   <div class="term"><strong><code>Contract-Change: yes</code> trailer</strong><span class="badge b-build">build</span><br>A commit trailer added <em>only</em> when the diff deliberately touches the locked contract surface — paired with an updated, re-locked contract, or the contract-check fails.</div>
   <div class="term"><strong>Conventional Commits</strong><span class="badge b-build">build</span><br>The commit/PR title convention used everywhere: <code>feat: …</code>, <code>fix: …</code> (lowercase after the type). Merged <code>feat:</code>/<code>fix:</code> commits also drive automated releases of the CLI itself.</div>
@@ -538,7 +541,7 @@ each code repo/
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 22 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 25 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>repo</code>).</div>
 
   <h3>People &amp; AI roles</h3>
@@ -681,7 +684,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 22 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 25 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -706,7 +709,10 @@ each code repo/
     <tr><td><a href="#sk-impl"><code>yad-implement</code></a></td><td>Build B</td><td>Implement one atomic task as a small branch.</td></tr>
     <tr><td><a href="#sk-checks"><code>yad-checks</code></a></td><td>Build C</td><td>Wire / run the CI gates.</td></tr>
     <tr><td><a href="#sk-prt"><code>yad-pr-template</code></a></td><td>Build D</td><td>Install the PR/MR template + risk routing.</td></tr>
-    <tr><td><a href="#sk-ship"><code>yad-ship</code></a></td><td>Build E</td><td>AI review → engineer review → ship + record.</td></tr>
+    <tr><td><a href="#sk-commit"><code>yad-commit</code></a></td><td>Build helper</td><td>Commit one staged atomic change by the conventions.</td></tr>
+    <tr><td><a href="#sk-openpr"><code>yad-open-pr</code></a></td><td>Build helper</td><td>Open a code-repo task PR/MR from the committed template.</td></tr>
+    <tr><td><a href="#sk-ship"><code>yad-ship</code></a></td><td>Build helper</td><td>Commit <strong>and</strong> open the task PR/MR in one step.</td></tr>
+    <tr><td><a href="#sk-engineer-review"><code>yad-engineer-review</code></a></td><td>Build E</td><td>AI review → engineer review → merge + record.</td></tr>
     <tr><td><a href="#sk-backfill"><code>yad-backfill</code></a></td><td>Build G</td><td>Spec already-built / legacy code before changing it.</td></tr>
     <tr><td><a href="#sk-run"><code>yad-run</code></a></td><td>Automation</td><td>Drive the back half on the dials; set dials; kill switch.</td></tr>
     <tr><td><a href="#sk-status"><code>yad-status</code></a></td><td>Anytime</td><td>Read-only view: where everything is and what’s blocking.</td></tr>
@@ -876,7 +882,7 @@ yad open-pr --repo backend</code></pre>
 
   <div class="skillcard" id="sk-checks">
     <h4><code>yad-checks</code> — Build Step C</h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The production-safety CI gates: <strong>spec-link</strong> (every change links a real story/spec), <strong>contract-check</strong> (a contract-surface diff without a re-locked contract FAILS), <strong>build/test/lint</strong>, and <strong>verified-commits</strong> (signed commits from roster-known authors). <code>wire</code> installs them into the repo’s CI (merging with any existing CI, never clobbering); <code>run</code> executes them right now, locally.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The production-safety CI gates: <strong>spec-link</strong> (every change links a real story/spec), <strong>contract-check</strong> (a contract-surface diff without a re-locked contract FAILS), <strong>build/test/lint</strong>, <strong>verified-commits</strong> (signed commits from roster-known authors), and the <strong>pattern gates</strong> — <strong>commit-message</strong> (Conventional subject + trailer order), <strong>pr-title</strong>, and <strong>pr-template</strong> (the PR/MR body uses the template). The pattern gates are profile-aware (<code>code</code>|<code>hub</code>), so they run on code repos <em>and</em> the product hub. <code>wire</code> installs them into the repo’s CI (merging with any existing CI, never clobbering); <code>run</code> executes them right now, locally.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-checks repo: backend action: wire   # once, during setup
 yad-checks repo: backend action: run    # before opening each PR
@@ -886,7 +892,7 @@ yad-checks repo: hub action: wire       # hub-flavored gates for the product hub
 
   <div class="skillcard" id="sk-prt">
     <h4><code>yad-pr-template</code> — Build Step D</h4>
-    <div class="row"><span class="lbl lbl-what">What</span> Detects the repo’s platform and commits the matching PR/MR template, which carries an <strong>Impact &amp; Risk block</strong>. A <code>high</code> risk level — or a touched contract/auth/payments surface — routes the review to the domain owners. <code>route</code> reads a PR body and prints exactly who must review it.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> Detects the repo’s platform and commits the matching PR/MR template, which carries an <strong>Impact &amp; Risk block</strong>. A <code>high</code> risk level — or a touched contract/auth/payments surface — routes the review to the domain owners. <code>route</code> reads a PR body and prints exactly who must review it. It also ships the <code>pr-title.sh</code> / <code>pr-template.sh</code> gate scripts that <code>yad-checks</code> runs.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-pr-template repo: backend action: wire    # once, during setup
 yad-pr-template repo: backend action: route   # who must review this PR?
@@ -894,13 +900,38 @@ yad-pr-template repo: hub action: wire        # the hub's front-half review temp
     <div class="row"><span class="lbl lbl-when">When</span> <code>wire</code> once per repo (and the hub) at setup; <code>route</code> whenever you’ve opened a PR and want the required reviewer list.</div>
   </div>
 
+  <div class="skillcard" id="sk-commit">
+    <h4><code>yad-commit</code> — Build helper</h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Commits <strong>one staged atomic change</strong> by the conventions: a Conventional-Commits subject, the fixed trailer block (<code>Task → Contract-Change → Co-Authored-By</code>), and a ≤3-file atomic guard. The human git author owns the commit; an assisting AI is recorded only as a <code>Co-Authored-By</code> footer chosen per-commit with <code>--ai</code> (default <code>none</code>, human-only).</div>
+    <div class="row"><span class="lbl lbl-how">How</span> From the repo holding the staged change:</div>
+<pre><code>yad commit --type feat -m "add the inquiry endpoint" --ai claude
+yad commit --type fix -m "handle null user" --dry-run   # preview only</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Any time you have a staged atomic change to commit by the rules — on a code repo or the hub.</div>
+  </div>
+
+  <div class="skillcard" id="sk-openpr">
+    <h4><code>yad-open-pr</code> — Build helper</h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Opens a code-repo <strong>task PR/MR</strong> from the committed platform template: detects GitHub/GitLab, pushes the task branch, and creates the PR/MR with the body prefilled and the title defaulting to the commit subject. Auto-assigns from the hub roster — assignee = the committer, reviewers = the repo’s reviewers + domain-owners. It never merges.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> On the task branch:</div>
+<pre><code>yad open-pr --repo backend --risk low</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> After committing a task, to raise its PR/MR for the check gates + engineer review.</div>
+  </div>
+
   <div class="skillcard" id="sk-ship">
-    <h4><code>yad-ship</code> — Build Step E</h4>
+    <h4><code>yad-ship</code> — Build helper</h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Does the two routine build-half hand-actions for one task in <strong>one step</strong>: commit by convention, then open the task PR/MR. A thin wrapper over <code>yad-commit</code> then <code>yad-open-pr</code> — the PR step runs <em>only</em> if the commit lands (a failed commit, tripped guard, or <code>--dry-run</code> stops before pushing). It never merges.</div>
+    <div class="row"><span class="lbl lbl-how">How</span> On the task branch, with the change staged:</div>
+<pre><code>yad ship --type feat -m "add the inquiry endpoint" --ai claude --repo backend --risk low</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> The common case — turn an implemented, staged task into a reviewable PR/MR in one command.</div>
+  </div>
+
+  <div class="skillcard" id="sk-engineer-review">
+    <h4><code>yad-engineer-review</code> — Build Step E</h4>
     <div class="row"><span class="lbl lbl-what">What</span> The last mile of a task’s PR: <code>ai-review</code> triggers the advisory AI pass (CodeRabbit — a second set of eyes, never the authority); <code>approve</code> records the <strong>human engineer approval</strong> (owner + 1 reviewer, same escalation); <code>ship</code> merges and records the ship in <code>build-log.json</code>, moving the story to <code>in-build</code> → <code>shipped</code> so the epic → story → task → PR chain stays traceable.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Against the task’s PR, in order:</div>
-<pre><code>yad-ship story: EP-istifta-inquiries-S01 task: T01 repo: backend action: ai-review
-yad-ship … action: approve     # the human engineer's approval
-yad-ship … action: ship        # merge + record in build-log.json</code></pre>
+<pre><code>yad-engineer-review story: EP-istifta-inquiries-S01 task: T01 repo: backend action: ai-review
+yad-engineer-review … action: approve     # the human engineer's approval
+yad-engineer-review … action: ship        # merge + record in build-log.json</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Once a task’s PR is open and the check gates are green. The engineer approval here is <strong>permanently human</strong> — no dial can ever automate it.</div>
   </div>
 
@@ -948,7 +979,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 22 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 25 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>

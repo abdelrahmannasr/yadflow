@@ -8,6 +8,7 @@ import { gateOpen, gateSync, gateComments, gateStatus, gateCi } from '../cli/gat
 import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
+import { runShip } from '../cli/ship.mjs';
 import { runRepo } from '../cli/repo.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 
@@ -34,6 +35,7 @@ ${c.bold('Review gate (front half)')}
 ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
   yad open-pr [--repo <name>]          Open a code-repo task PR/MR from the template
+  yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
 
@@ -122,6 +124,9 @@ async function main() {
       break;
     case 'open-pr':
       await runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
+      break;
+    case 'ship':
+      await runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
       break;
     case 'repo': {
       const [, action, name] = o._;

@@ -59,7 +59,7 @@ Co-Authored-By: CodeRabbit <noreply@coderabbit.ai>
 
 - Choose the entry whose `id` matches the tool that actually helped author the diff; add more than one
   line if several did. CodeRabbit is a co-author only when it **contributed code**, not when it merely
-  reviewed (that is `ai_review` in `yad-ship`).
+  reviewed (that is `ai_review` in `yad-engineer-review`).
 - For a fully human-authored commit, pick `id: none` — i.e. **omit** the trailer. `ai_coauthor.required`
   is `false`, so a missing trailer is valid and no gate fails on it.
 - `yad-implement` installs the `.gitmessage` template (`templates/.gitmessage`) and sets

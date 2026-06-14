@@ -1,0 +1,36 @@
+# yad-managed: yad-checks
+# Pattern gates for the PRODUCT HUB: every PR (including the front-half review/EP-* PRs) must follow
+# the hub conventions — Conventional-Commits commit subjects, a `review: <artifact> (EP-<slug>)` PR
+# title, and a PR body that uses the hub artifact-review template. They run with `--profile hub`.
+# Standalone workflow so it never collides with the code-repo yad-checks workflow.
+name: yad-hub-checks
+on:
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  commit-message:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/commit-message.sh --profile hub "origin/${{ github.base_ref }}"
+
+  # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
+  pr-title:
+    runs-on: ubuntu-latest
+    env:
+      PR_TITLE: ${{ github.event.pull_request.title }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash checks/pr-title.sh --profile hub "$PR_TITLE"
+
+  pr-template:
+    runs-on: ubuntu-latest
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
+          bash checks/pr-template.sh --profile hub "$body"

@@ -73,8 +73,13 @@ build:
       - { id: cursor,     name: "Cursor",             email: "noreply@cursor.com" }
       - { id: coderabbit, name: "CodeRabbit",         email: "noreply@coderabbit.ai" }
       - { id: none,       name: "(no AI assistance)", email: "" }
-  # Step C (yad-checks) — the three CI gates that must pass before merge. CI-agnostic bash in checks/.
+  # Step C (yad-checks) — the CI gates that must pass before merge. CI-agnostic bash in checks/.
   gates: [spec-link, contract-check, build-test-lint]
+  # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub): code
+  # repos validate the Conventional-Commits / task-PR conventions; the product hub validates its
+  # artifact-review conventions (review/EP-<slug>/<artifact>, the hub PR template). verified-commits is
+  # the separate security gate (signature + roster-known author). All blocking in CI; both repos + hub.
+  pattern_gates: [commit-message, pr-title, pr-template]
   ci_platforms: [github, gitlab]   # both wired from skills/yad-checks/templates/; GitHub is this product repo's platform
   contract_surface_glob: "specs/*/contracts/**"   # the repo's quoted contract slice; a diff here needs Contract-Change + a re-locked contract
   # Step D (yad-pr-template) — platform-matched PR/MR template + risk routing.
@@ -85,7 +90,7 @@ build:
       github: ".github/pull_request_template.md"
       gitlab: ".gitlab/merge_request_templates/Default.md"
   risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (yad-review-gate escalation)
-  # Step E (yad-ship) — AI review (advisory) + engineer review (the human gate) + ship.
+  # Step E (yad-engineer-review) — AI review (advisory) + engineer review (the human gate) + merge.
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
   build_log: "epics/EP-<slug>/.sdlc/build-log.json"   # append-only ship ledger (back-half analogue of approvals.json)
   story_build_states: [in-build, shipped]   # in-build = some tasks shipped; shipped = all tasks in tasks.md shipped
