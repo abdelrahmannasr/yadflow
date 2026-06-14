@@ -39,9 +39,9 @@ if [ "$PROFILE" = hub ]; then
   exit 1
 fi
 
-# code profile — Conventional-Commits subject, no trailing period.
-if ! printf '%s' "$TITLE" | grep -qE "^(${TYPES}): .+"; then
-  echo "FAIL [pr-title]: '${TITLE}' is not '<type>: <description>' (type one of: ${TYPES//|/, })."
+# code profile — Conventional-Commits subject (optional scope + breaking `!`), no trailing period.
+if ! printf '%s' "$TITLE" | grep -qE "^(${TYPES})(\([a-z0-9._-]+\))?!?: .+"; then
+  echo "FAIL [pr-title]: '${TITLE}' is not '<type>(<scope>)?!?: <description>' (type one of: ${TYPES//|/, })."
   exit 1
 fi
 if printf '%s' "$TITLE" | grep -qE '\.$'; then

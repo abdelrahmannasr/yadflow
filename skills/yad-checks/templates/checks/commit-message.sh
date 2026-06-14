@@ -49,9 +49,10 @@ while IFS= read -r sha; do
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
 
-  # 1) subject shape: "<type>: <non-empty description>"
-  if ! printf '%s' "$subject" | grep -qE "^(${TYPES}): .+"; then
-    echo "FAIL [commit-message]: ${short} subject '${subject}' is not '<type>: <description>' (type one of: ${TYPES//|/, })."
+  # 1) subject shape: "<type>(<optional scope>)<optional !>: <non-empty description>"
+  #    (scope + breaking-change `!` are allowed per CONTRIBUTING.md).
+  if ! printf '%s' "$subject" | grep -qE "^(${TYPES})(\([a-z0-9._-]+\))?!?: .+"; then
+    echo "FAIL [commit-message]: ${short} subject '${subject}' is not '<type>(<scope>)?!?: <description>' (type one of: ${TYPES//|/, })."
     rc=1
   # 2) no trailing period on the subject
   elif printf '%s' "$subject" | grep -qE '\.$'; then
@@ -62,10 +63,12 @@ while IFS= read -r sha; do
   fi
 
   # 3) trailer order Task -> Contract-Change -> Co-Authored-By (only among those present).
-  body="$(git log -1 --format=%B "$sha")"
-  lt="$(printf '%s\n' "$body" | grep -niE '^Task:' | head -1 | cut -d: -f1 || true)"
-  lc="$(printf '%s\n' "$body" | grep -niE '^Contract-Change:' | head -1 | cut -d: -f1 || true)"
-  lo="$(printf '%s\n' "$body" | grep -niE '^Co-Authored-By:' | head -1 | cut -d: -f1 || true)"
+  #    Parse ONLY the trailing trailer block (git interpret-trailers) so a body prose line that
+  #    happens to start with a trailer key is never mistaken for a trailer.
+  trailers="$(git log -1 --format=%B "$sha" | git interpret-trailers --parse 2>/dev/null || true)"
+  lt="$(printf '%s\n' "$trailers" | grep -niE '^Task:' | head -1 | cut -d: -f1 || true)"
+  lc="$(printf '%s\n' "$trailers" | grep -niE '^Contract-Change:' | head -1 | cut -d: -f1 || true)"
+  lo="$(printf '%s\n' "$trailers" | grep -niE '^Co-Authored-By:' | head -1 | cut -d: -f1 || true)"
   if { [ -n "$lt" ] && [ -n "$lc" ] && [ "$lt" -gt "$lc" ]; } \
      || { [ -n "$lt" ] && [ -n "$lo" ] && [ "$lt" -gt "$lo" ]; } \
      || { [ -n "$lc" ] && [ -n "$lo" ] && [ "$lc" -gt "$lo" ]; }; then

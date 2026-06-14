@@ -301,12 +301,30 @@ test('commit-message gate: conventional subject + ordered trailers passes', () =
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('commit-message gate: scoped + breaking-change subjects pass (CONTRIBUTING allows them)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat(api): add thing', { 'a.js': 'x' });
+  commit(T, 'feat(yad-run)!: change the dial schema', { 'b.js': 'x' });
+  commit(T, 'fix!: drop the legacy path', { 'c.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: a body line starting with a trailer key does not trip the order check', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: add thing\n\nContract-Change: discussed below, none here\n\nTask: EP-demo-S01-T01', { 'a.js': 'x' });
+  const r = runGate(COMMIT_MSG, T, ['main']);
+  assert.equal(r.code, 0, r.out); // only the real trailer block (Task:) is parsed, not the prose line
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('commit-message gate: unknown type fails', () => {
   const T = scaffoldRepo();
   commit(T, 'wip: half a thing', { 'a.js': 'x' });
   const r = runGate(COMMIT_MSG, T, ['main']);
   assert.equal(r.code, 1);
-  assert.match(r.out, /not '<type>: <description>'/);
+  assert.match(r.out, /is not '<type>/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -342,6 +360,7 @@ const PR_TITLE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-tit
 test('pr-title gate: conventional code title passes; trailing period fails', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add the inquiry endpoint']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat(api)!: drop legacy']).code, 0); // scope + breaking
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add it.']).code, 1);
   assert.equal(runGate(PR_TITLE, T, ['Add it']).code, 1); // no type, default profile
   fs.rmSync(T, { recursive: true, force: true });
