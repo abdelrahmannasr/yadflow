@@ -162,7 +162,41 @@ export function projectChecks(checks, root) {
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
   }
+
+  ciTagsChecks(checks, root, hub, registry);
   return { hub, registry };
+}
+
+// GitLab CI runner tags: the wired fragments run docker-image jobs. On instances whose runners are
+// all tag-locked (run_untagged: false), an untagged image job matches no runner and sits `pending`
+// forever — silently blocking the gates (issue #50). A current fragment carries
+// `tags: [$YAD_RUNNER_TAGS]`; warn on any wired GitLab fragment that sets an `image:` but has no
+// `tags:` (an old install, or one hand-reverted by a sync). Pure local read — no API calls.
+export function ciTagsChecks(checks, root, hub, registry) {
+  const untagged = (p) => {
+    try {
+      const txt = fs.readFileSync(p, 'utf8');
+      return /^\s*image:/m.test(txt) && !/^\s*tags:/m.test(txt);
+    } catch { return false; } // absent fragment is not this check's concern
+  };
+  const fragments = [];
+  if (hub?.platform === 'gitlab' && (hub.bridge_enabled === true || hub.bridge === true)) {
+    fragments.push(
+      { scope: 'hub', file: '.gitlab/ci/yad-gate-sync.yml', path: path.join(root, '.gitlab/ci/yad-gate-sync.yml') },
+      { scope: 'hub', file: '.gitlab/ci/yad-verified-commits.yml', path: path.join(root, '.gitlab/ci/yad-verified-commits.yml') },
+    );
+  }
+  for (const repo of registry?.repos || []) {
+    if (repo.platform !== 'gitlab' || !repo.path) continue;
+    fragments.push({ scope: repo.name, file: '.gitlab/ci/yad-checks.yml', path: path.join(path.resolve(root, repo.path), '.gitlab/ci/yad-checks.yml') });
+  }
+  for (const f of fragments) {
+    if (untagged(f.path)) {
+      check(checks, `ci-tags:${f.scope}`, 'project', 'warn',
+        `${f.scope}: ${f.file} runs a docker job with no \`tags:\` [YAD-CI-001]`,
+        'tag-locked runners (run_untagged: false) will strand it at `pending` — run `yad update`, then set the `YAD_RUNNER_TAGS` CI/CD variable');
+    }
+  }
 }
 
 export function epicChecks(checks, root) {

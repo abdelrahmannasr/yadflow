@@ -89,6 +89,14 @@ remains valid and is the fallback whenever CI cannot push.
      `SDLC_GATE_TOKEN` project-access-token variable (`read_api` + `write_repository`). GitLab fires no
      pipeline on an approval alone, so the schedule is the path that picks approvals up (≤ ~15 min
      latency); MR events and the merge are near-immediate.
+   - **If your runners are tag-locked** (`run_untagged: false`, common on self-hosted): set a
+     `YAD_RUNNER_TAGS` CI/CD variable (e.g. `dind_runner`) so the docker-image `yad-gate-sync` job
+     is routed to a runner — otherwise it sits `pending` forever. The fragment emits
+     `tags: [$YAD_RUNNER_TAGS]`. When unset, current GitLab (≥15) drops the empty-expanded tag so the
+     job runs untagged (gitlab.com shared runners); older versions may strand it `pending`, in which
+     case set the variable to a real tag. The variable lives in project settings, so it survives
+     every `yad` sync. Single value only — `tags: [$VAR]` is one tag equal to the whole variable,
+     not a comma-split.
 3. Commit the workflow to the hub. GitHub needs nothing else — the ephemeral `github.token` reads the
    PR and pushes the ledger. If the default branch is protected, see the workflow header for the
    bypass / PAT options; until then the run fails visibly and manual `yad gate sync` still works.

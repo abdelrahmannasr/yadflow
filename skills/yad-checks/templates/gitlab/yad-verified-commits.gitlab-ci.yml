@@ -12,6 +12,11 @@
 # Job name is yad-hub-prefixed so it can coexist with the code-repo fragment in one pipeline.
 yad-hub-verified-commits:
   needs: []
+  # Runner selection: set the YAD_RUNNER_TAGS CI/CD variable (e.g. `dind_runner`) to route this
+  # docker job on instances whose runners are tag-locked (run_untagged: false) — it lives in
+  # project Settings → CI/CD → Variables, so it survives every `yad` sync. When unset, current
+  # GitLab (>=15) runs the job untagged; older versions may strand it — set a real tag if so.
+  tags: [$YAD_RUNNER_TAGS]
   image: node:20
   variables:
     GIT_DEPTH: "0" # full history so the gate can diff against the target branch
