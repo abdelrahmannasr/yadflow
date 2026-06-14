@@ -191,7 +191,7 @@ function buildSite(dir) {
 }
 
 // ---- orchestration ------------------------------------------------------------------------------
-export async function runDocs(root, { action = 'list', epic, overview, sync, today } = {}) {
+export async function runDocs(root, { action = 'list', epic, overview, sync } = {}) {
   const { docs } = loadDocs(root);
   const targets = overview ? [{ overview: true }] : epic ? [{ epic }] : enumerateSites(root);
 
