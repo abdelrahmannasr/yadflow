@@ -234,7 +234,8 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   contract lock. `generate` / `refresh` / `deploy`.
 - **`yad-docs-overview`** — Generates the project **SDLC-overview site** (`docs/sdlc-site/`) — every
   stage from setup → ship as flow paths / system components / stakeholder roles, reusing the same shell —
-  superseding the hand-maintained `docs/index.html`.
+  superseding the hand-maintained `docs/index.html` (folded into the site as `public/report.html`, linked
+  from the nav).
 - **`yad-docs-sync`** — Keeps the sites fresh: detects staleness (a content hash of the authored
   artifacts + the connected repos' HEAD shas vs each site's build manifest), regenerates + redeploys, and
   can wire a CI job that rebuilds on push. Generalizes the rule that feature work must hand-update the

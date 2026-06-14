@@ -1,6 +1,6 @@
 ---
 name: yad-docs-overview
-description: 'Generates the project-level SDLC-overview interactive site — the same React/Vite/Tailwind shell as the per-epic docs — showing every yadflow stage from setup → ship: the pipeline as a flow canvas, each skill/gate as a flow step, the durable .sdlc state objects as system components, and the lenses as stakeholder roles. Themed with yadflow''s own brand palette for continuity, built from config.yaml + module-help.csv + the overview diagram. Supersedes docs/index.html with a thin redirect and deploys via `yad docs deploy --overview`. This is project documentation, not a gated state — it never touches any epic''s state or approvals. Use when the user says "generate the overview site", "build the SDLC overview docs", or after the pipeline (module-help.csv / config.yaml / skill count) changes.'
+description: 'Generates the project-level SDLC-overview interactive site — the same React/Vite/Tailwind shell as the per-epic docs — showing every yadflow stage from setup → ship: the pipeline as a flow canvas, each skill/gate as a flow step, the durable .sdlc state objects as system components, and the lenses as stakeholder roles. Themed with yadflow''s own brand palette for continuity, built from config.yaml + module-help.csv + the overview diagram. Folds the legacy hand-maintained docs/index.html report into the site as report.html (linked from the nav) and deploys via `yad docs deploy --overview`. This is project documentation, not a gated state — it never touches any epic''s state or approvals. Use when the user says "generate the overview site", "build the SDLC overview docs", or after the pipeline (module-help.csv / config.yaml / skill count) changes.'
 ---
 
 # SDLC — Author the Overview Site (project-level, the pipeline as a living map)
@@ -9,7 +9,7 @@ description: 'Generates the project-level SDLC-overview interactive site — the
 reusing the same shell as the per-epic docs (`skills/yad-docs/templates/app/`). Where `yad-docs`
 animates one epic's flows, this animates the **workflow itself**: the front gates, the build half, the
 automation dial, the setup connectors. It is the regenerable successor to the hand-maintained
-`docs/index.html` overview.
+overview report, which is folded into this site as `public/report.html`.
 
 This is **project documentation, not a gated state** — there is no epic, no `state.json`, no approvals.
 It only reads the pipeline definition and writes a project-level site. When a docs target is connected
@@ -22,7 +22,7 @@ It only reads the pipeline definition and writes a project-level site. When a do
   the generated **source is committed**. The overview build manifest is `docs/sdlc-site/.docs-build.json`.
 - The shell template is `skills/yad-docs/templates/app/` — copied **verbatim**, themed only in the
   `:root` of `index.css`. Generated data satisfies `src/data/types.ts`.
-- Theme: **yadflow's own brand palette** (the `:root` of `docs/index.html`) — for visual continuity with
+- Theme: **yadflow's own brand palette** (the `:root` of the legacy report, now `docs/sdlc-site/public/report.html`) — for visual continuity with
   the existing overview, not an epic's design tokens.
 - Speak in the configured `communication_language`; write documents in `document_output_language`.
 
@@ -68,7 +68,7 @@ Map the pipeline onto the same data structures `yad-docs` uses (concrete mapping
 Copy the shell from `templates/app/` **verbatim**, generate `src/data/*.ts` deterministically (same
 determinism rules as `yad-docs`: stable-ID sort by skill pipeline order / phase, fixed key order, no
 timestamps in the data files), theme the `:root` of `index.css` from **yadflow's brand palette** — the
-`docs/index.html` `:root`: `--accent: #2471a3` and the node colors (`--artifact-*`, `--gate-*`,
+the legacy report's `:root`: `--accent: #2471a3` and the node colors (`--artifact-*`, `--gate-*`,
 `--earns-*`, `--locked-*`, `--sentinel-*`) — and substitute the Vite base from `.sdlc/docs.json`
 `basePath` (the overview sits at the base root, e.g. `/<repo>/`).
 
@@ -91,11 +91,13 @@ doc-shell upgrade triggers a rebuild). `skillCount` rides along in the manifest 
 — it is **not** a separate hash input, since `module-help.csv` already moves whenever the skill set does.
 Not per-epic artifacts/repo heads.
 
-### Step 5 — Supersede `docs/index.html` (one release)
-Turn `docs/index.html` into a **thin redirect** to `docs/sdlc-site/` (e.g. a `<meta http-equiv="refresh">`
-+ a one-line link), and **note in the report** that the hand-maintained overview is superseded by the
-generated site for this release. This generalizes the standing rule that feature work hand-updates
-`docs/index.html`: the overview site now **regenerates** instead.
+### Step 5 — Fold the legacy report into the site
+Relocate the hand-maintained static report into the generated site as `docs/sdlc-site/public/report.html`
+(Vite copies `public/` verbatim into `dist/`, so it publishes alongside the app at `<base>/report.html`),
+and link it from the app nav (a "Full report" link in `TopNavBar`). The interactive overview becomes the
+primary documentation and the legacy report rides along as its detailed companion — no orphaned
+`docs/index.html` at the repo root. This generalizes the standing rule that feature work hand-updates the
+report: the overview site now **regenerates** instead.
 
 ### Step 6 — Build / deploy (`action`)
 - `action: generate` (default) — generate source + manifest; stop.
@@ -104,8 +106,8 @@ generated site for this release. This generalizes the standing rule that feature
 
 ### Step 7 — Stop. Report (no gate, no epic)
 Report: the site path (`docs/sdlc-site/`), the data files produced, that the theme is the yadflow brand
-palette, the deploy URL or "build-only", the staleness baseline, and that `docs/index.html` now
-redirects to the generated site. Never touches any epic state.
+palette, the deploy URL or "build-only", the staleness baseline, and that the legacy report is folded in
+at `public/report.html` (linked from the nav). Never touches any epic state.
 
 ## Hard rules
 

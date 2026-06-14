@@ -97,6 +97,6 @@ The eight yadflow lenses, each to its relevant phase sections + paths:
 ## Determinism + theme
 Same discipline as `yad-docs`: stable-sort steps by phase then pipeline order, fixed key order, **no
 timestamps** in `src/data/*.ts` (build time lives only in `.docs-build.json`). Theme the `:root` from
-**yadflow's brand palette** (`docs/index.html` `:root`): `--accent: #2471a3`, and carry the node-class
+**yadflow's brand palette** (the legacy report's `:root`): `--accent: #2471a3`, and carry the node-class
 colors through to step/path colors — `--artifact-* #b7950b`, `--gate-* #ca6f1e`, `--earns-* #2471a3`,
 `--locked-* #566573`, `--sentinel-* #1e8449` — so the canvas reads like the existing diagram.

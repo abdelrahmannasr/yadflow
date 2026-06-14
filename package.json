@@ -22,7 +22,6 @@
     "!cli/test.mjs",
     "!cli/test-checks.mjs",
     "skills/",
-    "docs/index.html",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
