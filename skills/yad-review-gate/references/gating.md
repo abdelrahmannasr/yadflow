@@ -63,8 +63,14 @@ on a real PR/MR instead of (or as well as) the skill recording it directly. `act
 tagged `"source": "bridge"`. **The predicate above is unchanged**: it counts owner/reviewer/domain-owner
 approvals regardless of how they were recorded.
 
-- login → role via the roster; `domain-owner` derived when a roster `name` equals a repo's `domain_owner`
-  and that repo is a touched domain; an unmapped login is a plain `reviewer`, never promoted.
+- login → role(s) via the roster's **per-scope map** (`roles: { hub: [...], <repo>: [...] }`): a person
+  can hold owner + reviewer + domain-owner at once, and a repo can list several people per role. The
+  `hub` roles plus each touched domain's `roles[<repo>]` are emitted; `domain-owner` is also **derived**
+  when a roster `name` equals a repo's `domain_owner`/`domain_owners` (legacy fallback) and that repo is a
+  touched domain; an unmapped login is a plain `reviewer`, never promoted.
+- On PR/MR open the assignee is the committer and reviewers are the scope's `reviewer` + `domain-owner`
+  members (minus the committer); the owner/author is recorded, not requested. See
+  `../yad-hub-bridge/references/login-roster.md`.
 - `sync` is idempotent (upsert by `(step, approver, role, domain)`; supersede revoked; key comments on
   comment id) and never touches **manual** approvals.
 - The architecture+contract staleness rule applies to bridge approvals too: a re-lock discards bridge

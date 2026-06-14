@@ -6,7 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { detectPlatform, createPr } from './platform.mjs';
+import { detectPlatform, createPr, reviewersForScopes, resolveCommitterLogin } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
@@ -57,7 +57,17 @@ export async function runOpenPr(root, opts = {}) {
     task, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name,
   });
 
-  const r = createPr(platform, { title, body, base: baseBranch, head: branch, cwd: repoRoot });
+  // Auto-assign from the hub roster, scoped to this repo: assignee = the committer (resolved from
+  // local git identity), reviewers = the repo's reviewers + domain-owners, minus the committer.
+  // Degrades cleanly when there is no roster / the committer is unmapped (gh self-assigns via @me).
+  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });
+  const roster = hub.roster || [];
+  const committer = resolveCommitterLogin(repoRoot, roster);
+  const scope = meta?.name ? [meta.name] : [];
+  const reviewers = reviewersForScopes(roster, scope, { excludeLogin: committer });
+  const assignees = committer ? [committer] : [];
+
+  const r = createPr(platform, { title, body, base: baseBranch, head: branch, reviewers, assignees, cwd: repoRoot });
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
   if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` for required reviewers');

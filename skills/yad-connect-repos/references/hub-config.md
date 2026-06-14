@@ -21,27 +21,36 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
   "bridge_enabled": true,                                     // open review PRs/MRs on the hub for front-half reviews
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
   "roster": [
-    { "login": "abdelrahmannasr", "name": "alice", "role": "owner" },
-    { "login": "bob-gh",          "name": "bob",   "role": "reviewer" }
+    { "login": "abdelrahmannasr", "name": "alice", "email": "alice@example.com",
+      "roles": { "hub": ["owner", "reviewer"] } },
+    { "login": "carol-gh", "name": "carol", "email": "carol@example.com",
+      "roles": { "hub": ["reviewer"], "backend": ["domain-owner", "owner"], "payments": ["reviewer"] } }
   ]
 }
 ```
 
-## The roster — login → name → role
+## The roster — login → name → per-scope roles
 
-The roster is how a platform identity (a GitHub/GitLab **login**) becomes an SDLC **name + role** in the
-file ledger (`approvals.json` / `comments.json`). Roles are the same three the gate already uses:
+The roster is how a platform identity (a GitHub/GitLab **login**) becomes an SDLC **name + role(s)** in
+the file ledger (`approvals.json` / `comments.json`). Roles are the same three the gate uses:
 `owner | reviewer | domain-owner`.
 
 - **`login`** — the platform username whose PR review / approval is being mapped.
 - **`name`** — the SDLC name written into the ledger (the same names used across `approvals.json`,
   `comments.json`, and `epic.md` `owner`). Keep it stable.
-- **`role`** — the person's default role: `owner` or `reviewer`.
+- **`email`** — the commit email; drives the **committer → login** reverse lookup that auto-assigns PRs.
+- **`roles`** — a **per-scope map**: scope (`hub`, or a connected repo name) → the roles held there. A
+  person can be **owner + reviewer + domain-owner at once** and across scopes; a repo gets **several**
+  people per role by appearing in several entries' maps. Validated against the hub during `yad setup` /
+  `yad doctor`; a login that does not resolve is flagged `unverified` (warn-only, never blocks).
 
-**`domain-owner` is DERIVED, never duplicated here.** A roster entry whose `name` equals a repo's
-`domain_owner` in `repos.json` is treated as that repo's domain-owner **when that repo is a touched
-domain for the step under review**. `repos.json` stays the single source of domain ownership; the roster
-only resolves the login → name link so the derivation can run.
+**Back-compat:** readers also accept a flat array `"roles": ["owner","reviewer"]` (treated as `hub`
+roles) and the legacy single `"role": "owner"` (a `hub` role).
+
+**`domain-owner` may also be DERIVED from `repos.json`.** A roster entry whose `name` equals a repo's
+`domain_owner`/`domain_owners` in `repos.json` is treated as that repo's domain-owner **when that repo is
+a touched domain for the step under review** — kept as a fallback so pre per-scope projects still resolve.
+New setups write the grant directly into the person's `roles[<repo>]` map.
 
 - **Unmapped login fallback.** A login absent from the roster maps to `name: <login>`, `role: reviewer`,
   and is flagged `<!-- unverified login: <login> -->` in the review record (mirrors the code-map

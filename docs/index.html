@@ -475,7 +475,7 @@ each code repo/
   <div class="term"><strong><code>approvals.json</code></strong><span class="badge b-file">files</span><br>Who approved which review, with name + role. The gate reads this to decide whether the rule is met.</div>
   <div class="term"><strong><code>repos.json</code></strong><span class="badge b-file">files</span><br>The project-wide registry of connected code repos (path/URL, platform, domain owner, freshness sha).</div>
   <div class="term"><strong><code>hub.json</code></strong><span class="badge b-file">files</span><br>The hub’s platform record (GitHub or GitLab) plus the reviewer roster, used to run front-half reviews on real PRs/MRs.</div>
-  <div class="term"><strong>Roster</strong><span class="badge b-role">roles</span><br>The mapping from each reviewer’s GitHub/GitLab login to their SDLC name + role (owner / reviewer). Domain owners are derived from each repo’s <code>domain_owner</code> in <code>repos.json</code>, not retyped.</div>
+  <div class="term"><strong>Roster</strong><span class="badge b-role">roles</span><br>The mapping from each person’s GitHub/GitLab login + commit email to their SDLC name and a <strong>per-scope roles map</strong> (<code>roles: { hub: […], &lt;repo&gt;: […] }</code>). One person can be owner, reviewer <em>and</em> domain owner at once; one repo can have several people per role. Logins are validated against GitHub/GitLab at setup (warn-only). When a PR/MR is opened, the committer becomes the <strong>assignee</strong> and the scope’s reviewers + domain owners are <strong>auto-requested</strong>.</div>
   <div class="term"><strong>Code-map</strong><span class="badge b-file">files</span><br>A lightweight, AI-readable summary of a connected code repo — its existing endpoints, events, data models and modules — cached under <code>.sdlc/code-context/</code> so the front-half steps don’t contradict code that already exists.</div>
   <div class="term"><strong>Repomix pack</strong><span class="badge b-tool">tools</span><br>A compressed, secret-scanned snapshot of a repo’s code produced by the Repomix tool (<code>npx repomix</code>), cached alongside the code-map so AI can read the codebase.</div>
   <div class="term"><strong>Fresh / stale</strong><span class="badge b-file">files</span><br>A connected repo’s cached picture is <em>fresh</em> if the repo hasn’t moved since it was packed (tracked by HEAD sha) and <em>stale</em> if it has. Refreshing is a deliberate human decision (<code>yad repo refresh</code>) — skills warn about staleness but never silently re-pack.</div>
@@ -718,12 +718,12 @@ each code repo/
     <h4><code>yad-connect-repos</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Introduces your code repos to the product hub so the “brain” knows what is already built. It registers each repo in <code>repos.json</code> and caches an AI-readable picture of it (a Repomix pack + a code-map of existing endpoints, events, data models and modules). Also sets up the hub’s own platform record and reviewer roster.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Run it in the product hub, once per repo:</div>
-<pre><code>yad-connect-repos action: connect repo: backend path: ../backend-repo domain_owner: carol
+<pre><code>yad-connect-repos action: connect repo: backend path: ../backend-repo domain_owners: carol,dave
 yad-connect-repos action: list                 # see every repo as fresh / stale
 yad-connect-repos action: refresh repo: backend  # re-pack after the code moved
 yad-connect-repos action: disconnect repo: backend
 yad-connect-repos action: detect-hub           # record the hub's GitHub/GitLab platform
-yad-connect-repos action: roster login: alice-gh name: alice role: owner   # once per reviewer</code></pre>
+yad-connect-repos action: roster login: alice-gh name: alice email: alice@x.com roles: hub=owner,reviewer  # validated vs the hub</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup, and again any time you add a new code repo. Re-run <code>refresh</code> when a skill warns a repo is stale. <strong>Greenfield with no code yet? Skip it entirely</strong> — the brain proceeds without it.</div>
   </div>
 

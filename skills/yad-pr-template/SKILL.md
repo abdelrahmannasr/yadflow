@@ -70,6 +70,11 @@ required reviewers:
   approval per touched domain — identical to `yad-review-gate`'s escalation. The actual approvals are
   recorded by the engineer review (Step E), via `yad-review-gate`.
 
+When the PR/MR is actually opened with `yad open-pr`, these reviewers are **requested automatically**
+from the repo-scoped roster (everyone with `reviewer`/`domain-owner` for the repo, minus the committer),
+and the **committer is set as the assignee**. `risk-route.sh` remains the advisory printout of who the
+gate will require.
+
 ### Step 4 — Stop (no auto-advance)
 Report what was committed (or the routing result). The template and routing are advisory inputs to the
 human review (Step E); they do not approve or merge. Do not touch the epic's `.sdlc/` state.

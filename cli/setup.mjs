@@ -11,6 +11,12 @@ import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, legacyRepoActions, legacyHubActions,
 } from './plan.mjs';
+import { validateLogin } from './platform.mjs';
+
+// Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
+function parseList(s) {
+  return [...new Set((s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean))];
+}
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
 
@@ -34,7 +40,35 @@ export function insideRoot(root, rpath) {
 // Validate + record one code repo into the registry (the testable half of the connect loop).
 // A path that is not a git repository is rejected and NOTHING is written — a registry entry with
 // syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
-export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', default_branch = 'main', today = null }) {
+// Grant per-repo roles to roster members by writing into each person's `roles[<repo>]` array in
+// hub.json. `grants` maps a role -> the yad names that hold it for this repo. A name that is not in
+// the roster is warned about and skipped (the roster is the source of identity). Idempotent.
+export function addRepoRoles(root, repo, grants = {}) {
+  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hub = readJSON(hubPath, null);
+  if (!hub || !Array.isArray(hub.roster)) return;
+  const byName = new Map(hub.roster.map((e) => [e.name, e]));
+  let touched = false;
+  for (const [role, names] of Object.entries(grants)) {
+    for (const nm of names) {
+      const entry = byName.get(nm);
+      if (!entry) { warn(`'${nm}' is not in the roster — skipped ${role} for ${repo}`); continue; }
+      // Normalize to the per-scope map, migrating the legacy shapes: a flat array or a single
+      // `role` string both become hub roles so nothing is lost.
+      if (!entry.roles || typeof entry.roles !== 'object' || Array.isArray(entry.roles)) {
+        const hub = Array.isArray(entry.roles) ? entry.roles : (entry.role ? [entry.role] : []);
+        entry.roles = hub.length ? { hub } : {};
+        delete entry.role;
+      }
+      const list = Array.isArray(entry.roles[repo]) ? entry.roles[repo] : [];
+      if (!list.includes(role)) { list.push(role); touched = true; }
+      entry.roles[repo] = list;
+    }
+  }
+  if (touched) writeJSON(hubPath, hub);
+}
+
+export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', domain_owners = null, default_branch = 'main', today = null }) {
   if (!insideRoot(root, rpath)) {
     warn(`${rpath} resolves outside the project root — skipped`);
     return null;
@@ -49,8 +83,12 @@ export function registerRepo(root, registry, { name, rpath, platform, domain_own
     if (plat) warn(`unknown platform '${platform}' — using ${detected}`);
     plat = detected;
   }
+  // A repo can have multiple domain owners. `domain_owners` is the array of record; `domain_owner`
+  // is kept as the first element so anything still reading the legacy single-owner field works.
+  const owners = (domain_owners && domain_owners.length) ? domain_owners : (domain_owner ? [domain_owner] : []);
   const repo = {
-    name, path: rpath, git_url: (remote.ok && remote.stdout) || null, platform: plat, domain_owner, default_branch,
+    name, path: rpath, git_url: (remote.ok && remote.stdout) || null, platform: plat,
+    domain_owner: owners[0] || '', domain_owners: owners, default_branch,
     connectedAt: today, lastSyncedAt: today,
     syncedHead: head,
     contextPack: `.sdlc/code-context/${name}/pack.md`,
@@ -226,9 +264,20 @@ export async function runSetup(root, opts = {}) {
         const login = await ask('  reviewer platform login (blank to finish)', '');
         if (!login) break;
         const name = await ask('    yad name', login);
-        const role = await ask('    role (owner/reviewer/domain-owner)', 'reviewer');
-        const email = await ask('    commit email (verified-commits gate; blank to skip)', '');
-        roster.push({ login, name, role, ...(email ? { email } : {}) });
+        const email = await ask('    commit email (committer→login lookup + verified-commits gate; blank to skip)', '');
+        // Per-scope roles: capture the hub roles here; per-repo roles are added in step 7 when the
+        // repo is connected. A person can hold several roles (owner reviewer) at once.
+        const hubRoles = parseList(await ask('    hub roles (owner/reviewer, space-separated)', 'reviewer'));
+        const entry = { login, name, ...(email ? { email } : {}), roles: { hub: hubRoles } };
+        // Validate the login exists on the hub — warn-only (fail-open): a miss is flagged unverified
+        // but still saved. `checked:false` (no CLI/auth) skips the check silently.
+        if (platform !== 'none') {
+          const v = validateLogin(platform, login);
+          if (v.checked && !v.exists) { warn(`'${login}' not found on ${platform} — saved as unverified`); entry.unverified = true; }
+          else if (v.checked && v.exists) ok(`verified ${login} on ${platform}`);
+        }
+        if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warn(`'${email}' does not look like an email address`);
+        roster.push(entry);
       }
     }
     const default_branch = platform === 'none' ? 'main' : await ask('Hub default branch', 'main');
@@ -306,10 +355,15 @@ export async function runSetup(root, opts = {}) {
       if (!insideRoot(root, rpath)) { warn(`${rpath} resolves outside the project root — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();
-      const domain_owner = await ask('    domain owner', '');
+      // A repo can have one or more domain owners; reviewers/owners can also be scoped to it. Names
+      // refer to roster `name`s; each grant is written into that person's per-scope roles map.
+      const domain_owners = parseList(await ask('    domain owner(s) (yad names, space-separated)', ''));
+      const repoReviewers = parseList(await ask('    repo reviewer(s) (yad names, space-separated; blank to skip)', ''));
+      const repoOwners = parseList(await ask('    repo owner(s) (yad names, space-separated; blank to skip)', ''));
       const default_branch = await ask('    default branch', 'main');
-      const repo = registerRepo(root, registry, { name, rpath, platform, domain_owner, default_branch, today: opts.today ?? null });
+      const repo = registerRepo(root, registry, { name, rpath, platform, domain_owners, default_branch, today: opts.today ?? null });
       if (!repo) continue;
+      addRepoRoles(root, name, { 'domain-owner': domain_owners, reviewer: repoReviewers, owner: repoOwners });
       known.add(name);
       ok(`registered ${name}`);
       packRepo(root, repo);

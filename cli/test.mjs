@@ -603,7 +603,7 @@ test('repo refresh rejects an unknown repo name', async () => {
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
-const { registerRepo, registerDesign, registerTesting, registerLearning } = await import('./setup.mjs');
+const { registerRepo, registerDesign, registerTesting, registerLearning, addRepoRoles } = await import('./setup.mjs');
 
 test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
@@ -667,6 +667,43 @@ test('registerRepo records a real repo; an unknown platform answer falls back to
   assert.equal(repo.git_url, null, 'no origin remote recorded as null, not ""');
   const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json')));
   assert.equal(reg.repos.length, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerRepo records multiple domain_owners, keeping domain_owner as the first', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
+  const real = path.join(T, 'real');
+  fs.mkdirSync(real);
+  git(real, 'init', '-q');
+  fs.writeFileSync(path.join(real, 'a.txt'), '1');
+  git(real, 'add', '-A');
+  git(real, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'init');
+  const repo = registerRepo(T, { repos: [] }, { name: 'real', rpath: 'real', platform: 'github', domain_owners: ['carol', 'dave'], today: '2026-06-14' });
+  assert.deepEqual(repo.domain_owners, ['carol', 'dave']);
+  assert.equal(repo.domain_owner, 'carol', 'legacy single field mirrors the first owner');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('addRepoRoles grants per-repo roles into the roster map and warns on unknown names', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roles-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', roster: [
+      { login: 'ca', name: 'carol', roles: { hub: ['reviewer'] } },
+      { login: 'al', name: 'alice', role: 'owner' }, // legacy entry gets migrated to a map
+    ],
+  }));
+  addRepoRoles(T, 'backend', { 'domain-owner': ['carol', 'ghost'], owner: ['alice'] });
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
+  const carol = hub.roster.find((r) => r.name === 'carol');
+  const alice = hub.roster.find((r) => r.name === 'alice');
+  assert.deepEqual(carol.roles.backend, ['domain-owner']);
+  assert.deepEqual(carol.roles.hub, ['reviewer'], 'existing hub roles preserved');
+  assert.deepEqual(alice.roles, { hub: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map');
+  // idempotent: re-granting the same role does not duplicate
+  addRepoRoles(T, 'backend', { 'domain-owner': ['carol'] });
+  const again = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
+  assert.deepEqual(again.roster.find((r) => r.name === 'carol').roles.backend, ['domain-owner']);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -788,7 +825,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, resolveLogin, mapApprovers } = await import('./platform.mjs');
+const { detectPlatform, cliFor, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs } = await import('./platform.mjs');
 
 test('detectPlatform / cliFor', () => {
   assert.equal(detectPlatform('git@github.com:o/r.git'), 'github');
@@ -817,6 +854,81 @@ test('mapApprovers only counts APPROVED and carries submittedAt', () => {
   assert.equal(recs.length, 1);
   assert.equal(recs[0].name, 'alice');
   assert.equal(recs[0].submittedAt, 't1');
+});
+
+test('rolesForScope normalizes the per-scope map, the flat array, and the legacy single role', () => {
+  assert.deepEqual(rolesForScope({ roles: { hub: ['owner'], backend: ['domain-owner'] } }, 'backend'), ['domain-owner']);
+  assert.deepEqual(rolesForScope({ roles: { hub: ['owner'] } }, 'frontend'), []);
+  assert.deepEqual(rolesForScope({ roles: ['reviewer'] }, 'hub'), ['reviewer']); // flat array => hub
+  assert.deepEqual(rolesForScope({ roles: ['reviewer'] }, 'backend'), []);
+  assert.deepEqual(rolesForScope({ role: 'owner' }, 'hub'), ['owner']);          // legacy single role
+  assert.deepEqual(rolesForScope({ role: 'owner' }, 'backend'), []);
+  assert.deepEqual(rolesForScope(null, 'hub'), []);
+});
+
+test('hasAnyRole searches the requested roles across scopes', () => {
+  const e = { roles: { hub: ['reviewer'], backend: ['domain-owner'] } };
+  assert.equal(hasAnyRole(e, ['hub'], ['owner']), false);
+  assert.equal(hasAnyRole(e, ['hub', 'backend'], ['domain-owner']), true);
+  assert.equal(hasAnyRole(e, ['frontend'], ['reviewer']), false);
+});
+
+test('resolveLogin reads per-scope roles (owner+reviewer+domain-owner at once)', () => {
+  const roster = [{ login: 'ca', name: 'carol', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] } }];
+  const recs = resolveLogin('ca', roster, [], ['backend']);
+  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'owner', 'reviewer']);
+  assert.equal(recs.find((r) => r.role === 'domain-owner').domain, 'backend');
+  // a domain not touched contributes no domain-owner record
+  assert.ok(!resolveLogin('ca', roster, [], []).some((r) => r.role === 'domain-owner'));
+  // an entry scoped only to backend contributes nothing to an untouched scope
+  const scoped = [{ login: 'dv', name: 'dave', roles: { backend: ['domain-owner'] } }];
+  assert.deepEqual(resolveLogin('dv', scoped, [], []), []);
+});
+
+test('resolveLogin keeps the legacy repos.json domain_owner fallback', () => {
+  const roster = [{ login: 'ca', name: 'carol', role: 'reviewer' }];
+  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owner: 'carol' }], ['backend']);
+  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'reviewer']);
+});
+
+test('reviewersForScopes picks reviewers + domain-owners and excludes the committer', () => {
+  const roster = [
+    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },              // owner-only => not requested
+    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
+    { login: 'ca', name: 'carol', roles: { hub: ['reviewer'], backend: ['domain-owner'] } },
+    { login: 'dv', name: 'dave', roles: { backend: ['domain-owner'] } },
+  ];
+  assert.deepEqual(reviewersForScopes(roster, ['hub'], {}).sort(), ['bo', 'ca']);
+  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { excludeLogin: 'bo' }).sort(), ['ca', 'dv']);
+});
+
+test('resolveCommitterLogin maps git identity through the roster', () => {
+  const { backend } = scaffold();
+  git(backend, 'config', 'user.email', 'a@b.c');
+  git(backend, 'config', 'user.name', 'x');
+  const roster = [{ login: 'xx', name: 'x', email: 'a@b.c' }, { login: 'yy', name: 'y' }];
+  assert.equal(resolveCommitterLogin(backend, roster), 'xx');           // by email
+  assert.equal(resolveCommitterLogin(backend, [{ login: 'zz', name: 'x' }]), 'zz'); // by name
+  assert.equal(resolveCommitterLogin(backend, [{ login: 'no', name: 'other' }]), null);
+});
+
+test('validateLogin returns checked:false when the platform CLI is unknown', () => {
+  assert.deepEqual(validateLogin(null, 'someone'), { ok: false, exists: false, checked: false });
+  assert.deepEqual(validateLogin('github', ''), { ok: false, exists: false, checked: false });
+});
+
+test('buildPrArgs wires reviewers + assignees for gh and glab', () => {
+  const gh = buildPrArgs('github', { title: 't', body: 'b', base: 'main', head: 'feat', reviewers: ['bo', 'ca'], assignees: ['al'], labels: ['domain:backend'] });
+  assert.ok(gh.includes('--reviewer') && gh[gh.indexOf('--reviewer') + 1] === 'bo,ca');
+  assert.ok(gh.includes('--assignee') && gh[gh.indexOf('--assignee') + 1] === 'al');
+  assert.ok(gh.includes('--label') && gh[gh.indexOf('--label') + 1] === 'domain:backend');
+  // gh self-assigns @me when no assignee resolved
+  assert.equal(buildPrArgs('github', { title: 't', body: 'b', base: 'main', head: 'f' }).at(-1), '@me');
+  const gl = buildPrArgs('gitlab', { title: 't', body: 'b', base: 'main', head: 'feat', reviewers: ['bo'], assignees: ['al'] });
+  assert.ok(gl.includes('--reviewer') && gl[gl.indexOf('--reviewer') + 1] === 'bo');
+  assert.ok(gl.includes('--assignee') && gl[gl.indexOf('--assignee') + 1] === 'al');
+  // glab omits --assignee entirely when none given (no @me concept)
+  assert.ok(!buildPrArgs('gitlab', { title: 't', body: 'b', base: 'main', head: 'f' }).includes('--assignee'));
 });
 
 // ---------------------------------------------------------------------------------------------
