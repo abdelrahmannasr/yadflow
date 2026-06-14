@@ -93,9 +93,9 @@ flowchart TD
       direction TB
       sp["yad-spec<br/>→ specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
-      ck["yad-checks<br/>spec-link · contract-check · build/test/lint"]:::earns
-      prm["open PR/MR + yad-pr-template route"]
-      eng{{"yad-ship · engineer review<br/>human · never automated"}}:::locked
+      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template"]:::earns
+      prm["yad-ship: commit + open PR/MR (yad-pr-template route)"]
+      eng{{"yad-engineer-review<br/>human · never automated"}}:::locked
       merged(["merge → build-log.json"]):::sentinel
       sp --> im --> ck --> prm --> eng --> merged
     end
@@ -165,7 +165,8 @@ mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
          yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
-         yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
+         yad-pr-template yad-review-comments yad-hub-bridge \
+         yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
@@ -246,7 +247,8 @@ mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
          yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
-         yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill \
+         yad-pr-template yad-review-comments yad-hub-bridge \
+         yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
@@ -324,12 +326,14 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    owns the commit, with a required `Task:` trailer and an optional per-commit `Co-Authored-By:` for the
    AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
 3. **Check** — `yad-checks repo:<repo> action: run` → the gates must pass: spec-link,
-   contract-check, build/test/lint, and verified-commits (every commit signed with a
-   platform-Verified key and authored by a roster-known email — on the hub and every repo).
-4. **Open the PR/MR** (the template is already wired) and run
-   `yad-pr-template repo:<repo> action: route` to print the required reviewers.
-5. **Ship** — `yad-ship` → AI review (advisory) → **engineer approval (a human)** → merge. The ship is
-   recorded in `build-log.json` and the story moves to `in-build` → `shipped`.
+   contract-check, build/test/lint, verified-commits (every commit signed with a
+   platform-Verified key and authored by a roster-known email — on the hub and every repo), and the
+   pattern gates commit-message / pr-title / pr-template.
+4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
+   step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
+   to print the required reviewers.
+5. **Engineer review + merge** — `yad-engineer-review` → AI review (advisory) → **engineer approval (a
+   human)** → merge. The ship is recorded in `build-log.json` and the story moves to `in-build` → `shipped`.
 
 **Multi-repo story?** A story tagged `repos: [backend, mobile]` just runs steps 1–5 in *each* repo,
 independently, all from the **one** locked contract.
@@ -391,7 +395,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 10. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 22)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 25)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -411,9 +415,12 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 22)*.
 | `yad-review-comments` | Install the PR/MR review-comment scaffolds. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
-| `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits). |
-| `yad-pr-template` | Install the platform PR/MR template + risk routing. |
-| `yad-ship` | AI review → engineer review → ship + record. |
+| `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |
+| `yad-pr-template` | Install the platform PR/MR template + risk routing + the pr-title/pr-template gate scripts. |
+| `yad-commit` | Commit one staged atomic change by the conventions (`--ai` co-author footer, atomic guard). |
+| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, roster auto-assign). |
+| `yad-ship` | Commit **and** open the task PR/MR in one step. |
+| `yad-engineer-review` | AI review → engineer review → merge + record. |
 | `yad-backfill` | Spec already-built / legacy code so new work doesn't break it. |
 | `yad-run` | Drive the back half on the automation dial; kill switch. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
@@ -422,6 +429,6 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 22)*.
 
 ## 11. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 22 skills.
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 25 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

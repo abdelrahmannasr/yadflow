@@ -298,7 +298,7 @@
 
 ## Phase 3 decisions (build-half Step E)
 
-> Recorded 2026-06-06 while building Step E (`yad-ship`) — AI review + engineer review + ship — and
+> Recorded 2026-06-06 while building Step E (`yad-engineer-review`) — AI review + engineer review + ship — and
 > shipping story `EP-istifta-inquiries-S01` end to end. Per `docs/phase-3-build-plan.md` §E.
 
 - **Two sets of eyes.** AI review is **advisory** — CodeRabbit (`.coderabbit.yaml`, `request_changes_workflow: false`)
@@ -376,7 +376,7 @@
 - **Steps A–G complete.** A `ready-for-build` story goes: spec (`yad-spec`, Spec Kit) → implement
   (`yad-implement`, one atomic task = one branch) → check gates (`yad-checks`: spec-link,
   contract-check, build/test/lint) → PR/MR template + risk routing (`yad-pr-template`) → AI review +
-  engineer review + ship (`yad-ship`, build-log + story state). Proven single-repo (S01 shipped end to
+  engineer review + ship (`yad-engineer-review`, build-log + story state). Proven single-repo (S01 shipped end to
   end), multi-repo (S03 in backend + mobile from one locked contract, bypass blocked per repo), and
   backfill (`yad-backfill` for an existing feature, human-approved, gated per touched feature).
 - **Nothing auto-advances** anywhere in Phase 3 — every gate is `human_approve`; AI review is advisory.
@@ -402,7 +402,7 @@
 - **Trust log = the evidence base.** New append-only `.sdlc/trust-log.json` records one entry per step
   run with a derived verdict (`rejected` on any check FAIL / scope overrun / contract touch;
   `approved-with-edits` if a human edited the diff; else `approved-unchanged`). The engineer review in
-  `yad-ship` confirms/overrides the provisional verdict — a human always has the last word on trust.
+  `yad-engineer-review` confirms/overrides the provisional verdict — a human always has the last word on trust.
 - **Earned per step, with evidence.** A step may be flipped to `machine_advance` only once its
   trust-log slice clears `config.yaml` `automation.trust_threshold` (default `min_runs: 5`,
   `min_approved_unchanged: 0.8`). `yad-run action: set-dial` enforces it and refuses front states /

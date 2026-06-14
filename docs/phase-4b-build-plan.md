@@ -34,7 +34,7 @@ gate result). 4b defines the missing signals and, crucially, **where each is cap
 |------|--------|----------------------|-----------------------|------------|-------------|
 | `spec` | `specs/<story>/` (spec/plan/tasks) | human approves the spec untouched | human edits the generated spec before approving | human rejects / re-runs the ceremony | the spec review (reuse `yad-review-gate` on the spec artifact) |
 | `tasks` | `tasks.md` (atomic task list) | task list implemented as generated | a task's `Files:`/scope edited before implementing | task list discarded / regenerated | the moment `yad-implement` first consumes a task (the list "survived contact") |
-| `implement` | task diff on a branch | merged as authored | engineer edited the diff before merge | scope overrun / contract touch / checks FAIL | the engineer review at `yad-ship` (already records this in 4a) |
+| `implement` | task diff on a branch | merged as authored | engineer edited the diff before merge | scope overrun / contract touch / checks FAIL | the engineer review at `yad-engineer-review` (already records this in 4a) |
 | `checks` | gate pass/fail | gates pass | n/a | any gate FAIL | the gate run (4a — done) |
 
 Two new capture points to build: a **spec-review trust hook** and a **tasks-survived-implementation

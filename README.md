@@ -60,7 +60,10 @@ human**. Detailed walkthroughs for each phase follow below.
 | `skills/yad-pr-template/` | Build Step D: install the platform PR/MR template + risk routing (code repos **and** the hub). |
 | `skills/yad-review-comments/` | Install platform-matched PR/MR review-comment scaffolds (code repos and the hub). |
 | `skills/yad-hub-bridge/` | The templated PR/MR **review bridge**: open a review PR/MR on the hub and sync platform approvals/comments into the file ledger. |
-| `skills/yad-ship/` | Build Step E: AI review (advisory) → engineer review → ship + record in the build log. |
+| `skills/yad-commit/` | Build helper: commit ONE staged atomic change by the conventions (Conventional subject, trailers, `--ai` footer, ≤3-file guard). |
+| `skills/yad-open-pr/` | Build helper: open a code-repo task PR/MR from the committed template (push, prefill, roster auto-assign). |
+| `skills/yad-ship/` | Build helper: commit **and** open the task PR/MR in one step (`yad commit` then `yad open-pr`). |
+| `skills/yad-engineer-review/` | Build Step E: AI review (advisory) → engineer review → merge + record in the build log. |
 | `skills/yad-backfill/` | Generate a human-verified spec for already-built code (Repomix), gated per touched feature. |
 | `skills/yad-run/` | Phase 4 orchestrator: drive a story's back half on the `automation` dial; kill switch. |
 | `skills/yad-status/` | Read-only view: front chain, build-half dials, trust record, fleet roll-up. |
@@ -94,13 +97,15 @@ with `npx` from your **product hub** repo — no clone needed.
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the hub workflow calls on review/merge events: derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the hub default branch (sweep every open review PR when no `--branch`). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
 | `yad open-pr [--repo <name>]` | Open a code-repo **task** PR/MR from the repo's platform template (build half). |
+| `yad ship --type <t> -m <subject>` | Commit **and** open the task PR/MR in one step (`yad commit` then `yad open-pr`). |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
 bypasses the commit atomic guard). Commit flags: `--type`, `-m/--message`, `--task`, `--ai
 <claude\|copilot\|cursor\|coderabbit\|none>`, `--contract-change`, `--dry-run`. `open-pr` flags:
-`--repo`, `--risk <low\|medium\|high>`, `--contract-change`.
+`--repo`, `--risk <low\|medium\|high>`, `--contract-change`. `ship` takes the union of the `commit`
+and `open-pr` flags (it runs `open-pr` only if the commit lands).
 
 ### The PR-driven review gate
 
@@ -128,7 +133,7 @@ simultaneous advancements can be lost; the next event or scheduled sweep re-sync
 ### What `setup` walks you through (10 steps)
 
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy all 22 `yad-*` skills into the IDE skill dirs you pick
+2. **Install the module** — copy all 25 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
 4. **Connect a design tool** — record the design tool (Figma / pencil / none) → `.sdlc/design.json` so
@@ -184,7 +189,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 22)
+## Agent skills (all 25)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -276,15 +281,25 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   (≤3 files) on its own branch. The diff stays inside the files the task declared (flag and STOP if it
   would grow). Commit ends with the task ID; `Contract-Change: yes` only if it touches the locked
   contract surface.
-- **`yad-checks`** — Step C, the production-safety gates. Wire and run three CI gates: **spec-link**
+- **`yad-checks`** — Step C, the production-safety gates. Wire and run the CI gates: **spec-link**
   (every change links a real story/spec), **contract-check** (a contract-surface diff without a
-  re-locked contract FAILS), and **build/test/lint**. CI-agnostic bash for GitHub Actions and GitLab CI.
+  re-locked contract FAILS), **build/test/lint**, **verified-commits** (signed + roster-known authors),
+  and the **pattern gates** — **commit-message** (Conventional subject + trailer order), **pr-title**,
+  and **pr-template** (the PR/MR body uses the template). Profile-aware (`code`|`hub`), so they run on
+  both code repos and the product hub. CI-agnostic bash for GitHub Actions and GitLab CI.
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
   an Impact & Risk block; high risk (or a contract/auth/payments surface) routes the review to domain
-  owners. Includes `risk-route.sh`.
-- **`yad-ship`** — Step E. AI review (CodeRabbit, advisory) → engineer review (the human gate, owner +
-  1 reviewer with the same escalation) → on merge, record the ship in the epic build-log and update the
-  story state so the epic → story → task → PR chain stays traceable.
+  owners. Includes `risk-route.sh` plus the `pr-title.sh` / `pr-template.sh` gate scripts.
+- **`yad-commit`** — build helper. Commit ONE staged atomic change by the conventions (Conventional
+  subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file
+  atomic guard). Drives `yad commit`.
+- **`yad-open-pr`** — build helper. Open a code-repo task PR/MR from the committed template: push the
+  branch, prefill the body, auto-assign the repo-scoped roster. Drives `yad open-pr`.
+- **`yad-ship`** — build helper. Commit **and** open the task PR/MR in one step (`yad commit` then
+  `yad open-pr`; the PR step runs only if the commit lands). Drives `yad ship`.
+- **`yad-engineer-review`** — Step E. AI review (CodeRabbit, advisory) → engineer review (the human gate,
+  owner + 1 reviewer with the same escalation) → on merge, record the ship in the epic build-log and
+  update the story state so the epic → story → task → PR chain stays traceable.
 - **`yad-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
   doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval
   before it counts. A change is blocked only until the features it touches have approved specs.
@@ -382,12 +397,14 @@ build half by hand”** below.
 11. `yad-implement story:<id> repo:<repo> task:<T0N>` → one atomic task = one branch = one commit
     (repeat per task). Commit by convention with **`yad commit --type <t> -m <subject> [--ai <tool>]`**
     (Task/Contract-Change/Co-Authored-By trailers, atomic-file guard).
-12. `yad-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, and
-    verified-commits (platform-Verified signature + roster-allowlisted author) must pass.
-13. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`**;
+12. `yad-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, verified-commits
+    (platform-Verified signature + roster-allowlisted author), and the pattern gates commit-message /
+    pr-title / pr-template must pass.
+13. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or do
+    12+13 in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**);
     `yad-pr-template repo:<repo> action: route` prints the required reviewers from the Impact & Risk block.
-14. `yad-ship` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge, record
-    in `build-log.json`, update story status to `in-build`/`shipped`).
+14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
+    record in `build-log.json`, update story status to `in-build`/`shipped`).
     - **Multi-repo:** repeat 10–14 in each repo, all from the **one** locked contract.
     - **Existing code:** `yad-backfill` first, to produce a human-verified spec for a built feature.
 
@@ -514,16 +531,19 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    (`feat/<story>-<task>-…`) = one PR. The diff stays inside the files the task declared. Commit with
    **`yad commit`** — it builds the conventional subject, derives the `Task:` trailer from the branch
    (add `--contract-change` only if the locked surface is touched), appends an optional `--ai` co-author,
-   and refuses a non-atomic stage. Open the PR with **`yad open-pr --repo <repo>`** (template prefilled).
-3. **Check gates** — `yad-checks` wires three CI gates (GitHub + GitLab) that must pass before merge:
+   and refuses a non-atomic stage. Open the PR with **`yad open-pr --repo <repo>`** (template prefilled),
+   or do both in one step with **`yad ship`** (commit then open-pr).
+3. **Check gates** — `yad-checks` wires the CI gates (GitHub + GitLab) that must pass before merge:
    **spec-link** (links a real story/spec), **contract-check** (a contract-surface change without
    `Contract-Change` + a re-locked contract FAILS, routing back to the architecture gate),
-   **build/test/lint**. They fail closed on a bad base ref.
+   **build/test/lint**, **verified-commits**, and the **pattern gates** **commit-message** / **pr-title**
+   / **pr-template** (profile-aware `code`|`hub`, so they also run on the product hub). They fail closed
+   on a bad base ref.
 4. **PR/MR template + risk routing** — `yad-pr-template` drops the platform-matched template with an
    Impact & Risk block; `high` risk (or a contract/auth/payments surface) routes the review to domain
    owners (`risk-route.sh`), the same escalation as the gate.
-5. **AI review → engineer review → ship** — `yad-ship`: CodeRabbit is an advisory first pass (never
-   the authority); a human engineer approves (owner + 1 reviewer, escalating to domain owners); on
+5. **AI review → engineer review → merge** — `yad-engineer-review`: CodeRabbit is an advisory first pass
+   (never the authority); a human engineer approves (owner + 1 reviewer, escalating to domain owners); on
    merge the ship is recorded in `.sdlc/build-log.json` and the story state becomes `in-build` →
    `shipped`. The epic → story → task → PR → mergeCommit chain is traceable both ways.
 
@@ -551,7 +571,7 @@ with their dials, per repo) and `trust-log.json` (every run's verdict). See
 - **Drive a story's back half:** `yad-run {story} {repo}` walks `spec → tasks → implement → checks`,
   reading each step's dial. On `machine_advance` it advances on its own; on `human_approve` it stops
   for a human; on any FAIL, scope overrun, or contract-surface touch it **halts and pulls in a human**.
-  It always stops at the engineer review (`yad-ship`), which is never automated.
+  It always stops at the engineer review (`yad-engineer-review`), which is never automated.
 - **Read the trust log:** `yad-status {epic}` shows each back step's dial, status, and trust record —
   runs, % `approved-unchanged`, and whether that clears the threshold (`automation.trust_threshold` in
   `config.yaml`, default ≥5 runs and ≥80% unchanged). The engineer review records each run's verdict

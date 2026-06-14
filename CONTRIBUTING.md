@@ -36,6 +36,12 @@ This repo uses **[Conventional Commits](https://www.conventionalcommits.org/)** 
 subjects** and **PR/MR titles**. (PRs are squash-merged, so the PR/MR title *becomes* the commit
 subject — they follow one rule.)
 
+> **CI-enforced.** These conventions are gated by `yad-checks` on every PR/MR, on code repos **and** the
+> product hub: the **commit-message** gate checks each commit subject + trailer order, the **pr-title**
+> gate checks the PR/MR title, and the **pr-template** gate checks the body uses the PR/MR template
+> (`profile: code` on code repos, `profile: hub` on the hub). `yad commit` / `yad ship` build a
+> compliant message for you.
+
 ```
 <type>(<optional scope>): <description>
 ```
