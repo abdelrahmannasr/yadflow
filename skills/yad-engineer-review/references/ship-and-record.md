@@ -1,6 +1,6 @@
 # Ship — the build ledger and the story state
 
-Step E (`yad-ship`) closes the build half: AI review (advisory) → engineer review (the human gate) →
+Step E (`yad-engineer-review`) closes the build half: AI review (advisory) → engineer review (the human gate) →
 ship. Shipping records the merge and updates the story state so the whole chain is traceable.
 
 ## Two sets of eyes
@@ -64,4 +64,4 @@ trailer → story → epic).
 2. The **AI review** has run (advisory; findings surfaced to the engineer).
 3. The **engineer review** rule is satisfied (base or escalated per the Impact & Risk block).
 
-Only then does the human merge and `yad-ship` record it. Nothing auto-advances.
+Only then does the human merge and `yad-engineer-review` record it. Nothing auto-advances.

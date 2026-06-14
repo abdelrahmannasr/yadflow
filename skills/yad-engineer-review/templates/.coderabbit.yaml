@@ -1,6 +1,6 @@
 # CodeRabbit — AI first-pass review (Phase 3 build plan §E).
 # Advisory only: a second set of eyes that COMMENTS on every PR. It never approves or merges — the
-# human engineer review (yad-review-gate discipline) owns that decision. See skills/yad-ship.
+# human engineer review (yad-review-gate discipline) owns that decision. See skills/yad-engineer-review.
 language: en
 reviews:
   request_changes_workflow: false   # never block the merge — the engineer review is the gate

@@ -1,9 +1,9 @@
 ---
-name: yad-ship
-description: 'Build-half Step E of the gated SDLC — AI review, engineer review, then ship. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same human_approve discipline as the front gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "ship this task", "record the engineer review", or "wire the AI review".'
+name: yad-engineer-review
+description: 'Build-half Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same human_approve discipline as the front gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
 ---
 
-# SDLC — Review & Ship (build-half Step E)
+# SDLC — Engineer Review & Merge (build-half Step E)
 
 **Goal:** Take a task PR/MR that has passed the **check gates** (Step C) through two sets of eyes and
 out to production: an **AI first-pass** (advisory) and a **human engineer review** (the authority),

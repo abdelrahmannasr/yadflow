@@ -216,7 +216,7 @@ base** that decides when a step is safe to automate (build plan Step A). One ent
 |------|---------|-------------------------------|
 | `spec` | `human_edited_spec` | the human who accepts `specs/<story>/` (`yad-spec` Step 8) |
 | `tasks` | `task_rescoped` | first consume by `yad-implement` (Step 8) |
-| `implement` | `human_edited_diff`, `scope_overrun`, `contract_touch` | engineer review at `yad-ship` |
+| `implement` | `human_edited_diff`, `scope_overrun`, `contract_touch` | engineer review at `yad-engineer-review` |
 | `checks` | `checks` (`pass`\|`fail`) | the gate run itself (objective) |
 
 **Deriving the provisional verdict** (build plan Step A; extended for `spec`/`tasks` in Phase 4b — the

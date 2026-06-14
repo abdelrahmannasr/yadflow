@@ -14,7 +14,7 @@ spec → tasks → implement → checks → engineer-review(locked)
 
 `spec` and `tasks` are the two legs of `yad-spec` (the heavy ceremony, then the atomic `tasks.md`).
 `implement` is one atomic task via `yad-implement`. `checks` is `yad-checks (action: run)`.
-`engineer-review` is the human gate at `yad-ship` — always a stop, never automated.
+`engineer-review` is the human gate at `yad-engineer-review` — always a stop, never automated.
 
 ## The loop (pseudocode)
 
@@ -40,7 +40,7 @@ while step is a back step (not engineer-review):
     else:  # human_approve
         bs.step.status = "done"; persist; STOP and report "waiting for human at <next>"
 
-# reached engineer-review: always stop, hand to yad-ship (human gate, finalizes the verdict)
+# reached engineer-review: always stop, hand to yad-engineer-review (human gate, finalizes the verdict)
 ```
 
 `ranBy` is `machine` when the *previous* step's effective dial caused this step to run without a human
@@ -62,7 +62,7 @@ per-step dial says. `engineer-review` and the five front states are covered by `
 ## Deriving signals & the provisional verdict
 
 `signals` are the raw facts of the run; the **provisional `verdict`** is derived from them. The human
-gate for each step (the engineer review at `yad-ship` for `implement`; spec acceptance for `spec`;
+gate for each step (the engineer review at `yad-engineer-review` for `implement`; spec acceptance for `spec`;
 first-consume for `tasks`; the gate itself for `checks`) later confirms or overrides the verdict and
 finalizes the entry — a human always has the last word on the trust signal.
 
@@ -114,7 +114,7 @@ Reverting (`to: human_approve`) is never gated — automation must be reversible
 
 ## What stays human, always
 
-- `engineer-review` — the merge gate. `yad-run` always stops here and hands to `yad-ship`.
+- `engineer-review` — the merge gate. `yad-run` always stops here and hands to `yad-engineer-review`.
 - The five front states (`epic`, `architecture`, `ui-design`, `stories`, `test-cases`) — not in
   `back_steps`, in `locked_steps`; the dial-setter refuses them.
 - Any contract-surface change — halts the loop and routes back to the architecture gate, regardless of

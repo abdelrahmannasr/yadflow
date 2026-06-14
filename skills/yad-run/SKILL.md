@@ -70,7 +70,7 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
      the next step, and **continue the loop** (this is the Step B auto-advance for `checks`).
    - else (**`human_approve`**) → set the step `done`/`in_review`, **stop** and report
      "waiting for a human at `<next-step>`".
-5. **Always stop at `engineer-review`** (it is `locked`): hand off to `yad-ship` for the human merge
+5. **Always stop at `engineer-review`** (it is `locked`): hand off to `yad-engineer-review` for the human merge
    gate, which finalizes the trust verdict (confirm/override the provisional one).
 
 ### `action: set-dial` — earn (or revert) a step's automation
@@ -106,4 +106,4 @@ reversible (build plan §Safety). Report the new state and that `yad-status` wil
 - The loop, the trust-verdict derivation, and the threshold predicate: `references/run-loop.md`.
 - State/trust schemas: `../yad-epic/references/state-schema.md`.
 - The steps it drives: `../yad-spec/`, `../yad-implement/`, `../yad-checks/`; the human gate it
-  hands off to: `../yad-ship/`.
+  hands off to: `../yad-engineer-review/`.
