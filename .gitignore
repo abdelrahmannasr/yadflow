@@ -34,5 +34,13 @@ epics/*/learning/
 design-artifacts/
 skills/reports/
 
+# Interactive doc sites (yad-docs / yad-docs-overview) — the generated SOURCE is committed; only the
+# build output and installed deps are ignored. The skill template under skills/yad-docs/templates/
+# ships no node_modules/dist, so it is unaffected.
+epics/*/docs-site/node_modules/
+epics/*/docs-site/dist/
+docs/sdlc-site/node_modules/
+docs/sdlc-site/dist/
+
 # Node
 node_modules/
