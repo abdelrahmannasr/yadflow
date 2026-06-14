@@ -1,12 +1,16 @@
 // `yad setup` — the guided, idempotent first-run wizard.
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
 import {
   c, log, step, ok, info, warn, hand, fail, ask, askYesNo, run, has,
   exists, readJSON, writeJSON,
 } from './lib.mjs';
 import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
-import { moduleActions, repoActions, hubActions, authorsActions } from './plan.mjs';
+import {
+  moduleActions, repoActions, hubActions, authorsActions,
+  legacyModuleActions, legacyRepoActions, legacyHubActions,
+} from './plan.mjs';
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
 
@@ -181,7 +185,26 @@ export async function runSetup(root, opts = {}) {
     ideTargets = answer.split(',').map((s) => s.trim()).filter(Boolean);
   }
   applyActions(moduleActions(root, ideTargets), { force: true });
+  // Migrate any pre-2.0 install in place: remove the old sdlc-* skill copies in the project's
+  // IDE targets and install their yad-* renames. Without this, setup only ADDED yad-* and left
+  // stale sdlc-* sitting next to them (the rename only ran under `yad update` / `yad check --fix`).
+  applyActions(legacyModuleActions(root, ideTargets), { force: true });
   ok(`module installed into: ${ideTargets.join(', ')}`);
+
+  // Global leftovers: a pre-2.0 install may have put sdlc-* skills in the user's global
+  // ~/.claude/skills (path.join(homedir, '.claude', 'skills', <old>)). The CLI is project-scoped,
+  // so touching the home dir requires an interactive yes — never auto-fire it in SDLC_NONINTERACTIVE
+  // (scripted/CI) mode, where the prompt would otherwise return its default. Silent when there is
+  // nothing to migrate.
+  const globalLegacy = process.env.SDLC_NONINTERACTIVE ? [] : legacyModuleActions(os.homedir(), ['.claude']);
+  if (globalLegacy.length) {
+    if (await askYesNo(`Found ${globalLegacy.length} legacy sdlc-* skill(s) in your global ~/.claude/skills (pre-2.0 install). Migrate them to yad-*?`, true)) {
+      applyActions(globalLegacy, { force: true });
+      ok('migrated global ~/.claude/skills to yad-*');
+    } else {
+      info('left global ~/.claude/skills untouched — re-run `yad setup` or migrate later with `yad update`');
+    }
+  }
 
   // 3. Detect hub platform + roster
   step(3, total, 'Hub platform & reviewer roster');
@@ -299,6 +322,9 @@ export async function runSetup(root, opts = {}) {
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
     applyActions(repoActions(root, repo), { force: true });
+    // Migrate pre-2.0 wired CI (marker-owned sdlc-*.yml -> yad-*.yml); a user-authored
+    // same-named file is never touched.
+    applyActions(legacyRepoActions(root, repo), { force: true });
   }
   // the hub: event-driven gate-sync CI, so platform approvals/merges drive `yad gate ci`
   const hubWiring = hubActions(root);
@@ -306,6 +332,7 @@ export async function runSetup(root, opts = {}) {
     log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
     applyActions(hubWiring, { force: true });
   }
+  applyActions(legacyHubActions(root), { force: true });
   // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
   applyActions(authorsActions(root, registry.repos), { force: true });
 
