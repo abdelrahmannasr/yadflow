@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-bg-primary: #141118;
+    --color-bg-secondary: #1e1a25;
+    --color-bg-tertiary: #2f2938;
+    --color-bg-brand-soft: #1a0244;
+    --color-bg-accent-soft: #25060e;
+
+    --color-surface-dark: #1e1a25;
+    --color-surface-highlight: #2f2938;
+    --color-surface-darker: #0f0e13;
+
+    --color-text-primary: #ffffff;
+    --color-text-secondary: #a8a4b2;
+    --color-text-muted: #767284;
+
+    --color-primary: #6116da;
+    --color-primary-hover: #7a2ce0;
+    --color-primary-soft: #35087c;
+
+    --color-accent: #ff6490;
+    --color-accent-hover: #fb2576;
+    --color-accent-soft: #4f0520;
+
+    --color-border-light: #453c53;
+    --color-border-default: #342e40;
+    --color-border-strong: #141118;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: 'Noto Sans', system-ui, -apple-system, sans-serif;
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-bg-primary);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-highlight);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border-light);
+  }
+}
+
+/* Utility classes */
+.glass-panel {
+  background: rgba(47, 41, 56, 0.4);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.flow-grid {
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}
+
+.code-block {
+  font-family: 'Courier New', Courier, monospace;
+  background: var(--color-surface-darker);
+  border: 1px solid var(--color-surface-highlight);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.font-display {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.font-body {
+  font-family: 'Noto Sans', sans-serif;
+}
+
+/* Logs terminal scrollbar */
+.logs-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.logs-scrollbar::-webkit-scrollbar-track {
+  background: var(--color-surface-darker);
+}
+
+.logs-scrollbar::-webkit-scrollbar-thumb {
+  background: #4a4059;
+  border-radius: 10px;
+}
+
+.logs-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #5d5270;
+}

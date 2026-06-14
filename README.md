@@ -133,7 +133,7 @@ simultaneous advancements can be lost; the next event or scheduled sweep re-sync
 ### What `setup` walks you through (10 steps)
 
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy all 25 `yad-*` skills into the IDE skill dirs you pick
+2. **Install the module** — copy all 29 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
 4. **Connect a design tool** — record the design tool (Figma / pencil / none) → `.sdlc/design.json` so
@@ -189,7 +189,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 25)
+## Agent skills (all 29)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -218,6 +218,27 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   tokens), detecting the **DeepTutor CLI on PATH** (a subprocess like Repomix — DeepTutor ships no MCP)
   and degrading to **harness-native** tutoring when absent. Idempotent and refreshable; one connection
   per project.
+- **`yad-connect-docs`** — Connects a docs/Pages target (GitHub Pages / GitLab Pages, auto-detected from
+  `hub.json`) so the generated documentation sites can deploy. Records the target + scope + base path in
+  `.sdlc/docs.json` (local-user auth, no stored tokens), degrading to **build-only** when no Pages host /
+  CLI is present. Idempotent and refreshable; one connection per project.
+
+### Living documentation (generated, themed, auto-kept-fresh)
+
+- **`yad-docs`** — Generates an **interactive documentation site** for an epic (a React + Vite + Tailwind
+  SPA: an animated front-stage flow canvas + role-based stakeholder doc pages) from the authored
+  artifacts — `epic.md`, `architecture.md`, the locked `contract.md`, `ui-design.md`, the stories — into
+  `epics/EP-<slug>/docs-site/`, themed by the **connected design system** (`DESIGN.md` / `design.json`
+  tokens → the site's CSS). The content lives in generated `src/data/*.ts`; the shell is a vendored
+  template. An **output enrichment, never a gate** — it never touches epic state, approvals, or the
+  contract lock. `generate` / `refresh` / `deploy`.
+- **`yad-docs-overview`** — Generates the project **SDLC-overview site** (`docs/sdlc-site/`) — every
+  stage from setup → ship as flow paths / system components / stakeholder roles, reusing the same shell —
+  superseding the hand-maintained `docs/index.html`.
+- **`yad-docs-sync`** — Keeps the sites fresh: detects staleness (a content hash of the authored
+  artifacts + the connected repos' HEAD shas vs each site's build manifest), regenerates + redeploys, and
+  can wire a CI job that rebuilds on push. Generalizes the rule that feature work must hand-update the
+  docs — the overview now regenerates whenever the skill set / pipeline changes.
 
 ### The learning layer (cross-cutting — any member, any stage)
 

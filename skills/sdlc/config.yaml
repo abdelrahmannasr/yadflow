@@ -176,6 +176,25 @@ learning:
   # tokens in the registry (kb name + sources are plain references, never credentials). Opt-in, never a gate.
   auth: user
 
+# Interactive documentation (yad-connect-docs / yad-docs / yad-docs-overview / yad-docs-sync) — the
+# generated React+Vite+Tailwind doc SITES. yad-docs builds a per-epic site (epics/EP-<slug>/docs-site/)
+# from the authored artifacts, themed by the connected design system; yad-docs-overview builds the
+# project SDLC-overview site (docs/sdlc-site/) from the pipeline definition, superseding docs/index.html.
+# The deploy TARGET is a Pages host, auto-detected from hub.platform (github->github-pages,
+# gitlab->gitlab-pages, null->build-only). The yad CLI does the npm build + Pages wiring + staleness;
+# the content generation is the AI step. Docs are an OUTPUT ENRICHMENT — never a gate, never touch state.
+docs:
+  registry: "{project-root}/.sdlc/docs.json"         # project-wide docs/Pages connection (NOT per-epic)
+  targets: [github-pages, gitlab-pages]               # supported Pages hosts; auto-detected from hub.platform
+  scope: hub                                          # publish from: hub (default) | <repo-name> | dedicated
+  degrade: build-only                                 # no Pages host / no gh|glab => build the dist, publish via CI
+  login_gate: false                                   # public docs by default (the client-side gate is presentational only)
+  manifest: "{project-root}/epics/EP-<slug>/.sdlc/docs-build.json"   # per-epic staleness baseline (yad-docs)
+  overview: "{project-root}/docs/sdlc-site/"          # the project SDLC-overview site (yad-docs-overview)
+  # Auth: `yad-connect-docs` records only how to reach the Pages host (platform + base path); it stores NO
+  # tokens — publishing runs as the LOCAL user's own gh/glab or the platform CI. Idempotent, refreshable.
+  auth: user
+
 # Hub platform + front-half review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
 # The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers

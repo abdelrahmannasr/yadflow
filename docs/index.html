@@ -284,7 +284,7 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 25 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 29 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> · <code>yad-review-comments</code> (CI gates, PR template, comment scaffold)</small></div>
         <div class="arrow-v">▼</div>
@@ -447,7 +447,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 25 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 29 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -684,7 +684,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 25 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 29 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -979,7 +979,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 25 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 29 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>

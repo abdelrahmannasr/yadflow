@@ -1705,3 +1705,127 @@ test('gate loadHub: an existing hub.json holding literal null is rejected (not t
   assert.ok(ep);
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---- docs (interactive documentation sites) -----------------------------------------------------
+const {
+  deployTargetFromHub, siteBasePath, siteDir, manifestPath,
+  docsArtifactHash, docsArtifactFiles, docsStale, pagesWorkflow, pagesWorkflowPath,
+} = await import('./docs.mjs');
+
+test('deployTargetFromHub maps platform (and git_url) to a Pages target', () => {
+  assert.equal(deployTargetFromHub({ platform: 'github' }), 'github-pages');
+  assert.equal(deployTargetFromHub({ platform: 'gitlab' }), 'gitlab-pages');
+  assert.equal(deployTargetFromHub({ platform: null }), 'none');
+  assert.equal(deployTargetFromHub({ git_url: 'git@gitlab.com:o/r.git' }), 'gitlab-pages');
+  assert.equal(deployTargetFromHub({}), 'none');
+});
+
+test('siteBasePath nests per-epic under the project base; overview is the base root', () => {
+  assert.equal(siteBasePath({ basePath: '/yadflow/' }, { overview: true }), '/yadflow/');
+  assert.equal(siteBasePath({ basePath: '/yadflow/' }, { epic: 'EP-foo' }), '/yadflow/epics/EP-foo/');
+  assert.equal(siteBasePath({ basePath: '/' }, { epic: 'EP-foo' }), '/epics/EP-foo/');
+  assert.equal(siteBasePath({}, { overview: true }), '/');
+  // a basePath WITHOUT a trailing slash must not double-slash or drop the join
+  assert.equal(siteBasePath({ basePath: '/foo' }, { epic: 'EP-x' }), '/foo/epics/EP-x/');
+  assert.equal(siteBasePath({ basePath: '/foo' }, { overview: true }), '/foo/');
+});
+
+test('siteDir / manifestPath resolve per-epic vs overview locations', () => {
+  assert.match(siteDir('/r', { epic: 'EP-x' }), /epics\/EP-x\/docs-site$/);
+  assert.match(siteDir('/r', { overview: true }), /docs\/sdlc-site$/);
+  assert.match(manifestPath('/r', { epic: 'EP-x' }), /epics\/EP-x\/\.sdlc\/docs-build\.json$/);
+  assert.match(manifestPath('/r', { overview: true }), /docs\/sdlc-site\/\.docs-build\.json$/);
+});
+
+test('docsArtifactHash is deterministic, order-independent, and changes on edit', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-test-'));
+  fs.writeFileSync(path.join(T, 'a.md'), 'alpha');
+  fs.writeFileSync(path.join(T, 'b.md'), 'beta');
+  const a = path.join(T, 'a.md'), b = path.join(T, 'b.md');
+  const h1 = docsArtifactHash([a, b]);
+  const h2 = docsArtifactHash([b, a]);           // order must not matter (sorted internally)
+  assert.equal(h1, h2);
+  assert.match(h1, /^sha256:[0-9a-f]{64}$/);
+  fs.writeFileSync(b, 'beta!');                   // an edit must move the hash
+  assert.notEqual(docsArtifactHash([a, b]), h1);
+  // the contract-surface `extra` is folded in: a surface change moves the hash; empty extra is a no-op
+  assert.notEqual(docsArtifactHash([a], 'sha256:surface-1'), docsArtifactHash([a], 'sha256:surface-2'));
+  assert.equal(docsArtifactHash([a]), docsArtifactHash([a], ''));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('docsArtifactFiles collects existing epic artifacts + stories, sorted', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-test-'));
+  const epicRoot = path.join(T, 'epics/EP-x');
+  fs.mkdirSync(path.join(epicRoot, 'stories'), { recursive: true });
+  fs.writeFileSync(path.join(epicRoot, 'epic.md'), '#');
+  fs.writeFileSync(path.join(epicRoot, 'architecture.md'), '#');
+  fs.writeFileSync(path.join(epicRoot, 'stories/EP-x-S01.md'), '#');
+  const files = docsArtifactFiles(T, 'EP-x');
+  assert.ok(files.some((f) => f.endsWith('epic.md')));
+  assert.ok(files.some((f) => f.endsWith('EP-x-S01.md')));
+  assert.ok(!files.some((f) => f.endsWith('contract.md')), 'absent files are not included');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('docsStale flags never-built, changed artifacts, advanced HEADs, and shell upgrades', () => {
+  assert.deepEqual(docsStale(null, {}), { stale: true, reasons: ['never built'] });
+  const m = { artifactHash: 'sha256:aaa', repoHeads: { backend: 'h1' }, templateVersion: '1.0.0' };
+  assert.equal(docsStale(m, { artifactHash: 'sha256:aaa', repoHeads: { backend: 'h1' }, templateVersion: '1.0.0' }).stale, false);
+  assert.ok(docsStale(m, { artifactHash: 'sha256:bbb' }).reasons.some((r) => /artifacts changed/.test(r)));
+  assert.ok(docsStale(m, { repoHeads: { backend: 'h2' } }).reasons.some((r) => /backend HEAD advanced/.test(r)));
+  assert.ok(docsStale(m, { templateVersion: '2.0.0' }).reasons.some((r) => /shell upgraded/.test(r)));
+});
+
+test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop-safe', () => {
+  const gh = pagesWorkflow('github');
+  assert.match(gh, /deploy-pages@v4/);
+  assert.match(gh, /concurrency:/);                 // deploy-loop guard
+  assert.match(gh, /# yad-managed/);
+  // both the overview AND per-epic sites are assembled into ./public (epics nested under epics/<id>/)
+  assert.match(gh, /docs\/sdlc-site/);
+  assert.match(gh, /epics\/\*\/docs-site/);
+  assert.match(gh, /public\/epics\/\$id/);
+  assert.match(gh, /path: public/);
+  assert.equal(pagesWorkflowPath('github'), '.github/workflows/yad-docs.yml');
+  const gl = pagesWorkflow('gitlab');
+  assert.match(gl, /^pages:/m);
+  assert.match(gl, /artifacts:/);
+  assert.match(gl, /epics\/\*\/docs-site/);         // GitLab publishes per-epic sites too
+  assert.equal(pagesWorkflowPath('gitlab'), '.gitlab/ci/yad-docs.yml');
+});
+
+test('runDocs: list/sync/wire orchestrate over generated sites and install the Pages CI', async () => {
+  const { runDocs } = await import('./docs.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'docs-run-'));
+  // a connected github-pages target + one generated epic site with artifacts and a manifest
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/docs.json'), JSON.stringify({ target: 'github-pages', scope: 'hub', basePath: '/yadflow/', source: 'gh' }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  const ep = path.join(T, 'epics/EP-x');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(ep, 'docs-site'), { recursive: true });
+  fs.writeFileSync(path.join(ep, 'epic.md'), '# epic');
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ repos: [] }));
+  fs.writeFileSync(path.join(ep, '.sdlc/docs-build.json'), JSON.stringify({ artifactHash: 'sha256:old' })); // mismatch -> stale
+
+  const listed = await runDocs(T, { action: 'list' });
+  assert.equal(listed.sites, 1);
+
+  const checked = await runDocs(T, { action: 'sync', sync: 'check' });
+  assert.equal(checked.stale, 1, 'the changed artifact hash marks the epic site stale');
+
+  const wired = await runDocs(T, { action: 'sync', sync: 'wire' });
+  assert.equal(wired.wired, '.github/workflows/yad-docs.yml');
+  assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-docs.yml')), 'Pages workflow written');
+
+  // build degrades (does not throw) when a targeted site has not been generated yet
+  const builtMissing = await runDocs(T, { action: 'build', epic: 'EP-nope' });
+  assert.equal(builtMissing.built, 0, 'build of a non-generated site yields nothing, no throw');
+
+  const before = process.exitCode;
+  await runDocs(T, { action: 'bogus' });
+  assert.equal(process.exitCode, 1, 'an unknown action sets a failing exit code');
+  process.exitCode = before;
+  fs.rmSync(T, { recursive: true, force: true });
+});

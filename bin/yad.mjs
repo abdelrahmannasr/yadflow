@@ -10,6 +10,7 @@ import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { runShip } from '../cli/ship.mjs';
 import { runRepo } from '../cli/repo.mjs';
+import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
@@ -39,6 +40,12 @@ ${c.bold('Build helpers')}
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
 
+${c.bold('Interactive docs (generated sites)')}
+  yad docs list                        Show the docs target + per-site freshness
+  yad docs build [--epic <id>|--overview]    npm-build a generated doc site
+  yad docs deploy [--epic <id>|--overview]   Build + report the Pages deploy
+  yad docs sync [--check|--refresh|--wire]   Staleness sweep; --wire installs the Pages CI
+
 ${c.bold('Options')}
   --dir <path>          Target project root (default: cwd)
   --type <t>            commit: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
@@ -48,6 +55,9 @@ ${c.bold('Options')}
   --contract-change     commit/open-pr: mark the contract surface touched
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
+  --epic <id>           docs: target one epic's site (EP-<slug>)
+  --overview            docs: target the project SDLC-overview site
+  --check/--refresh/--wire   docs sync: report stale / rebuild / install Pages CI
   --dry-run             commit: print the message, do not commit
   --force               commit: bypass the atomic-file guard / re-copy unchanged files
   --branch <head>       gate ci: the review PR/MR head branch (review/EP-<slug>/<artifact>)
@@ -56,7 +66,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -66,6 +76,10 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
+    else if (a === '--overview') o.overview = true;
+    else if (a === '--check') o.check = true;
+    else if (a === '--refresh') o.refresh = true;
+    else if (a === '--wire') o.wire = true;
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--json') o.json = true;
     else if (a === '-h' || a === '--help') o.help = true;
@@ -131,6 +145,13 @@ async function main() {
     case 'repo': {
       const [, action, name] = o._;
       await runRepo(o.dir, { action: action || 'list', name, today });
+      break;
+    }
+    case 'docs': {
+      const [, action] = o._;
+      if (o.epic && !isValidEpicId(o.epic)) { log(c.red(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      const sync = o.wire ? 'wire' : o.refresh ? 'refresh' : 'check';
+      await runDocs(o.dir, { action: action || 'list', epic: o.epic, overview: o.overview, sync, today });
       break;
     }
     default:
