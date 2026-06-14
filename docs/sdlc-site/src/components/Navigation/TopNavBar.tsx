@@ -58,14 +58,18 @@ export function TopNavBar() {
             <Icon name="description" size={18} className="mr-2" />
             Docs
           </button>
-          <button
+          <a
+            href={`${import.meta.env.BASE_URL}report.html`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="The full static SDLC report"
             className="flex items-center justify-center px-4 py-2 rounded-full text-slate-300 text-sm font-medium transition-colors"
             onMouseEnter={(e) => e.currentTarget.style.background = 'var(--color-surface-highlight)'}
             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
           >
-            <Icon name="settings" size={18} className="mr-2" />
-            Settings
-          </button>
+            <Icon name="article" size={18} className="mr-2" />
+            Full report
+          </a>
         </div>
         <div className="h-6 w-px mx-2" style={{ background: 'var(--color-surface-highlight)' }} />
         <div className="flex items-center gap-3">

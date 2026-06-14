@@ -2,7 +2,7 @@ import type { SystemComponent } from "./types";
 
 // The durable objects on the yadflow canvas — the product hub, its file ledger,
 // the connectors + connected tools, the platform, and the trust log. Brand
-// palette mirrors docs/index.html (accent #2471a3, sentinel #1e8449, gate
+// palette mirrors the legacy report public/report.html (accent #2471a3, sentinel #1e8449, gate
 // #ca6f1e, artifact #b7950b, locked #566573). Positions are 0–100, spread.
 export const COMPONENTS: SystemComponent[] = [
   {
