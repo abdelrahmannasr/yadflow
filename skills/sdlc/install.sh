@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-SKILLS=(yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-spec yad-implement yad-checks yad-pr-template yad-review-comments yad-hub-bridge yad-ship yad-backfill yad-run yad-review-gate yad-status)
+SKILLS=(yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-spec yad-implement yad-checks yad-pr-template yad-review-comments yad-hub-bridge yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill yad-run yad-review-gate yad-status)
 
 echo "Installing sdlc module from $ROOT/skills ..."
 
