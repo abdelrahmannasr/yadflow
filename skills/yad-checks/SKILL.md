@@ -16,6 +16,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    contract upstream, it **FAILS and routes back to the architecture gate**. The shared surface is
    never widened from inside a code repo (Phase 2 contract representation: delimited block + SHA-256 lock).
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
+   The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
+   that and is a no-op for other runners (see `references/check-gates.md`).
 4. **verified-commits** — no unverified commits from unverified users: every commit in the range must
    carry a signature the platform marks **Verified** AND be authored by a known identity
    (`.sdlc/verified-authors`, generated from the hub roster's `email` fields). Enforced on the

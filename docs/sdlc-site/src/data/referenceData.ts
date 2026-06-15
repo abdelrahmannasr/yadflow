@@ -136,7 +136,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'build-test-lint',
     queue: 'yad-checks',
     timing: 'on every PR/MR',
-    description: 'The repo builds, its tests pass, and the linter is clean.',
+    description: 'The repo builds, its tests pass, and the linter is clean. CI caps jest/vitest test workers (YAD_TEST_MAX_WORKERS, default 2); other runners are unaffected.',
     triggeredBy: 'PR/MR opened or updated',
     visibleTo: ALL,
   },

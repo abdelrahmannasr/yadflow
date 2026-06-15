@@ -221,6 +221,46 @@ test('build-test-lint gate: failing test script fails the gate', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A test fixture that passes iff it WAS handed `--maxWorkers=2`.
+const requiresFlag = 'process.exit(process.argv.includes("--maxWorkers=2") ? 0 : 1);\n';
+// A test fixture that passes iff it was NOT handed any --maxWorkers flag.
+const forbidsFlag = 'process.exit(process.argv.some((a) => a.startsWith("--maxWorkers")) ? 1 : 0);\n';
+
+test('build-test-lint gate: forwards --maxWorkers to a jest/vitest test script when capped', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: wire scripts', {
+    'package.json': npmStub('node -e ""', 'node -e ""', 'node vitest-stub.mjs'),
+    'vitest-stub.mjs': requiresFlag,
+  });
+  const r = runGate(BTL, T, [], { YAD_TEST_MAX_WORKERS: '2' });
+  assert.equal(r.code, 0, r.out); // fixture exits 0 only because the flag arrived
+  assert.match(r.out, /PASS \[build\/test\/lint\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('build-test-lint gate: does NOT forward --maxWorkers to a non-jest/vitest runner', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: wire scripts', {
+    // `node --test`-style script: must stay flag-free even when the cap env is set.
+    'package.json': npmStub('node -e ""', 'node -e ""', 'node plain-stub.mjs'),
+    'plain-stub.mjs': forbidsFlag,
+  });
+  const r = runGate(BTL, T, [], { YAD_TEST_MAX_WORKERS: '2' });
+  assert.equal(r.code, 0, r.out); // fixture exits 0 only because no flag was forwarded
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('build-test-lint gate: no cap env means no --maxWorkers even for jest/vitest', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: wire scripts', {
+    'package.json': npmStub('node -e ""', 'node -e ""', 'node vitest-stub.mjs'),
+    'vitest-stub.mjs': forbidsFlag,
+  });
+  const r = runGate(BTL, T, []); // YAD_TEST_MAX_WORKERS unset
+  assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------- risk-route.sh ----------
 const body = (T, text) => {
   const p = path.join(T, 'pr-body.md');

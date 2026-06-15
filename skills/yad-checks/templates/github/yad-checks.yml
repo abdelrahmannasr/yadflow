@@ -25,6 +25,8 @@ jobs:
 
   build-test-lint:
     runs-on: ubuntu-latest
+    env:
+      YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }

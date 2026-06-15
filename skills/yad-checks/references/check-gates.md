@@ -46,6 +46,11 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 - Runs `npm run lint`, `npm run build`, `npm test` in order; any non-zero exit fails the gate.
 - Tests must actually exercise behavior (build plan §C) — an empty or trivially-passing suite does not
   satisfy the gate's intent.
+- **Test worker cap.** When the CI job sets `YAD_TEST_MAX_WORKERS` (the templates default it to `2`)
+  and the repo's `test` script is jest/vitest, the gate forwards `--maxWorkers=<n>` to bound CI
+  concurrency. For any other runner (`node --test`, mocha, …) it is a no-op — the flag is never
+  passed, so the gate cannot break on an unknown option. Override it per repo via the
+  `YAD_TEST_MAX_WORKERS` CI variable, or unset it to remove the cap.
 
 ### Canonical `package.json` scripts (Node demo)
 
