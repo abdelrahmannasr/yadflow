@@ -5,6 +5,7 @@ import { useFlowStore } from '../../store/useFlowStore';
 import { PATHS } from '../../data/paths';
 import type { PathCategory } from '../../data/types';
 import { Icon } from '../shared/Icon';
+import { Tooltip } from '../shared/Tooltip';
 import { CATEGORY_ICONS } from '../../utils/iconMap';
 
 const CATEGORY_LABELS: Record<PathCategory, string> = {
@@ -47,9 +48,11 @@ export const PathSelector = () => {
         <h3 className="text-slate-100 text-sm font-bold font-display uppercase tracking-wider">
           Path Selection
         </h3>
-        <button className="text-xs font-medium" style={{ color: 'var(--color-primary)' }}>
-          View All
-        </button>
+        <Tooltip content="Coming soon">
+          <button disabled className="text-xs font-medium opacity-50 cursor-not-allowed" style={{ color: 'var(--color-primary)' }}>
+            View All
+          </button>
+        </Tooltip>
       </div>
 
       {/* Search */}

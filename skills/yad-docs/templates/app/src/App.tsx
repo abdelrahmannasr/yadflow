@@ -12,10 +12,8 @@ import { SystemLogsTerminal } from './components/Logs/SystemLogsTerminal';
 import { SubPathDetailPage } from './pages/SubPathDetailPage';
 import { RoleSelectPage } from './pages/RoleSelectPage';
 import { StakeholderDocPage } from './pages/StakeholderDocPage';
-import { LoginPage } from './components/Auth/LoginPage';
 import { usePlayback } from './hooks/usePlayback';
 import { useFlowStore } from './store/useFlowStore';
-import { useAuthStore } from './store/useAuthStore';
 
 function Dashboard() {
   usePlayback();
@@ -74,12 +72,6 @@ function Dashboard() {
 }
 
 function App() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
-
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden" style={{ background: 'var(--color-bg-primary)' }}>
       <TopNavBar />

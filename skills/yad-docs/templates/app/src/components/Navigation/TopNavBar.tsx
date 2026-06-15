@@ -1,13 +1,12 @@
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../shared/Icon';
+import { Tooltip } from '../shared/Tooltip';
 import { useFlowStore } from '../../store/useFlowStore';
-import { useAuthStore } from '../../store/useAuthStore';
 
 export function TopNavBar() {
   const navigate = useNavigate();
   const toggleReferencePanel = useFlowStore((s) => s.toggleReferencePanel);
   const toggleCommandPalette = useFlowStore((s) => s.toggleCommandPalette);
-  const logout = useAuthStore((s) => s.logout);
 
   return (
     <header className="flex-none flex items-center justify-between whitespace-nowrap border-b px-6 py-3 z-20"
@@ -17,8 +16,9 @@ export function TopNavBar() {
       }}
     >
       <div className="flex items-center gap-8">
-        <div className="flex items-center gap-3 text-white">
-          <img src="/logo.svg" alt="Logo" className="h-8" />
+        <div className="flex items-center gap-2 text-white">
+          <img src={`${import.meta.env.BASE_URL}yadflow-icon.png`} alt="yadflow" className="h-9 w-9 object-contain" />
+          <span className="text-lg font-bold font-display text-white tracking-tight">yadflow</span>
         </div>
         <button
           onClick={toggleCommandPalette}
@@ -58,31 +58,15 @@ export function TopNavBar() {
             <Icon name="description" size={18} className="mr-2" />
             Docs
           </button>
-          <button
-            className="flex items-center justify-center px-4 py-2 rounded-full text-slate-300 text-sm font-medium transition-colors"
-            onMouseEnter={(e) => e.currentTarget.style.background = 'var(--color-surface-highlight)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-          >
-            <Icon name="settings" size={18} className="mr-2" />
-            Settings
-          </button>
-        </div>
-        <div className="h-6 w-px mx-2" style={{ background: 'var(--color-surface-highlight)' }} />
-        <div className="flex items-center gap-3">
-          <div className="text-right hidden sm:block">
-            <p className="text-sm font-medium text-white">AbdelRahman Nasr</p>
-            <p className="text-xs text-slate-400">Admin</p>
-          </div>
-          <button
-            onClick={logout}
-            title="Sign out"
-            className="h-10 w-10 rounded-full ring-2 ring-[#2f2938] flex items-center justify-center cursor-pointer transition-opacity hover:opacity-80"
-            style={{
-              background: 'linear-gradient(135deg, var(--color-primary) 0%, #a855f7 100%)',
-            }}
-          >
-            <Icon name="logout" size={20} className="text-white" />
-          </button>
+          <Tooltip content="Coming soon">
+            <button
+              disabled
+              className="flex items-center justify-center px-4 py-2 rounded-full text-slate-300 text-sm font-medium opacity-50 cursor-not-allowed"
+            >
+              <Icon name="settings" size={18} className="mr-2" />
+              Settings
+            </button>
+          </Tooltip>
         </div>
       </div>
     </header>

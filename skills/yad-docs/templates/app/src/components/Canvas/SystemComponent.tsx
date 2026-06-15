@@ -52,8 +52,8 @@ export const SystemComponent: React.FC<SystemComponentProps> = React.memo(
               : 'rgba(47, 41, 56, 0.4)',
             backdropFilter: 'blur(12px)',
             ...glowStyle,
-            minWidth: '130px',
-            minHeight: '140px',
+            minWidth: '116px',
+            minHeight: '120px',
           }}
           animate={
             isReceiving

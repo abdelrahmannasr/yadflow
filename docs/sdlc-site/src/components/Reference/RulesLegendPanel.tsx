@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useFlowStore } from '../../store/useFlowStore';
 import { Icon } from '../shared/Icon';
+import { Tooltip } from '../shared/Tooltip';
 import { MESSAGE_COLORS } from '../../data/types';
 import { MESSAGE_TYPE_ICONS } from '../../utils/iconMap';
 import { StakeholderToggle } from './StakeholderToggle';
@@ -198,17 +199,21 @@ export function RulesLegendPanel() {
                 background: 'var(--color-surface-dark)',
               }}
             >
-              <button className="flex-1 py-3 px-4 rounded-lg text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                style={{ background: 'var(--color-primary)' }}
-              >
-                <Icon name="download" size={18} />
-                Export Rules PDF
-              </button>
-              <button className="p-3 rounded-lg text-slate-300 transition-colors"
-                style={{ background: 'rgba(255,255,255,0.05)' }}
-              >
-                <Icon name="settings" size={20} />
-              </button>
+              <Tooltip content="Coming soon" className="flex-1">
+                <button disabled className="w-full py-3 px-4 rounded-lg text-white text-sm font-bold flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
+                  style={{ background: 'var(--color-primary)' }}
+                >
+                  <Icon name="download" size={18} />
+                  Export Rules PDF
+                </button>
+              </Tooltip>
+              <Tooltip content="Coming soon">
+                <button disabled className="p-3 rounded-lg text-slate-300 opacity-50 cursor-not-allowed"
+                  style={{ background: 'rgba(255,255,255,0.05)' }}
+                >
+                  <Icon name="settings" size={20} />
+                </button>
+              </Tooltip>
             </div>
           </motion.div>
         </>

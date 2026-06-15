@@ -4,14 +4,15 @@ import { motion, AnimatePresence } from "framer-motion";
 interface TooltipProps {
   content: string;
   children: React.ReactNode;
+  className?: string;
 }
 
-export const Tooltip: React.FC<TooltipProps> = ({ content, children }) => {
+export const Tooltip: React.FC<TooltipProps> = ({ content, children, className = "" }) => {
   const [show, setShow] = useState(false);
 
   return (
     <div
-      className="relative inline-block"
+      className={`relative inline-block ${className}`}
       onMouseEnter={() => setShow(true)}
       onMouseLeave={() => setShow(false)}
       onFocus={() => setShow(true)}
