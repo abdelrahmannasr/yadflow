@@ -750,6 +750,117 @@ test('addRepoRoles grants per-repo roles into the roster map and warns on unknow
 });
 
 // ---------------------------------------------------------------------------------------------
+// `yad roster` — manage the roster + per-repo roles at any time (repo-driven, repos.json sync)
+// ---------------------------------------------------------------------------------------------
+const { parseRolesSpec, upsertRosterEntry, removeRepoRole, setRepoDomainOwners } = await import('./setup.mjs');
+const { runRoster } = await import('./roster.mjs');
+
+// A temp root with a hub.json (platform null so login validation is skipped) and a repos.json.
+function rosterRoot(roster = [], repos = []) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roster-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, bridge_enabled: false, default_branch: 'main', roster }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos }));
+  return T;
+}
+const readHub = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
+const readRepos = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json')));
+
+test('parseRolesSpec parses a multi-scope spec and dedupes', () => {
+  assert.deepEqual(parseRolesSpec('hub=owner,reviewer backend=domain-owner'),
+    { hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
+  assert.deepEqual(parseRolesSpec('hub=reviewer,reviewer'), { hub: ['reviewer'] }, 'dedupes within a scope');
+  assert.deepEqual(parseRolesSpec('garbage no-equals'), {}, 'malformed tokens are skipped');
+  assert.deepEqual(parseRolesSpec(''), {});
+});
+
+test('upsertRosterEntry inserts a new member and upserts by login, merging roles without dropping scopes', () => {
+  const T = rosterRoot();
+  upsertRosterEntry(T, { login: 'gl-abd', name: 'abdulrahman', email: 'a@b.c', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] }, platform: 'none' });
+  let e = readHub(T).roster.find((r) => r.login === 'gl-abd');
+  assert.equal(e.name, 'abdulrahman');
+  assert.equal(e.email, 'a@b.c');
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
+  // upsert by login: add a dashboard scope; hub + backend must survive
+  upsertRosterEntry(T, { login: 'gl-abd', roles: { dashboard: ['domain-owner'] }, platform: 'none' });
+  e = readHub(T).roster.find((r) => r.login === 'gl-abd');
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
+  assert.equal(readHub(T).roster.length, 1, 'upsert, not duplicate');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('setRepoDomainOwners adds/removes a name and mirrors domain_owner; no-op for an unregistered repo', () => {
+  const T = rosterRoot([], [{ name: 'backend', domain_owner: '', domain_owners: [] }]);
+  assert.equal(setRepoDomainOwners(T, 'backend', 'abdulrahman', { add: true }), true);
+  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['abdulrahman']);
+  assert.equal(readRepos(T).repos[0].domain_owner, 'abdulrahman', 'legacy field mirrors the first owner');
+  setRepoDomainOwners(T, 'backend', 'ayman', { add: true });
+  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['abdulrahman', 'ayman']);
+  setRepoDomainOwners(T, 'backend', 'abdulrahman', { add: false });
+  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['ayman']);
+  assert.equal(readRepos(T).repos[0].domain_owner, 'ayman', 'mirror follows the removal');
+  assert.equal(setRepoDomainOwners(T, 'ghost', 'x', { add: true }), false, 'unregistered repo is a no-op');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runRoster grant writes the roles map AND syncs repos.json domain_owners; revoke reverts both', async () => {
+  const T = rosterRoot(
+    [{ login: 'ay', name: 'ayman', roles: { hub: ['reviewer'] } }],
+    [{ name: 'backend', domain_owner: '', domain_owners: [] }],
+  );
+  await runRoster(T, { action: 'grant', args: ['ayman', 'backend', 'domain-owner'] });
+  assert.deepEqual(readHub(T).roster[0].roles.backend, ['domain-owner']);
+  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['ayman'], 'repos.json kept in sync');
+  await runRoster(T, { action: 'revoke', args: ['ayman', 'backend', 'domain-owner'] });
+  assert.equal(readHub(T).roster[0].roles.backend, undefined, 'empty scope key removed');
+  assert.deepEqual(readRepos(T).repos[0].domain_owners, [], 'repos.json reverted');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runRoster grant refuses a name that is not in the roster', async () => {
+  const T = rosterRoot([], [{ name: 'backend', domain_owners: [] }]);
+  const prev = process.exitCode;
+  await runRoster(T, { action: 'grant', args: ['ghost', 'backend', 'domain-owner'] });
+  assert.equal(process.exitCode, 1, 'sets a failing exit code');
+  assert.deepEqual(readHub(T).roster, [], 'nothing written');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runRoster add --roles (scripted) upserts and mirrors domain-owner scopes into repos.json', async () => {
+  const T = rosterRoot([], [{ name: 'backend', domain_owners: [] }, { name: 'dashboard', domain_owners: [] }]);
+  await runRoster(T, { action: 'add', args: ['gl-abd'], name: 'abdulrahman', email: 'a@b.c',
+    roles: 'hub=owner,reviewer backend=domain-owner dashboard=domain-owner' });
+  const e = readHub(T).roster.find((r) => r.login === 'gl-abd');
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
+  assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'backend').domain_owners, ['abdulrahman']);
+  assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'dashboard').domain_owners, ['abdulrahman']);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('removeRepoRole drops one role and empties the scope key; runRoster remove deletes by login', async () => {
+  const T = rosterRoot([{ login: 'ca', name: 'carol', roles: { hub: ['reviewer'], backend: ['domain-owner', 'reviewer'] } }],
+    [{ name: 'backend', domain_owners: ['carol'] }]);
+  removeRepoRole(T, 'carol', 'backend', ['reviewer']);
+  assert.deepEqual(readHub(T).roster[0].roles.backend, ['domain-owner'], 'only the named role is removed');
+  removeRepoRole(T, 'carol', 'backend', ['domain-owner']);
+  assert.equal(readHub(T).roster[0].roles.backend, undefined, 'empty scope key deleted');
+  await runRoster(T, { action: 'remove', args: ['ca'] });
+  assert.deepEqual(readHub(T).roster, [], 'member removed by login');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runRoster list reports members, repos, and hub<->repos.json domain-owner drift', async () => {
+  const T = rosterRoot([{ login: 'ca', name: 'carol', roles: { hub: ['reviewer'] } }],
+    [{ name: 'backend', domain_owners: ['carol'] }]); // carol owns backend in repos.json but has no roles.backend
+  const summary = await runRoster(T, { action: 'list' });
+  assert.equal(summary.members, 1);
+  assert.equal(summary.repos, 1);
+  assert.equal(summary.drift, 1, 'flags the repos.json-only ownership');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // `yad setup` — registerDesign: record the design-tool connection (deterministic half)
 // ---------------------------------------------------------------------------------------------
 test('registerDesign records a known tool with source unconfirmed (MCP detection is the AI step)', () => {

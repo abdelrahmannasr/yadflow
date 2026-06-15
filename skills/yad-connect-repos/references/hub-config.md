@@ -33,7 +33,9 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
 
 The roster is how a platform identity (a GitHub/GitLab **login**) becomes an SDLC **name + role(s)** in
 the file ledger (`approvals.json` / `comments.json`). Roles are the same three the gate uses:
-`owner | reviewer | domain-owner`.
+`owner | reviewer | domain-owner`. Populate and edit it any time with the **`yad roster`** CLI command
+(`list` / `add` / `grant` / `revoke` / `remove`) — `add` walks the connected repos asking for each
+one's role, and a `domain-owner` grant keeps `repos.json` `domain_owners` in sync.
 
 - **`login`** — the platform username whose PR review / approval is being mapped.
 - **`name`** — the SDLC name written into the ledger (the same names used across `approvals.json`,

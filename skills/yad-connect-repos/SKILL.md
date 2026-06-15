@@ -133,6 +133,10 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   `roles[<repo>]` (and still **derived** as a fallback when a roster `name` equals a repo's
   `domain_owner`/`domain_owners` in `repos.json` — see `references/hub-config.md`). An unmapped login
   degrades to a plain `reviewer`, never auto-promoted to owner/domain-owner.
+  **The deterministic half is the `yad roster` CLI command** — runnable any time, not just at setup:
+  `yad roster list`; `yad roster add <login>` (upsert, then a repo-driven walk that asks for each
+  connected repo's role); `yad roster grant|revoke <name> <repo> <role>`; `yad roster remove <login>`.
+  A `domain-owner` grant/revoke keeps `repos.json` `domain_owners` in sync so the gate never drifts.
 
 If the hub has no remote (`platform: null`) or the bridge is disabled, the front-half gate runs
 file-only with no error — the bridge is purely additive.

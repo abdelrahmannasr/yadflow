@@ -729,7 +729,8 @@ yad-connect-repos action: list                 # see every repo as fresh / stale
 yad-connect-repos action: refresh repo: backend  # re-pack after the code moved
 yad-connect-repos action: disconnect repo: backend
 yad-connect-repos action: detect-hub           # record the hub's GitHub/GitLab platform
-yad-connect-repos action: roster login: alice-gh name: alice email: alice@x.com roles: hub=owner,reviewer  # validated vs the hub</code></pre>
+yad roster add alice-gh --name alice --email alice@x.com --roles "hub=owner,reviewer"  # reviewer roster, any time (validated vs the hub)
+yad roster grant carol backend domain-owner    # per-repo role; keeps repos.json domain_owners in sync</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> During one-time setup, and again any time you add a new code repo. Re-run <code>refresh</code> when a skill warns a repo is stale. <strong>Greenfield with no code yet? Skip it entirely</strong> — the brain proceeds without it.</div>
   </div>
 
@@ -1074,6 +1075,20 @@ yad open-pr --repo backend --contract-change      # declares a locked-surface ch
 <pre><code>yad repo list
 yad repo refresh backend</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> <code>list</code> any time you wonder how current the brain’s picture is; <code>refresh</code> when a front-half step flags a stale repo before authoring against it.</div>
+  </div>
+
+  <h3>Reviewer roster</h3>
+
+  <div class="skillcard">
+    <h4><code>yad roster list | add | grant | revoke | remove</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Manages the reviewer roster in <code>hub.json</code> (platform login → SDLC name + per-scope roles) <em>any time</em>, not just during <code>yad setup</code>. <code>add</code> upserts a member then walks each connected repo asking for their role; <code>grant</code>/<code>revoke</code> set one directly. A <strong>domain-owner</strong> grant keeps <code>repos.json</code> <code>domain_owners</code> in sync, and <code>list</code> flags any drift between the two.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad roster list
+yad roster add carol-gh --name carol --email carol@x.com --roles "hub=reviewer backend=domain-owner"
+yad roster grant carol backend domain-owner       # one per-repo role; syncs repos.json
+yad roster revoke carol backend domain-owner
+yad roster remove carol-gh</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Setting up reviewers, onboarding a new team member, or fixing who owns a repo — without re-running the whole setup wizard.</div>
   </div>
 
   <h3>Global flags</h3>

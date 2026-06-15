@@ -11,11 +11,27 @@ import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, legacyRepoActions, legacyHubActions,
 } from './plan.mjs';
-import { validateLogin } from './platform.mjs';
+import { validateLogin, rolesForScope } from './platform.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
-function parseList(s) {
+export function parseList(s) {
   return [...new Set((s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean))];
+}
+
+// Parse a per-scope roles spec — `"hub=owner,reviewer backend=domain-owner"` — into the roster's
+// per-scope map `{ hub: ['owner','reviewer'], backend: ['domain-owner'] }`. Tokens are whitespace
+// separated; each is `scope=role[,role...]`. Malformed tokens (no `=`, empty scope/roles) are skipped.
+export function parseRolesSpec(s) {
+  const out = {};
+  for (const tok of (s || '').split(/\s+/).map((x) => x.trim()).filter(Boolean)) {
+    const eq = tok.indexOf('=');
+    if (eq < 0) continue;
+    const scope = tok.slice(0, eq).trim();
+    const roles = parseList(tok.slice(eq + 1));
+    if (!scope || !roles.length) continue;
+    out[scope] = [...new Set([...(out[scope] || []), ...roles])];
+  }
+  return out;
 }
 
 const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
@@ -66,6 +82,98 @@ export function addRepoRoles(root, repo, grants = {}) {
     }
   }
   if (touched) writeJSON(hubPath, hub);
+}
+
+// Normalize a roster entry's roles in place to the per-scope map, migrating the two legacy shapes
+// (a flat array, or a single `role` string) into `roles.hub` so nothing is lost. Mirrors the
+// migration addRepoRoles does; pulled out so upsert/remove share it.
+function normalizeRoles(entry) {
+  if (!entry.roles || typeof entry.roles !== 'object' || Array.isArray(entry.roles)) {
+    const hub = Array.isArray(entry.roles) ? entry.roles : (entry.role ? [entry.role] : []);
+    entry.roles = hub.length ? { hub } : {};
+    delete entry.role;
+  }
+  return entry.roles;
+}
+
+// Upsert one roster member into hub.json, keyed by `login`. Deep-merges the per-scope `roles` map so
+// scopes the caller did not name are preserved; sets `name`/`email` when given; validates the login
+// against the hub (warn-only — a miss flags `unverified`, `checked:false` skips silently). Creates the
+// hub.json shell if absent. Returns { entry, created }.
+export function upsertRosterEntry(root, { login, name, email, roles = {}, platform } = {}) {
+  if (!login) { warn('roster upsert needs a login — skipped'); return { entry: null, created: false }; }
+  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
+  if (!Array.isArray(hub.roster)) hub.roster = [];
+  let entry = hub.roster.find((e) => e.login === login);
+  const created = !entry;
+  if (!entry) { entry = { login, name: name || login, roles: {} }; hub.roster.push(entry); }
+  if (name) entry.name = name;
+  if (email) entry.email = email;
+  normalizeRoles(entry);
+  for (const [scope, list] of Object.entries(roles || {})) {
+    const cur = Array.isArray(entry.roles[scope]) ? entry.roles[scope] : [];
+    entry.roles[scope] = [...new Set([...cur, ...list])];
+  }
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warn(`'${email}' does not look like an email address`);
+  const plat = platform || hub.platform;
+  if (plat && plat !== 'none') {
+    const v = validateLogin(plat, login);
+    if (v.checked && !v.exists) { warn(`'${login}' not found on ${plat} — saved as unverified`); entry.unverified = true; }
+    else if (v.checked && v.exists) { ok(`verified ${login} on ${plat}`); delete entry.unverified; }
+  }
+  writeJSON(hubPath, hub);
+  return { entry, created };
+}
+
+// Inverse of addRepoRoles: drop the named role(s) from a member's `roles[<repo>]` scope, removing the
+// scope key when it empties. Member is found by yad `name` (matching addRepoRoles). Idempotent.
+export function removeRepoRole(root, name, repo, roles = []) {
+  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hub = readJSON(hubPath, null);
+  if (!hub || !Array.isArray(hub.roster)) return;
+  const entry = hub.roster.find((e) => e.name === name);
+  if (!entry) { warn(`'${name}' is not in the roster — nothing to revoke for ${repo}`); return; }
+  normalizeRoles(entry);
+  const cur = Array.isArray(entry.roles[repo]) ? entry.roles[repo] : [];
+  const next = cur.filter((r) => !roles.includes(r));
+  if (next.length === cur.length) return; // nothing removed
+  if (next.length) entry.roles[repo] = next; else delete entry.roles[repo];
+  writeJSON(hubPath, hub);
+}
+
+// Keep repos.json `domain_owners` in sync when a domain-owner role is granted/revoked via the roster,
+// so the gate's per-repo reviewer-routing and the derivation fallback never drift from hub.json. Adds
+// or removes the yad `name` and mirrors `domain_owner = domain_owners[0]`. No-op + warn if the repo is
+// not registered. Returns true when the registry was written.
+export function setRepoDomainOwners(root, repo, name, { add = true } = {}) {
+  const regPath = path.join(root, PROJECT_FILES.reposRegistry);
+  const registry = readJSON(regPath, { repos: [] });
+  const entry = (registry.repos || []).find((r) => r.name === repo);
+  if (!entry) { warn(`repo '${repo}' is not registered (.sdlc/repos.json) — domain_owners not synced`); return false; }
+  const owners = Array.isArray(entry.domain_owners) ? [...entry.domain_owners] : (entry.domain_owner ? [entry.domain_owner] : []);
+  const has = owners.includes(name);
+  let next;
+  if (add) { if (has) return false; next = [...owners, name]; }
+  else { if (!has) return false; next = owners.filter((o) => o !== name); }
+  entry.domain_owners = next;
+  entry.domain_owner = next[0] || '';
+  writeJSON(regPath, registry);
+  return true;
+}
+
+// Reconcile one repo's roles for a member to exactly `want`: grant what is new, revoke what is gone,
+// and mirror domain-owner changes into repos.json. `current` is the member's existing roles for the
+// repo. Shared by the `yad roster` walk and the `yad setup` per-repo role step. Idempotent.
+export function reconcileRepoRoles(root, name, repo, current = [], want = []) {
+  const toAdd = want.filter((r) => !current.includes(r));
+  const toRemove = current.filter((r) => !want.includes(r));
+  if (!toAdd.length && !toRemove.length) { info(`    ${repo}: unchanged`); return; }
+  if (toAdd.length) addRepoRoles(root, repo, Object.fromEntries(toAdd.map((r) => [r, [name]])));
+  if (toRemove.length) removeRepoRole(root, name, repo, toRemove);
+  if (toAdd.includes('domain-owner')) setRepoDomainOwners(root, repo, name, { add: true });
+  if (toRemove.includes('domain-owner')) setRepoDomainOwners(root, repo, name, { add: false });
+  ok(`    ${repo}: ${want.length ? want.join(', ') : 'cleared'}`);
 }
 
 export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', domain_owners = null, default_branch = 'main', today = null }) {
@@ -367,6 +475,24 @@ export async function runSetup(root, opts = {}) {
       known.add(name);
       ok(`registered ${name}`);
       packRepo(root, repo);
+    }
+  }
+
+  // 7b. Assign/update roles for ALREADY-connected repos. The connect loop above only prompts for the
+  // repos you add now; this closes the gap so a member's domain-owner/reviewer/owner role on a repo
+  // connected in an earlier run can be set without reconnecting. Mirrors `yad roster` (repo-driven).
+  const hub7 = readJSON(hubPath, null);
+  if (registry.repos.length && hub7 && Array.isArray(hub7.roster) && hub7.roster.length
+      && await askYesNo('Assign/update roles for connected repos?', false)) {
+    for (const member of hub7.roster) {
+      if (!(await askYesNo(`  edit ${member.name}'s repo roles?`, false))) continue;
+      for (const repo of registry.repos) {
+        const cur = rolesForScope(member, repo.name);
+        if (!(await askYesNo(`    set ${member.name}'s role on ${repo.name}? (current: ${cur.length ? cur.join(', ') : 'none'})`, false))) continue;
+        const input = await ask('      roles (domain-owner/reviewer/owner, space-separated; blank = clear)', cur.join(' '));
+        const want = parseList(input).filter((x) => ['owner', 'reviewer', 'domain-owner'].includes(x));
+        reconcileRepoRoles(root, member.name, repo.name, cur, want);
+      }
     }
   }
 

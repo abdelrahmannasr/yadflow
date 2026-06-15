@@ -195,7 +195,7 @@ yad-review-comments repo:<repo> action: wire   # installs the PR/MR review-comme
 
 ```text
 yad-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
-yad-connect-repos action: roster login:<gh-login> name:<yad-name> role:<owner|reviewer>   # once per reviewer
+yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
 yad-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
 yad-review-comments repo:hub action: wire                         # hub's review-comment scaffold
 yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
