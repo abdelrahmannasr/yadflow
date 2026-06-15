@@ -118,6 +118,9 @@ code_context:
                                                       # `yad repo refresh <repo>`) — they never silently
                                                       # re-pack. `yad repo list` shows fresh/stale;
                                                       # `yad repo refresh` and `yad check --fix` re-pack.
+  # `yad repo sync [<repo>]` (yad-sync-repos) switches every connected repo to its default_branch and
+  # fast-forwards it from origin before work starts — working-tree only (never writes the registry);
+  # a dirty repo is skipped, a diverged branch is left for manual resolution (fast-forward only).
   load_in_front_phases: true                          # epic, architecture, ui-design, stories read the maps
   # Auth: `yad-connect-repos` clones/fetches as the LOCAL user (SSH key or git credential helper),
   # works for both github and gitlab (and self-hosted), and stores NO tokens in the registry.

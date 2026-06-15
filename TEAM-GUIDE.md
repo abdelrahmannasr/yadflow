@@ -68,7 +68,8 @@ flowchart TD
       direction TB
       inst["install skills<br/>+ wire each repo"]
       conn["yad-connect-repos<br/>cache each repo's code-map"]
-      inst --> conn
+      sync["yad-sync-repos<br/>switch every repo to default branch + ff pull"]
+      inst --> conn --> sync
     end
 
     subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
@@ -163,7 +164,7 @@ npx yadflow setup
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
+         yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
@@ -245,7 +246,7 @@ You can start without any of them.
 git clone https://github.com/abdelrahmannasr/yadflow.git && cd yadflow
 mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
-         yad-connect-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
+         yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
@@ -395,7 +396,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 10. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 25)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 30)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -429,6 +430,6 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 25)*.
 
 ## 11. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 25 skills.
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 30 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.
