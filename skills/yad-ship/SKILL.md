@@ -1,6 +1,6 @@
 ---
 name: yad-ship
-description: 'Build-half helper of the gated SDLC — commit AND open the task PR/MR in one step. A thin orchestration over yad-commit then yad-open-pr: commit the staged atomic change by the conventions (Conventional-Commits subject, Task → Contract-Change → Co-Authored-By trailers, --ai footer, ≤3-file atomic guard), then push the branch and open the PR/MR from the committed template with the roster auto-assigned. The PR step runs ONLY if the commit lands (a failed commit, tripped guard, or --dry-run stops before pushing). Drives the `yad ship` CLI; never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR". (For the engineer review + merge, use yad-engineer-review.)'
+description: 'Build-half helper of the gated SDLC — commit AND open the task PR/MR in one step. A thin orchestration over yad-commit then yad-open-pr: commit the staged atomic change by the conventions (Conventional-Commits subject, Task → Contract-Change trailers, an OPTIONAL Co-Authored-By footer that is OFF by default and added only when --ai <id> is explicitly passed, ≤3-file atomic guard), then push the branch and open the PR/MR from the committed template with the roster auto-assigned. The PR step runs ONLY if the commit lands (a failed commit, tripped guard, or --dry-run stops before pushing). Drives the `yad ship` CLI; never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR". (For the engineer review + merge, use yad-engineer-review.)'
 ---
 
 # SDLC — Commit + Open PR/MR (build-half helper)
@@ -16,8 +16,8 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
   task branch with the atomic change **already staged** (`git add`).
 - Inherits every convention of the two steps it wraps:
   - Commit: subject `<type>: <lowercase imperative, no trailing period>`, fixed trailer order
-    `Task → Contract-Change → Co-Authored-By`, the `--ai` co-author footer, the ≤3-file atomic guard
-    (`../yad-commit/SKILL.md`).
+    `Task → Contract-Change → Co-Authored-By` (the footer **off by default** — added only via an explicit
+    `--ai`), the ≤3-file atomic guard (`../yad-commit/SKILL.md`).
   - PR/MR: pushed branch, the committed template prefilled, title defaulting to the commit subject,
     roster auto-assign, risk routing (`../yad-open-pr/SKILL.md`).
 - **Order matters:** the PR/MR is opened **only if the commit lands**. A failed commit, a tripped
@@ -26,7 +26,8 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
 ## Inputs
 
 - `type` / `message` — the commit type + subject (required), `--type <t> -m "<subject>"`.
-- `ai`              — co-author footer: `claude|copilot|cursor|coderabbit|none` (default `none`).
+- `ai`              — co-author footer: `claude|copilot|cursor|coderabbit|none` (default `none` = **no
+  footer**; the `Co-Authored-By` trailer appears only when this flag names a tool).
 - `task`           — Task trailer (optional; derived from the branch when omitted).
 - `contractChange` — flag; marks the contract surface touched (commit trailer + PR escalation).
 - `repo` / `risk` / `base` / `platform` / `title` — PR/MR options (see `yad-open-pr`).
@@ -54,6 +55,8 @@ the engineer review and merge are Step E (`yad-engineer-review`).
 ## Hard rules
 
 - **One staged atomic task = one commit = one PR/MR.** Never bundle; never open from the default branch.
+- **No AI footer by default.** The wrapped commit writes a `Co-Authored-By` trailer ONLY when `--ai <id>`
+  is explicitly passed; never add it on the AI's own initiative.
 - **No PR without a landed commit.** A failed/`--dry-run` commit stops the step before pushing.
 - **High risk routes to domain owners** — the same escalation as the gate.
 - **Shipping here never merges.** The human owns the merge in `yad-engineer-review`.
