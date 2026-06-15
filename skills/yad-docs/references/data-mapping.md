@@ -15,6 +15,27 @@ shell renders whatever these export, as long as it satisfies `src/data/types.ts`
 | `docSections.ts` | `DOC_SECTIONS: DocSectionConfig[]` | `epic.md`, `architecture.md`, `contract.md`, `ui-design.md`, `test-cases.md` | the ordered doc-section registry (`{ id, title, icon, iconColor, component }`); each section id is referenced from `roles.ts`. |
 | `referenceData.ts` | the reference tables/payloads the doc-section components render | `contract.md` CONTRACT-SURFACE (authoritative) + `architecture.md` + `test-cases.md` | API reference rows, the status machine, the DB schema, feature flags, error codes, the test plan — the structured data behind the doc sections. |
 
+## Canvas layout (`components.ts` `position`)
+
+`position` is `{ x, y }` in 0–100 (percent of the canvas). Lay the components out as a **hub-and-spoke
+organized into four zones** so the spokes fan out without crossing, rather than scattering nodes:
+
+- **Center** — the product hub (the brain).
+- **Top band** — the file ledger the hub owns (state / approvals / contract-lock), spread across one row.
+- **Left** — the code side: each connector with its external target just beyond it (`repos-json → code-repos`).
+- **Right** — the connected tools as a single aligned column: each connector on the inner edge with its
+  external tool on the same row just outside it (`design-json → Design Tool`, etc.).
+- **Bottom band** — publish / platform / evidence (docs / platform / trust-log).
+
+Layout constraints (the nodes are fixed-size cards, ~116×146px, so spacing is what prevents overlap):
+- Only **~4 rows** fit vertically — keep row centers **≥23% apart**; same-row neighbours **≥18% apart** in x.
+- Keep all nodes inside ~6–94% on each axis so no card clips the canvas edge (tool column ≤ ~88% x,
+  bottom band ≤ ~80% y).
+- Keep `label`s short (e.g. `Git Platform`, not `Platform (GitHub/GitLab)`) — a long label widens the
+  card and breaks the spacing.
+- The layout is **deterministic**: assign zones by role (ledger / code / tools / platform+evidence) and
+  order within a zone by stable id, so an unchanged architecture regenerates byte-identically.
+
 ## Section sources (the doc sections + their artifact)
 
 | Doc section(s) | Artifact source |

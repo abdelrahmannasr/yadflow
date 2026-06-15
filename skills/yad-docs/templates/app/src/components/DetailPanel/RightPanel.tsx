@@ -6,6 +6,7 @@ import { TriggerEventCard } from './TriggerEventCard';
 import { RequestPayloadPreview } from './RequestPayloadPreview';
 import { HandlerLogicSnippet } from './HandlerLogicSnippet';
 import { Icon } from '../shared/Icon';
+import { Tooltip } from '../shared/Tooltip';
 
 export function RightPanel() {
   const getCurrentStep = useFlowStore((s) => s.getCurrentStep);
@@ -68,19 +69,19 @@ export function RightPanel() {
             <Icon name="open_in_new" size={18} />
             View Full Path Details
           </button>
-          <button
-            onClick={() => console.log('Debug step:', step)}
-            className="w-full py-2.5 rounded-lg text-slate-300 text-sm font-medium border transition-colors flex items-center justify-center gap-2"
-            style={{
-              background: 'rgba(255,255,255,0.05)',
-              borderColor: 'rgba(255,255,255,0.05)',
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-          >
-            <Icon name="bug_report" size={18} />
-            Debug Step
-          </button>
+          <Tooltip content="Coming soon" className="w-full">
+            <button
+              disabled
+              className="w-full py-2.5 rounded-lg text-slate-300 text-sm font-medium border flex items-center justify-center gap-2 opacity-50 cursor-not-allowed"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                borderColor: 'rgba(255,255,255,0.05)',
+              }}
+            >
+              <Icon name="bug_report" size={18} />
+              Debug Step
+            </button>
+          </Tooltip>
         </div>
       )}
     </aside>
