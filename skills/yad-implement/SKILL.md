@@ -96,9 +96,9 @@ A contract change means the diff alters the agreed cross-repo shape itself.
 ### Step 6 — Commit on the task branch
 Stage only the declared files. Commit with the convention: a conventional subject, a short body, and a
 `Task: <story>-<task>` trailer (plus `Contract-Change: yes` if Step 5 applies). The human author owns the
-commit; if an AI tool helped author this diff, add its `Co-Authored-By:` line from
-`config.yaml` `build.ai_coauthor.allowed` (the `.gitmessage` template scaffolds the choices). Keep all
-trailers in one contiguous block. Do not commit sibling tasks' work.
+commit; **no `Co-Authored-By:` footer by default** — add one only when the human explicitly asks
+(`yad commit --ai <id>` / the `.gitmessage` choices from `config.yaml` `build.ai_coauthor.allowed`),
+never on the AI's own initiative. Keep all trailers in one contiguous block. Do not commit sibling tasks' work.
 
 ### Step 7 — Report; the advance decision belongs to the dial (Phase 4)
 Report: the branch name, the files changed, how the change satisfies the task's acceptance criterion,

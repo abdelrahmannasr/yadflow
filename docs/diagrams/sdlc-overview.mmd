@@ -10,11 +10,12 @@ flowchart TD
       inst["install.sh<br/>copy yad-* skills into IDE dirs"]
       wire["wire each repo:<br/>yad-checks · yad-pr-template · yad-review-comments"]
       conn["yad-connect-repos<br/>repos.json + cached code-map"]
+      sync["yad-sync-repos<br/>switch every repo to default branch + ff pull"]
       cdes["yad-connect-design<br/>design.json · Figma-first, pluggable"]
       ctest["yad-connect-testing<br/>testing.json · Playwright-first, pluggable"]
       clearn["yad-connect-learning<br/>learning.json · DeepTutor-first, pluggable"]
       phub["optional: hub on a platform<br/>detect-hub · roster"]
-      inst --> wire --> conn --> cdes --> ctest --> clearn --> phub
+      inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> phub
     end
 
     subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]

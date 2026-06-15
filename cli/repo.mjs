@@ -1,8 +1,10 @@
-// `yad repo list|refresh` — connected-repo staleness as an explicit HUMAN decision.
-// Skill steps no longer silently repack a stale repo; they flag it and point here. (`yad check --fix`
-// still refreshes too — it is also human-invoked.)
+// `yad repo list|refresh|sync` — connected-repo maintenance as explicit HUMAN decisions.
+// list/refresh: staleness of the cached code-context pack (HEAD != syncedHead). Skill steps no longer
+// silently repack a stale repo; they flag it and point here. (`yad check --fix` refreshes too — also
+// human-invoked.) sync: switch every connected repo to its registry default_branch and fast-forward
+// it to origin — a working-tree-only op (it never writes the registry; a dirty tree is skipped).
 import path from 'node:path';
-import { c, log, ok, info, warn, hand, fail, readJSON, writeJSON } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, readJSON, writeJSON, run } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 
@@ -16,6 +18,18 @@ function staleness(root, repo) {
   const head = gitHead(path.resolve(root, repo.path));
   const stale = head && repo.syncedHead && head !== repo.syncedHead;
   return { head, stale: !!stale, unknown: !head };
+}
+
+// ---- git helpers for `sync` (local-user auth only — never embed credentials) ----
+const git = (cwd, ...args) => run('git', args, { cwd });
+const hasRemote = (cwd, remote = 'origin') => git(cwd, 'remote', 'get-url', remote).ok;
+const isDirty = (cwd) => { const r = git(cwd, 'status', '--porcelain'); return r.ok && r.stdout.length > 0; };
+const currentBranch = (cwd) => { const r = git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD'); return r.ok ? r.stdout : null; };
+// Registry default_branch wins; else origin/HEAD; else 'main'.
+function defaultBranch(cwd, repo) {
+  if (repo.default_branch) return repo.default_branch;
+  const r = git(cwd, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD');
+  return r.ok && r.stdout ? r.stdout.replace(/^origin\//, '') : 'main';
 }
 
 export async function runRepo(root, { action = 'list', name, today } = {}) {
@@ -55,7 +69,44 @@ export async function runRepo(root, { action = 'list', name, today } = {}) {
     return { refreshed };
   }
 
-  fail(`unknown repo action: ${action} (list | refresh)`);
+  if (action === 'sync') {
+    const targets = name ? registry.repos.filter((r) => r.name === name) : registry.repos;
+    if (name && !targets.length) { fail(`unknown repo: ${name}`); process.exitCode = 1; return { synced: 0 }; }
+    log(c.bold('\nsync connected repos'));
+    let synced = 0, skipped = 0;
+    for (const repo of targets) {
+      const repoRoot = path.resolve(root, repo.path);
+      const tag = `${repo.name} ${c.dim(`(${repo.path})`)}`;
+      if (!gitHead(repoRoot)) { warn(`${tag} — not a git repo / HEAD unreadable — skipped`); skipped++; continue; }
+      if (isDirty(repoRoot)) { warn(`${repo.name} — ${c.yellow('dirty')} → SKIPPED (commit/stash first)`); skipped++; continue; }
+      const branch = defaultBranch(repoRoot, repo);
+      const remote = hasRemote(repoRoot);
+      if (remote) {
+        const f = git(repoRoot, 'fetch', 'origin', branch, '--prune');
+        if (!f.ok) { warn(`${repo.name} — fetch failed (${(f.stderr.split('\n')[0]) || 'auth?'}) — skipped`); skipped++; continue; }
+      }
+      if (currentBranch(repoRoot) !== branch) {
+        const co = git(repoRoot, 'checkout', branch);
+        if (!co.ok) { warn(`${repo.name} — cannot switch to ${branch} (${co.stderr.split('\n')[0] || 'no such branch'}) — skipped`); skipped++; continue; }
+      }
+      if (remote) {
+        const before = gitHead(repoRoot);
+        const m = git(repoRoot, 'merge', '--ff-only', `origin/${branch}`);
+        if (!m.ok) { warn(`${repo.name} — ${c.yellow('diverged')} on ${branch} → not fast-forwarded (resolve manually)`); skipped++; continue; }
+        ok(`${repo.name} ${c.dim('—')} ${before === gitHead(repoRoot) ? `already current on ${branch}` : `switched to ${branch}, pulled (ff)`}`);
+      } else {
+        ok(`${repo.name} ${c.dim('—')} on ${branch} (local-only, no remote)`);
+      }
+      synced++;
+    }
+    // A pulled repo's HEAD moves, so its cached code-context pack goes stale — point the human at refresh.
+    const staleCount = registry.repos.filter((r) => staleness(root, r).stale).length;
+    info(`synced ${synced}, skipped ${skipped}`);
+    if (staleCount) hand(`${staleCount} repo(s) now have a stale code-context pack — \`yad repo refresh\` to repack`);
+    return { synced, skipped, stale: staleCount };
+  }
+
+  fail(`unknown repo action: ${action} (list | refresh | sync)`);
   process.exitCode = 1;
   return {};
 }

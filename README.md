@@ -100,6 +100,7 @@ with `npx` from your **product hub** repo — no clone needed.
 | `yad open-pr [--repo <name>]` | Open a code-repo **task** PR/MR from the repo's platform template (build half). |
 | `yad ship --type <t> -m <subject>` | Commit **and** open the task PR/MR in one step (`yad commit` then `yad open-pr`). |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
+| `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
@@ -134,7 +135,7 @@ simultaneous advancements can be lost; the next event or scheduled sweep re-sync
 ### What `setup` walks you through (10 steps)
 
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy all 29 `yad-*` skills into the IDE skill dirs you pick
+2. **Install the module** — copy all 30 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    Edit the roster any time afterwards with `yad roster` (no need to re-run the whole wizard).
@@ -191,7 +192,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 29)
+## Agent skills (all 30)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -204,6 +205,11 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   `.sdlc/repos.json`, then caches an AI-readable picture of each — a compressed Repomix pack and a
   lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Idempotent and
   refreshable; staleness tracked by HEAD sha.
+- **`yad-sync-repos`** — Brings every connected repo up to date in one shot: switches each repo in
+  `.sdlc/repos.json` to its `default_branch` and fast-forwards it from origin (local-user git, no stored
+  tokens). A working-tree-only maintenance op — never a gate, never writes the registry. A dirty repo is
+  skipped and reported (never overwritten); a diverged branch is left for manual resolution. Drives
+  `yad repo sync [name]`.
 - **`yad-connect-design`** — Connects a design tool (Figma-first, pluggable) so the UI step can
   materialize the actual feature design (mobile screens / web pages) inside it, alongside the Markdown.
   Records the tool + project/file references in `.sdlc/design.json` (local-user / MCP-session auth, no

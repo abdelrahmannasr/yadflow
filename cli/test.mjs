@@ -643,6 +643,90 @@ test('repo refresh rejects an unknown repo name', async () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// `yad repo sync` — switch every connected repo to its default branch + fast-forward from origin
+// ---------------------------------------------------------------------------------------------
+const gc = (cwd, ...a) => git(cwd, '-c', 'user.email=a@b.c', '-c', 'user.name=x', ...a);
+
+// A repo wired to a bare origin, currently on a `feature` branch, with origin/main one commit AHEAD.
+function scaffoldSync() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-sync-'));
+  git(T, 'init', '-q');
+  git(T, 'init', '-q', '--bare', 'origin.git');
+  const origin = path.join(T, 'origin.git');
+  git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');  // so clones check out main, not master
+  const backend = path.join(T, 'demo/backend');
+  fs.mkdirSync(backend, { recursive: true });
+  git(backend, 'init', '-q');
+  fs.writeFileSync(path.join(backend, 'f.txt'), 'a');
+  gc(backend, 'add', '-A');
+  gc(backend, 'commit', '-q', '-m', 'init');
+  git(backend, 'branch', '-M', 'main');  // deterministic default-branch name
+  git(backend, 'remote', 'add', 'origin', origin);
+  git(backend, 'push', '-q', 'origin', 'main');
+  // advance origin/main via a throwaway second clone
+  git(T, 'clone', '-q', origin, 'other');
+  const other = path.join(T, 'other');
+  fs.writeFileSync(path.join(other, 'g.txt'), 'b');
+  gc(other, 'add', '-A');
+  gc(other, 'commit', '-q', '-m', 'advance');
+  git(other, 'push', '-q', 'origin', 'main');
+  git(backend, 'checkout', '-q', '-b', 'feature');  // start off the default branch
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: 'demo/backend', platform: null, default_branch: 'main' }],
+  }));
+  return { T, backend };
+}
+
+test('repo sync switches to the default branch and fast-forwards from origin', async () => {
+  const { T, backend } = scaffoldSync();
+  const r = await runRepo(T, { action: 'sync' });
+  assert.equal(r.synced, 1);
+  assert.equal(r.skipped, 0);
+  assert.equal(git(backend, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim(), 'main');
+  // local HEAD pulled up to the advanced origin tip
+  assert.equal(
+    git(backend, 'rev-parse', 'HEAD').toString().trim(),
+    git(backend, 'rev-parse', 'origin/main').toString().trim(),
+  );
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('repo sync skips a repo with a dirty working tree', async () => {
+  const { T, backend } = scaffoldSync();
+  fs.writeFileSync(path.join(backend, 'f.txt'), 'dirty change');
+  const before = git(backend, 'rev-parse', 'HEAD').toString().trim();
+  const r = await runRepo(T, { action: 'sync' });
+  assert.equal(r.synced, 0);
+  assert.equal(r.skipped, 1);
+  assert.equal(git(backend, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim(), 'feature'); // untouched
+  assert.equal(git(backend, 'rev-parse', 'HEAD').toString().trim(), before);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('repo sync switches a local-only repo (no remote) to its default branch', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-sync-'));
+  git(T, 'init', '-q');
+  const backend = path.join(T, 'demo/backend');
+  fs.mkdirSync(backend, { recursive: true });
+  git(backend, 'init', '-q');
+  fs.writeFileSync(path.join(backend, 'f.txt'), 'a');
+  gc(backend, 'add', '-A');
+  gc(backend, 'commit', '-q', '-m', 'init');
+  git(backend, 'branch', '-M', 'main');  // deterministic default-branch name
+  git(backend, 'checkout', '-q', '-b', 'feature');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: 'demo/backend', platform: null, default_branch: 'main' }],
+  }));
+  const r = await runRepo(T, { action: 'sync' });
+  assert.equal(r.synced, 1);
+  assert.equal(r.skipped, 0);
+  assert.equal(git(backend, 'rev-parse', '--abbrev-ref', 'HEAD').toString().trim(), 'main');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
 const { registerRepo, registerDesign, registerTesting, registerLearning, addRepoRoles } = await import('./setup.mjs');
