@@ -17,6 +17,23 @@ export function cliFor(platform) {
   return null;
 }
 
+// Bare host from a git remote URL, for hostname-scoped CLI auth checks. Handles both the
+// `https://[user@]host[:port]/...` and the scp-like `git@host:group/repo.git` forms. Returns
+// null when nothing parses (caller falls back to an unscoped check).
+export function hostFromGitUrl(url = '') {
+  if (typeof url !== 'string' || !url.trim()) return null;
+  const u = url.trim();
+  // scp-like syntax: [user@]host:path — only when there's no scheme and the colon precedes a path.
+  const scp = u.match(/^(?:[^@/]+@)?([^/:]+):(?!\/)/);
+  if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return scp[1].toLowerCase() || null;
+  try {
+    // URL needs a scheme to parse a host; ssh:// and https:// both work here.
+    return new URL(u).hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
 // Is the platform CLI present? (auth is the user's own; we don't probe it here.)
 export function platformReady(platform) {
   const cli = cliFor(platform);

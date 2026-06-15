@@ -8,7 +8,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSO
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
 import { loadLedger, epicRoot } from './epic-state.mjs';
 import { gitHead } from './setup.mjs';
-import { cliFor, validateLogin } from './platform.mjs';
+import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
 
 const MIN_NODE = 18;
 
@@ -68,8 +68,13 @@ export function projectChecks(checks, root) {
       // platform CLI + auth (best-effort; auth probing is the user's own session)
       const cli = cliFor(hub.platform);
       if (cli) {
+        // Scope the auth probe to the hub's own host (derived from git_url). `${cli} auth status`
+        // without --hostname exits non-zero when ANY configured instance fails, so an unrelated
+        // stale login (e.g. a dead gitlab.com token) would falsely flag a working self-hosted hub.
+        const host = hostFromGitUrl(hub.git_url);
+        const authArgs = host ? ['auth', 'status', '--hostname', host] : ['auth', 'status'];
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to file-only without it`);
-        else if (!run(cli, ['auth', 'status']).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated [YAD-ENV-002]`, `run \`${cli} auth login\``);
+        else if (!run(cli, authArgs).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated${host ? ` for ${host}` : ''} [YAD-ENV-002]`, `run \`${cli} auth login${host ? ` --hostname ${host}` : ''}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
           // Re-validate each roster login against the hub (warn-only). Skips when a login is already

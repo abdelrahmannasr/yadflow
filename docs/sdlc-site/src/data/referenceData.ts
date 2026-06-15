@@ -273,7 +273,7 @@ export const ERROR_CODES: ErrorCode[] = [
   {
     code: 'YAD-ENV-002',
     cause: 'Platform CLI (gh/glab) missing or not authenticated.',
-    resolution: 'Install it and authenticate (gh auth login / glab auth login); the gate degrades to file-only without it.',
+    resolution: 'Install it and authenticate to the hub\'s host (gh auth login / glab auth login --hostname <host>); the check is scoped to the hub host, so an unrelated stale login elsewhere will not trip it. The gate degrades to file-only without the CLI.',
     severity: 'warn',
     visibleTo: ALL,
   },
