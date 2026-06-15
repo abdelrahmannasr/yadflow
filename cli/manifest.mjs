@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = version;
 
-// The 29 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The 30 hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
   'yad-analysis',
   'yad-epic',
@@ -19,6 +19,7 @@ export const SKILLS = [
   'yad-stories',
   'yad-test-cases',
   'yad-connect-repos',
+  'yad-sync-repos',
   'yad-connect-design',
   'yad-connect-testing',
   'yad-connect-learning',
