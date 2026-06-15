@@ -42,6 +42,8 @@ yad-contract-check:
 yad-build-test-lint:
   extends: .sdlc_mr_only
   needs: []
+  variables:
+    YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:
     - bash checks/build-test-lint.sh
 
