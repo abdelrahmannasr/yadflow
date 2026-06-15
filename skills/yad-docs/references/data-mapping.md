@@ -18,7 +18,8 @@ shell renders whatever these export, as long as it satisfies `src/data/types.ts`
 ## Canvas layout (`components.ts` `position`)
 
 `position` is `{ x, y }` in 0–100 (percent of the canvas). Lay the components out as a **hub-and-spoke
-organized into four zones** so the spokes fan out without crossing, rather than scattering nodes:
+organized around a central hub into four surrounding zones** so the spokes fan out without crossing,
+rather than scattering nodes:
 
 - **Center** — the product hub (the brain).
 - **Top band** — the file ledger the hub owns (state / approvals / contract-lock), spread across one row.

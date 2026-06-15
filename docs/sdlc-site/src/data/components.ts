@@ -18,7 +18,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "Product Hub",
     icon: "🏛️",
     color: "#2471a3",
-    position: { x: 40, y: 39 },
+    position: { x: 40, y: 41 },
     description:
       "The product repo — the front-phase brain. Holds every epic's .sdlc ledger and the singular cross-repo contract.",
   },
@@ -27,7 +27,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "state.json",
     icon: "🧭",
     color: "#2471a3",
-    position: { x: 31, y: 4 },
+    position: { x: 31, y: 6 },
     description:
       "Per-epic state machine: currentStep, each step's assistance/automation dials, and front_steps_locked.",
   },
@@ -36,7 +36,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "approvals.json",
     icon: "✅",
     color: "#1e8449",
-    position: { x: 50, y: 4 },
+    position: { x: 50, y: 6 },
     description:
       "The recorded approvals ledger — owner + 1 reviewer per gate, hash-bound so a changed artifact drops them.",
   },
@@ -45,7 +45,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "contract-lock.json",
     icon: "🔒",
     color: "#566573",
-    position: { x: 69, y: 4 },
+    position: { x: 69, y: 6 },
     description:
       "SHA-256 of the CONTRACT-SURFACE block in contract.md — the hash-locked cross-repo surface.",
   },
@@ -54,7 +54,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "repos.json",
     icon: "🗂️",
     color: "#b7950b",
-    position: { x: 11, y: 27 },
+    position: { x: 11, y: 29 },
     description:
       "Project-wide registry of connected code repos (GitHub/GitLab, local-user auth, no stored tokens).",
   },
@@ -63,7 +63,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "Code Repos",
     icon: "📦",
     color: "#7d3c98",
-    position: { x: 11, y: 51 },
+    position: { x: 11, y: 53 },
     description:
       "The separate code repos (one .git each). Each is cached as a Repomix pack + a lightweight code-map.",
   },
@@ -72,7 +72,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "design.json",
     icon: "🎨",
     color: "#ca6f1e",
-    position: { x: 69, y: 27 },
+    position: { x: 69, y: 29 },
     description:
       "Design-tool connection (Figma-first, pluggable) so yad-ui can materialize screens, not just Markdown.",
   },
@@ -81,7 +81,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "testing.json",
     icon: "🧪",
     color: "#1e8449",
-    position: { x: 69, y: 51 },
+    position: { x: 69, y: 53 },
     description:
       "Testing-tool connection (Playwright-first) so yad-test-cases can implement the automation tests.",
   },
@@ -90,7 +90,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "learning.json",
     icon: "🎓",
     color: "#2471a3",
-    position: { x: 69, y: 74 },
+    position: { x: 69, y: 76 },
     description:
       "Learning-tool connection (DeepTutor-first, a CLI subprocess) powering the cross-cutting tutor layer.",
   },
@@ -99,7 +99,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "docs.json",
     icon: "📘",
     color: "#566573",
-    position: { x: 11, y: 74 },
+    position: { x: 11, y: 76 },
     description:
       "Docs/Pages publishing target (github-pages / gitlab-pages / build-only), auto-detected from hub.json.",
   },
@@ -108,7 +108,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "Design Tool",
     icon: "🖌️",
     color: "#ca6f1e",
-    position: { x: 85, y: 27 },
+    position: { x: 85, y: 29 },
     description:
       "The connected design tool (Figma / Pencil), reached via its MCP; degrades to markdown-only when absent.",
   },
@@ -117,7 +117,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "Testing Tool",
     icon: "🎭",
     color: "#1e8449",
-    position: { x: 85, y: 51 },
+    position: { x: 85, y: 53 },
     description:
       "The connected testing tool (Playwright / Cypress / pytest), reached via its MCP; degrades to artifacts-only.",
   },
@@ -126,7 +126,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "DeepTutor",
     icon: "🧠",
     color: "#2471a3",
-    position: { x: 85, y: 74 },
+    position: { x: 85, y: 76 },
     description:
       "The learning tutor (DeepTutor CLI on PATH); degrades to harness-native tutoring when absent — always opt-in.",
   },
@@ -135,7 +135,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "Git Platform",
     icon: "🌐",
     color: "#7d3c98",
-    position: { x: 31, y: 74 },
+    position: { x: 31, y: 76 },
     description:
       "The hub's git platform. The front-half review rides a real review PR/MR here; CI runs the check gates.",
   },
@@ -144,7 +144,7 @@ export const COMPONENTS: SystemComponent[] = [
     label: "trust-log.json",
     icon: "📈",
     color: "#b7950b",
-    position: { x: 49, y: 74 },
+    position: { x: 49, y: 76 },
     description:
       "Every back-half run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation.",
   },
