@@ -89,7 +89,7 @@ export function validateLogin(platform, login) {
   const r = run('glab', ['api', `users?username=${encodeURIComponent(login)}`]);
   if (!r.ok) return { ok: false, exists: false, checked: true };
   let exists = false;
-  try { exists = Array.isArray(JSON.parse(r.stdout)) && JSON.parse(r.stdout).length > 0; } catch { exists = false; }
+  try { exists = Array.isArray(JSON.parse(r.stdout)) && JSON.parse(r.stdout).length > 0; } catch { /* malformed JSON -> exists stays false */ }
   return { ok: exists, exists, checked: true };
 }
 
