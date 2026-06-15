@@ -1062,7 +1062,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs } = await import('./platform.mjs');
 
 test('detectPlatform / cliFor', () => {
   assert.equal(detectPlatform('git@github.com:o/r.git'), 'github');
@@ -1070,6 +1070,18 @@ test('detectPlatform / cliFor', () => {
   assert.equal(detectPlatform('file:///local'), null);
   assert.equal(cliFor('github'), 'gh');
   assert.equal(cliFor('gitlab'), 'glab');
+});
+
+test('hostFromGitUrl parses https, ssh, and scp-like remotes', () => {
+  assert.equal(hostFromGitUrl('https://github.com/o/r.git'), 'github.com');
+  assert.equal(hostFromGitUrl('https://user@gitlab.zadapps.info/g/r.git'), 'gitlab.zadapps.info');
+  assert.equal(hostFromGitUrl('git@gitlab.zadapps.info:group/repo.git'), 'gitlab.zadapps.info');
+  assert.equal(hostFromGitUrl('ssh://git@gitlab.example.com:2222/g/r.git'), 'gitlab.example.com');
+  assert.equal(hostFromGitUrl('https://GitLab.COM/o/r.git'), 'gitlab.com');
+  // Nothing parseable -> null, so the caller falls back to an unscoped check.
+  assert.equal(hostFromGitUrl(''), null);
+  assert.equal(hostFromGitUrl(null), null);
+  assert.equal(hostFromGitUrl('not a url'), null);
 });
 
 test('resolveLogin derives a domain-owner record for a touched repo', () => {
