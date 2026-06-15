@@ -113,12 +113,12 @@ const setupSteps: FlowStep[] = [
     id: "detect-hub",
     title: "Detect Hub & Roster",
     description:
-      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + role) into hub.json. With the bridge enabled, the front-half review runs through a real PR/MR.",
+      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With the bridge enabled, the front-half review runs through a real PR/MR.",
     actor: "system",
     status: "connected",
     stepState: ".sdlc/hub.json",
     trigger: "yad-connect-repos action: detect-hub",
-    handler: "yad-connect-repos (detect-hub) / roster",
+    handler: "yad-connect-repos (detect-hub) / yad roster",
     activeComponents: ["product-hub", "platform", "repos-json"],
     messages: [
       { id: "dh-1", from: "platform", to: "product-hub", label: "detect platform + roster", type: "write", color: "#7d3c98", delay: 0, duration: 800 },

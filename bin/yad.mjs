@@ -10,6 +10,7 @@ import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { runShip } from '../cli/ship.mjs';
 import { runRepo } from '../cli/repo.mjs';
+import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 
@@ -23,6 +24,14 @@ ${c.bold('Setup & maintenance')}
                        also migrates pre-2.0 sdlc-* installs to the yad-* names
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
+
+${c.bold('Reviewer roster')}
+  yad roster list                      Show every member + their roles per scope (hub + each repo)
+  yad roster add <login>               Add/edit a member, then walk the connected repos for their roles
+                                       (--name, --email, --roles "hub=owner,reviewer backend=domain-owner")
+  yad roster grant <name> <repo> <role...>   Grant role(s) for a connected repo (domain-owner|reviewer|owner)
+  yad roster revoke <name> <repo> <role...>  Remove role(s) for a repo
+  yad roster remove <login>            Delete a member from the roster
 
 ${c.bold('Review gate (front half)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
@@ -66,7 +75,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -145,6 +154,11 @@ async function main() {
     case 'repo': {
       const [, action, name] = o._;
       await runRepo(o.dir, { action: action || 'list', name, today });
+      break;
+    }
+    case 'roster': {
+      const [, action, ...rest] = o._;
+      await runRoster(o.dir, { action: action || 'list', args: rest, name: o.name, email: o.email, roles: o.roles, today });
       break;
     }
     case 'docs': {

@@ -243,6 +243,7 @@ export const CLI_COMMANDS: CliCommand[] = [
   { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: install the module, detect the hub, connect tools + repos.', visibleTo: ALL },
   { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed.', visibleTo: ALL },
   { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI).', visibleTo: ALL },
+  { constant: 'ROSTER', value: 'yad roster', target: 'setup', category: 'setup', description: 'Manage the reviewer roster + per-repo roles any time: list / add (repo-driven walk) / grant / revoke / remove. Domain-owner grants sync repos.json.', visibleTo: ALL },
   { constant: 'GATE', value: 'yad gate open|sync', target: 'setup', category: 'front', description: 'Drive the front-half review PR/MR; sync approvals into the ledger and auto-advance on merge.', visibleTo: ALL },
   { constant: 'COMMIT', value: 'yad commit', target: 'build', category: 'build', description: 'Commit one staged atomic change by the conventions (subject + trailers + ≤3-file guard).', visibleTo: BUILD },
   { constant: 'OPEN_PR', value: 'yad open-pr', target: 'build', category: 'build', description: 'Open a code-repo task PR/MR from the committed platform template.', visibleTo: BUILD },

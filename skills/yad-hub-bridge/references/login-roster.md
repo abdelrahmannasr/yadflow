@@ -3,6 +3,7 @@
 The roster lives in `.sdlc/hub.json` (`roster: [...]`) and is the only thing that turns a platform
 **login** into an SDLC **name + role** for the ledger. Schema and the no-tokens rule are documented once
 in `../../yad-connect-repos/references/hub-config.md`; this file covers how the bridge *uses* it.
+It is populated/edited any time with the `yad roster` CLI command (see that reference).
 
 ## Entry
 

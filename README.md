@@ -90,6 +90,7 @@ with `npx` from your **product hub** repo — no clone needed.
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched). |
 | `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads. Exit 1 on any failure; `--json` for CI and bug reports. |
+| `yad roster list` / `yad roster add <login>` | Manage the reviewer roster + per-repo roles **any time** (not just at setup). `add` upserts a member then walks each connected repo asking for their role; `grant`/`revoke <name> <repo> <role>` and `remove <login>` round it out. A `domain-owner` grant keeps `repos.json` `domain_owners` in sync. |
 | `yad gate open <epic> <artifact>` | Open the front-half **review PR/MR** for an artifact and mark the step `in_review`. |
 | `yad gate sync <epic> [artifact]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
@@ -136,6 +137,7 @@ simultaneous advancements can be lost; the next event or scheduled sweep re-sync
 2. **Install the module** — copy all 29 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
+   Edit the roster any time afterwards with `yad roster` (no need to re-run the whole wizard).
 4. **Connect a design tool** — record the design tool (Figma / pencil / none) → `.sdlc/design.json` so
    the UI step can materialize the design; the MCP itself is confirmed later by `yad-connect-design`.
 5. **Connect a testing tool** — record the testing tool (Playwright / cypress / pytest / none) →
@@ -388,9 +390,10 @@ detailed sections below expand every phase. Invoke a skill by name in your agent
    `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
    (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
 7. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
-   `yad-connect-repos action: detect-hub`, then `action: roster` once per reviewer (login → SDLC
-   name + role), and `yad-pr-template repo:hub action: wire` / `yad-review-comments repo:hub action:
-   wire` / `yad-checks repo:hub action: wire`. With no hub platform the front gate just runs file-only.
+   `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
+   SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
+   sets one directly), and `yad-pr-template repo:hub action: wire` / `yad-review-comments repo:hub
+   action: wire` / `yad-checks repo:hub action: wire`. With no hub platform the front gate runs file-only.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](CONTRIBUTING.md).
