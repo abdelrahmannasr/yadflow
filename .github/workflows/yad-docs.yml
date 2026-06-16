@@ -25,7 +25,7 @@ jobs:
       - name: Build the overview + per-epic sites into ./public
         run: |
           mkdir -p public
-          if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && cp -r docs/sdlc-site/dist/. public/; fi
+          if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html; fi
           for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v3

@@ -43,11 +43,12 @@ export function deployTargetFromHub(hub = {}) {
 }
 
 // The Vite `base` for one site: join the project base path (from docs.json) with the per-site
-// subpath. Per-epic sites nest under epics/<id>/; the overview is the Pages root. Always a
+// subpath. The overview SPA mounts under `app/` so the hand-maintained report.html can own the
+// Pages root (`<base>/`) as the main documentation; per-epic sites nest under epics/<id>/. Always a
 // leading+trailing slash so it works as a Vite base and a router basename.
 export function siteBasePath(docs = {}, { epic, overview } = {}) {
   const root = (docs.basePath || '/').replace(/\/+$/, '') || '';
-  const sub = overview ? '' : epic ? `/epics/${epic}` : '';
+  const sub = overview ? '/app' : epic ? `/epics/${epic}` : '';
   const joined = `${root}${sub}`.replace(/\/+/g, '/');
   return joined ? `${joined.replace(/\/$/, '')}/` : '/';
 }
@@ -113,12 +114,13 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, templateVers
 
 // ---- pure: the Pages CI workflow (committed by `yad docs sync --wire`) ---------------------------
 // GitHub Actions deploy-pages, or a GitLab `pages` job. Both assemble a single `public/` tree: the
-// overview at the root and every per-epic site under `epics/<id>/` — matching siteBasePath's nesting
-// (overview at `<base>/`, epics at `<base>/epics/EP-<slug>/`). A concurrency group prevents the
+// hand-maintained report.html owns the root (`<base>/` — the main documentation), the overview SPA
+// mounts under `app/`, and every per-epic site nests under `epics/<id>/` — matching siteBasePath
+// (overview at `<base>/app/`, epics at `<base>/epics/EP-<slug>/`). A concurrency group prevents the
 // deploy from retriggering. The shared shell script keeps the two platforms byte-for-byte aligned.
 const BUILD_PUBLIC = [
   'mkdir -p public',
-  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && cp -r docs/sdlc-site/dist/. public/; fi',
+  'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html; fi',
   'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done',
 ];
 export function pagesWorkflow(platform) {

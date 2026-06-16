@@ -1927,14 +1927,15 @@ test('deployTargetFromHub maps platform (and git_url) to a Pages target', () => 
   assert.equal(deployTargetFromHub({}), 'none');
 });
 
-test('siteBasePath nests per-epic under the project base; overview is the base root', () => {
-  assert.equal(siteBasePath({ basePath: '/yadflow/' }, { overview: true }), '/yadflow/');
+test('siteBasePath nests per-epic under the project base; the overview SPA mounts under app/', () => {
+  // the overview SPA sits under <base>/app/ so the hand-maintained report.html can own the root
+  assert.equal(siteBasePath({ basePath: '/yadflow/' }, { overview: true }), '/yadflow/app/');
   assert.equal(siteBasePath({ basePath: '/yadflow/' }, { epic: 'EP-foo' }), '/yadflow/epics/EP-foo/');
   assert.equal(siteBasePath({ basePath: '/' }, { epic: 'EP-foo' }), '/epics/EP-foo/');
-  assert.equal(siteBasePath({}, { overview: true }), '/');
+  assert.equal(siteBasePath({}, { overview: true }), '/app/');
   // a basePath WITHOUT a trailing slash must not double-slash or drop the join
   assert.equal(siteBasePath({ basePath: '/foo' }, { epic: 'EP-x' }), '/foo/epics/EP-x/');
-  assert.equal(siteBasePath({ basePath: '/foo' }, { overview: true }), '/foo/');
+  assert.equal(siteBasePath({ basePath: '/foo' }, { overview: true }), '/foo/app/');
 });
 
 test('siteDir / manifestPath resolve per-epic vs overview locations', () => {
@@ -1994,6 +1995,9 @@ test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop
   assert.match(gh, /epics\/\*\/docs-site/);
   assert.match(gh, /public\/epics\/\$id/);
   assert.match(gh, /path: public/);
+  // the overview SPA mounts under public/app and the report.html owns the root (index.html + report.html)
+  assert.match(gh, /public\/app/);
+  assert.match(gh, /report\.html public\/index\.html/);
   assert.equal(pagesWorkflowPath('github'), '.github/workflows/yad-docs.yml');
   const gl = pagesWorkflow('gitlab');
   assert.match(gl, /^pages:/m);

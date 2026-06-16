@@ -1,6 +1,6 @@
 ---
 name: yad-docs-overview
-description: 'Generates the project-level SDLC-overview interactive site — the same React/Vite/Tailwind shell as the per-epic docs — showing every yadflow stage from setup → ship: the pipeline as a flow canvas, each skill/gate as a flow step, the durable .sdlc state objects as system components, and the lenses as stakeholder roles. Themed with yadflow''s own brand palette for continuity, built from config.yaml + module-help.csv + the overview diagram. Folds the legacy hand-maintained docs/index.html report into the site as report.html (linked from the nav) and deploys via `yad docs deploy --overview`. This is project documentation, not a gated state — it never touches any epic''s state or approvals. Use when the user says "generate the overview site", "build the SDLC overview docs", or after the pipeline (module-help.csv / config.yaml / skill count) changes.'
+description: 'Generates the project-level SDLC-overview interactive site — the same React/Vite/Tailwind shell as the per-epic docs — showing every yadflow stage from setup → ship: the pipeline as a flow canvas, each skill/gate as a flow step, the durable .sdlc state objects as system components, and the lenses as stakeholder roles. Themed with yadflow''s own brand palette for continuity, built from config.yaml + module-help.csv + the overview diagram. The hand-maintained report is the MAIN documentation at the Pages root (report.html, also served as index.html); the interactive SPA mounts under `app/` and is reached from it (and links back). Deploys via `yad docs deploy --overview`. This is project documentation, not a gated state — it never touches any epic''s state or approvals. Use when the user says "generate the overview site", "build the SDLC overview docs", or after the pipeline (module-help.csv / config.yaml / skill count) changes.'
 ---
 
 # SDLC — Author the Overview Site (project-level, the pipeline as a living map)
@@ -8,8 +8,10 @@ description: 'Generates the project-level SDLC-overview interactive site — the
 **Goal:** Render the **whole yadflow pipeline** — every stage from setup → ship — as an interactive site,
 reusing the same shell as the per-epic docs (`skills/yad-docs/templates/app/`). Where `yad-docs`
 animates one epic's flows, this animates the **workflow itself**: the front gates, the build half, the
-automation dial, the setup connectors. It is the regenerable successor to the hand-maintained
-overview report, which is folded into this site as `public/report.html`.
+automation dial, the setup connectors. The hand-maintained overview report stays the **main
+documentation at the Pages root** (`<base>/`, served from `public/report.html` and `public/index.html`);
+this interactive SPA mounts under `<base>/app/` and is reached from the report — the report links
+forward to `app/`, the app links back to the report root.
 
 This is **project documentation, not a gated state** — there is no epic, no `state.json`, no approvals.
 It only reads the pipeline definition and writes a project-level site. When a docs target is connected
@@ -70,7 +72,8 @@ determinism rules as `yad-docs`: stable-ID sort by skill pipeline order / phase,
 timestamps in the data files), theme the `:root` of `index.css` from **yadflow's brand palette** — the
 the legacy report's `:root`: `--accent: #2471a3` and the node colors (`--artifact-*`, `--gate-*`,
 `--earns-*`, `--locked-*`, `--sentinel-*`) — and substitute the Vite base from `.sdlc/docs.json`
-`basePath` (the overview sits at the base root, e.g. `/<repo>/`).
+`basePath` **with `app/` appended** (the SPA mounts under `<base>/app/`, e.g. `/<repo>/app/`, so the
+report can own the root). `siteBasePath(docs, { overview: true })` in `cli/docs.mjs` computes this.
 
 ### Step 4 — Write the overview build manifest (the staleness baseline)
 Write `docs/sdlc-site/.docs-build.json` — `yad-docs-sync` compares against it:
@@ -91,13 +94,16 @@ doc-shell upgrade triggers a rebuild). `skillCount` rides along in the manifest 
 — it is **not** a separate hash input, since `module-help.csv` already moves whenever the skill set does.
 Not per-epic artifacts/repo heads.
 
-### Step 5 — Fold the legacy report into the site
-Relocate the hand-maintained static report into the generated site as `docs/sdlc-site/public/report.html`
-(Vite copies `public/` verbatim into `dist/`, so it publishes alongside the app at `<base>/report.html`),
-and link it from the app nav (a "Full report" link in `TopNavBar`). The interactive overview becomes the
-primary documentation and the legacy report rides along as its detailed companion — no orphaned
-`docs/index.html` at the repo root. This generalizes the standing rule that feature work hand-updates the
-report: the overview site now **regenerates** instead.
+### Step 5 — The report is the main documentation; the SPA is reached from it
+The hand-maintained static report lives at `docs/sdlc-site/public/report.html` and is the **primary
+documentation at the Pages root**. The deploy (`BUILD_PUBLIC` in `cli/docs.mjs`, mirrored by the Pages CI
+workflow) copies it to **both** `public/index.html` (the landing `<base>/`) and `public/report.html`
+(so the `<base>/report.html` URL keeps working), and copies the built SPA into `public/app/`. Wire the
+two cross-links: the report links **forward** to the interactive map with a relative `app/` href (its
+hero CTA); the app's `TopNavBar` "Full report" link points **back** to the report root
+(`import.meta.env.BASE_URL` with the trailing `app/` stripped). No orphaned `docs/index.html` at the repo
+root. This generalizes the standing rule that feature work hand-updates the report: the overview SPA now
+**regenerates** instead, while the report stays the front door.
 
 ### Step 6 — Build / deploy (`action`)
 - `action: generate` (default) — generate source + manifest; stop.
@@ -106,8 +112,9 @@ report: the overview site now **regenerates** instead.
 
 ### Step 7 — Stop. Report (no gate, no epic)
 Report: the site path (`docs/sdlc-site/`), the data files produced, that the theme is the yadflow brand
-palette, the deploy URL or "build-only", the staleness baseline, and that the legacy report is folded in
-at `public/report.html` (linked from the nav). Never touches any epic state.
+palette, the deploy URL or "build-only", the staleness baseline, and that the report is the main
+documentation at `<base>/` (`public/index.html` + `public/report.html`) with the interactive SPA mounted
+under `<base>/app/` and cross-linked. Never touches any epic state.
 
 ## Hard rules
 
