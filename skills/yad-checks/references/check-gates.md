@@ -24,6 +24,8 @@ repo uses. Each reads conventions established by earlier steps — it invents no
   or `test` (optional `(scope)` / breaking `!`) **PASSes** without a link — CI wiring, dependency
   bumps, and test-infra changes legitimately link no story.
 - For every other commit, requires a `Task: <story>-<task>` trailer. **FAIL** if absent.
+- The trailer must be a well-formed `<story>-T<NN>` id. **FAIL** on a malformed trailer (e.g.
+  `EP-demo-S01` with no `-T<NN>`) rather than letting it slip through the suffix-strip.
 - Strips the `-T<NN>` suffix from the task to get `<story>` and requires `specs/<story>/link.md` to
   exist. **FAIL** if missing.
 - An empty range (no non-merge commits) **PASSes**.

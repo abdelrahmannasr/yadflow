@@ -42,6 +42,14 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
+  # The trailer must be a real <story>-T<NN> id. Without this guard a malformed trailer
+  # (e.g. 'EP-demo-S01' with no -T<NN>) would survive the suffix-strip unchanged and PASS
+  # whenever specs/<that>/link.md happens to exist.
+  if ! printf '%s' "$task" | grep -qE '.+-T[0-9]+$'; then
+    echo "FAIL [spec-link]: ${short} '${subject}' has a malformed Task trailer '${task}' (expected <story>-T<NN>)."
+    rc=1
+    continue
+  fi
   story="$(printf '%s' "$task" | sed -E 's/-T[0-9]+$//')"
   if [ -f "specs/${story}/link.md" ]; then
     echo "PASS [spec-link]: ${short} ${task} -> specs/${story}/link.md"

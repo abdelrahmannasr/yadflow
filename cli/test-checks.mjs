@@ -108,6 +108,20 @@ test('spec-link gate: Task trailer with no link.md fails', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('spec-link gate: malformed Task trailer (no -T<NN>) fails even if specs/<task>/link.md exists', () => {
+  const T = scaffoldRepo();
+  // 'EP-demo-S01' has no -T<NN> task suffix; it must be rejected as malformed, not pass
+  // just because a specs/EP-demo-S01/link.md happens to exist.
+  commit(T, 'feat: add thing\n\nTask: EP-demo-S01', {
+    'src/thing.js': 'x',
+    'specs/EP-demo-S01/link.md': 'story: EP-demo-S01\n',
+  });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 1, 'malformed trailer must fail');
+  assert.match(r.out, /malformed Task trailer 'EP-demo-S01' \(expected <story>-T<NN>\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('spec-link gate: one linked + one unlinked story in range still fails', () => {
   const T = scaffoldRepo();
   commit(T, 'feat: linked\n\nTask: EP-demo-S01-T01', {
