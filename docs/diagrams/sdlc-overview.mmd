@@ -1,4 +1,4 @@
-flowchart TD
+flowchart LR
     classDef gated fill:#fdebd0,stroke:#ca6f1e,color:#000
     classDef earns fill:#d6eaf8,stroke:#2471a3,color:#000
     classDef locked fill:#eaecee,stroke:#566573,color:#000,stroke-dasharray:5 3
@@ -59,6 +59,8 @@ flowchart TD
 
     phub --> an
     rfb --> sp
+    merged -. story pipeline repeats · next story .-> sp
+    merged -. next epic · front pipeline repeats .-> ep
     run -. drives earned back steps .-> im
     bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
     bridge -. syncs approvals .-> gEp
