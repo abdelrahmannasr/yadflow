@@ -28,13 +28,16 @@ export function CommandPalette() {
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen, toggle]);
 
-  // Reset on open
-  useEffect(() => {
+  // Reset on open — adjust state during render (not inside an effect) so it does
+  // not trigger an extra cascading render (react-hooks/set-state-in-effect).
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen);
     if (isOpen) {
       setQuery('');
       setSelectedIndex(0);
     }
-  }, [isOpen]);
+  }
 
   const results = useMemo(() => {
     if (!query.trim()) {

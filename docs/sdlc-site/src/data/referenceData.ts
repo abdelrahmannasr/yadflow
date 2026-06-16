@@ -119,8 +119,8 @@ export const CHECK_GATES: CheckGate[] = [
   {
     name: 'spec-link',
     queue: 'yad-checks',
-    timing: 'on every change',
-    description: 'Every change must link a real story/spec via its Task: trailer.',
+    timing: 'per commit',
+    description: 'Every non-maintenance commit must link a real story/spec via its Task: trailer — checked per commit; ci/chore/build/test maintenance commits are exempt.',
     triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
     visibleTo: ALL,
   },

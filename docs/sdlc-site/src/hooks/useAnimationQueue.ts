@@ -9,13 +9,22 @@ export function useAnimationQueue() {
   const [animKey, setAnimKey] = useState(0);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // When step changes, reset and schedule completion events
+  // Reset the pulse state the instant the step (or speed) changes — done during
+  // render via the "adjust state on change" pattern rather than inside the effect,
+  // so it does not trigger an extra cascading render (react-hooks/set-state-in-effect).
+  const stepKey = `${activeStepIndex}-${speed}`;
+  const [resetKey, setResetKey] = useState(stepKey);
+  if (stepKey !== resetKey) {
+    setResetKey(stepKey);
+    setCompletedTargets(new Set());
+    setAnimKey((k) => k + 1);
+  }
+
+  // When step changes, schedule the target-pulse completion events.
   useEffect(() => {
     // Clear previous timers
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
-    setCompletedTargets(new Set());
-    setAnimKey((k) => k + 1);
 
     // Get messages from the current step
     const step = useFlowStore.getState().getCurrentStep();

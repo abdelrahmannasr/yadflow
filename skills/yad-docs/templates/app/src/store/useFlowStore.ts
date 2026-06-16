@@ -26,6 +26,8 @@ interface FlowStore {
   isReferencePanelOpen: boolean;
   isCommandPaletteOpen: boolean;
   isLogsPanelOpen: boolean;
+  isLeftPanelOpen: boolean;
+  isRightPanelOpen: boolean;
 
   // Logs
   logs: LogEntry[];
@@ -57,6 +59,8 @@ interface FlowStore {
   toggleReferencePanel: () => void;
   toggleCommandPalette: () => void;
   toggleLogsPanel: () => void;
+  toggleLeftPanel: () => void;
+  toggleRightPanel: () => void;
 
   // Logs
   addLog: (entry: Omit<LogEntry, 'id' | 'timestamp'>) => void;
@@ -90,6 +94,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   isReferencePanelOpen: false,
   isCommandPaletteOpen: false,
   isLogsPanelOpen: false,
+  isLeftPanelOpen: true,
+  isRightPanelOpen: true,
   logs: [],
   elapsedTime: 0,
 
@@ -157,6 +163,8 @@ export const useFlowStore = create<FlowStore>((set, get) => ({
   toggleReferencePanel: () => set((s) => ({ isReferencePanelOpen: !s.isReferencePanelOpen })),
   toggleCommandPalette: () => set((s) => ({ isCommandPaletteOpen: !s.isCommandPaletteOpen })),
   toggleLogsPanel: () => set((s) => ({ isLogsPanelOpen: !s.isLogsPanelOpen })),
+  toggleLeftPanel: () => set((s) => ({ isLeftPanelOpen: !s.isLeftPanelOpen })),
+  toggleRightPanel: () => set((s) => ({ isRightPanelOpen: !s.isRightPanelOpen })),
 
   // Logs
   addLog: (entry) => {

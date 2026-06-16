@@ -30,7 +30,7 @@ export function usePlayback() {
     return () => {
       if (elapsedRef.current) clearInterval(elapsedRef.current);
     };
-  }, [playbackState]);
+  }, [playbackState, tickElapsed, resetElapsed]);
 
   // Generate logs on step change
   useEffect(() => {
@@ -56,7 +56,7 @@ export function usePlayback() {
         });
       }, msg.delay / speed);
     }
-  }, [activeStepIndex, speed]);
+  }, [activeStepIndex, speed, addLog, getCurrentSteps]);
 
   useEffect(() => {
     if (playbackState !== "playing") {
@@ -96,5 +96,5 @@ export function usePlayback() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [playbackState, activeStepIndex, speed, animatingMessages]);
+  }, [playbackState, activeStepIndex, speed, animatingMessages, getCurrentSteps, nextStep, setAnimatingMessages]);
 }

@@ -12,6 +12,7 @@ export function RightPanel() {
   const getCurrentStep = useFlowStore((s) => s.getCurrentStep);
   const activeStepIndex = useFlowStore((s) => s.activeStepIndex);
   const selectedPath = useFlowStore((s) => s.selectedPath);
+  const toggleRightPanel = useFlowStore((s) => s.toggleRightPanel);
   const navigate = useNavigate();
   const step = getCurrentStep();
 
@@ -29,7 +30,14 @@ export function RightPanel() {
         <h3 className="text-slate-100 text-sm font-bold font-display uppercase tracking-wider">
           Step Details
         </h3>
-        <Icon name="close" size={20} className="text-slate-500 cursor-pointer hover:text-white" />
+        <button
+          onClick={toggleRightPanel}
+          title="Collapse panel"
+          aria-label="Collapse step-details panel"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+        >
+          <Icon name="right_panel_close" size={18} />
+        </button>
       </div>
 
       {!step ? (
