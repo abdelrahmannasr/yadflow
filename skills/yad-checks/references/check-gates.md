@@ -18,10 +18,17 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 
 ## 1. spec-link (`templates/checks/spec-link.sh`)
 
-- Collects the `Task:` trailers across `<base>..HEAD`.
-- **FAIL** if there is no `Task:` trailer (the change does not link a story/spec).
-- For each `Task: <story>-<task>`, strips the `-T<NN>` suffix to get `<story>` and requires
-  `specs/<story>/link.md` to exist. **FAIL** if missing.
+- Checks every non-merge commit in `<base>..HEAD` **per commit** (not aggregated across the range),
+  so the report names each offending commit and one bad commit never masks the rest.
+- Maintenance commits are **exempt**: a Conventional-Commits subject of type `ci`, `chore`, `build`,
+  or `test` (optional `(scope)` / breaking `!`) **PASSes** without a link — CI wiring, dependency
+  bumps, and test-infra changes legitimately link no story.
+- For every other commit, requires a `Task: <story>-<task>` trailer. **FAIL** if absent.
+- The trailer must be a well-formed `<story>-T<NN>` id. **FAIL** on a malformed trailer (e.g.
+  `EP-demo-S01` with no `-T<NN>`) rather than letting it slip through the suffix-strip.
+- Strips the `-T<NN>` suffix from the task to get `<story>` and requires `specs/<story>/link.md` to
+  exist. **FAIL** if missing.
+- An empty range (no non-merge commits) **PASSes**.
 - Portable across bash 3.2 (macOS) and 4+ (no `mapfile`).
 - **Fails closed** when `<base>` can't be resolved (so a shallow clone / wrong base never PASSes blind).
 

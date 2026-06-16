@@ -9,7 +9,14 @@
 # pipeline's default stage regardless of any `stages:` order the foreign root defines — a foreign
 # `stages:` list can neither break them nor reorder them. Job names are yad-prefixed to avoid
 # colliding with the host project's own job names.
-default:
+#
+# `image:`/`tags:` live on the .sdlc_mr_only anchor below — NOT a top-level `default:`. An included
+# top-level `default:` merges into the HOST root pipeline; if the host already sets a top-level
+# `image:`, GitLab rejects the whole config ("image is defined in top-level and 'default:' entry").
+# Putting them on the anchor scopes them to the gate jobs (which all `extends: .sdlc_mr_only`) and
+# never touches the host root.
+
+.sdlc_mr_only:
   image: node:20
   # Runner selection. These jobs need a docker/dind executor; on instances whose runners are all
   # tag-locked (run_untagged: false) an untagged image job never starts. Set the YAD_RUNNER_TAGS
@@ -19,8 +26,6 @@ default:
   # instead strand it `pending` — if so, set the variable to a real tag. Single value only:
   # `tags: [$VAR]` is one tag equal to the whole variable, not a comma-split.
   tags: [$YAD_RUNNER_TAGS]
-
-.sdlc_mr_only:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
@@ -45,6 +50,7 @@ yad-build-test-lint:
   variables:
     YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:
+    - npm ci
     - bash checks/build-test-lint.sh
 
 # Pattern gates: commit subject + MR title + MR body all follow the convention (profile: code).
