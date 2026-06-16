@@ -43,15 +43,6 @@ export const StepList = () => {
     }
   };
 
-  // Reset expanded state when active step changes externally (playback)
-  const prevActiveRef = { current: activeStepIndex };
-  if (prevActiveRef.current !== activeStepIndex) {
-    prevActiveRef.current = activeStepIndex;
-    if (expandedIndex !== null && expandedIndex !== activeStepIndex) {
-      // Auto-expand the new active step during playback
-    }
-  }
-
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between mb-2">
