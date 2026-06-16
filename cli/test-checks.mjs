@@ -67,7 +67,7 @@ test('spec-link gate: Task trailer resolving to specs/<story>/link.md passes', (
   });
   const r = runGate(SPEC_LINK, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /PASS \[spec-link\]: EP-demo-S01-T01 -> specs\/EP-demo-S01\/link\.md/);
+  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ EP-demo-S01-T01 -> specs\/EP-demo-S01\/link\.md/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -76,7 +76,26 @@ test('spec-link gate: commit without a Task trailer fails', () => {
   commit(T, 'feat: unlinked change', { 'src/thing.js': 'x' });
   const r = runGate(SPEC_LINK, T);
   assert.equal(r.code, 1, 'unlinked change must fail');
-  assert.match(r.out, /no 'Task: <story>-<task>' trailer/);
+  assert.match(r.out, /has no 'Task:' trailer/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: maintenance commit (ci/chore/build/test) is exempt', () => {
+  const T = scaffoldRepo();
+  // No Task trailer, no spec — a chore commit must still PASS (CI wiring / dep bumps link no story).
+  commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'chore\(deps\): bump x' — maintenance commit \(exempt\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: empty range (no non-merge commits) passes', () => {
+  const T = scaffoldRepo();
+  // feature branch is even with main — nothing to check.
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS \[spec-link\]: no non-merge commits/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -98,8 +117,8 @@ test('spec-link gate: one linked + one unlinked story in range still fails', () 
   commit(T, 'feat: unlinked\n\nTask: EP-ghost-S01-T01', { 'src/b.js': 'y' });
   const r = runGate(SPEC_LINK, T);
   assert.equal(r.code, 1, 'any unlinked task in the range must fail the gate');
-  assert.match(r.out, /PASS \[spec-link\]: EP-demo-S01-T01/);
-  assert.match(r.out, /FAIL \[spec-link\]: EP-ghost-S01-T01/);
+  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ EP-demo-S01-T01/);
+  assert.match(r.out, /FAIL \[spec-link\]: [0-9a-f]+ EP-ghost-S01-T01/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
