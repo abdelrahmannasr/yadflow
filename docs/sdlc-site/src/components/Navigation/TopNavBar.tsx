@@ -58,10 +58,8 @@ export function TopNavBar() {
             Docs
           </button>
           <a
-            href={`${import.meta.env.BASE_URL}report.html`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="The full static SDLC report"
+            href={import.meta.env.BASE_URL.replace(/app\/$/, '') || '/'}
+            title="Back to the full static SDLC report (the main documentation)"
             className="flex items-center justify-center px-4 py-2 rounded-full text-slate-300 text-sm font-medium transition-colors"
             onMouseEnter={(e) => e.currentTarget.style.background = 'var(--color-surface-highlight)'}
             onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
