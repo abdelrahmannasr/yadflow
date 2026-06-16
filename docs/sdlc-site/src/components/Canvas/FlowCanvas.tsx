@@ -81,6 +81,25 @@ export const FlowCanvas: React.FC = () => {
 
   const messages = currentStep?.messages || [];
 
+  // The loop-back arc: trust-log → product-hub, swept below the pipeline to read
+  // as "the pipeline repeats per epic" (the SDLC is a repeated cycle, not one pass).
+  const loopBack = useMemo(() => {
+    if (dims.width === 0) return null;
+    const a = COMPONENTS.find((c) => c.id === 'trust-log');
+    const b = COMPONENTS.find((c) => c.id === 'product-hub');
+    if (!a || !b) return null;
+    const x1 = (a.position.x / 100) * dims.width;
+    const y1 = (a.position.y / 100) * dims.height;
+    const x2 = (b.position.x / 100) * dims.width;
+    const y2 = (b.position.y / 100) * dims.height;
+    const yb = dims.height * 0.985;
+    return {
+      d: `M ${x1} ${y1} C ${x1} ${yb}, ${x2} ${yb}, ${x2} ${y2}`,
+      labelX: (x1 + x2) / 2,
+      labelY: dims.height * 0.92,
+    };
+  }, [dims]);
+
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
       {/* Canvas Header Overlay */}
@@ -165,6 +184,33 @@ export const FlowCanvas: React.FC = () => {
                 containerHeight={dims.height}
               />
             ))}
+
+            {/* Loop-back: the pipeline repeats per epic */}
+            {loopBack && (
+              <g>
+                <path
+                  d={loopBack.d}
+                  fill="none"
+                  stroke="#ff6490"
+                  strokeWidth={1.5}
+                  strokeDasharray="6 5"
+                  opacity={0.55}
+                  markerEnd="url(#arrowhead)"
+                />
+                <text
+                  x={loopBack.labelX}
+                  y={loopBack.labelY}
+                  textAnchor="middle"
+                  fontSize={12}
+                  fontWeight={700}
+                  letterSpacing={0.6}
+                  fill="#ff8db0"
+                  opacity={0.85}
+                >
+                  ↺ pipeline repeats per epic
+                </text>
+              </g>
+            )}
           </svg>
         )}
 
