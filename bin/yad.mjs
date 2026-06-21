@@ -13,6 +13,7 @@ import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
+import { runNext } from '../cli/next.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -32,6 +33,12 @@ ${c.bold('Reviewer roster')}
   yad roster grant <name> <repo> <role...>   Grant role(s) for a connected repo (domain-owner|reviewer|owner)
   yad roster revoke <name> <repo> <role...>  Remove role(s) for a repo
   yad roster remove <login>            Delete a member from the roster
+
+${c.bold('Where am I / what next')}
+  yad next                             Project-wide: the one next action to take (or run setup)
+  yad next <epic>                      The single next action for one epic (skill or yad command)
+  yad next <epic> --check <step>       Exit 0 if <step> is runnable now, else 1 (precondition guard)
+  yad next --all                       Every active epic's next action at once
 
 ${c.bold('Review gate (front half)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
@@ -86,7 +93,10 @@ function parseArgs(argv) {
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--overview') o.overview = true;
-    else if (a === '--check') o.check = true;
+    // `--check` is a bare boolean for `docs sync --check`, but takes a value for
+    // `next <epic> --check <step>`. Consume the next token only when it is a real value.
+    else if (a === '--check') { const v = argv[i + 1]; o.check = (v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
+    else if (a === '--all') o.all = true;
     else if (a === '--refresh') o.refresh = true;
     else if (a === '--wire') o.wire = true;
     else if (a === '--dry-run') o.dryRun = true;
@@ -128,6 +138,11 @@ async function main() {
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
       break;
+    case 'next': {
+      const [, epic] = o._;
+      await runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all });
+      break;
+    }
     case 'gate': {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).

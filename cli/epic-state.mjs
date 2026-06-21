@@ -235,4 +235,73 @@ export function markInReview(state, step) {
   return state;
 }
 
+// The front authoring step a `yad next` action maps to — the skill the user invokes for that step.
+// Review (review+approve) steps are driven by the `yad gate` CLI, not a skill, so they are not here.
+export const STEP_SKILL = {
+  analysis: 'yad-analysis',
+  epic: 'yad-epic',
+  architecture: 'yad-architecture',
+  'ui-design': 'yad-ui',
+  stories: 'yad-stories',
+  'test-cases': 'yad-test-cases',
+};
+
+// PURE precondition guard. Is `stepId` runnable right now? A step is runnable iff every step BEFORE it
+// in the chain is `done` and the step itself is not already `done`. With no state yet (greenfield), the
+// only runnable steps are the entry authoring steps (analysis | epic). Used by `yad next --check`
+// (the Phase B rail) and by the driver. No FS / network.
+export function preconditionsMet(state, stepId) {
+  if (!state || !Array.isArray(state.steps)) {
+    const ok = stepId === 'epic' || stepId === 'analysis';
+    return { ok, blockedBy: null, reason: ok ? 'entry step (no epic seeded yet)' : `start with yad-epic — no epic state for '${stepId}'` };
+  }
+  const i = state.steps.findIndex((s) => s.id === stepId);
+  if (i === -1) return { ok: false, blockedBy: null, reason: `unknown step '${stepId}'` };
+  if (state.steps[i].status === 'done') return { ok: false, blockedBy: null, reason: `${stepId} is already done` };
+  const blocker = state.steps.slice(0, i).find((s) => s.status !== 'done');
+  if (blocker) return { ok: false, blockedBy: blocker.id, reason: `${blocker.id} has not passed yet` };
+  return { ok: true, blockedBy: null, reason: 'ready' };
+}
+
+// PURE next-action resolver for ONE epic's ledger — what `yad next <epic>` prints. Reads state + the
+// recorded review PRs only. kind:
+//   'new'         — no epic state yet (seed one with yad-epic)
+//   'author'      — invoke a front authoring skill (STEP_SKILL)
+//   'review-open' — open the review PR/MR (`yad gate open`)
+//   'review-sync' — a review PR/MR is open; sync its state (`yad gate sync`)
+//   'build'       — front half approved (ready-for-build); the build half can run
+export function nextAction(ledger, { epic } = {}) {
+  const state = ledger?.state;
+  const epicId = epic || state?.epicId || null;
+  if (!state) return { epicId, kind: 'new', skill: 'yad-epic', why: 'no epic state yet — seed it with yad-epic' };
+
+  // The parallel test-cases track stays workable even once the epic is ready-for-build.
+  const tc = state.steps.find((s) => s.id === 'test-cases');
+  const tcOpen = !!tc && tc.status !== 'done' && tc.status !== 'blocked';
+  const parallel = tcOpen ? { step: 'test-cases', skill: STEP_SKILL['test-cases'], artifact: tc.artifact } : null;
+
+  if (state.currentStep === 'ready-for-build') {
+    return { epicId, kind: 'build', step: 'ready-for-build', status: 'ready-for-build', parallel,
+      why: 'front half approved — the build half can run' };
+  }
+
+  const step = state.steps.find((s) => s.id === state.currentStep)
+    || state.steps.find((s) => s.status !== 'done');
+  if (!step) return { epicId, kind: 'build', step: 'ready-for-build', parallel, why: 'all front steps are done' };
+
+  if (step.type === 'author') {
+    return { epicId, kind: 'author', step: step.id, status: step.status, parallel,
+      skill: STEP_SKILL[step.id] || null, artifact: step.artifact,
+      why: `${step.id} is ${step.status} — author ${step.artifact}` };
+  }
+
+  // review+approve: open the review PR if none is recorded yet, else sync the open one.
+  const pr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(step.artifact));
+  const verb = pr ? 'sync' : 'open';
+  return { epicId, kind: pr ? 'review-sync' : 'review-open', step: step.id, status: step.status,
+    artifact: step.artifact, pr: pr ? pr.number : null, parallel,
+    command: `yad gate ${verb} ${epicId} ${step.artifact}`,
+    why: pr ? `review PR #${pr.number} is open — sync its state to advance` : `${step.id} is open — create the review PR/MR` };
+}
+
 export { writeJSON };

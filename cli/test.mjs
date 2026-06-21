@@ -322,7 +322,7 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 // ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
-const { gatePredicate, artifactHash } = await import('./epic-state.mjs');
+const { gatePredicate, artifactHash, nextAction, preconditionsMet } = await import('./epic-state.mjs');
 
 const baseStep = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
 const escStep = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
@@ -364,6 +364,71 @@ test('gatePredicate: escalated step needs a domain-owner per touched repo', () =
   approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'domain-owner', domain: 'mobile', artifactHash: 'sha256:C' });
   const pass = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true });
   assert.equal(pass.passed, true);
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
+// ---------------------------------------------------------------------------------------------
+const S = (id, type, status, artifact, extra = {}) => ({ id, type, status, artifact, risk_tags: [], ...extra });
+// A small front chain at an arbitrary point: epic, epic-review, architecture, architecture-review.
+const chain = (overrides) => ({
+  epicId: 'EP-x',
+  currentStep: overrides.currentStep,
+  steps: [
+    S('epic', 'author', overrides.epic ?? 'done', 'epic.md'),
+    S('epic-review', 'review+approve', overrides.epicReview ?? 'done', 'epic.md'),
+    S('architecture', 'author', overrides.architecture ?? 'blocked', 'architecture.md'),
+    S('architecture-review', 'review+approve', overrides.architectureReview ?? 'blocked', 'architecture.md'),
+  ],
+});
+
+test('preconditionsMet: greenfield (no state) — epic is the entry step, architecture is not', () => {
+  assert.equal(preconditionsMet(null, 'epic').ok, true);
+  assert.equal(preconditionsMet(null, 'architecture').ok, false);
+});
+
+test('preconditionsMet: current step runnable, downstream blocked, done step not re-runnable', () => {
+  const state = chain({ currentStep: 'architecture', architecture: 'in_progress' });
+  assert.equal(preconditionsMet(state, 'architecture').ok, true);
+  const blocked = preconditionsMet(state, 'architecture-review');
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.blockedBy, 'architecture');
+  assert.equal(preconditionsMet(state, 'epic').ok, false); // already done
+  assert.equal(preconditionsMet(state, 'nope').ok, false); // unknown
+});
+
+test('nextAction: author step → invoke the mapped skill', () => {
+  const a = nextAction({ state: chain({ currentStep: 'architecture', architecture: 'in_progress' }), hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(a.kind, 'author');
+  assert.equal(a.skill, 'yad-architecture');
+  assert.equal(a.artifact, 'architecture.md');
+});
+
+test('nextAction: review step with no PR → open; with a PR → sync', () => {
+  const state = chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' });
+  const open = nextAction({ state, hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(open.kind, 'review-open');
+  assert.equal(open.command, 'yad gate open EP-x epic.md');
+  const sync = nextAction({ state, hubPrs: [{ artifact: 'epic.md', number: 7 }] }, { epic: 'EP-x' });
+  assert.equal(sync.kind, 'review-sync');
+  assert.equal(sync.command, 'yad gate sync EP-x epic.md');
+  assert.equal(sync.pr, 7);
+});
+
+test('nextAction: ready-for-build → build; an open test-cases track is surfaced as parallel', () => {
+  const base = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
+  assert.equal(nextAction({ state: base, hubPrs: [] }).kind, 'build');
+  assert.equal(nextAction({ state: base, hubPrs: [] }).parallel, null);
+  const withTc = { ...base, steps: [...base.steps, S('test-cases', 'author', 'in_progress', 'test-cases.md')] };
+  const a = nextAction({ state: withTc, hubPrs: [] });
+  assert.equal(a.kind, 'build');
+  assert.equal(a.parallel.skill, 'yad-test-cases');
+});
+
+test('nextAction: no state → kind new (seed with yad-epic)', () => {
+  const a = nextAction({ state: null, hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(a.kind, 'new');
+  assert.equal(a.skill, 'yad-epic');
 });
 
 // ---------------------------------------------------------------------------------------------
