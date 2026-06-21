@@ -85,6 +85,11 @@ function loadHub(root) {
   return { hub, repos: registry.repos };
 }
 
+// Solo mode (a lone developer): waive the approval requirement — on GitHub you cannot approve your own
+// PR, so an approval gate would deadlock. The review PR/MR and its merge stay (CI runs on the PR; the
+// merge advances the step). Recorded per-project in hub.json by `yad setup`.
+const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+
 // Re-add this step's bridge approvals from the current platform state (drop+re-add => dismissals and
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
 // reviewer first approved against unless their review is newer (a genuine re-approval) — that is what
@@ -159,6 +164,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
   const platform = hub.platform;
   const roster = hub.roster || [];
   const defaultReviewers = 1;
+  const solo = isSolo(hub);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
@@ -195,7 +201,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
 
     const pred = gatePredicate({
       step, approvals, currentHash: curHash, touchedDomains: domains,
-      defaultReviewers, threadsResolved, merged: pull.merged,
+      defaultReviewers, threadsResolved, merged: pull.merged, solo,
     });
 
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule})`)}`);
@@ -382,7 +388,8 @@ export async function gateStatus(root, { epic } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
-  log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}`)}`);
+  const solo = isSolo(loadHub(root).hub);
+  log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const cur = artifactHash(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !(a.artifactHash && cur && a.artifactHash !== cur));

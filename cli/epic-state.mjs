@@ -158,6 +158,7 @@ export function gatePredicate({
   defaultReviewers = 1,
   threadsResolved = true,
   merged = true,
+  solo = false,
 }) {
   const forStep = approvals.filter((a) => a.step === step.id && a.status === 'approved');
   // Revoke-on-change: an approval bound to a stale content hash no longer counts.
@@ -168,19 +169,24 @@ export function gatePredicate({
   const reviewers = uniqueBy(live.filter((a) => a.role === 'reviewer'), 'approver');
   const domainOwners = live.filter((a) => a.role === 'domain-owner');
 
-  const missing = [];
-  if (owners.length < 1) missing.push('1 owner approval');
-  if (reviewers.length < defaultReviewers) {
-    missing.push(`${defaultReviewers - reviewers.length} reviewer approval(s)`);
-  }
   const escalate = isEscalated(step);
-  if (escalate) {
-    for (const d of touchedDomains) {
-      if (!domainOwners.some((a) => a.domain === d)) missing.push(`domain-owner for ${d}`);
+  const missing = [];
+  // Solo mode waives the APPROVAL requirements entirely (you can't approve your own PR on GitHub) —
+  // merge + resolved threads are what advance the step. Team mode is unchanged.
+  if (!solo) {
+    if (owners.length < 1) missing.push('1 owner approval');
+    if (reviewers.length < defaultReviewers) {
+      missing.push(`${defaultReviewers - reviewers.length} reviewer approval(s)`);
+    }
+    if (escalate) {
+      for (const d of touchedDomains) {
+        if (!domainOwners.some((a) => a.domain === d)) missing.push(`domain-owner for ${d}`);
+      }
     }
   }
   const approvalsSatisfied = missing.length === 0;
-  if (stale.length) missing.unshift(`${stale.length} approval(s) revoked — artifact changed; re-approve`);
+  // A stale approval only matters when approvals are required (team mode); in solo they are moot.
+  if (!solo && stale.length) missing.unshift(`${stale.length} approval(s) revoked — artifact changed; re-approve`);
   if (!threadsResolved) missing.push('unresolved review comments');
   if (!merged) missing.push('review PR/MR not merged');
 
@@ -191,7 +197,7 @@ export function gatePredicate({
     staleDropped: stale.length,
     passed: approvalsSatisfied && threadsResolved && merged,
     missing,
-    rule: escalate ? (step.id === 'stories-review' ? 'per-repo' : 'escalated') : 'base',
+    rule: solo ? 'solo' : escalate ? (step.id === 'stories-review' ? 'per-repo' : 'escalated') : 'base',
   };
 }
 

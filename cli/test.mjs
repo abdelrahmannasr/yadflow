@@ -366,6 +366,27 @@ test('gatePredicate: escalated step needs a domain-owner per touched repo', () =
   assert.equal(pass.passed, true);
 });
 
+test('gatePredicate: solo waives approvals — merged + resolved passes with zero approvals', () => {
+  const p = gatePredicate({ step: baseStep, approvals: [], currentHash: 'sha256:H1', merged: true, threadsResolved: true, solo: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'solo');
+});
+
+test('gatePredicate: solo still requires the merge and resolved threads', () => {
+  const unmerged = gatePredicate({ step: baseStep, approvals: [], merged: false, threadsResolved: true, solo: true });
+  assert.equal(unmerged.passed, false);
+  assert.ok(unmerged.missing.includes('review PR/MR not merged'));
+  const unresolved = gatePredicate({ step: baseStep, approvals: [], merged: true, threadsResolved: false, solo: true });
+  assert.equal(unresolved.passed, false);
+  assert.ok(unresolved.missing.includes('unresolved review comments'));
+});
+
+test('gatePredicate: solo passes an escalated step without any domain-owner approvals', () => {
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true, threadsResolved: true, solo: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'solo');
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
 // ---------------------------------------------------------------------------------------------

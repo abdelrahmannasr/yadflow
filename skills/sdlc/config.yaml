@@ -31,6 +31,14 @@ defaults:
 # Team review gate defaults (build plan §3 piece 2, §4).
 review_gate:
   default_reviewers: 1          # non-owner reviewers required (in addition to 1 owner) => owner + 1 reviewer
+  # Solo mode (a lone developer): a relaxed, opt-in safety guarantee, recorded per-project in
+  # .sdlc/hub.json (`solo: true`). On GitHub you CANNOT approve your own PR, so requiring an approval
+  # would deadlock a solo user. Solo waives the APPROVAL requirement only — the review PR/MR and its
+  # MERGE stay (CI still runs on the PR, and the merge is what advances the step). Net: the gate passes
+  # on `merged + all comment threads resolved`, no approval needed. NOT a default; team gates are
+  # unchanged. (Branch protection must not "require approvals", or the solo dev's own merge is blocked —
+  # `yad doctor` warns when it does.)
+  solo: false
   escalate_when: [contract, auth, payments]   # escalate to domain owners
   # PR-driven automation (the `yad gate` CLI). With a hub platform, the review rides the per-step
   # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
