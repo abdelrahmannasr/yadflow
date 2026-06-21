@@ -1087,6 +1087,17 @@ test('registerRepo records multiple domain_owners, keeping domain_owner as the f
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('registerRepo with pack:false (greenfield) leaves syncedHead null and reads as needs-pack', async () => {
+  const { T } = scaffold(); // scaffold registers `backend` with syncedHead == HEAD (fresh)
+  const registry = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+  const repo = registerRepo(T, registry, { name: 'gf', rpath: 'demo/backend', platform: 'github', pack: false });
+  assert.equal(repo.syncedHead, null, 'no pack produced => no synced HEAD claimed');
+  // The fresh `backend` is not flagged; the never-packed `gf` is — so `yad repo list` reports 1 to refresh.
+  const r = await runRepo(T, { action: 'list' });
+  assert.equal(r.stale, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('addRepoRoles grants per-repo roles into the roster map and warns on unknown names', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roles-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });

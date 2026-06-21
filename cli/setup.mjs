@@ -176,7 +176,7 @@ export function reconcileRepoRoles(root, name, repo, current = [], want = []) {
   ok(`    ${repo}: ${want.length ? want.join(', ') : 'cleared'}`);
 }
 
-export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', domain_owners = null, default_branch = 'main', today = null }) {
+export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', domain_owners = null, default_branch = 'main', today = null, pack = true }) {
   if (!insideRoot(root, rpath)) {
     warn(`${rpath} resolves outside the project root — skipped`);
     return null;
@@ -198,7 +198,10 @@ export function registerRepo(root, registry, { name, rpath, platform, domain_own
     name, path: rpath, git_url: (remote.ok && remote.stdout) || null, platform: plat,
     domain_owner: owners[0] || '', domain_owners: owners, default_branch,
     connectedAt: today, lastSyncedAt: today,
-    syncedHead: head,
+    // Only claim a synced HEAD when a pack is actually produced. The greenfield path skips packing
+    // (pack:false), so leave syncedHead null — the repo then reads as "needs an initial pack" in
+    // `yad repo list` / `yad doctor` instead of falsely "fresh".
+    syncedHead: pack ? head : null,
     contextPack: `.sdlc/code-context/${name}/pack.md`,
     codeMap: `.sdlc/code-context/${name}/code-map.md`,
     source: 'repomix',
@@ -586,7 +589,7 @@ export async function runSetup(root, opts = {}) {
       const repoReviewers = solo || mono ? [] : parseList(await ask('    repo reviewer(s) (yad names, space-separated; blank to skip)', ''));
       const repoOwners = solo || mono ? [] : parseList(await ask('    repo owner(s) (yad names, space-separated; blank to skip)', ''));
       const default_branch = await ask('    default branch', 'main');
-      const repo = registerRepo(root, registry, { name, rpath, platform, domain_owners, default_branch, today: opts.today ?? null });
+      const repo = registerRepo(root, registry, { name, rpath, platform, domain_owners, default_branch, today: opts.today ?? null, pack: !greenfield });
       if (!repo) continue;
       addRepoRoles(root, name, { 'domain-owner': domain_owners, reviewer: repoReviewers, owner: repoOwners });
       known.add(name);
