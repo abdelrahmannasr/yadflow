@@ -28,11 +28,10 @@ engine (never typed by hand); front steps are locked to `human_approve`.
 ### Step 1 — Get the idea
 Ask the user for a one-line feature idea if not provided.
 
-**Precondition gate (rail):** analysis is the optional first entry point and seeds state exactly once,
-so it must run on a clean slate. If `.sdlc/state.json` already exists for the target epic, run
-`yad next EP-<slug> --check analysis` — it will exit non-zero (analysis was already seeded, or the epic
-is past it); **STOP** and point the user at `yad next EP-<slug>`. When no `state.json` exists yet,
-proceed and seed state.
+**Precondition gate (rail):** analysis is the optional first entry point and seeds state exactly once.
+If `.sdlc/state.json` already exists for the target epic, run `yad next EP-<slug> --check analysis`; if it
+exits non-zero, **STOP** and point the user at `yad next EP-<slug>` (the epic is past analysis). If it
+exits zero, resume analysis for that epic. When no `state.json` exists yet, proceed and seed state.
 
 ### Step 2 — Shape the idea (assist: analyst)
 Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) to pressure-test the idea in depth: who is the

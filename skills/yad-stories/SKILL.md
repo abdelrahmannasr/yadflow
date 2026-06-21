@@ -30,8 +30,8 @@ Resolve the `EP-<slug>` (ask if not provided).
 **STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
 it passes.
 
-This passes only when `currentStep == "stories"` and that step's `status == "in_progress"` (the UI
-review must already have passed).
+This passes when `stories` is the next runnable step per the state sequence — every prior step
+(through the UI review) is `done` and `stories` is not already `done`.
 
 ### Step 1b — Open the authoring branch
 Open the stories authoring branch `stories/EP-<slug>` per the shared procedure

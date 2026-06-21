@@ -29,8 +29,8 @@ Resolve the `EP-<slug>` (ask if not provided).
 **STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
 it passes. (The check is the authoritative rail; the description below explains what it enforces.)
 
-This passes only when `currentStep == "architecture"` and that step's `status == "in_progress"` (the
-epic review must already have passed).
+This passes when `architecture` is the next runnable step per the state sequence — every prior step
+(through the epic review) is `done` and `architecture` is not already `done`.
 
 ### Step 1b — Open the authoring branch
 Open the architecture authoring branch `architecture/EP-<slug>` per the shared procedure

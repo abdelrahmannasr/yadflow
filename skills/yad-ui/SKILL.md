@@ -39,8 +39,8 @@ Resolve the `EP-<slug>` (ask if not provided).
 **STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
 it passes.
 
-This passes only when `currentStep == "ui-design"` and that step's `status == "in_progress"` (the
-architecture review must already have passed).
+This passes when `ui-design` is the next runnable step per the state sequence — every prior step
+(through the architecture review) is `done` and `ui-design` is not already `done`.
 
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
