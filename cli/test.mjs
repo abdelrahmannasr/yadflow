@@ -452,6 +452,48 @@ test('nextAction: no state → kind new (seed with yad-epic)', () => {
   assert.equal(a.skill, 'yad-epic');
 });
 
+// runNext (the CLI surface) — capture stdout and assert the guidance + exit codes.
+const { runNext } = await import('./next.mjs');
+async function grab(fn) {
+  const orig = console.log;
+  const out = [];
+  console.log = (...a) => out.push(a.map(String).join(' '));
+  try { await fn(); } finally { console.log = orig; }
+  return out.join('\n');
+}
+function seedEpic(T, id, state) {
+  fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/state.json'), JSON.stringify(state));
+}
+
+test('runNext: a fresh project tells you to run yad setup', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next1-'));
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /yad setup/);
+});
+
+test('runNext: set up but no epics points at yad-epic; brownfield suggests yad-backfill first', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, profile: { codebase: 'brownfield' } }));
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /yad-epic/);
+  assert.match(s, /yad-backfill/);
+});
+
+test('runNext: specific epic prints the action; --check on a blocked step exits 1', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /yad-architecture/);
+  process.exitCode = 0;
+  await grab(() => runNext(T, { epic: 'EP-x', check: 'architecture-review' }));
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0; // do not leak a failing exit code into the test runner
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — the profile interview (resolveProfile is pure of side effects)
 // ---------------------------------------------------------------------------------------------

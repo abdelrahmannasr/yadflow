@@ -73,8 +73,9 @@ cat > "$HUB/.sdlc/repos.json" <<EOF
  "contextPack":".sdlc/code-context/backend/pack.md","codeMap":".sdlc/code-context/backend/code-map.md"}]}
 EOF
 
-say "yad setup (non-interactive)"
-SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" || die "yad setup failed"
+say "yad setup (non-interactive, team profile + tools configured)"
+SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" --team 2 --brownfield --separate --tools || die "yad setup failed"
+jassert "$HUB/.sdlc/hub.json" 'j.solo === false && j.profile.codebase === "brownfield" && j.profile.repo_layout === "separate" && j.profile.team_size === 2'
 [ -f "$HUB/.claude/skills/yad-epic/SKILL.md" ] || die "skills not installed"
 [ -f "$BACKEND/checks/spec-link.sh" ] || die "code repo not wired with check gates"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
@@ -118,6 +119,12 @@ yad gate sync EP-e2e epic.md --dir "$HUB" || die "gate sync (approved) failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
 jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "Alice" && a.role === "owner" && a.status === "approved")'
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
+
+say "yad next drives the build half and guards step order"
+NEXT_OUT="$(yad next EP-e2e --dir "$HUB")" || die "yad next failed"
+echo "$NEXT_OUT" | grep -qi "build\|yad-run" || die "yad next should point at the build half at ready-for-build: $NEXT_OUT"
+yad next EP-e2e --check epic --dir "$HUB" && die "precondition --check must exit non-zero for a done step"
+yad next --dir "$HUB" >/dev/null || die "general yad next failed"
 
 say "yad doctor is healthy on the fresh project"
 yad doctor --dir "$HUB" >/dev/null || die "doctor must pass on a healthy project"

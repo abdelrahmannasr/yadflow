@@ -319,8 +319,10 @@ export async function resolveProfile(root, opts = {}) {
   else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
   else if (typeof hub?.solo === 'boolean') { solo = hub.solo; team_size = prev.team_size ?? (solo ? 1 : 2); }
   else {
-    solo = !(await ask('Solo or team?', 'solo')).toLowerCase().startsWith('t');
-    team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', '2'), 10) || 2);
+    // Default from any existing roster: a hub already carrying reviewers is a team; otherwise solo.
+    const rosterN = Array.isArray(hub?.roster) ? hub.roster.length : 0;
+    solo = !(await ask('Solo or team?', rosterN > 1 ? 'team' : 'solo')).toLowerCase().startsWith('t');
+    team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', String(rosterN || 2)), 10) || 2);
   }
 
   // 2. Greenfield (new code) or brownfield (existing code).
