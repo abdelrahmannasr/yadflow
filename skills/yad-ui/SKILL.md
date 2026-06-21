@@ -33,9 +33,14 @@ like Impeccable.
 ## On Activation
 
 ### Step 1 — Resolve the epic and check the gate
-Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only proceed when
-`currentStep == "ui-design"` and that step's `status == "in_progress"` (the architecture review must
-already have passed). If not, stop and point the user at `yad-status` / the gate.
+Resolve the `EP-<slug>` (ask if not provided).
+
+**Precondition gate (rail):** run `yad next EP-<slug> --check ui-design` first. If it exits non-zero,
+**STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
+it passes.
+
+This passes only when `currentStep == "ui-design"` and that step's `status == "in_progress"` (the
+architecture review must already have passed).
 
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure

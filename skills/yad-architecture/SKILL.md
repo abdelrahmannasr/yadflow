@@ -23,9 +23,14 @@ shared cross-repo surface at charter altitude; front steps stay locked to `human
 ## On Activation
 
 ### Step 1 — Resolve the epic and check the gate
-Resolve the `EP-<slug>` (ask if not provided). Read `{project-root}/epics/EP-<slug>/.sdlc/state.json`.
-Only proceed when `currentStep == "architecture"` and that step's `status == "in_progress"` (the epic
-review must already have passed). If not, stop and point the user at `yad-status` / the gate.
+Resolve the `EP-<slug>` (ask if not provided).
+
+**Precondition gate (rail):** run `yad next EP-<slug> --check architecture` first. If it exits non-zero,
+**STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
+it passes. (The check is the authoritative rail; the description below explains what it enforces.)
+
+This passes only when `currentStep == "architecture"` and that step's `status == "in_progress"` (the
+epic review must already have passed).
 
 ### Step 1b — Open the authoring branch
 Open the architecture authoring branch `architecture/EP-<slug>` per the shared procedure

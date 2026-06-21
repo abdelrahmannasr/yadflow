@@ -40,7 +40,10 @@ exists for the idea.
 
 Either mode runs Step 3b (branch), Step 4 (write the epic), and Step 6 (stop at the gate).
 
-If `state.json` exists but `currentStep != "epic"`, stop and point the user at `yad-status` / the gate.
+**Precondition gate (rail):** if `state.json` already exists (analysis-ran or re-entry), run
+`yad next EP-<slug> --check epic` — if it exits non-zero, **STOP** and surface the blocker, pointing the
+user at `yad next EP-<slug>`. When no `state.json` exists yet, this is the greenfield entry point — the
+check is not applicable, so proceed and seed state.
 
 ### Step 2 — Shape the idea (assist: analyst) — or read the analysis
 - **Analysis skipped:** ask the user for a one-line feature idea if not provided, then adopt the
