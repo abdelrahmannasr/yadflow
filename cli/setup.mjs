@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import {
-  c, log, step, ok, info, warn, hand, fail, ask, askYesNo, run, has,
+  c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, has,
   exists, readJSON, writeJSON,
 } from './lib.mjs';
 import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
@@ -305,13 +305,66 @@ function applyActions(actions, { force = false } = {}) {
   return changed;
 }
 
+// Step 0 — resolve the setup profile that branches the rest of the wizard. Flags pre-answer each
+// question (CI/scripts); an existing hub.json carries prior answers forward (idempotent re-run);
+// otherwise we prompt with a default. Pure of side effects — it only reads. Returns
+// { solo, team_size, codebase, repo_layout, configureTools }.
+export async function resolveProfile(root, opts = {}) {
+  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+  const prev = (hub && hub.profile) || {};
+
+  // 1. Solo or team (+ size). --solo / --team <n> win; else carry hub.solo forward; else ask.
+  let solo, team_size;
+  if (opts.solo) { solo = true; team_size = 1; }
+  else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
+  else if (typeof hub?.solo === 'boolean') { solo = hub.solo; team_size = prev.team_size ?? (solo ? 1 : 2); }
+  else {
+    solo = !(await ask('Solo or team?', 'solo')).toLowerCase().startsWith('t');
+    team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', '2'), 10) || 2);
+  }
+
+  // 2. Greenfield (new code) or brownfield (existing code).
+  let codebase;
+  if (opts.greenfield) codebase = 'greenfield';
+  else if (opts.brownfield) codebase = 'brownfield';
+  else if (prev.codebase) codebase = prev.codebase;
+  else codebase = (await ask('Greenfield (new code) or brownfield (existing code)?', 'greenfield')).toLowerCase().startsWith('b') ? 'brownfield' : 'greenfield';
+
+  // 3. Monorepo (one repo) or separate repos.
+  let repo_layout;
+  if (opts.monorepo) repo_layout = 'monorepo';
+  else if (opts.separate) repo_layout = 'separate';
+  else if (prev.repo_layout) repo_layout = prev.repo_layout;
+  else repo_layout = (await ask('Monorepo (one repo) or separate repos?', 'monorepo')).toLowerCase().startsWith('s') ? 'separate' : 'monorepo';
+
+  // 4. Configure the optional tools now, or defer (records them as none, connect later).
+  const configureTools = opts.tools === true ? true
+    : process.env.SDLC_NONINTERACTIVE ? false
+      : await askYesNo('Configure design/testing/learning tools now? (else connect them later)', false);
+
+  return { solo, team_size, codebase, repo_layout, configureTools };
+}
+
 export async function runSetup(root, opts = {}) {
-  const total = 10;
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));
 
-  // 1. Preflight
-  step(1, total, 'Preflight');
+  // 0. Profile interview — branch the wizard to the user's situation (solo/team, code, repo layout).
+  const { solo, team_size, codebase, repo_layout, configureTools } = await resolveProfile(root, opts);
+  // Steps: interview, preflight, install, hub, tools (1 if deferred else 3), repos, wire, coderabbit, done.
+  const total = 8 + (configureTools ? 3 : 1);
+  let _n = 0;
+  const S = (title) => step(++_n, total, title);
+
+  S('Profile');
+  guide([
+    'How you answer here shapes the rest of setup — fewer prompts, the right path.',
+    `solo: ${solo ? 'yes — you review by merging your own PR (approval waived)' : `no — team of ${team_size}`}`,
+    `code: ${codebase}  •  repos: ${repo_layout}  •  optional tools: ${configureTools ? 'configure now' : 'deferred (connect later)'}`,
+  ]);
+
+  // Preflight
+  S('Preflight');
   if (!exists(path.join(root, '.git'))) {
     if (await askYesNo('Not a git repo. Run `git init` here?', true)) {
       run('git', ['init'], { cwd: root });
@@ -321,8 +374,12 @@ export async function runSetup(root, opts = {}) {
   for (const tool of ['git', 'node']) has(tool) ? ok(`${tool} present`) : warn(`${tool} not found on PATH`);
   if (!has('npx')) warn('npx not found — repomix packing will be skipped');
 
-  // 2. Install the module
-  step(2, total, 'Install the module (skills + _bmad registration)');
+  // Install the module
+  S('Install the module (skills + _bmad registration)');
+  guide([
+    'Copies the yad-* skills into your AI tool(s) so they appear in Claude Code / agents / opencode.',
+    'Enter the IDE folders to install into, comma-separated; default = whatever is already present.',
+  ]);
   let ideTargets = opts.ideTargets;
   if (!ideTargets) {
     const present = ALL_IDES.filter((d) => exists(path.join(root, d)));
@@ -352,8 +409,18 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 3. Detect hub platform + roster
-  step(3, total, 'Hub platform & reviewer roster');
+  // Detect hub platform + roster
+  S(solo ? 'Hub platform (solo — no roster)' : 'Hub platform & reviewer roster');
+  guide(solo
+    ? [
+      'Your hub is this repo on GitHub/GitLab (or none for a file-only gate).',
+      'Solo: no roster needed — you review by merging your own PR (approval waived).',
+    ]
+    : [
+      'Your hub is this repo on GitHub/GitLab; reviewers approve artifacts there.',
+      `Add your ${team_size}-person roster: platform login → yad name → hub role (owner/reviewer).`,
+      'An owner + 1 reviewer is required to pass a gate; skip now and add later with `yad roster add`.',
+    ]);
   const hubPath = path.join(root, PROJECT_FILES.hubConfig);
   if (exists(hubPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
     info('keeping existing .sdlc/hub.json');
@@ -367,7 +434,8 @@ export async function runSetup(root, opts = {}) {
       platform = 'none';
     }
     const roster = [];
-    if (await askYesNo('Add reviewers to the roster now?', true)) {
+    // Solo mode needs no roster — the lone developer is owner and reviewer-by-merge.
+    if (!solo && await askYesNo('Add reviewers to the roster now?', true)) {
       for (;;) {
         const login = await ask('  reviewer platform login (blank to finish)', '');
         if (!login) break;
@@ -392,68 +460,113 @@ export async function runSetup(root, opts = {}) {
     // `bridge_enabled` is the canonical flag (hub-config schema); keep the legacy `bridge` spelling
     // for anything that still reads it.
     const enabled = platform !== 'none';
-    writeJSON(hubPath, { platform: enabled ? platform : null, bridge_enabled: enabled, bridge: enabled, default_branch, roster });
-    ok(`wrote ${PROJECT_FILES.hubConfig} (${roster.length} reviewer(s))`);
+    writeJSON(hubPath, { platform: enabled ? platform : null, bridge_enabled: enabled, bridge: enabled, default_branch, roster, solo, profile: { codebase, repo_layout, team_size } });
+    ok(`wrote ${PROJECT_FILES.hubConfig} (${roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
+  }
+  // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
+  // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.
+  if (exists(hubPath)) {
+    const cur = readJSON(hubPath, {}) || {};
+    if (cur.solo !== solo || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size })) {
+      writeJSON(hubPath, { ...cur, solo, profile: { codebase, repo_layout, team_size } });
+      info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
+    }
   }
 
-  // 4. Connect a design tool (Figma-first, pluggable; the UI step materializes the design here)
-  step(4, total, 'Connect a design tool (Figma / pencil / none)');
+  // Optional tools (design / testing / learning). Paths are declared here so the final summary can
+  // read them whether or not we configured the tools this run.
   const designPath = path.join(root, PROJECT_FILES.designConfig);
-  if (exists(designPath) && !(await askYesNo('design.json exists — reconfigure?', false))) {
-    info('keeping existing .sdlc/design.json');
-  } else {
-    let tool = (await ask(`Design tool (${DESIGN_TOOLS.join('/')}/none)`, DESIGN_PRIMARY)).toLowerCase();
-    if (![...DESIGN_TOOLS, 'none'].includes(tool)) {
-      warn(`unknown design tool '${tool}' — using ${DESIGN_PRIMARY}`);
-      tool = DESIGN_PRIMARY;
-    }
-    const project_url = tool === 'none' ? null : (await ask('  project/file URL (blank to set later)', '')) || null;
-    registerDesign(root, { tool, project_url, today: opts.today ?? null });
-    ok(tool === 'none'
-      ? `wrote ${PROJECT_FILES.designConfig} (markdown-only)`
-      : `wrote ${PROJECT_FILES.designConfig} (${tool})`);
-  }
-
-  // 5. Connect a testing tool (Playwright-first, pluggable; the test-cases step implements automation here)
-  step(5, total, 'Connect a testing tool (playwright / cypress / pytest / none)');
   const testingPath = path.join(root, PROJECT_FILES.testingConfig);
-  if (exists(testingPath) && !(await askYesNo('testing.json exists — reconfigure?', false))) {
-    info('keeping existing .sdlc/testing.json');
-  } else {
-    let tool = (await ask(`Testing tool (${TESTING_TOOLS.join('/')}/none)`, TESTING_PRIMARY)).toLowerCase();
-    if (![...TESTING_TOOLS, 'none'].includes(tool)) {
-      warn(`unknown testing tool '${tool}' — using ${TESTING_PRIMARY}`);
-      tool = TESTING_PRIMARY;
-    }
-    const project_url = tool === 'none' ? null : (await ask('  project/config reference (blank to set later)', '')) || null;
-    registerTesting(root, { tool, project_url, today: opts.today ?? null });
-    ok(tool === 'none'
-      ? `wrote ${PROJECT_FILES.testingConfig} (artifacts-only)`
-      : `wrote ${PROJECT_FILES.testingConfig} (${tool})`);
-  }
-
-  // 6. Connect a learning tool (DeepTutor-first, pluggable; the learning layer tutors team members here)
-  step(6, total, 'Connect a learning tool (deeptutor / none)');
   const learningPath = path.join(root, PROJECT_FILES.learningConfig);
-  if (exists(learningPath) && !(await askYesNo('learning.json exists — reconfigure?', false))) {
-    info('keeping existing .sdlc/learning.json');
-  } else {
-    let tool = (await ask(`Learning tool (${LEARNING_TOOLS.join('/')}/none)`, LEARNING_PRIMARY)).toLowerCase();
-    if (![...LEARNING_TOOLS, 'none'].includes(tool)) {
-      warn(`unknown learning tool '${tool}' — using ${LEARNING_PRIMARY}`);
-      tool = LEARNING_PRIMARY;
+  if (configureTools) {
+    // Connect a design tool (Figma-first, pluggable; the UI step materializes the design here)
+    S('Connect a design tool (Figma / pencil / none)');
+    guide([
+      'Where yad-ui materializes real screens. figma (confirm the MCP later) or none for markdown-only.',
+      'Skipping is safe — the UI step degrades to ui-design.md.',
+    ]);
+    if (exists(designPath) && !(await askYesNo('design.json exists — reconfigure?', false))) {
+      info('keeping existing .sdlc/design.json');
+    } else {
+      let tool = (await ask(`Design tool (${DESIGN_TOOLS.join('/')}/none)`, DESIGN_PRIMARY)).toLowerCase();
+      if (![...DESIGN_TOOLS, 'none'].includes(tool)) {
+        warn(`unknown design tool '${tool}' — using ${DESIGN_PRIMARY}`);
+        tool = DESIGN_PRIMARY;
+      }
+      const project_url = tool === 'none' ? null : (await ask('  project/file URL (blank to set later)', '')) || null;
+      registerDesign(root, { tool, project_url, today: opts.today ?? null });
+      ok(tool === 'none'
+        ? `wrote ${PROJECT_FILES.designConfig} (markdown-only)`
+        : `wrote ${PROJECT_FILES.designConfig} (${tool})`);
     }
-    registerLearning(root, { tool, today: opts.today ?? null });
-    ok(tool === 'none'
-      ? `wrote ${PROJECT_FILES.learningConfig} (harness-native)`
-      : `wrote ${PROJECT_FILES.learningConfig} (${tool})`);
+
+    // Connect a testing tool (Playwright-first, pluggable; the test-cases step implements automation here)
+    S('Connect a testing tool (playwright / cypress / pytest / none)');
+    guide([
+      'Where yad-test-cases generates automation. playwright/cypress/pytest, or none for artifacts-only.',
+      'Skipping is safe — test-cases authors test-cases.md only.',
+    ]);
+    if (exists(testingPath) && !(await askYesNo('testing.json exists — reconfigure?', false))) {
+      info('keeping existing .sdlc/testing.json');
+    } else {
+      let tool = (await ask(`Testing tool (${TESTING_TOOLS.join('/')}/none)`, TESTING_PRIMARY)).toLowerCase();
+      if (![...TESTING_TOOLS, 'none'].includes(tool)) {
+        warn(`unknown testing tool '${tool}' — using ${TESTING_PRIMARY}`);
+        tool = TESTING_PRIMARY;
+      }
+      const project_url = tool === 'none' ? null : (await ask('  project/config reference (blank to set later)', '')) || null;
+      registerTesting(root, { tool, project_url, today: opts.today ?? null });
+      ok(tool === 'none'
+        ? `wrote ${PROJECT_FILES.testingConfig} (artifacts-only)`
+        : `wrote ${PROJECT_FILES.testingConfig} (${tool})`);
+    }
+
+    // Connect a learning tool (DeepTutor-first, pluggable; the learning layer tutors team members here)
+    S('Connect a learning tool (deeptutor / none)');
+    guide([
+      'Lets any team member invoke yad-learn to be tutored in-context. deeptutor (a CLI), or none.',
+      'Skipping is safe — yad-learn tutors via the harness model (harness-native).',
+    ]);
+    if (exists(learningPath) && !(await askYesNo('learning.json exists — reconfigure?', false))) {
+      info('keeping existing .sdlc/learning.json');
+    } else {
+      let tool = (await ask(`Learning tool (${LEARNING_TOOLS.join('/')}/none)`, LEARNING_PRIMARY)).toLowerCase();
+      if (![...LEARNING_TOOLS, 'none'].includes(tool)) {
+        warn(`unknown learning tool '${tool}' — using ${LEARNING_PRIMARY}`);
+        tool = LEARNING_PRIMARY;
+      }
+      registerLearning(root, { tool, today: opts.today ?? null });
+      ok(tool === 'none'
+        ? `wrote ${PROJECT_FILES.learningConfig} (harness-native)`
+        : `wrote ${PROJECT_FILES.learningConfig} (${tool})`);
+    }
+  } else {
+    // Deferred: record any not-yet-present tool as none (degrades gracefully). Existing connections kept.
+    S('Optional tools (design / testing / learning) — deferred');
+    guide(['Recorded as none; connect any later with the yad-connect-* skills. Existing connections are kept.']);
+    if (!exists(designPath)) registerDesign(root, { tool: 'none', project_url: null, today: opts.today ?? null });
+    if (!exists(testingPath)) registerTesting(root, { tool: 'none', project_url: null, today: opts.today ?? null });
+    if (!exists(learningPath)) registerLearning(root, { tool: 'none', today: opts.today ?? null });
+    info('design / testing / learning recorded as none (connect later)');
   }
 
-  // 7. Connect code repos
-  step(7, total, 'Connect code repos');
+  // Connect code repos
+  S(repo_layout === 'monorepo' ? 'Connect your code repo (monorepo)' : 'Connect code repos');
+  guide(repo_layout === 'monorepo'
+    ? [
+      'One repo holds all the code; the contract lives in the hub and stories tag this single repo.',
+      codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: the repo is packed so the front phases see what already exists.',
+    ]
+    : [
+      'Register each code repo the feature touches; stories get tagged with the repos that implement them.',
+      'Per repo: name → path (inside this project) → platform → domain owner(s).',
+      codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: each repo is packed so the front phases see what already exists.',
+    ]);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const registry = readJSON(regPath, { repos: [] });
   const known = new Set(registry.repos.map((r) => r.name));
+  const greenfield = codebase === 'greenfield';
+  const mono = repo_layout === 'monorepo';
   if (await askYesNo(`Connect a code repo? ${c.dim(`(${registry.repos.length} already registered)`)}`, registry.repos.length === 0)) {
     for (;;) {
       const name = await ask('  repo name (blank to finish)', '');
@@ -463,26 +576,28 @@ export async function runSetup(root, opts = {}) {
       if (!insideRoot(root, rpath)) { warn(`${rpath} resolves outside the project root — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();
-      // A repo can have one or more domain owners; reviewers/owners can also be scoped to it. Names
-      // refer to roster `name`s; each grant is written into that person's per-scope roles map.
-      const domain_owners = parseList(await ask('    domain owner(s) (yad names, space-separated)', ''));
-      const repoReviewers = parseList(await ask('    repo reviewer(s) (yad names, space-separated; blank to skip)', ''));
-      const repoOwners = parseList(await ask('    repo owner(s) (yad names, space-separated; blank to skip)', ''));
+      // Domain owners route the per-repo review. Solo (no roster) and monorepo (one repo = one owner)
+      // skip these prompts — there is no second person to route to.
+      const domain_owners = solo || mono ? [] : parseList(await ask('    domain owner(s) (yad names, space-separated)', ''));
+      const repoReviewers = solo || mono ? [] : parseList(await ask('    repo reviewer(s) (yad names, space-separated; blank to skip)', ''));
+      const repoOwners = solo || mono ? [] : parseList(await ask('    repo owner(s) (yad names, space-separated; blank to skip)', ''));
       const default_branch = await ask('    default branch', 'main');
       const repo = registerRepo(root, registry, { name, rpath, platform, domain_owners, default_branch, today: opts.today ?? null });
       if (!repo) continue;
       addRepoRoles(root, name, { 'domain-owner': domain_owners, reviewer: repoReviewers, owner: repoOwners });
       known.add(name);
       ok(`registered ${name}`);
-      packRepo(root, repo);
+      if (greenfield) info(`${name}: greenfield — skipped repomix pack (run \`yad repo refresh ${name}\` once it has code)`);
+      else packRepo(root, repo);
+      if (mono) { info('monorepo — one repo connected; stop here'); break; }
     }
   }
 
-  // 7b. Assign/update roles for ALREADY-connected repos. The connect loop above only prompts for the
-  // repos you add now; this closes the gap so a member's domain-owner/reviewer/owner role on a repo
-  // connected in an earlier run can be set without reconnecting. Mirrors `yad roster` (repo-driven).
+  // Assign/update roles for ALREADY-connected repos. Skipped in solo mode (no roster). The connect loop
+  // above only prompts for repos you add now; this closes the gap so a member's role on a repo connected
+  // in an earlier run can be set without reconnecting. Mirrors `yad roster` (repo-driven).
   const hub7 = readJSON(hubPath, null);
-  if (registry.repos.length && hub7 && Array.isArray(hub7.roster) && hub7.roster.length
+  if (!solo && registry.repos.length && hub7 && Array.isArray(hub7.roster) && hub7.roster.length
       && await askYesNo('Assign/update roles for connected repos?', false)) {
     for (const member of hub7.roster) {
       if (!(await askYesNo(`  edit ${member.name}'s repo roles?`, false))) continue;
@@ -496,8 +611,9 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 8. Wire each connected repo + the hub itself
-  step(8, total, 'Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
+  // Wire each connected repo + the hub itself
+  S('Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
+  guide(['Installs the CI safety gates, PR/MR template, and gate-sync — automatic, no input needed.']);
   if (registry.repos.length === 0) info('no repos to wire');
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
@@ -516,8 +632,9 @@ export async function runSetup(root, opts = {}) {
   // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
   applyActions(authorsActions(root, registry.repos), { force: true });
 
-  // 9. Optional CodeRabbit
-  step(9, total, 'AI review (CodeRabbit)');
+  // Optional CodeRabbit
+  S('AI review (CodeRabbit)');
+  guide(['Advisory AI first-pass on PRs — never the authority. Opt in per repo; safe to skip.']);
   for (const repo of registry.repos) {
     const cr = path.join(path.resolve(root, repo.path), '.coderabbit.yaml');
     if (exists(cr)) { info(`${repo.name}: .coderabbit.yaml present`); continue; }
@@ -527,13 +644,25 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // 10. Summary + version stamp
-  step(10, total, 'Done');
+  // Summary + version stamp
+  S('Done');
   writeJSON(path.join(root, PROJECT_FILES.version), { version: VERSION, ideTargets, updatedAt: opts.today ?? null });
   ok(`stamped ${PROJECT_FILES.version} (v${VERSION})`);
   log('');
-  log(c.bold('Next — AI-only steps (run in Claude Code):'));
-  hand('generate code-maps: run `yad-connect-repos` for each connected repo');
+  // Tailored fastest path to the first epic, by profile.
+  log(c.bold('Next:'));
+  if (codebase === 'brownfield' && registry.repos.length) {
+    hand('capture what already exists first: run `yad-backfill`, then your first epic with `yad-epic`');
+  } else {
+    hand('author your first epic: run `yad-epic`');
+  }
+  hand('your single next action, anytime: `yad next`');
+  if (!solo && !(readJSON(hubPath, null)?.roster || []).length) {
+    hand('add reviewers when ready: `yad roster add <login>` (an owner + 1 reviewer passes a gate)');
+  }
+  log('');
+  log(c.bold('Then — AI-only steps (run in Claude Code):'));
+  if (registry.repos.length) hand('generate code-maps: run `yad-connect-repos` for each connected repo');
   const design = readJSON(designPath, null);
   if (design && design.tool && design.tool !== 'none') {
     hand(`confirm the design tool: run \`yad-connect-design\` to detect the ${design.tool} MCP (or it degrades to markdown-only)`);
@@ -546,7 +675,6 @@ export async function runSetup(root, opts = {}) {
   if (learning && learning.tool && learning.tool !== 'none') {
     hand(`confirm the learning tool: run \`yad-connect-learning\` to detect the ${learning.tool} CLI (or it degrades to harness-native)`);
   }
-  hand('author your first epic: run `yad-epic`');
   log('');
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
 }

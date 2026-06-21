@@ -453,6 +453,39 @@ test('nextAction: no state → kind new (seed with yad-epic)', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
+// `yad setup` — the profile interview (resolveProfile is pure of side effects)
+// ---------------------------------------------------------------------------------------------
+const { resolveProfile } = await import('./setup.mjs');
+
+test('resolveProfile: flags fully determine a solo/greenfield/monorepo profile (no prompts)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof-'));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const p = await resolveProfile(T, { solo: true, greenfield: true, monorepo: true });
+    assert.deepEqual(p, { solo: true, team_size: 1, codebase: 'greenfield', repo_layout: 'monorepo', configureTools: false });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+});
+
+test('resolveProfile: --team N is a team of N; brownfield/separate/--tools honored', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof2-'));
+  const p = await resolveProfile(T, { team: '3', brownfield: true, separate: true, tools: true });
+  assert.deepEqual(p, { solo: false, team_size: 3, codebase: 'brownfield', repo_layout: 'separate', configureTools: true });
+});
+
+test('resolveProfile: carries a prior profile forward from hub.json on re-run', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 } }));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const p = await resolveProfile(T, {}); // no flags — must reuse hub.json
+    assert.equal(p.solo, true);
+    assert.equal(p.codebase, 'brownfield');
+    assert.equal(p.repo_layout, 'separate');
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+});
+
+// ---------------------------------------------------------------------------------------------
 // `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
 const { gateSync, gateOpen, gateStatus } = await import('./gate.mjs');

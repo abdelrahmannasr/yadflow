@@ -18,7 +18,9 @@ import { runNext } from '../cli/next.mjs';
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
 ${c.bold('Setup & maintenance')}
-  yad setup            Guided first-run setup (install module, connect & wire repos)
+  yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
+                       profile flags: --solo | --team <n>, --greenfield | --brownfield,
+                       --monorepo | --separate, --tools (configure design/testing/learning now)
   yad check            Report what is missing / drifted / stale / legacy (read-only)
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
@@ -82,7 +84,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -97,6 +99,13 @@ function parseArgs(argv) {
     // `next <epic> --check <step>`. Consume the next token only when it is a real value.
     else if (a === '--check') { const v = argv[i + 1]; o.check = (v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
+    // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
+    else if (a === '--solo') o.solo = true;
+    else if (a === '--greenfield') o.greenfield = true;
+    else if (a === '--brownfield') o.brownfield = true;
+    else if (a === '--monorepo') o.monorepo = true;
+    else if (a === '--separate') o.separate = true;
+    else if (a === '--tools') o.tools = true;
     else if (a === '--refresh') o.refresh = true;
     else if (a === '--wire') o.wire = true;
     else if (a === '--dry-run') o.dryRun = true;
@@ -127,7 +136,11 @@ async function main() {
   const today = new Date().toISOString().slice(0, 10);
   switch (cmd) {
     case 'setup':
-      await runSetup(o.dir, { today, force: o.force });
+      await runSetup(o.dir, {
+        today, force: o.force,
+        solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
+        monorepo: o.monorepo, separate: o.separate, tools: o.tools,
+      });
       break;
     case 'check':
       await reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, today });
