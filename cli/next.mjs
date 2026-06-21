@@ -19,7 +19,9 @@ function isSolo(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
   return !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 }
+// The setup profile recorded by `yad setup` (codebase / repo_layout / team_size), or null.
 const profileOf = (root) => readJSON(path.join(root, PROJECT_FILES.hubConfig), null)?.profile || null;
+// Has `yad setup` run here? True once the version stamp or hub config exists.
 const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(path.join(root, PROJECT_FILES.hubConfig));
 
 // Every epic that has a state ledger, in directory order.
@@ -99,6 +101,8 @@ function checkPrecondition(root, epic, stepId) {
   process.exitCode = 1;
 }
 
+// Entry point for the `next` command: route to the precondition check, a single epic's action, or the
+// project-wide general view. Validates the epic id first.
 export async function runNext(root, { epic, check, all } = {}) {
   if (epic && !isValidEpicId(epic)) {
     fail(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`);

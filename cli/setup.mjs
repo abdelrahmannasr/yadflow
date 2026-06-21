@@ -347,6 +347,8 @@ export async function resolveProfile(root, opts = {}) {
   return { solo, team_size, codebase, repo_layout, configureTools };
 }
 
+// The guided, idempotent first-run wizard: a Step 0 profile interview (resolveProfile) that branches
+// the remaining steps — install, hub + roster, optional tools, repos, wiring — and persists the profile.
 export async function runSetup(root, opts = {}) {
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));

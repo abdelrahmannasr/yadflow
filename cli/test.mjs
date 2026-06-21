@@ -201,6 +201,7 @@ test('CLI --version matches manifest', () => {
 
 // `--check` value-consume must be scoped to the `next` command — it must NOT swallow a positional in
 // any other subcommand (regression guard for the bin/yad.mjs arg parser).
+// Run the installed CLI in dir T and capture { out, code } without throwing on non-zero exit.
 const yadRun = (T, ...args) => {
   try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' }), code: 0 }; }
   catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status ?? 1 }; }
@@ -421,6 +422,7 @@ test('gatePredicate: solo passes an escalated step without any domain-owner appr
 // ---------------------------------------------------------------------------------------------
 // `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
 // ---------------------------------------------------------------------------------------------
+// Build a single state-machine step record for the test chains below.
 const S = (id, type, status, artifact, extra = {}) => ({ id, type, status, artifact, risk_tags: [], ...extra });
 // A small front chain at an arbitrary point: epic, epic-review, architecture, architecture-review.
 const chain = (overrides) => ({
@@ -485,6 +487,7 @@ test('nextAction: no state → kind new (seed with yad-epic)', () => {
 
 // runNext (the CLI surface) — capture stdout and assert the guidance + exit codes.
 const { runNext } = await import('./next.mjs');
+// Capture console.log output produced while running fn (the CLI commands print via console.log).
 async function grab(fn) {
   const orig = console.log;
   const out = [];
@@ -492,6 +495,7 @@ async function grab(fn) {
   try { await fn(); } finally { console.log = orig; }
   return out.join('\n');
 }
+// Write a minimal per-epic state ledger under T/epics/<id>/.sdlc/state.json for driver tests.
 function seedEpic(T, id, state) {
   fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/state.json'), JSON.stringify(state));
