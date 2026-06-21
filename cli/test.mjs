@@ -494,6 +494,59 @@ test('runNext: specific epic prints the action; --check on a blocked step exits 
   process.exitCode = 0; // do not leak a failing exit code into the test runner
 });
 
+test('runNext: review-sync action in solo mode notes the merge-only path', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next4-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', solo: true }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' }));
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), JSON.stringify([{ artifact: 'epic.md', number: 9 }]));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /yad gate sync EP-x epic\.md/);
+  assert.match(s, /solo/i);
+});
+
+test('runNext: build action surfaces the parallel test-cases track', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next5-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [
+    S('stories-review', 'review+approve', 'done', 'stories/'),
+    S('test-cases', 'author', 'in_progress', 'test-cases.md'),
+  ] });
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /yad-run|build/i);
+  assert.match(s, /yad-test-cases/);
+});
+
+test('runNext: several epics list each action, and --all expands them', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next6-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-a', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  seedEpic(T, 'EP-b', chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' }));
+  const list = await grab(() => runNext(T, {}));
+  assert.match(list, /EP-a/);
+  assert.match(list, /EP-b/);
+  const all = await grab(() => runNext(T, { all: true }));
+  assert.match(all, /yad-architecture/); // EP-a author action shown in detail
+});
+
+test('runNext: no-epics non-brownfield omits the backfill hint; bad id / missing epic are handled', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next7-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, profile: { codebase: 'greenfield' } }));
+  const fresh = await grab(() => runNext(T, {}));
+  assert.match(fresh, /yad-epic/);
+  assert.doesNotMatch(fresh, /yad-backfill/);
+  process.exitCode = 0;
+  await grab(() => runNext(T, { epic: 'not-an-id' }));
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0;
+  await grab(() => runNext(T, { epic: 'EP-missing' }));
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0;
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — the profile interview (resolveProfile is pure of side effects)
 // ---------------------------------------------------------------------------------------------
@@ -525,6 +578,34 @@ test('resolveProfile: carries a prior profile forward from hub.json on re-run', 
     assert.equal(p.codebase, 'brownfield');
     assert.equal(p.repo_layout, 'separate');
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
+});
+
+const { runSetup } = await import('./setup.mjs');
+
+test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers the optional tools', async () => {
+  const { T } = scaffold();
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.solo, true);
+  assert.equal(hub.profile.codebase, 'greenfield');
+  assert.equal(hub.profile.repo_layout, 'monorepo');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'none'); // deferred
+});
+
+test('runSetup: team + --tools records a team profile and configures the optional tools', async () => {
+  const { T } = scaffold();
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { team: '2', brownfield: true, separate: true, tools: true, ideTargets: ['.claude'] });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.solo, false);
+  assert.equal(hub.profile.team_size, 2);
+  assert.equal(hub.profile.codebase, 'brownfield');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'figma'); // configured (default)
 });
 
 // ---------------------------------------------------------------------------------------------
