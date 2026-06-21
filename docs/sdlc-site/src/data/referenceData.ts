@@ -240,7 +240,8 @@ export interface CliCommand extends Filterable {
 }
 
 export const CLI_COMMANDS: CliCommand[] = [
-  { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: install the module, detect the hub, connect tools + repos.', visibleTo: ALL },
+  { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: a short profile interview (solo/team, greenfield/brownfield, mono/separate) then the branched steps — install, detect the hub, connect tools + repos.', visibleTo: ALL },
+  { constant: 'NEXT', value: 'yad next', target: 'setup', category: 'setup', description: 'Where am I / what next: the one concrete next action — project-wide or per epic (yad next <epic>); --check <step> guards step order.', visibleTo: ALL },
   { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed.', visibleTo: ALL },
   { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI).', visibleTo: ALL },
   { constant: 'ROSTER', value: 'yad roster', target: 'setup', category: 'setup', description: 'Manage the reviewer roster + per-repo roles any time: list / add (repo-driven walk) / grant / revoke / remove. Domain-owner grants sync repos.json.', visibleTo: ALL },

@@ -85,7 +85,8 @@ with `npx` from your **product hub** repo — no clone needed.
 
 | Command | What it does |
 |---------|--------------|
-| `npx yadflow setup` | Guided first-run wizard (the steps below). |
+| `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
+| `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) vs the bundled manifest. |
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched). |
@@ -120,6 +121,13 @@ The merge click is the human approval act, so front steps still never `machine_a
 **revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. With no
 hub platform / no `gh`/`glab`, the gate degrades to file-only with no error.
 
+**Solo mode.** A lone developer can't approve their own PR on GitHub, so an approval requirement would
+deadlock them. Opt in (`yad setup --solo`, recorded as `solo: true` in `.sdlc/hub.json`) and the gate
+**waives the approval requirement only** — the review PR/MR and its merge stay, so CI still runs on the
+PR and the **merge** advances the step. Net: the gate passes on *merged + all threads resolved*. It's a
+documented, reversible relaxation; `yad doctor` warns if branch protection still "requires approvals"
+(which would block the solo dev's own merge).
+
 **Event-driven sync.** Wire the hub once (`yad check --fix` installs `.github/workflows/yad-gate-sync.yml`,
 or the GitLab fragment + schedule) and every **approval, change request, and merge** on a review PR/MR
 triggers `yad gate ci` in the hub's own CI: the ledger updates land directly on the hub's default branch
@@ -132,29 +140,33 @@ a manual `yad gate sync` racing CI, or GitLab pipelines — two simultaneous syn
 *commits* via the rebase retry but each works from the state it read at start, so the rarer of two
 simultaneous advancements can be lost; the next event or scheduled sweep re-syncs and converges.
 
-### What `setup` walks you through (10 steps)
+### What `setup` walks you through (a guided, branching interview)
 
+Setup opens with a short **profile interview** — *solo or team (how many)? greenfield or brownfield?
+monorepo or separate repos?* — and the answers (recorded in `.sdlc/hub.json` as `solo` + `profile`)
+branch the rest so you only answer what your situation needs. Each step prints inline guidance (what it
+does / why / what to enter / what skipping means), and the step count adapts.
+
+0. **Profile** — the three questions above, plus "configure optional tools now?". Pre-answer for
+   CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
 2. **Install the module** — copy all 30 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
-   Edit the roster any time afterwards with `yad roster` (no need to re-run the whole wizard).
-4. **Connect a design tool** — record the design tool (Figma / pencil / none) → `.sdlc/design.json` so
-   the UI step can materialize the design; the MCP itself is confirmed later by `yad-connect-design`.
-5. **Connect a testing tool** — record the testing tool (Playwright / cypress / pytest / none) →
-   `.sdlc/testing.json` so the test-cases step can implement the automation; the MCP itself is confirmed
-   later by `yad-connect-testing`.
-6. **Connect a learning tool** — record the learning tool (DeepTutor / none) → `.sdlc/learning.json` so
-   the learning layer can tutor the team; the CLI + knowledge base are confirmed later by
-   `yad-connect-learning`.
-7. **Connect code repos** — register each repo into `.sdlc/repos.json` and cache a Repomix pack.
-8. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
-9. **AI review** — optionally write `.coderabbit.yaml`.
-10. **Done** — stamp `.sdlc/cli-version.json` and hand off the AI-only steps (code-maps; first epic).
+   **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
+4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest), learning (DeepTutor).
+   Configure now, or **defer with one prompt** → all recorded as `none` (connect later with the
+   `yad-connect-*` skills; the MCPs/CLIs are confirmed there).
+5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo and
+   skips domain-owner prompts; **greenfield** skips the Repomix pack (run `yad repo refresh` once it has code).
+6. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
+7. **AI review** — optionally write `.coderabbit.yaml`.
+8. **Done** — stamp `.sdlc/cli-version.json` and print a **profile-tailored next step** (brownfield →
+   `yad-backfill` first; everyone → `yad next` and your first epic via `yad-epic`).
 
 The deterministic file work runs automatically; the AI-only steps are handed to the Claude Code skills
 with a printed next-action. Re-run `… check --fix` any time the workflow updates — it never re-asks for
-input you already gave.
+input you already gave; re-running `setup` carries your profile forward.
 
 **Releases:** automated via semantic-release on merge to `main` (Conventional Commits → npm, with
 provenance). See [`RELEASING.md`](RELEASING.md).
