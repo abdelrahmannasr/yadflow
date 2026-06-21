@@ -24,9 +24,14 @@ There is **no `sm` agent** (Phase 0 Deviation 1): the `pm` lens breaks down the 
 ## On Activation
 
 ### Step 1 — Resolve the epic and check the gate
-Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only proceed when
-`currentStep == "stories"` and that step's `status == "in_progress"` (the UI review must already have
-passed). If not, stop and point the user at `yad-status` / the gate.
+Resolve the `EP-<slug>` (ask if not provided).
+
+**Precondition gate (rail):** run `yad next EP-<slug> --check stories` first. If it exits non-zero,
+**STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
+it passes.
+
+This passes when `stories` is the next runnable step per the state sequence — every prior step
+(through the UI review) is `done` and `stories` is not already `done`.
 
 ### Step 1b — Open the authoring branch
 Open the stories authoring branch `stories/EP-<slug>` per the shared procedure

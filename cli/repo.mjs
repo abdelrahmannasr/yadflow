@@ -13,11 +13,14 @@ function load(root) {
   return { regPath, registry: readJSON(regPath, { repos: [] }) };
 }
 
-// HEAD != syncedHead => stale (config.yaml code_context.staleness: head-sha).
+// HEAD != syncedHead => stale (config.yaml code_context.staleness: head-sha). A repo that has a HEAD but
+// no syncedHead was registered without a pack (the greenfield path) — it needs an initial pack, which is
+// also a "run `yad repo refresh`" state, kept distinct from HEAD-moved staleness.
 function staleness(root, repo) {
   const head = gitHead(path.resolve(root, repo.path));
+  const neverPacked = !!head && !repo.syncedHead;
   const stale = head && repo.syncedHead && head !== repo.syncedHead;
-  return { head, stale: !!stale, unknown: !head };
+  return { head, stale: !!stale, unknown: !head, neverPacked };
 }
 
 // ---- git helpers for `sync` (local-user auth only — never embed credentials) ----
@@ -40,9 +43,10 @@ export async function runRepo(root, { action = 'list', name, today } = {}) {
     log(c.bold('\nconnected repos'));
     let staleCount = 0;
     for (const repo of registry.repos) {
-      const { stale, unknown } = staleness(root, repo);
+      const { stale, unknown, neverPacked } = staleness(root, repo);
       if (unknown) { warn(`${repo.name} ${c.dim(`(${repo.path})`)} — HEAD unreadable`); continue; }
-      if (stale) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
+      if (neverPacked) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('no code-context pack yet')} (registered without one)`); }
+      else if (stale) { staleCount++; warn(`${repo.name} ${c.dim(`(${repo.path})`)} — ${c.yellow('stale')} (HEAD moved since last pack)`); }
       else ok(`${repo.name} ${c.dim('— fresh')}`);
     }
     if (staleCount) hand(`refresh with \`yad repo refresh${registry.repos.length > 1 ? ' <name>' : ''}\` (or \`yad repo refresh\` for all)`);

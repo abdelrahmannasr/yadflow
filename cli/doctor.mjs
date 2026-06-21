@@ -12,6 +12,12 @@ import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
 
 const MIN_NODE = 18;
 
+// Solo mode (a lone developer): approval waived, merge + resolved threads still gate. Persisted in
+// hub.json. Mirrors gate.mjs / next.mjs.
+const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+// owner/repo slug from a git url (https or ssh), for the branch-protection probe.
+const repoSlug = (url) => ((url || '').match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/) || [])[1] || null;
+
 // Each check: { id, section, status: 'ok'|'warn'|'fail', message, hint? }
 function check(checks, id, section, status, message, hint = '') {
   checks.push({ id, section, status, message, ...(hint ? { hint } : {}) });
@@ -65,6 +71,7 @@ export function projectChecks(checks, root) {
     else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'file-only'}, ${(hub.roster || []).length} reviewer(s)`);
+      if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
       // platform CLI + auth (best-effort; auth probing is the user's own session)
       const cli = cliFor(hub.platform);
       if (cli) {
@@ -86,6 +93,18 @@ export function projectChecks(checks, root) {
           }
           if (bad.length) check(checks, 'roster', 'project', 'warn', `roster login(s) not found on ${hub.platform}: ${bad.join(', ')}`, 'fix the login or re-run `yad setup` (they cannot satisfy a gate)');
           else check(checks, 'roster', 'project', 'ok', `roster: ${(hub.roster || []).length} member(s) validated on ${hub.platform}`);
+          // Solo + GitHub: a branch that "requires approvals" would block the solo dev's own merge
+          // (they can't approve their own PR). Best-effort probe; a 404 (no protection) is fine.
+          if (isSolo(hub) && hub.platform === 'github') {
+            const slug = repoSlug(hub.git_url) || repoSlug(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
+            const br = hub.default_branch || 'main';
+            if (slug) {
+              const probe = run('gh', ['api', `repos/${slug}/branches/${br}/protection/required_pull_request_reviews`, '--jq', '.required_approving_review_count']);
+              if (probe.ok && Number(probe.stdout) > 0) {
+                check(checks, 'solo-branch-protection', 'project', 'warn', `solo mode but ${br} requires ${probe.stdout} approval(s) — you cannot approve your own PR, so the merge will be blocked`, `relax "Require approvals" in ${slug} branch protection for ${br}`);
+              }
+            }
+          }
         }
       }
     }
@@ -173,7 +192,8 @@ export function projectChecks(checks, root) {
       if (!exists(repoRoot)) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo'); continue; }
       const head = gitHead(repoRoot);
       if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} is not a git repository (or has no commits) [YAD-STATE-003]`, 'init/clone the repo, then re-connect it'); continue; }
-      if (repo.syncedHead && head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
+      if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
+      else if (head !== repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: code-context is stale (HEAD moved since last pack)`, 'run `yad repo refresh ' + repo.name + '`');
       else check(checks, `repo:${repo.name}`, 'project', 'ok', `${repo.name}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');

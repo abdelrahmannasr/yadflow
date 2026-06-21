@@ -36,11 +36,16 @@ the Markdown artifact only — the testing tool is additive, exactly like the de
 ## On Activation
 
 ### Step 1 — Resolve the epic and check the track
-Resolve the `EP-<slug>` (ask if not provided). Read `.sdlc/state.json`. Only proceed when the
-**`test-cases` step's `status == "in_progress"`** — it opens when `stories-review` passes (the epic is
-already `ready-for-build` by then; `currentStep` stays there because this is a parallel track, so do
-**not** gate on `currentStep`). If `test-cases` is still `blocked`, the stories review has not passed —
-stop and point the user at `yad-status` / the gate.
+Resolve the `EP-<slug>` (ask if not provided).
+
+**Precondition gate (rail):** run `yad next EP-<slug> --check test-cases` first. If it exits non-zero,
+**STOP** — surface the blocker it prints and point the user at `yad next EP-<slug>`. Do not author until
+it passes. The check is track-aware: it keys off the `test-cases` step's predecessors, **not**
+`currentStep` (this is a parallel track — `currentStep` stays at `ready-for-build`).
+
+This passes once the `test-cases` step is runnable — its predecessor `stories-review` is `done` (so the
+step has opened to `in_progress`) and `test-cases` is not already `done`. While it is still `blocked`,
+the stories review has not passed.
 
 ### Step 1b — Open the authoring branch
 Open the test-cases authoring branch `test-cases/EP-<slug>` per the shared procedure

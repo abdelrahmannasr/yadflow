@@ -199,6 +199,38 @@ test('CLI --version matches manifest', () => {
   assert.equal(out, version);
 });
 
+// `--check` value-consume must be scoped to the `next` command — it must NOT swallow a positional in
+// any other subcommand (regression guard for the bin/yad.mjs arg parser).
+// Run the installed CLI in dir T and capture { out, code } without throwing on non-zero exit.
+const yadRun = (T, ...args) => {
+  try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' }), code: 0 }; }
+  catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status ?? 1 }; }
+};
+
+test('CLI: `next <epic> --check <step>` reads the step; bare `--check` is a usage error', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-argp-'));
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-x', currentStep: 'architecture', steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'in_progress', risk_tags: [] },
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'blocked', risk_tags: [] },
+    ],
+  }));
+  assert.equal(yadRun(T, 'next', 'EP-x', '--check', 'architecture').code, 0); // runnable
+  assert.equal(yadRun(T, 'next', 'EP-x', '--check', 'architecture-review').code, 1); // blocked
+  assert.equal(yadRun(T, 'next', 'EP-x', '--check').code, 1); // no step → usage error
+});
+
+test('CLI: a non-next command does not let `--check` swallow a following positional', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-argp2-'));
+  // Before the scoped fix, `gate --check open EP-x epic.md` consumed `open` as the --check value,
+  // shifting `EP-x`/`epic.md` and yielding a spurious "invalid epic id". After: `open` stays the action.
+  const r = yadRun(T, 'gate', '--check', 'open', 'EP-x', 'epic.md');
+  assert.doesNotMatch(r.out, /invalid epic id/);
+});
+
 // ---------------------------------------------------------------------------------------------
 // lib.mjs — atomic writeJSON (a killed process must never leave a truncated ledger file)
 // ---------------------------------------------------------------------------------------------
@@ -322,7 +354,7 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 // ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
-const { gatePredicate, artifactHash } = await import('./epic-state.mjs');
+const { gatePredicate, artifactHash, nextAction, preconditionsMet } = await import('./epic-state.mjs');
 
 const baseStep = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
 const escStep = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
@@ -364,6 +396,251 @@ test('gatePredicate: escalated step needs a domain-owner per touched repo', () =
   approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'domain-owner', domain: 'mobile', artifactHash: 'sha256:C' });
   const pass = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true });
   assert.equal(pass.passed, true);
+});
+
+test('gatePredicate: solo waives approvals — merged + resolved passes with zero approvals', () => {
+  const p = gatePredicate({ step: baseStep, approvals: [], currentHash: 'sha256:H1', merged: true, threadsResolved: true, solo: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'solo');
+});
+
+test('gatePredicate: solo still requires the merge and resolved threads', () => {
+  const unmerged = gatePredicate({ step: baseStep, approvals: [], merged: false, threadsResolved: true, solo: true });
+  assert.equal(unmerged.passed, false);
+  assert.ok(unmerged.missing.includes('review PR/MR not merged'));
+  const unresolved = gatePredicate({ step: baseStep, approvals: [], merged: true, threadsResolved: false, solo: true });
+  assert.equal(unresolved.passed, false);
+  assert.ok(unresolved.missing.includes('unresolved review comments'));
+});
+
+test('gatePredicate: solo passes an escalated step without any domain-owner approvals', () => {
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true, threadsResolved: true, solo: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'solo');
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
+// ---------------------------------------------------------------------------------------------
+// Build a single state-machine step record for the test chains below.
+const S = (id, type, status, artifact, extra = {}) => ({ id, type, status, artifact, risk_tags: [], ...extra });
+// A small front chain at an arbitrary point: epic, epic-review, architecture, architecture-review.
+const chain = (overrides) => ({
+  epicId: 'EP-x',
+  currentStep: overrides.currentStep,
+  steps: [
+    S('epic', 'author', overrides.epic ?? 'done', 'epic.md'),
+    S('epic-review', 'review+approve', overrides.epicReview ?? 'done', 'epic.md'),
+    S('architecture', 'author', overrides.architecture ?? 'blocked', 'architecture.md'),
+    S('architecture-review', 'review+approve', overrides.architectureReview ?? 'blocked', 'architecture.md'),
+  ],
+});
+
+test('preconditionsMet: greenfield (no state) — epic is the entry step, architecture is not', () => {
+  assert.equal(preconditionsMet(null, 'epic').ok, true);
+  assert.equal(preconditionsMet(null, 'architecture').ok, false);
+});
+
+test('preconditionsMet: current step runnable, downstream blocked, done step not re-runnable', () => {
+  const state = chain({ currentStep: 'architecture', architecture: 'in_progress' });
+  assert.equal(preconditionsMet(state, 'architecture').ok, true);
+  const blocked = preconditionsMet(state, 'architecture-review');
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.blockedBy, 'architecture');
+  assert.equal(preconditionsMet(state, 'epic').ok, false); // already done
+  assert.equal(preconditionsMet(state, 'nope').ok, false); // unknown
+});
+
+test('nextAction: author step → invoke the mapped skill', () => {
+  const a = nextAction({ state: chain({ currentStep: 'architecture', architecture: 'in_progress' }), hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(a.kind, 'author');
+  assert.equal(a.skill, 'yad-architecture');
+  assert.equal(a.artifact, 'architecture.md');
+});
+
+test('nextAction: review step with no PR → open; with a PR → sync', () => {
+  const state = chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' });
+  const open = nextAction({ state, hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(open.kind, 'review-open');
+  assert.equal(open.command, 'yad gate open EP-x epic.md');
+  const sync = nextAction({ state, hubPrs: [{ artifact: 'epic.md', number: 7 }] }, { epic: 'EP-x' });
+  assert.equal(sync.kind, 'review-sync');
+  assert.equal(sync.command, 'yad gate sync EP-x epic.md');
+  assert.equal(sync.pr, 7);
+});
+
+test('nextAction: ready-for-build → build; an open test-cases track is surfaced as parallel', () => {
+  const base = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
+  assert.equal(nextAction({ state: base, hubPrs: [] }).kind, 'build');
+  assert.equal(nextAction({ state: base, hubPrs: [] }).parallel, null);
+  const withTc = { ...base, steps: [...base.steps, S('test-cases', 'author', 'in_progress', 'test-cases.md')] };
+  const a = nextAction({ state: withTc, hubPrs: [] });
+  assert.equal(a.kind, 'build');
+  assert.equal(a.parallel.skill, 'yad-test-cases');
+});
+
+test('nextAction: no state → kind new (seed with yad-epic)', () => {
+  const a = nextAction({ state: null, hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(a.kind, 'new');
+  assert.equal(a.skill, 'yad-epic');
+});
+
+// runNext (the CLI surface) — capture stdout and assert the guidance + exit codes.
+const { runNext } = await import('./next.mjs');
+// Capture console.log output produced while running fn (the CLI commands print via console.log).
+async function grab(fn) {
+  const orig = console.log;
+  const out = [];
+  console.log = (...a) => out.push(a.map(String).join(' '));
+  try { await fn(); } finally { console.log = orig; }
+  return out.join('\n');
+}
+// Write a minimal per-epic state ledger under T/epics/<id>/.sdlc/state.json for driver tests.
+function seedEpic(T, id, state) {
+  fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/state.json'), JSON.stringify(state));
+}
+
+test('runNext: a fresh project tells you to run yad setup', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next1-'));
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /yad setup/);
+});
+
+test('runNext: set up but no epics points at yad-epic; brownfield suggests yad-backfill first', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, profile: { codebase: 'brownfield' } }));
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /yad-epic/);
+  assert.match(s, /yad-backfill/);
+});
+
+test('runNext: specific epic prints the action; --check on a blocked step exits 1', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /yad-architecture/);
+  process.exitCode = 0;
+  await grab(() => runNext(T, { epic: 'EP-x', check: 'architecture-review' }));
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0; // do not leak a failing exit code into the test runner
+});
+
+test('runNext: review-sync action in solo mode notes the merge-only path', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next4-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', solo: true }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' }));
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), JSON.stringify([{ artifact: 'epic.md', number: 9 }]));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /yad gate sync EP-x epic\.md/);
+  assert.match(s, /solo/i);
+});
+
+test('runNext: build action surfaces the parallel test-cases track', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next5-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [
+    S('stories-review', 'review+approve', 'done', 'stories/'),
+    S('test-cases', 'author', 'in_progress', 'test-cases.md'),
+  ] });
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /yad-run|build/i);
+  assert.match(s, /yad-test-cases/);
+});
+
+test('runNext: several epics list each action, and --all expands them', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next6-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-a', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  seedEpic(T, 'EP-b', chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' }));
+  const list = await grab(() => runNext(T, {}));
+  assert.match(list, /EP-a/);
+  assert.match(list, /EP-b/);
+  const all = await grab(() => runNext(T, { all: true }));
+  assert.match(all, /yad-architecture/); // EP-a author action shown in detail
+});
+
+test('runNext: no-epics non-brownfield omits the backfill hint; bad id / missing epic are handled', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next7-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, profile: { codebase: 'greenfield' } }));
+  const fresh = await grab(() => runNext(T, {}));
+  assert.match(fresh, /yad-epic/);
+  assert.doesNotMatch(fresh, /yad-backfill/);
+  process.exitCode = 0;
+  await grab(() => runNext(T, { epic: 'not-an-id' }));
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0;
+  await grab(() => runNext(T, { epic: 'EP-missing' }));
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0;
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad setup` — the profile interview (resolveProfile is pure of side effects)
+// ---------------------------------------------------------------------------------------------
+const { resolveProfile } = await import('./setup.mjs');
+
+test('resolveProfile: flags fully determine a solo/greenfield/monorepo profile (no prompts)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof-'));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const p = await resolveProfile(T, { solo: true, greenfield: true, monorepo: true });
+    assert.deepEqual(p, { solo: true, team_size: 1, codebase: 'greenfield', repo_layout: 'monorepo', configureTools: false });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+});
+
+test('resolveProfile: --team N is a team of N; brownfield/separate/--tools honored', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof2-'));
+  const p = await resolveProfile(T, { team: '3', brownfield: true, separate: true, tools: true });
+  assert.deepEqual(p, { solo: false, team_size: 3, codebase: 'brownfield', repo_layout: 'separate', configureTools: true });
+});
+
+test('resolveProfile: carries a prior profile forward from hub.json on re-run', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 } }));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const p = await resolveProfile(T, {}); // no flags — must reuse hub.json
+    assert.equal(p.solo, true);
+    assert.equal(p.codebase, 'brownfield');
+    assert.equal(p.repo_layout, 'separate');
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+});
+
+const { runSetup } = await import('./setup.mjs');
+
+test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers the optional tools', async () => {
+  const { T } = scaffold();
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.solo, true);
+  assert.equal(hub.profile.codebase, 'greenfield');
+  assert.equal(hub.profile.repo_layout, 'monorepo');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'none'); // deferred
+});
+
+test('runSetup: team + --tools records a team profile and configures the optional tools', async () => {
+  const { T } = scaffold();
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { team: '2', brownfield: true, separate: true, tools: true, ideTargets: ['.claude'] });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.solo, false);
+  assert.equal(hub.profile.team_size, 2);
+  assert.equal(hub.profile.codebase, 'brownfield');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'figma'); // configured (default)
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -807,6 +1084,17 @@ test('registerRepo records multiple domain_owners, keeping domain_owner as the f
   const repo = registerRepo(T, { repos: [] }, { name: 'real', rpath: 'real', platform: 'github', domain_owners: ['carol', 'dave'], today: '2026-06-14' });
   assert.deepEqual(repo.domain_owners, ['carol', 'dave']);
   assert.equal(repo.domain_owner, 'carol', 'legacy single field mirrors the first owner');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('registerRepo with pack:false (greenfield) leaves syncedHead null and reads as needs-pack', async () => {
+  const { T } = scaffold(); // scaffold registers `backend` with syncedHead == HEAD (fresh)
+  const registry = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+  const repo = registerRepo(T, registry, { name: 'gf', rpath: 'demo/backend', platform: 'github', pack: false });
+  assert.equal(repo.syncedHead, null, 'no pack produced => no synced HEAD claimed');
+  // The fresh `backend` is not flagged; the never-packed `gf` is — so `yad repo list` reports 1 to refresh.
+  const r = await runRepo(T, { action: 'list' });
+  assert.equal(r.stale, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

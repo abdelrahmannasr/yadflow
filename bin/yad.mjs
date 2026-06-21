@@ -13,11 +13,14 @@ import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
+import { runNext } from '../cli/next.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
 ${c.bold('Setup & maintenance')}
-  yad setup            Guided first-run setup (install module, connect & wire repos)
+  yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
+                       profile flags: --solo | --team <n>, --greenfield | --brownfield,
+                       --monorepo | --separate, --tools (configure design/testing/learning now)
   yad check            Report what is missing / drifted / stale / legacy (read-only)
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
@@ -32,6 +35,12 @@ ${c.bold('Reviewer roster')}
   yad roster grant <name> <repo> <role...>   Grant role(s) for a connected repo (domain-owner|reviewer|owner)
   yad roster revoke <name> <repo> <role...>  Remove role(s) for a repo
   yad roster remove <login>            Delete a member from the roster
+
+${c.bold('Where am I / what next')}
+  yad next                             Project-wide: the one next action to take (or run setup)
+  yad next <epic>                      The single next action for one epic (skill or yad command)
+  yad next <epic> --check <step>       Exit 0 if <step> is runnable now, else 1 (precondition guard)
+  yad next --all                       Every active epic's next action at once
 
 ${c.bold('Review gate (front half)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
@@ -75,7 +84,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -86,7 +95,19 @@ function parseArgs(argv) {
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--overview') o.overview = true;
-    else if (a === '--check') o.check = true;
+    // `--check` is a bare boolean for `docs sync --check`, but takes a value for
+    // `next <epic> --check <step>`. Only the `next` command consumes the following token as a value —
+    // scoping it to `next` keeps `docs sync --check overview` (and any other command) from swallowing a
+    // positional. `o._[0]` is the command, already pushed by the time `--check` is seen in normal use.
+    else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
+    else if (a === '--all') o.all = true;
+    // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
+    else if (a === '--solo') o.solo = true;
+    else if (a === '--greenfield') o.greenfield = true;
+    else if (a === '--brownfield') o.brownfield = true;
+    else if (a === '--monorepo') o.monorepo = true;
+    else if (a === '--separate') o.separate = true;
+    else if (a === '--tools') o.tools = true;
     else if (a === '--refresh') o.refresh = true;
     else if (a === '--wire') o.wire = true;
     else if (a === '--dry-run') o.dryRun = true;
@@ -117,7 +138,11 @@ async function main() {
   const today = new Date().toISOString().slice(0, 10);
   switch (cmd) {
     case 'setup':
-      await runSetup(o.dir, { today, force: o.force });
+      await runSetup(o.dir, {
+        today, force: o.force,
+        solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
+        monorepo: o.monorepo, separate: o.separate, tools: o.tools,
+      });
       break;
     case 'check':
       await reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, today });
@@ -128,6 +153,13 @@ async function main() {
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
       break;
+    case 'next': {
+      const [, epic] = o._;
+      // `--check` with no step is a malformed guard call — fail loudly rather than silently print.
+      if (o.check === true) { log(c.red('usage: yad next <epic> --check <step>')); process.exitCode = 1; break; }
+      await runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all });
+      break;
+    }
     case 'gate': {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
