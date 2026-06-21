@@ -96,8 +96,10 @@ function parseArgs(argv) {
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--overview') o.overview = true;
     // `--check` is a bare boolean for `docs sync --check`, but takes a value for
-    // `next <epic> --check <step>`. Consume the next token only when it is a real value.
-    else if (a === '--check') { const v = argv[i + 1]; o.check = (v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
+    // `next <epic> --check <step>`. Only the `next` command consumes the following token as a value —
+    // scoping it to `next` keeps `docs sync --check overview` (and any other command) from swallowing a
+    // positional. `o._[0]` is the command, already pushed by the time `--check` is seen in normal use.
+    else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
@@ -153,6 +155,8 @@ async function main() {
       break;
     case 'next': {
       const [, epic] = o._;
+      // `--check` with no step is a malformed guard call — fail loudly rather than silently print.
+      if (o.check === true) { log(c.red('usage: yad next <epic> --check <step>')); process.exitCode = 1; break; }
       await runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all });
       break;
     }

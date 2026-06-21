@@ -199,6 +199,37 @@ test('CLI --version matches manifest', () => {
   assert.equal(out, version);
 });
 
+// `--check` value-consume must be scoped to the `next` command — it must NOT swallow a positional in
+// any other subcommand (regression guard for the bin/yad.mjs arg parser).
+const yadRun = (T, ...args) => {
+  try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' }), code: 0 }; }
+  catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status ?? 1 }; }
+};
+
+test('CLI: `next <epic> --check <step>` reads the step; bare `--check` is a usage error', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-argp-'));
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-x', currentStep: 'architecture', steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'in_progress', risk_tags: [] },
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'blocked', risk_tags: [] },
+    ],
+  }));
+  assert.equal(yadRun(T, 'next', 'EP-x', '--check', 'architecture').code, 0); // runnable
+  assert.equal(yadRun(T, 'next', 'EP-x', '--check', 'architecture-review').code, 1); // blocked
+  assert.equal(yadRun(T, 'next', 'EP-x', '--check').code, 1); // no step → usage error
+});
+
+test('CLI: a non-next command does not let `--check` swallow a following positional', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-argp2-'));
+  // Before the scoped fix, `gate --check open EP-x epic.md` consumed `open` as the --check value,
+  // shifting `EP-x`/`epic.md` and yielding a spurious "invalid epic id". After: `open` stays the action.
+  const r = yadRun(T, 'gate', '--check', 'open', 'EP-x', 'epic.md');
+  assert.doesNotMatch(r.out, /invalid epic id/);
+});
+
 // ---------------------------------------------------------------------------------------------
 // lib.mjs — atomic writeJSON (a killed process must never leave a truncated ledger file)
 // ---------------------------------------------------------------------------------------------
