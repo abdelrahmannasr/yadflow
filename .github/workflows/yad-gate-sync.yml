@@ -47,7 +47,7 @@ jobs:
       # A head branch auto-deleted on merge is fine: the event payload still carries head.ref (the
       # string `gate ci` parses), and a failed fetch just skips the overlay — by then the artifact
       # is already on the base branch via the merge.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
