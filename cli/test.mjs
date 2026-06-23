@@ -1986,6 +1986,30 @@ test('doctor: healthy project has no failures (warnings allowed)', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('doctor: warns on an open review PR recorded on the default branch (pre-3.0 migration guard)', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-mig/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  const writeState = (reviewStatus) => fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({
+    epicId: 'EP-mig', currentStep: 'epic-review',
+    steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: reviewStatus },
+    ],
+  }));
+  writeState('in_review');
+  fs.writeFileSync(path.join(ep, 'hub-prs.json'), JSON.stringify([
+    { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 7, branch: 'review/EP-mig/epic' },
+  ]));
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'epic:EP-mig:migration' && x.status === 'warn'), 'open review PR on the default branch warns');
+  // once the review step is done, the recorded PR is historical — no warning.
+  writeState('done');
+  const r2 = await doctorOn(T);
+  assert.ok(!r2.checks.some((x) => x.id === 'epic:EP-mig:migration'), 'a done review does not warn');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: untagged GitLab fragment warns with YAD-CI-001; tagged is silent', async () => {
   const { T } = scaffold();
   const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
