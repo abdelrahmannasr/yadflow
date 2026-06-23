@@ -25,6 +25,12 @@ jassert() {
   ' "$2"
 }
 
+# fa_status <file> <expected> — assert the frontmatter `status:` of a markdown artifact.
+fa_status() {
+  local got; got="$(sed -n 's/^status:[[:space:]]*//p' "$1" | head -1)"
+  [ "$got" = "$2" ] || die "$1 status is '$got', expected '$2'"
+}
+
 # Test commits must carry the identity each scratch repo sets, not CI's exported one.
 unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL || true
 git_id() { git -C "$1" config user.name dev; git -C "$1" config user.email dev@corp.io; }
@@ -96,7 +102,7 @@ echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 outdated, 0 stale, 0 legacy" 
 say "seed an epic at its review gate"
 EPIC="$HUB/epics/EP-e2e"
 mkdir -p "$EPIC/.sdlc"
-printf -- '---\nowner: Alice\nrepos: [backend]\n---\n# EP-e2e\n' > "$EPIC/epic.md"
+printf -- '---\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-e2e\n' > "$EPIC/epic.md"
 cat > "$EPIC/.sdlc/state.json" <<'EOF'
 {"epicId":"EP-e2e","createdAt":"2026-06-13","currentStep":"epic-review","steps":[
  {"id":"epic","type":"author","artifact":"epic.md","assistance":"review","automation":"human_approve","locked":true,"status":"done","risk_tags":[]},
@@ -107,6 +113,8 @@ EOF
 say "yad gate open records the review PR"
 yad gate open EP-e2e epic.md --dir "$HUB" || die "gate open failed"
 jassert "$EPIC/.sdlc/hub-prs.json" 'j.length === 1 && j[0].number === 7 && j[0].artifact === "epic.md"'
+# Local gate auto-syncs artifact frontmatter: epic-review is in_review -> epic.md flips draft -> in-review.
+fa_status "$EPIC/epic.md" in-review
 
 say "gate sync holds while approvals are missing"
 yad gate sync EP-e2e epic.md --dir "$HUB" || die "gate sync (pending) failed"
@@ -118,7 +126,41 @@ echo approved > "$E2E_GH_PHASE_FILE"
 yad gate sync EP-e2e epic.md --dir "$HUB" || die "gate sync (approved) failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
 jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "Alice" && a.role === "owner" && a.status === "approved")'
+# Gate passed -> epic-review done -> epic.md advances in-review -> approved.
+fa_status "$EPIC/epic.md" approved
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
+
+say "yad sync-status is idempotent and preserves owned values"
+SYNC_OUT="$(yad sync-status EP-e2e --dir "$HUB")" || die "sync-status failed"
+echo "$SYNC_OUT" | grep -qi "in sync" || die "sync-status should report nothing to do after the gate ran: $SYNC_OUT"
+yad sync-status EP-e2e --dir "$HUB" --dry-run >/dev/null || die "sync-status --dry-run failed"
+
+say "gate ci pre-merge: writes the ledger (+reviews) but NOT the artifact; holds in_review"
+CIE="$HUB/epics/EP-cici"
+mkdir -p "$CIE/.sdlc"
+printf -- '---\nid: EP-cici\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-cici\n' > "$CIE/epic.md"
+cat > "$CIE/.sdlc/state.json" <<'EOF'
+{"epicId":"EP-cici","createdAt":"2026-06-13","currentStep":"epic-review","steps":[
+ {"id":"epic","type":"author","artifact":"epic.md","status":"done","risk_tags":[]},
+ {"id":"epic-review","type":"review+approve","artifact":"epic.md","status":"in_review","risk_tags":[]}
+]}
+EOF
+echo pending > "$E2E_GH_PHASE_FILE"
+yad gate ci --branch review/EP-cici/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
+# Pre-merge commit carries the ledger + reviews (they ride the review branch), never the artifact.
+CI_FILES="$(git -C "$HUB" show --name-only --format= HEAD | grep '^epics/EP-cici/' || true)"
+echo "$CI_FILES" | grep -q '^epics/EP-cici/.sdlc/' || die "pre-merge did not commit the .sdlc ledger: $CI_FILES"
+if echo "$CI_FILES" | grep -q '^epics/EP-cici/epic.md'; then die "pre-merge must NOT commit the artifact: $CI_FILES"; fi
+jassert "$CIE/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
+fa_status "$CIE/epic.md" draft   # CI never touches the artifact pre-merge
+
+say "gate ci --merged: advances the step + flips status to approved on the default branch"
+echo approved > "$E2E_GH_PHASE_FILE"
+yad gate ci --branch review/EP-cici/epic --pr 7 --merged --no-push --dir "$HUB" || die "gate ci (merge) failed"
+jassert "$CIE/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
+fa_status "$CIE/epic.md" approved
+MERGE_FILES="$(git -C "$HUB" show --name-only --format= HEAD | grep '^epics/EP-cici/' || true)"
+echo "$MERGE_FILES" | grep -q '^epics/EP-cici/epic.md' || die "merge must commit the artifact status flip: $MERGE_FILES"
 
 say "yad next drives the build half and guards step order"
 NEXT_OUT="$(yad next EP-e2e --dir "$HUB")" || die "yad next failed"
