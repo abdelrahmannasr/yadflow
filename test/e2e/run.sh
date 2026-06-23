@@ -110,23 +110,27 @@ cat > "$EPIC/.sdlc/state.json" <<'EOF'
 ]}
 EOF
 
-say "yad gate open records the review PR"
+say "yad gate open opens the PR but writes NO ledger (CI is the sole writer)"
 yad gate open EP-e2e epic.md --dir "$HUB" || die "gate open failed"
-jassert "$EPIC/.sdlc/hub-prs.json" 'j.length === 1 && j[0].number === 7 && j[0].artifact === "epic.md"'
-# Local gate auto-syncs artifact frontmatter: epic-review is in_review -> epic.md flips draft -> in-review.
-fa_status "$EPIC/epic.md" in-review
+[ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "gate open must not write the ledger in bridge mode"
 
-say "gate sync holds while approvals are missing"
-yad gate sync EP-e2e epic.md --dir "$HUB" || die "gate sync (pending) failed"
+say "CI pre-merge writes the ledger to the branch and holds in_review"
+echo pending > "$E2E_GH_PHASE_FILE"
+yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
+jassert "$EPIC/.sdlc/hub-prs.json" 'j.length === 1 && j[0].number === 7 && j[0].artifact === "epic.md"'
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 jassert "$EPIC/.sdlc/approvals.json" 'j.length === 1 && j[0].approver === "Bob" && j[0].role === "reviewer"'
+fa_status "$EPIC/epic.md" draft   # CI never touches the artifact pre-merge
 
-say "gate sync advances on owner + reviewer + merge"
+say "local yad gate sync is advisory in bridge mode (writes nothing, even on an approved+merged PR)"
 echo approved > "$E2E_GH_PHASE_FILE"
-yad gate sync EP-e2e epic.md --dir "$HUB" || die "gate sync (approved) failed"
+yad gate sync EP-e2e epic.md --dir "$HUB" || die "advisory gate sync failed"
+jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
+
+say "CI --merged advances on the default branch: step done + artifact status approved"
+yad gate ci --branch review/EP-e2e/epic --pr 7 --merged --no-push --dir "$HUB" || die "gate ci (merge) failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
 jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "Alice" && a.role === "owner" && a.status === "approved")'
-# Gate passed -> epic-review done -> epic.md advances in-review -> approved.
 fa_status "$EPIC/epic.md" approved
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
 

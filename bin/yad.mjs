@@ -178,10 +178,11 @@ async function main() {
       if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      // `open` and `sync` move the local state machine; keep the artifact frontmatter status in
-      // step. (Never for `gate ci`: CI must not write artifact content to the default branch.)
-      if (action === 'open') { await gateOpen(o.dir, { epic, artifact, today }); await syncStatuses(o.dir, { epic }); }
-      else if (action === 'sync') { await gateSync(o.dir, { epic, artifact, today }); await syncStatuses(o.dir, { epic }); }
+      // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
+      // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
+      // CI's job at merge — never wired into the local gate. File-only mode keeps local writes.
+      if (action === 'open') await gateOpen(o.dir, { epic, artifact, today });
+      else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
       else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|ci)`)); process.exitCode = 1; }

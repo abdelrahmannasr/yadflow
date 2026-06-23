@@ -159,13 +159,16 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
 
 // ---- actions ------------------------------------------------------------------------------------
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, local = false } = {}) {
   const { hub, repos } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
   const roster = hub.roster || [];
   const defaultReviewers = 1;
   const solo = isSolo(hub);
+  // Local invocation in bridge mode is ADVISORY: CI is the sole ledger writer, so a human run reads
+  // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
+  const readOnly = local;
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
@@ -219,6 +222,10 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr } 
     synced++;
   }
 
+  if (readOnly) {
+    info('bridge mode: advisory view — CI owns the ledger, nothing written locally');
+    return { synced, advanced };
+  }
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
   writeJSON(ledger.files.hubPrs, hubPrs);
@@ -426,12 +433,19 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   const domains = touchedDomains(epicDir, step);
   warnUnlockedContract(epicDir, artifact);
 
-  // Mark in-review in the ledger regardless of platform (file-only still works).
-  ledger.state = markInReview(ledger.state, step);
-  writeJSON(ledger.files.state, ledger.state);
+  // File-only mode (no platform): there is no CI to write the ledger, so mark in_review locally.
+  if (!hub?.platform) {
+    ledger.state = markInReview(ledger.state, step);
+    writeJSON(ledger.files.state, ledger.state);
+    warn('no hub platform — marked in_review file-only (no PR opened)');
+    ok(`${step.id} → in_review`);
+    return;
+  }
 
-  if (!hub?.platform) { warn('no hub platform — marked in_review file-only (no PR opened)'); ok(`${step.id} → in_review`); return; }
-
+  // Bridge mode: open the PR only. CI is the SOLE writer of the ledger — it records markInReview +
+  // the hub-prs entry on the review branch when the `opened` event fires. `yad gate open` never
+  // commits gate-state files (the ledger-guard check enforces that on the review PR), so the human
+  // keeps the artifact and CI keeps the ledger.
   const body = fillHubTemplate({ epic, artifact, step, owner: ownerOf(epicDir), domains });
   // Assignee = whoever opens the review PR (the committer); reviewers = the hub's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
@@ -442,13 +456,10 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = createPr(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
-  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'}); step is in_review file-only`); return; }
+  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'}) — open it manually; CI records the gate on the opened event`); return; }
 
-  const number = Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null;
-  ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number, url: r.url, branch, lastSyncedAt: null });
-  writeJSON(ledger.files.hubPrs, ledger.hubPrs);
   ok(`opened ${r.url}`);
-  hand(`reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
+  hand('reviewers approve/comment there; CI syncs the gate (ledger → review branch) on each event');
 }
 
 // ---- helpers ------------------------------------------------------------------------------------
