@@ -705,6 +705,40 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate sync local: writes when the bridge is OFF, advisory (no writes) when ON', async () => {
+  // bridge OFF (a platform but no gate-sync CI wired): local sync stays the writer and advances.
+  const a = scaffoldEpic();
+  await gateSync(a.T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval, local: true });
+  const sa = JSON.parse(fs.readFileSync(path.join(a.ep, '.sdlc/state.json')));
+  assert.equal(sa.steps.find((s) => s.id === 'architecture-review').status, 'done', 'non-bridge local sync advances');
+  fs.rmSync(a.T, { recursive: true, force: true });
+
+  // bridge ON: local sync is advisory — CI owns the ledger, so it writes nothing.
+  const b = scaffoldEpic();
+  const hub = JSON.parse(fs.readFileSync(path.join(b.T, '.sdlc/hub.json')));
+  hub.bridge_enabled = true;
+  fs.writeFileSync(path.join(b.T, '.sdlc/hub.json'), JSON.stringify(hub));
+  await gateSync(b.T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval, local: true });
+  const sb = JSON.parse(fs.readFileSync(path.join(b.ep, '.sdlc/state.json')));
+  assert.equal(sb.steps.find((s) => s.id === 'architecture-review').status, 'in_review', 'bridge local sync writes nothing');
+  fs.rmSync(b.T, { recursive: true, force: true });
+});
+
+test('gate sync advisory (bridge, local): unresolved comments do not dirty reviews/*.md', async () => {
+  const { T, ep } = scaffoldEpic();
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
+  hub.bridge_enabled = true;
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+  const blocking = {
+    ok: true, state: 'OPEN', merged: false, headOid: 'z',
+    reviews: [{ login: 'bo', state: 'CHANGES_REQUESTED' }],
+    threads: [{ id: 't1', resolved: false, login: 'bo', body: 'fix this' }],
+  };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => blocking, local: true });
+  assert.ok(!fs.existsSync(path.join(ep, 'reviews')), 'advisory sync wrote no reviews/*.md');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: a re-sync after advance does not clobber the next step', async () => {
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
