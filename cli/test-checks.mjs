@@ -470,20 +470,31 @@ test('pr-template gate: the real hub template passes under --profile hub', () =>
 });
 
 // ---------- ledger-guard.sh ----------
+// No origin remote in these scratch repos, so the platform signature check is waived (WARN) — the
+// tests exercise the bridge gate + author half hermetically (the signature half mirrors
+// verified-commits, whose signature path is likewise not unit-mocked).
 const LEDGER_GUARD = path.join(CHECKS, 'ledger-guard.sh');
+const enableBridge = (T) => {
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","bridge_enabled":true}\n');
+};
 
-test('ledger-guard: a non-bot commit touching gate-state files FAILS', () => {
+test('ledger-guard: with the bridge ON, a non-bot commit touching gate-state files FAILS', () => {
   const T = scaffoldRepo();
+  enableBridge(T);
+  commit(T, 'enable bridge', {}); // commit the hub.json (artifact-side; not a gate file)
   commit(T, 'review: epic', { 'epics/EP-x/epic.md': 'x\n' }); // artifact ok
   commit(T, 'sneaky', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' }); // human ledger edit
   const r = runGate(LEDGER_GUARD, T);
-  assert.equal(r.code, 1);
-  assert.match(r.out, /CI-owned gate file: epics\/EP-x\/\.sdlc\/approvals\.json/);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-x\/\.sdlc\/approvals\.json/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('ledger-guard: artifact + contract-lock edits by a human PASS', () => {
   const T = scaffoldRepo();
+  enableBridge(T);
+  commit(T, 'enable bridge', {});
   commit(T, 'review: architecture', {
     'epics/EP-x/architecture.md': '# a\n',
     'epics/EP-x/contract.md': 'POST /x\n',
@@ -493,8 +504,10 @@ test('ledger-guard: artifact + contract-lock edits by a human PASS', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('ledger-guard: a bot-authored ledger commit is exempt (PASS)', () => {
+test('ledger-guard: a bot-authored ledger commit is allowed (signature waived without a remote)', () => {
   const T = scaffoldRepo();
+  enableBridge(T);
+  commit(T, 'enable bridge', {});
   fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
   git(T, 'add', '-A');
@@ -504,8 +517,19 @@ test('ledger-guard: a bot-authored ledger commit is exempt (PASS)', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('ledger-guard: an unresolvable base ref FAILs closed', () => {
+test('ledger-guard: with the bridge OFF it is a no-op (humans own the ledger locally)', () => {
+  const T = scaffoldRepo(); // no .sdlc/hub.json → bridge not enabled
+  commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /bridge not enabled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
   const T = scaffoldRepo();
+  enableBridge(T);
+  commit(T, 'enable bridge', {});
   assert.equal(runGate(LEDGER_GUARD, T, ['origin/nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });

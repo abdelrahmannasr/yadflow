@@ -93,8 +93,14 @@ while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
   author="$(git log -1 --format=%ae "$sha" | tr '[:upper:]' '[:lower:]')"
+  # The gate-sync bot is a machine identity, not a roster human — waive the allowlist for it. Its
+  # commits are still held to the SIGNATURE check below, so a contributor cannot spoof the bot author
+  # to dodge the allowlist (a forged-author commit is not platform-Verified). Mirrors how the
+  # platform-committer merge commits are allowlist-exempt but signature-covered.
+  is_bot=0
+  case "${author}|$(git log -1 --format=%an "$sha" | tr '[:upper:]' '[:lower:]')" in *yad-gate-sync*) is_bot=1 ;; esac
 
-  if [ "$authors_on" = 1 ]; then
+  if [ "$authors_on" = 1 ] && [ "$is_bot" = 0 ]; then
     # tolerate CRLF / stray surrounding whitespace in a hand-edited allowlist
     if grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
         | tr '[:upper:]' '[:lower:]' | grep -qxF "$author"; then
@@ -103,6 +109,8 @@ while IFS= read -r sha; do
       echo "FAIL [verified-commits]: ${short} author <${author}> is not in ${ALLOWLIST} — unverified user."
       rc=1
     fi
+  elif [ "$is_bot" = 1 ]; then
+    echo "PASS [verified-commits]: ${short} gate-sync bot — allowlist waived (signature still required)"
   fi
 
   if [ -n "$platform" ]; then

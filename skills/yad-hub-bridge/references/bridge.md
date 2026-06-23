@@ -102,11 +102,14 @@ Pre-merge, CI writes `epics/<epic>/.sdlc/*.json` + `reviews/*.md` to the **revie
 the default branch via the human merge. At merge, CI commits the advance — and the `draft → approved`
 status flip — to the **default branch**. Both commits carry `[skip ci]`.
 
-**The ledger is CI-owned.** Humans never commit gate-state files: the `ledger-guard` check (yad-checks)
-FAILs any non-bot commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}.json` or
-`reviews/*.md` (the author check exempts the gate bot; `.sdlc/contract-lock.json` is artifact-side and
-allowed). `yad gate open` opens the PR only; local `yad gate sync` is advisory in bridge mode (reads the
-platform, prints status, writes nothing). After a merge, everyone `git checkout <default> && git pull`.
+**The ledger is CI-owned (bridge mode only).** Humans never commit gate-state files: the `ledger-guard`
+check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
+.json` or `reviews/*.md` unless it is a **verified gate-bot commit** — bot-authored AND platform-Verified
+(author text alone is spoofable, so the Verified signature is what proves CI authorship). The co-wired
+`verified-commits` waives the allowlist for the bot but still demands its signature; `.sdlc/contract-lock
+.json` is artifact-side and allowed. `yad gate open` opens the PR only; local `yad gate sync` is advisory
+in bridge mode (writes nothing). After a merge, everyone `git checkout <default> && git pull`. (Without
+the bridge, humans own the ledger locally and these guards are no-ops.)
 
 **Loop prevention & races.** A pre-merge ledger push lands on the review branch, which would otherwise
 re-fire `synchronize` / the MR pipeline — the `[skip ci]` on the commit makes the platform skip it. The

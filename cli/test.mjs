@@ -1967,6 +1967,20 @@ test('verified-commits gate: missing allowlist warns (not enforced); empty range
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('verified-commits gate: the gate-sync bot is allowlist-waived (signature still governs)', () => {
+  const T = scaffoldGateRepo(); // allowlist has alice@corp.io only; no remote → signature skipped
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
+  git(T, 'add', '-A');
+  // bot author NOT in the allowlist — passes anyway because the bot is waived.
+  git(T, '-c', 'user.name=yad-gate-sync[bot]', '-c', 'user.email=yad-gate-sync[bot]@users.noreply.github.com',
+    'commit', '-q', '-m', 'chore(gate): sync [skip ci]');
+  const r = runGate(T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /gate-sync bot — allowlist waived/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('verified-commits gate: unresolvable base fails closed', () => {
   const T = scaffoldGateRepo();
   try {
