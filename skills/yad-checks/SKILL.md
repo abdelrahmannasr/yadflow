@@ -38,6 +38,10 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
   - `templates/checks/{spec-link,contract-check,build-test-lint,verified-commits}.sh`
+  - `templates/checks/ledger-guard.sh` → **hub-only** gate: on review PRs it FAILs any non-bot commit
+    that touches the CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`,
+    `reviews/*.md`); the gate bot and `.sdlc/contract-lock.json` (artifact-side) are exempt. Runs in
+    `yad-hub-checks` so the ledger stays CI-owned (see `yad-hub-bridge`).
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
     → the standalone hub-side verified-commits CI (installed by `yad check --fix` with the hub wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`)

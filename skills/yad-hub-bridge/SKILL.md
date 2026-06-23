@@ -1,6 +1,6 @@
 ---
 name: yad-hub-bridge
-description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire event-driven sync on the hub: a CI workflow that runs `yad gate ci` whenever a reviewer approves / requests changes / a human merges, committing the ledger to the default branch. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire event-driven sync on the hub: a CI workflow that runs `yad gate ci` whenever a reviewer approves / requests changes / a human merges — CI is the sole ledger writer, writing it to the review branch during review and advancing on the default branch at merge. Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
@@ -57,13 +57,16 @@ each required domain-owner to a platform `login` via the roster (a roster `name`
    filled with the epic, artifact, gate step, owner, `epic.repos`, and the step's risk tags.
 3. **Request the required reviewers** (their logins) and add a `domain:<repo>` label per touched repo so
    per-repo routing is legible on the PR.
-4. Upsert a record into `epics/<epic>/.sdlc/hub-prs.json`:
+4. **Do not write the ledger.** CI is the sole writer — it records `hub-prs.json` (and marks the step
+   in_review) **on the review branch** when the `opened` event fires, in this shape:
    ```json
    { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab",
      "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": null }
    ```
+   A human commit touching `.sdlc/*.json` on a review PR is rejected by the `ledger-guard` check. (The
+   `yad gate open` CLI behaves the same: in bridge mode it opens the PR only and writes no ledger.)
 5. Report the PR/MR URL and the required reviewers. **Do not** record approvals or advance — reviewers
-   act on the platform; `yad-review-gate action: sync` pulls it back.
+   act on the platform; CI (`yad gate ci`) pulls it back onto the review branch.
 
 ### Step 3 — `route` (print required reviewers)
 Compute and print the required reviewers as above. Use `templates/checks/hub-route.sh <body>` to parse a
@@ -71,10 +74,12 @@ PR/MR body's Impact & Risk block when given one; otherwise derive from `epic.rep
 `risk_tags`. Advisory only — it routes the human review, it does not approve.
 
 ### Step 4 — `wire` (event-driven sync on the hub)
-Install the hub CI that turns platform actions — a review **approval**, a **change request**, a review
-dismissal, or the human **merge** — into an automatic `yad gate ci` run that syncs the ledger and
-commits it to the hub's default branch. No more waiting on a manual `yad gate sync`; the manual command
-remains valid and is the fallback whenever CI cannot push.
+Install the hub CI that turns platform actions into `yad gate ci` runs, with CI as the **sole writer**
+of the ledger. Pre-merge (PR opened, approval, change request, dismissal, push) CI writes the ledger to
+the **review branch**; on the human **merge** CI advances the step and flips the artifact `status:` on
+the **default branch**. Also install the `ledger-guard` check (yad-checks) so humans cannot commit
+gate-state files, and recommend enabling the platform's **"dismiss stale approvals on push"**. The
+manual `yad gate sync` remains as the file-only fallback (advisory in bridge mode).
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
    enabled bridge in `.sdlc/hub.json` it installs
@@ -111,8 +116,9 @@ remains valid and is the fallback whenever CI cannot push.
   act) — `yad gate sync` records the approvals + resolution + merged state and advances; unresolved
   comments or a changed artifact hold it `in_review`. The mechanical sync is the `yad gate` CLI.
 - **CI never approves and never merges.** The wired workflow only runs `gate ci` — the same sync +
-  unchanged predicate — and commits the **ledger files only** to the default branch; the artifact lands
-  on the default branch exclusively via the human merge. Front gates stay permanently human.
+  unchanged predicate. Pre-merge it writes the **ledger to the review branch** (the artifact + ledger
+  ride that branch to the default branch via the human merge); at merge it advances the step + flips the
+  artifact status on the default branch. CI is the sole ledger writer; front gates stay permanently human.
 - **The CI tokens are the one documented bend of "no stored tokens".** GitHub uses the platform's own
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
   project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so

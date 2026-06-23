@@ -81,56 +81,63 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
 
 ## Event-driven sync (hub CI)
 
-The `wire` action (SKILL.md Step 4) installs a CI workflow on the hub so the platform events drive
-`yad gate ci` instead of waiting on a manual `yad gate sync`. The CLI entry is self-sufficient: it
-derives the epic + artifact from the `review/EP-<slug>/<artifact-base>` head branch and takes the PR/MR
-number from the event payload — it even upserts the `hub-prs.json` entry when the author never committed
-it, so the first CI commit converges the views. `yad gate ci` with no `--branch` sweeps every open
-review PR (the scheduled path).
+The `wire` action (SKILL.md Step 4) installs CI on the hub so platform events drive `yad gate ci` —
+**CI is the SOLE writer of the ledger.** The CLI is self-sufficient: it derives the epic + artifact from
+the `review/EP-<slug>/<artifact-base>` head branch, takes the PR/MR number from the event, and upserts
+the `hub-prs.json` entry itself — so the first run (the `opened` event) seeds the ledger.
 
-| Platform event | CI action |
-|---|---|
-| review submitted (approve / changes requested) or dismissed | `gate ci --branch <head> --pr <n>` → sync the ledger; the predicate may hold or pass |
-| PR/MR `synchronize` (new commits on the review branch) | same — promptly re-stamps/revokes approvals on artifact change |
-| PR/MR closed **and merged** (the human act) | same — predicate sees `merged: true` and advances the step |
-| GitLab schedule (`*/15 * * * *`, `SDLC_GATE_SYNC=true`) | `gate ci` sweep — the **only** GitLab path that sees a bare approval (≤ ~15 min latency) |
+Two phases, and CI writes the ledger to a **different place** in each:
 
-**The overlay.** Pre-merge, the artifact under review exists only on the review branch, while the
-ledger lives on the default branch. `gate ci` checks out the default branch, fetches the head ref and
-overlays just the artifact paths (for architecture: `architecture.md` + `contract.md` +
-`.sdlc/contract-lock.json`; for stories: `stories/`) so `artifactHash` binds each approval to **what the
-reviewers actually approved** — then drops the overlay before committing. Only
-`epics/<epic>/.sdlc/*.json` + `reviews/*.md` are committed (message `chore(gate): … [skip ci]`); the
-artifact reaches the default branch exclusively via the human merge.
+| Platform event | Phase | CI action |
+|---|---|---|
+| PR/MR opened / reopened | pre-merge | `gate ci --branch <head> --pr <n>` → seed markInReview + hub-prs **on the review branch** |
+| review submitted (approve / changes requested) or dismissed | pre-merge | same → sync approvals/threads onto the review branch (predicate holds) |
+| PR/MR `synchronize` (new commits on the review branch) | pre-merge | same → re-stamp / revoke approvals on artifact change |
+| PR/MR closed **and merged** (the human act) | merge | `gate ci --branch <head> --pr <n> --merged` → the branch ledger reached the default branch via the merge; CI advances the step + flips the artifact `status:` **on the default branch** |
+| GitLab schedule (`*/15`, `SDLC_GATE_SYNC=true`) | sweep | `gate ci` (no `--branch`) — the only GitLab path that sees a bare approval (≤ ~15 min); advances + flips status on a merge it catches |
 
-**Loop prevention & races.** The GitHub triggers (`pull_request_review`, `pull_request`) cannot fire on
-a push to the default branch, `[skip ci]` guards every other workflow on both platforms, and a
-repo-wide concurrency group serializes runs; the ledger push retries with a rebase (ledger-only commits
-across epics touch disjoint files).
+**No overlay.** The artifact and the ledger live together on the review branch during review, so
+`artifactHash` binds each approval to the reviewed content directly — the old overlay-then-drop is gone.
+Pre-merge, CI writes `epics/<epic>/.sdlc/*.json` + `reviews/*.md` to the **review branch**; they reach
+the default branch via the human merge. At merge, CI commits the advance — and the `draft → approved`
+status flip — to the **default branch**. Both commits carry `[skip ci]`.
+
+**The ledger is CI-owned.** Humans never commit gate-state files: the `ledger-guard` check (yad-checks)
+FAILs any non-bot commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}.json` or
+`reviews/*.md` (the author check exempts the gate bot; `.sdlc/contract-lock.json` is artifact-side and
+allowed). `yad gate open` opens the PR only; local `yad gate sync` is advisory in bridge mode (reads the
+platform, prints status, writes nothing). After a merge, everyone `git checkout <default> && git pull`.
+
+**Loop prevention & races.** A pre-merge ledger push lands on the review branch, which would otherwise
+re-fire `synchronize` / the MR pipeline — the `[skip ci]` on the commit makes the platform skip it. The
+merge advance lands on the default branch (no PR trigger). Pre-merge runs serialize per review branch;
+the merge advance serializes on the default branch; the push retries with a rebase.
 
 **Tokens.**
 - GitHub: the ephemeral `github.token` with `contents: write` + `pull-requests: read` — nothing stored.
+  Pre-merge pushes target the (unprotected) review branch; only the merge job pushes the default branch.
 - GitLab: a masked `SDLC_GATE_TOKEN` project access token (`read_api` + `write_repository`) — the one
-  documented bend of the no-stored-tokens rule; `CI_JOB_TOKEN` can neither read the approvals API nor
-  push.
-- Protected default branch (GitHub): prefer a ruleset bypass for Actions; else a fine-grained PAT as
-  `SDLC_GATE_TOKEN` passed to `actions/checkout`; else leave it — the run fails **visibly** and manual
-  `yad gate sync` remains the fallback. Never wire branch protection that couples the merge itself to
-  the gate.
+  documented bend of the no-stored-tokens rule; `CI_JOB_TOKEN` can neither read the approvals API nor push.
+- Protected default branch (GitHub): only the merge advance needs to push it now — prefer a ruleset
+  bypass for Actions, else a fine-grained PAT as `SDLC_GATE_TOKEN` on the mergesync checkout. Also enable
+  **"dismiss stale approvals on push"** so revoke-on-change survives a force-push that wipes CI's
+  `approvals.json` (which CI rebuilds from the platform on the next event).
 
-**Manual sync stays first-class.** `yad gate sync <epic> [artifact]` is unchanged and always valid —
-the CI is the same sync on a trigger, and the file ledger is still the source of truth.
+**Manual sync.** In bridge mode `yad gate sync` is advisory (CI owns the writes). File-only mode (no
+platform) keeps the local write path. The file ledger is still the source of truth.
 
 ### Manual end-to-end verification (GitHub)
 
 1. On a scratch hub: `yad setup` (platform github, roster with a second account) → `yad check --fix`
    installs `.github/workflows/yad-gate-sync.yml`; commit + push it.
-2. Author an epic → `yad gate open EP-x epic.md` → the review PR opens.
-3. Second account **approves** → the Actions run commits `approvals.json` to the default branch.
-4. Second account **requests changes** → the run records the blocking comment; `yad gate status EP-x`
-   (after `git pull`) shows the gate held.
-5. Resolve the thread, approve again, a human **merges** → the closed-event run advances `state.json`
-   (`epic-review: done`, `currentStep: architecture`).
-6. `git pull` locally — `yad gate status EP-x` matches the platform history.
+2. Author an epic → `yad gate open EP-x epic.md` → the review PR opens (CI seeds the ledger on the
+   review branch via the `opened` event).
+3. Second account **approves** → the presync run records `approvals.json` **on the review branch**.
+4. Second account **requests changes** → the run records the blocking comment on the review branch;
+   checking the PR (or local `yad gate sync`, advisory) shows the gate held.
+5. Resolve the thread, approve again, a human **merges** → the mergesync run advances `state.json`
+   (`epic-review: done`, `currentStep: architecture`) + flips `epic.md` to `approved` **on the
+   default branch**.
+6. `git checkout <default> && git pull` locally — `yad gate status EP-x` matches the platform history.
 
 GitLab variant: same flow on an MR; a bare approval appears after the next schedule tick.
