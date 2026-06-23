@@ -63,14 +63,27 @@ yad-gate-sync:
         git fetch origin "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
         git checkout -B "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" "origin/$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
         npx -y -p yadflow@3 yad gate ci --branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --pr "$CI_MERGE_REQUEST_IID"
+      elif [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
+        # SCHEDULED SWEEP — GitLab fires no pipeline on a bare approval, so this is the catch-up path.
+        # (a) Default-branch sweep: advance any merged-but-stuck review (e.g. a squash merge whose
+        #     message dropped the branch name) — its ledger already reached the default branch.
+        git fetch origin "$CI_DEFAULT_BRANCH"
+        git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+        npx -y -p yadflow@3 yad gate ci || true
+        # (b) Per-branch sweep: in-flight reviews keep their ledger ON the review branch, so enumerate
+        #     the open review branches and sync each (the PR number is read from the branch ledger).
+        for ref in $(git ls-remote --heads origin 'refs/heads/review/EP-*' | awk '{print $2}' | sed 's#refs/heads/##'); do
+          git fetch -q origin "$ref" && git checkout -q -B "$ref" "origin/$ref" || continue
+          npx -y -p yadflow@3 yad gate ci --branch "$ref" || true
+        done
       else
-        # MERGE push or scheduled sweep: advance on the default branch.
+        # MERGE push to the default branch whose commit names a review branch: advance there.
         git fetch origin "$CI_DEFAULT_BRANCH"
         git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
         REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE 'review/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
         if [ -n "$REVIEW_BRANCH" ]; then
           npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --merged
         else
-          npx -y -p yadflow@3 yad gate ci   # scheduled sweep (advances + flips status on a merge it catches)
+          npx -y -p yadflow@3 yad gate ci   # fallback sweep on the default branch
         fi
       fi

@@ -94,7 +94,7 @@ Two phases, and CI writes the ledger to a **different place** in each:
 | review submitted (approve / changes requested) or dismissed | pre-merge | same → sync approvals/threads onto the review branch (predicate holds) |
 | PR/MR `synchronize` (new commits on the review branch) | pre-merge | same → re-stamp / revoke approvals on artifact change |
 | PR/MR closed **and merged** (the human act) | merge | `gate ci --branch <head> --pr <n> --merged` → the branch ledger reached the default branch via the merge; CI advances the step + flips the artifact `status:` **on the default branch** |
-| GitLab schedule (`*/15`, `SDLC_GATE_SYNC=true`) | sweep | `gate ci` (no `--branch`) — the only GitLab path that sees a bare approval (≤ ~15 min); advances + flips status on a merge it catches |
+| GitLab schedule (`*/15`, `SDLC_GATE_SYNC=true`) | sweep | the only GitLab path that sees a bare approval (≤ ~15 min). Two passes: (a) `gate ci` on the default branch advances any merged-but-stuck review (e.g. a squash merge whose message dropped the branch name); (b) `git ls-remote` enumerates open `review/EP-*` branches and runs `gate ci --branch <ref>` on each (the in-flight ledger lives on the branch, so the default-branch sweep alone can't see it) |
 
 **No overlay.** The artifact and the ledger live together on the review branch during review, so
 `artifactHash` binds each approval to the reviewed content directly — the old overlay-then-drop is gone.
