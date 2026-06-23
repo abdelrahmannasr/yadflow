@@ -195,6 +195,8 @@ export const wiringFor = (platform) => [
 export const HUB_WIRING = {
   common: [
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
+    // The ledger is CI-owned: block non-bot commits to gate-state files on hub review PRs.
+    { src: 'skills/yad-checks/templates/checks/ledger-guard.sh', dest: 'checks/ledger-guard.sh', exec: true },
     // Pattern gates run on the hub too (profile: hub) — commit subject + PR title + PR body.
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },

@@ -34,3 +34,11 @@ jobs:
       - run: |
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
           bash checks/pr-template.sh --profile hub "$body"
+
+  # The gate ledger is CI-owned: reject non-bot commits to .sdlc/*.json or reviews/*.md.
+  ledger-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/ledger-guard.sh "origin/${{ github.base_ref }}"

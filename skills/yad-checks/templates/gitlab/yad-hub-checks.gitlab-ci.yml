@@ -37,3 +37,10 @@ yad-hub-pr-template:
   script:
     - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
     - bash checks/pr-template.sh --profile hub "$body"
+
+# The gate ledger is CI-owned: reject non-bot commits to .sdlc/*.json or reviews/*.md.
+yad-hub-ledger-guard:
+  extends: .yad_hub_mr_only
+  needs: []
+  script:
+    - bash checks/ledger-guard.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
