@@ -62,8 +62,8 @@ flowchart LR
     merged -. story pipeline repeats · next story .-> sp
     merged -. next epic · front pipeline repeats .-> ep
     run -. drives earned back steps .-> im
-    bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
-    bridge -. syncs approvals .-> gEp
+    bridge["yad-hub-bridge<br/>review PR/MR ↔ ledger (merge-time)"]:::gated
+    bridge -. advances on merge .-> gEp
     status["yad-status<br/>read-only view over all of it"]
     status -. observes .-> FRONT
     status -. observes .-> BUILD
