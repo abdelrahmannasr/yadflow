@@ -31,7 +31,9 @@
 # Token: CI_JOB_TOKEN can neither read the approvals API nor push to a protected branch. Create a
 # PROJECT ACCESS TOKEN with `read_api` + `write_repository` (role Developer+, allowed to push to the
 # default branch — the merge advance pushes there) and store it as a masked CI/CD variable
-# SDLC_GATE_TOKEN. Without it the job fails visibly and manual `yad gate sync` remains the fallback.
+# SDLC_GATE_TOKEN. Without it the job fails visibly; recover by setting the token, then re-run the
+# pipeline or run `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default
+# branch (advisory `yad gate sync` is read-only in bridge mode and cannot recover a stuck gate).
 variables:
   GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch
 
@@ -59,20 +61,25 @@ yad-gate-sync:
     - git fetch origin "$CI_DEFAULT_BRANCH"
     - git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
     - |
+      rc=0
       if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
         # SCHEDULED SWEEP — discover merged review MRs from the platform (Path B keeps no per-branch
         # ledger), then advance each. `gate ci` is idempotent: a step already `done` is skipped.
         # A stuck review MR (a squash merge whose commit dropped the branch name, or a failed merge
         # push) is always RECENT, so sweep a generous recent window and PAGINATE it fully (--paginate)
         # — this bounds cost without the old hard 50-row cap that could permanently strand older MRs.
-        # An MR stuck beyond the window signals a deeper failure; fix it with manual `yad gate sync`.
+        # Aggregate failures into rc and exit nonzero so a persistent failure surfaces (red pipeline)
+        # instead of silently stranding a merged gate. Read from a file, not a pipe (a piped `while`
+        # runs in a subshell, losing rc). An MR stuck beyond the window needs manual recovery — run
+        # `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default branch.
         SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
         glab api --paginate "projects/:id/merge_requests?state=merged&updated_after=${SINCE}&per_page=100&order_by=updated_at" \
-          --jq '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' \
-        | while read -r IID REF; do
-            git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
-            npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$IID" --merged || true
-          done
+          --jq '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' > /tmp/yad-merged-mrs || rc=1
+        while read -r IID REF; do
+          [ -n "$IID" ] || continue
+          git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+          npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$IID" --merged || rc=1
+        done < /tmp/yad-merged-mrs
       else
         # MERGE push to the default branch whose commit names a review branch: resolve the merged MR's
         # IID from its source branch so `gate ci` can re-read approvals, then advance there.
@@ -81,9 +88,10 @@ yad-gate-sync:
           IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" --jq '.[0].iid' 2>/dev/null || true)"
           # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
           if [ -n "$IID" ]; then
-            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged
+            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
           else
-            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --merged
+            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --merged || rc=1
           fi
         fi
       fi
+      exit $rc

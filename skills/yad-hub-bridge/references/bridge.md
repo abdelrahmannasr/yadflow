@@ -90,13 +90,17 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
     CHANGES_REQUESTED is still honored, so a degraded read can only ever *hold* the gate.
   The `artifactHash` stamp still binds architecture approvals to the locked contract surface (see
   "Contract re-lock" above).
-- **Known limitation — protect the hub default branch.** The advance reads the artifact from the
-  default branch as it stands when CI runs. In the narrow window where (1) the merge-time run failed,
-  so the scheduled reconcile advances later, AND (2) that same artifact was changed on the default
-  branch in between **outside the review flow**, the reconcile would advance with that out-of-band
-  content (approvals are still SHA-bound to the reviewed head, so this needs an out-of-band edit, not
-  just a delay). Close it operationally: **require branch protection on the hub default branch so
-  `epics/**` artifacts can only change through a review PR/MR** — then condition (2) cannot occur.
+- **Known limitation — protect the hub default branch.** The advance hashes the artifact from the
+  default branch as it stands when CI runs, while approvals are SHA-bound to the reviewed PR/MR head.
+  Those can differ if the artifact changes on the **base** outside this review while the PR/MR is open
+  (the merge then integrates a change the reviewers never saw) or if a later out-of-band commit edits
+  the merged artifact before a delayed reconcile advances it. In both cases each approval's commit
+  still equals the reviewed head, so the SHA check passes, yet the live content was not reviewed. Close
+  it operationally: **require branch protection on the hub default branch so `epics/**` artifacts can
+  only change through their own review PR/MR** (one open review per artifact) — then the base copy of an
+  artifact cannot move while its review is open, so the merged/live content always equals the reviewed
+  content. (The complete in-code fix would hash the artifact at the reviewed PR-head revision before
+  advancing; deferred in favor of the branch-protection mitigation.)
 
 ## Event-driven sync (hub CI) — Path B
 
@@ -148,8 +152,13 @@ push retries with a rebase.
 - Protected default branch (GitHub): the merge advance needs to push it — prefer a ruleset bypass for
   Actions, else a fine-grained PAT as `SDLC_GATE_TOKEN` on the mergesync checkout.
 
-**Manual sync.** In bridge mode `yad gate sync` is advisory (CI owns the writes). File-only mode (no
-platform) keeps the local write path. The file ledger is still the source of truth.
+**Manual sync & recovery.** In bridge mode `yad gate sync` is **advisory** (read-only) — it prints the
+predicate but writes nothing, so it is **not** a recovery path when CI fails. If a merge-time run fails
+(can't push, API hiccup), recovery is the scheduled **reconcile** job (automatic; it re-advances merged
+reviews not yet `done`). To force it immediately, a maintainer runs the same command CI runs, locally on
+the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (this writes + pushes,
+unlike advisory `yad gate sync`). File-only mode (no platform) keeps `yad gate sync` as the local writer.
+The file ledger is still the source of truth.
 
 ### Manual end-to-end verification (GitHub)
 

@@ -85,8 +85,10 @@ Revoke-on-change is enforced at merge: on **GitHub** in code (an approval whose 
 head is dropped — no setting needed); on **GitLab** it has no per-approval commit SHA, so enabling the
 platform's **"remove all approvals when commits are added to the source branch"** is **required** for
 the guarantee. Either way it is safe because CI never pushes the review branch — only the owner's own
-artifact pushes dismiss approvals. The manual `yad gate sync` remains as the file-only fallback
-(advisory in bridge mode).
+artifact pushes dismiss approvals. In bridge mode `yad gate sync` is advisory (read-only) and is **not**
+a recovery path; if a merge-time run fails, the scheduled reconcile job re-advances it automatically, or
+a maintainer can force it with `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the
+default branch. (File-only mode keeps `yad gate sync` as the local writer.)
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
    enabled bridge in `.sdlc/hub.json` it installs
@@ -114,7 +116,9 @@ artifact pushes dismiss approvals. The manual `yad gate sync` remains as the fil
    PR and pushes the merge advance to the default branch, and the workflow's reconcile **schedule**
    runs automatically (no setup) as the safety net that recovers a merge whose run failed transiently.
    If the default branch is protected, see the workflow header for the bypass / PAT options; until then
-   the run fails visibly and manual `yad gate sync` still works.
+   the run fails visibly — recover by granting the push path, then re-run the workflow or run
+   `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the default branch (advisory
+   `yad gate sync` cannot recover a bridge gate).
 
 ## Hard rules
 
