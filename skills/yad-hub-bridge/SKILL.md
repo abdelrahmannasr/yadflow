@@ -65,8 +65,10 @@ each required domain-owner to a platform `login` via the roster (a roster `name`
    { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab",
      "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": null }
    ```
-   A human commit touching `.sdlc/*.json` on a review PR is rejected by the `ledger-guard` check. (The
-   `yad gate open` CLI behaves the same: in bridge mode it opens the PR only and writes no ledger.)
+   A human commit touching the gate-state files (`.sdlc/{state,approvals,comments,hub-prs}.json` or
+   `reviews/*.md`; `.sdlc/contract-lock.json` is artifact-side and allowed) on a review PR is rejected
+   by the `ledger-guard` check. (The `yad gate open` CLI behaves the same: in bridge mode it opens the
+   PR only and writes no ledger.)
 5. Report the PR/MR URL and the required reviewers. **Do not** record approvals or advance — reviewers
    act on the platform; CI (`yad gate ci`) reconciles it onto the default branch at merge.
 

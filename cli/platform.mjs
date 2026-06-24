@@ -147,14 +147,14 @@ export function mapApprovers(reviews = [], { roster, repos, touchedDomains, head
     if (r.state !== 'APPROVED') continue;
     // Revoke-on-change, enforced in code where the platform binds an approval to a commit. The reader
     // sets `commit` to the review's SHA (GitHub), to `null` when that read DEGRADED, or leaves it
-    // ABSENT when the platform exposes no per-approval SHA (GitLab). Three cases, against the merged
-    // head (`headOid`):
+    // ABSENT when the platform exposes no per-approval SHA (GitLab):
+    //   - `null` (degraded read)  → FAIL CLOSED → drop, independently of headOid: we cannot prove the
+    //                               approval is for the merged content, so a transient failure holds
+    //                               the gate rather than advancing on unverifiable approvals;
     //   - a known SHA ≠ head      → the approval is stale (artifact moved) → drop;
-    //   - `null` (degraded read)  → FAIL CLOSED → drop: we cannot prove the approval is for the merged
-    //                               content, so a transient failure holds the gate rather than
-    //                               advancing on unverifiable approvals (re-run `yad gate sync`);
     //   - absent (GitLab)         → keep: revoke-on-change is the platform's "remove approvals on new
     //                               commits" setting.
+    if (r.commit === null) continue;
     if (headOid && r.commit !== undefined && r.commit !== headOid) continue;
     for (const rec of resolveLogin(r.login, roster, repos, touchedDomains)) {
       out.push({ ...rec, submittedAt: r.submittedAt || null });

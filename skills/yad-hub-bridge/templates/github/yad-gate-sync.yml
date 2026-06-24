@@ -105,7 +105,7 @@ jobs:
             --jq '.items[].number' > /tmp/yad-merged-prs || rc=1
           while read -r N; do
             [ -n "$N" ] || continue
-            REF="$(gh pr view "$N" --json headRefName --jq '.headRefName' 2>/dev/null || true)"
+            REF="$(gh pr view "$N" --json headRefName --jq '.headRefName' 2>/dev/null)" || rc=1
             case "$REF" in
               review/EP-*) npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
             esac

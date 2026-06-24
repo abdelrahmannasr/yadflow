@@ -196,7 +196,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     if (step.status === 'done') { info(`${pr.artifact}: ${step.id} already done — skipping`); continue; }
     const domains = touchedDomains(epicDir, step);
     const pull = reader(platform, pr.number, { cwd: root });
-    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (file-only)`); continue; }
+    // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
+    // (the wired workflow's reconcile/sweep aggregates this exit) instead of silently not advancing.
+    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (file-only)`); process.exitCode = 1; continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);

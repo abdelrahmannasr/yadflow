@@ -86,11 +86,14 @@ yad-gate-sync:
         REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE 'review/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
         if [ -n "$REVIEW_BRANCH" ]; then
           IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" --jq '.[0].iid' 2>/dev/null || true)"
-          # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
           if [ -n "$IID" ]; then
+            # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
             npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
           else
-            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --merged || rc=1
+            # Without the IID, gate ci cannot re-read approvals — fail visibly (the scheduled sweep
+            # retries) rather than running a green no-op that silently leaves the gate unadvanced.
+            echo "yad-gate-sync: could not resolve merged MR IID for ${REVIEW_BRANCH}" >&2
+            rc=1
           fi
         fi
       fi

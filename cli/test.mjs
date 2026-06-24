@@ -759,6 +759,30 @@ test('gate sync: a NULL commit (degraded GitHub read) fails closed — gate hold
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
     'in_review', 'a degraded read (null commit) fails closed — the gate holds');
   fs.rmSync(T, { recursive: true, force: true });
+
+  // …and a null commit must fail closed even when the read also omitted headOid.
+  const degradedNoHead = { ok: true, state: 'MERGED', merged: true,
+    reviews: [
+      { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: null },
+      { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: null },
+      { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: null },
+    ], threads: [] };
+  const b = scaffoldEpic();
+  await gateSync(b.T, { epic: 'EP-test', today: '2026-06-09', reader: () => degradedNoHead });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(b.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
+    'in_review', 'null commit fails closed even without headOid');
+  fs.rmSync(b.T, { recursive: true, force: true });
+});
+
+test('gate sync: a failed platform read flags the run non-zero (no green no-op) and holds the step', async () => {
+  const { T, ep } = scaffoldEpic();
+  const prev = process.exitCode;
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => ({ ok: false, reason: 'gh auth failed' }) });
+  assert.equal(process.exitCode, 1, 'a failed read surfaces as a non-zero run');
+  process.exitCode = prev;
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
+    'in_review', 'the step is not advanced on a failed read');
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('gate sync local: writes when the bridge is OFF, advisory (no writes) when ON', async () => {

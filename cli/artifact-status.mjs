@@ -81,8 +81,11 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
       const want = desiredStatus(state, base);
       if (!want) continue;
       if (dryRun) {
-        // Peek without writing so --dry-run reports exactly what would change.
-        const cur = (fs.readFileSync(file, 'utf8').match(/^---\n[\s\S]*?\nstatus:\s*(.*)$/m) || [])[1]?.trim();
+        // Peek without writing so --dry-run reports exactly what would change. Scope the match to the
+        // frontmatter block so a `status:` line in the Markdown body can't be mistaken for the value.
+        const text = fs.readFileSync(file, 'utf8');
+        const fm = text.match(/^---\n([\s\S]*?)\n---/);
+        const cur = (fm?.[1].match(/^status:\s*(.*)$/m) || [])[1]?.trim();
         if (cur && !PRESERVE.has(cur) && cur in RANK && RANK[want] > RANK[cur]) {
           log(`  ${c.dim('• would update')} ${path.relative(root, file)}: ${cur} → ${want}`);
           changed++;
