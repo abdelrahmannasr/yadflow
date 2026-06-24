@@ -14,6 +14,7 @@ import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 import { runNext } from '../cli/next.mjs';
+import { syncStatuses } from '../cli/artifact-status.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -27,6 +28,8 @@ ${c.bold('Setup & maintenance')}
                        also migrates pre-2.0 sdlc-* installs to the yad-* names
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
+  yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
+                       from .sdlc/state.json — all epics if omitted (--dry-run to preview)
 
 ${c.bold('Reviewer roster')}
   yad roster list                      Show every member + their roles per scope (hub + each repo)
@@ -47,9 +50,9 @@ ${c.bold('Review gate (front half)')}
   yad gate sync <epic> [artifact]      Pull PR state -> ledger; advance on approved+resolved+merged
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
-  yad gate ci [--branch <head>] [--pr <n>]
-                        CI entry (hub workflow): derive epic/artifact from the review branch,
-                        sync, commit the ledger to the default branch (sweep all PRs if no --branch)
+  yad gate ci [--branch <head>] [--pr <n>] [--merged]
+                        CI entry (hub workflow): pre-merge is read-only (nothing pushed);
+                        --merged advances the step + flips artifact status on the default branch
 
 ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
@@ -80,6 +83,7 @@ ${c.bold('Options')}
   --force               commit: bypass the atomic-file guard / re-copy unchanged files
   --branch <head>       gate ci: the review PR/MR head branch (review/EP-<slug>/<artifact>)
   --pr <n>              gate ci: the PR/MR number from the CI event
+  --merged              gate ci: merge phase — advance the step on the default branch
   --no-push             gate ci: commit the ledger but do not push
   -h, --help            Show this help
   -v, --version         Print version`;
@@ -94,6 +98,7 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
+    else if (a === '--merged') o.merged = true;
     else if (a === '--overview') o.overview = true;
     // `--check` is a bare boolean for `docs sync --check`, but takes a value for
     // `next <epic> --check <step>`. Only the `next` command consumes the following token as a value —
@@ -153,6 +158,12 @@ async function main() {
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
       break;
+    case 'sync-status': {
+      const [, epic] = o._;
+      if (epic && !isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      await syncStatuses(o.dir, { epic, dryRun: o.dryRun });
+      break;
+    }
     case 'next': {
       const [, epic] = o._;
       // `--check` with no step is a malformed guard call — fail loudly rather than silently print.
@@ -163,12 +174,15 @@ async function main() {
     case 'gate': {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
-      if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, push: !o.noPush, today }); break; }
+      if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
       if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
+      // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
+      // CI's job at merge — never wired into the local gate. File-only mode keeps local writes.
       if (action === 'open') await gateOpen(o.dir, { epic, artifact, today });
-      else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today });
+      else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
       else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|ci)`)); process.exitCode = 1; }

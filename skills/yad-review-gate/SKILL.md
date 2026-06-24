@@ -165,21 +165,23 @@ If the predicate **passes**:
   now `ready-for-build`, with `test-cases` running in parallel).
 
 ### PR-driven automation (the `yad gate` CLI)
-When the hub has a platform, the mechanical `open`/`sync`/`advance` is performed deterministically by the
-**`yad gate` CLI** (`yad gate open|sync|comments|status`), which writes the same `.sdlc/` + `reviews/`
-records this skill describes. The skill's job is then the human half: presenting the artifact, helping the
-owner address comments, and narrating the gate. The CLI is the single implementation of the gh/glab
-mechanics — do not hand-run gh/glab recipes when it is installed.
+When the hub has a platform, **CI is the sole writer of the ledger**. `yad gate open` opens the review
+PR only; CI (`yad gate ci`) writes the `.sdlc/` + `reviews/` records this skill describes. The skill's
+job is the human half: presenting the artifact, helping the owner address comments, and narrating the
+gate. Local `yad gate sync` is advisory in bridge mode (reads the platform, prints status, writes
+nothing); a human must never commit gate-state files (the `ledger-guard` check rejects it).
 
 Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rule is satisfied, whose
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and
 unblocks the next step. (Until those three hold, the step stays `in_review`.)
 
-`sync` can also be **event-driven**: when the hub is wired with the gate-sync CI (`yad-hub-bridge`
-`wire` action), every approval / change request / dismissal / merge on the review PR/MR triggers
-`yad gate ci` on the hub, which runs the same sync and commits the ledger updates directly to the
-hub's default branch (pull to see them locally). The predicate, the human merge, and manual
-`yad gate sync` are all unchanged — CI never approves and never merges.
+The flow is **merge-driven** (wired by `yad-hub-bridge` `wire`): during review CI writes nothing — the
+platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review
+branch (so an in-flight approval is never dismissed and required checks never strand). On the human
+**merge** CI re-reads approvals, advances the step, and flips the artifact `status:` on the **default
+branch**. After a merge, `git checkout <default> && git pull` to see it. The predicate and the human
+merge are unchanged — CI never approves and never merges. File-only mode (no platform) keeps the local
+write path.
 
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A front step advances only when a human merges the
