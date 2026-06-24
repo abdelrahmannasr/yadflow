@@ -114,12 +114,12 @@ say "yad gate open opens the PR but writes NO ledger (CI is the sole writer)"
 yad gate open EP-e2e epic.md --dir "$HUB" || die "gate open failed"
 [ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "gate open must not write the ledger in bridge mode"
 
-say "CI pre-merge writes the ledger to the branch and holds in_review"
+say "CI pre-merge is read-only in bridge mode (Path B): no ledger, the platform is the source of truth"
 echo pending > "$E2E_GH_PHASE_FILE"
 yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
-jassert "$EPIC/.sdlc/hub-prs.json" 'j.length === 1 && j[0].number === 7 && j[0].artifact === "epic.md"'
+[ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
+[ ! -f "$EPIC/.sdlc/approvals.json" ] || die "pre-merge must not write approvals (Path B)"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
-jassert "$EPIC/.sdlc/approvals.json" 'j.length === 1 && j[0].approver === "Bob" && j[0].role === "reviewer"'
 fa_status "$EPIC/epic.md" draft   # CI never touches the artifact pre-merge
 
 say "local yad gate sync is advisory in bridge mode (writes nothing, even on an approved+merged PR)"
@@ -139,7 +139,7 @@ SYNC_OUT="$(yad sync-status EP-e2e --dir "$HUB")" || die "sync-status failed"
 echo "$SYNC_OUT" | grep -qi "in sync" || die "sync-status should report nothing to do after the gate ran: $SYNC_OUT"
 yad sync-status EP-e2e --dir "$HUB" --dry-run >/dev/null || die "sync-status --dry-run failed"
 
-say "gate ci pre-merge: writes the ledger (+reviews) but NOT the artifact; holds in_review"
+say "gate ci pre-merge makes NO commit in bridge mode (Path B): nothing rides the review branch"
 CIE="$HUB/epics/EP-cici"
 mkdir -p "$CIE/.sdlc"
 printf -- '---\nid: EP-cici\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-cici\n' > "$CIE/epic.md"
@@ -150,11 +150,11 @@ cat > "$CIE/.sdlc/state.json" <<'EOF'
 ]}
 EOF
 echo pending > "$E2E_GH_PHASE_FILE"
+HEAD_BEFORE="$(git -C "$HUB" rev-parse HEAD)"
 yad gate ci --branch review/EP-cici/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
-# Pre-merge commit carries the ledger + reviews (they ride the review branch), never the artifact.
-CI_FILES="$(git -C "$HUB" show --name-only --format= HEAD | grep '^epics/EP-cici/' || true)"
-echo "$CI_FILES" | grep -q '^epics/EP-cici/.sdlc/' || die "pre-merge did not commit the .sdlc ledger: $CI_FILES"
-if echo "$CI_FILES" | grep -q '^epics/EP-cici/epic.md'; then die "pre-merge must NOT commit the artifact: $CI_FILES"; fi
+# Path B: pre-merge writes/commits nothing — the platform PR holds the review state until merge.
+[ "$HEAD_BEFORE" = "$(git -C "$HUB" rev-parse HEAD)" ] || die "pre-merge must not commit (Path B)"
+[ ! -f "$CIE/.sdlc/hub-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
 jassert "$CIE/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 fa_status "$CIE/epic.md" draft   # CI never touches the artifact pre-merge
 

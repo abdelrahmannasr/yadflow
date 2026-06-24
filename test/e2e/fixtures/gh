@@ -37,7 +37,20 @@ case "${1:-} ${2:-}" in
     echo '{"owner":{"login":"acme"},"name":"hub"}'
     ;;
   "api graphql")
-    echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'
+    # readPrGitHub fires two GraphQL queries: latestReviews (with commit.oid) and reviewThreads.
+    # Discriminate on the query text so each gets its matching shape. Commit oids equal headRefOid
+    # (deadbeef) so the in-code revoke-on-change (commit === merged head) keeps the approvals.
+    q=""
+    for a in "$@"; do case "$a" in query=*) q="$a" ;; esac; done
+    if printf '%s' "$q" | grep -q latestReviews; then
+      if [ "$phase" = "approved" ]; then
+        echo '{"data":{"repository":{"pullRequest":{"latestReviews":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"alice"},"state":"APPROVED","submittedAt":"2026-06-13T10:00:00Z","commit":{"oid":"deadbeef"}},{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T10:01:00Z","commit":{"oid":"deadbeef"}}]}}}}}'
+      else
+        echo '{"data":{"repository":{"pullRequest":{"latestReviews":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"bob"},"state":"APPROVED","submittedAt":"2026-06-13T09:00:00Z","commit":{"oid":"deadbeef"}}]}}}}}'
+      fi
+    else
+      echo '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}}'
+    fi
     ;;
   *)
     echo "fake gh: unhandled args: $*" >&2
