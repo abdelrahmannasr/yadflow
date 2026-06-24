@@ -705,6 +705,62 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate sync: an approval on an older commit than the merged head is stale — gate holds (revoke-on-change in code)', async () => {
+  const head = 'deadbeefcafe';
+  const onHead = (login) => ({ login, state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: head });
+  // carol (the backend domain-owner) approved an EARLIER revision; the artifact moved before merge,
+  // so her review sits on an older commit than the merged head → dropped → escalated gate holds.
+  const staleCarol = { ok: true, state: 'MERGED', merged: true, headOid: head,
+    reviews: [onHead('al'), onHead('bo'), { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-08T00:00:00Z', commit: 'oldsha' }],
+    threads: [] };
+  const s1 = scaffoldEpic();
+  await gateSync(s1.T, { epic: 'EP-test', today: '2026-06-09', reader: () => staleCarol });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(s1.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
+    'in_review', 'stale domain-owner approval is dropped → escalated gate holds');
+  fs.rmSync(s1.T, { recursive: true, force: true });
+
+  // all three approved the merged head → all count → the escalated gate passes.
+  const allHead = { ok: true, state: 'MERGED', merged: true, headOid: head,
+    reviews: [onHead('al'), onHead('bo'), onHead('ca')], threads: [] };
+  const s2 = scaffoldEpic();
+  await gateSync(s2.T, { epic: 'EP-test', today: '2026-06-09', reader: () => allHead });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(s2.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
+    'done', 'approvals on the merged head advance');
+  fs.rmSync(s2.T, { recursive: true, force: true });
+});
+
+test('gate sync: an ABSENT commit (GitLab — no per-approval SHA) is kept — relies on the platform dismissal setting', async () => {
+  // Reviews omit `commit` entirely (GitLab approvals carry no per-approval SHA) → the in-code SHA
+  // filter must NOT drop them; revoke-on-change there is the platform "remove approvals" setting.
+  const noSha = { ok: true, state: 'MERGED', merged: true, headOid: 'whatever',
+    reviews: [
+      { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
+      { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
+      { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
+    ], threads: [] };
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => noSha });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
+    'done', 'approvals with an absent commit SHA still count');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a NULL commit (degraded GitHub read) fails closed — gate holds, never advances on unverifiable approvals', async () => {
+  // commit === null is the GitHub reader signaling a degraded read: we cannot prove the approval is
+  // for the merged content, so it must NOT count — a transient API failure holds the gate.
+  const degraded = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
+    reviews: [
+      { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: null },
+      { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: null },
+      { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: null },
+    ], threads: [] };
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => degraded });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
+    'in_review', 'a degraded read (null commit) fails closed — the gate holds');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync local: writes when the bridge is OFF, advisory (no writes) when ON', async () => {
   // bridge OFF (a platform but no gate-sync CI wired): local sync stays the writer and advances.
   const a = scaffoldEpic();
@@ -1548,9 +1604,10 @@ test('runCommit dry-run prints without committing', async () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// `yad gate ci` — event-driven sync: derive from the review branch, overlay, ledger-only commit
+// `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
+// default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, contractSurfaceHash, artifactBase, advanceState, markInReview } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -1636,9 +1693,9 @@ test('upsertHubPr replaces by artifact, never duplicates', () => {
   assert.equal(c2.length, 2);
 });
 
-// A hub repo with a bare origin: main carries the epic scaffolding (NO hub-prs.json — the
-// wrinkle-1 case), the review branch carries the artifact edit, and a separate "CI" clone runs
-// `gate ci` the way the workflow does.
+// A hub repo with a bare origin: main carries the epic scaffolding (NO hub-prs.json — Path B never
+// seeds it pre-merge), the review branch carries only the owner's artifact edit, and a separate "CI"
+// clone runs `gate ci` the way the workflow does.
 const SEED_CONTRACT = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n';
 const BRANCH_CONTRACT = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n';
 function scaffoldCiHub() {
@@ -1696,39 +1753,34 @@ function scaffoldCiHub() {
 }
 const show = (cwd, ref) => git(cwd, 'show', ref).toString();
 
-test('gate ci pre-merge: writes the ledger to the REVIEW branch, holds in_review, never touches the artifact or the default branch', async () => {
+test('gate ci pre-merge: read-only — never pushes the review branch or the default branch (Path B)', async () => {
   const { T, author, ci } = scaffoldCiHub();
-  // CI checks out the review branch itself — artifact + ledger live together, no overlay needed.
+  // CI checks out the review branch itself, just as a wired workflow would.
   git(ci, 'fetch', '-q', 'origin', 'review/EP-test/architecture');
   git(ci, 'checkout', '-q', '-B', 'review/EP-test/architecture', 'origin/review/EP-test/architecture');
-  // Pre-merge the PR is approved + threads resolved but NOT yet merged → the gate holds in_review.
-  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: false, today: '2026-06-09', reader: () => ({ ...fullApproval, state: 'OPEN', merged: false }) });
+  // Pre-merge the PR is approved + threads resolved but NOT yet merged → a held step. Under Path B
+  // CI writes nothing: the platform PR is the source of truth during review.
+  const r = await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: false, today: '2026-06-09', reader: () => ({ ...fullApproval, state: 'OPEN', merged: false }) });
+  assert.equal(r.synced, 1, 'the predicate still ran (synced) — it just was not persisted');
 
   git(author, 'fetch', '-q', 'origin');
-  const onBranch = 'origin/review/EP-test/architecture';
-  // ledger landed on the REVIEW branch; the step holds in_review (only the merge advances).
-  const state = JSON.parse(show(author, `${onBranch}:epics/EP-test/.sdlc/state.json`));
-  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'in_review');
-  const hubPrs = JSON.parse(show(author, `${onBranch}:epics/EP-test/.sdlc/hub-prs.json`));
-  assert.equal(hubPrs[0].number, 7);
-  // approvals are recorded on the branch, bound to the branch contract surface (no overlay needed).
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hash-'));
-  fs.writeFileSync(path.join(tmp, 'contract.md'), BRANCH_CONTRACT);
-  const branchHash = contractSurfaceHash(tmp);
-  const approvals = JSON.parse(show(author, `${onBranch}:epics/EP-test/.sdlc/approvals.json`));
-  assert.ok(approvals.length && approvals.every((a) => a.artifactHash === branchHash), 'approvals bound to the reviewed content');
-  // CI never touches the artifact pre-merge — the owner's status stays draft.
-  assert.match(show(author, `${onBranch}:epics/EP-test/architecture.md`), /status: draft/);
-  // the DEFAULT branch is untouched: its HEAD is still the seed, ledger still at the seed in_review.
+  // the REVIEW branch is untouched: HEAD is still the owner's artifact commit, no CI ledger commit.
+  assert.equal(git(author, 'log', '-1', '--format=%s', 'origin/review/EP-test/architecture').toString().trim(), 'review: architecture (EP-test)');
+  // no CI-written gate-state files exist on the review branch (review state lives on the platform).
+  // state.json pre-exists from the seed; hub-prs/approvals/comments are CI-only — they must be absent.
+  const tree = git(author, 'ls-tree', '-r', '--name-only', 'origin/review/EP-test/architecture').toString();
+  assert.doesNotMatch(tree, /epics\/EP-test\/\.sdlc\/(hub-prs|approvals|comments)\.json/, 'no CI ledger pushed to the review branch');
+  assert.doesNotMatch(tree, /epics\/EP-test\/reviews\//, 'no review summaries pushed to the review branch');
+  // the DEFAULT branch is untouched too — its HEAD is still the seed.
   assert.equal(git(author, 'log', '-1', '--format=%s', 'origin/trunk').toString().trim(), 'seed');
-  // loop guard rides on the branch commit (a push to the review branch would otherwise re-fire CI).
-  assert.match(git(author, 'log', '-1', '--format=%B', onBranch).toString(), /\[skip ci\]/);
+  // and the read-only run leaves the CI checkout clean (the hub-prs seed is restored, nothing else).
+  assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '', 'pre-merge leaves a clean working tree');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('gate ci --merged: advances the step + flips artifact status on the default branch (rebase-retries past the merge)', async () => {
   const { T, author, ci } = scaffoldCiHub();
-  // The human merge brings the review branch (artifact edit + branch ledger) onto the default
+  // The human merge brings the review branch (the owner's artifact edit) onto the default
   // branch. This lands AFTER the CI clone took its trunk, so CI's advance push rebases and retries.
   git(author, 'checkout', '-q', 'trunk');
   git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge review/EP-test/architecture');

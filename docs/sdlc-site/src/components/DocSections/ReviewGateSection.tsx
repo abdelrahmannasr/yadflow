@@ -57,8 +57,9 @@ export function ReviewGateSection() {
           With a hub platform the gate rides a real review PR/MR and{' '}
           <strong className="text-white">auto-advances on merge</strong>, which is the human approval act — so
           front steps still never machine_advance. <strong className="text-white">CI is the sole writer of the
-          ledger</strong>: it writes to the review branch during review and advances on the default branch at
-          merge; humans never commit the gate files. Approvals are revoked when the artifact changes (re-hash).
+          ledger</strong>, and writes only at merge, on the default branch: during review the platform PR/MR is
+          the source of truth and CI never touches the review branch; humans never commit the gate files.
+          Approvals are revoked when the artifact changes (re-hash), re-checked when CI reads the platform at merge.
         </p>
       </div>
 

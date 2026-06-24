@@ -42,7 +42,7 @@ export function artifactFromBase(base) {
 }
 
 // The files (relative to the epic dir) a review of this artifact covers — what `gate open` commits
-// on the review branch, and what the CI overlay checks out from the head ref (and never commits).
+// on the review branch (the owner's artifact), and what CI re-reads to bind the approval at merge.
 // Architecture mirrors artifactHash(): the approval is bound to the locked contract surface too.
 export function artifactPaths(base) {
   if (base === 'architecture') return ['architecture.md', 'contract.md', '.sdlc/contract-lock.json'];

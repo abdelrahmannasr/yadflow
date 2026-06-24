@@ -1,84 +1,60 @@
 # yad-managed: yad-hub-bridge
-# Event-driven gate sync for the PRODUCT HUB. CI is the SOLE writer of the ledger; humans never
-# commit gate-state files (enforced by the ledger-guard check). Two phases:
+# Merge-time gate sync for the PRODUCT HUB (Path B). CI is the SOLE writer of the ledger, and it
+# writes ONLY at merge, ONLY to the default branch.
 #
-#   PRE-MERGE (review submitted/dismissed, PR opened/reopened/synchronize): check out the REVIEW
-#   branch and run `yad gate ci --branch <head> --pr <n>`. The artifact + ledger live together on
-#   that branch, so no overlay is needed; CI writes the ledger back to the SAME review branch. The
-#   commit carries [skip ci] so the push does not re-fire `synchronize` (loop guard).
+# During review there is NO CI write: the platform PR is the source of truth (native approvals +
+# review threads). CI never pushes to the review branch, so an in-flight approval is never dismissed
+# by a CI commit and the PR's required checks never strand on one. Because nothing is pushed to the
+# PR head, you can safely enable "Dismiss stale pull request approvals when new commits are pushed"
+# — only the artifact owner's own pushes will dismiss approvals (the intended revoke-on-change).
 #
-#   MERGE (PR closed + merged): check out the default branch (the merge already landed the branch
-#   ledger + artifact here) and run `yad gate ci … --merged`, which advances the step and flips the
-#   artifact status on the default branch.
+# Two jobs:
+#   MERGE (PR closed + merged): the fast path. Check out the default branch (the human merge already
+#   landed the artifact there) and run `yad gate ci --branch <head> --pr <n> --merged`. CI re-reads
+#   the PR's approvals fresh from the platform, advances the step, and flips the artifact `status:` to
+#   approved — committing that advance to the default branch with [skip ci].
+#
+#   RECONCILE (schedule, every 15 min): the safety net. The merge job's `closed` event fires once and
+#   never repeats, so a transient API/GraphQL/push failure (or a fail-closed degraded approval read)
+#   would otherwise strand a merged review until someone reran it by hand. This periodic job discovers
+#   recently-merged review PRs from the API and advances any not yet done (idempotent — a step already
+#   `done` is skipped). On GitHub a scheduled workflow runs automatically once committed (no setup).
 #
 # CI never approves and never merges — the merge click is the human approval act.
 #
-# Protected default branch? ONLY the merge job pushes there now (pre-merge pushes go to the
-# unprotected review branch). If the default branch is protected against Actions:
+# Protected default branch? Only these jobs push there. If the default branch is protected against
+# Actions:
 #   a) add a ruleset bypass so GitHub Actions may push to it, or
-#   b) store a fine-grained PAT as the SDLC_GATE_TOKEN secret and pass it to actions/checkout in the
-#      mergesync job via `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }` — see references/bridge.md.
-# Recommended: enable "Dismiss stale pull request approvals when new commits are pushed" so an
-# approval is dropped by the platform when the artifact changes (revoke-on-change stays robust even
-# if a force-push wipes CI's approvals.json, which CI then rebuilds).
+#   b) store a fine-grained PAT as the SDLC_GATE_TOKEN secret and pass it to actions/checkout below
+#      via `with: { token: ${{ secrets.SDLC_GATE_TOKEN }} }` — see references/bridge.md.
 name: yad-gate-sync
 on:
-  pull_request_review:
-    types: [submitted, dismissed]
   pull_request:
-    types: [opened, reopened, synchronize, closed]
+    types: [closed]
+  schedule:
+    - cron: "*/15 * * * *"
 
 permissions:
-  contents: write # push the ledger commit (review branch pre-merge; default branch on merge)
+  contents: write # push the merge-advance ledger commit to the default branch
   pull-requests: read # gh pr view + reviewThreads GraphQL
 
 jobs:
-  presync:
-    # Any pre-merge signal on a review branch — a review, or the PR being opened/updated. NOT a merge.
-    if: >
-      startsWith(github.event.pull_request.head.ref, 'review/EP-') &&
-      github.event.pull_request.merged != true &&
-      (github.event_name == 'pull_request_review' ||
-       contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action))
-    runs-on: ubuntu-latest
-    # Serialize per review branch so a PR's own runs never race; different PRs sync in parallel.
-    concurrency:
-      group: yad-gate-presync-${{ github.event.pull_request.head.ref }}
-      cancel-in-progress: false
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      # Check out the REVIEW branch itself — artifact + ledger live together, no overlay needed.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Sync the gate ledger onto the review branch
-        run: |
-          git config user.name  "yad-gate-sync[bot]"
-          git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
-          npx -y -p yadflow@3 yad gate ci \
-            --branch "${{ github.event.pull_request.head.ref }}" \
-            --pr "${{ github.event.pull_request.number }}"
-
   mergesync:
-    # The human merge: advance the step + flip the artifact status on the default branch.
+    # The human merge of a review branch: advance the step + flip the artifact status on the default
+    # branch. Nothing runs pre-merge — review state lives on the platform until the merge.
     if: >
+      github.event_name == 'pull_request' &&
       startsWith(github.event.pull_request.head.ref, 'review/EP-') &&
-      github.event.action == 'closed' &&
       github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    # Serialize every merge advance — they all push the default branch.
+    # Serialize every advance with the reconcile job — they all push the default branch.
     concurrency:
       group: yad-gate-mergesync
       cancel-in-progress: false
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      # Check out the default branch — the merge already landed the branch ledger + artifact here.
+      # Check out the default branch — the merge already landed the artifact here.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.ref }}
@@ -94,3 +70,38 @@ jobs:
             --branch "${{ github.event.pull_request.head.ref }}" \
             --pr "${{ github.event.pull_request.number }}" \
             --merged
+
+  reconcile:
+    # Safety net: recover any merged review PR whose merge-time run failed transiently (the `closed`
+    # event never re-fires). Idempotent — `yad gate ci` skips a step that is already `done`.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: yad-gate-mergesync
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Reconcile recently-merged review PRs
+        run: |
+          git config user.name  "yad-gate-sync[bot]"
+          git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
+          # A stuck merged review is always recent; window generously and let `gate ci` no-op the rest.
+          # Page the search API fully (no fixed result cap) so a stuck PR is never missed for volume.
+          SINCE="$(date -u -d '7 days ago' +%Y-%m-%d 2>/dev/null || date -u -v-7d +%Y-%m-%d)"
+          gh api --paginate -X GET search/issues \
+            --raw-field q="repo:${GITHUB_REPOSITORY} type:pr is:merged merged:>=${SINCE}" \
+            --jq '.items[].number' \
+          | while read -r N; do
+              REF="$(gh pr view "$N" --json headRefName --jq '.headRefName' 2>/dev/null || true)"
+              case "$REF" in
+                review/EP-*) npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$N" --merged || true ;;
+              esac
+            done

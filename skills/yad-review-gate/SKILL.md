@@ -175,11 +175,13 @@ Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rul
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and
 unblocks the next step. (Until those three hold, the step stays `in_review`.)
 
-The flow is **event-driven** in two phases (wired by `yad-hub-bridge` `wire`): pre-merge (PR opened /
-approval / change request / dismissal / push) CI writes the ledger to the **review branch**; on the
-human **merge** CI advances the step and flips the artifact `status:` on the **default branch**. After a
-merge, `git checkout <default> && git pull` to see it. The predicate and the human merge are unchanged —
-CI never approves and never merges. File-only mode (no platform) keeps the local write path.
+The flow is **merge-driven** (wired by `yad-hub-bridge` `wire`): during review CI writes nothing — the
+platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review
+branch (so an in-flight approval is never dismissed and required checks never strand). On the human
+**merge** CI re-reads approvals, advances the step, and flips the artifact `status:` on the **default
+branch**. After a merge, `git checkout <default> && git pull` to see it. The predicate and the human
+merge are unchanged — CI never approves and never merges. File-only mode (no platform) keeps the local
+write path.
 
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A front step advances only when a human merges the

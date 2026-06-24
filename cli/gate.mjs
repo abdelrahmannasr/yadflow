@@ -165,7 +165,7 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
 
 // ---- actions ------------------------------------------------------------------------------------
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, local = false } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, local = false, dryRun = false } = {}) {
   const { hub, repos } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -175,7 +175,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   // Local invocation in bridge mode is ADVISORY: CI is the sole ledger writer, so a human run reads
   // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
   // Without the bridge (platform but no gate-sync CI) the local command stays the writer.
-  const readOnly = local && isBridge(hub);
+  // dryRun forces the same read-only behavior regardless of bridge — used for the Path B pre-merge
+  // evaluation, which must persist nothing (gateCi passes dryRun for a held branch event).
+  const readOnly = (local && isBridge(hub)) || dryRun;
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
@@ -198,7 +200,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
 
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
-    const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains });
+    const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
@@ -242,28 +244,30 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   return { synced, advanced };
 }
 
-// `yad gate ci` — the self-sufficient entry point hub CI calls on platform events. Two phases:
+// `yad gate ci` — the self-sufficient entry point hub CI calls on platform events. Path B: CI
+// never writes the ledger to the review branch — during review the platform PR/MR is the source of
+// truth, and the ledger is reconciled onto the default branch at merge.
 //
-//   PRE-MERGE (review submitted/dismissed, PR opened/synchronize): the workflow checks out the
-//   review branch itself, so the artifact + ledger live together — no overlay needed. CI writes
-//   the ledger (markInReview, approvals, comments) and pushes it back to the SAME review branch.
-//   The commit carries [skip ci] so the push does not re-fire `synchronize` (loop guard).
+//   PRE-MERGE (a held step, no --merged and nothing advanced): READ-ONLY. The predicate is
+//   evaluated for visibility, but nothing is committed or pushed — so an in-flight approval is never
+//   dismissed and the PR's required checks never strand on a CI commit.
 //
-//   MERGE (--merged, PR closed+merged): the branch ledger already reached the default branch via
-//   the human merge; the workflow checks out the default branch. CI runs the same sync — now the
-//   PR reads merged=true so the predicate ADVANCES the step — flips the artifact `status:` to
-//   approved (syncStatuses), and commits the advance to the default branch.
+//   MERGE (--merged, PR/MR closed+merged): the artifact reached the default branch via the human
+//   merge; the workflow checks out the default branch. CI runs the sync — the PR reads merged=true,
+//   so the predicate ADVANCES the step, flips the artifact `status:` to approved (syncStatuses), and
+//   commits the advance to the default branch. CI re-reads approvals fresh from the platform, so it
+//   needs no ledger pre-seeded on the branch.
 //
-// Either way CI is the SOLE writer of the ledger; humans never commit gate-state files (enforced
-// by the ledger-guard check). Sweep mode (no --branch) advances open reviews found in the locally
-// checked-out ledgers — used by the GitLab schedule on the default branch.
+// CI is the SOLE writer of the ledger and only ever commits to the default branch; humans never
+// commit gate-state files (enforced by the ledger-guard check). Sweep mode (no --branch) advances
+// merged-but-stuck reviews found in the locally checked-out default-branch ledgers.
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
-  // Push target is decided AFTER the sync, once we know whether any step advanced: a held pre-merge
-  // step rides the review branch; an advance lands on the default branch (see below).
+  // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
+  // not merged) is read-only and pushes nothing; an advance lands on the default branch (see below).
 
   // Build the work list: one job per (epic, artifact) — from the event branch, or a full sweep.
   const jobs = [];
@@ -316,8 +320,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     const step = findReviewStep(ledger.state, job.artifact);
     if (!step) { warn(`${job.epic}: no review step for ${job.artifact} — skipping`); continue; }
 
-    // The event may fire (PR opened) before any hub-prs record exists — build the entry from the
-    // event itself so the first CI commit lands it on the review branch and the views converge.
+    // The merge event may fire before any hub-prs record exists (Path B never wrote one pre-merge) —
+    // build the entry from the event itself so the advance commit carries it onto the default branch.
     const existing = (ledger.hubPrs || []).find((x) => x.artifact === job.artifact);
     const number = Number(job.pr) || existing?.number || null;
     if (!existing || existing.number !== number || existing.branch !== job.branch) {
@@ -328,11 +332,13 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       writeJSON(ledger.files.hubPrs, ledger.hubPrs);
     }
 
-    // No overlay: pre-merge the artifact is already on the review branch CI checked out; at merge
-    // it is on the default branch via the merge. artifactHash binds to it directly either way.
+    // No overlay: at merge the artifact is on the default branch CI checked out, so artifactHash
+    // binds to the reviewed content directly when CI re-reads the platform.
     let failed = false;
     try {
-      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader });
+      // A branch event that is not a merge can never advance (the predicate requires merged), so it
+      // is read-only under Path B — run it as a dry sync that persists nothing to the working tree.
+      const r = await gateSync(root, { epic: job.epic, artifact: job.artifact, today, reader, dryRun: !!branch && !merged });
       synced += r.synced;
       // When the step actually ADVANCED (the merge phase, or a swept merge the schedule observed),
       // reflect it in the artifact frontmatter (draft → approved). Keyed off the advance, not the
@@ -350,28 +356,41 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   }
   if (!touched.size) return { synced };
 
-  // An advance (merge phase, or a swept merge) lands on the default branch and carries the artifact
-  // status flip; a held step (pre-merge) stays on the review branch and never touches the artifact.
+  // Path B: CI never writes the ledger to the review branch. A held step that did not advance is
+  // read-only here — during review the platform PR/MR is the source of truth (native approvals/
+  // threads); the ledger is reconciled onto the default branch at merge. Keeping CI off the PR head
+  // is what stops an approval from being dismissed and required checks from stranding. Correctness is
+  // unaffected: the merge phase re-reads approvals fresh from the platform (readPr).
   const advancedAny = advancedEpics.size > 0;
-  const target = !merged && !advancedAny && branch ? branch : defaultBranch;
+  if (!merged && !advancedAny) {
+    // Pre-merge is read-only (Path B): the gate was evaluated with a dry sync that persists nothing.
+    // The one working-tree write is the hub-prs.json seed above (so the dry sync could find the PR);
+    // restore exactly that file per epic so the checkout stays clean — never touching anything else,
+    // so a local `yad gate ci --branch` cannot disturb unrelated files.
+    for (const e of touched) {
+      const hp = path.join('epics', e, '.sdlc', 'hub-prs.json');
+      git('checkout', '-q', '--', hp); // restore it if it was tracked
+      git('clean', '-fq', '--', hp);   // remove it if the event first-seeded it (untracked)
+    }
+    info('pre-merge: gate evaluated; the ledger reconciles on the default branch at merge — nothing pushed');
+    return { synced };
+  }
+  const target = defaultBranch; // CI only ever commits the ledger to the default branch
 
-  // Stage what this phase owns, per epic:
+  // Stage what this merge-phase run owns, per epic (everything lands on the default branch):
   //  - advanced → the whole epic (ledger advance + the status flip syncStatuses wrote into the .md).
-  //  - held → the ledger (.sdlc) + the generated reviews/ summaries; the artifact is the owner's,
-  //    left untouched. These ride the review branch and reach the default branch via the merge.
+  //  - merged but not advanced (merged before the rule passed) → the ledger (.sdlc) + the generated
+  //    reviews/ summaries only; the artifact is the owner's, left untouched.
   for (const e of touched) {
     if (advancedEpics.has(e)) git('add', '-A', '--', path.join('epics', e));
     else { git('add', '-A', '--', path.join('epics', e, '.sdlc')); git('add', '-A', '--', path.join('epics', e, 'reviews')); }
   }
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
-  // [skip ci] on BOTH phases: a pre-merge push to the review branch would otherwise re-fire
-  // `synchronize` and loop; the advance commit lands on the default branch (no PR trigger) but keeps
-  // the marker to guard sibling workflows.
+  // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
+  // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
   const subject = !branch
     ? 'chore(gate): scheduled gate sync [skip ci]' // sweep is a batch; one subject for the run
-    : (merged || advancedAny)
-      ? `chore(gate): advance ${jobs[0].epic}/${jobs[0].base} on merge [skip ci]`
-      : `chore(gate): sync ${jobs[0].epic}/${jobs[0].base} via CI [skip ci]`;
+    : `chore(gate): advance ${jobs[0].epic}/${jobs[0].base} on merge [skip ci]`;
   const cm = git('commit', '-m', subject);
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
   ok(`committed gate update: ${c.dim(subject)}`);
@@ -454,9 +473,9 @@ export async function gateOpen(root, { epic, artifact } = {}) {
     return;
   }
 
-  // Open the PR. In bridge mode CI records the hub-prs entry (and markInReview) on the review branch
-  // when the `opened` event fires — `yad gate open` never commits gate-state files (the ledger-guard
-  // check enforces that). Without the bridge, the local command records the PR itself (no CI will).
+  // Open the PR. In bridge mode CI records the hub-prs entry (and advances) on the default branch at
+  // merge — `yad gate open` never commits gate-state files (the ledger-guard check enforces that), and
+  // CI writes nothing pre-merge. Without the bridge, the local command records the PR itself (no CI will).
   const body = fillHubTemplate({ epic, artifact, step, owner: ownerOf(epicDir), domains });
   // Assignee = whoever opens the review PR (the committer); reviewers = the hub's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
@@ -467,7 +486,7 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = createPr(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
-  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${bridge ? ' — open it manually; CI records the gate on the opened event' : '; step is in_review file-only'}`); return; }
+  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${bridge ? ' — open it manually; CI records the gate on merge' : '; step is in_review file-only'}`); return; }
 
   if (!bridge) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
@@ -475,7 +494,7 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   }
   ok(`opened ${r.url}`);
   hand(bridge
-    ? 'reviewers approve/comment there; CI syncs the gate (ledger → review branch) on each event'
+    ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
 }
 

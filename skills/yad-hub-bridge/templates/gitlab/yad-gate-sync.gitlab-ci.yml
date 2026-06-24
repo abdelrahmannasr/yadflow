@@ -1,25 +1,28 @@
 # yad-managed-include: yad-hub-bridge
-# Event-driven gate sync for the PRODUCT HUB, as an INCLUDABLE fragment. Pulled into the hub's
-# root .gitlab-ci.yml via:
+# Merge-time gate sync for the PRODUCT HUB, as an INCLUDABLE fragment (Path B). Pulled into the
+# hub's root .gitlab-ci.yml via:
 #   include:
 #     - local: '.gitlab/ci/yad-gate-sync.yml'
 # so wiring never edits the foreign root pipeline beyond that one include line. The job carries
 # `needs: []` and no `stage:` (same merge-safety as the yad-checks fragment).
 #
-# CI is the SOLE writer of the ledger; humans never commit gate-state files (ledger-guard enforces
-# it). Two phases:
-#   PRE-MERGE (MR event — open / push to the review branch): check out the MR SOURCE (review) branch
-#   and run `yad gate ci --branch <source> --pr <iid>`. Artifact + ledger live together there, so no
-#   overlay; the ledger is written back to the review branch. The commit carries [skip ci] so the
-#   push does not re-fire the MR pipeline (loop guard).
-#   MERGE (push to the default branch whose commit names a review branch): check out the default
-#   branch and run `yad gate ci --branch <review-branch> --merged` — advance + status flip there.
+# CI is the SOLE writer of the ledger, and it writes ONLY at merge, ONLY to the default branch.
+# During review there is NO CI write: the MR itself is the source of truth (native approvals +
+# threads). CI never pushes to the MR source (review) branch, so an in-flight approval is never
+# dismissed by a CI commit. Because nothing is pushed to the source branch, you can safely enable
+# "Remove all approvals when commits are added to the source branch" — only the artifact owner's own
+# pushes will dismiss approvals (the intended revoke-on-change).
 #
-# GitLab is the DEGRADED path, stated honestly: GitLab fires no pipeline on an approval alone.
-#   - MR events (open / push to the review branch) and the merge are picked up near-immediately.
-#   - Approvals are only seen by the SCHEDULED sweep. Create a pipeline schedule (one-time, cannot
-#     be committed as code): cron `*/15 * * * *` with variable SDLC_GATE_SYNC=true — so an approval
-#     can take up to ~15 minutes to reach the ledger. UI: CI/CD > Schedules, or:
+# GitLab is the DEGRADED platform, stated honestly: it fires no pipeline on an approval, and the
+# merge push to the default branch may omit the source-branch name (squash / fast-forward). So the
+# ledger is reconciled from the PLATFORM (glab API), not from any per-branch ledger:
+#   - MERGE push (default branch, commit names a review branch): resolve the merged MR's IID from its
+#     source branch, then advance + flip status on the default branch — near-immediate.
+#   - SCHEDULED sweep (catch-up): enumerate recently-merged review MRs via the API and advance any
+#     not yet advanced (idempotent — a step already `done` is skipped). Covers bare approvals and
+#     squash merges whose commit message dropped the branch name. Create a pipeline schedule
+#     (one-time, cannot be committed as code): cron `*/15 * * * *` with variable SDLC_GATE_SYNC=true.
+#     UI: CI/CD > Schedules, or:
 #       glab api projects/:id/pipeline_schedules -X POST \
 #         -f description='yad gate sync' -f ref=main -f cron='*/15 * * * *'
 #       glab api "projects/:id/pipeline_schedules/<id>/variables" -X POST \
@@ -27,12 +30,10 @@
 #
 # Token: CI_JOB_TOKEN can neither read the approvals API nor push to a protected branch. Create a
 # PROJECT ACCESS TOKEN with `read_api` + `write_repository` (role Developer+, allowed to push to the
-# default branch — the merge phase pushes there; pre-merge pushes the unprotected review branch) and
-# store it as a masked CI/CD variable SDLC_GATE_TOKEN. Without it the job fails visibly and manual
-# `yad gate sync` remains the fallback. Recommended: enable "Remove all approvals when commits are
-# added to the source branch" so revoke-on-change stays robust across a force-push.
+# default branch — the merge advance pushes there) and store it as a masked CI/CD variable
+# SDLC_GATE_TOKEN. Without it the job fails visibly and manual `yad gate sync` remains the fallback.
 variables:
-  GIT_DEPTH: "0" # full history: gate ci pushes the ledger to the review / default branch
+  GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch
 
 yad-gate-sync:
   needs: []
@@ -43,12 +44,10 @@ yad-gate-sync:
   tags: [$YAD_RUNNER_TAGS]
   image: node:20
   rules:
-    # MR-event path: fires on MR open / push to the review branch — NOT on approval (see header).
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME =~ /^review\/EP-/
     # Merge path: branch pipeline on the default branch whose merge commit names a review branch.
     # Squash/fast-forward merges may omit the branch name — those advance on the next scheduled sweep.
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_MESSAGE =~ /review\/EP-/
-    # Scheduled sweep: the only path that picks up approvals (advances + flips status on a merge it sees).
+    # Scheduled sweep: the only path that picks up bare approvals (advances merged reviews it finds).
     - if: $CI_PIPELINE_SOURCE == "schedule" && $SDLC_GATE_SYNC == "true"
   script:
     # Pinned glab binary (node:20 has no glab). Alternative: image registry.gitlab.com/gitlab-org/cli.
@@ -57,33 +56,34 @@ yad-gate-sync:
     - git config user.name "yad-gate-sync" && git config user.email "yad-gate-sync@noreply.${CI_SERVER_HOST}"
     - git remote set-url origin "https://oauth2:${SDLC_GATE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
     - export GITLAB_TOKEN="$SDLC_GATE_TOKEN" GITLAB_HOST="$CI_SERVER_URL"
+    - git fetch origin "$CI_DEFAULT_BRANCH"
+    - git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
     - |
-      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
-        # PRE-MERGE: write the ledger onto the MR source (review) branch — artifact + ledger together.
-        git fetch origin "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
-        git checkout -B "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" "origin/$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
-        npx -y -p yadflow@3 yad gate ci --branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --pr "$CI_MERGE_REQUEST_IID"
-      elif [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
-        # SCHEDULED SWEEP — GitLab fires no pipeline on a bare approval, so this is the catch-up path.
-        # (a) Default-branch sweep: advance any merged-but-stuck review (e.g. a squash merge whose
-        #     message dropped the branch name) — its ledger already reached the default branch.
-        git fetch origin "$CI_DEFAULT_BRANCH"
-        git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
-        npx -y -p yadflow@3 yad gate ci || true
-        # (b) Per-branch sweep: in-flight reviews keep their ledger ON the review branch, so enumerate
-        #     the open review branches and sync each (the PR number is read from the branch ledger).
-        for ref in $(git ls-remote --heads origin 'refs/heads/review/EP-*' | awk '{print $2}' | sed 's#refs/heads/##'); do
-          git fetch -q origin "$ref" && git checkout -q -B "$ref" "origin/$ref" || continue
-          npx -y -p yadflow@3 yad gate ci --branch "$ref" || true
-        done
+      if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
+        # SCHEDULED SWEEP — discover merged review MRs from the platform (Path B keeps no per-branch
+        # ledger), then advance each. `gate ci` is idempotent: a step already `done` is skipped.
+        # A stuck review MR (a squash merge whose commit dropped the branch name, or a failed merge
+        # push) is always RECENT, so sweep a generous recent window and PAGINATE it fully (--paginate)
+        # — this bounds cost without the old hard 50-row cap that could permanently strand older MRs.
+        # An MR stuck beyond the window signals a deeper failure; fix it with manual `yad gate sync`.
+        SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
+        glab api --paginate "projects/:id/merge_requests?state=merged&updated_after=${SINCE}&per_page=100&order_by=updated_at" \
+          --jq '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' \
+        | while read -r IID REF; do
+            git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+            npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$IID" --merged || true
+          done
       else
-        # MERGE push to the default branch whose commit names a review branch: advance there.
-        git fetch origin "$CI_DEFAULT_BRANCH"
-        git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
+        # MERGE push to the default branch whose commit names a review branch: resolve the merged MR's
+        # IID from its source branch so `gate ci` can re-read approvals, then advance there.
         REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE 'review/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
         if [ -n "$REVIEW_BRANCH" ]; then
-          npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --merged
-        else
-          npx -y -p yadflow@3 yad gate ci   # fallback sweep on the default branch
+          IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" --jq '.[0].iid' 2>/dev/null || true)"
+          # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
+          if [ -n "$IID" ]; then
+            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged
+          else
+            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --merged
+          fi
         fi
       fi

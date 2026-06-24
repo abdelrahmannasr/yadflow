@@ -141,10 +141,21 @@ export function resolveLogin(login, roster = [], repos = [], touchedDomains = []
 
 // Normalized PR reviews -> approval records (only APPROVED states count). `submittedAt` rides along
 // so the gate can tell a fresh re-approval from a stale one (revoke-on-change).
-export function mapApprovers(reviews = [], { roster, repos, touchedDomains }) {
+export function mapApprovers(reviews = [], { roster, repos, touchedDomains, headOid } = {}) {
   const out = [];
   for (const r of reviews) {
     if (r.state !== 'APPROVED') continue;
+    // Revoke-on-change, enforced in code where the platform binds an approval to a commit. The reader
+    // sets `commit` to the review's SHA (GitHub), to `null` when that read DEGRADED, or leaves it
+    // ABSENT when the platform exposes no per-approval SHA (GitLab). Three cases, against the merged
+    // head (`headOid`):
+    //   - a known SHA ≠ head      → the approval is stale (artifact moved) → drop;
+    //   - `null` (degraded read)  → FAIL CLOSED → drop: we cannot prove the approval is for the merged
+    //                               content, so a transient failure holds the gate rather than
+    //                               advancing on unverifiable approvals (re-run `yad gate sync`);
+    //   - absent (GitLab)         → keep: revoke-on-change is the platform's "remove approvals on new
+    //                               commits" setting.
+    if (headOid && r.commit !== undefined && r.commit !== headOid) continue;
     for (const rec of resolveLogin(r.login, roster, repos, touchedDomains)) {
       out.push({ ...rec, submittedAt: r.submittedAt || null });
     }
@@ -157,17 +168,35 @@ function readPrGitHub(n, { cwd } = {}) {
   const view = run('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,headRefOid'], { cwd });
   if (!view.ok) return { ok: false, reason: view.stderr || 'gh pr view failed' };
   const meta = JSON.parse(view.stdout);
-  // latestReviews collapses a reviewer's superseded reviews to their current one.
-  const rev = run('gh', ['pr', 'view', String(n), '--json', 'latestReviews'], { cwd });
-  const reviews = rev.ok
-    ? (JSON.parse(rev.stdout).latestReviews || []).map((x) => ({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt }))
-    : [];
+  let reviews = [];
+  let reviewsOk = false;
   // Review-thread resolution via GraphQL (REST does not expose isResolved). Paginate so a PR with
   // >100 threads is not mistakenly read as "all resolved".
   let threads = [];
   const nwo = run('gh', ['repo', 'view', '--json', 'owner,name'], { cwd });
   if (nwo.ok) {
     const { owner, name } = JSON.parse(nwo.stdout);
+    // latestReviews collapses a reviewer's superseded reviews to their current one; commit.oid binds
+    // each approval to the revision it was made on, so an approval on an older commit than the merged
+    // head is dropped as stale (revoke-on-change in code — see mapApprovers). `gh pr view --json
+    // latestReviews` does not expose the commit, so read it via GraphQL. Paginate so a PR with >100
+    // reviewers never silently omits one; any page failure aborts to the commitless fallback below,
+    // which fails closed rather than advancing on a partial read.
+    const rq = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{author{login} state submittedAt commit{oid}}}}}}`;
+    let rcursor = null;
+    reviewsOk = true;
+    for (let guard = 0; guard < 50; guard++) {
+      const args = ['api', 'graphql', '-f', `query=${rq}`, '-F', `o=${owner.login}`, '-F', `r=${name}`, '-F', `n=${n}`];
+      if (rcursor) args.push('-F', `c=${rcursor}`);
+      const rg = run('gh', args, { cwd });
+      if (!rg.ok) { reviewsOk = false; reviews = []; break; }
+      const conn = JSON.parse(rg.stdout)?.data?.repository?.pullRequest?.latestReviews;
+      for (const x of conn?.nodes || []) {
+        reviews.push({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, commit: x.commit?.oid || null });
+      }
+      if (!conn?.pageInfo?.hasNextPage) break;
+      rcursor = conn.pageInfo.endCursor;
+    }
     const q = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){reviewThreads(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{isResolved comments(first:1){nodes{author{login} body}}}}}}}`;
     let cursor = null;
     for (let guard = 0; guard < 50; guard++) {
@@ -187,6 +216,15 @@ function readPrGitHub(n, { cwd } = {}) {
       if (!page?.pageInfo?.hasNextPage) break;
       cursor = page.pageInfo.endCursor;
     }
+  }
+  // Fallback if the GraphQL reviews read failed (no nwo / API hiccup): take the plain JSON view with
+  // commit=null. Approvals then FAIL CLOSED in mapApprovers (a degraded read cannot prove an approval
+  // is for the merged content), while CHANGES_REQUESTED is still honored — so a transient failure
+  // holds the gate, never advances it.
+  if (!reviewsOk) {
+    const rev = run('gh', ['pr', 'view', String(n), '--json', 'latestReviews'], { cwd });
+    if (rev.ok) reviews = (JSON.parse(rev.stdout).latestReviews || [])
+      .map((x) => ({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, commit: null }));
   }
   return {
     ok: true,

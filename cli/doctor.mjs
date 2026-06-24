@@ -246,17 +246,17 @@ export function epicChecks(checks, root) {
       if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`, 'author it via yad-epic, or remove the directory');
       else {
         check(checks, `epic:${e}`, 'epics', 'ok', `${e}: currentStep ${ledger.state.currentStep}`);
-        // Migration guard (pre-3.0 → branch-ledger model): under the new model an in-flight review's
-        // ledger lives on its review branch, so an OPEN review PR recorded here on the default branch
-        // means it was opened under the old model. Merge/close it under the version that opened it
-        // before relying on the new CI flow, or its advance will not sync.
+        // Migration guard (pre-3.0 model): under the current model CI records the ledger on the
+        // default branch only at merge (when the step is already done), and writes nothing during
+        // review — so an OPEN (non-done) review PR recorded here means it was opened under an older
+        // model. Merge/close it under the version that opened it before relying on the CI flow.
         const openPr = (ledger.hubPrs || []).find((p) => {
           const st = (ledger.state.steps.find((s) => s.id === p.step) || {}).status;
           return st && st !== 'done';
         });
         if (openPr) check(checks, `epic:${e}:migration`, 'epics', 'warn',
           `${e}: an open review PR (${openPr.artifact}${openPr.number ? ` #${openPr.number}` : ''}) is recorded on the default branch`,
-          'opened under a pre-3.0 yadflow? merge/close it before continuing — the gate ledger now lives on the review branch');
+          'opened under a pre-3.0 yadflow? merge/close it before continuing — CI now records the gate ledger on the default branch only at merge');
       }
     } catch (err) {
       check(checks, `epic:${e}`, 'epics', 'fail', `${e}: ${err.message} [${err.code || 'YAD-STATE-001'}]`, err.hint || 'fix the file or restore it from git');

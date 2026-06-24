@@ -51,7 +51,7 @@ ${c.bold('Review gate (front half)')}
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
   yad gate ci [--branch <head>] [--pr <n>] [--merged]
-                        CI entry (hub workflow): pre-merge writes the ledger to the review branch;
+                        CI entry (hub workflow): pre-merge is read-only (nothing pushed);
                         --merged advances the step + flips artifact status on the default branch
 
 ${c.bold('Build helpers')}
