@@ -446,6 +446,19 @@ test('pr-title gate: hub review title passes; a code title fails under hub', () 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('pr-title gate: hub splits by --head — review/EP-* wants the review shape, any other branch wants a code subject', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
+  // review/EP-* head => artifact-review title required
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'review: architecture.md (EP-demo)']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'chore: nope']).code, 1);
+  // any other head => a hub tooling PR, follows the code (Conventional-Commits) convention
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the hub gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'review: nope (EP-x)']).code, 1);
+  // no --head stays strict (artifact-review), so existing single-arg callers are unaffected
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'chore: nope']).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------- pr-template.sh ----------
 const PR_TEMPLATE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
 const CODE_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/github/pull_request_template.md');
@@ -466,6 +479,19 @@ test('pr-template gate: the real hub template passes under --profile hub', () =>
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
   // a missing file is a hard fail
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', path.join(T, 'nope.md')]).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-template gate: hub splits by --head — review/EP-* wants the artifact template, any other branch wants the code template', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  // review/EP-* head => artifact-review template required
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', HUB_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', CODE_TPL]).code, 1);
+  // any other head => a hub tooling PR, uses the code task template
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', CODE_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', HUB_TPL]).code, 1);
+  // no --head stays strict (artifact-review template)
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

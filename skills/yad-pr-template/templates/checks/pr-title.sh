@@ -5,17 +5,23 @@
 #     period (config.yaml build.pr_title_style: same_as_commit_subject; one task = one PR, the title is
 #     the squash-merge subject). Keep <type> in sync with cli/manifest.mjs COMMIT_TYPES.
 #   --profile hub — a front-half artifact-review title "review: <artifact> (EP-<slug>)", the shape
-#     `yad gate open` creates (cli/gate.mjs).
+#     `yad gate open` creates (cli/gate.mjs) — BUT only for review/EP-* head branches. Every other
+#     hub PR is a tooling/code change to the hub itself and follows the code convention; pass the
+#     head ref via --head so the gate can tell the two apart (a tooling PR has no EP artifact to
+#     review). With no --head, the hub profile stays strict (requires the review shape).
 # The title is passed as the (single) positional arg; CI injects it from the event payload
 # (GitHub: github.event.pull_request.title; GitLab: $CI_MERGE_REQUEST_TITLE).
 set -euo pipefail
 
 PROFILE=code
+HEADREF=""
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --profile) PROFILE="${2:-code}"; shift 2 ;;
     --profile=*) PROFILE="${1#*=}"; shift ;;
+    --head) HEADREF="${2:-}"; shift 2 ;;
+    --head=*) HEADREF="${1#*=}"; shift ;;
     *) ARGS+=("$1"); shift ;;
   esac
 done
@@ -29,23 +35,34 @@ fi
 
 TYPES='feat|fix|docs|refactor|test|perf|build|ci|chore|revert'
 
-if [ "$PROFILE" = hub ]; then
-  # review: <artifact> (EP-<slug>)
-  if printf '%s' "$TITLE" | grep -qE '^review: .+ \(EP-[a-z0-9-]+\)$'; then
-    echo "PASS [pr-title]: '${TITLE}' (profile: hub)"
-    exit 0
+# Conventional-Commits subject (optional scope + breaking `!`), no trailing period. Used by the code
+# profile and by hub tooling PRs (any head branch that is not review/EP-*).
+check_code_title() {
+  if ! printf '%s' "$TITLE" | grep -qE "^(${TYPES})(\([a-z0-9._-]+\))?!?: .+"; then
+    echo "FAIL [pr-title]: '${TITLE}' is not '<type>(<scope>)?!?: <description>' (type one of: ${TYPES//|/, })."
+    exit 1
   fi
-  echo "FAIL [pr-title]: '${TITLE}' is not a hub review title 'review: <artifact> (EP-<slug>)'."
-  exit 1
+  if printf '%s' "$TITLE" | grep -qE '\.$'; then
+    echo "FAIL [pr-title]: '${TITLE}' must not end with a period."
+    exit 1
+  fi
+  echo "PASS [pr-title]: '${TITLE}' (profile: ${PROFILE}, tooling/code)"
+  exit 0
+}
+
+if [ "$PROFILE" = hub ]; then
+  # review/EP-* head branch (or unknown head ref) => front-half artifact-review PR: 'review: <artifact> (EP-<slug>)'.
+  case "$HEADREF" in
+    review/EP-*|"")
+      if printf '%s' "$TITLE" | grep -qE '^review: .+ \(EP-[a-z0-9-]+\)$'; then
+        echo "PASS [pr-title]: '${TITLE}' (profile: hub, artifact-review)"
+        exit 0
+      fi
+      echo "FAIL [pr-title]: '${TITLE}' is not a hub review title 'review: <artifact> (EP-<slug>)'."
+      exit 1
+      ;;
+    # Any other hub PR is a tooling/code change to the hub itself — fall through to the code convention.
+  esac
 fi
 
-# code profile — Conventional-Commits subject (optional scope + breaking `!`), no trailing period.
-if ! printf '%s' "$TITLE" | grep -qE "^(${TYPES})(\([a-z0-9._-]+\))?!?: .+"; then
-  echo "FAIL [pr-title]: '${TITLE}' is not '<type>(<scope>)?!?: <description>' (type one of: ${TYPES//|/, })."
-  exit 1
-fi
-if printf '%s' "$TITLE" | grep -qE '\.$'; then
-  echo "FAIL [pr-title]: '${TITLE}' must not end with a period."
-  exit 1
-fi
-echo "PASS [pr-title]: '${TITLE}' (profile: code)"
+check_code_title
