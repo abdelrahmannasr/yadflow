@@ -183,7 +183,7 @@ async function main() {
       // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
       // CI's job at merge — never wired into the local gate. File-only mode keeps local writes.
-      if (action === 'open') await gateOpen(o.dir, { epic, artifact, today });
+      if (action === 'open') await gateOpen(o.dir, { epic, artifact });
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });

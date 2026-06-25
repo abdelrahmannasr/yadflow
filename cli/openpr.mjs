@@ -110,6 +110,8 @@ export async function runOpenPr(root, opts = {}) {
     // Pass the branch we just pushed as the head so gateOpen opens the PR against it (its own
     // recompute would collapse a per-story base). gateOpen signals failure by returning no url —
     // mirror open-pr's own error contract so `ship` sees the non-zero exit and never reports success.
+    // (On a platform-less hub gateOpen marks the step in_review file-only and returns no url; open-pr's
+    // job is to open a PR, so "no PR opened" is a non-zero outcome here, unlike `yad gate open`.)
     const res = await gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), head: branch });
     if (!res?.url) process.exitCode = 1;
     return res;
