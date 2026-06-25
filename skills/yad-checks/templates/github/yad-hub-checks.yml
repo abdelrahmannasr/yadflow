@@ -1,8 +1,11 @@
 # yad-managed: yad-checks
-# Pattern gates for the PRODUCT HUB: every PR (including the front-half review/EP-* PRs) must follow
-# the hub conventions — Conventional-Commits commit subjects, a `review: <artifact> (EP-<slug>)` PR
-# title, and a PR body that uses the hub artifact-review template. They run with `--profile hub`.
-# Standalone workflow so it never collides with the code-repo yad-checks workflow.
+# Pattern gates for the PRODUCT HUB. They run with `--profile hub` and split by head branch:
+#   review/EP-* PRs are front-half artifact-review vehicles — a `review: <artifact> (EP-<slug>)` title
+#     and the hub artifact-review template body.
+#   every other PR is a tooling/code change to the hub itself — a Conventional-Commits title and the
+#     code task template body (same convention the code repos use).
+# The head ref is passed via --head so the gate can tell the two apart. Commit subjects are always
+# Conventional-Commits. Standalone workflow so it never collides with the code-repo yad-checks workflow.
 name: yad-hub-checks
 on:
   pull_request:
@@ -17,23 +20,34 @@ jobs:
       - run: bash checks/commit-message.sh --profile hub "origin/${{ github.base_ref }}"
 
   # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
+  # fetch-depth: 0 + the base ref give us the PR's changed paths, so the gate can reject an artifact
+  # change (epics/**) riding a non-review head past the front-half review with a plain code title.
   pr-title:
     runs-on: ubuntu-latest
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_HEAD: ${{ github.event.pull_request.head.ref }}
+      BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@v4
-      - run: bash checks/pr-title.sh --profile hub "$PR_TITLE"
+        with: { fetch-depth: 0 }
+      - run: |
+          changed="$(mktemp)"; git diff --name-only "origin/${BASE_REF}...HEAD" > "$changed"
+          bash checks/pr-title.sh --profile hub --head "$PR_HEAD" --changed "$changed" "$PR_TITLE"
 
   pr-template:
     runs-on: ubuntu-latest
     env:
       PR_BODY: ${{ github.event.pull_request.body }}
+      PR_HEAD: ${{ github.event.pull_request.head.ref }}
+      BASE_REF: ${{ github.base_ref }}
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - run: |
+          changed="$(mktemp)"; git diff --name-only "origin/${BASE_REF}...HEAD" > "$changed"
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
-          bash checks/pr-template.sh --profile hub "$body"
+          bash checks/pr-template.sh --profile hub --head "$PR_HEAD" --changed "$changed" "$body"
 
   # The gate ledger is CI-owned: reject non-bot commits to .sdlc/*.json or reviews/*.md.
   ledger-guard:

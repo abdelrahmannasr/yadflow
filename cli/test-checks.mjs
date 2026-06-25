@@ -446,6 +446,36 @@ test('pr-title gate: hub review title passes; a code title fails under hub', () 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('pr-title gate: hub splits by --head — review/EP-* wants the review shape, any other branch wants a code subject', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
+  // review/EP-* head => artifact-review title required
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'review: architecture.md (EP-demo)']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'chore: nope']).code, 1);
+  // any other head => a hub tooling PR, follows the code (Conventional-Commits) convention
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the hub gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'review: nope (EP-x)']).code, 1);
+  // no --head stays strict (artifact-review), so existing single-arg callers are unaffected
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'chore: nope']).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review head — the bypass guard', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
+  const artifact = path.join(T, 'changed-artifact.txt');
+  fs.writeFileSync(artifact, 'epics/EP-demo/epic.md\nREADME.md\n');
+  const tooling = path.join(T, 'changed-tooling.txt');
+  fs.writeFileSync(tooling, 'skills/yad-checks/x.sh\ncli/y.mjs\n');
+  // non-review head touching epics/** => FAIL even with an otherwise-valid code title
+  const r = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', artifact, 'chore: sneak in an artifact']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /front-half artifacts/);
+  // non-review head touching only tooling paths => still a tooling PR, code title passes
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the hub gates']).code, 0);
+  // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------- pr-template.sh ----------
 const PR_TEMPLATE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
 const CODE_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/github/pull_request_template.md');
@@ -466,6 +496,36 @@ test('pr-template gate: the real hub template passes under --profile hub', () =>
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
   // a missing file is a hard fail
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', path.join(T, 'nope.md')]).code, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-template gate: hub splits by --head — review/EP-* wants the artifact template, any other branch wants the code template', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  // review/EP-* head => artifact-review template required
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', HUB_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', CODE_TPL]).code, 1);
+  // any other head => a hub tooling PR, uses the code task template
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', CODE_TPL]).code, 0);
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', HUB_TPL]).code, 1);
+  // no --head stays strict (artifact-review template)
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-template gate: hub rejects an artifact change (epics/**) on a non-review head — the bypass guard', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  const artifact = path.join(T, 'changed-artifact.txt');
+  fs.writeFileSync(artifact, 'epics/EP-demo/architecture.md\n');
+  const tooling = path.join(T, 'changed-tooling.txt');
+  fs.writeFileSync(tooling, 'skills/yad-checks/x.sh\n');
+  // non-review head touching epics/** => FAIL even with an otherwise-valid code template body
+  const r = runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', artifact, CODE_TPL]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /front-half artifacts/);
+  // non-review head touching only tooling paths => code task template passes
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, CODE_TPL]).code, 0);
+  // the legitimate path: a review/EP-* head still requires the artifact-review template
+  assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, HUB_TPL]).code, 0);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

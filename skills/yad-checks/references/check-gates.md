@@ -121,8 +121,17 @@ from the event payload):
 - `--profile code` (default) → a Conventional-Commits subject `<type>: <description>`, no trailing
   period (`config.yaml build.pr_title_style: same_as_commit_subject` — one task = one PR, the title is
   the squash-merge subject).
-- `--profile hub` → a front-half artifact-review title `review: <artifact> (EP-<slug>)`, the shape
-  `yad gate open` creates.
+- `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
+  - `review/EP-*` head (or no `--head` — stays strict) → a front-half artifact-review title
+    `review: <artifact> (EP-<slug>)`, the shape `yad gate open` creates.
+  - any other head → a tooling/code change to the hub itself, so it follows the `code` convention (a
+    Conventional-Commits subject). This is what lets a PR that changes the hub's own workflows/checks
+    pass — it has no EP artifact to review.
+  - **Anti-bypass guard.** The branch name alone is not trusted: a non-review head that actually
+    changes front-half artifacts (any path under `epics/**`) **FAILS** — those changes must go through
+    a `review/EP-*` PR and the artifact-review workflow. CI passes the PR's changed paths via
+    `--changed <file>` (computed from the diff against the base ref); without that list (a direct
+    by-hand caller) the guard is inert and the branch split alone applies.
 
 ## 7. pr-template (`templates/checks/pr-template.sh`)
 
@@ -131,8 +140,14 @@ catches a free-form description that bypassed it:
 
 - `--profile code` (default) → requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled
   `Risk level:` (`low|medium|high`).
-- `--profile hub` → requires `## Artifact under review`, `## Impact & Risk (front-half)`, `## Checklist`,
-  and a `Risk tags:` line.
+- `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
+  - `review/EP-*` head (or no `--head`) → requires the artifact-review template: `## Artifact under
+    review`, `## Impact & Risk (front-half)`, `## Checklist`, and a `Risk tags:` line.
+  - any other head → a hub tooling PR, so it requires the `code` task template (`## Summary`,
+    `## Impact & Risk`, `## Checklist`, filled `Risk level:`).
+  - **Anti-bypass guard** (same as pr-title): a non-review head that changes front-half artifacts
+    (`epics/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
+    must go through a `review/EP-*` PR.
 
 ## CI wiring (both platforms)
 
@@ -202,9 +217,12 @@ its one include line) whenever `.sdlc/hub.json` has a platform with the bridge e
 front-half review PRs are held to the same rule as code-repo PRs: signed, known authors only.
 
 The hub **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
-`--profile hub`, so the front-half review PRs follow the hub conventions — Conventional-Commits commit
-subjects, a `review: <artifact> (EP-<slug>)` title, and a body that uses the hub artifact-review
-template. `yad check --fix` installs the same `checks/*.sh` scripts plus a standalone hub workflow
+`--profile hub`. The pattern gates split by the PR/MR **head branch** (passed via `--head`): a
+`review/EP-*` head is a front-half review PR — Conventional-Commits commit subjects, a
+`review: <artifact> (EP-<slug>)` title, and the hub artifact-review template body; **any other head is
+a tooling/code change to the hub itself** and follows the `code` convention (a Conventional-Commits
+title + the code task template), so a PR that changes the hub's own workflows/checks can pass.
+`yad check --fix` installs the same `checks/*.sh` scripts plus a standalone hub workflow
 (`templates/github/yad-hub-checks.yml` → `.github/workflows/yad-hub-checks.yml`, or the GitLab fragment
 `templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
 line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
