@@ -352,6 +352,66 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 });
 
 // ---------------------------------------------------------------------------------------------
+// detectStage / templateBody — stage-aware open-pr (fix #80)
+// ---------------------------------------------------------------------------------------------
+const { detectStage, templateBody } = await import('./openpr.mjs');
+
+// A bare dir that IS a hub (carries .sdlc/hub.json) vs one that is not.
+function hubDir() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+  return T;
+}
+
+test('detectStage: code-repo when the root is not a hub, or the target repo is a sub-repo', () => {
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-')); // no hub.json
+  assert.equal(detectStage(plain, plain, 'feat/EP-x-S01-T01'), 'code-repo');
+  const T = hubDir();
+  // --repo resolves repoRoot to a sub-dir of the hub => a connected code repo, never the hub
+  assert.equal(detectStage(T, path.join(T, 'demo/backend'), 'feat/EP-x-S01-T01'), 'code-repo');
+  fs.rmSync(plain, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('detectStage: on the hub, a review/EP-* head is hub-front, anything else is hub-tooling', () => {
+  const T = hubDir();
+  assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'hub-front');
+  assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-front');
+  assert.equal(detectStage(T, T, 'ci/some-fix'), 'hub-tooling');
+  assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'hub-tooling'); // must be review/EP-*
+  // path.resolve normalises a trailing-slash / "." repoRoot to the same hub
+  assert.equal(detectStage(T, T + path.sep, 'ci/x'), 'hub-tooling');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: hub-tooling emits the code-task shape (fixes #80) and fills the risk', () => {
+  const T = hubDir();
+  const b = templateBody(T, 'github', { task: 'EP-x-S01-T01', risk: 'low', contract: false, domains: 'hub', stage: 'hub-tooling' });
+  assert.match(b, /## Summary/);
+  assert.match(b, /## Checklist/);
+  assert.match(b, /\*\*Risk level:\*\* low/);
+  // it must NOT carry the artifact-review markers the hub's own template has
+  assert.doesNotMatch(b, /## Artifact under review/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: the hub-tooling body passes the real pr-template hub gate on a tooling head (#80 regression)', () => {
+  const T = hubDir();
+  const b = templateBody(T, 'github', { risk: 'low', stage: 'hub-tooling' });
+  const bodyFile = path.join(T, 'pr-body.md');
+  fs.writeFileSync(bodyFile, b);
+  const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+  // before the fix this body was the artifact-review template and the gate FAILED it.
+  const code = (() => {
+    try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'ci/some-fix', bodyFile], { stdio: 'pipe' }); return 0; }
+    catch (e) { return e.status; }
+  })();
+  assert.equal(code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
 const { gatePredicate, artifactHash, nextAction, preconditionsMet } = await import('./epic-state.mjs');
@@ -1625,6 +1685,33 @@ test('runCommit dry-run prints without committing', async () => {
   assert.match(r.message, /^docs: note/);
   assert.throws(() => git(T, 'rev-parse', 'HEAD'));   // nothing committed
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a hub gate):
+// on the hub it must reassure, not threaten with a gate that does not run there.
+test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', async () => {
+  // a hub (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main'); git(T, 'checkout', '-q', '-b', 'ci/wire-gates');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+  fs.writeFileSync(path.join(T, 'a.txt'), '1'); git(T, 'add', '-A');
+  const onHub = await grab(() => runCommit(T, { type: 'ci', message: 'wire the gates', dryRun: true }));
+  assert.match(onHub, /fine for a hub PR/);
+  assert.doesNotMatch(onHub, /spec-link gate will fail on a code repo/);
+  fs.rmSync(T, { recursive: true, force: true });
+
+  // a plain code repo (no hub.json) keeps the original code-repo warning
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
+  git(R, 'init', '-q'); git(R, 'config', 'user.email', 'a@b.c'); git(R, 'config', 'user.name', 'x');
+  fs.writeFileSync(path.join(R, 'seed.txt'), '0'); git(R, 'add', '-A'); git(R, 'commit', '-q', '-m', 'seed');
+  git(R, 'branch', '-q', '-M', 'main'); git(R, 'checkout', '-q', '-b', 'feature/no-task');
+  fs.writeFileSync(path.join(R, 'a.txt'), '1'); git(R, 'add', '-A');
+  const onRepo = await grab(() => runCommit(R, { type: 'feat', message: 'do a thing', dryRun: true }));
+  assert.match(onRepo, /spec-link gate will fail on a code repo/);
+  fs.rmSync(R, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------------------------
