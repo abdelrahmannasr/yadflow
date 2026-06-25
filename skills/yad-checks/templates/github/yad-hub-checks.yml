@@ -9,6 +9,9 @@
 name: yad-hub-checks
 on:
   pull_request:
+    # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
+    # re-runs the pattern gates without a close/reopen — e.g. fixing a body the pr-template gate held.
+    types: [opened, synchronize, reopened, edited]
     branches: ["**"]
 
 jobs:
