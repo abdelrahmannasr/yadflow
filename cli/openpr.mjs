@@ -23,12 +23,14 @@ function resolveRepo(root, { repo, dir }) {
 
 // Which SDLC stage is this PR? The hub serves two vehicles; a code repo only one. Mirrors the
 // `--head` split the hub pattern gates (pr-title.sh/pr-template.sh) already apply:
-//   code-repo    — repoRoot is NOT the product hub (a connected repo, or no hub here).
-//   hub-front    — repoRoot IS the hub AND head is a review/EP-* branch (artifact-review PR).
-//   hub-tooling  — repoRoot IS the hub AND head is anything else (a tooling/CI change to the hub).
-// "is the hub" = repoRoot resolves to root AND root carries .sdlc/hub.json. path.resolve normalises
-// `--dir .` / trailing slashes; `--repo <name>` resolves to a code subdir, so it is never the hub.
-export function detectStage(root, repoRoot, head) {
+//   code-repo    — NOT the product hub (a registry repo via --repo, or root is not a hub).
+//   hub-front    — the hub itself AND head is a review/EP-* branch (artifact-review PR).
+//   hub-tooling  — the hub itself AND head is anything else (a tooling/CI change to the hub).
+// `meta` (truthy when resolved from the repos registry via --repo) is a connected code repo, so it is
+// never the hub regardless of its path. Otherwise "is the hub" = repoRoot resolves to root AND root
+// carries .sdlc/hub.json. path.resolve normalises `--dir .` / trailing slashes.
+export function detectStage(root, repoRoot, head, meta) {
+  if (meta) return 'code-repo';
   const isHub = path.resolve(repoRoot) === path.resolve(root)
     && exists(path.join(root, PROJECT_FILES.hubConfig));
   if (!isHub) return 'code-repo';
@@ -93,7 +95,7 @@ export async function runOpenPr(root, opts = {}) {
   const baseBranch = opts.base || meta?.default_branch || 'main';
   if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
 
-  const stage = detectStage(root, repoRoot, branch);
+  const stage = detectStage(root, repoRoot, branch, meta);
 
   // hub-front: this is a front-half artifact-review PR (review/EP-*/<artifact> head on the hub). The
   // artifact-review title, body, and ledger bookkeeping all live in `yad gate open` — delegate to it
@@ -105,7 +107,12 @@ export async function runOpenPr(root, opts = {}) {
     info(`pushing ${branch} …`);
     const fpush = run('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });
     if (!fpush.ok) { fail(`git push failed — ${fpush.stderr.split('\n')[0] || 'unknown'}`); process.exitCode = 1; return; }
-    return gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), today: opts.today });
+    // Pass the branch we just pushed as the head so gateOpen opens the PR against it (its own
+    // recompute would collapse a per-story base). gateOpen signals failure by returning no url —
+    // mirror open-pr's own error contract so `ship` sees the non-zero exit and never reports success.
+    const res = await gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), head: branch });
+    if (!res?.url) process.exitCode = 1;
+    return res;
   }
 
   // Push the branch (sets upstream) using the user's own auth. Abort on failure — creating a PR for a

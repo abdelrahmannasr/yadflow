@@ -370,6 +370,8 @@ test('detectStage: code-repo when the root is not a hub, or the target repo is a
   const T = hubDir();
   // --repo resolves repoRoot to a sub-dir of the hub => a connected code repo, never the hub
   assert.equal(detectStage(T, path.join(T, 'demo/backend'), 'feat/EP-x-S01-T01'), 'code-repo');
+  // a registry entry (meta truthy) is always a code repo — even if its path resolves to the hub root
+  assert.equal(detectStage(T, T, 'review/EP-demo/architecture', { name: 'oddly-registered' }), 'code-repo');
   fs.rmSync(plain, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -409,6 +411,75 @@ test('templateBody: the hub-tooling body passes the real pr-template hub gate on
   })();
   assert.equal(code, 0);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: code-repo / hub-front stages read the repo\'s own committed template', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
+  fs.mkdirSync(path.join(T, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.github/pull_request_template.md'), '## Summary\n- **Risk level:** medium\n');
+  // a non-hub-tooling stage uses the committed repo template (here a marker we can detect)
+  const b = templateBody(T, 'github', { risk: 'high', stage: 'code-repo' });
+  assert.match(b, /\*\*Risk level:\*\* high/); // the committed template's value is overwritten
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: hub-tooling on gitlab uses the bundled MR template, not the repo file', () => {
+  const T = hubDir(); // its .github file would be artifact-review; gitlab must pull the packaged one
+  const b = templateBody(T, 'gitlab', { risk: 'low', stage: 'hub-tooling' });
+  assert.match(b, /## Summary/);
+  assert.match(b, /## Checklist/);
+  assert.match(b, /\*\*Risk level:\*\* low/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// gateOpen head override (P1) + runOpenPr hub-front delegation failure signalling (P2)
+// ---------------------------------------------------------------------------------------------
+const { gateOpen } = await import('./gate.mjs');
+const { runOpenPr } = await import('./openpr.mjs');
+
+// A hub with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
+function hubWithStoriesStep() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [] }));
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/.sdlc/state.json'), JSON.stringify({
+    currentStep: 'stories-review',
+    steps: [{ id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'in_review', risk_tags: [] }],
+  }));
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/epic.md'), '---\nowner: x\nrepos: []\n---\n');
+  return T;
+}
+
+test('gateOpen: opens the PR against the head override, not its recomputed per-story branch (P1)', async () => {
+  const T = hubWithStoriesStep();
+  let seenHead;
+  const creator = (_platform, opts) => { seenHead = opts.head; return { ok: true, url: 'https://x/pr/1' }; };
+  // a per-story review: artifact collapses to stories/, but the pushed head is the -S01 branch
+  const res = await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', head: 'review/EP-demo/stories-S01', creator });
+  assert.equal(seenHead, 'review/EP-demo/stories-S01'); // NOT review/EP-demo/stories
+  assert.deepEqual(res, { url: 'https://x/pr/1' });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit code (P2)', async () => {
+  const prev = process.exitCode;
+  const T = hubWithStoriesStep();
+  // give it a bare remote so the branch push succeeds, then platform-less hub => gateOpen opens no PR
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, default_branch: 'main', roster: [] }));
+  fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', bare);
+  git(T, 'checkout', '-q', '-b', 'review/EP-demo/stories-S01');
+  process.exitCode = 0;
+  const res = await runOpenPr(T, {});
+  assert.ok(!res?.url, 'no PR opened');
+  assert.ok(process.exitCode, 'delegated failure sets a non-zero exit code');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(bare, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -706,7 +777,7 @@ test('runSetup: team + --tools records a team profile and configures the optiona
 // ---------------------------------------------------------------------------------------------
 // `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
-const { gateSync, gateOpen, gateStatus } = await import('./gate.mjs');
+const { gateSync, gateStatus } = await import('./gate.mjs'); // gateOpen imported earlier (P1/P2 block)
 
 function scaffoldEpic() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-'));
