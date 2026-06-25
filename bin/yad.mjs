@@ -56,8 +56,10 @@ ${c.bold('Review gate (front half)')}
 
 ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
-  yad open-pr [--repo <name>]          Open a code-repo task PR/MR from the template
-  yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step
+  yad open-pr [--repo <name>]          Open a task PR/MR — stage-aware on the hub: a review/EP-*
+                                       branch opens the front-half artifact-review PR (delegates to
+                                       gate open), any other hub branch uses the code-task template
+  yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
 
@@ -181,7 +183,7 @@ async function main() {
       // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
       // CI's job at merge — never wired into the local gate. File-only mode keeps local writes.
-      if (action === 'open') await gateOpen(o.dir, { epic, artifact, today });
+      if (action === 'open') await gateOpen(o.dir, { epic, artifact });
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });

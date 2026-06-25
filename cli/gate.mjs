@@ -449,7 +449,11 @@ export async function gateStatus(root, { epic } = {}) {
   }
 }
 
-export async function gateOpen(root, { epic, artifact } = {}) {
+// `head` overrides the review branch the PR is opened against — `open-pr` delegates here after pushing
+// the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
+// the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
+// the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
+export async function gateOpen(root, { epic, artifact, head, creator = createPr } = {}) {
   const { hub } = loadHub(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -458,7 +462,7 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   const step = findReviewStep(ledger.state, artifact);
   if (!step) { fail(`no review step for ${artifact}`); process.exitCode = 1; return; }
   const b = base(artifact);
-  const branch = `review/${epic}/${b}`;
+  const branch = head || `review/${epic}/${b}`;
   const domains = touchedDomains(epicDir, step);
   warnUnlockedContract(epicDir, artifact);
 
@@ -487,7 +491,7 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   const assignees = committer ? [committer] : [];
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
-  const r = createPr(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
+  const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${bridge ? ' — open it manually; CI records the gate on merge' : '; step is in_review file-only'}`); return; }
 
   if (!bridge) {
@@ -498,6 +502,7 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   hand(bridge
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
+  return { url: r.url };
 }
 
 // ---- helpers ------------------------------------------------------------------------------------

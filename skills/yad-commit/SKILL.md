@@ -21,7 +21,8 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
   `feat|fix|docs|refactor|test|perf|build|ci|chore|revert`; proper nouns/acronyms keep their case.
 - **Task trailer** — required on a code repo (anchors the `spec-link` + `commit-message` gates). Given
   with `--task`, else derived from the branch (`feat/<story>-<task>-…`). Hub commits are not
-  task-scoped, so the trailer is optional there.
+  task-scoped, so the trailer is optional there — a missing-Task warning is informational on the hub
+  (`spec-link` is a code-repo gate) and only flags a real gate failure in a code repo.
 - **Contract-Change trailer** — `--contract-change` only when the diff touches the locked contract
   surface; it routes the change back to the architecture gate.
 - **AI co-author footer — OFF by default.** No `Co-Authored-By` trailer is written unless `--ai <id>`

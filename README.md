@@ -98,8 +98,8 @@ with `npx` from your **product hub** repo — no clone needed.
 | `yad gate status <epic>` | Show each review step and its recorded approvals. |
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the hub workflow calls on review/merge events: derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the hub default branch (sweep every open review PR when no `--branch`). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
-| `yad open-pr [--repo <name>]` | Open a code-repo **task** PR/MR from the repo's platform template (build half). |
-| `yad ship --type <t> -m <subject>` | Commit **and** open the task PR/MR in one step (`yad commit` then `yad open-pr`). |
+| `yad open-pr [--repo <name>]` | Open a **task** PR/MR from the platform template (build half). **Stage-aware on the hub:** a `review/EP-*` branch opens the front-half artifact-review PR (delegates to `yad gate open`); any other hub branch uses the code-task template (so hub tooling PRs pass the `pr-template` gate). |
+| `yad ship --type <t> -m <subject>` | Commit **and** open the task PR/MR in one step (`yad commit` then `yad open-pr`) — stage-aware, same as `open-pr`. |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
 | `npx yadflow --version` | Print the installed CLI version. |

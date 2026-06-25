@@ -9,11 +9,17 @@
 name: yad-hub-checks
 on:
   pull_request:
+    # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
+    # re-runs the pattern gates without a close/reopen — e.g. fixing a body the pr-template gate held.
+    types: [opened, synchronize, reopened, edited]
     branches: ["**"]
 
 jobs:
+  # commit-message + ledger-guard read the commit range, not the PR title/body — skip them on a bare
+  # `edited` event (only pr-title/pr-template need to re-check a title/body fix).
   commit-message:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -52,6 +58,7 @@ jobs:
   # The gate ledger is CI-owned: reject non-bot commits to .sdlc/*.json or reviews/*.md.
   ledger-guard:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }

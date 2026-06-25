@@ -22,6 +22,10 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
     roster auto-assign, risk routing (`../yad-open-pr/SKILL.md`).
 - **Order matters:** the PR/MR is opened **only if the commit lands**. A failed commit, a tripped
   atomic guard, or `--dry-run` stops the step before anything is pushed.
+- **Stage-aware on the product hub** (via `yad-open-pr`): on a `review/EP-*` branch `ship` opens the
+  front-half **artifact-review** PR (delegating to `yad gate open` — `--title` is ignored); on any
+  other hub branch it opens the **code-task** PR from the bundled code-task template. In a code repo
+  it is unchanged.
 
 ## Inputs
 

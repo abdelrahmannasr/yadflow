@@ -22,6 +22,14 @@ the product hub.
   `.gitlab/merge_request_templates/Default.md`) with `Task:`, `Risk level:`, `Contract surface
   touched:`, and `Domains` prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate.
+- **Stage-aware on the product hub** — `open-pr` mirrors the `--head` split the hub gates apply:
+  - a **`review/EP-*/<artifact>`** branch is a front-half artifact-review PR → it **delegates to
+    `yad gate open`** (artifact-review title `review: <artifact> (EP-<slug>)`, the hub artifact-review
+    body, and the gate ledger bookkeeping all in one place). Any `--title`/`-m` is ignored here.
+  - any **other hub branch** is a tooling/CI change → it uses the bundled **code-task** template
+    (`## Summary` / `Risk level:` / `## Checklist`) instead of the hub's artifact-review
+    `pull_request_template.md`, so the hub `pr-template` gate passes.
+  In a code repo nothing changes — it reads the repo's own committed code-task template.
 - **Auto-assign** — from the hub roster scoped to this repo: assignee = the committer (resolved from
   the local git identity), reviewers = the repo's `reviewer`/`domain-owner` logins minus the committer.
   Degrades cleanly when there is no roster.

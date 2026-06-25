@@ -352,6 +352,150 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 });
 
 // ---------------------------------------------------------------------------------------------
+// detectStage / templateBody — stage-aware open-pr (fix #80)
+// ---------------------------------------------------------------------------------------------
+const { detectStage, templateBody } = await import('./openpr.mjs');
+
+// A bare dir that IS a hub (carries .sdlc/hub.json) vs one that is not.
+function hubDir() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+  return T;
+}
+
+test('detectStage: code-repo when the root is not a hub, or the target repo is a sub-repo', () => {
+  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-')); // no hub.json
+  assert.equal(detectStage(plain, plain, 'feat/EP-x-S01-T01'), 'code-repo');
+  const T = hubDir();
+  // --repo resolves repoRoot to a sub-dir of the hub => a connected code repo, never the hub
+  assert.equal(detectStage(T, path.join(T, 'demo/backend'), 'feat/EP-x-S01-T01'), 'code-repo');
+  // a registry entry (meta truthy) is always a code repo — even if its path resolves to the hub root
+  assert.equal(detectStage(T, T, 'review/EP-demo/architecture', { name: 'oddly-registered' }), 'code-repo');
+  fs.rmSync(plain, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('detectStage: on the hub, a review/EP-* head is hub-front, anything else is hub-tooling', () => {
+  const T = hubDir();
+  assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'hub-front');
+  assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-front');
+  assert.equal(detectStage(T, T, 'ci/some-fix'), 'hub-tooling');
+  assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'hub-tooling'); // must be review/EP-*
+  // path.resolve normalises a trailing-slash / "." repoRoot to the same hub
+  assert.equal(detectStage(T, T + path.sep, 'ci/x'), 'hub-tooling');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: hub-tooling emits the code-task shape (fixes #80) and fills the risk', () => {
+  const T = hubDir();
+  const b = templateBody(T, 'github', { task: 'EP-x-S01-T01', risk: 'low', contract: false, domains: 'hub', stage: 'hub-tooling' });
+  assert.match(b, /## Summary/);
+  assert.match(b, /## Checklist/);
+  assert.match(b, /\*\*Risk level:\*\* low/);
+  // it must NOT carry the artifact-review markers the hub's own template has
+  assert.doesNotMatch(b, /## Artifact under review/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: the hub-tooling body passes the real pr-template hub gate on a tooling head (#80 regression)', () => {
+  const T = hubDir();
+  const b = templateBody(T, 'github', { risk: 'low', stage: 'hub-tooling' });
+  const bodyFile = path.join(T, 'pr-body.md');
+  fs.writeFileSync(bodyFile, b);
+  const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+  // before the fix this body was the artifact-review template and the gate FAILED it.
+  const code = (() => {
+    try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'ci/some-fix', bodyFile], { stdio: 'pipe' }); return 0; }
+    catch (e) { return e.status; }
+  })();
+  assert.equal(code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: code-repo / hub-front stages read the repo\'s own committed template', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
+  fs.mkdirSync(path.join(T, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.github/pull_request_template.md'), '## Summary\n- **Risk level:** medium\n');
+  // a non-hub-tooling stage uses the committed repo template (here a marker we can detect)
+  const b = templateBody(T, 'github', { risk: 'high', stage: 'code-repo' });
+  assert.match(b, /\*\*Risk level:\*\* high/); // the committed template's value is overwritten
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: hub-tooling on gitlab uses the bundled MR template, not the repo file', () => {
+  const T = hubDir(); // its .github file would be artifact-review; gitlab must pull the packaged one
+  const b = templateBody(T, 'gitlab', { risk: 'low', stage: 'hub-tooling' });
+  assert.match(b, /## Summary/);
+  assert.match(b, /## Checklist/);
+  assert.match(b, /\*\*Risk level:\*\* low/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// gateOpen head override (P1) + runOpenPr hub-front delegation failure signalling (P2)
+// ---------------------------------------------------------------------------------------------
+const { gateOpen } = await import('./gate.mjs');
+const { runOpenPr } = await import('./openpr.mjs');
+
+// A hub with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
+function hubWithStoriesStep() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [] }));
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/.sdlc/state.json'), JSON.stringify({
+    currentStep: 'stories-review',
+    steps: [{ id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'in_review', risk_tags: [] }],
+  }));
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/epic.md'), '---\nowner: x\nrepos: []\n---\n');
+  return T;
+}
+
+test('gateOpen: opens the PR against the head override, not its recomputed per-story branch (P1)', async () => {
+  const T = hubWithStoriesStep();
+  let seenHead;
+  const creator = (_platform, opts) => { seenHead = opts.head; return { ok: true, url: 'https://x/pr/1' }; };
+  // a per-story review: artifact collapses to stories/, but the pushed head is the -S01 branch
+  const res = await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', head: 'review/EP-demo/stories-S01', creator });
+  assert.equal(seenHead, 'review/EP-demo/stories-S01'); // NOT review/EP-demo/stories
+  assert.deepEqual(res, { url: 'https://x/pr/1' });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit code (P2)', async () => {
+  const prev = process.exitCode;
+  const T = hubWithStoriesStep();
+  let bare;
+  try {
+    // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
+    // file-only "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
+    // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
+    bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, default_branch: 'main', roster: [] }));
+    fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+    git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', bare);
+    git(T, 'checkout', '-q', '-b', 'review/EP-demo/stories-S01');
+    process.exitCode = 0;
+    // pass --platform so open-pr's OWN platform detection passes (a bare-file remote is neither
+    // github nor gitlab) and execution actually reaches the hub-front delegation, not the early abort.
+    let res;
+    const out = await grab(() => runOpenPr(T, { platform: 'github' }).then((r) => { res = r; }));
+    assert.match(out, /no hub platform/);                 // proves the delegated gateOpen was reached
+    assert.doesNotMatch(out, /could not detect platform/); // ...not the early platform-detection abort
+    assert.ok(!res?.url, 'no PR opened');
+    assert.ok(process.exitCode, 'delegated no-PR result sets a non-zero exit code (P2 line)');
+  } finally {
+    // restore global state + temp dirs even if an assertion throws, so a failure here cannot leak a
+    // non-zero exit code to the runner or strand temp repos (CodeRabbit).
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    if (bare) fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
 const { gatePredicate, artifactHash, nextAction, preconditionsMet } = await import('./epic-state.mjs');
@@ -646,7 +790,7 @@ test('runSetup: team + --tools records a team profile and configures the optiona
 // ---------------------------------------------------------------------------------------------
 // `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
-const { gateSync, gateOpen, gateStatus } = await import('./gate.mjs');
+const { gateSync, gateStatus } = await import('./gate.mjs'); // gateOpen imported earlier (P1/P2 block)
 
 function scaffoldEpic() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-'));
@@ -1625,6 +1769,33 @@ test('runCommit dry-run prints without committing', async () => {
   assert.match(r.message, /^docs: note/);
   assert.throws(() => git(T, 'rev-parse', 'HEAD'));   // nothing committed
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a hub gate):
+// on the hub it must reassure, not threaten with a gate that does not run there.
+test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', async () => {
+  // a hub (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main'); git(T, 'checkout', '-q', '-b', 'ci/wire-gates');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
+  fs.writeFileSync(path.join(T, 'a.txt'), '1'); git(T, 'add', '-A');
+  const onHub = await grab(() => runCommit(T, { type: 'ci', message: 'wire the gates', dryRun: true }));
+  assert.match(onHub, /fine for a hub PR/);
+  assert.doesNotMatch(onHub, /spec-link gate will fail on a code repo/);
+  fs.rmSync(T, { recursive: true, force: true });
+
+  // a plain code repo (no hub.json) keeps the original code-repo warning
+  const R = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
+  git(R, 'init', '-q'); git(R, 'config', 'user.email', 'a@b.c'); git(R, 'config', 'user.name', 'x');
+  fs.writeFileSync(path.join(R, 'seed.txt'), '0'); git(R, 'add', '-A'); git(R, 'commit', '-q', '-m', 'seed');
+  git(R, 'branch', '-q', '-M', 'main'); git(R, 'checkout', '-q', '-b', 'feature/no-task');
+  fs.writeFileSync(path.join(R, 'a.txt'), '1'); git(R, 'add', '-A');
+  const onRepo = await grab(() => runCommit(R, { type: 'feat', message: 'do a thing', dryRun: true }));
+  assert.match(onRepo, /spec-link gate will fail on a code repo/);
+  fs.rmSync(R, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------------------------
