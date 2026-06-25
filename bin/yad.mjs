@@ -56,8 +56,10 @@ ${c.bold('Review gate (front half)')}
 
 ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
-  yad open-pr [--repo <name>]          Open a code-repo task PR/MR from the template
-  yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step
+  yad open-pr [--repo <name>]          Open a task PR/MR — stage-aware on the hub: a review/EP-*
+                                       branch opens the front-half artifact-review PR (delegates to
+                                       gate open), any other hub branch uses the code-task template
+  yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
 
@@ -192,10 +194,10 @@ async function main() {
       await runCommit(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force });
       break;
     case 'open-pr':
-      await runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange });
+      await runOpenPr(o.dir, { repo: o.repo, platform: o.platform, base: o.base, title: o.title || o.message, task: o.task, risk: o.risk, contractChange: o.contractChange, today });
       break;
     case 'ship':
-      await runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
+      await runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk, today });
       break;
     case 'repo': {
       const [, action, name] = o._;

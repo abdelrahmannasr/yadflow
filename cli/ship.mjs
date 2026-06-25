@@ -30,7 +30,7 @@ export async function runShip(root, opts = {}) {
   const opened = await runOpenPr(root, {
     repo: opts.repo, platform: opts.platform, base: opts.base,
     title: opts.title, task: opts.task,
-    risk: opts.risk, contractChange: opts.contractChange,
+    risk: opts.risk, contractChange: opts.contractChange, today: opts.today,
   });
 
   return { ...committed, ...opened };

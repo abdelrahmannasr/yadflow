@@ -498,6 +498,7 @@ export async function gateOpen(root, { epic, artifact } = {}) {
   hand(bridge
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
+  return { url: r.url };
 }
 
 // ---- helpers ------------------------------------------------------------------------------------

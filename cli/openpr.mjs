@@ -8,6 +8,8 @@ import { c, log, ok, info, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, createPr, reviewersForScopes, resolveCommitterLogin } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
+import { parseReviewBranch, artifactFromBase } from './epic-state.mjs';
+import { gateOpen } from './gate.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
 function resolveRepo(root, { repo, dir }) {
@@ -19,11 +21,57 @@ function resolveRepo(root, { repo, dir }) {
   return { repoRoot: path.resolve(root, dir || '.'), meta: null };
 }
 
-function templateBody(repoRoot, platform, { task, risk, contract, domains }) {
-  const tplPath = platform === 'gitlab'
-    ? path.join(repoRoot, '.gitlab/merge_request_templates/Default.md')
-    : path.join(repoRoot, '.github/pull_request_template.md');
-  const base = exists(tplPath) ? fs.readFileSync(tplPath, 'utf8') : '## Summary\n\n## Impact & Risk\n';
+// Which SDLC stage is this PR? The hub serves two vehicles; a code repo only one. Mirrors the
+// `--head` split the hub pattern gates (pr-title.sh/pr-template.sh) already apply:
+//   code-repo    — repoRoot is NOT the product hub (a connected repo, or no hub here).
+//   hub-front    — repoRoot IS the hub AND head is a review/EP-* branch (artifact-review PR).
+//   hub-tooling  — repoRoot IS the hub AND head is anything else (a tooling/CI change to the hub).
+// "is the hub" = repoRoot resolves to root AND root carries .sdlc/hub.json. path.resolve normalises
+// `--dir .` / trailing slashes; `--repo <name>` resolves to a code subdir, so it is never the hub.
+export function detectStage(root, repoRoot, head) {
+  const isHub = path.resolve(repoRoot) === path.resolve(root)
+    && exists(path.join(root, PROJECT_FILES.hubConfig));
+  if (!isHub) return 'code-repo';
+  return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'hub-front' : 'hub-tooling';
+}
+
+// The bundled code-task template — the same file `REPO_WIRING` installs into code repos, resolved
+// from the package (mirrors how manifest.mjs reads ../package.json). Used for a hub-tooling PR, whose
+// `.github/pull_request_template.md` is the ARTIFACT-REVIEW template (wrong shape for the code-task
+// hub gate). Falls back to a minimal body that still carries every section the gate requires.
+function codeTaskTemplate(platform) {
+  const rel = platform === 'gitlab'
+    ? '../skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md'
+    : '../skills/yad-pr-template/templates/github/pull_request_template.md';
+  try {
+    return fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
+  } catch {
+    return [
+      '## Summary', '',
+      '## Impact & Risk',
+      '- **Domains / repos touched:** <repo>',
+      '- **Contract surface touched:** no',
+      '- **Risk level:** low',
+      '',
+      '## Checklist',
+      '- [ ] Lint, build, and tests pass (build/test/lint gate)',
+      '',
+    ].join('\n');
+  }
+}
+
+export function templateBody(repoRoot, platform, { task, risk, contract, domains, stage }) {
+  // hub-tooling: the hub's own template is artifact-review — use the bundled code-task template so the
+  // body matches the shape the hub `pr-template` gate demands for a non-review head.
+  let base;
+  if (stage === 'hub-tooling') {
+    base = codeTaskTemplate(platform);
+  } else {
+    const tplPath = platform === 'gitlab'
+      ? path.join(repoRoot, '.gitlab/merge_request_templates/Default.md')
+      : path.join(repoRoot, '.github/pull_request_template.md');
+    base = exists(tplPath) ? fs.readFileSync(tplPath, 'utf8') : codeTaskTemplate(platform);
+  }
   // Fill the obvious fields; leave the rest of the committed template intact for the author.
   return base
     .replace(/EP-<slug>-S0N-T0N/g, task || 'EP-<slug>-S0N-T0N')
@@ -45,6 +93,21 @@ export async function runOpenPr(root, opts = {}) {
   const baseBranch = opts.base || meta?.default_branch || 'main';
   if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
 
+  const stage = detectStage(root, repoRoot, branch);
+
+  // hub-front: this is a front-half artifact-review PR (review/EP-*/<artifact> head on the hub). The
+  // artifact-review title, body, and ledger bookkeeping all live in `yad gate open` — delegate to it
+  // rather than emit the code-task shape (which the hub gate would reject). Push first (gateOpen does
+  // not push), then hand off; any --title/--message is dropped (gateOpen sets `review: …`).
+  if (stage === 'hub-front') {
+    const parsed = parseReviewBranch(branch);
+    if (!parsed) { fail(`could not parse review branch '${branch}' (expected review/EP-<slug>/<artifact>)`); process.exitCode = 1; return; }
+    info(`pushing ${branch} …`);
+    const fpush = run('git', ['push', '-u', 'origin', branch], { cwd: repoRoot });
+    if (!fpush.ok) { fail(`git push failed — ${fpush.stderr.split('\n')[0] || 'unknown'}`); process.exitCode = 1; return; }
+    return gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), today: opts.today });
+  }
+
   // Push the branch (sets upstream) using the user's own auth. Abort on failure — creating a PR for a
   // branch that is not on the remote just fails with a more confusing error.
   info(`pushing ${branch} …`);
@@ -54,7 +117,7 @@ export async function runOpenPr(root, opts = {}) {
   const task = opts.task || taskFromBranch(branch);
   const title = opts.title || run('git', ['log', '-1', '--format=%s'], { cwd: repoRoot }).stdout || `task ${task || branch}`;
   const body = templateBody(repoRoot, platform, {
-    task, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name,
+    task, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
   });
 
   // Auto-assign from the hub roster, scoped to this repo: assignee = the committer (resolved from
