@@ -467,26 +467,32 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
 test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit code (P2)', async () => {
   const prev = process.exitCode;
   const T = hubWithStoriesStep();
-  // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
-  // file-only "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
-  // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
-  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, default_branch: 'main', roster: [] }));
-  fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
-  git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', bare);
-  git(T, 'checkout', '-q', '-b', 'review/EP-demo/stories-S01');
-  process.exitCode = 0;
-  // pass --platform so open-pr's OWN platform detection passes (a bare-file remote is neither
-  // github nor gitlab) and execution actually reaches the hub-front delegation, not the early abort.
-  let res;
-  const out = await grab(() => runOpenPr(T, { platform: 'github' }).then((r) => { res = r; }));
-  assert.match(out, /no hub platform/);                 // proves the delegated gateOpen was reached
-  assert.doesNotMatch(out, /could not detect platform/); // ...not the early platform-detection abort
-  assert.ok(!res?.url, 'no PR opened');
-  assert.ok(process.exitCode, 'delegated no-PR result sets a non-zero exit code (P2 line)');
-  process.exitCode = prev;
-  fs.rmSync(T, { recursive: true, force: true });
-  fs.rmSync(bare, { recursive: true, force: true });
+  let bare;
+  try {
+    // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
+    // file-only "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
+    // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
+    bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, default_branch: 'main', roster: [] }));
+    fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+    git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', bare);
+    git(T, 'checkout', '-q', '-b', 'review/EP-demo/stories-S01');
+    process.exitCode = 0;
+    // pass --platform so open-pr's OWN platform detection passes (a bare-file remote is neither
+    // github nor gitlab) and execution actually reaches the hub-front delegation, not the early abort.
+    let res;
+    const out = await grab(() => runOpenPr(T, { platform: 'github' }).then((r) => { res = r; }));
+    assert.match(out, /no hub platform/);                 // proves the delegated gateOpen was reached
+    assert.doesNotMatch(out, /could not detect platform/); // ...not the early platform-detection abort
+    assert.ok(!res?.url, 'no PR opened');
+    assert.ok(process.exitCode, 'delegated no-PR result sets a non-zero exit code (P2 line)');
+  } finally {
+    // restore global state + temp dirs even if an assertion throws, so a failure here cannot leak a
+    // non-zero exit code to the runner or strand temp repos (CodeRabbit).
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    if (bare) fs.rmSync(bare, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------------------------
