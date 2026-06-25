@@ -27,18 +27,22 @@ yad-hub-commit-message:
   script:
     - bash checks/commit-message.sh --profile hub "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
+# GIT_DEPTH: 0 (above) gives the changed paths, so the gate can reject an artifact change (epics/**)
+# riding a non-review source branch past the front-half review with a plain code title/template.
 yad-hub-pr-title:
   extends: .yad_hub_mr_only
   needs: []
   script:
-    - bash checks/pr-title.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" "$CI_MERGE_REQUEST_TITLE"
+    - changed="$(mktemp)"; git diff --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
+    - bash checks/pr-title.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$CI_MERGE_REQUEST_TITLE"
 
 yad-hub-pr-template:
   extends: .yad_hub_mr_only
   needs: []
   script:
+    - changed="$(mktemp)"; git diff --name-only "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME...HEAD" > "$changed"
     - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
-    - bash checks/pr-template.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" "$body"
+    - bash checks/pr-template.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$body"
 
 # The gate ledger is CI-owned: reject non-bot commits to .sdlc/*.json or reviews/*.md.
 yad-hub-ledger-guard:

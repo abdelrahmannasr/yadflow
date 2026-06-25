@@ -160,7 +160,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'pr-title · pr-template',
     queue: 'pattern-gate',
     timing: 'once the PR exists',
-    description: 'The PR/MR title follows the commit-subject style and the body uses the committed template (Impact & Risk block).',
+    description: 'The PR/MR title follows the commit-subject style and the body uses the committed template (Impact & Risk block). Profile-aware code | hub; on the hub they split by head branch (review/EP-* → artifact-review shape, any other branch → code shape) and reject a non-review branch that changes a front-half artifact (epics/**).',
     triggeredBy: 'PR/MR opened',
     visibleTo: ALL,
   },

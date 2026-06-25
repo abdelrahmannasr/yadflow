@@ -24,6 +24,7 @@ const GATE_GROUPS = [
       { control: 'commit-message — Conventional-Commits subject + the fixed trailer order' },
       { control: 'pr-title — the PR/MR title follows the commit-subject style' },
       { control: 'pr-template — the PR/MR body uses the committed template (Impact & Risk block)' },
+      { control: 'on the hub, pr-title/pr-template split by head branch (review/EP-* → artifact-review shape, else code shape) and reject an epics/** change on a non-review branch' },
     ],
   },
   {
