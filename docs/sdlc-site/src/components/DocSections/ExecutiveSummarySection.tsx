@@ -2,9 +2,9 @@ import { Icon } from '../shared/Icon';
 
 const METRICS = [
   { label: 'yad-* Skills', value: '35', icon: 'extension', color: '#2471a3' },
-  { label: 'Pipeline Phases', value: '5', icon: 'route', color: '#1e8449' },
+  { label: 'Pipeline Phases', value: '6', icon: 'route', color: '#1e8449' },
   { label: 'Front Gates', value: '5', icon: 'rate_review', color: '#ca6f1e' },
-  { label: 'Check Gates', value: '9', icon: 'verified', color: '#b7950b' },
+  { label: 'Check Gates', value: '10', icon: 'verified', color: '#b7950b' },
 ];
 
 const KEY_POINTS = [

@@ -156,7 +156,9 @@ function gateStep(
   };
 }
 
-const frontSteps: FlowStep[] = [
+// ── Phase 2 — Front-zero · project discovery (optional, once per project) ────
+
+const discoverySteps: FlowStep[] = [
   {
     id: "discovery",
     title: "Project Discovery (optional front-zero)",
@@ -176,6 +178,11 @@ const frontSteps: FlowStep[] = [
     sideEffects: { jobs: "market-research.md · competitor-analysis.md · current-state.md · feasibility.md · requirements.md · roadmap.md", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
   },
   gateStep("discovery", "discovery artifacts", "owner + 1 reviewer (base rule)", "#1e8449"),
+];
+
+// ── Phase 3 — Front half (author → review gate, repeated per epic) ───────────
+
+const frontSteps: FlowStep[] = [
   {
     id: "analysis",
     title: "Author Analysis (optional)",
@@ -539,16 +546,26 @@ export const PATHS: FlowPath[] = [
   },
   {
     id: 2,
+    label: "Front-Zero · Project Discovery",
+    icon: "travel_explore",
+    color: "#2471a3",
+    description:
+      "Optional front-zero, once per project: pressure-test the product — market, competitor, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Modelled as the reserved epic-zero EP-discovery; terminates at discovery-done, no build half.",
+    category: "front",
+    steps: discoverySteps,
+  },
+  {
+    id: 3,
     label: "Front Half (human-gated)",
     icon: "edit_note",
     color: "#2471a3",
     description:
-      "Author the thinking — an optional once-per-project discovery front-zero, then once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate.",
+      "Author the thinking once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate.",
     category: "front",
     steps: frontSteps,
   },
   {
-    id: 3,
+    id: 4,
     label: "Build Half (per story)",
     icon: "build",
     color: "#1e8449",
@@ -558,7 +575,7 @@ export const PATHS: FlowPath[] = [
     steps: buildSteps,
   },
   {
-    id: 4,
+    id: 5,
     label: "Automation (earned)",
     icon: "smart_toy",
     color: "#ca6f1e",
@@ -568,7 +585,7 @@ export const PATHS: FlowPath[] = [
     steps: automationSteps,
   },
   {
-    id: 5,
+    id: 6,
     label: "Change Management (feature threads)",
     icon: "manage_history",
     color: "#7d3c98",
