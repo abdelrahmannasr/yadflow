@@ -11,7 +11,7 @@ import { PROJECT_FILES } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
-  upsertHubPr,
+  upsertHubPr, DISCOVERY_FILES,
 } from './epic-state.mjs';
 import { readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin } from './platform.mjs';
 import { syncStatuses } from './artifact-status.mjs';
@@ -48,7 +48,12 @@ export function touchedDomains(epicDir, step) {
   return frontmatter(path.join(epicDir, 'epic.md')).repos || [];
 }
 
-const ownerOf = (epicDir) => frontmatter(path.join(epicDir, 'epic.md')).owner || '<owner>';
+// The artifact owner shown in the review PR/MR body. Feature epics carry it in epic.md; the discovery
+// front-zero (EP-discovery) has no epic.md, so fall back to roadmap.md's frontmatter owner.
+const ownerOf = (epicDir) =>
+  frontmatter(path.join(epicDir, 'epic.md')).owner
+  || frontmatter(path.join(epicDir, 'roadmap.md')).owner
+  || '<owner>';
 
 // A null architecture hash with a BEGIN marker present means the surface block is malformed
 // (no END, or empty) — approvals would not be hash-bound, so make that visible.
@@ -59,6 +64,16 @@ function warnUnlockedContract(epicDir, artifact) {
   if (fs.existsSync(f) && /CONTRACT-SURFACE:BEGIN/.test(fs.readFileSync(f, 'utf8'))) {
     warn('contract.md has CONTRACT-SURFACE:BEGIN without a matching END (or an empty block) — surface not locked, approvals will not be hash-bound');
   }
+}
+
+// A null discovery hash means the discovery set is incomplete (a required artifact is missing), so the
+// review is not yet reviewable and an approval would not be hash-bound. Name the missing files so the
+// owner can complete the set before the gate is opened/advanced (mirrors warnUnlockedContract).
+function warnIncompleteDiscovery(epicDir, artifact) {
+  if (artifactBase(artifact) !== 'discovery') return;
+  if (artifactHash(epicDir, artifact) !== null) return;
+  const missing = DISCOVERY_FILES.filter((f) => !fs.existsSync(path.join(epicDir, f)));
+  warn(`discovery set incomplete — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
 }
 
 // Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
@@ -202,6 +217,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
 
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
+    warnIncompleteDiscovery(epicDir, pr.artifact);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
 
@@ -465,6 +481,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr 
   const branch = head || `review/${epic}/${b}`;
   const domains = touchedDomains(epicDir, step);
   warnUnlockedContract(epicDir, artifact);
+  warnIncompleteDiscovery(epicDir, artifact);
 
   const bridge = isBridge(hub);
   // Outside bridge mode (file-only, OR a platform with no gate-sync CI) there is no CI to write the

@@ -563,6 +563,17 @@ test('gatePredicate: solo passes an escalated step without any domain-owner appr
   assert.equal(p.rule, 'solo');
 });
 
+test('gatePredicate: discovery-review is a base-rule gate (owner + 1 reviewer, no escalation)', () => {
+  const step = { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', risk_tags: [] };
+  const approvals = [
+    { step: 'discovery-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:D' },
+    { step: 'discovery-review', status: 'approved', approver: 'bob', role: 'reviewer', artifactHash: 'sha256:D' },
+  ];
+  const p = gatePredicate({ step, approvals, currentHash: 'sha256:D', merged: true, threadsResolved: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'base');
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
 // ---------------------------------------------------------------------------------------------
@@ -627,6 +638,42 @@ test('nextAction: no state → kind new (seed with yad-epic)', () => {
   const a = nextAction({ state: null, hubPrs: [] }, { epic: 'EP-x' });
   assert.equal(a.kind, 'new');
   assert.equal(a.skill, 'yad-epic');
+});
+
+// --- discovery ("epic zero") — a 2-step author→review chain with no build half/parallel track ---
+const dstate = (over) => ({
+  epicId: 'EP-discovery', kind: 'discovery', currentStep: over.currentStep,
+  steps: [
+    S('discovery', 'author', over.discovery ?? 'done', 'discovery/'),
+    S('discovery-review', 'review+approve', over.review ?? 'in_review', 'discovery/'),
+  ],
+});
+
+test('nextAction: discovery author step maps to yad-discovery', () => {
+  const a = nextAction({ state: dstate({ currentStep: 'discovery', discovery: 'in_progress', review: 'blocked' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  assert.equal(a.kind, 'author');
+  assert.equal(a.skill, 'yad-discovery');
+  assert.equal(a.artifact, 'discovery/');
+});
+
+test('nextAction: discovery in review → open the gate; with a PR → sync (no parallel track)', () => {
+  const open = nextAction({ state: dstate({ currentStep: 'discovery-review' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  assert.equal(open.kind, 'review-open');
+  assert.equal(open.command, 'yad gate open EP-discovery discovery/');
+  assert.equal(open.parallel, undefined);
+  const sync = nextAction({ state: dstate({ currentStep: 'discovery-review' }), hubPrs: [{ artifact: 'discovery/', number: 3 }] }, { epic: 'EP-discovery' });
+  assert.equal(sync.kind, 'review-sync');
+  assert.equal(sync.pr, 3);
+});
+
+test('nextAction: an approved discovery (discovery-done) points at yad-epic, not the build half', () => {
+  const a = nextAction({ state: dstate({ currentStep: 'discovery-done', discovery: 'done', review: 'done' }), hubPrs: [] }, { epic: 'EP-discovery' });
+  assert.equal(a.kind, 'discovery-done');
+  assert.match(a.why, /roadmap\.md/);
+});
+
+test('preconditionsMet: discovery is a greenfield entry step (alongside epic/analysis)', () => {
+  assert.equal(preconditionsMet(null, 'discovery').ok, true);
 });
 
 // runNext (the CLI surface) — capture stdout and assert the guidance + exit codes.
@@ -695,6 +742,27 @@ test('runNext: build action surfaces the parallel test-cases track', async () =>
   const s = await grab(() => runNext(T, { epic: 'EP-x' }));
   assert.match(s, /yad-run|build/i);
   assert.match(s, /yad-test-cases/);
+});
+
+test('runNext: set up greenfield with no epics suggests the yad-discovery front-zero, then yad-epic', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextd-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, profile: { codebase: 'greenfield' } }));
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /yad-discovery/);
+  assert.match(s, /yad-epic/);
+});
+
+test('runNext: an open EP-discovery is surfaced (its gate action), not mixed into the feature roll-up', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextd2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-discovery', { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review', steps: [
+    S('discovery', 'author', 'done', 'discovery/'),
+    S('discovery-review', 'review+approve', 'in_review', 'discovery/'),
+  ] });
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /yad gate (open|sync) EP-discovery discovery\//);
 });
 
 test('runNext: several epics list each action, and --all expands them', async () => {
@@ -846,6 +914,44 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
   const again = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
   assert.equal(again.filter((a) => a.source === 'bridge').length, approvals.filter((a) => a.source === 'bridge').length);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: EP-discovery advances through the SAME gate to discovery-done (base rule, no escalation)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-disc-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', default_branch: 'main',
+    roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
+  }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  const ep = path.join(T, 'epics/EP-discovery');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  // The whole set must exist for the discovery review to be reviewable (hash-bound).
+  fs.writeFileSync(path.join(ep, 'roadmap.md'), '---\nid: EP-discovery\nartifact: roadmap\nstatus: draft\nowner: alice\n---\n# roadmap\n');
+  fs.writeFileSync(path.join(ep, 'requirements.md'), '---\nid: EP-discovery\nartifact: requirements\nstatus: draft\n---\n# reqs\n');
+  for (const f of ['market-research.md', 'competitor-analysis.md', 'current-state.md', 'feasibility.md']) {
+    fs.writeFileSync(path.join(ep, f), `---\nid: EP-discovery\nartifact: ${f.replace('.md', '')}\nstatus: draft\n---\n# ${f}\n`);
+  }
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review',
+    steps: [
+      { id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done', risk_tags: [] },
+      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'in_review', risk_tags: [] },
+    ],
+  }));
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    { step: 'discovery-review', artifact: 'discovery/', platform: 'github', number: 4, url: 'http://x/4', branch: 'review/EP-discovery/discovery', lastSyncedAt: null },
+  ]));
+  const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
+    reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }],
+    threads: [] };
+  await gateSync(T, { epic: 'EP-discovery', today: '2026-06-09', reader: () => approval });
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'discovery-review').status, 'done');
+  assert.equal(state.currentStep, 'discovery-done', 'discovery terminates at discovery-done, never ready-for-build');
+  const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.ok(!approvals.some((a) => a.role === 'domain-owner'), 'discovery never escalates to domain owners');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1802,7 +1908,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -1835,6 +1941,43 @@ test('test-cases.md is a single-file artifact: base, reverse and paths use the d
   assert.equal(artifactBase('test-cases.md'), 'test-cases');
   assert.equal(artifactFromBase('test-cases'), 'test-cases.md');
   assert.deepEqual(artifactPaths('test-cases'), ['test-cases.md']);
+});
+
+test('discovery: artifact mapping uses the virtual discovery/ set (mirrors stories/)', () => {
+  assert.equal(artifactBase('discovery/'), 'discovery');
+  assert.equal(artifactFromBase('discovery'), 'discovery/');
+  assert.deepEqual(artifactPaths('discovery'), DISCOVERY_FILES);
+});
+
+test('advanceState: approving discovery-review terminates at discovery-done (no build half)', () => {
+  const state = {
+    epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review',
+    steps: [
+      { id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done' },
+      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'in_review' },
+    ],
+  };
+  advanceState(state, state.steps[1]);
+  assert.equal(state.steps[1].status, 'done');
+  assert.equal(state.currentStep, 'discovery-done', 'discovery never becomes ready-for-build');
+});
+
+test('discoveryHash: a partial set is non-reviewable (null); the full set hashes and is edit-sensitive', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-disc-'));
+  assert.equal(discoveryHash(T), null, 'no discovery files → non-reviewable');
+  // A partial set (a required artifact still missing) is incomplete → not reviewable.
+  fs.writeFileSync(path.join(T, 'roadmap.md'), '# roadmap v1');
+  assert.equal(discoveryHash(T), null, 'missing required discovery files → null');
+  // Complete the set → a real fingerprint, stable when unchanged.
+  for (const f of DISCOVERY_FILES) fs.writeFileSync(path.join(T, f), `# ${f} v1`);
+  const h1 = discoveryHash(T);
+  assert.ok(h1 && h1.startsWith('sha256:'));
+  assert.equal(discoveryHash(T), h1, 'stable when unchanged');
+  // Edit any file → hash changes (revoke-on-change); remove one → back to non-reviewable.
+  fs.writeFileSync(path.join(T, 'requirements.md'), '# requirements.md v2');
+  assert.notEqual(discoveryHash(T), h1, 'a changed discovery file changes the set hash');
+  fs.rmSync(path.join(T, 'feasibility.md'));
+  assert.equal(discoveryHash(T), null, 'a deleted required file makes the set non-reviewable again');
 });
 
 test('advanceState: approving stories-review opens test-cases AND makes the epic ready-for-build (parallel)', () => {
@@ -2746,5 +2889,28 @@ test('syncStatuses sweeps every epic, honors dry-run, and is idempotent', async 
 
   const again = await syncStatuses(T, {});
   assert.equal(again.changed, 0, 'second run is a no-op');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('syncStatuses reconciles the discovery set: draft → approved once discovery-review is done', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ssd-'));
+  const dir = path.join(T, 'epics/EP-discovery');
+  fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-done', steps: [
+      { id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done' },
+      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'done' },
+    ],
+  }));
+  const fm = (a, s) => `---\nid: EP-discovery\nartifact: ${a}\nstatus: ${s}\n---\n# x\n`;
+  fs.writeFileSync(path.join(dir, 'roadmap.md'), fm('roadmap', 'draft'));
+  fs.writeFileSync(path.join(dir, 'requirements.md'), fm('requirements', 'draft'));
+  fs.writeFileSync(path.join(dir, 'market-research.md'), fm('market-research', 'draft'));
+
+  const run = await syncStatuses(T, {});
+  assert.equal(run.changed, 3, 'all three present discovery files advance together');
+  assert.match(fs.readFileSync(path.join(dir, 'roadmap.md'), 'utf8'), /status: approved/);
+  assert.match(fs.readFileSync(path.join(dir, 'requirements.md'), 'utf8'), /status: approved/);
+  assert.equal((await syncStatuses(T, {})).changed, 0, 'second run is a no-op');
   fs.rmSync(T, { recursive: true, force: true });
 });

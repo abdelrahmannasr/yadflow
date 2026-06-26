@@ -396,7 +396,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 10. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 30)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 31)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -430,6 +430,6 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 30)*.
 
 ## 11. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 30 skills.
+- **`README.md`** — the complete reference for every phase, dial, gate, and all 31 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

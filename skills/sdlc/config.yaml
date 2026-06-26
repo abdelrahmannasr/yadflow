@@ -10,6 +10,19 @@ methodology: gated-team-multirepo-sdlc
 product_root: "{project-root}"
 epics_folder: "{project-root}/epics"
 
+# Project discovery (yad-discovery) — the OPTIONAL front-zero, run once per project (greenfield AND
+# brownfield). It is modelled as the reserved "epic zero" `EP-discovery` so the entire review gate +
+# PR/MR bridge + CI sync + `yad next` operate on it unchanged. A 2-step author→review chain whose
+# review binds to the whole artifact set; on approval it terminates at `discovery-done` (no build half).
+# Output: a phased roadmap (incl. MVP) that each feature epic reads (yad-epic Step 2c) — reference-only,
+# never auto-seeds epics.
+discovery:
+  epic_id: "EP-discovery"                              # reserved id; yad-epic/yad-analysis never pick it
+  location: "{project-root}/epics/EP-discovery/"       # discovery artifacts + ledger live here
+  optional: true                                       # skip-able; a team that knows what to build starts at yad-epic
+  modes: [greenfield, brownfield]                       # current-state is code-aware in brownfield; competitor study in both
+  artifacts: [market-research.md, competitor-analysis.md, current-state.md, feasibility.md, requirements.md, roadmap.md]
+
 # Core configuration values (inherited convention from _bmad/config.toml).
 project_name: yadflow
 communication_language: English
@@ -20,11 +33,12 @@ output_folder: "{project-root}/_bmad-output"
 defaults:
   assistance: review          # none | review | heavy
   automation: human_approve   # human_approve | machine_advance
-  # Front steps (analysis [optional], epic, architecture, ui-design, stories, test-cases) are locked to
-  # human_approve and may NOT be set to machine_advance in this version (build plan §1, §8.7).
+  # Front steps (discovery [optional front-zero], analysis [optional], epic, architecture, ui-design,
+  # stories, test-cases) are locked to human_approve and may NOT be set to machine_advance in this
+  # version (build plan §1, §8.7).
   front_steps_locked: true
   # Each front authoring step opens its own branch at the start of the step (the <step> is the step id:
-  # analysis | epic | architecture | ui-design | stories | test-cases). Git/greenfield-safe; distinct
+  # discovery | analysis | epic | architecture | ui-design | stories | test-cases). Git/greenfield-safe; distinct
   # from the bridge's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
   front_authoring_branch: "<step>/EP-<slug>"
 
@@ -238,7 +252,7 @@ automation:
   # Hard lock — the dial-setter REFUSES machine_advance for these, regardless of trust evidence.
   # The front authoring steps (already locked:true in state.json; analysis is optional) + the human
   # merge gate.
-  locked_steps: [analysis, epic, architecture, ui-design, stories, test-cases, engineer-review]
+  locked_steps: [discovery, analysis, epic, architecture, ui-design, stories, test-cases, engineer-review]
   # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
   # system-wide, no per-step edits. One line, instantly reversible. Toggle via `yad-run action: kill`.
   kill_switch: false

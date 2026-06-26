@@ -1,6 +1,6 @@
 // `yad next` — the unified next-step driver. Read-only: it never writes state or acts. It reads the
 // file ledger and prints the ONE concrete, copy-pasteable next action (and a one-line why), so a user
-// never has to remember which of the 30 skills / gate commands comes next. "Guide, don't act" — the
+// never has to remember which of the 31 skills / gate commands comes next. "Guide, don't act" — the
 // front half still never auto-advances.
 //
 //   yad next                  general orientation across the whole project
@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId } from './epic-state.mjs';
+import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -47,6 +47,8 @@ function actionLine(a, { solo } = {}) {
       return `${c.bold(a.command)}${solo ? c.dim('   (solo: no approval needed — just merge your own PR)') : ''}`;
     case 'build':
       return `${c.bold('yad-run')} ${c.dim('(or per story: yad-spec → yad-implement → yad ship → yad-engineer-review)')}`;
+    case 'discovery-done':
+      return `invoke the ${c.bold('yad-epic')} skill ${c.dim('(seed a feature epic from roadmap.md)')}`;
     default:
       return c.dim('nothing to do');
   }
@@ -67,23 +69,36 @@ function generalNext(root, { all } = {}) {
     hand(`run ${c.bold('yad setup')} ${c.dim('(then come back to `yad next`)')}`);
     return;
   }
-  const epics = listEpics(root);
-  if (!epics.length) {
-    const brownfield = profileOf(root)?.codebase === 'brownfield';
-    log(`\n  ${c.bold('Set up — no epics yet.')}`);
+  const solo = isSolo(root);
+  const brownfield = profileOf(root)?.codebase === 'brownfield';
+  // The project front-zero (EP-discovery / "epic zero") is not a feature epic — split it out so it is
+  // surfaced on its own line and never mixed into the feature-epic roll-up.
+  const allEpics = listEpics(root);
+  const hasDiscovery = allEpics.includes(DISCOVERY_EPIC);
+  const featureEpics = allEpics.filter((id) => id !== DISCOVERY_EPIC);
+  const discoveryAction = hasDiscovery
+    ? nextAction(loadLedger(epicRoot(root, DISCOVERY_EPIC)), { epic: DISCOVERY_EPIC })
+    : null;
+  const discoveryOpen = !!discoveryAction && discoveryAction.kind !== 'discovery-done';
+
+  if (!featureEpics.length) {
+    if (discoveryOpen) { printAction(discoveryAction, { solo }); return; }
+    log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
-    hand(`start your first epic: invoke the ${c.bold('yad-epic')} skill`);
+    if (!hasDiscovery) hand(`frame the whole project (market, feasibility, roadmap): invoke the ${c.bold('yad-discovery')} skill ${c.dim('(optional front-zero)')}`);
+    hand(`start your first epic: invoke the ${c.bold('yad-epic')} skill${hasDiscovery ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
     return;
   }
-  const solo = isSolo(root);
-  const actions = epics.map((id) => nextAction(loadLedger(epicRoot(root, id)), { epic: id }));
 
-  if (epics.length === 1 || all) {
+  const actions = featureEpics.map((id) => nextAction(loadLedger(epicRoot(root, id)), { epic: id }));
+  if (discoveryOpen) printAction(discoveryAction, { solo });   // an unfinished discovery comes first
+
+  if (featureEpics.length === 1 || all) {
     for (const a of actions) printAction(a, { solo });
     return;
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
-  log(`\n  ${c.bold(`${epics.length} epics`)} ${c.dim('— next action each:')}`);
+  log(`\n  ${c.bold(`${featureEpics.length} epics`)} ${c.dim('— next action each:')}`);
   for (const a of actions) log(`    ${c.cyan(a.epicId)}  ${actionLine(a, { solo })}`);
   info(c.dim(`detail: ${c.bold('yad next <epic>')}  •  all at once: ${c.bold('yad next --all')}`));
 }

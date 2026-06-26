@@ -18,9 +18,13 @@ flowchart LR
       inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> phub
     end
 
-    subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
+    subgraph FRONT["A · Front half — product hub · human-gated"]
       direction TB
-      an["yad-analysis<br/>optional → analysis.md"]:::artifact
+      disc["yad-discovery<br/>optional front-zero · once per project<br/>market · competitor · feasibility · requirements · roadmap.md"]:::artifact
+      gDisc{{"gate · discovery · base"}}:::gated
+      dd(["currentStep: discovery-done"]):::sentinel
+      disc --> gDisc --> dd
+      an["yad-analysis<br/>optional → analysis.md · once per epic"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
       ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
       ui["yad-ui<br/>ui-design.md + DESIGN.md + design tool screens"]:::artifact
@@ -57,7 +61,9 @@ flowchart LR
       run --- kill
     end
 
+    phub --> disc
     phub --> an
+    dd -. roadmap frames each epic .-> ep
     rfb --> sp
     merged -. story pipeline repeats · next story .-> sp
     merged -. next epic · front pipeline repeats .-> ep

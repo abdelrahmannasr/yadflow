@@ -38,6 +38,7 @@ export function parseReviewBranch(branch = '') {
 // (storiesHash fingerprints the directory), so any story branch syncs the same review step.
 export function artifactFromBase(base) {
   if (base === 'stories' || /^stories-S\d+$/i.test(base)) return 'stories/';
+  if (base === 'discovery') return 'discovery/';
   return `${base}.md`;
 }
 
@@ -47,6 +48,7 @@ export function artifactFromBase(base) {
 export function artifactPaths(base) {
   if (base === 'architecture') return ['architecture.md', 'contract.md', '.sdlc/contract-lock.json'];
   if (base === 'stories') return ['stories'];
+  if (base === 'discovery') return [...DISCOVERY_FILES];
   return [`${base}.md`];
 }
 
@@ -87,13 +89,41 @@ export function storiesHash(epicDir) {
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
+// The reserved id of the project front-zero ("epic zero"). yad-discovery seeds it; yad-epic /
+// yad-analysis must never pick this slug for a feature.
+export const DISCOVERY_EPIC = 'EP-discovery';
+
+// The project-discovery artifact set (EP-discovery / "epic zero"). The `discovery-review` step binds
+// to the whole set, mirroring how stories-review binds to the stories/ directory — editing any file
+// revokes prior approvals. A fixed list (not a dir scan) because the files live in the epic root.
+export const DISCOVERY_FILES = [
+  'market-research.md',
+  'competitor-analysis.md',
+  'current-state.md',
+  'feasibility.md',
+  'requirements.md',
+  'roadmap.md',
+];
+
+// Deterministic fingerprint of the discovery set: hash every file in the fixed DISCOVERY_FILES order,
+// combine. The WHOLE set is the reviewable unit — if any required artifact is missing the discovery is
+// incomplete and NON-REVIEWABLE, so this returns null (no hash to bind an approval to), the same
+// "nothing to lock" signal storiesHash/contractSurfaceHash give for an absent/malformed surface. Once
+// the full set exists, an edit (or deletion) of any file changes the hash and revokes prior approvals.
+export function discoveryHash(epicDir) {
+  if (!DISCOVERY_FILES.every((f) => fs.existsSync(path.join(epicDir, f)))) return null;
+  const parts = DISCOVERY_FILES.map((f) => `${f}:${fileSha(path.join(epicDir, f))}`);
+  return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
+}
+
 // The content fingerprint an approval is bound to. For architecture the fingerprint is the locked
-// contract surface (a re-lock => stale); for stories it is the whole stories/ set; for every other
-// artifact it is the file's bytes.
+// contract surface (a re-lock => stale); for stories it is the whole stories/ set; for discovery it is
+// the whole discovery file set; for every other artifact it is the file's bytes.
 export function artifactHash(epicDir, artifact) {
   const b = artifactBase(artifact);
   if (b === 'architecture') return contractSurfaceHash(epicDir);
   if (b === 'stories') return storiesHash(epicDir);
+  if (b === 'discovery') return discoveryHash(epicDir);
   return fileSha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
@@ -221,6 +251,13 @@ export function advanceState(state, step) {
     state.currentStep = 'ready-for-build';
     return state;
   }
+  // Discovery is the project front-zero ("epic zero"): it has no build half, so its review terminates
+  // at a `discovery-done` sentinel rather than `ready-for-build` (which would make `yad next` claim the
+  // build half can run). The roadmap it approved is the input the real feature epics read.
+  if (step.id === 'discovery-review') {
+    state.currentStep = 'discovery-done';
+    return state;
+  }
   const next = state.steps[i + 1];
   if (next) {
     next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
@@ -244,6 +281,7 @@ export function markInReview(state, step) {
 // The front authoring step a `yad next` action maps to — the skill the user invokes for that step.
 // Review (review+approve) steps are driven by the `yad gate` CLI, not a skill, so they are not here.
 export const STEP_SKILL = {
+  discovery: 'yad-discovery',
   analysis: 'yad-analysis',
   epic: 'yad-epic',
   architecture: 'yad-architecture',
@@ -258,8 +296,8 @@ export const STEP_SKILL = {
 // (the Phase B rail) and by the driver. No FS / network.
 export function preconditionsMet(state, stepId) {
   if (!state || !Array.isArray(state.steps)) {
-    const ok = stepId === 'epic' || stepId === 'analysis';
-    return { ok, blockedBy: null, reason: ok ? 'entry step (no epic seeded yet)' : `start with yad-epic — no epic state for '${stepId}'` };
+    const ok = stepId === 'epic' || stepId === 'analysis' || stepId === 'discovery';
+    return { ok, blockedBy: null, reason: ok ? 'entry step (no state seeded yet)' : `start with yad-epic — no epic state for '${stepId}'` };
   }
   const i = state.steps.findIndex((s) => s.id === stepId);
   if (i === -1) return { ok: false, blockedBy: null, reason: `unknown step '${stepId}'` };
@@ -280,6 +318,30 @@ export function nextAction(ledger, { epic } = {}) {
   const state = ledger?.state;
   const epicId = epic || state?.epicId || null;
   if (!state) return { epicId, kind: 'new', skill: 'yad-epic', why: 'no epic state yet — seed it with yad-epic' };
+
+  // EP-discovery ("epic zero") is the project front-zero: a 2-step author→review chain with no build
+  // half and no parallel track. Resolve its action in isolation so the feature-epic logic below never
+  // applies to it.
+  if (state.kind === 'discovery') {
+    if (state.currentStep === 'discovery-done') {
+      return { epicId, kind: 'discovery-done', step: 'discovery-done', status: 'done',
+        why: 'discovery approved — seed feature epics with yad-epic (each reads roadmap.md)' };
+    }
+    const dstep = state.steps.find((s) => s.id === state.currentStep)
+      || state.steps.find((s) => s.status !== 'done');
+    if (!dstep) return { epicId, kind: 'discovery-done', step: 'discovery-done', why: 'discovery is done' };
+    if (dstep.type === 'author') {
+      return { epicId, kind: 'author', step: dstep.id, status: dstep.status,
+        skill: STEP_SKILL[dstep.id] || null, artifact: dstep.artifact,
+        why: `${dstep.id} is ${dstep.status} — author ${dstep.artifact}` };
+    }
+    const dpr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(dstep.artifact));
+    const dverb = dpr ? 'sync' : 'open';
+    return { epicId, kind: dpr ? 'review-sync' : 'review-open', step: dstep.id, status: dstep.status,
+      artifact: dstep.artifact, pr: dpr ? dpr.number : null,
+      command: `yad gate ${dverb} ${epicId} ${dstep.artifact}`,
+      why: dpr ? `review PR #${dpr.number} is open — sync its state to advance` : `${dstep.id} is open — create the review PR/MR` };
+  }
 
   // The parallel test-cases track stays workable even once the epic is ready-for-build.
   const tc = state.steps.find((s) => s.id === 'test-cases');
