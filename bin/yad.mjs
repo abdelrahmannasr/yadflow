@@ -15,6 +15,7 @@ import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 import { runNext } from '../cli/next.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
+import { runThread, runReconcile } from '../cli/thread.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -62,6 +63,12 @@ ${c.bold('Build helpers')}
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
+
+${c.bold('Feature threads (post-lock change management)')}
+  yad thread                           List every feature thread (genesis → changes → defects)
+  yad thread <epic> [--json]           Show one thread: its epics, the resolved current truth, open debt
+  yad reconcile [check|refresh|wire]   Flag orphan drift + open hotfix debt across threads (advisory,
+                                       never a gate — the gates block at merge)
 
 ${c.bold('Interactive docs (generated sites)')}
   yad docs list                        Show the docs target + per-site freshness
@@ -214,6 +221,20 @@ async function main() {
       if (o.epic && !isValidEpicId(o.epic)) { log(c.red(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       const sync = o.wire ? 'wire' : o.refresh ? 'refresh' : 'check';
       await runDocs(o.dir, { action: action || 'list', epic: o.epic, overview: o.overview, sync, today });
+      break;
+    }
+    case 'thread': {
+      const [, epic] = o._;
+      if (epic && !isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      await runThread(o.dir, { epic, json: o.json });
+      break;
+    }
+    case 'reconcile': {
+      const [, action] = o._;
+      const thread = o.epic || o.thread || null;
+      if (thread && !isValidEpicId(thread)) { log(c.red(`invalid epic id: ${thread} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      const act = action || (o.wire ? 'wire' : o.refresh ? 'refresh' : 'check');
+      await runReconcile(o.dir, { action: act, thread });
       break;
     }
     default:
