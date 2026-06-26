@@ -289,7 +289,7 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 30 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 35 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> · <code>yad-review-comments</code> (CI gates, PR template, comment scaffold)</small></div>
         <div class="arrow-v">▼</div>
@@ -345,7 +345,7 @@
         <div class="arrow-v">▼</div>
         <div class="node"><strong>yad-implement</strong><small>1 atomic task = 1 branch = 1 commit (small diff, ≤3 files) — <em>earns automation</em></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node"><strong>yad-checks</strong><small>CI gates: spec-link · contract-check · build/test/lint · verified-commits — <em>earns automation</em></small></div>
+        <div class="node"><strong>yad-checks</strong><small>CI gates: spec-link · contract-check · build/test/lint · verified-commits · lineage-check · epic-open · reconcile-debt — <em>earns automation</em></small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Open PR/MR</strong><small>from the wired template; risk routing picks the required reviewers</small></div>
         <div class="arrow-v">▼</div>
@@ -367,8 +367,21 @@
         <div class="node plain"><strong>Kill switch</strong><small><code>yad-run action: kill</code> → everything back to <code>human_approve</code> instantly</small></div>
       </div>
     </div>
+
+    <div class="flow-v"><div class="arrow-v">▼</div></div>
+
+    <div class="lane">
+      <div class="lane-title">D · Post-lock change management — feature threads (Phase 6)</div>
+      <div class="flow-v">
+        <div class="node artifact"><strong>yad-change</strong><small>after a feature ships, a change is a <strong>new epic threaded to its parent</strong> — triage the depth, inherit the unchanged artifacts by reference, re-author only what changes. Artifacts are never mutated, only superseded.</small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node sentinel"><strong>change-epic EP-&lt;slug&gt;</strong><small>pointer-lock · <code>change.json</code> · <code>reconcile-debt.json</code> — re-enters the front half on the changed steps only</small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node plain"><strong>yad-timeline · yad-defects · yad-reconcile</strong><small>the evolution view + current-truth map; the quality-gap report by escape stage; the drift/debt sweep (all read-only, never gates)</small></div>
+      </div>
+    </div>
     <div class="caption">
-      <code>yad-status</code> is a read-only view over all of it · <code>yad-hub-bridge</code> mirrors front-half reviews to real PRs/MRs.
+      <code>yad-status</code> is a read-only view over all of it · <code>yad-hub-bridge</code> mirrors front-half reviews to real PRs/MRs · <code>yad thread</code> / <code>yad reconcile</code> surface a feature's evolution and any post-lock drift.
     </div>
   </div>
 
@@ -452,7 +465,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 30 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 35 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -689,7 +702,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 30 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 35 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -722,6 +735,10 @@ each code repo/
     <tr><td><a href="#sk-backfill"><code>yad-backfill</code></a></td><td>Build G</td><td>Spec already-built / legacy code before changing it.</td></tr>
     <tr><td><a href="#sk-run"><code>yad-run</code></a></td><td>Automation</td><td>Drive the back half on the dials; set dials; kill switch.</td></tr>
     <tr><td><a href="#sk-status"><code>yad-status</code></a></td><td>Anytime</td><td>Read-only view: where everything is and what’s blocking.</td></tr>
+    <tr><td><a href="#sk-change"><code>yad-change</code></a></td><td>Phase 6</td><td>Post-lock change/defect/hotfix intake — a new epic threaded to its parent.</td></tr>
+    <tr><td><a href="#sk-timeline"><code>yad-timeline</code></a></td><td>Phase 6</td><td>Feature-thread evolution view + the resolved current-truth map.</td></tr>
+    <tr><td><a href="#sk-defects"><code>yad-defects</code></a></td><td>Phase 6</td><td>Quality-gap report by escape stage + root cause.</td></tr>
+    <tr><td><a href="#sk-reconcile"><code>yad-reconcile</code></a></td><td>Phase 6</td><td>Read-only drift/orphan/debt sweep across threads.</td></tr>
   </table>
 
   <h3>Setup &amp; code-awareness</h3>
@@ -981,6 +998,30 @@ yad-run action: unkill    # restore earned automation</code></pre>
 yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Any time, freely — it’s the “where are we and what’s blocking?” command. The best first move whenever you’re unsure what to do next.</div>
   </div>
+
+  <div class="skillcard" id="sk-change">
+    <h4><code>yad-change</code> <span class="badge b-gate">Phase 6</span></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The <strong>post-lock change/defect/hotfix intake</strong>. After a feature's contract locks and its stories ship, you don't edit the locked artifacts — a change becomes a <strong>new epic threaded to its parent</strong>. <code>yad-change</code> triages the <em>depth</em> (defect-fix / behavioral-no-surface / contract-surface / new-capability), seeds the new <code>EP-&lt;slug&gt;</code> with lineage frontmatter, an inherited-step <code>state.json</code>, a pointer-lock <code>contract-lock.json</code>, and <code>change.json</code> (recording a defect's <code>escape_stage</code> + <code>root_cause</code>); a hotfix also opens <code>reconcile-debt.json</code>. It inherits the unchanged front artifacts by reference and re-authors only what changes — so artifacts are never stale, only <em>superseded</em>. Never auto-advances.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Whenever a shipped feature needs a fix — or when CI fails with <code>epic-open: targets SEALED epic</code>.</div>
+  </div>
+
+  <div class="skillcard" id="sk-timeline">
+    <h4><code>yad-timeline</code> <span class="badge b-core">enrichment</span></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Renders a feature <strong>thread</strong> (genesis → changes → defects) as an evolution view (the yad-docs shell + <code>TIMELINE.md</code>) and resolves the inheritance chain into <code>thread-resolved.md</code> — the composed <strong>current-truth map</strong> (which epic owns each artifact now) that AI/humans read to plan the next change. Output enrichment, never a gate.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> To see how a feature evolved, or to get its authoritative current artifacts before the next change.</div>
+  </div>
+
+  <div class="skillcard" id="sk-defects">
+    <h4><code>yad-defects</code> <span class="badge b-core">enrichment</span></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> A per-epic/per-thread <strong>quality-gap report</strong> (the yad-docs shell + <code>DEFECTS.md</code>) that aggregates defects by <strong><code>escape_stage</code></strong> (the gate that should have caught it) and <code>root_cause</code>, so the team sees <em>where the SDLC leaks</em> — e.g. "100% of this feature's defects escaped at the test-cases gate" — and hardens that stage, not just the symptom.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Retro / quality review — "which gate do our defects keep escaping at?"</div>
+  </div>
+
+  <div class="skillcard" id="sk-reconcile">
+    <h4><code>yad-reconcile</code> <span class="badge b-auto">maintenance</span></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> A read-only <strong>drift/orphan/debt sweep</strong> across feature threads (mirrors <code>yad-docs-sync</code>): shipped code or a repo HEAD advance with no owning change-epic, broken lineage, or open hotfix debt — reported with <em>why</em>. <code>refresh</code> points you at <code>yad-change</code>; <code>wire</code> commits advisory CI. <strong>Never a gate</strong> — the hard block is the <code>lineage-check</code> / <code>epic-open</code> / <code>reconcile-debt</code> CI gates.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Periodically, or in CI — to catch a change that shipped without being threaded, or debt left unpaid.</div>
+  </div>
 </section>
 
 <!-- ======================================================= -->
@@ -995,7 +1036,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 30 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 35 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>

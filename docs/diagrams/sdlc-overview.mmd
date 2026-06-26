@@ -46,7 +46,7 @@ flowchart LR
       sp["yad-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
       shp["yad-ship<br/>yad-commit + yad-open-pr"]
-      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template"]:::earns
+      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template<br/>lineage-check · epic-open · reconcile-debt"]:::earns
       prm["yad-pr-template route<br/>required reviewers"]
       air["yad-engineer-review<br/>AI review (advisory)"]
       eng{{"engineer review<br/>human · never automated"}}:::locked
@@ -61,12 +61,28 @@ flowchart LR
       run --- kill
     end
 
+    subgraph THREAD["D · Post-lock change management — feature threads"]
+      direction TB
+      chg["yad-change<br/>intake + triage depth<br/>seed threaded change-epic (kind/parent/thread)<br/>inherit by reference · re-author only what changes"]:::artifact
+      cepic(["change-epic EP-&lt;slug&gt;<br/>pointer-lock · change.json · reconcile-debt.json"]):::sentinel
+      tl["yad-timeline<br/>evolution view + thread-resolved.md (current truth)"]
+      df["yad-defects<br/>quality-gap report by escape_stage"]
+      rec["yad-reconcile<br/>drift / orphan / debt sweep (advisory)"]
+      chg --> cepic
+      cepic -. timeline + resolved truth .-> tl
+      cepic -. defect escape analysis .-> df
+      cepic -. drift / open debt .-> rec
+    end
+
     phub --> disc
     phub --> an
     dd -. roadmap frames each epic .-> ep
     rfb --> sp
     merged -. story pipeline repeats · next story .-> sp
     merged -. next epic · front pipeline repeats .-> ep
+    merged -. sealed epic · post-lock change .-> chg
+    cepic -. re-author only the changed artifacts .-> ar
+    cepic -. defect / behavioural change .-> st
     run -. drives earned back steps .-> im
     bridge["yad-hub-bridge<br/>review PR/MR ↔ ledger (merge-time)"]:::gated
     bridge -. advances on merge .-> gEp

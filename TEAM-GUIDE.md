@@ -168,6 +168,7 @@ for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-case
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
+         yad-change yad-timeline yad-defects yad-reconcile \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
@@ -250,6 +251,7 @@ for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-case
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-review-comments yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
+         yad-change yad-timeline yad-defects yad-reconcile \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
@@ -344,7 +346,49 @@ feature before changing it.
 
 ---
 
-## 7. Who approves what (the gate rules)
+## 7. Changing a shipped feature (post-lock changes, defects, hotfixes)
+
+Once a feature's contract is locked and its stories ship, you **don't edit the locked artifacts** — that
+would destroy the audit trail and the lock. Instead you open a **new epic threaded to the original**. A
+feature becomes a *thread* of epics (genesis → change → defect → …); the new epic **inherits** everything
+it doesn't change and **re-authors only what it does**. The old artifacts aren't stale — they're
+*superseded*, and `yad thread` always shows you the feature's current truth.
+
+**You'll know you need this** when CI fails with `epic-open: targets SEALED epic …` — that means the epic
+is fully shipped and a new change must go in its own threaded epic.
+
+**The runbook (in the product hub):**
+
+1. **File it.** Invoke **`yad-change`**: give it the `parent` epic (usually the feature's current tip),
+   a `title`, the `kind` (`change` | `defect` | `hotfix`), and for a defect/hotfix the `origin`,
+   `severity`, **`escape_stage`** (which gate *should* have caught it) and `root_cause`. It triages the
+   **depth** and tells you what gets re-authored vs inherited:
+   - **defect-fix** — re-author `stories` (a regression story) + `test-cases` (the missing case); inherit
+     the rest.
+   - **behavioral change, surface unchanged** — re-author `stories` + `test-cases` (+ `ui-design` if
+     visible); inherit `architecture`/`contract`.
+   - **contract-surface change** — re-author `architecture` (it **re-locks** + re-routes the escalated
+     contract review) + `stories` + `test-cases`.
+   It seeds the new `EP-<slug>` (threaded, with the inherited steps pre-approved) and stops.
+2. **Author + gate only what changed.** Run `yad-stories` / `yad-test-cases` (and `yad-architecture` for a
+   surface change), then the review gate — exactly as for a new epic, but only on the re-authored
+   artifacts. The inherited ones are not re-reviewed.
+3. **Build + ship** the change-epic's story the normal way (`yad-spec` → … → `yad-engineer-review`). A
+   defect's regression test is the durable memory of the bug.
+4. **A genesis epic from before this existed?** Add `kind: feature` and `thread: <its own id>` to its
+   `epic.md` once (a one-line frontmatter add) before threading a change off it.
+
+**Hotfixes** (`kind: hotfix`) may ship the fix **first** (an outage can't wait for the front gates), but
+`yad-change` opens **reconcile debt**: the thread's *next* change is blocked until you pay it — update the
+front artifacts + add a regression test. `yad reconcile` and `yad doctor` show open debt.
+
+**See the evolution:** `yad thread EP-<feature>` (the chain + the resolved current truth + open debt),
+`yad-timeline` (the visual evolution), and `yad-defects` (a quality report showing **which gate your
+defects keep escaping at**, so you fix the stage, not just the symptom).
+
+---
+
+## 8. Who approves what (the gate rules)
 
 From `skills/sdlc/config.yaml` — the base rule is **owner + 1 reviewer**, with escalation on risky
 surfaces (`contract`, `auth`, `payments`):
@@ -359,7 +403,7 @@ surfaces (`contract`, `auth`, `payments`):
 
 ---
 
-## 8. Handy anytime
+## 9. Handy anytime
 
 - **See what's blocking:** `yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start
@@ -377,7 +421,7 @@ surfaces (`contract`, `auth`, `payments`):
 
 ---
 
-## 9. Naming cheat sheet
+## 10. Naming cheat sheet
 
 IDs are **immutable once assigned** — renaming them breaks every downstream link.
 
@@ -393,10 +437,10 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 
 ---
 
-## 10. The skills at a glance (what to invoke)
+## 11. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 31)*.
+descriptions are in [`README.md`](README.md) → *Agent skills (all 35)*.
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -423,12 +467,16 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 31)*.
 | `yad-ship` | Commit **and** open the task PR/MR in one step. |
 | `yad-engineer-review` | AI review → engineer review → merge + record. |
 | `yad-backfill` | Spec already-built / legacy code so new work doesn't break it. |
+| `yad-change` | **Post-lock change/defect/hotfix intake** — open a new epic threaded to its parent (inherit the unchanged artifacts, re-author only what changes). |
+| `yad-timeline` | Render a feature **thread** (its evolution) + resolve its current truth. |
+| `yad-defects` | Per-epic/per-thread **quality-gap report** by escape stage + root cause. |
+| `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
 | `yad-run` | Drive the back half on the automation dial; kill switch. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
 
 ---
 
-## 11. Want more detail?
+## 12. Want more detail?
 
 - **`README.md`** — the complete reference for every phase, dial, gate, and all 31 skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
