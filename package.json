@@ -1,7 +1,7 @@
 {
   "name": "yadflow",
   "version": "1.0.2",
-  "description": "Yadflow — the gated, team, multi-repo SDLC: author → review → build with a PR-driven review gate and a zero-dependency `yad` CLI (setup, gate, commit, open-pr, ship, repo). A BMAD module + 31 yad-* skills.",
+  "description": "Yadflow — the gated, team, multi-repo SDLC: author → review → build with a PR-driven review gate and a zero-dependency `yad` CLI (setup, gate, commit, open-pr, ship, repo, thread, reconcile). A BMAD module + 35 yad-* skills.",
   "type": "module",
   "author": "AbdelRahman Nasr",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "cli/",
     "!cli/test.mjs",
     "!cli/test-checks.mjs",
+    "!cli/test-threads.mjs",
     "skills/",
     "README.md",
     "LICENSE",
@@ -36,9 +37,9 @@
   "scripts": {
     "yad": "node bin/yad.mjs",
     "lint": "eslint cli bin",
-    "test": "node --test cli/test.mjs cli/test-checks.mjs",
+    "test": "node --test cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs",
     "test:e2e": "bash test/e2e/run.sh",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='cli/test*.mjs' --test-coverage-lines=70 --test-coverage-branches=70 cli/test.mjs cli/test-checks.mjs",
+    "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='cli/test*.mjs' --test-coverage-lines=70 --test-coverage-branches=70 cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs",
     "diagrams": "npx -y @mermaid-js/mermaid-cli -i docs/diagrams/sdlc-overview.mmd -o docs/diagrams/sdlc-overview.svg -b transparent && npx -y @mermaid-js/mermaid-cli -i docs/diagrams/review-loop.mmd -o docs/diagrams/review-loop.svg -b transparent",
     "prepublishOnly": "npm test"
   },
