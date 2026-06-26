@@ -16,7 +16,7 @@ const setupSteps: FlowStep[] = [
     id: "install",
     title: "Install the Module",
     description:
-      "Run `npx yadflow setup` — the guided wizard copies all 30 yad-* skills into your IDE skill dirs and registers the sdlc module. Idempotent; re-run `check --fix` any time.",
+      "Run `npx yadflow setup` — the guided wizard copies all 35 yad-* skills into your IDE skill dirs and registers the sdlc module. Idempotent; re-run `check --fix` any time.",
     actor: "system",
     status: "installed",
     stepState: "_bmad/sdlc/ registered",
@@ -24,7 +24,7 @@ const setupSteps: FlowStep[] = [
     handler: "yad setup / install.sh",
     activeComponents: ["product-hub", "platform"],
     messages: [
-      { id: "in-1", from: "platform", to: "product-hub", label: "install 30 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "in-1", from: "platform", to: "product-hub", label: "install 35 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: ".sdlc/cli-version.json stamped" },
   },
@@ -155,6 +155,32 @@ function gateStep(
     sideEffects: { jobs: rule, notifications: "owner + reviewer (escalates on contract/auth/payments)" },
   };
 }
+
+// ── Phase 2 — Front-zero · project discovery (optional, once per project) ────
+
+const discoverySteps: FlowStep[] = [
+  {
+    id: "discovery",
+    title: "Project Discovery (optional front-zero)",
+    description:
+      "Optional front-zero, once per project: with the analyst, pressure-test the product idea — market, competitor, current-state, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Greenfield AND brownfield; modelled as the reserved epic-zero EP-discovery, it terminates at discovery-done (no build half).",
+    actor: "analyst",
+    status: "draft",
+    stepState: "EP-discovery/ · roadmap.md",
+    trigger: "yad-discovery {idea}",
+    handler: "yad-discovery",
+    activeComponents: ["product-hub", "state-json", "code-repos"],
+    messages: [
+      { id: "di-1", from: "code-repos", to: "analyst", label: "read code-maps (brownfield)", type: "event", color: "#1e8449", delay: 0, duration: 600 },
+      { id: "di-2", from: "analyst", to: "product-hub", label: "write market / feasibility / roadmap.md", type: "write", color: "#2471a3", delay: 700, duration: 800 },
+      { id: "di-3", from: "product-hub", to: "state-json", label: "seed EP-discovery → discovery-done", type: "event", color: "#1e8449", delay: 1500, duration: 600 },
+    ],
+    sideEffects: { jobs: "market-research.md · competitor-analysis.md · current-state.md · feasibility.md · requirements.md · roadmap.md", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
+  },
+  gateStep("discovery", "discovery artifacts", "owner + 1 reviewer (base rule)", "#1e8449"),
+];
+
+// ── Phase 3 — Front half (author → review gate, repeated per epic) ───────────
 
 const frontSteps: FlowStep[] = [
   {
@@ -311,7 +337,7 @@ const buildSteps: FlowStep[] = [
     id: "checks",
     title: "Check Gates (Step C)",
     description:
-      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, and the pattern gates (commit-message / pr-title / pr-template). Blocking in CI.",
+      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), and the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt). Blocking in CI.",
     actor: "system",
     status: "checks-passing",
     stepState: "checks/*.sh · yad-checks.yml",
@@ -320,7 +346,7 @@ const buildSteps: FlowStep[] = [
     activeComponents: ["code-repos", "platform", "contract-lock"],
     messages: [
       { id: "ck-1", from: "code-repos", to: "platform", label: "run spec-link · contract-check · build/test/lint", type: "job", color: "#b7950b", delay: 0, duration: 800 },
-      { id: "ck-2", from: "platform", to: "code-repos", label: "verified-commits + pattern gates", type: "job", color: "#b7950b", delay: 900, duration: 700 },
+      { id: "ck-2", from: "platform", to: "code-repos", label: "verified-commits + pattern + thread gates", type: "job", color: "#b7950b", delay: 900, duration: 700 },
     ],
     sideEffects: { jobs: "checks/*.sh · .github/workflows/yad-checks.yml · .gitlab-ci.yml" },
   },
@@ -433,6 +459,80 @@ const automationSteps: FlowStep[] = [
   },
 ];
 
+// ── Phase 6 — Change management (feature threads, post-lock) ─────────────────
+
+const changeSteps: FlowStep[] = [
+  {
+    id: "change",
+    title: "Change Intake & Triage",
+    description:
+      "The entry point of a feature thread. Classify a post-lock change into a depth (defect-fix / behavioral-no-surface / contract-surface / new-capability) and seed a new EP-<slug> change-epic threaded to its parent (genesis → change → defect). Inherits unchanged front artifacts by reference; re-authors only what changes, so locked artifacts are never mutated — only superseded. Hotfixes open reconcile-debt.",
+    actor: "pm",
+    status: "draft",
+    stepState: "change.json · pointer-lock contract-lock.json",
+    trigger: "yad-change {request}",
+    handler: "yad-change",
+    activeComponents: ["product-hub", "state-json", "change-json", "reconcile-debt-json"],
+    messages: [
+      { id: "cg-1", from: "product-hub", to: "change-json", label: "seed change-epic (kind / parent / thread)", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "cg-2", from: "change-json", to: "state-json", label: "inherited-step state + pointer-lock", type: "event", color: "#1e8449", delay: 900, duration: 700 },
+      { id: "cg-3", from: "change-json", to: "reconcile-debt-json", label: "hotfix → open reconcile-debt", type: "cleanup", color: "#c0392b", delay: 1700, duration: 600 },
+    ],
+    sideEffects: { jobs: "change.json · contract-lock.json (pointer) · reconcile-debt.json", notifications: "never auto-advances — hands off to the authoring skills + review gate" },
+  },
+  {
+    id: "timeline",
+    title: "Thread Timeline & Current Truth",
+    description:
+      "The evolution view over a feature thread: TIMELINE.md walks genesis → change → defect, and thread-resolved.md resolves the current truth — which artifact version is live after all supersessions. `yad thread <epic>` prints the thread + its resolved truth + any open debt.",
+    actor: "pm",
+    status: "draft",
+    stepState: "TIMELINE.md · thread-resolved.md",
+    trigger: "yad-timeline {epic} / yad thread {epic}",
+    handler: "yad-timeline",
+    activeComponents: ["product-hub", "change-json", "state-json"],
+    messages: [
+      { id: "tl-1", from: "change-json", to: "product-hub", label: "walk lineage → TIMELINE.md", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "tl-2", from: "product-hub", to: "state-json", label: "resolve current truth → thread-resolved.md", type: "write", color: "#2471a3", delay: 800, duration: 700 },
+    ],
+    sideEffects: { jobs: "TIMELINE.md · thread-resolved.md" },
+  },
+  {
+    id: "defects",
+    title: "Defect Escape Analysis",
+    description:
+      "Quality-gap report over the thread: DEFECTS.md groups each defect by escape_stage (which gate let it through) and root cause, so the front gates can be tightened where escapes cluster.",
+    actor: "tester",
+    status: "draft",
+    stepState: "DEFECTS.md",
+    trigger: "yad-defects {epic}",
+    handler: "yad-defects",
+    activeComponents: ["product-hub", "change-json"],
+    messages: [
+      { id: "df-1", from: "change-json", to: "product-hub", label: "group by escape_stage + root cause", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "df-2", from: "product-hub", to: "product-hub", label: "write DEFECTS.md", type: "write", color: "#2471a3", delay: 800, duration: 600 },
+    ],
+    sideEffects: { jobs: "DEFECTS.md (by escape_stage + root cause)" },
+  },
+  {
+    id: "reconcile",
+    title: "Drift / Debt Sweep (advisory)",
+    description:
+      "A read-only sweep across threads — drift (a bound artifact whose hash moved), orphans (a thread with a missing parent), and open hotfix debt. Advisory like yad-docs-sync; the CI gates (lineage-check / epic-open / reconcile-debt) are what actually block.",
+    actor: "system",
+    status: "earned",
+    stepState: "reconcile-debt.json",
+    trigger: "yad-reconcile / yad reconcile",
+    handler: "yad-reconcile",
+    activeComponents: ["product-hub", "reconcile-debt-json", "contract-lock"],
+    messages: [
+      { id: "rc-1", from: "product-hub", to: "reconcile-debt-json", label: "scan drift / orphan / open debt", type: "job", color: "#b7950b", delay: 0, duration: 800 },
+      { id: "rc-2", from: "reconcile-debt-json", to: "contract-lock", label: "flag drifted boundHash (corruption)", type: "cleanup", color: "#c0392b", delay: 900, duration: 700 },
+    ],
+    sideEffects: { jobs: "reconcile-debt.json (advisory)", notifications: "a thread with open hotfix debt is frozen until paid" },
+  },
+];
+
 export const PATHS: FlowPath[] = [
   {
     id: 1,
@@ -440,22 +540,32 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: install the 30 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
+      "One-time setup: install the 35 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
     category: "setup",
     steps: setupSteps,
   },
   {
     id: 2,
+    label: "Front-Zero · Project Discovery",
+    icon: "travel_explore",
+    color: "#2471a3",
+    description:
+      "Optional front-zero, once per project: pressure-test the product — market, competitor, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Modelled as the reserved epic-zero EP-discovery; terminates at discovery-done, no build half.",
+    category: "front",
+    steps: discoverySteps,
+  },
+  {
+    id: 3,
     label: "Front Half (human-gated)",
     icon: "edit_note",
     color: "#2471a3",
     description:
-      "Author the thinking once per epic — analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate.",
+      "Author the thinking once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate.",
     category: "front",
     steps: frontSteps,
   },
   {
-    id: 3,
+    id: 4,
     label: "Build Half (per story)",
     icon: "build",
     color: "#1e8449",
@@ -465,7 +575,7 @@ export const PATHS: FlowPath[] = [
     steps: buildSteps,
   },
   {
-    id: 4,
+    id: 5,
     label: "Automation (earned)",
     icon: "smart_toy",
     color: "#ca6f1e",
@@ -473,5 +583,15 @@ export const PATHS: FlowPath[] = [
       "The second dial made real: run the back half on each step's dial, record every run in the trust log, earn machine_advance per step, and keep the kill switch.",
     category: "automate",
     steps: automationSteps,
+  },
+  {
+    id: 6,
+    label: "Change Management (feature threads)",
+    icon: "manage_history",
+    color: "#7d3c98",
+    description:
+      "Post-lock evolution: a sealed epic can't be mutated in place, so a change becomes a new epic threaded to its parent — yad-change intake/triage, then yad-timeline, yad-defects, and the advisory yad-reconcile sweep. Locked artifacts are never mutated, only superseded.",
+    category: "change",
+    steps: changeSteps,
   },
 ];

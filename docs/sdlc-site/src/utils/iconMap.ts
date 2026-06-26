@@ -18,6 +18,9 @@ export const COMPONENT_ICONS: Record<string, string> = {
   'learning-tool': 'psychology',
   platform: 'hub',
   'trust-log': 'trending_up',
+  'change-json': 'manage_history',
+  'reconcile-debt-json': 'running_with_errors',
+  'build-log-json': 'receipt_long',
 };
 
 export const COMPONENT_ROLES: Record<string, string> = {
@@ -36,6 +39,9 @@ export const COMPONENT_ROLES: Record<string, string> = {
   'learning-tool': 'Tool',
   platform: 'Platform',
   'trust-log': 'Evidence',
+  'change-json': 'Thread',
+  'reconcile-debt-json': 'Debt',
+  'build-log-json': 'Ledger',
 };
 
 export const CATEGORY_ICONS: Record<string, string> = {
@@ -43,6 +49,7 @@ export const CATEGORY_ICONS: Record<string, string> = {
   front: 'edit_note',
   build: 'build',
   automate: 'smart_toy',
+  change: 'manage_history',
 };
 
 export const ACTOR_ICONS: Record<string, string> = {

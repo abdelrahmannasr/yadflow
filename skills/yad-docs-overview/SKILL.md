@@ -56,7 +56,7 @@ git work tree). Generate and commit on it.
 Map the pipeline onto the same data structures `yad-docs` uses (concrete mapping in
 `references/pipeline-model.md`):
 
-- **Flow paths** = the **phases** — `Setup`, `Front half`, `Build half`, `Automation`.
+- **Flow paths** = the **phases** — `Setup`, `Front-zero` (discovery), `Front half`, `Build half`, `Automation`, `Change management` (feature threads).
 - **Flow steps** = the **skills/gates in order** (from `module-help.csv` `preceded-by`/`followed-by`),
   each step's `messages` = the skill's `outputs`, and `sideEffects` = the `.sdlc/` files it writes.
 - **System components** = the **durable state objects** — the product hub, each `.sdlc/*.json`

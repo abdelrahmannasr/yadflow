@@ -10,7 +10,7 @@ ordering source of truth is `skills/sdlc/module-help.csv` (`phase`, `preceded-by
 
 | Shell primitive | Overview meaning |
 |-----------------|------------------|
-| `FlowPath` (`paths.ts`) | a **phase**: Setup, Front half, Build half, Automation. |
+| `FlowPath` (`paths.ts`) | a **phase**: Setup, Front-zero (discovery), Front half, Build half, Automation, Change management (feature threads). |
 | `FlowStep` (within a path) | a **skill or gate** in order; `messages` = its `outputs`; `sideEffects` = the `.sdlc/` files it writes; `status`/`bookingStatus` annotate gated vs. enrichment vs. earned. |
 | `SystemComponent` (`components.ts`) | a **durable state object** (the hub, each `.sdlc/*.json`, code repos, the design/testing/learning tools, the platform). |
 | `RoleConfig` (`roles.ts`) | a **lens** → its relevant sections + paths. |
@@ -66,7 +66,7 @@ Per-story, per-repo: `spec → tasks → implement → checks → engineer-revie
 |--------------|------------------------|
 | `yad-spec` | `specs/<story-id>/` (Spec Kit layout), `link.md` |
 | `yad-implement` | a branch + commit per atomic task |
-| `yad-checks` | `checks/*.sh`, CI workflows |
+| `yad-checks` | `checks/*.sh`, CI workflows — the gate set: `spec-link · contract-check · build-test-lint · verified-commits · commit-message · pr-title · pr-template · lineage-check · epic-open · reconcile-debt` |
 | `yad-pr-template` | PR/MR template + routing helpers |
 | `yad-commit` / `yad-open-pr` / `yad-ship` | one commit / one PR/MR |
 | `yad-engineer-review` | engineer review + ship recorded in `build-log.json` |
@@ -83,11 +83,30 @@ node classes from the diagram.
 | `yad-status` | read-only view (no writes) |
 | `yad-docs` / `yad-docs-overview` / `yad-docs-sync` | the docs sites + their `docs-build.json` manifests |
 
+### Path: Change management — feature threads (`phase: 6-change`)
+The post-lock evolution layer. Once an epic is **sealed** (all stories shipped), behaviour can no longer
+be mutated in place — a change request becomes a **new epic threaded to its parent** (genesis → change →
+defect), inheriting unchanged front artifacts **by reference** and re-authoring only what changes, so
+locked artifacts are never mutated and never go stale, only superseded. Three CI gates enforce the thread
+(`lineage-check`, `epic-open`, `reconcile-debt`). This path never gates the front chain; `yad-change` is
+the intake, then it hands off to the normal authoring skills + the review gate.
+
+| Step (skill) | Outputs / sideEffects |
+|--------------|------------------------|
+| `yad-change` | intake + triage depth (defect-fix / behavioral-no-surface / contract-surface / new-capability); seeds a threaded change-epic — lineage frontmatter, inherited-step `state.json`, pointer-lock `contract-lock.json`, `change.json`, and `reconcile-debt.json` for hotfixes |
+| `yad-timeline` | `TIMELINE.md` (the thread evolution view) + `thread-resolved.md` (the resolved current truth) |
+| `yad-defects` | `DEFECTS.md` (quality-gap report by `escape_stage` + root cause) |
+| `yad-reconcile` | advisory drift / orphan / debt sweep (read-only; mirrors `yad-docs-sync`) |
+
+CLI: `yad thread [<epic>]` prints a thread + its resolved current truth + open debt; `yad reconcile`
+runs the sweep. The three thread gates ride in the build-half `yad-checks` set above.
+
 ## System components = the durable state objects
 
 `components.ts` renders these on the canvas (deterministic positions): the **product hub**; each
 `.sdlc/*.json` (`state.json`, `approvals.json`, `comments.json`, `hub.json`, `repos.json`, `design.json`,
-`testing.json`, `learning.json`, `docs.json`, `contract-lock.json`, `build-state/*`, `trust-log.json`);
+`testing.json`, `learning.json`, `docs.json`, `contract-lock.json`, `build-state/*`, `trust-log.json`,
+and the change-thread ledgers `change.json`, `reconcile-debt.json`, `build-log.json`);
 the **connected code repos**; the **design / testing / learning tools**; and the **platform**
 (GitHub/GitLab + Pages). A skill's `sideEffects` link its step to the component it writes.
 

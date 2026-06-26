@@ -150,4 +150,32 @@ export const COMPONENTS: SystemComponent[] = [
     description:
       "Every back-half run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation.",
   },
+  // Phase 6 — the feature-thread ledgers (post-lock change management).
+  {
+    id: "change-json",
+    label: "change.json",
+    icon: "🧵",
+    color: "#7d3c98",
+    position: { x: 18, y: 92 },
+    description:
+      "The feature-thread record: a change-epic's kind (change/defect/hotfix), its parent, and the thread lineage — inherit unchanged front artifacts by reference, re-author only what changes.",
+  },
+  {
+    id: "reconcile-debt-json",
+    label: "reconcile-debt.json",
+    icon: "🧾",
+    color: "#c0392b",
+    position: { x: 38, y: 92 },
+    description:
+      "Open hotfix debt on a thread — a fast fix that skipped a gate owes a reconcile. The reconcile-debt CI gate freezes the thread until it is paid.",
+  },
+  {
+    id: "build-log-json",
+    label: "build-log.json",
+    icon: "📒",
+    color: "#1e8449",
+    position: { x: 58, y: 92 },
+    description:
+      "The per-epic ship ledger — every merged story recorded at merge time. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic.",
+  },
 ];

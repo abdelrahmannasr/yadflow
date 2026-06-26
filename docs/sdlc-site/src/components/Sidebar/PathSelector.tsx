@@ -13,6 +13,7 @@ const CATEGORY_LABELS: Record<PathCategory, string> = {
   front: 'Front Half',
   build: 'Build Half',
   automate: 'Automation',
+  change: 'Change Management',
 };
 
 const CATEGORY_ORDER: PathCategory[] = [
@@ -20,6 +21,7 @@ const CATEGORY_ORDER: PathCategory[] = [
   'front',
   'build',
   'automate',
+  'change',
 ];
 
 export const PathSelector = () => {
