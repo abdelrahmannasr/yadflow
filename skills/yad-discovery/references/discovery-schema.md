@@ -24,6 +24,10 @@ object and the 2-step chain.
 - `artifact: "discovery/"` is a **virtual** base: `artifactHash` fingerprints the whole discovery file
   set (`discoveryHash` in `cli/epic-state.mjs`), so an edit to any discovery file revokes prior
   approvals — exactly like `stories/` fingerprints the stories directory.
+- The **full set is required to review**: if any of the six files is missing, `discoveryHash` returns
+  `null` — the discovery is **incomplete and non-reviewable** (no hash to bind an approval to), and
+  `yad gate open` / `yad gate sync` warn with the missing filenames. Write all six (in greenfield,
+  `current-state.md` is a short clean-slate note) before handing off to the gate.
 - On approval the gate sets `currentStep: "discovery-done"` (a terminal sentinel — discovery has **no**
   build half, so it never becomes `ready-for-build`).
 - The discovery files (relative to the epic dir) the gate commits on the review branch and re-hashes at

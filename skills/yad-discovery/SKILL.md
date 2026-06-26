@@ -106,6 +106,8 @@ Notes:
 - The review step's artifact is the virtual base `discovery/` — the gate fingerprints the whole
   discovery file set (`market-research`, `competitor-analysis`, `current-state`, `feasibility`,
   `requirements`, `roadmap`), so editing any of them revokes prior approvals (mirrors `stories/`).
+  **All six must exist to review:** if any is missing the set is incomplete and non-reviewable (the
+  hash is `null`) and `yad gate open`/`sync` warn — so write all six (Step 4) before the gate.
 - `discovery-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer); discovery
   never escalates to domain owners (no contract surface is touched yet).
 - Also create an empty approvals ledger `.sdlc/approvals.json` and comments ledger

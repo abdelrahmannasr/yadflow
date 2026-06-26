@@ -68,14 +68,17 @@ and let it inform which `repos` the epic should touch.
 - For depth on a specific area not in the map, do a live on-demand read (see `yad-connect-repos`
   `references/code-context.md`) — do not block on it.
 
-### Step 2c — Read the project roadmap (project context, if discovery ran)
-If `{project-root}/epics/EP-discovery/roadmap.md` exists (the project front-zero, `yad-discovery`),
-read it and the sibling `requirements.md` for the project framing: which phase (MVP / later) this
-feature belongs to, the functional/non-functional requirements it carries, and how it fits the wider
-plan. Use it so the epic's **Goal / Scope / Acceptance signals** stay consistent with the approved
-roadmap. **Optional & non-blocking:** if there is no discovery (no `EP-discovery/roadmap.md`), proceed
-unchanged. After seeding the epic, the matching roadmap row's `status:` can be bumped
-`planned → epic-started` by hand (a human edit; discovery never auto-seeds epics).
+### Step 2c — Read the project roadmap (project context, only once discovery is APPROVED)
+Consume the project front-zero (`yad-discovery`) **only after its review gate has passed** — never a
+draft or in-review roadmap (that would bypass `discovery-review`). Gate on the **state**, not file
+existence: read `{project-root}/epics/EP-discovery/.sdlc/state.json` and proceed **only when
+`currentStep == "discovery-done"`**. When it is, read its `roadmap.md` and sibling `requirements.md`
+for the project framing: which phase (MVP / later) this feature belongs to, the functional/non-functional
+requirements it carries, and how it fits the wider plan — so the epic's **Goal / Scope / Acceptance
+signals** stay consistent with the approved roadmap. **Optional & non-blocking:** if there is no
+discovery, or it has not yet reached `discovery-done` (absent / still draft / in-review), proceed
+unchanged — do not consume an unapproved roadmap. After seeding the epic, the matching roadmap row's
+`status:` can be bumped `planned → epic-started` by hand (a human edit; discovery never auto-seeds epics).
 
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand) — analysis-skipped only
 *(Skip when analysis ran — the ID was already assigned by `yad-analysis`.)*

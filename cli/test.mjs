@@ -927,8 +927,12 @@ test('gate sync: EP-discovery advances through the SAME gate to discovery-done (
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
   const ep = path.join(T, 'epics/EP-discovery');
   fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  // The whole set must exist for the discovery review to be reviewable (hash-bound).
   fs.writeFileSync(path.join(ep, 'roadmap.md'), '---\nid: EP-discovery\nartifact: roadmap\nstatus: draft\nowner: alice\n---\n# roadmap\n');
   fs.writeFileSync(path.join(ep, 'requirements.md'), '---\nid: EP-discovery\nartifact: requirements\nstatus: draft\n---\n# reqs\n');
+  for (const f of ['market-research.md', 'competitor-analysis.md', 'current-state.md', 'feasibility.md']) {
+    fs.writeFileSync(path.join(ep, f), `---\nid: EP-discovery\nartifact: ${f.replace('.md', '')}\nstatus: draft\n---\n# ${f}\n`);
+  }
   fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
     epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review',
     steps: [
@@ -1958,20 +1962,22 @@ test('advanceState: approving discovery-review terminates at discovery-done (no 
   assert.equal(state.currentStep, 'discovery-done', 'discovery never becomes ready-for-build');
 });
 
-test('discoveryHash fingerprints the whole set: editing any discovery file revokes prior approvals', () => {
+test('discoveryHash: a partial set is non-reviewable (null); the full set hashes and is edit-sensitive', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-disc-'));
+  assert.equal(discoveryHash(T), null, 'no discovery files → non-reviewable');
+  // A partial set (a required artifact still missing) is incomplete → not reviewable.
   fs.writeFileSync(path.join(T, 'roadmap.md'), '# roadmap v1');
-  fs.writeFileSync(path.join(T, 'requirements.md'), '# reqs v1');
+  assert.equal(discoveryHash(T), null, 'missing required discovery files → null');
+  // Complete the set → a real fingerprint, stable when unchanged.
+  for (const f of DISCOVERY_FILES) fs.writeFileSync(path.join(T, f), `# ${f} v1`);
   const h1 = discoveryHash(T);
   assert.ok(h1 && h1.startsWith('sha256:'));
   assert.equal(discoveryHash(T), h1, 'stable when unchanged');
-  fs.writeFileSync(path.join(T, 'requirements.md'), '# reqs v2');
+  // Edit any file → hash changes (revoke-on-change); remove one → back to non-reviewable.
+  fs.writeFileSync(path.join(T, 'requirements.md'), '# requirements.md v2');
   assert.notEqual(discoveryHash(T), h1, 'a changed discovery file changes the set hash');
-});
-
-test('discoveryHash is null when no discovery files exist (nothing to bind to yet)', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-disc0-'));
-  assert.equal(discoveryHash(T), null);
+  fs.rmSync(path.join(T, 'feasibility.md'));
+  assert.equal(discoveryHash(T), null, 'a deleted required file makes the set non-reviewable again');
 });
 
 test('advanceState: approving stories-review opens test-cases AND makes the epic ready-for-build (parallel)', () => {

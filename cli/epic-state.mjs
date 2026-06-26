@@ -105,14 +105,14 @@ export const DISCOVERY_FILES = [
   'roadmap.md',
 ];
 
-// Deterministic fingerprint of the discovery set: hash each present file in the fixed DISCOVERY_FILES
-// order, combine. Lets an edit (or deletion) of any discovery artifact revoke prior discovery-review
-// approvals (analogue of storiesHash, which must sort readdir; here the order is the fixed list).
+// Deterministic fingerprint of the discovery set: hash every file in the fixed DISCOVERY_FILES order,
+// combine. The WHOLE set is the reviewable unit — if any required artifact is missing the discovery is
+// incomplete and NON-REVIEWABLE, so this returns null (no hash to bind an approval to), the same
+// "nothing to lock" signal storiesHash/contractSurfaceHash give for an absent/malformed surface. Once
+// the full set exists, an edit (or deletion) of any file changes the hash and revokes prior approvals.
 export function discoveryHash(epicDir) {
-  const parts = DISCOVERY_FILES
-    .filter((f) => fs.existsSync(path.join(epicDir, f)))
-    .map((f) => `${f}:${fileSha(path.join(epicDir, f))}`);
-  if (!parts.length) return null;
+  if (!DISCOVERY_FILES.every((f) => fs.existsSync(path.join(epicDir, f)))) return null;
+  const parts = DISCOVERY_FILES.map((f) => `${f}:${fileSha(path.join(epicDir, f))}`);
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
