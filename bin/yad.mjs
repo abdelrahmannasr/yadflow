@@ -234,6 +234,9 @@ async function main() {
       const thread = o.epic || o.thread || null;
       if (thread && !isValidEpicId(thread)) { log(c.red(`invalid epic id: ${thread} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       const act = action || (o.wire ? 'wire' : o.refresh ? 'refresh' : 'check');
+      if (!['check', 'refresh', 'wire'].includes(act)) {
+        log(c.red(`unknown reconcile action: ${act} (check|refresh|wire)`)); process.exitCode = 1; break;
+      }
       await runReconcile(o.dir, { action: act, thread });
       break;
     }

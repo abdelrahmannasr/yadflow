@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  resolveThread, threadEpics, resolveCurrentArtifacts, epicLineage, gatePredicate,
+  resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary } from './thread.mjs';
 
@@ -91,12 +91,38 @@ test('resolveCurrentArtifacts: a defect-epic owns only what it re-authored; gene
     inherits: ['epic', 'architecture', 'contract', 'ui-design'],
   });
   const owner = resolveCurrentArtifacts(T, 'EP-gen');
-  assert.equal(owner.epic, 'EP-gen');
+  assert.equal(owner.epic, 'EP-gen');           // REPLACE base: single latest owner
   assert.equal(owner.architecture, 'EP-gen');
   assert.equal(owner.contract, 'EP-gen');
   assert.equal(owner['ui-design'], 'EP-gen');
-  assert.equal(owner.stories, 'EP-fix');       // re-authored by the defect
-  assert.equal(owner['test-cases'], 'EP-fix');  // re-authored by the defect
+  // ADDITIVE bases: the UNION of contributors (genesis + the defect), never collapsed to one.
+  assert.deepEqual(owner.stories, ['EP-gen', 'EP-fix']);
+  assert.deepEqual(owner['test-cases'], ['EP-gen', 'EP-fix']);
+});
+
+test('resolveCurrentStories: composes the story set — inherited parent stories survive a defect-fix', () => {
+  const T = hub();
+  writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped', 'shipped', 'shipped'] });
+  // genesis story files are EP-gen-S01..S03 (writeEpic names them by epic id).
+  // defect re-authors stories but contributes only its OWN regression story; inherits the rest.
+  writeEpic(T, 'EP-fix', { kind: 'defect', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic', 'architecture', 'contract', 'ui-design'] }, { stories: ['shipped'] });
+  const stories = resolveCurrentStories(T, 'EP-gen');
+  // the three genesis stories are still owned by genesis (NOT dropped) ...
+  assert.equal(stories['EP-gen-S01'], 'EP-gen');
+  assert.equal(stories['EP-gen-S03'], 'EP-gen');
+  // ... plus the defect's own regression story.
+  assert.equal(stories['EP-fix-S01'], 'EP-fix');
+  assert.equal(Object.keys(stories).length, 4);
+});
+
+test('resolveCurrentStories: `supersedes` retires a parent story id', () => {
+  const T = hub();
+  writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped', 'shipped'] });
+  writeEpic(T, 'EP-chg', { kind: 'change', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic', 'architecture', 'contract', 'ui-design'], supersedes: ['EP-gen-S02'] }, { stories: ['draft'] });
+  const stories = resolveCurrentStories(T, 'EP-gen');
+  assert.equal(stories['EP-gen-S01'], 'EP-gen');         // kept
+  assert.equal(stories['EP-gen-S02'], undefined);        // retired via supersedes
+  assert.equal(stories['EP-chg-S01'], 'EP-chg');         // the change's replacement
 });
 
 test('resolveCurrentArtifacts: a later contract-surface change shadows architecture+contract', () => {
@@ -106,10 +132,10 @@ test('resolveCurrentArtifacts: a later contract-surface change shadows architect
   // contract-surface change re-authors architecture + contract (omits them from inherits).
   writeEpic(T, 'EP-surf', { kind: 'change', parent: 'EP-fix', thread: 'EP-gen', inherits: ['epic', 'ui-design'] });
   const owner = resolveCurrentArtifacts(T, 'EP-gen');
-  assert.equal(owner.architecture, 'EP-surf');
+  assert.equal(owner.architecture, 'EP-surf');  // REPLACE: the surface change wins (latest re-author)
   assert.equal(owner.contract, 'EP-surf');
-  assert.equal(owner.stories, 'EP-surf');       // EP-surf re-authored stories too
-  assert.equal(owner['test-cases'], 'EP-surf');
+  assert.deepEqual(owner.stories, ['EP-gen', 'EP-fix', 'EP-surf']); // ADDITIVE: every contributor
+  assert.deepEqual(owner['test-cases'], ['EP-gen', 'EP-fix', 'EP-surf']);
   assert.equal(owner.epic, 'EP-gen');            // never re-authored
 });
 

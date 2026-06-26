@@ -8,6 +8,7 @@ team hardens the originating stage.
 - **Defects:** 1 · **Severity mix:** sev3 ×1 · **Open:** 0 (closed with a regression test).
 
 ## Escape-stage breakdown (the actionable headline)
+
 | Escape stage | Defects | % of thread defects |
 |--------------|--------:|--------------------:|
 | **test-cases** | 1 | **100%** |
@@ -20,6 +21,7 @@ team hardens the originating stage.
 > exclusion case per state-machine transition); that is the highest-leverage fix.
 
 ## Root-cause breakdown
+
 | Root cause | Defects |
 |------------|--------:|
 | missing-negative-test | 1 |

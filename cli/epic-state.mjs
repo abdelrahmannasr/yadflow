@@ -479,14 +479,46 @@ export function threadEpics(root, threadOrEpicId) {
 // change-epic shadows only what it re-authored. Returns { <base>: <owning epic id> } — the source-of-
 // truth map AI/humans read for the next change (rendered by yad-timeline as thread-resolved.md).
 export const THREAD_ARTIFACT_BASES = ['epic', 'architecture', 'contract', 'ui-design', 'stories', 'test-cases'];
-export function resolveCurrentArtifacts(root, threadOrEpicId, bases = THREAD_ARTIFACT_BASES) {
+// REPLACE bases — a re-author supersedes the prior version wholesale, so the LATEST re-author owns it
+// (a contract-surface change re-locks and replaces; a re-authored architecture supersedes the old one).
+const REPLACE_BASES = ['epic', 'architecture', 'contract', 'ui-design'];
+// ADDITIVE bases — each re-authoring epic CONTRIBUTES (stories add files; a change adds its test-cases
+// file), so the current truth is the UNION of contributors, never a single owner. Collapsing these to
+// one epic would drop the parent's inherited stories/cases.
+const ADDITIVE_BASES = ['stories', 'test-cases'];
+
+// The owning epic per artifact base across a thread. REPLACE bases resolve to a single epic id (the
+// latest re-author); ADDITIVE bases resolve to the ordered LIST of every epic that re-authored them
+// (genesis-first) — use resolveCurrentStories for story-id-level ownership of the composed set.
+export function resolveCurrentArtifacts(root, threadOrEpicId) {
   const members = threadEpics(root, threadOrEpicId); // genesis-first
-  const owner = {};
-  for (const base of bases) owner[base] = null;
+  const out = {};
+  for (const b of REPLACE_BASES) out[b] = null;
+  for (const b of ADDITIVE_BASES) out[b] = [];
   for (const id of members) {
     const { inherits } = epicLineage(root, id);
-    for (const base of bases) {
-      if (!inherits.includes(base)) owner[base] = id; // re-authored here -> this epic owns it now
+    for (const b of REPLACE_BASES) if (!inherits.includes(b)) out[b] = id;
+    for (const b of ADDITIVE_BASES) if (!inherits.includes(b)) out[b].push(id);
+  }
+  return out;
+}
+
+// Compose the current STORY SET at story-id granularity across the thread: each re-authoring epic's
+// stories/ files are overlaid (a later same-id supersedes; a `supersedes:` entry retires a parent
+// story). Returns { <story-id>: <owning epic id> } — the real current truth for stories, because a
+// change-epic re-authors only the stories it changes and inherits the rest by reference. Without this,
+// a defect-fix that adds one regression story would appear to drop every unchanged parent story.
+export function resolveCurrentStories(root, threadOrEpicId) {
+  const members = threadEpics(root, threadOrEpicId); // genesis-first
+  const owner = {};
+  for (const id of members) {
+    const lin = epicLineage(root, id);
+    for (const sid of lin.supersedes) delete owner[sid]; // explicitly retired parent stories
+    if (lin.inherits.includes('stories')) continue; // inherited wholesale -> contributes nothing new
+    const sdir = path.join(epicRoot(root, id), 'stories');
+    if (!fs.existsSync(sdir)) continue;
+    for (const f of fs.readdirSync(sdir).filter((x) => /\.md$/.test(x))) {
+      owner[f.replace(/\.md$/, '')] = id; // contribute / override same-id
     }
   }
   return owner;

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import {
   epicRoot, isValidEpicId, epicLineage, readFrontmatter,
-  resolveThread, threadEpics, resolveCurrentArtifacts, THREAD_ARTIFACT_BASES,
+  resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
 // ---- file readers (all derived; no DB) -----------------------------------------------------------
@@ -64,6 +64,7 @@ export function threadSummary(root, threadOrEpic) {
     broken,
     nodes,
     resolved: resolveCurrentArtifacts(root, rootId),
+    resolvedStories: resolveCurrentStories(root, rootId),
     openDebt: openDebtOnThread(root, rootId),
   };
 }
@@ -106,7 +107,15 @@ export async function runThread(root, { epic, json = false } = {}) {
     if (n.brokenThread) log(c.red(`      ✗ ${n.brokenThread}`));
   }
   log(c.bold('\n  Current truth') + c.dim('  (authoritative source per artifact)'));
-  for (const base of THREAD_ARTIFACT_BASES) log(`    ${base.padEnd(12)} ${c.dim('←')} ${s.resolved[base] || c.dim('(none)')}`);
+  for (const base of THREAD_ARTIFACT_BASES) {
+    const v = s.resolved[base];
+    const disp = Array.isArray(v) ? (v.length ? v.join(' + ') : c.dim('(none)')) : (v || c.dim('(none)'));
+    log(`    ${base.padEnd(12)} ${c.dim('←')} ${disp}`);
+  }
+  const sids = Object.keys(s.resolvedStories).sort();
+  if (sids.length) {
+    log(c.dim(`    composed stories (${sids.length}): ` + sids.map((id) => `${id}←${s.resolvedStories[id]}`).join(', ')));
+  }
   if (s.openDebt.length) {
     log(c.red('\n  ⚠ Open reconcile debt (blocks the next change until paid):'));
     for (const d of s.openDebt) log(`    ${d.epicId}: ${d.reason || ''} — requires [${(d.requires || []).join(', ')}]`);
