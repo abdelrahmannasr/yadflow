@@ -11,6 +11,9 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | spec-link | the `Task: <story>-<task>` commit trailer; `specs/<story>/link.md` | `yad-implement` (trailer), `yad-spec` (link.md) |
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
 | build/test/lint | the repo's `npm run lint` / `npm run build` / `npm test` | the repo |
+| lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the hub | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
+| epic-open | the `Task:` trailer → `link.md` → the hub epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
+| reconcile-debt | the `Task:` trailer → `link.md` → the hub epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
 | verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | hub roster `email` fields (`yad check --fix` generates the allowlist) |
 | commit-message | each non-merge commit's subject + trailer block | `yad-commit` / `CONTRIBUTING.md` (`config.yaml build.commit_subject_style`) |
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
@@ -149,6 +152,28 @@ catches a free-form description that bypassed it:
     (`epics/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
     must go through a `review/EP-*` PR.
 
+## 8. Phase 6 — feature-thread gates (`lineage-check.sh`, `epic-open.sh`, `reconcile-debt-check.sh`)
+
+After the contract locks and code ships, a change must not mutate a locked artifact — it becomes a new
+epic threaded to its parent (`config.yaml` `change:`). These three gates keep that discipline. All three
+resolve the owning epic the same way: `Task:` trailer → `specs/<story>/link.md` (`epic` + `product-repo`)
+→ the hub epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
+commits are exempt. When the **product hub is not reachable** from CI (the usual case for a code-repo
+PR), each degrades to a **PASS-with-note** — the hub-side check (`yad doctor` / `yad reconcile`) covers
+that path, and spec-link still proves the story link.
+
+- **lineage-check** — reads the hub epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
+  passes. A `change`/`defect`/`hotfix` epic **FAILS** unless it declares a `parent:` that resolves to a
+  real `epics/<parent>/` in the hub (no orphan threads). This is the "every code change has an owning
+  epic in a thread" enforcement, layered on spec-link.
+- **epic-open** — an epic is **sealed** iff it has ≥1 story and **every** `stories/*.md` `status:` is
+  `shipped`. A commit whose owning epic is sealed **FAILS**: new behaviour cannot mutate a shipped epic;
+  it must land in a new threaded change-epic. This is what stops the front artifacts from going stale.
+- **reconcile-debt** — resolves the epic's `thread` (its `thread:` frontmatter, else the epic id) and
+  scans every thread epic's `reconcile-debt.json`. An **open** entry the current epic does not own
+  **FAILS** the change (the thread is frozen until the hotfix debt is paid: artifacts updated + a
+  regression test added, then `status: paid`). Thread-scoped — only the affected thread freezes.
+
 ## CI wiring (both platforms)
 
 The gates run identically under either CI; the config just invokes the scripts with the PR/MR base.
@@ -158,6 +183,8 @@ The gates run identically under either CI; the config just invokes the scripts w
   (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The pattern jobs
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
+  The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) run as their own jobs with
+  `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`

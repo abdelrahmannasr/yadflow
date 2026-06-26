@@ -1,6 +1,6 @@
 ---
 name: yad-checks
-description: 'Build-half Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, and verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the hub and every repo). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
+description: 'Build-half Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the hub and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
 # SDLC — Check Gates (build-half Step C)
@@ -24,6 +24,18 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    **product hub and every connected repo**; runs on PRs/MRs only, so the gate-sync bot's direct
    ledger pushes are unaffected (never replace it with a default-branch push rule — see
    `references/check-gates.md` §4).
+5. **lineage-check** (Phase 6) — the change's owning epic is a valid node in a **feature thread**: a
+   `change`/`defect`/`hotfix` epic must thread to a real `parent`. Builds on spec-link's story→epic
+   resolution; the every-code-change-has-a-threaded-epic enforcement.
+6. **epic-open** (Phase 6, the staleness preventer) — an epic is **sealed** once every story is
+   `shipped`; a commit targeting a sealed epic **FAILS**, forcing new behaviour into a new threaded
+   change-epic (so the front artifacts can never go stale).
+7. **reconcile-debt** (Phase 6) — a hotfix that shipped first opens debt; the **next** change on its
+   thread **FAILS** until the debt is paid (artifacts updated + a regression test added).
+
+The Phase 6 gates read the owning epic in the **product hub** via `specs/<story>/link.md`'s
+`product-repo` path (like contract-check), and degrade to a PASS-with-note when the hub is not reachable
+from CI. See `references/check-gates.md` and `skills/yad-change`.
 
 The gates are **CI-agnostic bash** in `checks/`; thin pipeline configs invoke them on GitHub Actions
 and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the skill or let CI run them;

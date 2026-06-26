@@ -53,6 +53,26 @@ yad-build-test-lint:
     - npm ci
     - bash checks/build-test-lint.sh
 
+# Phase 6 — feature-thread gates (lineage / seal / hotfix-debt). Build on spec-link's story->epic
+# resolution; degrade to a note when the product repo is not reachable from CI.
+yad-lineage-check:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - bash checks/lineage-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+yad-epic-open:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - bash checks/epic-open.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+yad-reconcile-debt:
+  extends: .sdlc_mr_only
+  needs: []
+  script:
+    - bash checks/reconcile-debt-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
 # Pattern gates: commit subject + MR title + MR body all follow the convention (profile: code).
 yad-commit-message:
   extends: .sdlc_mr_only
