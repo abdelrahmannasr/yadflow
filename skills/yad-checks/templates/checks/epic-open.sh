@@ -64,10 +64,24 @@ while IFS= read -r sha; do
   [ -f "$link" ] || { echo "note [epic-open]: ${short} ${task} — link.md missing (spec-link will FAIL)."; continue; }
   product_rel="$(fm_val product-repo "$link")"
   epic="$(fm_val epic "$link")"
+  # A malformed link.md (empty product-repo, or an epic that is not a real EP-<slug>) must FAIL, not
+  # slip through as "not reachable" — an empty epic would collapse ep_dir to <product>/epics/ (a real
+  # dir) and pass the seal check as if the epic were open.
+  if [ -z "$product_rel" ] || ! printf '%s' "$epic" | grep -qE '^EP-[a-z0-9-]+$'; then
+    echo "FAIL [epic-open]: ${short} ${task} — link.md has no valid product-repo/epic metadata."
+    rc=1
+    continue
+  fi
   # product-repo is relative to the link.md's directory (specs/<story>/), so join it there.
-  ep_dir="specs/${story}/${product_rel}/epics/${epic}"
-  if [ -z "$product_rel" ] || [ ! -d "$ep_dir" ]; then
+  prod="specs/${story}/${product_rel}"
+  ep_dir="${prod}/epics/${epic}"
+  if [ ! -d "$prod" ]; then
     echo "PASS [epic-open]: ${short} ${task} -> ${epic} (product repo not reachable — seal check deferred)."
+    continue
+  fi
+  if [ ! -d "$ep_dir" ]; then
+    echo "FAIL [epic-open]: ${short} ${task} -> epic ${epic} does not exist in the product repo (orphan story link)."
+    rc=1
     continue
   fi
   if epic_sealed "$ep_dir"; then

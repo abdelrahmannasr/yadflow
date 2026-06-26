@@ -60,7 +60,7 @@ if [ -z "$commits" ]; then
 fi
 
 rc=0
-seen_threads=""
+seen_keys=""
 while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
@@ -83,9 +83,12 @@ while IFS= read -r sha; do
     continue
   fi
   thread="$(thread_root "$prod" "$epic")"
-  # De-dup the (potentially expensive) thread scan per range.
-  case " $seen_threads " in *" $thread "*) continue ;; esac
-  seen_threads="$seen_threads $thread"
+  # De-dup by (thread, epic) — NOT thread alone. open_debt_on_thread excludes the CURRENT epic, so the
+  # blocker set depends on both; caching by thread would make later commits on a different epic in the
+  # same thread inherit the first epic's result (order-dependent, can miss a real block).
+  key="${thread}:${epic}"
+  case " $seen_keys " in *" $key "*) continue ;; esac
+  seen_keys="$seen_keys $key"
   blockers="$(open_debt_on_thread "$prod" "$thread" "$epic")"
   if [ -n "$blockers" ]; then
     echo "FAIL [reconcile-debt]: thread ${thread} carries OPEN hotfix debt:"

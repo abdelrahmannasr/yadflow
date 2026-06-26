@@ -61,8 +61,15 @@ while IFS= read -r sha; do
   # product-repo is relative to the link.md's directory (specs/<story>/), so join it there.
   prod="specs/${story}/${product_rel}"
   epicmd="${prod}/epics/${epic}/epic.md"
-  if [ -z "$product_rel" ] || [ ! -f "$epicmd" ]; then
+  # Defer ONLY when the product checkout itself is unreachable. A reachable hub whose epic is missing is
+  # an orphaned story link — FAIL, do not pass it off as "not reachable".
+  if [ -z "$product_rel" ] || [ ! -d "$prod" ]; then
     echo "PASS [lineage-check]: ${short} ${task} -> epic ${epic} (product repo not reachable — lineage check deferred)."
+    continue
+  fi
+  if [ ! -f "$epicmd" ]; then
+    echo "FAIL [lineage-check]: ${short} ${task} -> epic ${epic} does not exist in the product repo (orphan story link)."
+    rc=1
     continue
   fi
   kind="$(fm_val kind "$epicmd")"
