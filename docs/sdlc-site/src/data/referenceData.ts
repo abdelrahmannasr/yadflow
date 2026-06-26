@@ -164,6 +164,30 @@ export const CHECK_GATES: CheckGate[] = [
     triggeredBy: 'PR/MR opened',
     visibleTo: ALL,
   },
+  {
+    name: 'lineage-check',
+    queue: 'yad-checks',
+    timing: 'per commit',
+    description: 'A change/defect/hotfix epic must thread to a real parent (genesis → change → defect). Layered on spec-link\'s story→epic resolution; fails closed on an unresolvable base; degrades to PASS-with-note when the hub is unreachable from CI.',
+    triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
+    visibleTo: ALL,
+  },
+  {
+    name: 'epic-open',
+    queue: 'yad-checks',
+    timing: 'per commit',
+    description: 'A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic — so the front artifacts can never go stale, only superseded.',
+    triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
+    visibleTo: ALL,
+  },
+  {
+    name: 'reconcile-debt',
+    queue: 'yad-checks',
+    timing: 'per commit',
+    description: 'A thread with open hotfix debt is frozen until the debt is paid (the reconcile that a gate-skipping fast fix owes).',
+    triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
+    visibleTo: ALL,
+  },
 ];
 
 // ─── Connectors (the registries the setup phase writes) — "feature flags" matrix ───
@@ -252,6 +276,8 @@ export const CLI_COMMANDS: CliCommand[] = [
   { constant: 'SHIP', value: 'yad ship', target: 'build', category: 'build', description: 'Commit AND open the task PR/MR in one step (commit, then open-pr).', visibleTo: BUILD },
   { constant: 'REPO', value: 'yad repo list|refresh', target: 'build', category: 'build', description: 'List connected repos as fresh/stale and re-pack a stale one.', visibleTo: BUILD },
   { constant: 'DOCS', value: 'yad docs', target: 'build', category: 'automation', description: 'Build / deploy the generated documentation sites.', visibleTo: BUILD },
+  { constant: 'THREAD', value: 'yad thread', target: 'build', category: 'change', description: 'Print a feature thread (genesis → change → defect) with its resolved current truth and any open hotfix debt — yad thread <epic>.', visibleTo: ALL },
+  { constant: 'RECONCILE', value: 'yad reconcile', target: 'build', category: 'change', description: 'Advisory drift / orphan / debt sweep across threads (mirrors yad docs sync). Check | refresh | wire.', visibleTo: ALL },
 ];
 
 // ─── Error / status codes — rendered via the Troubleshooting accordion ───

@@ -32,7 +32,7 @@ export type ActorType =
   | "system";
 
 // One category per pipeline phase (the FlowPath grouping).
-export type PathCategory = "setup" | "front" | "build" | "automate";
+export type PathCategory = "setup" | "front" | "build" | "automate" | "change";
 
 export type PlaybackState = "idle" | "playing" | "paused";
 

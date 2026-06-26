@@ -6,6 +6,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   front: '#2471a3',
   build: '#1e8449',
   automate: '#ca6f1e',
+  change: '#7d3c98',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -13,6 +14,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   front: 'Front half (human-gated)',
   build: 'Build half (per story)',
   automate: 'Automation (earned)',
+  change: 'Change management (feature threads)',
 };
 
 export function FlowOverviewSection() {
@@ -40,7 +42,7 @@ export function FlowOverviewSection() {
         </p>
       </div>
 
-      {['setup', 'front', 'build', 'automate'].map((category) => {
+      {['setup', 'front', 'build', 'automate', 'change'].map((category) => {
         const paths = grouped[category] || [];
         const color = CATEGORY_COLORS[category] || '#64748b';
         return (

@@ -310,6 +310,10 @@
     <div class="lane">
       <div class="lane-title">A · Front half — product hub · human-gated · once per epic</div>
       <div class="flow-v">
+        <div class="node artifact"><strong>yad-discovery</strong> <em>(optional front-zero · once per project)</em><small>market · competitor · feasibility · requirements → <code>roadmap.md</code> (the feature menu) · seeds <code>EP-discovery</code></small></div>
+        <div class="arrow-v">▼</div>
+        <div class="node gate">gate · discovery review<small>terminates at <code>discovery-done</code> · no build half</small></div>
+        <div class="arrow-v">▼</div>
         <div class="node artifact"><strong>yad-analysis</strong> <em>(optional)</em><small>pressure-test the idea with the analyst → <code>analysis.md</code></small></div>
         <div class="arrow-v">▼</div>
         <div class="node gate">gate · analysis review</div>
@@ -559,7 +563,7 @@ each code repo/
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 30 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 35 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>repo</code>).</div>
 
   <h3>People &amp; AI roles</h3>
@@ -715,6 +719,7 @@ each code repo/
     <tr><td><a href="#sk-sync"><code>yad-sync-repos</code></a></td><td>Setup</td><td>Switch every connected repo to its default branch + fast-forward from origin.</td></tr>
     <tr><td><a href="#sk-connect-design"><code>yad-connect-design</code></a></td><td>Setup</td><td>Connect a design tool (Figma-first) so <code>yad-ui</code> can materialize the screens.</td></tr>
     <tr><td><a href="#sk-connect-testing"><code>yad-connect-testing</code></a></td><td>Setup</td><td>Connect a testing tool (Playwright-first) so <code>yad-test-cases</code> can implement the automation.</td></tr>
+    <tr><td><a href="#sk-discovery"><code>yad-discovery</code></a></td><td>Front-zero</td><td><em>(Optional)</em> once-per-project discovery — market / feasibility / requirements → <code>roadmap.md</code>; seeds <code>EP-discovery</code>.</td></tr>
     <tr><td><a href="#sk-analysis"><code>yad-analysis</code></a></td><td>Front</td><td><em>(Optional)</em> pressure-test an idea into <code>analysis.md</code>.</td></tr>
     <tr><td><a href="#sk-epic"><code>yad-epic</code></a></td><td>Front</td><td>Start a feature: write <code>epic.md</code>, assign the ID.</td></tr>
     <tr><td><a href="#sk-arch"><code>yad-architecture</code></a></td><td>Front</td><td>Author <code>architecture.md</code> + the locked <code>contract.md</code>.</td></tr>
@@ -812,6 +817,14 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
   </div>
 
   <h3>Front half — author the thinking (in the product hub)</h3>
+
+  <div class="skillcard" id="sk-discovery">
+    <h4><code>yad-discovery</code> <em>(optional · front-zero)</em></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> A once-per-project discovery phase that runs <em>before</em> any epic: with the analyst, it pressure-tests the product itself — market, competitors, current state, feasibility, requirements — and writes <code>roadmap.md</code>, the feature menu each <code>yad-epic</code> reads. Greenfield and brownfield; modelled as the reserved epic-zero <code>EP-discovery</code>, it terminates at <code>discovery-done</code> (there is no build half).</div>
+    <div class="row"><span class="lbl lbl-how">How</span> In the product hub, describe the product:</div>
+<pre><code>run yad-discovery — idea: "a platform for submitting and tracking religious inquiries"</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> At project kick-off, to frame the whole product before the first epic. <strong>Skip it freely</strong> — <code>roadmap.md</code> is reference-only and never auto-seeds epics.</div>
+  </div>
 
   <div class="skillcard" id="sk-analysis">
     <h4><code>yad-analysis</code> <em>(optional)</em></h4>
