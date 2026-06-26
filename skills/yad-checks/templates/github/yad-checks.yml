@@ -34,6 +34,31 @@ jobs:
         with: { node-version: "20" }
       - run: bash checks/build-test-lint.sh
 
+  # Phase 6 — feature-thread gates. lineage-check: the change links a real threaded epic. epic-open:
+  # a sealed epic (all stories shipped) refuses new behaviour, forcing a change-epic. reconcile-debt:
+  # a thread with open hotfix debt is frozen for new changes until paid. All build on spec-link's
+  # story->epic resolution and degrade to a note when the product repo is not reachable from CI.
+  lineage-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/lineage-check.sh "origin/${{ github.base_ref }}"
+
+  epic-open:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/epic-open.sh "origin/${{ github.base_ref }}"
+
+  reconcile-debt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/reconcile-debt-check.sh "origin/${{ github.base_ref }}"
+
   # Pattern gates: commit subject + PR title + PR body all follow the convention (profile: code).
   commit-message:
     runs-on: ubuntu-latest

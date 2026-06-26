@@ -462,6 +462,49 @@
 - **Validated:** `implement` slice = 5 runs / 100% → earned; `tasks`/`spec` = 0 runs → `set-dial`
   refuses; `trust-log.json` and `build-state/*.json` are valid JSON.
 
+## Phase 6 decisions (post-lock change management — feature threads)
+
+> Phase 6 closes the gap that opened after the contract locks: there was no change/defect intake, and a
+> behavioural change that did not touch the contract surface shipped without updating the front/spec
+> artifacts — so they went stale and the SDLC stopped being a trusted source of truth. The decision: a
+> change is **not** an edit to a locked artifact; it is a **new epic threaded to its parent**.
+
+- **A feature is a thread of epics; artifacts are superseded, never mutated.** A change-epic inherits the
+  front artifacts it does not change (by reference) and re-authors only what it does. The feature's current
+  truth = the head of the thread, composed by `resolveCurrentArtifacts`. This preserves every lock,
+  approval, and review record, and turns the chain into a first-class evolution timeline.
+- **Derive the thread, don't register it.** The thread is the transitive closure of `parent:` frontmatter;
+  `thread:` is a denormalized cache whose disagreement with the computed root is detectable corruption
+  (`yad doctor`). Same "derive, don't duplicate" rule as roster domain-owners.
+- **Inheritance rides the existing gates with zero new derivation.** The CI gates already strip `-S0N` to
+  get the epic and read *that epic's own* `contract-lock.json`. A change-epic is a new `EP-<slug2>` with its
+  own stories, so `spec-link.sh` / `contract-check.sh` are **byte-for-byte unchanged**. The two seams that
+  make it work: (a) an inherited `architecture` writes a **pointer-lock** carrying the parent hash verbatim,
+  so `contract-check` passes and the surface cannot drift; (b) inherited `state.json` steps are pre-`done`
+  with `inherited: true` + a `boundHash`, and `gatePredicate` short-circuits them as satisfied — only the
+  re-authored artifacts are re-reviewed.
+- **Unify the contract-change route.** Omitting `architecture` from `inherits` (depth `contract-surface`)
+  re-authors `contract.md`, re-locks (new hash), and escalates the architecture review — the same
+  mechanism the build half already meant by "route back to the architecture gate", now with a concrete
+  form (a contract-surface change-epic). No second mechanism.
+- **Staleness made unshippable (the `epic-open` seal).** An epic is *sealed* once every story is `shipped`;
+  `epic-open.sh` fails a commit targeting a sealed epic, so new behaviour MUST enter a new threaded
+  change-epic whose re-authored stories/test-cases describe it. This is what forces the front half to stay
+  current — the core fix for the staleness problem.
+- **Hotfix ship-first, reconcile-after.** A `kind: hotfix` may run the build half before its front gates
+  approve, but opens `reconcile-debt.json`; `reconcile-debt.sh` freezes the thread's next change until the
+  debt is paid (artifacts updated + a regression test added). A hotfix jumps the queue once, never forever.
+- **Defects are first-class for quality analytics.** Each defect carries `escape_stage` (the gate that
+  should have caught it) + `root_cause`, so `yad-defects` aggregates *where the SDLC leaks*, not just what
+  broke. The fix's regression test makes the suite the durable memory of the bug.
+- **Reports are enrichment, never gates.** `yad-timeline` / `yad-defects` reuse the `yad-docs` shell and
+  degrade to markdown; `yad-reconcile` mirrors `yad-docs-sync` (check/refresh/wire, advisory). The hard
+  block is the three CI gates; the reconciler only discovers.
+- **Validated:** `cli/test-threads.mjs` (resolveThread linear/cycle/missing/cache-mismatch;
+  resolveCurrentArtifacts; the inherited short-circuit; seal + debt); the worked demo
+  `EP-istifta-inquiries → EP-istifta-queue-filter` (epic-open FAILs a further change to the sealed
+  change-epic; lineage/contract/reconcile PASS; `yad reconcile`/`yad doctor` flag open hotfix debt).
+
 ## License note (for any future commercial intent)
 
 - BMAD-METHOD: **MIT**. Impeccable: **Apache-2.0** (derived from Anthropic frontend-design skill).

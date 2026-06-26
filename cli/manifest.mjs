@@ -157,6 +157,9 @@ export const epicFiles = (epicRoot) => ({
   comments: `${epicRoot}/.sdlc/comments.json`,
   hubPrs: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,
+  buildLog: `${epicRoot}/.sdlc/build-log.json`,
+  change: `${epicRoot}/.sdlc/change.json`,             // Phase 6 — change/defect intake + triage
+  reconcileDebt: `${epicRoot}/.sdlc/reconcile-debt.json`, // Phase 6 — hotfix ship-first debt
 });
 
 // Per-repo wiring: src is relative to PKG_ROOT, dest relative to the repo root.
@@ -166,6 +169,9 @@ export const REPO_WIRING = {
     { src: 'skills/yad-checks/templates/checks/spec-link.sh', dest: 'checks/spec-link.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/contract-check.sh', dest: 'checks/contract-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/build-test-lint.sh', dest: 'checks/build-test-lint.sh', exec: true },
+    { src: 'skills/yad-checks/templates/checks/lineage-check.sh', dest: 'checks/lineage-check.sh', exec: true },
+    { src: 'skills/yad-checks/templates/checks/epic-open.sh', dest: 'checks/epic-open.sh', exec: true },
+    { src: 'skills/yad-checks/templates/checks/reconcile-debt-check.sh', dest: 'checks/reconcile-debt-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/risk-route.sh', dest: 'checks/risk-route.sh', exec: true },

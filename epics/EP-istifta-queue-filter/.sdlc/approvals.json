@@ -1,0 +1,12 @@
+[
+  { "artifact": "epic.md",         "step": "epic-review",         "status": "inherited", "from": "EP-istifta-inquiries", "boundHash": "sha256:1775bc0b3053eefef643bd0120292d443c4d86b7736c9afd7fd6a2931fdbd3f1", "date": "2026-06-26" },
+  { "artifact": "architecture.md", "step": "architecture-review", "status": "inherited", "from": "EP-istifta-inquiries", "boundHash": "sha256:c466fcc4b09860de02d7cb0182b8e059bd6fa2cb7bff25354cd60c37b6bd4b67", "date": "2026-06-26" },
+  { "artifact": "ui-design.md",    "step": "ui-design-review",    "status": "inherited", "from": "EP-istifta-inquiries", "boundHash": "sha256:882db8cdb1098fc7d7e917561666e67f4aef6a2ed7cafa7935d5c5e2af2d8b74", "date": "2026-06-26" },
+
+  { "artifact": "stories/",      "step": "stories-review",      "approver": "alice",   "role": "owner",        "status": "approved", "date": "2026-06-26" },
+  { "artifact": "stories/",      "step": "stories-review",      "approver": "carol",   "role": "domain-owner", "domain": "backend", "status": "approved", "date": "2026-06-26" },
+  { "artifact": "stories/",      "step": "stories-review",      "approver": "bob",     "role": "reviewer",     "status": "approved", "date": "2026-06-26" },
+
+  { "artifact": "test-cases.md", "step": "test-cases-review",   "approver": "alice",   "role": "owner",        "status": "approved", "date": "2026-06-26" },
+  { "artifact": "test-cases.md", "step": "test-cases-review",   "approver": "murat",   "role": "reviewer",     "status": "approved", "date": "2026-06-26" }
+]

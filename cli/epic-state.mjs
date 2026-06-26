@@ -190,6 +190,21 @@ export function gatePredicate({
   merged = true,
   solo = false,
 }) {
+  // Phase 6: an INHERITED step (a change-epic carrying a parent artifact by reference) is satisfied
+  // without re-review — its approval lives upstream in the thread, recorded as an `inherited` provenance
+  // entry. It is pre-marked `done` in state.json, so the gate is normally never invoked on it; this
+  // short-circuit makes a direct call safe and surfaces a corrupted boundHash (a referenced artifact
+  // cannot change under the child, so a mismatch is corruption — re-thread, do not silently pass).
+  if (step?.inherited) {
+    const drift = step.boundHash && currentHash && step.boundHash !== currentHash;
+    return {
+      approvalsSatisfied: true, threadsResolved: true, merged: true, staleDropped: 0,
+      passed: !drift,
+      missing: drift ? [`inherited artifact drifted from ${step.inheritedFrom || 'parent'} — re-thread`] : [],
+      rule: 'inherited',
+    };
+  }
+
   const forStep = approvals.filter((a) => a.step === step.id && a.status === 'approved');
   // Revoke-on-change: an approval bound to a stale content hash no longer counts.
   const stale = forStep.filter((a) => a.artifactHash && currentHash && a.artifactHash !== currentHash);
@@ -370,6 +385,143 @@ export function nextAction(ledger, { epic } = {}) {
     artifact: step.artifact, pr: pr ? pr.number : null, parallel,
     command: `yad gate ${verb} ${epicId} ${step.artifact}`,
     why: pr ? `review PR #${pr.number} is open — sync its state to advance` : `${step.id} is open — create the review PR/MR` };
+}
+
+// ---- Phase 6: feature threads (lineage frontmatter on epic.md) -----------------------------------
+
+// Minimal frontmatter reader (key: value, and `inherits: [a, b]` arrays). Mirrors gate.mjs's reader so
+// the thread helpers and the gate agree on the same parse; shared here as the lineage source.
+export function readFrontmatter(file) {
+  if (!fs.existsSync(file)) return {};
+  const m = fs.readFileSync(file, 'utf8').match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return {};
+  const out = {};
+  for (const line of m[1].split('\n')) {
+    const kv = line.match(/^(\w[\w-]*):\s*(.*)$/);
+    if (!kv) continue;
+    const [, k, v] = kv;
+    out[k] = /^\[.*\]$/.test(v) ? v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean) : v.trim();
+  }
+  return out;
+}
+
+const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+
+// The lineage of an epic from epic.md frontmatter. `kind` defaults to `feature` (genesis) when absent,
+// so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
+export function epicLineage(root, epic) {
+  const fm = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md'));
+  return {
+    kind: fm.kind || 'feature',
+    parent: fm.parent || null,
+    thread: fm.thread || null,
+    inherits: asList(fm.inherits),
+    supersedes: asList(fm.supersedes),
+  };
+}
+
+// Walk `parent` to the thread root. Cycle- and missing-safe. Returns the genesis-first `chain`, the
+// computed `rootId`, and a `broken` reason (missing parent dir, a cycle, or a denormalized `thread`
+// cache that disagrees with the computed root) — the signal yad doctor / yad next --check report.
+export function resolveThread(root, epicId) {
+  const chain = [];
+  const seen = new Set();
+  let cur = epicId;
+  let broken = null;
+  while (cur) {
+    if (seen.has(cur)) { broken = `cycle at ${cur}`; break; }
+    seen.add(cur);
+    if (!fs.existsSync(epicRoot(root, cur))) {
+      broken = cur === epicId ? `missing epic ${cur}` : `missing parent epic ${cur}`;
+      break;
+    }
+    chain.unshift(cur); // genesis ends up first
+    const { parent } = epicLineage(root, cur);
+    if (!parent) break; // reached genesis
+    cur = parent;
+  }
+  const rootId = chain[0] || epicId;
+  const tip = epicLineage(root, epicId);
+  // A non-genesis epic (has a parent) MUST carry a `thread:` cache that equals the computed root.
+  // A missing cache is corruption too — without it the bash gates' parent-walk is the only safety net,
+  // and a tool reading the field would mis-scope the thread.
+  if (!broken && tip.parent && !tip.thread) {
+    broken = `missing thread cache on ${epicId} (kind:${tip.kind}, parent:${tip.parent}) — should be '${rootId}'`;
+  }
+  if (!broken && tip.thread && tip.thread !== rootId) {
+    broken = `thread cache '${tip.thread}' != computed root '${rootId}'`;
+  }
+  return { rootId, chain, broken };
+}
+
+// Every epic that belongs to a thread (resolved root == this thread's root), ordered genesis-first by
+// chain depth. Derived by scanning epics/ — no duplicated thread registry. Used by yad-timeline/yad-defects.
+export function threadEpics(root, threadOrEpicId) {
+  const { rootId } = resolveThread(root, threadOrEpicId);
+  const dir = path.join(root, 'epics');
+  if (!fs.existsSync(dir)) return [rootId];
+  const depth = new Map();
+  const members = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory() || !isValidEpicId(e.name) || !fs.existsSync(path.join(dir, e.name, 'epic.md'))) continue;
+    const rt = resolveThread(root, e.name); // one walk per member (not per comparison)
+    if (rt.rootId !== rootId) continue;
+    members.push(e.name);
+    depth.set(e.name, rt.chain.length);
+  }
+  // Genesis-first by depth, then a STABLE, machine-independent tie-break (id order) so the resolver is
+  // deterministic across filesystems even when two epics sit at the same depth (a branch).
+  return members.sort((a, b) => (depth.get(a) - depth.get(b)) || a.localeCompare(b));
+}
+
+// Compose the CURRENT authoritative source per artifact base across a thread: the LATEST epic in the
+// chain that actually RE-AUTHORED it (did NOT list it in `inherits`). Genesis owns everything; a later
+// change-epic shadows only what it re-authored. Returns { <base>: <owning epic id> } — the source-of-
+// truth map AI/humans read for the next change (rendered by yad-timeline as thread-resolved.md).
+export const THREAD_ARTIFACT_BASES = ['epic', 'architecture', 'contract', 'ui-design', 'stories', 'test-cases'];
+// REPLACE bases — a re-author supersedes the prior version wholesale, so the LATEST re-author owns it
+// (a contract-surface change re-locks and replaces; a re-authored architecture supersedes the old one).
+const REPLACE_BASES = ['epic', 'architecture', 'contract', 'ui-design'];
+// ADDITIVE bases — each re-authoring epic CONTRIBUTES (stories add files; a change adds its test-cases
+// file), so the current truth is the UNION of contributors, never a single owner. Collapsing these to
+// one epic would drop the parent's inherited stories/cases.
+const ADDITIVE_BASES = ['stories', 'test-cases'];
+
+// The owning epic per artifact base across a thread. REPLACE bases resolve to a single epic id (the
+// latest re-author); ADDITIVE bases resolve to the ordered LIST of every epic that re-authored them
+// (genesis-first) — use resolveCurrentStories for story-id-level ownership of the composed set.
+export function resolveCurrentArtifacts(root, threadOrEpicId) {
+  const members = threadEpics(root, threadOrEpicId); // genesis-first
+  const out = {};
+  for (const b of REPLACE_BASES) out[b] = null;
+  for (const b of ADDITIVE_BASES) out[b] = [];
+  for (const id of members) {
+    const { inherits } = epicLineage(root, id);
+    for (const b of REPLACE_BASES) if (!inherits.includes(b)) out[b] = id;
+    for (const b of ADDITIVE_BASES) if (!inherits.includes(b)) out[b].push(id);
+  }
+  return out;
+}
+
+// Compose the current STORY SET at story-id granularity across the thread: each re-authoring epic's
+// stories/ files are overlaid (a later same-id supersedes; a `supersedes:` entry retires a parent
+// story). Returns { <story-id>: <owning epic id> } — the real current truth for stories, because a
+// change-epic re-authors only the stories it changes and inherits the rest by reference. Without this,
+// a defect-fix that adds one regression story would appear to drop every unchanged parent story.
+export function resolveCurrentStories(root, threadOrEpicId) {
+  const members = threadEpics(root, threadOrEpicId); // genesis-first
+  const owner = {};
+  for (const id of members) {
+    const lin = epicLineage(root, id);
+    for (const sid of lin.supersedes) delete owner[sid]; // explicitly retired parent stories
+    if (lin.inherits.includes('stories')) continue; // inherited wholesale -> contributes nothing new
+    const sdir = path.join(epicRoot(root, id), 'stories');
+    if (!fs.existsSync(sdir)) continue;
+    for (const f of fs.readdirSync(sdir).filter((x) => /\.md$/.test(x))) {
+      owner[f.replace(/\.md$/, '')] = id; // contribute / override same-id
+    }
+  }
+  return owner;
 }
 
 export { writeJSON };

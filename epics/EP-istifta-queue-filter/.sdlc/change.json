@@ -1,0 +1,21 @@
+{
+  "epicId": "EP-istifta-queue-filter",
+  "thread": "EP-istifta-inquiries",
+  "parent": "EP-istifta-inquiries",
+  "kind": "defect",
+  "depth": "defect-fix",
+  "intakeBy": "alice",
+  "intakeDate": "2026-06-26",
+  "title": "Pending queue exclusion is untested (no negative regression test)",
+  "description": "QA review found GET /inquiries/queue has no test asserting it excludes answered/assigned inquiries. The read path is correct today, but the exclusion is untested — a latent gap any future refactor could regress past CI. The contract is unchanged. The fix is the missing negative test.",
+  "affectedArtifacts": ["stories", "test-cases"],
+  "reauthors": ["stories", "test-cases"],
+  "inherits": ["epic", "architecture", "contract", "ui-design"],
+  "defect": {
+    "origin": "qa",
+    "severity": "sev3",
+    "escape_stage": "test-cases",
+    "root_cause": "missing-negative-test"
+  },
+  "hotfix": null
+}

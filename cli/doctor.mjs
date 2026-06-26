@@ -6,7 +6,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
-import { loadLedger, epicRoot } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread } from './epic-state.mjs';
+import { loadDebt } from './thread.mjs';
 import { gitHead } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
 
@@ -264,11 +265,40 @@ export function epicChecks(checks, root) {
   }
 }
 
+// Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
+// `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
+// on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
+export function threadChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!fs.statSync(path.join(epicsDir, e)).isDirectory() || !isValidEpicId(e)) continue;
+    if (!exists(path.join(epicsDir, e, 'epic.md'))) continue;
+    const lin = epicLineage(root, e);
+    if (lin.kind === 'feature' && !lin.parent) continue; // genesis with no lineage — nothing to check
+    const { broken } = resolveThread(root, e);
+    if (broken) {
+      check(checks, `thread:${e}`, 'threads', 'fail', `${e}: ${broken}`,
+        'a change-epic must thread to a real parent; fix `parent:`/`thread:` in epic.md frontmatter');
+    } else {
+      check(checks, `thread:${e}`, 'threads', 'ok', `${e}: ${lin.kind} threaded to ${lin.thread || lin.parent}`);
+    }
+    for (const d of loadDebt(root, e)) {
+      if (d.status === 'open') {
+        check(checks, `thread:${e}:debt`, 'threads', 'warn',
+          `${e}: open reconcile debt (${d.reason || 'hotfix shipped first'})`,
+          'pay it — update the artifacts + add a regression test; the next change on this thread is blocked until then');
+      }
+    }
+  }
+}
+
 export async function runDoctor(root, { json = false } = {}) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
   epicChecks(checks, root);
+  threadChecks(checks, root);
 
   const failed = checks.filter((x) => x.status === 'fail');
   const warned = checks.filter((x) => x.status === 'warn');

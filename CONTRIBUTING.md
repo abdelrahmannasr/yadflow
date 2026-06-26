@@ -161,12 +161,23 @@ widen the shared surface from inside an implementation branch.
 
 Full detail: `skills/yad-implement/references/implement-conventions.md`.
 
+## Post-lock changes — feature threads (Phase 6)
+
+Once a feature's epic is **sealed** (every story shipped), you cannot add new behaviour to it — the
+`epic-open` gate FAILs a commit targeting a sealed epic. New behaviour goes in a **new epic threaded to
+its parent** (`yad-change`): it inherits the unchanged front artifacts by reference and re-authors only
+what it changes, so the locked artifacts are never mutated and never go stale. Three CI gates enforce the
+thread: **lineage-check** (a `change`/`defect`/`hotfix` epic must declare a real `parent:`), **epic-open**
+(the seal above), and **reconcile-debt** (a thread with an open hotfix debt is frozen until paid). A
+genesis epic carries `kind: feature` + `thread: <self>` frontmatter; a change-epic adds `parent:` +
+`thread:` + `inherits:`. See `docs/phase-6-build-plan.md` and `skills/yad-change/`.
+
 ---
 
 ## Before you push
 
-- Run the check gates: `yad-checks repo:<repo> action: run` (spec-link, contract-check, build/test/lint
-  must pass).
+- Run the check gates: `yad-checks repo:<repo> action: run` (spec-link, contract-check, build/test/lint,
+  and the Phase 6 thread gates lineage-check / epic-open / reconcile-debt must pass).
 - Run the CLI suites: `npm test` (unit + bash gates) and `npm run test:e2e` (the installed tarball
   end-to-end). New behavior needs tests — the coverage gate floors at 70% lines/branches.
 - `yad doctor` should be clean (or warnings-only) in any project you touched.

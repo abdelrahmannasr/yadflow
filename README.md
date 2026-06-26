@@ -69,9 +69,13 @@ human**. Detailed walkthroughs for each phase follow below.
 | `skills/yad-backfill/` | Generate a human-verified spec for already-built code (Repomix), gated per touched feature. |
 | `skills/yad-run/` | Phase 4 orchestrator: drive a story's back half on the `automation` dial; kill switch. |
 | `skills/yad-status/` | Read-only view: front chain, build-half dials, trust record, fleet roll-up. |
-| `epics/EP-istifta-inquiries/` | A worked demo epic run **end to end** (front half + build half + automation). |
+| `skills/yad-change/` | Phase 6: post-lock change/defect/hotfix **intake + triage** — seed a new epic threaded to its parent (inherit by reference, re-author only what changes). |
+| `skills/yad-timeline/` | Phase 6: render a feature **thread** as an evolution view + resolve its current truth (`thread-resolved.md`). |
+| `skills/yad-defects/` | Phase 6: per-epic/per-thread **quality-gap report** by `escape_stage` + `root_cause`. |
+| `skills/yad-reconcile/` | Phase 6: read-only **drift/orphan/debt sweep** across threads (mirrors `yad-docs-sync`; never a gate). |
+| `epics/EP-istifta-inquiries/` | A worked demo epic run **end to end** (front half + build half + automation + a Phase 6 change thread). |
 | `demo-repos/` | Throwaway code repos for the build half (separate git repos; regenerable — see `demo-repos/README.md`). |
-| `docs/` | The phased build plans (`phase-2`…`phase-5`) and the original workflow design. |
+| `docs/` | The phased build plans (`phase-2`…`phase-6`) and the original workflow design. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Commit & PR/MR title convention (Conventional Commits, lowercase after the type). |
 
 ## The `yad` CLI (install, update, reconcile)
@@ -104,6 +108,8 @@ with `npx` from your **product hub** repo — no clone needed.
 | `yad ship --type <t> -m <subject>` | Commit **and** open the task PR/MR in one step (`yad commit` then `yad open-pr`) — stage-aware, same as `open-pr`. |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
+| `yad thread [<epic>]` | **Feature threads (Phase 6).** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling. Read-only. |
+| `yad reconcile [check\|refresh\|wire]` | Sweep threads for **drift / orphans / open hotfix debt** and report which thread drifted and why (mirrors `yad docs sync`; advisory — the CI gates block at merge). |
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
@@ -206,7 +212,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 31)
+## Agent skills (all 35)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -368,6 +374,33 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
 - **`yad-status`** — Read-only view of an epic: the current step, each step's dials (assistance/
   automation) and status, which approvals are still required, per-story back-half trust records, the
   kill-switch state, and a fleet roll-up across epics.
+
+### Post-lock change management — feature threads (Phase 6)
+
+After the contract locks and code ships, a change must **not** mutate a locked artifact — it becomes a
+**new epic threaded to its parent**. A feature is a *thread* of linked epics (genesis → change → defect →
+…); a change-epic **inherits** the front artifacts it does not change (by reference) and **re-authors**
+only what it does. So artifacts never go stale — they are *superseded*; the feature's current truth is the
+head of the thread. This is what keeps the SDLC a trusted source of truth for AI on the next change.
+
+- **`yad-change`** — the intake + triage. Classifies the change *depth* (defect-fix /
+  behavioral-no-surface / contract-surface / new-capability), seeds a new `EP-<slug>` threaded to its
+  parent (lineage frontmatter, an inherited-step `state.json`, a pointer-lock `contract-lock.json`,
+  `change.json`), and for hotfixes opens `reconcile-debt.json`. Never auto-advances — hands off to the
+  normal authoring skills + the review gate.
+- **`yad-timeline`** — render the thread as an evolution view (yad-docs shell + `TIMELINE.md`) and emit
+  `thread-resolved.md`, the composed **current-truth map** (which epic owns each artifact now).
+- **`yad-defects`** — a per-epic/per-thread quality-gap report aggregating defects by **`escape_stage`**
+  (the gate that should have caught it) + `root_cause` — *where the SDLC leaks*, so the team hardens the
+  originating stage.
+- **`yad-reconcile`** — a read-only drift/orphan/debt sweep across threads (mirrors `yad-docs-sync`; never
+  a gate). The hard block is the CI gates.
+
+Three CI gates (in `yad-checks`) enforce it: **lineage-check** (a change links a real threaded epic),
+**epic-open** (a *sealed* epic — all stories shipped — refuses new behaviour, forcing a change-epic so the
+front artifacts can never go stale), and **reconcile-debt** (a thread with open hotfix debt is frozen
+until paid). Two read-only CLIs surface it: `yad thread <epic>` (the thread + resolved truth + open debt)
+and `yad reconcile` (the drift sweep).
 
 ## The two dials (per step, build plan §2)
 
