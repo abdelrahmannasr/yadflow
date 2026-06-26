@@ -23,10 +23,11 @@ a scaffolded module that installs cleanly, and a working **team review gate** yo
 
 ## The workflow at a glance
 
-The whole lifecycle, from an empty project to shipped code. Setup is one-time; the **front half**
-is human-gated and runs once per epic in the product hub; the **build half** runs once per story
-per code repo; **automation** is opt-in and earned. `yad-status` reads it all; `yad-hub-bridge`
-mirrors front-half reviews to real PR/MRs.
+The whole lifecycle, from an empty project to shipped code. Setup is one-time; the optional
+**front-zero** (`yad-discovery`) frames the whole project once — market, feasibility, and a phased
+roadmap; the **front half** is human-gated and runs once per epic in the product hub; the **build
+half** runs once per story per code repo; **automation** is opt-in and earned. `yad-status` reads it
+all; `yad-hub-bridge` mirrors front-half reviews to real PR/MRs.
 
 <!-- Source: docs/diagrams/sdlc-overview.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
 ![Yadflow SDLC overview — setup, human-gated front half, per-story build half, earned automation](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
@@ -435,6 +436,10 @@ drive it deterministically with the **`yad gate`** CLI (`open → sync → … �
 the per-step PR/MR and the step **auto-advances on merge** once approvals are satisfied and all comment
 threads are resolved. Details: **“Run the full front half by hand”** below.
 
+0. *(optional, once per project)* `yad-discovery` → the discovery set (`market-research.md`,
+   `competitor-analysis.md`, `current-state.md`, `feasibility.md`, `requirements.md`, `roadmap.md`)
+   under the reserved `EP-discovery` → review (base rule) → `currentStep: discovery-done`. The whole
+   set is required to review; its `roadmap.md` then frames each epic below (read once it is approved).
 6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (base rule).
 7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
 8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).
@@ -480,7 +485,10 @@ Details: **“Run the back half on the dial”** below.
 
 ## Run the full front half by hand
 
-The front half walks **epic → review → architecture+contract → review → UI design → review → stories
+Optionally preceded once per project by the **front-zero** — **`yad-discovery` → review →
+`discovery-done`** — which frames the whole product (market, competitor, feasibility, requirements,
+roadmap) under the reserved `EP-discovery`; its approved `roadmap.md` then feeds each epic. The front
+half itself walks **epic → review → architecture+contract → review → UI design → review → stories
 → review → `ready-for-build`**, then **test cases → review** runs as a **parallel, non-blocking track**
 alongside the build half. It is all files under `epics/EP-<slug>/`. The skills below guide you, but you
 can also edit the files directly — that's the point.
