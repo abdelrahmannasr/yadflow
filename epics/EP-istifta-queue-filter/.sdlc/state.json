@@ -1,0 +1,17 @@
+{
+  "epicId": "EP-istifta-queue-filter",
+  "createdAt": "2026-06-26",
+  "currentStep": "ready-for-build",
+  "steps": [
+    { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "inherited": true, "inheritedFrom": "EP-istifta-inquiries", "boundHash": "sha256:1775bc0b3053eefef643bd0120292d443c4d86b7736c9afd7fd6a2931fdbd3f1", "risk_tags": [] },
+    { "id": "epic-review",         "type": "review+approve", "artifact": "epic.md",         "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "inherited": true, "inheritedFrom": "EP-istifta-inquiries", "boundHash": "sha256:1775bc0b3053eefef643bd0120292d443c4d86b7736c9afd7fd6a2931fdbd3f1", "risk_tags": [] },
+    { "id": "architecture",        "type": "author",         "artifact": "architecture.md", "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "inherited": true, "inheritedFrom": "EP-istifta-inquiries", "boundHash": "sha256:c466fcc4b09860de02d7cb0182b8e059bd6fa2cb7bff25354cd60c37b6bd4b67", "risk_tags": [] },
+    { "id": "architecture-review", "type": "review+approve", "artifact": "architecture.md", "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "inherited": true, "inheritedFrom": "EP-istifta-inquiries", "boundHash": "sha256:c466fcc4b09860de02d7cb0182b8e059bd6fa2cb7bff25354cd60c37b6bd4b67", "risk_tags": ["contract"] },
+    { "id": "ui-design",           "type": "author",         "artifact": "ui-design.md",    "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "inherited": true, "inheritedFrom": "EP-istifta-inquiries", "boundHash": "sha256:882db8cdb1098fc7d7e917561666e67f4aef6a2ed7cafa7935d5c5e2af2d8b74", "risk_tags": [] },
+    { "id": "ui-design-review",    "type": "review+approve", "artifact": "ui-design.md",    "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "inherited": true, "inheritedFrom": "EP-istifta-inquiries", "boundHash": "sha256:882db8cdb1098fc7d7e917561666e67f4aef6a2ed7cafa7935d5c5e2af2d8b74", "risk_tags": [] },
+    { "id": "stories",             "type": "author",         "artifact": "stories/",        "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "risk_tags": [] },
+    { "id": "stories-review",      "type": "review+approve", "artifact": "stories/",        "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "risk_tags": [] },
+    { "id": "test-cases",          "type": "author",         "artifact": "test-cases.md",   "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "risk_tags": [] },
+    { "id": "test-cases-review",   "type": "review+approve", "artifact": "test-cases.md",   "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",        "risk_tags": [] }
+  ]
+}

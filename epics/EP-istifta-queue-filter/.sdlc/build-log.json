@@ -1,0 +1,23 @@
+{
+  "epic": "EP-istifta-queue-filter",
+  "ships": [
+    {
+      "story": "EP-istifta-queue-filter-S01",
+      "task": "T01",
+      "repo": "backend",
+      "branch": "test/EP-istifta-queue-filter-S01-T01-queue-exclusion-regression",
+      "pr": "local-demo",
+      "mergeCommit": "demo-fix1",
+      "gates": ["spec-link", "contract-check", "build-test-lint", "lineage-check", "epic-open", "reconcile-debt"],
+      "ai_review": "coderabbit (advisory)",
+      "engineer_review": [
+        { "approver": "alice", "role": "owner" },
+        { "approver": "carol", "role": "domain-owner", "domain": "backend" }
+      ],
+      "risk": "low",
+      "regressionTest": "test/inquiry.queue.test.js::TC-QF-02",
+      "closesDefect": "EP-istifta-queue-filter",
+      "shippedAt": "2026-06-26"
+    }
+  ]
+}
