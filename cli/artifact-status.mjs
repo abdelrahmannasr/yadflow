@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, readJSONStrict } from './lib.mjs';
-import { epicRoot, artifactBase, artifactFromBase, findReviewStep } from './epic-state.mjs';
+import { epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
 // The front-gate lifecycle this command manages. Forward-only: a status is only ever moved UP this
@@ -74,6 +74,11 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
       for (const f of fs.readdirSync(storiesDir).filter((x) => x.endsWith('.md'))) {
         files.push({ base: 'stories', file: path.join(storiesDir, f) });
       }
+    }
+    // Discovery ("epic zero") set: the project-discovery files all key to the single discovery /
+    // discovery-review step pair, so they reconcile together (mirrors the stories/ set above).
+    for (const f of DISCOVERY_FILES) {
+      if (fs.existsSync(path.join(dir, f))) files.push({ base: 'discovery', file: path.join(dir, f) });
     }
 
     for (const { base, file } of files) {

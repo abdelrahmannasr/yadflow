@@ -50,9 +50,17 @@ connected repo** (the epic's `repos` are not chosen yet), load the lightweight c
   stamp `code-context: stale` in the frontmatter.
 - **Traceability:** record which maps you loaded in the analysis frontmatter `code-context:` field.
 
+### Step 2c — Read the project roadmap (project context, if discovery ran)
+If `{project-root}/epics/EP-discovery/roadmap.md` exists (the project front-zero, `yad-discovery`),
+read it and the sibling `requirements.md` for the project framing: which phase (MVP / later) this
+feature belongs to and the requirements it carries. Use it so the analysis's **Problem / Options /
+Recommendation** stay consistent with the approved roadmap. **Optional & non-blocking:** if there is
+no discovery, proceed unchanged.
+
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand)
 Derive `EP-<slug>` where `slug` is **2–4 lowercase words joined by hyphens**, drawn from the idea
-(e.g. `EP-istifta-inquiries`). Lowercase except the fixed `EP` prefix. **The ID is assigned once and
+(e.g. `EP-istifta-inquiries`). Lowercase except the fixed `EP` prefix. `EP-discovery` is **reserved**
+for the project front-zero — never use it for a feature. **The ID is assigned once and
 never renamed** — renaming breaks every downstream link (build plan §6b). Check
 `{project-root}/epics/` for collisions; if the slug exists, append a distinguishing word.
 

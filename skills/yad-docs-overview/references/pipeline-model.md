@@ -32,6 +32,18 @@ and never gates.
 | `yad-connect-learning` | `learning.json` |
 | `yad-connect-docs` | `docs.json` |
 
+### Path: Front-zero (`phase: 0-front`)
+The OPTIONAL once-per-project discovery phase, modelled as the reserved "epic zero" `EP-discovery`.
+Greenfield AND brownfield; a 2-step author→review chain whose review binds to the whole artifact set
+and terminates at `discovery-done` (no build half).
+
+| Step (skill) | Gate | Outputs / sideEffects |
+|--------------|------|------------------------|
+| `yad-discovery` *(optional)* | → `discovery-review` (base rule) | `market-research.md`, `competitor-analysis.md`, `current-state.md`, `feasibility.md`, `requirements.md`, `roadmap.md`; seeds `EP-discovery/.sdlc/state.json` |
+
+`roadmap.md` is the menu of features each `yad-epic` reads (Step 2c) — reference-only, never
+auto-seeds epics.
+
 ### Path: Front half (`phase: 1-front`)
 The gated authoring chain + the reusable review gate (10 steps, or 12 with the optional analysis).
 
@@ -85,8 +97,8 @@ The eight yadflow lenses, each to its relevant phase sections + paths:
 
 | Lens | Relevant phases / sections |
 |------|----------------------------|
-| analyst | Setup intent, analysis step, front-half discovery |
-| pm | epic, stories, roadmap; the front gates |
+| analyst | Setup intent, project discovery (front-zero), analysis step, front-half discovery |
+| pm | project discovery (market/feasibility/roadmap), epic, stories; the front gates |
 | architect | architecture + the locked contract; escalation |
 | ux | UI design, design tool connection, the design system |
 | dev | build half: spec → implement, the per-repo loop |

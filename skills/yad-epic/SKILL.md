@@ -68,10 +68,20 @@ and let it inform which `repos` the epic should touch.
 - For depth on a specific area not in the map, do a live on-demand read (see `yad-connect-repos`
   `references/code-context.md`) — do not block on it.
 
+### Step 2c — Read the project roadmap (project context, if discovery ran)
+If `{project-root}/epics/EP-discovery/roadmap.md` exists (the project front-zero, `yad-discovery`),
+read it and the sibling `requirements.md` for the project framing: which phase (MVP / later) this
+feature belongs to, the functional/non-functional requirements it carries, and how it fits the wider
+plan. Use it so the epic's **Goal / Scope / Acceptance signals** stay consistent with the approved
+roadmap. **Optional & non-blocking:** if there is no discovery (no `EP-discovery/roadmap.md`), proceed
+unchanged. After seeding the epic, the matching roadmap row's `status:` can be bumped
+`planned → epic-started` by hand (a human edit; discovery never auto-seeds epics).
+
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand) — analysis-skipped only
 *(Skip when analysis ran — the ID was already assigned by `yad-analysis`.)*
 Derive `EP-<slug>` where `slug` is **2–4 lowercase words joined by hyphens**, drawn from the idea
-(e.g. `EP-istifta-inquiries`). Lowercase except the fixed `EP` prefix. **The ID is assigned once and
+(e.g. `EP-istifta-inquiries`). Lowercase except the fixed `EP` prefix. `EP-discovery` is **reserved**
+for the project front-zero — never use it for a feature. **The ID is assigned once and
 never renamed** — renaming breaks every downstream link (build plan §6b).
 Check `{project-root}/epics/` for collisions; if the slug exists, append a distinguishing word.
 

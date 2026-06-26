@@ -44,6 +44,7 @@ human**. Detailed walkthroughs for each phase follow below.
 | `RESEARCH-NOTES.md` | Verified Phase 0 facts about BMAD, Spec Kit, Repomix, Impeccable + deviations. |
 | `skills/sdlc/` | Module source of truth (`config.yaml`, `module-help.csv`, `install.sh`). Survives BMAD updates. |
 | `bin/`, `cli/` | The `yad` setup/update CLI (published to npm as `yadflow`). |
+| `skills/yad-discovery/` | Optional front-zero (once per project, greenfield + brownfield): market research, competitor study, feasibility, current-state, requirements (functional + non-functional) and a phased roadmap (MVP+) under the reserved `EP-discovery`. `roadmap.md` is the menu of features each epic reads. |
 | `skills/yad-analysis/` | Optional front state 1: pressure-test the idea with the analyst into `analysis.md` (skippable). |
 | `skills/yad-epic/` | Front state 1: author an epic with AI assist, assign its `EP-<slug>` ID, seed state. |
 | `skills/yad-architecture/` | Front state 3: author `architecture.md` + the locked `contract.md`; hash-lock the contract surface. |
@@ -150,7 +151,7 @@ does / why / what to enter / what skipping means), and the step count adapts.
 0. **Profile** — the three questions above, plus "configure optional tools now?". Pre-answer for
    CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
 1. **Preflight** — confirm the hub is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy all 30 `yad-*` skills into the IDE skill dirs you pick
+2. **Install the module** — copy all 31 `yad-*` skills into the IDE skill dirs you pick
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
@@ -204,7 +205,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 
 Filing a bug? Attach `yad doctor --json` — it contains no secrets (names, paths, and check results only).
 
-## Agent skills (all 30)
+## Agent skills (all 31)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *“run `yad-epic`”*) to actually do the work. State lives in files you can also edit
@@ -273,6 +274,17 @@ directly. Each skill stops at a gate and never auto-advances unless a step has *
   (`yad-status` rolls up the local records). **Purely opt-in — it never blocks a gate** and
   never touches epic state, approvals, or the contract lock. *AI builds, the hand decides* — and now the
   hand can also learn, on demand, what it is deciding about.
+
+### Front-zero — frame the whole project (once per project, optional, human-gated)
+
+- **`yad-discovery`** — *Optional* front-zero, for **greenfield and brownfield**. With the analyst
+  and pm, run market research, a **competitor study** (both modes), a feasibility study, and — in
+  brownfield — a code-aware current-state study, then distil a **functional + non-functional
+  requirements** list and a **phased roadmap** (an explicit **MVP** phase, then later phases) under the
+  reserved `EP-discovery` ("epic zero"). It is gated by the same review gate (base rule: owner + 1
+  reviewer); on approval it terminates at `discovery-done` (no build half). Its `roadmap.md` is the menu
+  of features — each `yad-epic` reads it for project context (reference-only; discovery never
+  auto-seeds epics).
 
 ### Front half — author the "thinking" (once per epic, human-gated)
 

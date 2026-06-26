@@ -48,7 +48,12 @@ export function touchedDomains(epicDir, step) {
   return frontmatter(path.join(epicDir, 'epic.md')).repos || [];
 }
 
-const ownerOf = (epicDir) => frontmatter(path.join(epicDir, 'epic.md')).owner || '<owner>';
+// The artifact owner shown in the review PR/MR body. Feature epics carry it in epic.md; the discovery
+// front-zero (EP-discovery) has no epic.md, so fall back to roadmap.md's frontmatter owner.
+const ownerOf = (epicDir) =>
+  frontmatter(path.join(epicDir, 'epic.md')).owner
+  || frontmatter(path.join(epicDir, 'roadmap.md')).owner
+  || '<owner>';
 
 // A null architecture hash with a BEGIN marker present means the surface block is malformed
 // (no END, or empty) — approvals would not be hash-bound, so make that visible.
