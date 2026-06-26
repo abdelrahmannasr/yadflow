@@ -20,7 +20,8 @@ fi
 RANGE="${BASE}..HEAD"
 EXEMPT='ci|chore|build|test'
 
-fm_val() { sed -n '/^---$/,/^---$/p' "$2" 2>/dev/null | sed -nE "s/^$1:[[:space:]]*(.*)$/\1/p" | head -1 | tr -d '\r'; }
+# Read one frontmatter value from the FIRST --- … --- block only (awk stops at the first closing fence).
+fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
 
 # Is the epic SEALED? true iff it has >=1 story and EVERY stories/*.md frontmatter status is `shipped`.
 epic_sealed() {

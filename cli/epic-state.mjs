@@ -431,7 +431,10 @@ export function resolveThread(root, epicId) {
   while (cur) {
     if (seen.has(cur)) { broken = `cycle at ${cur}`; break; }
     seen.add(cur);
-    if (!fs.existsSync(epicRoot(root, cur))) { broken = `missing parent epic ${cur}`; break; }
+    if (!fs.existsSync(epicRoot(root, cur))) {
+      broken = cur === epicId ? `missing epic ${cur}` : `missing parent epic ${cur}`;
+      break;
+    }
     chain.unshift(cur); // genesis ends up first
     const { parent } = epicLineage(root, cur);
     if (!parent) break; // reached genesis
@@ -439,6 +442,12 @@ export function resolveThread(root, epicId) {
   }
   const rootId = chain[0] || epicId;
   const tip = epicLineage(root, epicId);
+  // A non-genesis epic (has a parent) MUST carry a `thread:` cache that equals the computed root.
+  // A missing cache is corruption too — without it the bash gates' parent-walk is the only safety net,
+  // and a tool reading the field would mis-scope the thread.
+  if (!broken && tip.parent && !tip.thread) {
+    broken = `missing thread cache on ${epicId} (kind:${tip.kind}, parent:${tip.parent}) — should be '${rootId}'`;
+  }
   if (!broken && tip.thread && tip.thread !== rootId) {
     broken = `thread cache '${tip.thread}' != computed root '${rootId}'`;
   }
@@ -451,11 +460,18 @@ export function threadEpics(root, threadOrEpicId) {
   const { rootId } = resolveThread(root, threadOrEpicId);
   const dir = path.join(root, 'epics');
   if (!fs.existsSync(dir)) return [rootId];
-  const members = fs.readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && isValidEpicId(e.name) && fs.existsSync(path.join(dir, e.name, 'epic.md')))
-    .map((e) => e.name)
-    .filter((id) => resolveThread(root, id).rootId === rootId);
-  return members.sort((a, b) => resolveThread(root, a).chain.length - resolveThread(root, b).chain.length);
+  const depth = new Map();
+  const members = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory() || !isValidEpicId(e.name) || !fs.existsSync(path.join(dir, e.name, 'epic.md'))) continue;
+    const rt = resolveThread(root, e.name); // one walk per member (not per comparison)
+    if (rt.rootId !== rootId) continue;
+    members.push(e.name);
+    depth.set(e.name, rt.chain.length);
+  }
+  // Genesis-first by depth, then a STABLE, machine-independent tie-break (id order) so the resolver is
+  // deterministic across filesystems even when two epics sit at the same depth (a branch).
+  return members.sort((a, b) => (depth.get(a) - depth.get(b)) || a.localeCompare(b));
 }
 
 // Compose the CURRENT authoritative source per artifact base across a thread: the LATEST epic in the

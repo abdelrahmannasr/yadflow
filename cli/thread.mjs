@@ -25,7 +25,8 @@ export const loadBuildLog = (root, epic) => readJSON(path.join(epicRoot(root, ep
 export function sealedEpic(root, epic) {
   const dir = path.join(epicRoot(root, epic), 'stories');
   if (!exists(dir)) return false;
-  const stories = fs.readdirSync(dir).filter((f) => /\.md$/.test(f));
+  const stories = fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && /\.md$/.test(e.name)).map((e) => e.name);
   if (!stories.length) return false;
   return stories.every((f) => readFrontmatter(path.join(dir, f)).status === 'shipped');
 }

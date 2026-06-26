@@ -19,8 +19,10 @@ fi
 RANGE="${BASE}..HEAD"
 EXEMPT='ci|chore|build|test'
 
-# Read one frontmatter value (first --- … --- block only) from a file. Plain scalar values only.
-fm_val() { sed -n '/^---$/,/^---$/p' "$2" 2>/dev/null | sed -nE "s/^$1:[[:space:]]*(.*)$/\1/p" | head -1 | tr -d '\r'; }
+# Read one frontmatter value from the FIRST --- … --- block only. awk bounds to the first block (stops
+# at the first closing fence), so a body `---` or an absent key can never leak a body line. Plain
+# scalars only.
+fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
 
 commits="$(git rev-list --no-merges "$RANGE")"
 if [ -z "$commits" ]; then

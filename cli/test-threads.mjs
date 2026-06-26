@@ -56,6 +56,25 @@ test('resolveThread: a missing parent and a thread-cache mismatch are flagged br
   assert.match(resolveThread(T, 'EP-bad').broken, /thread cache 'EP-wrong' != computed root 'EP-gen'/);
 });
 
+test('resolveThread: a non-genesis epic with NO thread cache is flagged broken (fail-closed)', () => {
+  const T = hub();
+  writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
+  writeEpic(T, 'EP-nocache', { kind: 'change', parent: 'EP-gen' }); // parent set, thread cache absent
+  const r = resolveThread(T, 'EP-nocache');
+  assert.equal(r.rootId, 'EP-gen');            // still computes the root by walking parent
+  assert.match(r.broken, /missing thread cache/); // but flags the missing cache (gates/doctor catch it)
+});
+
+test('threadEpics: same-depth siblings (a branch) order deterministically by id, not readdir', () => {
+  const T = hub();
+  writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
+  // Two change-epics both threaded directly off genesis — same depth (a fork).
+  writeEpic(T, 'EP-bbb', { kind: 'change', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic'] });
+  writeEpic(T, 'EP-aaa', { kind: 'change', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic'] });
+  // Genesis first, then the two siblings in stable id order (aaa before bbb) — machine-independent.
+  assert.deepEqual(threadEpics(T, 'EP-gen'), ['EP-gen', 'EP-aaa', 'EP-bbb']);
+});
+
 test('resolveThread: a cycle is detected, not looped forever', () => {
   const T = hub();
   writeEpic(T, 'EP-a', { kind: 'change', parent: 'EP-b', thread: 'EP-a' });

@@ -19,30 +19,37 @@ fi
 RANGE="${BASE}..HEAD"
 EXEMPT='ci|chore|build|test'
 
-fm_val() { sed -n '/^---$/,/^---$/p' "$2" 2>/dev/null | sed -nE "s/^$1:[[:space:]]*(.*)$/\1/p" | head -1 | tr -d '\r'; }
+fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
 
-# Thread root of an epic dir: its frontmatter `thread:` if set, else the epic id (genesis).
-thread_of() {
-  ep_dir="$1"; ep_id="$2"
-  t="$(fm_val thread "${ep_dir}/epic.md")"
-  [ -n "$t" ] && printf '%s' "$t" || printf '%s' "$ep_id"
+# Thread ROOT of an epic: walk `parent:` to the genesis (no parent). COMPUTED — never trusts the
+# denormalized `thread:` cache, so a missing/wrong cache cannot bypass the freeze. Cycle-safe.
+thread_root() {
+  prod="$1"; cur="$2"; seen=" "
+  while : ; do
+    case "$seen" in *" $cur "*) break ;; esac   # cycle guard -> stop at the last seen id
+    seen="$seen$cur "
+    em="${prod}/epics/${cur}/epic.md"
+    [ -f "$em" ] || break
+    p="$(fm_val parent "$em")"
+    [ -z "$p" ] && { printf '%s' "$cur"; return; }   # genesis reached
+    cur="$p"
+  done
+  printf '%s' "$cur"
 }
 
-# Print "epicId" for any OPEN reconcile-debt on the given thread, excluding the current epic. Scans every
-# epic's reconcile-debt.json in the product repo (a small JSON array). Best-effort JSON scan with grep —
-# the ledger is machine-written one entry per object, so a per-object grep is reliable enough for a gate.
+# Print "epicId" for any epic that (a) belongs to the target thread — by COMPUTED membership, not the
+# debt's `thread` field — (b) is not the current epic, and (c) has an OPEN entry in its reconcile-debt
+# ledger. Because each ledger lives under exactly one epic (one thread), "this epic is on the thread AND
+# its ledger has an open status" is the correct, per-object-safe test.
 open_debt_on_thread() {
   prod="$1"; thread="$2"; self="$3"
   for dj in "${prod}"/epics/*/.sdlc/reconcile-debt.json; do
     [ -e "$dj" ] || continue
-    # Only consider ledgers whose thread matches AND that carry an open status.
-    if grep -q "\"thread\"[[:space:]]*:[[:space:]]*\"${thread}\"" "$dj" 2>/dev/null \
-       && grep -q "\"status\"[[:space:]]*:[[:space:]]*\"open\"" "$dj" 2>/dev/null; then
-      owner_epic="$(sed -nE 's/.*"epicId"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$dj" | head -1)"
-      [ -z "$owner_epic" ] && owner_epic="$(basename "$(dirname "$(dirname "$dj")")")"
-      [ "$owner_epic" = "$self" ] && continue
-      printf '%s\n' "$owner_epic"
-    fi
+    owner_epic="$(basename "$(dirname "$(dirname "$dj")")")"   # the epic that OWNS this ledger
+    [ "$owner_epic" = "$self" ] && continue
+    [ "$(thread_root "$prod" "$owner_epic")" = "$thread" ] || continue   # computed thread membership
+    grep -q "\"status\"[[:space:]]*:[[:space:]]*\"open\"" "$dj" 2>/dev/null || continue
+    printf '%s\n' "$owner_epic"
   done
 }
 
@@ -75,7 +82,7 @@ while IFS= read -r sha; do
     echo "PASS [reconcile-debt]: ${short} ${task} -> ${epic} (product repo not reachable — debt check deferred)."
     continue
   fi
-  thread="$(thread_of "$ep_dir" "$epic")"
+  thread="$(thread_root "$prod" "$epic")"
   # De-dup the (potentially expensive) thread scan per range.
   case " $seen_threads " in *" $thread "*) continue ;; esac
   seen_threads="$seen_threads $thread"
