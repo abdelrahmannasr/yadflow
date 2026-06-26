@@ -229,3 +229,109 @@ same three-way shape, anchored to each step's human gate, never self-graded):
 `machine_advance` only when its slice of `trust-log.json` (same `step`, this story's repo or the
 project) has `>= min_runs` entries AND the fraction with `verdict == "approved-unchanged"` is
 `>= min_approved_unchanged`. The dial-setter in `yad-run` enforces this; `yad-status` surfaces it.
+
+---
+
+# Phase 6 — feature threads (post-lock change management)
+
+After the contract locks and code ships, a change must not **mutate** a locked artifact (that destroys
+the lock + the audit trail). Instead every change request becomes a **new epic, threaded to its parent**
+(`config.yaml` `change:`). A feature is a **thread** of linked epics (genesis → change → defect → …); a
+change-epic **inherits** unchanged front artifacts from its parent by reference and only **re-authors**
+what it changes. So artifacts are never stale, only *superseded*; the feature's current truth is the
+head of the thread, composed by the resolver (`yad-timeline`). `yad-change` seeds a change-epic;
+`yad-defects` / `yad-timeline` render the thread; `yad-reconcile` flags drift; three CI gates enforce it.
+
+## Lineage frontmatter (added to `epic.md`)
+
+An enrichment block on `epic.md` — like the `design:` / `testing:` blocks, it does **not** change the
+locked `state.json` step shape. Genesis epics are backfilled once with `kind: feature`, `thread: <self>`.
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `kind` | `feature` \| `change` \| `defect` \| `hotfix` | Genesis is `feature` (default when absent). |
+| `thread` | `EP-<genesis>` | Stable thread id = the genesis epic's id (never renamed → stablest anchor). A **derived cache** — the authoritative thread is `parent` walked to the root; a mismatch is detectable corruption (`yad doctor`). Genesis: `thread == id`. |
+| `parent` | `EP-<slug>` | The immediate predecessor epic. **Absent ⇔ `kind: feature`.** |
+| `inherits` | subset of `[epic, architecture, contract, ui-design, stories, test-cases]` | Artifact bases carried **by reference**, not re-authored. The rest are re-authored in this epic. |
+| `supersedes` | `[EP-<slug>-S0N, …]` | Optional — specific parent story IDs this epic replaces in the head. |
+| `origin` | `production` \| `staging` \| `qa` \| `review` | **defect/hotfix only.** Where the defect was found. |
+| `severity` | `sev1` … `sev4` | **defect/hotfix only.** |
+| `escape_stage` | an SDLC stage id (`stories`, `test-cases`, `architecture`, …) | **defect/hotfix only.** The gate that *should* have caught it — feeds the `yad-defects` quality report. |
+| `root_cause` | short tag | **defect/hotfix only.** e.g. `missing-negative-test`. |
+
+## Inherited steps in `state.json`
+
+A change-epic's `state.json` is structurally identical (so `advanceState` / `nextAction` / `gatePredicate`
+/ the bridge run unchanged), but **inherited** steps are pre-marked `done` with two extra fields, and
+only re-authored steps run. The seeder sets `currentStep` to the first re-authored step.
+
+```json
+{ "id": "architecture", "type": "author", "artifact": "architecture.md",
+  "assistance": "review", "automation": "human_approve", "locked": true,
+  "status": "done", "inherited": true, "inheritedFrom": "EP-istifta-inquiries",
+  "boundHash": "sha256:…", "risk_tags": [] }
+```
+
+- `inherited` — `true` when this step's artifact is taken by reference from the thread (not authored here).
+- `inheritedFrom` — the epic in the thread that owns the referenced artifact.
+- `boundHash` — the artifact's hash at inherit time (contract surface hash for `architecture`; the
+  `storiesHash`/file hash for others). The gate predicate short-circuits an `inherited` step as
+  **satisfied** iff `boundHash` still equals the thread's current hash for that artifact — always true,
+  since the artifact lives in the parent and can't be edited from the child, so inherited steps never
+  block and are never re-reviewed.
+
+`approvals.json` gets a **provenance** record per inherited gate (not a forged approval):
+
+```json
+{ "artifact": "architecture.md", "step": "architecture-review", "status": "inherited",
+  "from": "EP-istifta-inquiries", "boundHash": "sha256:…", "date": "<YYYY-MM-DD>" }
+```
+
+## The pointer-lock — `contract-lock.json` in a change-epic
+
+When `architecture` is inherited, the seeder writes a **derived** `contract-lock.json` carrying the
+parent's hash **verbatim** so `contract-check.sh` (which reads only `hash`) passes unchanged. There is
+no `contract.md` in the child to edit, so the surface physically cannot drift.
+
+```json
+{ "artifact": "contract.md", "hash": "sha256:<parent hash, verbatim>", "lockedAt": "<date>",
+  "inheritedFrom": "EP-istifta-inquiries", "ref": "../../EP-istifta-inquiries/.sdlc/contract-lock.json" }
+```
+
+Omitting `architecture` from `inherits` (depth `contract-surface`) is what triggers a **real re-lock**:
+`yad-architecture` re-authors `contract.md`, computes a **new** hash, and `architecture-review` carries
+`risk_tags: ["contract"]` → the usual domain-owner escalation. This unifies "route back to the
+architecture gate" with "open a contract-surface change-epic" — one mechanism, not two.
+
+## `change.json`
+Intake + triage record, one per change/defect/hotfix epic (sibling of `approvals.json`).
+
+```json
+{ "epicId": "EP-istifta-queue-filter", "thread": "EP-istifta-inquiries", "parent": "EP-istifta-inquiries",
+  "kind": "defect", "depth": "defect-fix", "intakeBy": "alice", "intakeDate": "<YYYY-MM-DD>",
+  "title": "Pending queue returns answered inquiries", "description": "…",
+  "affectedArtifacts": ["stories", "test-cases"],
+  "reauthors": ["stories", "test-cases"], "inherits": ["epic", "architecture", "contract", "ui-design"],
+  "defect": { "origin": "production", "severity": "sev2", "escape_stage": "test-cases",
+              "root_cause": "missing-negative-test" },
+  "hotfix": null }
+```
+
+`depth` ∈ `defect-fix | behavioral-no-surface | contract-surface | new-capability` (`config.yaml`
+`change.depths`). `defect` is `null` for a plain `change`; `hotfix` is `{ "shipFirst": true }` only for
+a `hotfix`. Thread-level rollups (`yad-timeline` / `yad-defects`) are **derived** — walk every epic
+sharing `thread` and read each `change.json`; there is no duplicated thread registry.
+
+## `reconcile-debt.json`
+Append-only ledger of hotfix ship-first debt (a hotfix shipped code before its front gates approved).
+
+```json
+[ { "thread": "EP-istifta-inquiries", "epicId": "EP-istifta-hotfix-x", "openedDate": "<date>",
+    "reason": "prod outage", "requires": ["artifacts-updated", "regression-test"],
+    "status": "open", "paidDate": null, "paidBy": null,
+    "evidence": { "artifacts": [], "regressionTest": "" } } ]
+```
+
+`status: "open"` blocks the **next** normal change on the thread (`reconcile-debt-check.sh`) until it is
+`"paid"` (evidence: the front artifacts updated **and** a regression test added). The debt lets a hotfix
+jump the queue once, but freezes new thread work until the SDLC again describes production.

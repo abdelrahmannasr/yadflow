@@ -96,7 +96,11 @@ build:
       - { id: coderabbit, name: "CodeRabbit",         email: "noreply@coderabbit.ai" }
       - { id: none,       name: "(no AI assistance)", email: "" }
   # Step C (yad-checks) — the CI gates that must pass before merge. CI-agnostic bash in checks/.
-  gates: [spec-link, contract-check, build-test-lint]
+  # Phase 6 adds three thread-aware gates: lineage-check (every change links a real threaded epic),
+  # epic-open (a SEALED epic — all stories shipped — refuses new behaviour, forcing a change-epic so the
+  # front artifacts can never go stale), and reconcile-debt (a hotfix's ship-first debt blocks the next
+  # change on its thread until paid). See the `change:` block below.
+  gates: [spec-link, contract-check, build-test-lint, lineage-check, epic-open, reconcile-debt]
   # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub): code
   # repos validate the Conventional-Commits / task-PR conventions; the product hub validates its
   # artifact-review conventions (review/EP-<slug>/<artifact>, the hub PR template). verified-commits is
@@ -256,3 +260,44 @@ automation:
   # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
   # system-wide, no per-step edits. One line, instantly reversible. Toggle via `yad-run action: kill`.
   kill_switch: false
+
+# Phase 6 (post-lock change management) — FEATURE THREADS. After the contract locks and code ships, a
+# change must not MUTATE a locked artifact (that destroys the audit trail and the lock). Instead every
+# change request becomes a NEW epic, threaded to its parent: a feature is a thread of linked epics
+# (genesis -> change -> defect -> ...). A change-epic INHERITS unchanged front artifacts from its parent
+# BY REFERENCE and only RE-AUTHORS what it changes — so artifacts are never stale, only superseded; the
+# feature's current truth is the head of the thread, and the chain IS the evolution timeline. See
+# docs/phase-6-build-plan.md and skills/yad-change. yad-defects/yad-timeline render it; yad-reconcile
+# (read-only, like yad-docs-sync) flags orphan/drift; the three gates above enforce it.
+change:
+  # The kind of an epic (epic.md frontmatter `kind:`). `feature` is the genesis (default when absent).
+  kinds: [feature, change, defect, hotfix]
+  # Triage DEPTH (yad-change auto-proposes, human confirms) -> which front states are re-authored vs
+  # inherited. defect-fix re-authors stories+test-cases only; contract-surface re-authors architecture
+  # and RE-LOCKS (a new hash routes architecture-review through the contract escalation, as today).
+  depths: [defect-fix, behavioral-no-surface, contract-surface, new-capability]
+  thread_id: genesis_epic_id            # the thread id = the genesis epic's id (never renamed -> stablest anchor)
+  # Lineage frontmatter added to epic.md (mirrors the design:/testing: enrichment blocks — the locked
+  # state.json step shape is untouched). `thread` is a DERIVED cache (authoritative = walk `parent` to
+  # the root); a mismatch is detectable corruption (yad doctor threadChecks). defect/hotfix also carry
+  # origin/severity/escape_stage/root_cause for the quality report (yad-defects).
+  lineage_frontmatter: [kind, thread, parent, inherits, supersedes, origin, severity, escape_stage, root_cause]
+  artifact_bases: [epic, architecture, contract, ui-design, stories, test-cases]   # what `inherits` may list
+  severity: [sev1, sev2, sev3, sev4]    # defect/hotfix severity
+  # Per-change-epic ledgers (siblings of approvals.json; the locked state.json shape is untouched).
+  ledgers:
+    change: "{project-root}/epics/EP-<slug>/.sdlc/change.json"          # intake + triage (one per change/defect/hotfix epic)
+    debt:   "{project-root}/epics/EP-<slug>/.sdlc/reconcile-debt.json"  # append-only hotfix ship-first debt
+  # An inherited artifact is taken by REFERENCE: the change-epic's contract-lock.json is a POINTER-LOCK
+  # carrying the parent's hash verbatim (+ inheritedFrom/ref), so contract-check.sh passes UNCHANGED and
+  # the surface physically cannot drift (there is no contract.md in the child to edit). Omitting
+  # `architecture` from `inherits` is what triggers a real re-lock + the architecture gate.
+  inherit_by: reference
+  # An epic is SEALED once every story is `shipped` (build.story_build_states). epic-open.sh refuses new
+  # behaviour on a sealed epic -> the change must land in a new threaded change-epic (the front half is
+  # forced to stay current; staleness is unshippable).
+  seal_on: all-stories-shipped
+  hotfix:
+    ship_first: true                    # a hotfix may run the build half BEFORE its front gates approve
+    debt_blocks_next_change: true       # but opens reconcile-debt.json; the next change on the thread is blocked until paid
+    debt_requires: [artifacts-updated, regression-test]   # evidence that clears the debt
