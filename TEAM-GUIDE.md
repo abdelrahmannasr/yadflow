@@ -4,7 +4,10 @@
 moves every gate. On npm as `yadflow`.
 
 This is the short, plain-language version of `README.md`, written for a developer team. If you only read
-one page before starting, read this one. The full reference is in `README.md`.
+one page before starting, read this one. For depth, see [`docs/CLI.md`](docs/CLI.md) (commands),
+[`docs/SKILLS.md`](docs/SKILLS.md) (every skill), and [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)
+(the by-hand, end-to-end path) — or learn by doing in the
+[guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/).
 
 ---
 
@@ -440,7 +443,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 11. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions are in [`README.md`](README.md) → *Agent skills (all 35)*.
+descriptions of all 35 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -478,6 +481,8 @@ descriptions are in [`README.md`](README.md) → *Agent skills (all 35)*.
 
 ## 12. Want more detail?
 
-- **`README.md`** — the complete reference for every phase, dial, gate, and all 31 skills.
+- **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
+- **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
+- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 35 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

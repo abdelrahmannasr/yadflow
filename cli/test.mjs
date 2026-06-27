@@ -2750,7 +2750,7 @@ test('docsStale flags never-built, changed artifacts, advanced HEADs, and shell 
 
 test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop-safe', () => {
   const gh = pagesWorkflow('github');
-  assert.match(gh, /deploy-pages@v4/);
+  assert.match(gh, /deploy-pages@v5/);
   assert.match(gh, /concurrency:/);                 // deploy-loop guard
   assert.match(gh, /# yad-managed/);
   // both the overview AND per-epic sites are assembled into ./public (epics nested under epics/<id>/)
@@ -2761,6 +2761,9 @@ test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop
   // the overview SPA mounts under public/app and the report.html owns the root (index.html + report.html)
   assert.match(gh, /public\/app/);
   assert.match(gh, /report\.html public\/index\.html/);
+  // the guided tutorial site mounts under public/tutorial (peer of the overview app)
+  assert.match(gh, /docs\/tutorial-site/);
+  assert.match(gh, /public\/tutorial/);
   assert.equal(pagesWorkflowPath('github'), '.github/workflows/yad-docs.yml');
   const gl = pagesWorkflow('gitlab');
   assert.match(gl, /^pages:/m);

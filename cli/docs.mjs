@@ -121,6 +121,7 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, templateVers
 const BUILD_PUBLIC = [
   'mkdir -p public',
   'if [ -d docs/sdlc-site ]; then (cd docs/sdlc-site && npm ci && npm run build) && mkdir -p public/app && cp -r docs/sdlc-site/dist/. public/app/ && cp docs/sdlc-site/public/report.html public/index.html && cp docs/sdlc-site/public/report.html public/report.html; fi',
+  'if [ -d docs/tutorial-site ]; then (cd docs/tutorial-site && npm ci && npm run build) && mkdir -p public/tutorial && cp -r docs/tutorial-site/dist/. public/tutorial/; fi',
   'for d in epics/*/docs-site; do [ -d "$d" ] || continue; id=$(basename "$(dirname "$d")"); (cd "$d" && npm ci && npm run build) && mkdir -p "public/epics/$id" && cp -r "$d/dist/." "public/epics/$id/"; done',
 ];
 export function pagesWorkflow(platform) {
@@ -160,19 +161,19 @@ jobs:
       name: github-pages
       url: \${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       - name: Build the overview + per-epic sites into ./public
         run: |
 ${BUILD_PUBLIC.map((l) => `          ${l}`).join('\n')}
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: public
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 `;
 }
 export function pagesWorkflowPath(platform) {
