@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Icon } from '../components/Icon';
@@ -20,10 +20,11 @@ export function LessonPage() {
   const isComplete = useProgress((s) => (lessonId ? Boolean(s.completed[lessonId]) : false));
   const markComplete = useProgress((s) => s.markComplete);
   const toggle = useProgress((s) => s.toggle);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   // Scroll to top whenever the lesson changes.
   useEffect(() => {
-    document.getElementById('lesson-scroll')?.scrollTo({ top: 0 });
+    scrollRef.current?.scrollTo({ top: 0 });
   }, [lessonId]);
 
   if (!result) {
@@ -45,7 +46,7 @@ export function LessonPage() {
   };
 
   return (
-    <div id="lesson-scroll" className="h-full overflow-y-auto">
+    <div ref={scrollRef} className="h-full overflow-y-auto">
       <article className="max-w-3xl mx-auto px-6 py-10">
         {/* Header */}
         <motion.div key={lesson.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -74,6 +75,7 @@ export function LessonPage() {
           <div className="mt-8 flex items-center gap-3">
             <button
               onClick={() => toggle(lesson.id)}
+              aria-pressed={isComplete}
               className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
               style={{
                 border: `1px solid ${isComplete ? '#3fae6b' : 'var(--color-border-light)'}`,

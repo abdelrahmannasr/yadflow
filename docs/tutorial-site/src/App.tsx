@@ -11,6 +11,15 @@ export default function App() {
   const location = useLocation();
   const isLesson = location.pathname.startsWith('/lesson/');
 
+  // Close the mobile drawer on every navigation so it never re-mounts open.
+  // Adjusting state during render (React's documented pattern) instead of an
+  // effect avoids an extra paint with the stale-open drawer.
+  const [lastPath, setLastPath] = useState(location.pathname);
+  if (location.pathname !== lastPath) {
+    setLastPath(location.pathname);
+    if (mobileSidebarOpen) setMobileSidebarOpen(false);
+  }
+
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-primary)' }}>
       <TopNav onToggleSidebar={isLesson ? () => setMobileSidebarOpen((v) => !v) : undefined} />

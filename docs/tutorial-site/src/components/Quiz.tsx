@@ -39,9 +39,19 @@ function Question({ question, onResolved }: { question: QuizQuestion; onResolved
         })}
       </div>
       {answered && (
-        <div className="mt-3 rounded-lg p-3 text-sm flex gap-2" style={{ background: 'rgba(90,169,230,0.08)', borderLeft: '3px solid var(--color-earns)', color: 'var(--color-text-secondary)' }}>
+        <div
+          role="status"
+          aria-live="polite"
+          className="mt-3 rounded-lg p-3 text-sm flex gap-2"
+          style={{ background: 'rgba(90,169,230,0.08)', borderLeft: '3px solid var(--color-earns)', color: 'var(--color-text-secondary)' }}
+        >
           <Icon name="lightbulb" size={17} style={{ color: 'var(--color-earns)', flex: 'none', marginTop: 1 }} />
-          <span><InlineText text={question.explain} /></span>
+          <span>
+            <strong style={{ color: 'var(--color-text-primary)' }}>
+              {picked === question.answer ? 'Correct. ' : 'Not quite. '}
+            </strong>
+            <InlineText text={question.explain} />
+          </span>
         </div>
       )}
     </div>

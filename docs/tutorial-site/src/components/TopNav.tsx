@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom';
 import { Icon } from './Icon';
 import { useProgress } from '../store/useProgress';
-import { TOTAL_LESSONS } from '../data/lessons';
+import { ALL_LESSONS, TOTAL_LESSONS } from '../data/lessons';
+import { REFERENCE_URL, REPO_URL } from '../links';
 
 export function TopNav({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
   const completed = useProgress((s) => s.completed);
-  const doneCount = Object.keys(completed).length;
+  // Count only lessons that still exist — stale localStorage IDs must not inflate progress.
+  const doneCount = ALL_LESSONS.filter((l) => completed[l.id]).length;
   const pct = Math.round((doneCount / TOTAL_LESSONS) * 100);
 
   return (
@@ -43,7 +45,7 @@ export function TopNav({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
           <span className="text-xs font-medium tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>{doneCount}/{TOTAL_LESSONS}</span>
         </div>
         <a
-          href="https://abdelrahmannasr.github.io/yadflow/"
+          href={REFERENCE_URL}
           target="_blank"
           rel="noreferrer"
           className="hidden md:flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md transition-colors hover:bg-white/5"
@@ -53,7 +55,7 @@ export function TopNav({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
           Reference
         </a>
         <a
-          href="https://github.com/abdelrahmannasr/yadflow"
+          href={REPO_URL}
           target="_blank"
           rel="noreferrer"
           className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-white/5"

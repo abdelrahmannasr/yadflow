@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Icon } from '../components/Icon';
 import { MODULES, ALL_LESSONS, TOTAL_LESSONS } from '../data/lessons';
 import { useProgress } from '../store/useProgress';
+import { REFERENCE_URL } from '../links';
 
 const levelMeta: Record<string, { color: string; label: string }> = {
   beginner: { color: 'var(--color-earns)', label: 'Beginner' },
@@ -13,7 +14,8 @@ const levelMeta: Record<string, { color: string; label: string }> = {
 export function HomePage() {
   const completed = useProgress((s) => s.completed);
   const navigate = useNavigate();
-  const doneCount = Object.keys(completed).length;
+  // Count only lessons that still exist — stale localStorage IDs must not inflate progress.
+  const doneCount = ALL_LESSONS.filter((l) => completed[l.id]).length;
   const firstUndone = ALL_LESSONS.find((l) => !completed[l.id]) ?? ALL_LESSONS[0];
   const resuming = doneCount > 0 && doneCount < TOTAL_LESSONS;
 
@@ -43,7 +45,7 @@ export function HomePage() {
                 {resuming ? `Resume — ${firstUndone.title}` : 'Start the tutorial'}
               </button>
               <a
-                href="https://abdelrahmannasr.github.io/yadflow/"
+                href={REFERENCE_URL}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-colors hover:bg-white/5"

@@ -161,19 +161,19 @@ jobs:
       name: github-pages
       url: \${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
       - name: Build the overview + per-epic sites into ./public
         run: |
 ${BUILD_PUBLIC.map((l) => `          ${l}`).join('\n')}
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: public
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 `;
 }
 export function pagesWorkflowPath(platform) {
