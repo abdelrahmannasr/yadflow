@@ -3,6 +3,7 @@ import { Icon } from './Icon';
 import { InlineText } from './InlineText';
 import type { QuizQuestion } from '../data/types';
 
+/** A single comprehension question: choose an option, then see the verdict + explanation. */
 function Question({ question, onResolved }: { question: QuizQuestion; onResolved: (correct: boolean) => void }) {
   const [picked, setPicked] = useState<number | null>(null);
   const answered = picked !== null;
@@ -58,6 +59,7 @@ function Question({ question, onResolved }: { question: QuizQuestion; onResolved
   );
 }
 
+/** The end-of-lesson "Check yourself" card wrapping one or more questions. */
 export function Quiz({ questions }: { questions: QuizQuestion[] }) {
   return (
     <div className="rounded-xl p-5" style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border-default)' }}>

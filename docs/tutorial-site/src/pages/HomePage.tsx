@@ -11,6 +11,7 @@ const levelMeta: Record<string, { color: string; label: string }> = {
   advanced: { color: 'var(--color-accent)', label: 'Advanced' },
 };
 
+/** Landing page: hero with start/resume CTA and the grid of curriculum modules. */
 export function HomePage() {
   const completed = useProgress((s) => s.completed);
   const navigate = useNavigate();

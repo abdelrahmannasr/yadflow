@@ -6,6 +6,7 @@ import { Sidebar } from './components/Sidebar';
 import { HomePage } from './pages/HomePage';
 import { LessonPage } from './pages/LessonPage';
 
+/** Root layout: top bar, the lesson-only sidebar (desktop + mobile drawer), and routes. */
 export default function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const location = useLocation();

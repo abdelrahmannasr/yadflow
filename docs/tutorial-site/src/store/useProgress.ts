@@ -10,6 +10,7 @@ interface ProgressState {
   reset: () => void;
 }
 
+/** Tracks which lessons the learner has completed, persisted to localStorage. */
 export const useProgress = create<ProgressState>()(
   persist(
     (set, get) => ({

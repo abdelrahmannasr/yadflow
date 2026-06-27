@@ -9,6 +9,7 @@ const levelColor: Record<string, string> = {
   advanced: 'var(--color-accent)',
 };
 
+/** The curriculum navigator: modules and lessons with per-module progress counts. */
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const completed = useProgress((s) => s.completed);
 

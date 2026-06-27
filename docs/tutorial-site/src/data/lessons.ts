@@ -792,6 +792,7 @@ export const ALL_LESSONS = MODULES.flatMap((m) =>
 
 export const TOTAL_LESSONS = ALL_LESSONS.length;
 
+/** Look up a lesson by id, returning it with its previous/next neighbours (or null). */
 export function findLesson(id: string) {
   const idx = ALL_LESSONS.findIndex((l) => l.id === id);
   if (idx === -1) return null;

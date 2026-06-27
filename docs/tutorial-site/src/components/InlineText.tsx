@@ -1,6 +1,9 @@
 import { Fragment } from 'react';
 
-// Minimal inline renderer: supports `code` spans and **bold** — no parser dependency.
+/**
+ * Renders a single line of lesson text with minimal inline formatting —
+ * `` `code` `` spans and `**bold**` — without pulling in a Markdown parser.
+ */
 export function InlineText({ text }: { text: string }) {
   // First split on backtick code spans, then handle **bold** inside non-code parts.
   const parts = text.split(/(`[^`]+`)/g);

@@ -4,6 +4,7 @@ import { useProgress } from '../store/useProgress';
 import { ALL_LESSONS, TOTAL_LESSONS } from '../data/lessons';
 import { REFERENCE_URL, REPO_URL } from '../links';
 
+/** The top bar: brand, overall progress, and links to the report and repo. */
 export function TopNav({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
   const completed = useProgress((s) => s.completed);
   // Count only lessons that still exist — stale localStorage IDs must not inflate progress.

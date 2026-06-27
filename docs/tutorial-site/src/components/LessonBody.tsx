@@ -8,6 +8,7 @@ const calloutStyles: Record<string, { border: string; bg: string; icon: string; 
   key: { border: 'var(--color-accent)', bg: 'rgba(255,100,144,0.08)', icon: 'key', iconColor: 'var(--color-accent)', label: 'Key idea' },
 };
 
+/** Renders one content block (paragraph, heading, list, steps, or callout). */
 function BlockView({ block }: { block: Block }) {
   switch (block.kind) {
     case 'h':
@@ -66,6 +67,7 @@ function BlockView({ block }: { block: Block }) {
   }
 }
 
+/** A "Try it" terminal-styled panel listing the commands a lesson runs. */
 export function CommandList({ commands }: { commands: CommandLine[] }) {
   return (
     <div className="mb-5 rounded-lg overflow-hidden code-block">
@@ -90,6 +92,7 @@ export function CommandList({ commands }: { commands: CommandLine[] }) {
   );
 }
 
+/** Lists the files/state a lesson's step produces, styled as artifacts. */
 export function ProducesList({ produces }: { produces: string[] }) {
   return (
     <div className="mb-5 rounded-lg p-4" style={{ background: 'rgba(244,208,63,0.05)', border: '1px solid rgba(244,208,63,0.18)' }}>
@@ -109,6 +112,7 @@ export function ProducesList({ produces }: { produces: string[] }) {
   );
 }
 
+/** Renders the ordered content blocks that make up a lesson's body. */
 export function LessonBody({ body }: { body: Block[] }) {
   return (
     <div className="prose-tutorial">

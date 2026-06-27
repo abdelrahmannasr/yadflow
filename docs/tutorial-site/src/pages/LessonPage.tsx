@@ -13,6 +13,7 @@ const levelColor: Record<string, string> = {
   advanced: 'var(--color-accent)',
 };
 
+/** Renders one lesson (body, commands, produces, quiz) with prev/next navigation. */
 export function LessonPage() {
   const { lessonId } = useParams();
   const navigate = useNavigate();
