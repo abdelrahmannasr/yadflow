@@ -16,7 +16,7 @@ steady state. This doc covers the one-time bootstrap and the ongoing flow.
 1. install deps (`npm ci`) and run tests (`npm test`),
 2. run `npx semantic-release`, which:
    - reads the [Conventional Commits](CONTRIBUTING.md) since the last release to pick the next version
-     (`fix:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major),
+     (`docs:`/`fix:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major),
    - regenerates `CHANGELOG.md` and ships it **inside the npm tarball**,
    - **publishes to npm via tokenless Trusted Publishing (OIDC) with build provenance** — no `NPM_TOKEN`,
    - pushes the `vX.Y.Z` git tag and cuts a GitHub release with the notes.
@@ -78,8 +78,9 @@ GitHub release.) The source repo must also be **public** — npm provenance is r
 
 1. Merge a PR to `main` with a Conventional-Commit title (**squash-merge** keeps the PR title as the
    commit subject, which is what semantic-release reads).
-   - `feat: …` → minor, `fix: …`/`perf: …` → patch, `feat!:` or a `BREAKING CHANGE:` footer → major.
-   - `docs:`/`chore:`/`ci:`/`test:`/`refactor:` alone → **no release**.
+   - `feat: …` → minor, `fix: …`/`perf: …`/`docs: …` → patch, `feat!:` or a `BREAKING CHANGE:` footer → major.
+   - `docs:` triggers a patch so README/docs that ship in the npm tarball reach the registry without a manual nudge (custom `releaseRules` in `.releaserc.json`).
+   - `chore:`/`ci:`/`test:`/`refactor:` alone → **no release**.
 2. `release.yml` runs automatically. Watch it under the repo's **Actions** tab.
 
 ## Verify
@@ -102,7 +103,7 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
 - **PR won't merge ("review required"):** `main` is branch-protected with a required review. Approve the
   PR, or admin-merge: `gh pr merge <n> --squash --admin`. The release workflow itself does not push to
   `main`, so it is never blocked by this.
-- **No release was cut:** the merged commits were all non-releasing types (`docs:`, `chore:`, …). That's
-  expected — only `feat`/`fix`/`perf`/breaking trigger a version.
+- **No release was cut:** the merged commits were all non-releasing types (`chore:`, `ci:`, `test:`,
+  `refactor:`). That's expected — only `feat`/`fix`/`perf`/`docs`/breaking trigger a version.
 - **A `2FA` prompt blocks automated publish:** it shouldn't — OIDC trusted publishing satisfies the
   publish requirement without an OTP. Only the one-time manual bootstrap (step A) prompts.
