@@ -13,7 +13,24 @@ cd "$ROOT"
 
 SKILLS=(yad-discovery yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-connect-docs yad-docs yad-docs-overview yad-docs-sync yad-learn yad-spec yad-implement yad-checks yad-pr-template yad-hub-bridge yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill yad-run yad-review-gate yad-status yad-change yad-timeline yad-defects yad-reconcile)
 
+# Skills removed in a later release: this installer only refreshes names still in SKILLS, so a
+# rerun would otherwise leave a dropped skill sitting in the IDE dirs. Purge any lingering copy
+# (current name + any pre-rename alias) so the breaking removal takes effect for existing installs.
+# Mirrors the CLI's REMOVED_SKILLS purge in `yad update`.
+REMOVED_SKILLS=(yad-review-comments sdlc-review-comments)
+
 echo "Installing sdlc module from $ROOT/skills ..."
+
+for ide in .claude .agents .zencoder; do
+  for s in "${REMOVED_SKILLS[@]}"; do
+    rm -rf "$ide/skills/$s"
+  done
+done
+if [ -d ".opencode/commands" ]; then
+  for s in "${REMOVED_SKILLS[@]}"; do
+    rm -f ".opencode/commands/$s.md"
+  done
+fi
 
 # 1. Folder-per-skill IDEs: .claude, .agents, .zencoder
 for ide in .claude .agents .zencoder; do

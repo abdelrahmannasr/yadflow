@@ -73,6 +73,14 @@ export const LEGACY_SKILLS = {
   'yad-status': 'sdlc-status',
 };
 
+// Skills removed in a later release that must be PURGED from existing installs. Unlike
+// LEGACY_SKILLS (a rename: drop old name, install new), these have no replacement — a rerun of
+// `yad update` / `yad setup` deletes any installed copy from every IDE target so a breaking
+// removal actually takes effect. List every install basename to purge, including any pre-rename
+// alias the skill ever shipped under.
+//   yad-review-comments — removed in 2.x (was sdlc-review-comments pre-2.0).
+export const REMOVED_SKILLS = ['yad-review-comments', 'sdlc-review-comments'];
+
 // Pre-2.0 wired-file dests replaced by renamed ones (old dest -> new dest, per platform).
 // An old file is removed ONLY when its first line carries the old ownership marker —
 // a same-named file the user authored themselves is never touched.

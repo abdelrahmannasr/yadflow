@@ -8,7 +8,7 @@ import {
 } from './lib.mjs';
 import {
   SKILLS, IDE_FOLDER_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
-  LEGACY_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES,
+  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES,
 } from './manifest.mjs';
 
 // status: 'ok' | 'missing' | 'outdated'
@@ -98,6 +98,39 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
             fs.rmSync(oldDest, { recursive: true, force: true });
             copyDir(asset('skills', skill), path.join(root, ide, 'skills', skill));
           },
+        });
+      }
+    }
+  }
+  return actions;
+}
+
+// Purge of skills removed in a later release (REMOVED_SKILLS). Status is 'removed' — like 'legacy'
+// it is applied by `yad update` (--scope=changed) too, because the skill IS installed and a
+// breaking removal must actually delete it. An action is emitted ONLY when a copy is present, so a
+// clean tree yields nothing and the purge is idempotent. apply() just deletes the install (no
+// replacement — that is what makes this a removal, not a rename).
+export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
+  const actions = [];
+  for (const ide of ideTargets) {
+    for (const skill of REMOVED_SKILLS) {
+      if (ide === '.opencode') {
+        const dest = path.join(root, IDE_OPENCODE_DIR, `${skill}.md`);
+        if (!exists(dest)) continue;
+        actions.push({
+          scope: ide,
+          item: `${skill}.md (removed)`,
+          status: 'removed',
+          apply: () => fs.rmSync(dest, { force: true }),
+        });
+      } else {
+        const dest = path.join(root, ide, 'skills', skill);
+        if (!exists(dest)) continue;
+        actions.push({
+          scope: ide,
+          item: `${skill} (removed)`,
+          status: 'removed',
+          apply: () => fs.rmSync(dest, { recursive: true, force: true }),
         });
       }
     }

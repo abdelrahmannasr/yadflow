@@ -9,7 +9,7 @@ import {
 import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, authorsActions,
-  legacyModuleActions, legacyRepoActions, legacyHubActions,
+  legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
 } from './plan.mjs';
 import { validateLogin, rolesForScope } from './platform.mjs';
 
@@ -399,6 +399,9 @@ export async function runSetup(root, opts = {}) {
   // IDE targets and install their yad-* renames. Without this, setup only ADDED yad-* and left
   // stale sdlc-* sitting next to them (the rename only ran under `yad update` / `yad check --fix`).
   applyActions(legacyModuleActions(root, ideTargets), { force: true });
+  // Purge any skill removed in a later release (REMOVED_SKILLS) that a prior install left behind —
+  // setup only ADDS current skills, so without this a breaking removal would linger next to them.
+  applyActions(removedModuleActions(root, ideTargets), { force: true });
   ok(`module installed into: ${ideTargets.join(', ')}`);
 
   // Global leftovers: a pre-2.0 install may have put sdlc-* skills in the user's global
@@ -413,6 +416,18 @@ export async function runSetup(root, opts = {}) {
       ok('migrated global ~/.claude/skills to yad-*');
     } else {
       info('left global ~/.claude/skills untouched — re-run `yad setup` or migrate later with `yad update`');
+    }
+  }
+
+  // Same opt-in pass for skills removed in a later release (REMOVED_SKILLS) that linger in the
+  // global ~/.claude/skills — purge them so a global install also drops the dead command.
+  const globalRemoved = process.env.SDLC_NONINTERACTIVE ? [] : removedModuleActions(os.homedir(), ['.claude']);
+  if (globalRemoved.length) {
+    if (await askYesNo(`Found ${globalRemoved.length} removed skill(s) in your global ~/.claude/skills. Delete them?`, true)) {
+      applyActions(globalRemoved, { force: true });
+      ok('purged removed skill(s) from global ~/.claude/skills');
+    } else {
+      info('left global ~/.claude/skills untouched — re-run `yad setup` or purge later with `yad update`');
     }
   }
 
