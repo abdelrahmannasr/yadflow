@@ -292,9 +292,9 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 35 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 34 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> · <code>yad-review-comments</code> (CI gates, PR template, comment scaffold)</small></div>
+        <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> (CI gates, PR template)</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Connect code repos</strong><small><code>yad-connect-repos</code> → <code>repos.json</code> + a cached code-map per repo <em>(skip if greenfield)</em></small></div>
         <div class="arrow-v">▼</div>
@@ -479,7 +479,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 35 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 34 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -530,7 +530,6 @@ each code repo/
   <div class="term"><strong>Hub bridge (<code>yad-hub-bridge</code>)</strong><span class="badge b-gate">gates</span><br>The machinery that connects the file ledger to platform PRs/MRs: opens the review PR per artifact, sets required reviewers/labels from the routing rule, and provides the read-only <code>gh</code>/<code>glab</code> recipes for syncing approvals and comments back.</div>
   <div class="term"><strong>Merge-time gate sync</strong><span class="badge b-gate">gates</span><br>A CI workflow on the hub that runs <code>yad gate ci</code> on merge — <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. During review CI writes nothing: the platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review branch — so an in-flight approval is never dismissed and required checks never strand. On the human merge it re-reads approvals, advances the step, and flips the artifact status on the default branch. A <code>ledger-guard</code> check keeps humans out of the gate files. CI never approves and never merges; the human keeps the merge click, then <code>git pull</code>s.</div>
   <div class="term"><strong>Approval revocation (re-hash)</strong><span class="badge b-gate">gates</span><br>If a reviewed artifact actually changes after approval, the recorded approvals are revoked automatically (the artifact is re-hashed) — reviewers get a fresh pass at the new content.</div>
-  <div class="term"><strong>Review-comment scaffold</strong><span class="badge b-gate">gates</span><br>Committed comment templates (<code>REVIEW_COMMENTS.md</code> / GitLab comment templates) so reviewers leave structured, attributable feedback — each canned comment carries a <code>**name (role)**</code> header that maps cleanly into the file ledger.</div>
   <div class="term"><strong>Risk tags / risk routing</strong><span class="badge b-gate">gates</span><br>Labels (<code>contract</code>, <code>auth</code>, <code>payments</code>) and the PR template’s Impact &amp; Risk block that decide who must review. High risk or a touched risky surface routes the review to the relevant domain owners (<code>risk-route.sh</code> prints them).</div>
   <div class="term"><strong>Impact &amp; Risk block</strong><span class="badge b-gate">gates</span><br>A section in the wired PR/MR template where the author declares the risk level and touched surfaces — the input the risk routing reads.</div>
 
@@ -573,7 +572,7 @@ each code repo/
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 35 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 34 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>repo</code>).</div>
 
   <h3>People &amp; AI roles</h3>
@@ -716,7 +715,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 35 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 34 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -738,7 +737,6 @@ each code repo/
     <tr><td><a href="#sk-test-cases"><code>yad-test-cases</code></a></td><td>Front</td><td>With the test architect, author the test cases; implement the automation when a testing tool is connected.</td></tr>
     <tr><td><a href="#sk-gate"><code>yad-review-gate</code></a></td><td>Cross-cutting</td><td>Review / comment / approve / advance <strong>any</strong> gate.</td></tr>
     <tr><td><a href="#sk-bridge"><code>yad-hub-bridge</code></a></td><td>Cross-cutting</td><td>Run front-half reviews over real PRs/MRs and sync them back.</td></tr>
-    <tr><td><a href="#sk-comments"><code>yad-review-comments</code></a></td><td>Setup</td><td>Install the structured review-comment scaffolds.</td></tr>
     <tr><td><a href="#sk-spec"><code>yad-spec</code></a></td><td>Build A</td><td>Spec one ready story in one repo (Spec Kit ceremony).</td></tr>
     <tr><td><a href="#sk-impl"><code>yad-implement</code></a></td><td>Build B</td><td>Implement one atomic task as a small branch.</td></tr>
     <tr><td><a href="#sk-checks"><code>yad-checks</code></a></td><td>Build C</td><td>Wire / run the CI gates.</td></tr>
@@ -906,15 +904,6 @@ yad-review-gate … action: advance    # move on — only if the rule is met, el
     <div class="row"><span class="lbl lbl-when">When</span> Once during setup (step “wire the hub”), if you want front-half reviews to ride real PRs/MRs. No platform or no <code>gh</code>/<code>glab</code>? Everything degrades to the file-only gate with no error — you never <em>need</em> this skill.</div>
   </div>
 
-  <div class="skillcard" id="sk-comments">
-    <h4><code>yad-review-comments</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> Installs ready-made review-comment templates into a repo (a committed <code>REVIEW_COMMENTS.md</code> on GitHub / comment templates on GitLab), so reviewers leave structured, attributable feedback — each comment carries a <code>**name (role)**</code> header that maps cleanly into the file ledger.</div>
-    <div class="row"><span class="lbl lbl-how">How</span> Once per repo (and once for the hub):</div>
-<pre><code>yad-review-comments repo: backend action: wire
-yad-review-comments repo: hub action: wire</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> During one-time setup, together with the other wiring. Re-running is a harmless no-op.</div>
-  </div>
-
   <h3>Build half — turn stories into shipped code (in a code repo)</h3>
 
   <div class="skillcard" id="sk-spec">
@@ -1059,7 +1048,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 35 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template, comment scaffold), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 34 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>

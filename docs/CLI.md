@@ -93,7 +93,7 @@ does / why / what to enter / what skipping means), and the step count adapts.
    `yad-connect-*` skills; the MCPs/CLIs are confirmed there).
 5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo and
    skips domain-owner prompts; **greenfield** skips the Repomix pack (run `yad repo refresh` once it has code).
-6. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
+6. **Wire each repo** — CI gates and PR/MR template.
 7. **AI review** — optionally write `.coderabbit.yaml`.
 8. **Done** — stamp `.sdlc/cli-version.json` and print a **profile-tailored next step** (brownfield →
    `yad-backfill` first; everyone → `yad next` and your first epic via `yad-epic`).

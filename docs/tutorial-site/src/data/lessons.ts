@@ -231,9 +231,8 @@ export const MODULES: Module[] = [
         commands: [
           { cmd: 'yad-checks          repo:<repo> action: wire', note: 'install the CI gates (merges with existing CI)' },
           { cmd: 'yad-pr-template     repo:<repo> action: wire', note: 'PR/MR template + risk routing' },
-          { cmd: 'yad-review-comments repo:<repo> action: wire', note: 'review-comment scaffold' },
         ],
-        produces: ['.github/workflows/yad-checks.yml (or GitLab include)', 'PR/MR template', 'review-comment scaffold'],
+        produces: ['.github/workflows/yad-checks.yml (or GitLab include)', 'PR/MR template'],
         quiz: [
           {
             q: 'What happens when you wire gates into a repo that already has CI?',

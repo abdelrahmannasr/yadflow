@@ -8,7 +8,7 @@ flowchart LR
     subgraph SETUP["0 · One-time setup (per project)"]
       direction TB
       inst["install.sh<br/>copy yad-* skills into IDE dirs"]
-      wire["wire each repo:<br/>yad-checks · yad-pr-template · yad-review-comments"]
+      wire["wire each repo:<br/>yad-checks · yad-pr-template"]
       conn["yad-connect-repos<br/>repos.json + cached code-map"]
       sync["yad-sync-repos<br/>switch every repo to default branch + ff pull"]
       cdes["yad-connect-design<br/>design.json · Figma-first, pluggable"]

@@ -619,7 +619,7 @@ export async function runSetup(root, opts = {}) {
   }
 
   // Wire each connected repo + the hub itself
-  S('Wire connected repos + the hub (CI gates, PR template, comment scaffold, gate-sync)');
+  S('Wire connected repos + the hub (CI gates, PR template, gate-sync)');
   guide(['Installs the CI safety gates, PR/MR template, and gate-sync — automatic, no input needed.']);
   if (registry.repos.length === 0) info('no repos to wire');
   for (const repo of registry.repos) {

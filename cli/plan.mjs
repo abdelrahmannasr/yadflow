@@ -152,7 +152,7 @@ export function legacyHubActions(root) {
   return legacyFileActions('hub', root, LEGACY_HUB_FILES[hub.platform], wiring);
 }
 
-// Per-repo wiring (gate scripts, CI, PR template, comment scaffold).
+// Per-repo wiring (gate scripts, CI, PR template).
 export function repoActions(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
   return wiringFor(repo.platform).map((w) =>
