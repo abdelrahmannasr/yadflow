@@ -16,7 +16,7 @@ const setupSteps: FlowStep[] = [
     id: "install",
     title: "Install the Module",
     description:
-      "Run `npx yadflow setup` — the guided wizard copies all 35 yad-* skills into your IDE skill dirs and registers the sdlc module. Idempotent; re-run `check --fix` any time.",
+      "Run `npx yadflow setup` — the guided wizard copies all 34 yad-* skills into your IDE skill dirs and registers the sdlc module. Idempotent; re-run `check --fix` any time.",
     actor: "system",
     status: "installed",
     stepState: "_bmad/sdlc/ registered",
@@ -24,7 +24,7 @@ const setupSteps: FlowStep[] = [
     handler: "yad setup / install.sh",
     activeComponents: ["product-hub", "platform"],
     messages: [
-      { id: "in-1", from: "platform", to: "product-hub", label: "install 35 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "in-1", from: "platform", to: "product-hub", label: "install 34 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: ".sdlc/cli-version.json stamped" },
   },
@@ -540,7 +540,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: install the 35 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
+      "One-time setup: install the 34 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
     category: "setup",
     steps: setupSteps,
   },

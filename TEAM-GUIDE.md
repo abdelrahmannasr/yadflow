@@ -149,7 +149,7 @@ first `yad-epic` run creates `epics/EP-<slug>/` and its state files for you.
 
 **c. Install everything with the CLI.** From the product hub repo, run the guided setup — it installs the
 skills into the IDE dirs, detects the hub platform, connects your code repos, and wires each one (CI gates,
-PR/MR template, review-comment scaffold):
+PR/MR template):
 
 ```bash
 cd <product-hub-repo>
@@ -169,7 +169,7 @@ mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
          yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
-         yad-pr-template yad-review-comments yad-hub-bridge \
+         yad-pr-template yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
          yad-change yad-timeline yad-defects yad-reconcile \
          yad-run yad-status; do
@@ -189,7 +189,6 @@ Re-run this block after you `git pull` updates into `yadflow`.
 ```text
 yad-checks          repo:<repo> action: wire   # installs the CI gates (merges with existing CI, never clobbers)
 yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + risk routing
-yad-review-comments repo:<repo> action: wire   # installs the PR/MR review-comment scaffold
 ```
 
 > **Wiring is additive.** `yad-checks` detects any CI you already have and *merges* the gates in
@@ -202,7 +201,6 @@ yad-review-comments repo:<repo> action: wire   # installs the PR/MR review-comme
 yad-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
 yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
 yad-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
-yad-review-comments repo:hub action: wire                         # hub's review-comment scaffold
 yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
 yad-hub-bridge      action: wire                                  # event-driven gate sync (CI runs `yad gate ci` on approve/request-changes/merge)
 ```
@@ -252,7 +250,7 @@ mkdir -p ~/.claude/skills
 for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases \
          yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-learn yad-review-gate \
          yad-spec yad-implement yad-checks \
-         yad-pr-template yad-review-comments yad-hub-bridge \
+         yad-pr-template yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
          yad-change yad-timeline yad-defects yad-reconcile \
          yad-run yad-status; do
@@ -443,7 +441,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 11. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions of all 35 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
+descriptions of all 34 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -460,7 +458,6 @@ descriptions of all 35 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
 | `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
-| `yad-review-comments` | Install the PR/MR review-comment scaffolds. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
 | `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |
@@ -483,6 +480,6 @@ descriptions of all 35 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
-- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 35 agent skills.
+- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 34 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

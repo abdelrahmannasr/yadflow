@@ -33,7 +33,6 @@ export const SKILLS = [
   'yad-implement',
   'yad-checks',
   'yad-pr-template',
-  'yad-review-comments',
   'yad-hub-bridge',
   'yad-commit',
   'yad-open-pr',
@@ -43,6 +42,10 @@ export const SKILLS = [
   'yad-run',
   'yad-review-gate',
   'yad-status',
+  'yad-change',
+  'yad-timeline',
+  'yad-defects',
+  'yad-reconcile',
 ];
 
 // Pre-2.0 skill names (the sdlc-* -> yad-* rename). `check`/`update` migrate any install
@@ -58,7 +61,6 @@ export const LEGACY_SKILLS = {
   'yad-implement': 'sdlc-implement',
   'yad-checks': 'sdlc-checks',
   'yad-pr-template': 'sdlc-pr-template',
-  'yad-review-comments': 'sdlc-review-comments',
   'yad-hub-bridge': 'sdlc-hub-bridge',
   // Step E ("ship") was renamed to yad-engineer-review (the yad-ship name now belongs to the new
   // commit+open-PR combined skill). Pre-2.0 installs carry sdlc-ship → migrate it to yad-engineer-review.
@@ -70,6 +72,14 @@ export const LEGACY_SKILLS = {
   'yad-review-gate': 'sdlc-review-gate',
   'yad-status': 'sdlc-status',
 };
+
+// Skills removed in a later release that must be PURGED from existing installs. Unlike
+// LEGACY_SKILLS (a rename: drop old name, install new), these have no replacement — a rerun of
+// `yad update` / `yad setup` deletes any installed copy from every IDE target so a breaking
+// removal actually takes effect. List every install basename to purge, including any pre-rename
+// alias the skill ever shipped under.
+//   yad-review-comments — removed in 2.x (was sdlc-review-comments pre-2.0).
+export const REMOVED_SKILLS = ['yad-review-comments', 'sdlc-review-comments'];
 
 // Pre-2.0 wired-file dests replaced by renamed ones (old dest -> new dest, per platform).
 // An old file is removed ONLY when its first line carries the old ownership marker —
@@ -181,12 +191,10 @@ export const REPO_WIRING = {
   github: [
     { src: 'skills/yad-checks/templates/github/yad-checks.yml', dest: '.github/workflows/yad-checks.yml' },
     { src: 'skills/yad-pr-template/templates/github/pull_request_template.md', dest: '.github/pull_request_template.md' },
-    { src: 'skills/yad-review-comments/templates/github/REVIEW_COMMENTS.md', dest: '.github/REVIEW_COMMENTS.md' },
   ],
   gitlab: [
     { src: 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml', dest: '.gitlab/ci/yad-checks.yml' },
     { src: 'skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md', dest: '.gitlab/merge_request_templates/Default.md' },
-    { src: 'skills/yad-review-comments/templates/gitlab/REVIEW_COMMENTS.md', dest: '.gitlab/REVIEW_COMMENTS.md' },
   ],
 };
 

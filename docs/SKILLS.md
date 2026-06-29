@@ -1,4 +1,4 @@
-# Agent skills (all 35)
+# Agent skills (all 34)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -120,8 +120,6 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
   ledger. The file ledger stays the source of truth; degrades to a file-only gate with no platform.
-- **`yad-review-comments`** — Installs platform-matched PR/MR review-comment scaffolds so reviewers
-  leave structured, attributable feedback that maps cleanly into the file ledger.
 
 ## Build half — turn stories into shipped code (once per story, per repo)
 

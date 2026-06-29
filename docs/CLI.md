@@ -19,9 +19,9 @@ no clone needed.
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. |
-| `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) vs the bundled manifest. |
+| `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
-| `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched). |
+| `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. |
 | `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads. Exit 1 on any failure; `--json` for CI and bug reports. |
 | `yad roster list` / `yad roster add <login>` | Manage the reviewer roster + per-repo roles **any time** (not just at setup). `add` upserts a member then walks each connected repo asking for their role; `grant`/`revoke <name> <repo> <role>` and `remove <login>` round it out. A `domain-owner` grant keeps `repos.json` `domain_owners` in sync. |
 | `yad gate open <epic> <artifact>` | Open the front-half **review PR/MR** for an artifact and mark the step `in_review`. |
@@ -93,7 +93,7 @@ does / why / what to enter / what skipping means), and the step count adapts.
    `yad-connect-*` skills; the MCPs/CLIs are confirmed there).
 5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo and
    skips domain-owner prompts; **greenfield** skips the Repomix pack (run `yad repo refresh` once it has code).
-6. **Wire each repo** — CI gates, PR/MR template, and review-comment scaffold.
+6. **Wire each repo** — CI gates and PR/MR template.
 7. **AI review** — optionally write `.coderabbit.yaml`.
 8. **Done** — stamp `.sdlc/cli-version.json` and print a **profile-tailored next step** (brownfield →
    `yad-backfill` first; everyone → `yad next` and your first epic via `yad-epic`).

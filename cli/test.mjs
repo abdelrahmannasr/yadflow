@@ -123,7 +123,7 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 // legacyModuleActions(os.homedir(), ['.claude']) so an old skill at <root>/.claude/skills/<old>
 // is removed and its yad-* rename installed. This drives that helper directly (the same way
 // setup's applyActions does) to avoid the interactive runSetup prompts.
-const { legacyModuleActions } = await import('./plan.mjs');
+const { legacyModuleActions, removedModuleActions } = await import('./plan.mjs');
 test('setup migration: legacyModuleActions renames <root>/.claude/skills/sdlc-* to yad-*', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-setup-legacy-'));
   fs.mkdirSync(path.join(T, '.claude/skills/sdlc-author-epic'), { recursive: true });
@@ -138,6 +138,33 @@ test('setup migration: legacyModuleActions renames <root>/.claude/skills/sdlc-* 
 
   // Idempotent: a clean tree yields no further legacy actions.
   assert.equal(legacyModuleActions(T, ['.claude']).length, 0, 'migration is idempotent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A skill removed in a later release (REMOVED_SKILLS) must be PURGED from existing installs —
+// setup/update only refresh current skills, so without this a breaking removal lingers. Covers
+// both the folder IDEs (whole skill dir) and opencode's flat <name>.md command, and the legacy
+// alias the skill shipped under (sdlc-review-comments) so a pre-2.0 leftover is purged too.
+test('setup purge: removedModuleActions deletes lingering yad-review-comments installs', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-setup-removed-'));
+  fs.mkdirSync(path.join(T, '.claude/skills/yad-review-comments'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.claude/skills/yad-review-comments/SKILL.md'), '---\nname: yad-review-comments\n---\n');
+  fs.mkdirSync(path.join(T, '.claude/skills/sdlc-review-comments'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.claude/skills/sdlc-review-comments/SKILL.md'), '---\nname: sdlc-review-comments\n---\n');
+  fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.opencode/commands/yad-review-comments.md'), '# yad-review-comments\n');
+
+  const actions = removedModuleActions(T, ['.claude', '.opencode']);
+  assert.equal(actions.length, 3, 'one action per lingering install (yad + alias folder + opencode cmd)');
+  assert.ok(actions.every((a) => a.status === 'removed'), 'all are removal actions');
+  for (const a of actions) a.apply();
+
+  assert.ok(!fs.existsSync(path.join(T, '.claude/skills/yad-review-comments')), 'folder install purged');
+  assert.ok(!fs.existsSync(path.join(T, '.claude/skills/sdlc-review-comments')), 'legacy alias purged');
+  assert.ok(!fs.existsSync(path.join(T, '.opencode/commands/yad-review-comments.md')), 'opencode command purged');
+
+  // Idempotent: a clean tree yields no further removal actions.
+  assert.equal(removedModuleActions(T, ['.claude', '.opencode']).length, 0, 'purge is idempotent');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

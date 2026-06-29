@@ -40,7 +40,7 @@ states stay `human_approve` forever.
    and `yad-learn`).
 4. **Wire each code repo once:** `yad-checks repo:<repo> action: wire` (installs the CI gates —
    *merges* with any existing CI, never clobbers), `yad-pr-template repo:<repo> action: wire` (PR/MR
-   template + risk routing), `yad-review-comments repo:<repo> action: wire` (review-comment scaffold).
+   template + risk routing).
 5. **Connect each code repo to the hub** (so the front phases see what's already built):
    `yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>`. It
    registers the repo in `.sdlc/repos.json` and caches a Repomix pack + a lightweight **code-map**
@@ -56,8 +56,8 @@ states stay `human_approve` forever.
 7. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
    `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
    SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
-   sets one directly), and `yad-pr-template repo:hub action: wire` / `yad-review-comments repo:hub
-   action: wire` / `yad-checks repo:hub action: wire`. With no hub platform the front gate runs file-only.
+   sets one directly), and `yad-pr-template repo:hub action: wire` /
+   `yad-checks repo:hub action: wire`. With no hub platform the front gate runs file-only.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](../CONTRIBUTING.md).
