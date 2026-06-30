@@ -39,11 +39,22 @@ a **second set of eyes, never the authority**: it cannot approve or merge. Where
 (no remote), run an equivalent AI first-pass by hand and capture its notes. Record that the AI review
 ran; surface its findings to the engineer. Do **not** treat AI approval as a gate.
 
+Also run the **Review Companion** so the human review is easy and fun: post the 60-sec trailer
+(`yad review trailer --repo <r> --pr <n> --body "<text>"`) and deal the swipe cards / open the grounded
+chat from the bundle (`yad review context --repo <r> --pr <n>` → [yad-review-companion](../yad-review-companion/SKILL.md)).
+Companion comments carry `<!-- yad:noblock -->` (history-only, never block); genuine concerns are posted
+unflagged and block normally.
+
 ### Step 2 — `approve` (the engineer review — the human gate)
 A human engineer reads the diff **against the spec** (`specs/<story>/`) and the acceptance criteria,
 and records an approval. Determine the rule from the PR's Impact & Risk block (run
 `../yad-pr-template/templates/checks/risk-route.sh` on the PR body): base, or escalated to a
 domain-owner per touched domain. Record each approval; re-evaluate whether the rule is satisfied.
+Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
+approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
+platform. Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
+`hub.review.requireEngagement: true`. The signal is gameable by design and sits **beside** the CI gates,
+never above them.
 Recording an approval does **not** ship — shipping is a separate, explicit step. Front-half discipline:
 the gate talks only through files; refuse to treat AI review as a human approval.
 
@@ -55,8 +66,8 @@ engineer-review rule is satisfied (Step 2). Then:
   ```json
   { "story": "<story>", "task": "<task>", "repo": "<repo>", "branch": "feat/<story>-<task>-…",
     "pr": "<url|#>", "mergeCommit": "<sha>", "gates": ["spec-link","contract-check","build-test-lint"],
-    "ai_review": "coderabbit (advisory)", "engineer_review": [{"approver":"<name>","role":"<role>","domain":"<opt>"}],
-    "risk": "<low|medium|high>", "shippedAt": "<YYYY-MM-DD>" }
+    "ai_review": "coderabbit (advisory)", "engineer_review": [{"approver":"<name>","role":"<role>","domain":"<opt>","engagement":"<verified|none>"}],
+    "companion": {"trailer":true,"cards":true,"chat":false}, "risk": "<low|medium|high>", "shippedAt": "<YYYY-MM-DD>" }
   ```
 - **Update the story state** — when **every** task in `specs/<story>/tasks.md` has a ship record, set
   the story frontmatter `status: shipped`; otherwise `status: in-build`. The chain

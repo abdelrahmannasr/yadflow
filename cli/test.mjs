@@ -1020,6 +1020,51 @@ test('gate sync: a genuine unresolved thread still holds the gate in_review', as
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------------------------------------------------
+// `yad review` — back-half companion + bridge (code PR/MR)
+// ---------------------------------------------------------------------------------------------
+const { reviewReconcile, reviewContext } = await import('./review.mjs');
+
+test('review reconcile: stamps engagement onto the matching build-log ship record (back-half bridge)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-review-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github',
+    roster: [{ login: 'al', name: 'amelia', roles: { backend: ['owner'] } }, { login: 'ca', name: 'carol', roles: { backend: ['reviewer'] } }],
+  }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'main' }] }));
+  const ep = path.join(T, 'epics/EP-test/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'build-log.json'), JSON.stringify({
+    epic: 'EP-test',
+    ships: [{ story: 'EP-test-S01', task: 'T01', repo: 'backend', pr: 'http://x/pull/5', engineer_review: [] }],
+  }));
+  const reader = () => ({ ok: true, merged: true, headOid: 'h', reviews: [
+    { login: 'al', state: 'APPROVED', body: 'read it\n<!-- yad:engagement verified -->' },
+    { login: 'ca', state: 'APPROVED' },
+  ], threads: [] });
+  const res = await reviewReconcile(T, { epic: 'EP-test', repo: 'backend', pr: 5, reader });
+  assert.equal(res.written, true);
+  const bl = JSON.parse(fs.readFileSync(path.join(ep, 'build-log.json')));
+  const er = bl.ships[0].engineer_review;
+  assert.equal(er.find((e) => e.approver === 'amelia').engagement, 'verified');
+  assert.equal(er.find((e) => e.approver === 'carol').engagement, 'none');
+  assert.equal(er.find((e) => e.approver === 'amelia').role, 'owner');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review context: prints the grounding bundle (diff cmd + code-map) for the companion', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctx-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'gitlab', default_branch: 'main' }] }));
+  const b = await reviewContext(T, { repo: 'backend', pr: 9 });
+  assert.equal(b.platform, 'gitlab');
+  assert.equal(b.pr, 9);
+  assert.ok(b.diffCmd.includes('main...HEAD'));
+  assert.ok(b.codeMap.endsWith('.sdlc/code-context/backend/code-map.md'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: EP-discovery advances through the SAME gate to discovery-done (base rule, no escalation)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-disc-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });

@@ -8,6 +8,7 @@ import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateT
 import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
+import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile } from '../cli/review.mjs';
 import { runShip } from '../cli/ship.mjs';
 import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
@@ -65,6 +66,10 @@ ${c.bold('Build helpers')}
                                        branch opens the front-half artifact-review PR (delegates to
                                        gate open), any other hub branch uses the code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
+  yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
+  yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
+  yad review nudge --repo <r> --pr <n>                    Friendly @-mention on a bare code-PR approve
+  yad review reconcile --epic <id> --repo <r> --pr <n>    Bridge: stamp engagement onto the build-log ship
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
 
@@ -201,6 +206,15 @@ async function main() {
       else if (action === 'review') await gateReview(o.dir, { epic, artifact });
       else if (action === 'trailer') await gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
       else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|review|trailer|ci)`)); process.exitCode = 1; }
+      break;
+    }
+    case 'review': {
+      const [, action] = o._;
+      if (action === 'trailer') await reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
+      else if (action === 'context' || action === 'chat' || action === 'cards') await reviewContext(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'nudge') await reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'reconcile') await reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
+      else { log(c.red('usage: yad review <trailer|context|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]')); process.exitCode = 1; }
       break;
     }
     case 'commit':
