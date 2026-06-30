@@ -71,6 +71,18 @@ review_gate:
   # stamp, it does not prove a human read the artifact). Persisted per-project in hub.json as
   # `review.requireEngagement`; companion comments carry `<!-- yad:noblock -->` so they never block.
   require_engagement: false
+  # Pair Review (yad-pair-review) — the guided, two-way, TEACHING walkthrough; the AI-driven 5th
+  # companion face. The AI walks the human through the change one risk-ordered stop at a time, asks
+  # Socratic questions, and both sign off when satisfied; the session doubles as a learning session and
+  # records the engineer's review-skill growth in the local-only yad-learn ledger. SOFT and additive —
+  # it NEVER blocks a merge or gate (no strict switch); it rides the same `engagement: verified` signal
+  # as the companion and surfaces genuine concerns as normal blocking comments. `mode: optional` is the
+  # default posture (offered, never required). The quiz/comprehension signal reuses learning.capabilities.
+  pair_review:
+    enabled: true
+    mode: optional              # optional | encouraged — never `required` (it can never gate)
+    never_blocks: true          # invariant: a pair session is advisory; the gate predicate is untouched
+    rubric: review-rubric.md    # the transferable review method (skills/yad-pair-review/references/)
 
 # Build half (Phase 3). Code repos are SEPARATE git repos (one .git each), not subfolders
 # of the product repo — faithful to "per-repo specs in each code repo, contract singular in the

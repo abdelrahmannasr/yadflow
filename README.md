@@ -66,6 +66,19 @@ Every step stops at a gate until a human approves. New here? **Walk it lesson-by
 - **Everything is files.** State, approvals, the contract lock, the build log — all plain files under
   `epics/EP-<slug>/`. No database. The audit trail *is* the repo.
 
+## Review, made a pairing — and a lesson
+
+Reviewing AI-generated code is where governance lives or dies, so Yadflow makes the honest review the
+*easiest* path — and, optionally, a **teaching** one. The **Review Companion** turns a PR/MR into a
+60-second trailer, swipe-through cards, and a grounded chat. On top of it, **Pair Review**
+(`yad pair-review`) runs a guided, two-way walkthrough: the AI walks the engineer through the change
+**one risk-ordered stop at a time**, explains each change in depth, then **asks them about it**; the
+engineer answers and asks back, until **both are satisfied**. The session doubles as a lesson — it
+demonstrates a transferable review method, scores the engineer against it, and records their review-skill
+growth in a **private, local-only** learning log (`yad status` rolls it up). It's **soft and additive**:
+it never blocks a merge, it rides the same `engagement: verified` signal, and any genuine concern it
+surfaces blocks like a normal review comment.
+
 ## Who it's for
 
 Tech leads and engineering managers who want their team to move fast with AI **without** giving up
@@ -78,7 +91,7 @@ development, not another code generator.
 - **[Terminology & workflow report](https://abdelrahmannasr.github.io/yadflow/)** — every term, artifact, gate, and skill on one illustrated page.
 - **[TEAM-GUIDE.md](TEAM-GUIDE.md)** — the short, plain-language version for a developer team.
 - **[docs/CLI.md](docs/CLI.md)** — the full `yad` command reference, the PR-driven gate, and `yad doctor` codes.
-- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 34 agent skills.
+- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 36 agent skills.
 - **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — the by-hand, end-to-end path through every phase.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[RESEARCH-NOTES.md](RESEARCH-NOTES.md)** · **[RELEASING.md](RELEASING.md)**
 

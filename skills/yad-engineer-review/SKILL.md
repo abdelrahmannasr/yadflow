@@ -45,6 +45,13 @@ chat from the bundle (`yad review context --repo <r> --pr <n>` → [yad-review-c
 Companion comments carry `<!-- yad:noblock -->` (history-only, never block); genuine concerns are posted
 unflagged and block normally.
 
+For a **deep, teaching** review instead of a skim, offer the **Pair Review** walkthrough
+([yad-pair-review](../yad-pair-review/SKILL.md)): `yad review walkthrough --repo <r> --pr <n>` deals an
+ordered, risk-tagged stop-list, and the AI walks the engineer through the change one stop at a time —
+asking questions, answering theirs, until both are satisfied — then records the engineer's review-skill
+growth in the local-only learning log. Still soft: it rides the same `engagement: verified` signal and
+never gates. When a pair session backs the approve, you may set `companion.pair: true` on the ship record.
+
 ### Step 2 — `approve` (the engineer review — the human gate)
 A human engineer reads the diff **against the spec** (`specs/<story>/`) and the acceptance criteria,
 and records an approval. Determine the rule from the PR's Impact & Risk block (run

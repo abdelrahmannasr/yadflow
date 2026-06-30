@@ -30,6 +30,9 @@ export const info = (s) => log(`  ${c.dim('•')} ${s}`);
 export const warn = (s) => log(`  ${c.yellow('!')} ${s}`);
 export const fail = (s) => log(`  ${c.red('✗')} ${s}`);
 export const hand = (s) => log(`  ${c.yellow('→')} ${s}`);
+// Like `info`, but to STDERR — for diagnostics emitted by commands whose STDOUT must stay pure (e.g. a
+// JSON bundle a tool parses). Keeps the human hint visible without corrupting machine-readable output.
+export const note = (s) => console.error(`  ${c.dim('•')} ${s}`);
 // Dimmed, indented guidance under a step — what it does / why / what to enter / what skipping means.
 // Accepts a string or an array of lines so a knowledgeable user can skim past it.
 export const guide = (lines) => { for (const l of (Array.isArray(lines) ? lines : [lines])) log(`    ${c.dim(l)}`); };

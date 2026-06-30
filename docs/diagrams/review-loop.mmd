@@ -6,3 +6,11 @@ flowchart LR
     ap --> adv{"rule met,<br/>threads resolved,<br/>merged?"}
     adv -->|no — names who's missing| o
     adv -->|yes| nxt(["next step"])
+
+    o -.companion.-> pr["🤝 pair review<br/>(yad-pair-review)"]
+    pr --> stops["risk-ordered<br/>stops, one by one"]
+    stops --> qa["AI briefs + asks;<br/>human answers + asks"]
+    qa -->|until both satisfied| qa
+    qa --> so["dual sign-off<br/>+ scorecard"]
+    so -.engagement: verified.-> ap
+    so -.local-only.-> learn["learning record<br/>(yad-learn → yad status)"]

@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-SKILLS=(yad-discovery yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-connect-docs yad-docs yad-docs-overview yad-docs-sync yad-learn yad-spec yad-implement yad-checks yad-pr-template yad-hub-bridge yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill yad-run yad-review-gate yad-status yad-change yad-timeline yad-defects yad-reconcile)
+SKILLS=(yad-discovery yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-cases yad-connect-repos yad-sync-repos yad-connect-design yad-connect-testing yad-connect-learning yad-connect-docs yad-docs yad-docs-overview yad-docs-sync yad-learn yad-spec yad-implement yad-checks yad-pr-template yad-hub-bridge yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill yad-run yad-review-gate yad-review-companion yad-pair-review yad-status yad-change yad-timeline yad-defects yad-reconcile)
 
 # Skills removed in a later release: this installer only refreshes names still in SKILLS, so a
 # rerun would otherwise leave a dropped skill sitting in the IDE dirs. Purge any lingering copy

@@ -59,3 +59,32 @@ export function nudgeMessage(login, cmd = 'yad gate review') {
   const who = login ? `@${login}` : 'there';
   return noBlock(`Thanks ${who} for the quick approval 🙏 — mind running \`${cmd}\`? It won't take long, and a real read has way more impact than the few minutes it costs 💛`);
 }
+
+// ---- pair review (yad-pair-review) --------------------------------------------------------------
+// The pair-review walkthrough records its session as a PERMANENT PR/MR comment: the transcript summary,
+// the review-skill scorecard, and BOTH sign-offs. It carries this marker so a recorded pair session is
+// IDENTIFIABLE in platform history (the skill / `yad status` can recognise + count paired reviews for the
+// 🏆 roll-up), AND the noblock marker so the session thread never holds the gate. The human's actual
+// approval still rides the existing `<!-- yad:engagement verified -->` mark — the session comment NEVER
+// carries an engagement marker (it is history, not the approval). `isPair` is the marker's public reader,
+// symmetrical with `isNoBlock`; the engagement roll-up itself lives in the local yad-learn ledger.
+export const PAIR_MARK = '<!-- yad:pair -->';
+
+// True when a comment is a recorded pair-review session (countable, but never blocking).
+export function isPair(body) {
+  return typeof body === 'string' && body.includes(PAIR_MARK);
+}
+
+// Render the pair-review session-record comment. The skill generates each prose section; this composes
+// them into one comment carrying both the pair marker (countable) and the noblock marker (never blocks).
+export function pairSessionBody({ summary = '', scorecard = '', verdict = '', humanSignoff = '', aiSignoff = '' } = {}) {
+  const parts = [
+    PAIR_MARK,
+    '## 🤝 Pair review session',
+    summary && summary.trim(),
+    scorecard && `### Review-skill scorecard\n${scorecard.trim()}`,
+    verdict && `### AI verdict\n${verdict.trim()}`,
+    (humanSignoff || aiSignoff) && `### Sign-off\n- 🧑 Human: ${humanSignoff || '—'}\n- 🤖 AI: ${aiSignoff || '—'}`,
+  ].filter(Boolean);
+  return noBlock(parts.join('\n\n'));
+}
