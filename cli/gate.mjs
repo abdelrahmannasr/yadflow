@@ -470,7 +470,7 @@ export async function gateStatus(root, { epic } = {}) {
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
 export async function gateOpen(root, { epic, artifact, head, creator = createPr } = {}) {
-  const { hub } = loadHub(root);
+  const { hub, repos } = loadHub(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
@@ -504,12 +504,16 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr 
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
   // to review their own artifact). Scope is the hub plus every touched domain.
   const committer = resolveCommitterLogin(root, hub.roster || []);
-  const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer });
+  const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer, repos });
   const assignees = committer ? [committer] : [];
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${bridge ? ' — open it manually; CI records the gate on merge' : '; step is in_review file-only'}`); return; }
+  // Surface routing: who was assigned as a reviewer, who was @-mentioned (GitLab field cap), and any
+  // login the platform could not add (dropped) so a partial roster is visible, not silent.
+  if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);
+  if (r.dropped?.length) warn(`could not request as reviewer (unknown/non-collaborator login): ${r.dropped.join(', ')}`);
 
   if (!bridge) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });

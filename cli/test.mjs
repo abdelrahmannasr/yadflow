@@ -491,6 +491,32 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain labels (BUG-1/BUG-3)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  // bob is a hub reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', default_branch: 'main',
+    roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
+  }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', domain_owner: 'carol' }] }));
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/.sdlc/state.json'), JSON.stringify({
+    currentStep: 'stories-review',
+    steps: [{ id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'in_review', risk_tags: [] }],
+  }));
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/epic.md'), '---\nowner: x\nrepos: [backend]\n---\n');
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nrepos: [backend]\n---\n');
+  let seen;
+  const creator = (_p, opts) => { seen = opts; return { ok: true, url: 'https://x/pr/1' }; };
+  await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator });
+  assert.deepEqual(seen.reviewers.sort(), ['bo', 'ca']); // carol requested via repos.json (BUG-1)
+  assert.deepEqual(seen.labels, ['domain:backend']);     // escalated step labels the touched domain
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit code (P2)', async () => {
   const prev = process.exitCode;
   const T = hubWithStoriesStep();
@@ -1828,6 +1854,31 @@ test('reviewersForScopes picks reviewers + domain-owners and excludes the commit
   ];
   assert.deepEqual(reviewersForScopes(roster, ['hub'], {}).sort(), ['bo', 'ca']);
   assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { excludeLogin: 'bo' }).sort(), ['ca', 'dv']);
+});
+
+test('reviewersForScopes requests a repos.json-only domain owner (BUG-1 regression)', () => {
+  // carol owns backend ONLY via repos.json domain_owner — no roster role for the backend scope.
+  const roster = [
+    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },
+    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
+    { login: 'ca', name: 'carol' },                       // identity only, no roles map
+  ];
+  const repos = [{ name: 'backend', domain_owner: 'carol' }];
+  // Without repos: carol is never requested (the bug). With repos: she is.
+  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], {}).sort(), ['bo']);
+  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { repos }).sort(), ['bo', 'ca']);
+  // domain_owners[] (plural) is honored too, and excludeLogin still applies.
+  const repos2 = [{ name: 'backend', domain_owners: ['carol', 'bob'] }];
+  assert.deepEqual(reviewersForScopes(roster, ['backend'], { repos: repos2, excludeLogin: 'bo' }).sort(), ['ca']);
+});
+
+test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {
+  const gl = buildPrArgs('gitlab', { title: 't', body: 'b', base: 'main', head: 'f', reviewers: ['bo', 'ca', 'dv'] });
+  assert.equal(gl[gl.indexOf('--reviewer') + 1], 'bo');   // only the first; the rest get @-mentioned
+  assert.equal(gl.filter((a) => a === '--reviewer').length, 1);
+  // GitHub keeps the full comma list (multiple reviewers are supported there).
+  const gh = buildPrArgs('github', { title: 't', body: 'b', base: 'main', head: 'f', reviewers: ['bo', 'ca'] });
+  assert.equal(gh[gh.indexOf('--reviewer') + 1], 'bo,ca');
 });
 
 test('resolveCommitterLogin maps git identity through the roster', () => {

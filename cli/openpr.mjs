@@ -136,12 +136,16 @@ export async function runOpenPr(root, opts = {}) {
   const roster = hub.roster || [];
   const committer = resolveCommitterLogin(repoRoot, roster);
   const scope = meta?.name ? [meta.name] : [];
-  const reviewers = reviewersForScopes(roster, scope, { excludeLogin: committer });
+  // Pass the repo registry entry so a domain owner declared only in repos.json (not the roster roles
+  // map) is still requested as a reviewer (BUG-1).
+  const reviewers = reviewersForScopes(roster, scope, { excludeLogin: committer, repos: meta ? [meta] : [] });
   const assignees = committer ? [committer] : [];
 
   const r = createPr(platform, { title, body, base: baseBranch, head: branch, reviewers, assignees, cwd: repoRoot });
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
+  if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);
+  if (r.dropped?.length) hand(`could not request as reviewer (unknown/non-collaborator login): ${r.dropped.join(', ')}`);
   if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` for required reviewers');
   return { url: r.url };
 }

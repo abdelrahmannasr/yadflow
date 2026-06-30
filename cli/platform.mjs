@@ -68,11 +68,22 @@ export function hasAnyRole(entry, scopes = [], wanted = []) {
 
 // Platform logins to auto-request as reviewers for the given scopes: everyone holding a `reviewer`
 // or `domain-owner` role in any scope, minus `excludeLogin` (you don't review your own PR), deduped.
-export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = null } = {}) {
+// `repos` (the registry) is consulted so a repo whose domain ownership lives ONLY in the legacy
+// `repos.json` `domain_owner`/`domain_owners` field — not the roster roles map — is still requested
+// as a reviewer for any scope that is its repo name. Without this the read side credits that login as
+// a domain-owner (resolveLogin's legacy fallback) but the open side never asks them, so an escalated
+// gate becomes structurally unsatisfiable through platform routing (BUG-1).
+export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = null, repos = [] } = {}) {
   const out = [];
+  const add = (login) => { if (login && login !== excludeLogin && !out.includes(login)) out.push(login); };
   for (const entry of roster) {
-    if (!entry.login || entry.login === excludeLogin) continue;
-    if (hasAnyRole(entry, scopes, ['reviewer', 'domain-owner']) && !out.includes(entry.login)) out.push(entry.login);
+    if (hasAnyRole(entry, scopes, ['reviewer', 'domain-owner'])) add(entry.login);
+  }
+  for (const scope of scopes) {
+    const repo = repos.find((r) => r.name === scope);
+    if (!repo) continue;
+    const names = repo.domain_owners || (repo.domain_owner ? [repo.domain_owner] : []);
+    for (const name of names) add(roster.find((r) => r.name === name)?.login);
   }
   return out;
 }
@@ -281,7 +292,9 @@ export function readPr(platform, n, opts = {}) {
 export function buildPrArgs(platform, { title, body, base, head, reviewers = [], labels = [], assignees = [] } = {}) {
   if (platform === 'gitlab') {
     const args = ['mr', 'create', '--title', title, '--description', body, '--target-branch', base, '--source-branch', head, '--yes'];
-    if (reviewers.length) args.push('--reviewer', reviewers.join(','));
+    // A Free/Core GitLab MR carries a SINGLE reviewer field (multiple reviewers is a Premium feature),
+    // so only the first reviewer goes in the field; createPr @-mentions the rest in a note (BUG-2).
+    if (reviewers.length) args.push('--reviewer', reviewers[0]);
     if (assignees.length) args.push('--assignee', assignees.join(','));
     if (labels.length) args.push('--label', labels.join(','));
     return args;
@@ -293,8 +306,43 @@ export function buildPrArgs(platform, { title, body, base, head, reviewers = [],
   return args;
 }
 
+// Number/IID at the tail of a PR/MR URL (…/pull/123, …/-/merge_requests/45). null when unparsable.
+export function prNumberFromUrl(url = '') {
+  const m = String(url).match(/\/(\d+)(?:[/?#]|$)/);
+  return m ? m[1] : null;
+}
+
+// Create a PR/MR and route the required reviewers, resiliently, on both platforms:
+//   GitHub — create WITHOUT reviewers, then add each via `gh pr edit --add-reviewer`. A bad/
+//            non-collaborator login then WARNS (dropped) instead of aborting the whole create (BUG-4).
+//   GitLab — assign the first reviewer to the MR field; @-mention the remaining required reviewers in
+//            an MR note so they are still notified/routed despite the single-reviewer-field cap (BUG-2).
+// Returns { ok, url, reviewers (assigned), mentioned, dropped }.
 export function createPr(platform, opts = {}) {
   if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
-  const r = run(cliFor(platform), buildPrArgs(platform, opts), { cwd: opts.cwd });
-  return { ok: r.ok, url: r.stdout.split('\n').pop(), reason: r.stderr };
+  const reviewers = opts.reviewers || [];
+  if (platform === 'github') {
+    const r = run('gh', buildPrArgs('github', { ...opts, reviewers: [] }), { cwd: opts.cwd });
+    if (!r.ok) return { ok: false, reason: r.stderr };
+    const url = r.stdout.split('\n').pop();
+    const number = prNumberFromUrl(url);
+    const added = []; const dropped = [];
+    if (number) {
+      for (const rv of reviewers) {
+        (run('gh', ['pr', 'edit', number, '--add-reviewer', rv], { cwd: opts.cwd }).ok ? added : dropped).push(rv);
+      }
+    }
+    return { ok: true, url, reviewers: added, mentioned: [], dropped };
+  }
+  // gitlab
+  const r = run('glab', buildPrArgs('gitlab', opts), { cwd: opts.cwd });
+  if (!r.ok) return { ok: false, reason: r.stderr };
+  const url = r.stdout.split('\n').pop();
+  const iid = prNumberFromUrl(url);
+  const mentioned = reviewers.slice(1);
+  if (mentioned.length && iid) {
+    const ats = mentioned.map((m) => `@${m}`).join(' ');
+    run('glab', ['mr', 'note', iid, '-m', `Review requested (owner + reviewer rule): ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
+  }
+  return { ok: true, url, reviewers: reviewers.slice(0, 1), mentioned, dropped: [] };
 }
