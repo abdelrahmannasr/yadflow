@@ -1097,6 +1097,35 @@ test('review reconcile: stamps engagement onto the matching build-log ship recor
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('review reconcile: matches a ship by exact PR number, never substring', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-recon2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'amelia', roles: { backend: ['owner'] } }] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github' }] }));
+  const ep = path.join(T, 'epics/EP-test/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  // A ship recorded against PR #15 must NOT be matched by --pr 5.
+  fs.writeFileSync(path.join(ep, 'build-log.json'), JSON.stringify({ epic: 'EP-test', ships: [{ story: 'S', task: 'T', repo: 'backend', pr: 'http://x/pull/15', engineer_review: [{ approver: 'old' }] }] }));
+  const reader = () => ({ ok: true, reviews: [{ login: 'al', state: 'APPROVED' }] });
+  const res = await reviewReconcile(T, { epic: 'EP-test', repo: 'backend', pr: 5, reader });
+  assert.equal(res.written, false, 'no false substring match against #15');
+  const bl = JSON.parse(fs.readFileSync(path.join(ep, 'build-log.json')));
+  assert.equal(bl.ships[0].engineer_review[0].approver, 'old', 'the #15 ship is untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review: an explicit --repo not in the registry fails fast (no silent cwd fallthrough)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rrepo-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github' }] }));
+  const prev = process.exitCode; process.exitCode = 0;
+  const r = await reviewContext(T, { repo: 'nope', pr: 1 });
+  assert.ok(!r, 'returns nothing');
+  assert.ok(process.exitCode, 'sets a non-zero exit code');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('review context: prints the grounding bundle (diff cmd + code-map) for the companion', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctx-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -1906,7 +1935,22 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+
+test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
+  assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
+  assert.equal(prNumberFromUrl('https://gitlab.com/group/proj/-/merge_requests/45'), '45');
+  // a numeric segment BEFORE the MR path must not win
+  assert.equal(prNumberFromUrl('https://gitlab.example.com/team/123/-/merge_requests/45'), '45');
+  assert.equal(prNumberFromUrl('https://x/pull/5'), '5');
+  assert.equal(prNumberFromUrl('nonsense'), null);
+});
+
+test('resolveLogin credits a domain owner declared via repos.json domain_owners[] (symmetry)', () => {
+  const roster = [{ login: 'ca', name: 'carol' }];
+  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owners: ['carol', 'bob'] }], ['backend']);
+  assert.ok(recs.some((r) => r.role === 'domain-owner' && r.domain === 'backend'));
+});
 const { parseEngagement, isNoBlock, upsertTrailerBlock, nudgeMessage, engagementBody, noBlock, NOBLOCK_MARK } = await import('./companion.mjs');
 
 test('companion: engagement + noblock markers parse and round-trip', () => {
@@ -1928,6 +1972,10 @@ test('companion: upsertTrailerBlock inserts once and replaces idempotently', () 
   assert.ok(t2.includes('TRAILER TWO') && !t2.includes('TRAILER ONE')); // replaced, not duplicated
   assert.equal((t2.match(/<!-- yad:trailer -->/g) || []).length, 1);
   assert.ok(t2.includes('existing description')); // surrounding body preserved
+  // an earlier QUOTED end-marker in the body must not break idempotent replacement
+  const quoted = upsertTrailerBlock('quote: `<!-- /yad:trailer -->` in prose\n\n' + t1, 'TRAILER THREE');
+  assert.equal((quoted.match(/<!-- yad:trailer -->/g) || []).length, 1, 'still exactly one trailer block');
+  assert.ok(quoted.includes('TRAILER THREE') && !quoted.includes('TRAILER ONE'));
 });
 
 test('mapApprovers reads the engagement marker from the review body', () => {

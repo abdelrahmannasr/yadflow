@@ -214,7 +214,11 @@ async function main() {
       if (action === 'trailer') await reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
       else if (action === 'context' || action === 'chat' || action === 'cards') await reviewContext(o.dir, { repo: o.repo, pr: o.pr });
       else if (action === 'nudge') await reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
-      else if (action === 'reconcile') await reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
+      else if (action === 'reconcile') {
+        // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
+        if (!o.epic || !isValidEpicId(o.epic)) { log(c.red(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+        await reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
+      }
       else { log(c.red('usage: yad review <trailer|context|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]')); process.exitCode = 1; }
       break;
     }

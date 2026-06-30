@@ -139,8 +139,11 @@ export function resolveLogin(login, roster = [], repos = [], touchedDomains = []
     for (const role of rolesForScope(entry, d)) {
       push(role === 'domain-owner' ? { name: entry.name, role, domain: d } : { name: entry.name, role });
     }
-    // Legacy fallback: a repo whose domain_owner is this name confers domain-owner for that domain.
-    const legacy = repos.find((repo) => repo.name === d && repo.domain_owner === entry.name);
+    // Legacy fallback: a repo whose domain_owner / domain_owners[] includes this name confers
+    // domain-owner for that domain. Both spellings are honored — symmetric with reviewersForScopes,
+    // which REQUESTS from both, so a person routed as a domain owner is also credited as one.
+    const legacy = repos.find((repo) => repo.name === d
+      && (repo.domain_owner === entry.name || (Array.isArray(repo.domain_owners) && repo.domain_owners.includes(entry.name))));
     if (legacy) push({ name: entry.name, role: 'domain-owner', domain: d });
   }
   // An identity-only entry (no roles map and no legacy `role`) still contributes a base reviewer
@@ -317,10 +320,15 @@ export function buildPrArgs(platform, { title, body, base, head, reviewers = [],
   return args;
 }
 
-// Number/IID at the tail of a PR/MR URL (…/pull/123, …/-/merge_requests/45). null when unparsable.
+// Number/IID from a PR/MR URL (…/pull/123, …/pulls/123, …/-/merge_requests/45). Anchored to the
+// PR/MR path segment so a numeric group/org/repo earlier in the URL is never mistaken for it; falls
+// back to a trailing number for non-standard URLs. null when unparsable.
 export function prNumberFromUrl(url = '') {
-  const m = String(url).match(/\/(\d+)(?:[/?#]|$)/);
-  return m ? m[1] : null;
+  const s = String(url);
+  const m = s.match(/\/(?:pull|pulls|merge_requests)\/(\d+)/);
+  if (m) return m[1];
+  const tail = s.match(/\/(\d+)(?:[/?#]|$)/);
+  return tail ? tail[1] : null;
 }
 
 // Create a PR/MR and route the required reviewers, resiliently, on both platforms:
@@ -373,7 +381,12 @@ export function submitApproval(platform, n, body = '', { cwd } = {}) {
   }
   const a = run('glab', ['mr', 'approve', String(n)], { cwd });
   if (!a.ok) return { ok: false, reason: a.stderr };
-  if (body) run('glab', ['mr', 'note', String(n), '-m', body], { cwd });
+  if (body) {
+    // The engagement marker rides in this note (GitLab approvals carry no body). If it fails to post,
+    // the approval landed but the engagement signal is lost — report failure so the caller can retry.
+    const note = run('glab', ['mr', 'note', String(n), '-m', body], { cwd });
+    if (!note.ok) return { ok: false, reason: `approved, but failed to post the engagement note: ${note.stderr || 'unknown'}` };
+  }
   return { ok: true };
 }
 
@@ -398,10 +411,16 @@ export function createPr(platform, opts = {}) {
   if (!r.ok) return { ok: false, reason: r.stderr };
   const url = r.stdout.split('\n').pop();
   const iid = prNumberFromUrl(url);
-  const mentioned = reviewers.slice(1);
-  if (mentioned.length && iid) {
-    const ats = mentioned.map((m) => `@${m}`).join(' ');
-    run('glab', ['mr', 'note', iid, '-m', `Review requested (owner + reviewer rule): ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
+  const rest = reviewers.slice(1);
+  // Only report a reviewer as `mentioned` if the @-mention note actually posted; otherwise they were
+  // neither assigned (single-field cap) nor notified — surface them as `dropped` so the caller warns.
+  let mentioned = []; let dropped = [];
+  if (rest.length && iid) {
+    const ats = rest.map((m) => `@${m}`).join(' ');
+    const note = run('glab', ['mr', 'note', iid, '-m', `Review requested (owner + reviewer rule): ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
+    if (note.ok) mentioned = rest; else dropped = rest;
+  } else if (rest.length) {
+    dropped = rest; // could not parse the IID to post the note
   }
-  return { ok: true, url, reviewers: reviewers.slice(0, 1), mentioned, dropped: [] };
+  return { ok: true, url, reviewers: reviewers.slice(0, 1), mentioned, dropped };
 }

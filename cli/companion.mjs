@@ -44,7 +44,9 @@ export function upsertTrailerBlock(description = '', trailer = '') {
   const desc = typeof description === 'string' ? description : '';
   const block = `${TRAILER_BEGIN}\n${trailer}\n${TRAILER_END}`;
   const s = desc.indexOf(TRAILER_BEGIN);
-  const e = desc.indexOf(TRAILER_END);
+  // Find the END marker AFTER the BEGIN, so an earlier quoted `<!-- /yad:trailer -->` in the body
+  // can't break idempotency (otherwise a second block gets prepended instead of replacing).
+  const e = s === -1 ? -1 : desc.indexOf(TRAILER_END, s + TRAILER_BEGIN.length);
   if (s !== -1 && e !== -1 && e > s) {
     return desc.slice(0, s) + block + desc.slice(e + TRAILER_END.length);
   }

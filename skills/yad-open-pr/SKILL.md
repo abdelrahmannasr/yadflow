@@ -65,7 +65,7 @@ domain-owner reviewers — the same escalation `yad-engineer-review` enforces.
 ### Step 3b — Post the review trailer (optional, recommended)
 Make the reviewer's job easy: generate the 60-sec briefing and post it to the new PR/MR so it greets
 every reviewer in the UI (idempotent; safe to re-run after a push):
-```
+```bash
 yad review trailer --repo <name> --pr <n> --body "<companion-generated briefing>"
 ```
 The full fun-review flow (cards + grounded chat + engagement) is driven by the

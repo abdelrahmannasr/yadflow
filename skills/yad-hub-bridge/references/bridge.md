@@ -48,7 +48,7 @@ nobody asked. The CLI (`createPr` in `cli/platform.mjs`) does this; an agent ope
 
 **GitHub** — create, then add each reviewer (a bad/non-collaborator login WARNS instead of aborting the
 whole create):
-```
+```bash
 gh pr create --title "review: <artifact> (<epic>)" --body <body> --base <default> --head <branch> \
   --assignee @me --label domain:<repo>
 gh pr edit <n> --add-reviewer <login>      # once per required reviewer
@@ -56,7 +56,7 @@ gh pr edit <n> --add-reviewer <login>      # once per required reviewer
 
 **GitLab** — a Free/Core MR carries a **single** reviewer field (multiple reviewers is Premium), so
 assign the first required reviewer and **@-mention the rest in a note** so they are still notified/routed:
-```
+```bash
 glab mr create --title "review: <artifact> (<epic>)" --description <body> \
   --target-branch <default> --source-branch <branch> --reviewer <first-login> --label domain:<repo> --yes
 glab mr note <iid> -m "Review requested (owner + reviewer rule): @<l2> @<l3> — please review and approve/comment on this MR (this drives the gate)."

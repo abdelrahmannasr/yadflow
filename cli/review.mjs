@@ -10,18 +10,21 @@ import { log, ok, info, warn, fail, run, readJSON, writeJSON } from './lib.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
 import { epicRoot } from './epic-state.mjs';
 import {
-  detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment,
+  detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
 } from './platform.mjs';
 import { upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 
 const NUDGE_CMD = 'yad review chat';
 
 // Resolve the target code repo: --repo <name> from the registry (platform + path + roles), else cwd.
+// An explicit --repo that is NOT in the registry is an error — never silently fall through to cwd (that
+// would operate on the wrong repo). Returns { error } in that case for the caller to surface.
 function resolveRepo(root, { repo, dir }) {
   if (repo) {
     const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
     const found = (reg.repos || []).find((r) => r.name === repo);
-    if (found) return { repoRoot: path.resolve(root, found.path), meta: found };
+    if (!found) return { error: `repo '${repo}' is not in .sdlc/repos.json — connect it first (yad-connect-repos)` };
+    return { repoRoot: path.resolve(root, found.path), meta: found };
   }
   return { repoRoot: path.resolve(root, dir || '.'), meta: null };
 }
@@ -35,7 +38,9 @@ function platformOf(root, repoRoot, meta) {
 // `yad review context --repo <r> --pr <n>` — print the grounding bundle the companion uses to generate
 // the trailer / cards and run the chat over the CODE diff (grounded in the repo code-map + the PR).
 export async function reviewContext(root, { repo, dir, pr } = {}) {
-  const { repoRoot, meta } = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir });
+  if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
+  const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   const base = meta?.default_branch || 'main';
   const bundle = {
@@ -58,7 +63,9 @@ export async function reviewContext(root, { repo, dir, pr } = {}) {
 export async function reviewTrailer(root, { repo, dir, pr, body, getBody = getPrBody, editBody = editPrBody } = {}) {
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad review trailer --repo <r> --pr <n> --body <text>`'); process.exitCode = 1; return; }
-  const { repoRoot, meta } = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir });
+  if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
+  const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const cur = getBody(platform, pr, { cwd: repoRoot });
@@ -73,7 +80,9 @@ export async function reviewTrailer(root, { repo, dir, pr, body, getBody = getPr
 // of a code PR. A platform comment (carries the noblock marker so it never blocks); call once per PR.
 export async function reviewNudge(root, { repo, dir, pr, reader = readPr, poster = postComment } = {}) {
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
-  const { repoRoot, meta } = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir });
+  if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
+  const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const pull = reader(platform, pr, { cwd: repoRoot });
@@ -96,7 +105,9 @@ export async function reviewNudge(root, { repo, dir, pr, reader = readPr, poster
 export async function reviewReconcile(root, { epic, repo, dir, pr, reader = readPr } = {}) {
   if (!epic) { fail('--epic <id> is required'); process.exitCode = 1; return; }
   if (!pr) { fail('--pr <n> is required'); process.exitCode = 1; return; }
-  const { repoRoot, meta } = resolveRepo(root, { repo, dir });
+  const rr = resolveRepo(root, { repo, dir });
+  if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
+  const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });
@@ -119,7 +130,9 @@ export async function reviewReconcile(root, { epic, repo, dir, pr, reader = read
 
   const file = epicFiles(epicRoot(root, epic)).buildLog;
   const ledger = readJSON(file, null);
-  const ship = ledger?.ships?.find((s) => s.pr != null && String(s.pr).includes(String(pr)));
+  // Match by exact PR number — never substring (`--pr 5` must not match a ship recorded against #15).
+  const ship = ledger?.ships?.find((s) => s.pr != null
+    && (String(s.pr) === String(pr) || prNumberFromUrl(s.pr) === String(pr)));
   if (!ship) {
     warn(`no build-log ship record matches PR #${pr} in ${epic} — attach this at ship time:`);
     log(JSON.stringify({ engineer_review: engineerReview }, null, 2));
