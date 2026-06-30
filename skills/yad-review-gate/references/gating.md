@@ -12,6 +12,15 @@ Let `A` = the set of `approved` records in `.sdlc/approvals.json` for this step.
 **Escalated pass** (step `risk_tags` ∩ `{contract, auth, payments}` ≠ ∅): base pass AND, for every
 touched `domain`, `|domainOwners[domain]| >= 1`.
 
+**Engagement (the Review Companion).** Each approval carries `engagement: verified | none` —
+`verified` when it was recorded through the companion (a real trailer/cards/chat session), `none` for a
+bare UI click. By **default (soft)** both count: a bare approve still passes the gate but is recorded
+`none` and draws a friendly public @-mention nudge, so review *quality* is visible without blocking
+anyone. When `hub.review.requireEngagement: true`, only `verified` approvals are counted toward the
+sets above (a determined faker can still run an empty session — the signal is **gameable by design**;
+it raises the cost of a rubber-stamp and makes laziness visible, it does not prove a human read the
+artifact). Philosophy: *visible, not impossible.*
+
 **Touched domains** are resolved from files, not hardcoded:
 - Architecture+contract review: the touched domains are the epic's `repos` (every repo shares the
   contract surface).
@@ -54,6 +63,15 @@ gate appends a record per commenter per round on every `comment` action (the mac
 counterpart to the `reviews/*--comments.md` markdown). It does **not** feed the predicate — approvals
 alone decide the gate — but it makes the `approved.md` roster's "Reviewed / commented by" section
 attributable, and it is the same shape a future service or the platform bridge can write.
+
+## Non-blocking companion comments (`<!-- yad:noblock -->`)
+The Review Companion posts scaffolding comments (the card deck, the chat log) and the social nudge.
+These are fun/interactive aids, **not** review objections, so they must never hold the PR/MR — yet they
+are deliberately **left unresolved** so they remain in the PR/MR history forever (anyone can scroll back
+to see the trailer, cards, chat, and nudges). Every such comment carries a `<!-- yad:noblock -->`
+marker, and the gate **excludes marked threads** from the unresolved-thread blocking check (so it does
+not "resolve to pass" — it ignores them). A reviewer's *genuine* concern is posted **without** the
+marker and blocks normally, exactly as a `CHANGES_REQUESTED` or any unresolved human thread does.
 
 ## Platform-backed input (the bridge)
 When the hub has a platform (`.sdlc/hub.json`) and the bridge is enabled, reviewers can approve/comment

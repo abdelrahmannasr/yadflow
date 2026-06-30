@@ -41,6 +41,7 @@ export const SKILLS = [
   'yad-backfill',
   'yad-run',
   'yad-review-gate',
+  'yad-review-companion',
   'yad-status',
   'yad-change',
   'yad-timeline',

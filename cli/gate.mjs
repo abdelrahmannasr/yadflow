@@ -13,7 +13,11 @@ import {
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   upsertHubPr, DISCOVERY_FILES,
 } from './epic-state.mjs';
-import { readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin } from './platform.mjs';
+import {
+  readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
+  getPrBody, editPrBody, postComment,
+} from './platform.mjs';
+import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { syncStatuses } from './artifact-status.mjs';
 import { err } from './errors.mjs';
 
@@ -112,6 +116,11 @@ const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo ==
 // or reviews could never advance. Mirrors plan.mjs hubActions.
 const isBridge = (hub) => !!(hub?.platform && (hub.bridge_enabled === true || hub.bridge === true));
 
+// requireEngagement (config `hub.review.requireEngagement`): when on, the predicate counts only
+// approvals carrying a verified engagement signal. Soft-off by default — a bare approve still counts
+// but is recorded `engagement: none` and draws the friendly nudge.
+const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
+
 // Re-add this step's bridge approvals from the current platform state (drop+re-add => dismissals and
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
 // reviewer first approved against unless their review is newer (a genuine re-approval) — that is what
@@ -142,6 +151,7 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today }) {
       ...(r.domain ? { domain: r.domain } : {}),
       status: 'approved', date: today, source: 'bridge',
       artifactHash: artHash, approvedAt,
+      engagement: r.engagement === 'verified' ? 'verified' : 'none',
       ...(r.unverified ? { unverified: true } : {}),
     });
   }
@@ -187,6 +197,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   const roster = hub.roster || [];
   const defaultReviewers = 1;
   const solo = isSolo(hub);
+  const reqEng = requireEngagement(hub);
   // Local invocation in bridge mode is ADVISORY: CI is the sole ledger writer, so a human run reads
   // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
   // Without the bridge (platform but no gate-sync CI) the local command stays the writer.
@@ -222,7 +233,10 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
-    const unresolved = (pull.threads || []).filter((t) => !t.resolved);
+    // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
+    // blocking check — they stay unresolved as a permanent PR/MR history trail but never hold the gate.
+    // Only genuine (unflagged) unresolved threads block.
+    const unresolved = (pull.threads || []).filter((t) => !t.resolved && !isNoBlock(t.body));
     const threadsResolved = unresolved.length === 0 && changeRequested.length === 0;
     const blocking = [
       ...changeRequested.map((r) => ({ login: r.login, changesRequested: true })),
@@ -232,9 +246,21 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
     comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
 
+    // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
+    // posts a friendly public @-mention inviting the reviewer to run the companion. Idempotent via
+    // pr.nudged; only on the writer path (a platform comment, not a ledger write).
+    if (!readOnly) {
+      const nudged = new Set(pr.nudged || []);
+      for (const rv of pull.reviews) {
+        if (rv.state !== 'APPROVED' || parseEngagement(rv.body) === 'verified' || !rv.login || nudged.has(rv.login)) continue;
+        if (postComment(platform, pr.number, nudgeMessage(rv.login), { cwd: root }).ok) nudged.add(rv.login);
+      }
+      pr.nudged = [...nudged];
+    }
+
     const pred = gatePredicate({
       step, approvals, currentHash: curHash, touchedDomains: domains,
-      defaultReviewers, threadsResolved, merged: pull.merged, solo,
+      defaultReviewers, threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
     });
 
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule})`)}`);
@@ -524,6 +550,58 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr 
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
   return { url: r.url };
+}
+
+// `yad gate review <epic> [artifact]` — assemble + print the grounding bundle the companion skill uses
+// to generate the 60-sec trailer / swipe cards and to run the grounded chat (artifact + risk tags +
+// contract + PR + repo code-maps). The CLI never calls an LLM; the skill (yad-review-companion)
+// consumes this JSON, generates, and posts back via the platform (trailer/comments/approval).
+export async function gateReview(root, { epic, artifact } = {}) {
+  const { hub, repos } = loadHub(root);
+  const epicDir = epicRoot(root, epic);
+  const ledger = loadLedger(epicDir);
+  if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
+  const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
+  const art = artifact || pr?.artifact || null;
+  const step = art ? findReviewStep(ledger.state, art) : null;
+  const bundle = {
+    epic,
+    artifact: art,
+    platform: hub?.platform || null,
+    pr: pr ? { number: pr.number, url: pr.url } : null,
+    step: step ? { id: step.id, riskTags: step.risk_tags || [], escalated: isEscalated(step) } : null,
+    artifactPath: art ? path.join(epicDir, art) : null,
+    contractPath: art && base(art) === 'architecture' ? path.join(epicDir, 'contract.md') : null,
+    touchedDomains: step ? touchedDomains(epicDir, step) : [],
+    repos: (repos || []).map((r) => ({
+      name: r.name,
+      codeMap: r.name ? path.join(root, '.sdlc/code-context', r.name, 'code-map.md') : null,
+    })),
+    requireEngagement: requireEngagement(hub),
+    markers: { trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->', engagementVerified: '<!-- yad:engagement verified -->' },
+  };
+  log(JSON.stringify(bundle, null, 2));
+  return bundle;
+}
+
+// `yad gate trailer <epic> [artifact] --body <text> [--pr <n>]` — the skill generates the 60-second
+// briefing text and passes it here; this upserts it idempotently into the review PR/MR description as a
+// delimited block, so regenerating on every artifact change never duplicates it. A platform write only.
+export async function gateTrailer(root, { epic, artifact, body, number, getBody = getPrBody, editBody = editPrBody } = {}) {
+  const { hub } = loadHub(root);
+  if (!hub?.platform) { warn('no hub platform configured — the trailer posts to the PR/MR (file-only has none)'); return; }
+  if (!body || !String(body).trim()) { fail('trailer body is required: `yad gate trailer <epic> <artifact> --body <text>` (the companion generates it)'); process.exitCode = 1; return; }
+  const epicDir = epicRoot(root, epic);
+  const ledger = loadLedger(epicDir);
+  const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
+  const n = number || pr?.number;
+  if (!n) { warn('no PR number — pass `--pr <n>` (in bridge mode the PR is recorded in the ledger only at merge)'); return; }
+  const cur = getBody(hub.platform, n, { cwd: root });
+  if (!cur.ok) { fail(`could not read PR #${n} description: ${cur.reason || 'unknown'}`); process.exitCode = 1; return; }
+  const r = editBody(hub.platform, n, upsertTrailerBlock(cur.body, String(body).trim()), { cwd: root });
+  if (!r.ok) { fail(`could not update PR #${n}: ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
+  ok(`trailer posted to PR #${n}`);
+  return { number: n };
 }
 
 // ---- helpers ------------------------------------------------------------------------------------

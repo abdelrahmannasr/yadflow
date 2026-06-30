@@ -189,6 +189,7 @@ export function gatePredicate({
   threadsResolved = true,
   merged = true,
   solo = false,
+  requireEngagement = false,
 }) {
   // Phase 6: an INHERITED step (a change-epic carrying a parent artifact by reference) is satisfied
   // without re-review — its approval lives upstream in the thread, recorded as an `inherited` provenance
@@ -210,9 +211,14 @@ export function gatePredicate({
   const stale = forStep.filter((a) => a.artifactHash && currentHash && a.artifactHash !== currentHash);
   const live = forStep.filter((a) => !stale.includes(a));
 
-  const owners = uniqueBy(live.filter((a) => a.role === 'owner'), 'approver');
-  const reviewers = uniqueBy(live.filter((a) => a.role === 'reviewer'), 'approver');
-  const domainOwners = live.filter((a) => a.role === 'domain-owner');
+  // requireEngagement (config `hub.review.requireEngagement`, soft-off by default): only an approval
+  // carrying a verified engagement signal counts. The signal is gameable by design — this raises the
+  // cost of a bare rubber-stamp, it does not claim to prove a human read the artifact.
+  const counted = requireEngagement ? live.filter((a) => a.engagement === 'verified') : live;
+  const unengaged = requireEngagement ? live.filter((a) => a.engagement !== 'verified').length : 0;
+  const owners = uniqueBy(counted.filter((a) => a.role === 'owner'), 'approver');
+  const reviewers = uniqueBy(counted.filter((a) => a.role === 'reviewer'), 'approver');
+  const domainOwners = counted.filter((a) => a.role === 'domain-owner');
 
   const escalate = isEscalated(step);
   const missing = [];
@@ -230,6 +236,10 @@ export function gatePredicate({
     }
   }
   const approvalsSatisfied = missing.length === 0;
+  // Surface engagement-gated approvals that did not count (only when requireEngagement holds the gate).
+  if (!solo && requireEngagement && !approvalsSatisfied && unengaged) {
+    missing.push(`${unengaged} approval(s) without verified engagement — run \`yad gate review\` so they count`);
+  }
   // A stale approval only matters when approvals are required (team mode); in solo they are moot.
   if (!solo && stale.length) missing.unshift(`${stale.length} approval(s) revoked — artifact changed; re-approve`);
   if (!threadsResolved) missing.push('unresolved review comments');
