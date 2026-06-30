@@ -4,11 +4,11 @@ import { VERSION } from '../cli/manifest.mjs';
 import { c, log, closePrompts } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
-import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer } from '../cli/gate.mjs';
+import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough } from '../cli/gate.mjs';
 import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
-import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile } from '../cli/review.mjs';
+import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile, reviewWalkthrough } from '../cli/review.mjs';
 import { runShip } from '../cli/ship.mjs';
 import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
@@ -55,6 +55,8 @@ ${c.bold('Review gate (front half)')}
   yad gate status <epic>               Show each review step + approvals
   yad gate review <epic> [artifact]    Print the grounding bundle for the review companion
                                        (artifact + risk + contract + PR + code-maps) — fun, easy review
+  yad gate walkthrough <epic> [artifact]  Grounding bundle + ordered risk-tagged stops for the
+                                       pair-review walkthrough (yad-pair-review) — guided, teaching review
   yad gate trailer <epic> [artifact] --body <text> [--pr <n>]
                                        Upsert the companion's 60-sec briefing into the PR/MR description
   yad gate ci [--branch <head>] [--pr <n>] [--merged]
@@ -69,6 +71,8 @@ ${c.bold('Build helpers')}
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
+  yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
+                                                          pair-review walkthrough (yad-pair-review)
   yad review nudge --repo <r> --pr <n>                    Friendly @-mention on a bare code-PR approve
   yad review reconcile --epic <id> --repo <r> --pr <n>    Bridge: stamp engagement onto the build-log ship
   yad repo list                        Show connected repos (fresh / stale)
@@ -194,7 +198,7 @@ async function main() {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
       if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
-      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|review|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
+      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|review|walkthrough|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
@@ -205,21 +209,23 @@ async function main() {
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
       else if (action === 'review') await gateReview(o.dir, { epic, artifact });
+      else if (action === 'walkthrough') await gateWalkthrough(o.dir, { epic, artifact });
       else if (action === 'trailer') await gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
-      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|review|trailer|ci)`)); process.exitCode = 1; }
+      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|review|walkthrough|trailer|ci)`)); process.exitCode = 1; }
       break;
     }
     case 'review': {
       const [, action] = o._;
       if (action === 'trailer') await reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
       else if (action === 'context' || action === 'chat' || action === 'cards') await reviewContext(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'walkthrough') await reviewWalkthrough(o.dir, { repo: o.repo, pr: o.pr });
       else if (action === 'nudge') await reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
       else if (action === 'reconcile') {
         // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
         if (!o.epic || !isValidEpicId(o.epic)) { log(c.red(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
         await reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
       }
-      else { log(c.red('usage: yad review <trailer|context|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]')); process.exitCode = 1; }
+      else { log(c.red('usage: yad review <trailer|context|walkthrough|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]')); process.exitCode = 1; }
       break;
     }
     case 'commit':

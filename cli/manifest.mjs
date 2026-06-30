@@ -42,6 +42,7 @@ export const SKILLS = [
   'yad-run',
   'yad-review-gate',
   'yad-review-companion',
+  'yad-pair-review',
   'yad-status',
   'yad-change',
   'yad-timeline',

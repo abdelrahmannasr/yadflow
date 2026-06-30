@@ -1050,7 +1050,33 @@ test('gate sync: a genuine unresolved thread still holds the gate in_review', as
 // ---------------------------------------------------------------------------------------------
 // `yad review` — back-half companion + bridge (code PR/MR)
 // ---------------------------------------------------------------------------------------------
-const { reviewReconcile, reviewContext, reviewNudge } = await import('./review.mjs');
+const { reviewReconcile, reviewContext, reviewNudge, reviewWalkthrough } = await import('./review.mjs');
+const { gateWalkthrough } = await import('./gate.mjs');
+const { sequenceDiff, riskTagsForPath } = await import('./walkthrough.mjs');
+
+test('gate walkthrough: front-half bundle + stops sequenced from the artifact review diff', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gwalk-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  const ep = path.join(T, 'epics/EP-test');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, 'architecture.md'), '---\nid: EP-test\nartifact: architecture\n---\n# arch\n');
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-test', currentStep: 'architecture-review',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review', risk_tags: ['contract'] }],
+  }));
+  const diff = 'diff --git a/architecture.md b/architecture.md\n@@ -1,1 +1,3 @@\n+a\n+b\n';
+  const runner = () => ({ ok: true, stdout: diff, code: 0, stderr: '' });
+  const out = await gateWalkthrough(T, { epic: 'EP-test', artifact: 'architecture.md', runner });
+  assert.equal(out.epic, 'EP-test');
+  assert.equal(out.markers.pair, '<!-- yad:pair -->');
+  assert.equal(out.step.escalated, true); // contract risk tag still escalates the gate
+  assert.equal(out.stops.length, 1);
+  assert.equal(out.stops[0].order, 1);
+  assert.equal(out.stops[0].added, 2);
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 test('review nudge: posts a friendly @-mention only on bare (un-engaged) approvals', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rnudge-'));
@@ -1136,6 +1162,74 @@ test('review context: prints the grounding bundle (diff cmd + code-map) for the 
   assert.ok(b.diffCmd.includes('main...HEAD'));
   assert.ok(b.codeMap.endsWith('.sdlc/code-context/backend/code-map.md'));
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review walkthrough: prints the bundle PLUS ordered, risk-tagged stops (highest-risk first)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rwalk-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'main' }] }));
+  const fakeDiff = [
+    'diff --git a/docs/readme.md b/docs/readme.md',
+    '@@ -1,1 +1,2 @@',
+    '+a line',
+    'diff --git a/src/auth/session.js b/src/auth/session.js',
+    '@@ -3,2 +3,4 @@ fn()',
+    '-old', '+new1', '+new2',
+  ].join('\n');
+  const runner = () => ({ ok: true, stdout: fakeDiff, code: 0, stderr: '' });
+  const out = await reviewWalkthrough(T, { repo: 'backend', pr: 7, runner });
+  assert.equal(out.repo, 'backend');
+  assert.ok(Array.isArray(out.stops) && out.stops.length === 2);
+  // The auth hunk outranks the docs hunk.
+  assert.equal(out.stops[0].file, 'src/auth/session.js');
+  assert.ok(out.stops[0].riskTags.includes('auth'));
+  assert.equal(out.stops[0].order, 1);
+  assert.equal(out.stops[1].file, 'docs/readme.md');
+  assert.deepEqual(out.stops[1].riskTags, []);
+  assert.equal(out.markers.pair, '<!-- yad:pair -->');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('sequenceDiff: anchors line ranges, counts +/- lines, and one zero-size stop for a hunkless file', () => {
+  const diff = [
+    'diff --git a/payments/charge.js b/payments/charge.js',
+    '@@ -10,3 +10,5 @@',
+    '-removed', '+added1', '+added2',
+    'diff --git a/assets/logo.png b/assets/logo.png',
+    'Binary files a/assets/logo.png and b/assets/logo.png differ',
+  ].join('\n');
+  const stops = sequenceDiff(diff, {});
+  const charge = stops.find((s) => s.file === 'payments/charge.js');
+  assert.equal(charge.startLine, 10);
+  assert.equal(charge.endLine, 14);
+  assert.equal(charge.added, 2);
+  assert.equal(charge.removed, 1);
+  assert.ok(charge.riskTags.includes('payments'));
+  const logo = stops.find((s) => s.file === 'assets/logo.png');
+  assert.equal(logo.hunkHeader, null);
+  assert.equal(logo.added, 0);
+  // orders are a contiguous 1..n
+  assert.deepEqual(stops.map((s) => s.order).sort((a, b) => a - b), [1, 2]);
+});
+
+test('sequenceDiff: an explicit contractPath force-tags the locked surface', () => {
+  const diff = 'diff --git a/lib/widget.ts b/lib/widget.ts\n@@ -1,1 +1,2 @@\n+x\n';
+  assert.deepEqual(sequenceDiff(diff, { contractPath: 'lib/widget.ts' })[0].riskTags, ['contract']);
+  assert.deepEqual(riskTagsForPath('lib/widget.ts', {}), []); // not contract without the hint
+});
+
+test('sequenceDiff: empty diff yields no stops', () => {
+  assert.deepEqual(sequenceDiff('', {}), []);
+  assert.deepEqual(sequenceDiff(undefined, {}), []);
+});
+
+test('sequenceDiff: counts content lines that themselves start with ++ / -- (e.g. CLI flags)', () => {
+  // A removed `--flag` is the diff line `---flag`; an added `++i` is `+++i`. Both are content, not the
+  // `--- a/file` / `+++ b/file` headers (those sit before the first @@), so they must be counted.
+  const diff = 'diff --git a/x.sh b/x.sh\n@@ -1,2 +1,2 @@\n---flag\n+++i\n';
+  const [s] = sequenceDiff(diff, {});
+  assert.equal(s.removed, 1, '`---flag` content line counted as a removal');
+  assert.equal(s.added, 1, '`+++i` content line counted as an addition');
 });
 
 test('gate sync: EP-discovery advances through the SAME gate to discovery-done (base rule, no escalation)', async () => {
@@ -1951,7 +2045,7 @@ test('resolveLogin credits a domain owner declared via repos.json domain_owners[
   const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owners: ['carol', 'bob'] }], ['backend']);
   assert.ok(recs.some((r) => r.role === 'domain-owner' && r.domain === 'backend'));
 });
-const { parseEngagement, isNoBlock, upsertTrailerBlock, nudgeMessage, engagementBody, noBlock, NOBLOCK_MARK } = await import('./companion.mjs');
+const { parseEngagement, isNoBlock, upsertTrailerBlock, nudgeMessage, engagementBody, noBlock, NOBLOCK_MARK, PAIR_MARK, isPair, pairSessionBody } = await import('./companion.mjs');
 
 test('companion: engagement + noblock markers parse and round-trip', () => {
   assert.equal(parseEngagement('looks good\n<!-- yad:engagement verified -->'), 'verified');
@@ -1962,6 +2056,32 @@ test('companion: engagement + noblock markers parse and round-trip', () => {
   assert.ok(isNoBlock(noBlock('a companion card')));
   assert.ok(!isNoBlock('a real concern'));
   assert.ok(isNoBlock(nudgeMessage('ayman')) && nudgeMessage('ayman').includes('@ayman'));
+});
+
+test('companion: pairSessionBody carries the pair + noblock marks but NEVER an engagement mark', () => {
+  const body = pairSessionBody({
+    summary: 'walked 3 stops', scorecard: '| step | grade |', verdict: 'no blockers',
+    humanSignoff: 'satisfied', aiSignoff: 'satisfied',
+  });
+  assert.ok(isPair(body), 'is a countable pair session');
+  assert.ok(isNoBlock(body), 'never holds the gate');
+  assert.equal(parseEngagement(body), 'none', 'the session log is history, not the approval');
+  assert.ok(body.includes(PAIR_MARK) && body.includes(NOBLOCK_MARK));
+  assert.ok(body.includes('walked 3 stops') && body.includes('🧑 Human: satisfied') && body.includes('🤖 AI: satisfied'));
+  // a plain comment is neither a pair session nor a card
+  assert.ok(!isPair('a real concern'));
+  // empty input still produces a valid (marked) body, just no sections
+  assert.ok(isPair(pairSessionBody()) && isNoBlock(pairSessionBody()));
+});
+
+test('yad-pair-review skill rides `yad update` (delete it → update reinstalls it)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.rmSync(path.join(T, '.claude/skills/yad-pair-review'), { recursive: true, force: true });
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-pair-review/SKILL.md')), 'pair-review installed by update');
+  assert.ok(r.counts.new >= 1, 'counted as new');
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('companion: upsertTrailerBlock inserts once and replaces idempotently', () => {

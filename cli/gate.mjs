@@ -18,6 +18,7 @@ import {
   getPrBody, editPrBody, postComment,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
+import { sequenceDiff } from './walkthrough.mjs';
 import { syncStatuses } from './artifact-status.mjs';
 import { err } from './errors.mjs';
 
@@ -556,11 +557,14 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr 
 // to generate the 60-sec trailer / swipe cards and to run the grounded chat (artifact + risk tags +
 // contract + PR + repo code-maps). The CLI never calls an LLM; the skill (yad-review-companion)
 // consumes this JSON, generates, and posts back via the platform (trailer/comments/approval).
-export async function gateReview(root, { epic, artifact } = {}) {
+// Build (but don't print) the front-half grounding bundle. Shared by `review` and `walkthrough` so the
+// pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
+// Returns { error } when there is no epic state, else { bundle, epicDir, hub }.
+function reviewBundle(root, { epic, artifact } = {}) {
   const { hub, repos } = loadHub(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
-  if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
+  if (!ledger.state) return { error: `no epic state at ${epicDir}` };
   const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
   const art = artifact || pr?.artifact || null;
   const step = art ? findReviewStep(ledger.state, art) : null;
@@ -578,10 +582,41 @@ export async function gateReview(root, { epic, artifact } = {}) {
       codeMap: r.name ? path.join(root, '.sdlc/code-context', r.name, 'code-map.md') : null,
     })),
     requireEngagement: requireEngagement(hub),
-    markers: { trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->', engagementVerified: '<!-- yad:engagement verified -->' },
+    markers: {
+      trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->',
+      engagementVerified: '<!-- yad:engagement verified -->', pair: '<!-- yad:pair -->',
+    },
   };
-  log(JSON.stringify(bundle, null, 2));
-  return bundle;
+  return { bundle, epicDir, hub };
+}
+
+export async function gateReview(root, { epic, artifact } = {}) {
+  const r = reviewBundle(root, { epic, artifact });
+  if (r.error) { fail(r.error); process.exitCode = 1; return; }
+  log(JSON.stringify(r.bundle, null, 2));
+  return r.bundle;
+}
+
+// `yad gate walkthrough <epic> [artifact]` — the front-half pair-review grounding: the same bundle PLUS
+// an ordered `stops[]` from the artifact's review diff (highest-risk first). The skill (yad-pair-review)
+// walks the stops and runs the two-way teaching session. Deterministic sequencing only — no LLM here.
+export async function gateWalkthrough(root, { epic, artifact, runner = run } = {}) {
+  const r = reviewBundle(root, { epic, artifact });
+  if (r.error) { fail(r.error); process.exitCode = 1; return; }
+  const { bundle, hub } = r;
+  const defaultBranch = hub?.default_branch || 'main';
+  let stops = [];
+  if (bundle.artifactPath) {
+    const rel = path.relative(root, bundle.artifactPath) || bundle.artifact;
+    const diff = runner('git', ['-C', root, 'diff', `${defaultBranch}...HEAD`, '--', rel]);
+    if (diff.ok && diff.stdout.trim()) {
+      stops = sequenceDiff(diff.stdout, { contractPath: bundle.contractPath });
+    }
+  }
+  const out = { ...bundle, stops };
+  log(JSON.stringify(out, null, 2));
+  if (!stops.length) info('no stops from the artifact diff — walk the artifact by section (see yad-pair-review)');
+  return out;
 }
 
 // `yad gate trailer <epic> [artifact] --body <text> [--pr <n>]` — the skill generates the 60-second

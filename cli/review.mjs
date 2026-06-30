@@ -13,6 +13,7 @@ import {
   detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
 } from './platform.mjs';
 import { upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
+import { sequenceDiff } from './walkthrough.mjs';
 
 const NUDGE_CMD = 'yad review chat';
 
@@ -35,11 +36,12 @@ function platformOf(root, repoRoot, meta) {
   return detectPlatform(remote) || readJSON(path.join(root, PROJECT_FILES.hubConfig), {}).platform || null;
 }
 
-// `yad review context --repo <r> --pr <n>` — print the grounding bundle the companion uses to generate
-// the trailer / cards and run the chat over the CODE diff (grounded in the repo code-map + the PR).
-export async function reviewContext(root, { repo, dir, pr } = {}) {
+// Build (but don't print) the back-half grounding bundle. Shared by `context` and `walkthrough` so the
+// pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
+// Returns { error } on a bad --repo, else { bundle, repoRoot, base }.
+function contextBundle(root, { repo, dir, pr } = {}) {
   const rr = resolveRepo(root, { repo, dir });
-  if (rr.error) { fail(rr.error); process.exitCode = 1; return; }
+  if (rr.error) return { error: rr.error };
   const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   const base = meta?.default_branch || 'main';
@@ -52,10 +54,39 @@ export async function reviewContext(root, { repo, dir, pr } = {}) {
     diffCmd: `git -C ${repoRoot} diff ${base}...HEAD`,
     codeMap: meta?.name ? path.join(root, '.sdlc/code-context', meta.name, 'code-map.md') : null,
     pack: meta?.name ? path.join(root, '.sdlc/code-context', meta.name, 'pack.md') : null,
-    markers: { trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->', engagementVerified: '<!-- yad:engagement verified -->' },
+    contract: meta?.contract || null,
+    markers: {
+      trailerBegin: '<!-- yad:trailer -->', noblock: '<!-- yad:noblock -->',
+      engagementVerified: '<!-- yad:engagement verified -->', pair: '<!-- yad:pair -->',
+    },
   };
-  log(JSON.stringify(bundle, null, 2));
-  return bundle;
+  return { bundle, repoRoot, base };
+}
+
+// `yad review context --repo <r> --pr <n>` — print the grounding bundle the companion uses to generate
+// the trailer / cards and run the chat over the CODE diff (grounded in the repo code-map + the PR).
+export async function reviewContext(root, { repo, dir, pr } = {}) {
+  const r = contextBundle(root, { repo, dir, pr });
+  if (r.error) { fail(r.error); process.exitCode = 1; return; }
+  log(JSON.stringify(r.bundle, null, 2));
+  return r.bundle;
+}
+
+// `yad review walkthrough --repo <r> --pr <n>` — the pair-review grounding: the same bundle PLUS an
+// ordered `stops[]` (the code diff parsed into hunk-anchored, risk-tagged review stops, highest-risk
+// first). The CLI sequences deterministically; the skill (yad-pair-review) walks the stops, generates
+// the per-stop briefing + Socratic question, and runs the two-way session. No LLM here, no ledger write.
+export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = {}) {
+  const r = contextBundle(root, { repo, dir, pr });
+  if (r.error) { fail(r.error); process.exitCode = 1; return; }
+  const { bundle, repoRoot, base } = r;
+  const diff = runner('git', ['-C', repoRoot, 'diff', `${base}...HEAD`]);
+  if (!diff.ok) { warn(`could not read the diff (${base}...HEAD) in ${repoRoot} — is the branch pushed and the base correct?`); }
+  const stops = sequenceDiff(diff.ok ? diff.stdout : '', { contractPath: bundle.contract });
+  const out = { ...bundle, stops };
+  log(JSON.stringify(out, null, 2));
+  if (!stops.length) info('no stops — the diff is empty (nothing to walk through)');
+  return out;
 }
 
 // `yad review trailer --repo <r> --pr <n> --body <text>` — idempotently upsert the 60-sec briefing into

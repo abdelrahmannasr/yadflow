@@ -1,4 +1,4 @@
-# Agent skills (all 34)
+# Agent skills (all 36)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -122,6 +122,14 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   an **engagement** signal on each approval (`verified` vs `none`) and posts a friendly public nudge on a
   bare rubber-stamp. Soft by default ("visible, not impossible"); gates only when
   `hub.review.requireEngagement`. Companion comments carry `<!-- yad:noblock -->` so they never block.
+- **`yad-pair-review`** — The guided, two-way, **teaching** walkthrough — the AI-driven 5th companion
+  face (front **and** back half). The AI walks the engineer through the change **one risk-ordered stop at
+  a time** (`yad review walkthrough` / `yad gate walkthrough`), gives comprehensive context per change,
+  then **asks them about it**; the engineer answers and asks back until **both are satisfied** (dual
+  sign-off). It doubles as a learning session — demonstrates a transferable review method, scores the
+  engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (`yad status`
+  rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
+  surfaces genuine concerns as normal blocking comments.
 - **`yad-hub-bridge`** — The templated PR/MR bridge for the front-half gate. When the hub has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file

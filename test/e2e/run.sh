@@ -197,6 +197,20 @@ printf 'export {};\n' > "$BACKEND/src/endpoint.js"
 yad commit --dir "$BACKEND" --type feat -m "add endpoint" || die "yad commit failed"
 git -C "$BACKEND" log -1 --format=%B | grep -q "Task: EP-e2e-S01-T01" || die "Task trailer missing from commit"
 
+say "yad review walkthrough sequences the code diff into ordered stops (pair review)"
+HEAD_HUB_WALK="$(git -C "$HUB" rev-parse HEAD)"
+WALK_JSON="$(yad review walkthrough --dir "$HUB" --repo backend --pr 1)" || die "yad review walkthrough failed"
+echo "$WALK_JSON" | node -e '
+  let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+    const o=JSON.parse(s);
+    if(!Array.isArray(o.stops)||o.stops.length<2) throw new Error("expected >=2 stops, got "+JSON.stringify(o.stops));
+    if(!o.stops.every((x,i)=>x.order===i+1)) throw new Error("stops not 1..n ordered");
+    if(o.markers.pair!=="<!-- yad:pair -->") throw new Error("pair marker missing from bundle");
+  });
+' || die "walkthrough stops malformed"
+[ "$HEAD_HUB_WALK" = "$(git -C "$HUB" rev-parse HEAD)" ] || die "walkthrough must not write/commit anything (advisory only)"
+ls "$EPIC/.sdlc/" | grep -qi "pair\|walkthrough" && die "walkthrough must not create a ledger file"
+
 say "installed check gates pass on the linked branch"
 ( cd "$BACKEND" && bash checks/spec-link.sh main ) || die "spec-link should pass on a linked branch"
 ( cd "$BACKEND" && bash checks/contract-check.sh main ) || die "contract-check should pass when the surface is untouched"
