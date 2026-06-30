@@ -1023,7 +1023,24 @@ test('gate sync: a genuine unresolved thread still holds the gate in_review', as
 // ---------------------------------------------------------------------------------------------
 // `yad review` — back-half companion + bridge (code PR/MR)
 // ---------------------------------------------------------------------------------------------
-const { reviewReconcile, reviewContext } = await import('./review.mjs');
+const { reviewReconcile, reviewContext, reviewNudge } = await import('./review.mjs');
+
+test('review nudge: posts a friendly @-mention only on bare (un-engaged) approvals', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rnudge-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'main' }] }));
+  const reader = () => ({ ok: true, reviews: [
+    { login: 'al', state: 'APPROVED', body: '<!-- yad:engagement verified -->' }, // engaged → no nudge
+    { login: 'bo', state: 'APPROVED' },                                            // bare → nudge
+    { login: 'ca', state: 'COMMENTED' },                                           // not an approval → skip
+  ] });
+  const posted = [];
+  const poster = (_p, _n, body) => { posted.push(body); return { ok: true }; };
+  const res = await reviewNudge(T, { repo: 'backend', pr: 7, reader, poster });
+  assert.equal(res.nudged, 1);
+  assert.ok(posted[0].includes('@bo') && posted[0].includes('yad review chat') && posted[0].includes('yad:noblock'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 test('review reconcile: stamps engagement onto the matching build-log ship record (back-half bridge)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-review-'));
