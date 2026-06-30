@@ -67,7 +67,9 @@ Print, in this order:
    each such story and each of its repos print the back-half chain
    `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
    `automation` dial, and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
-   which back steps are automated and where a run is waiting.
+   which back steps are automated and where a run is waiting. (For the single *next* build sub-step to
+   take per story/repo — rather than this full status view — point the user at `yad next <epic>`, which
+   reads the same `build-state` files.)
 8. **Automation & trust** — print the system-wide **kill switch** state from `config.yaml`
    `automation.kill_switch` (when `on`, note that every step is forced to `human_approve`). Then, for
    each back-half step that has entries in `.sdlc/trust-log.json`, print its **trust record**: number

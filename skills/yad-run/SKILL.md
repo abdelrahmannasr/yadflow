@@ -35,6 +35,9 @@ signal to seed them from, so they are earned only on real runs.
   `../yad-epic/references/state-schema.md`.
 - The orchestrator **calls the existing step skills unchanged** — `yad-spec` (A), `yad-implement`
   (B), `yad-checks` (C). It owns only the *advance decision*, never what a step does.
+- To see (read-only, without driving the loop) the next build sub-step per story/repo, use
+  `yad next <epic>` — it reads the same `build-state/<story-id>.json` and prints the next sub-step plus
+  the remaining chain and the automation dial.
 
 ## Inputs
 

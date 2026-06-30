@@ -229,6 +229,10 @@ gates that protect production. Per-repo specs live in each code repo; the contra
 the product repo. Code repos are **separate git repos** under `demo-repos/<repo>/` (gitignored;
 `demo-repos/README.md` explains regeneration). **Nothing auto-advances** — every gate is human-owned.
 
+> **Lost in the build half?** `yad next <epic>` reads each story's `build-state` and tells you the
+> next sub-step per repo (`spec → implement → checks → engineer-review`) plus the remaining chain and
+> the automation dial — so you never have to remember which step comes after `yad-spec`.
+
 1. **Spec** — `yad-spec` runs the heavy Spec Kit ceremony **once per story per repo**
    (`specify`→`clarify`→`plan`→`analyze`→`checklist`→`tasks`), writing `specs/<story-id>/` and a
    `link.md` back to the story (drives `/speckit.*` when installed, else degrades). It **quotes** the
