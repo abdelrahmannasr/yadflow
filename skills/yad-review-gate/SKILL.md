@@ -92,8 +92,12 @@ Repeat comment→address rounds until reviewers are satisfied. **Commenting neve
 
 **`approve`** — Record an approval. Append to `.sdlc/approvals.json`:
 ```json
-{ "artifact": "<artifact>", "step": "<step id>", "approver": "<name>", "role": "<owner|reviewer|domain-owner>", "domain": "<optional>", "status": "approved", "date": "<YYYY-MM-DD>" }
+{ "artifact": "<artifact>", "step": "<step id>", "approver": "<name>", "role": "<owner|reviewer|domain-owner>", "domain": "<optional>", "status": "approved", "date": "<YYYY-MM-DD>", "engagement": "<verified|none>" }
 ```
+`engagement` records whether the approval came through the [Review Companion](../yad-review-companion/SKILL.md)
+(a real trailer/cards/chat session = `verified`) or as a bare click (`none`). It is soft by default
+(both count; a bare approve draws a friendly nudge) and only gates when `hub.review.requireEngagement`
+is on — see `references/gating.md`. The signal is gameable by design ("visible, not impossible").
 Also write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named roster** with three
 sections, so every participant is attributable in one place:
 

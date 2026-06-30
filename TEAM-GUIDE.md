@@ -159,6 +159,11 @@ npx yadflow setup
 > Re-run `npx yadflow check --fix` after any workflow update — it reports what is
 > missing / drifted / stale and reconciles only what changed (it never re-asks for what you already
 > answered).
+>
+> **Upgrading to a new yadflow version:** run `npx yadflow update`. It installs newly-added skills
+> (e.g. `yad-review-companion`), updates changed skills, and re-copies updated gate scripts into your
+> connected repos. All new review-gate fields are optional and default-off, so your in-flight epics,
+> `hub.json`, open review PRs, and ledgers keep working with no migration.
 
 <details>
 <summary>Manual fallback (no CLI)</summary>
@@ -417,7 +422,7 @@ surfaces (`contract`, `auth`, `payments`):
 - **Keep the install in sync with the CLI** (run from the product hub):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).
-  - `npx yadflow update` — apply drift only.
+  - `npx yadflow update` — apply drift + install newly-added skills (the upgrade command).
   - `npx yadflow --version` — the installed CLI version.
 
 ---
@@ -457,6 +462,7 @@ descriptions of all 34 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
+| `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (front gate & code PRs). |
 | `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |

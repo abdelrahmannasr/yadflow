@@ -19,6 +19,7 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
   "git_url": "https://github.com/abdelrahmannasr/yadflow.git",
   "default_branch": "main",
   "bridge_enabled": true,                                     // open review PRs/MRs on the hub for front-half reviews
+  "review": { "requireEngagement": false },                   // Review Companion: false (soft) counts bare approves but nudges; true counts only verified-engagement approvals
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
   "roster": [
     { "login": "abdelrahmannasr", "name": "alice", "email": "alice@example.com",
@@ -75,6 +76,15 @@ as the registry). `detect-hub` upserts `hub.json` in place — it is idempotent 
 - `bridge_enabled: false`, `platform: null`, or no/unauthenticated CLI → the gate falls back to the
   existing **file-only** flow with no error. The file ledger is the source of truth in both modes.
 - The master switch `config.yaml` `hub.bridge: false` disables the bridge globally regardless of `hub.json`.
+
+## Review Companion engagement (`review.requireEngagement`)
+
+`review.requireEngagement` (default `false`) controls the [Review Companion](../../yad-review-companion/SKILL.md)
+engagement gate. Each approval records `engagement: verified | none`. **Soft (`false`):** both count — a
+bare approve still passes but draws a friendly public nudge, so review *quality* is visible without
+blocking. **Strict (`true`):** the predicate counts only `verified` approvals. The signal is gameable by
+design ("visible, not impossible") — it raises the cost of a rubber-stamp, it does not prove a human
+read the artifact. Applies to both the front gate and the back-half engineer review.
 
 ## Git tracking
 

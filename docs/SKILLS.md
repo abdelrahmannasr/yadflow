@@ -116,6 +116,12 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   reviewer comments and approvals as files, enforces the **owner + 1 reviewer** rule (escalating to
   domain owners on contract/auth/payments), and advances the epic state **only** when approval is
   recorded.
+- **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
+  back half). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
+  review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records
+  an **engagement** signal on each approval (`verified` vs `none`) and posts a friendly public nudge on a
+  bare rubber-stamp. Soft by default ("visible, not impossible"); gates only when
+  `hub.review.requireEngagement`. Companion comments carry `<!-- yad:noblock -->` so they never block.
 - **`yad-hub-bridge`** — The templated PR/MR bridge for the front-half gate. When the hub has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file

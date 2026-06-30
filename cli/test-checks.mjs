@@ -491,6 +491,19 @@ test('pr-template gate: the real code template passes; a stripped body fails', (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('pr-template gate: a prepended companion trailer block does not break the check', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  const tpl = fs.readFileSync(CODE_TPL, 'utf8');
+  // The companion prepends a trailer whose prose mentions "Risk level: high" and adds a noblock note —
+  // neither must hide a section nor be mistaken for the template's real Risk level.
+  const withTrailer = body(T,
+    '<!-- yad:trailer -->\nThis change is big. Risk level: high. Read time: 2 min.\n<!-- /yad:trailer -->\n\n'
+    + tpl + '\n<!-- yad:noblock -->\n');
+  const r = runGate(PR_TEMPLATE, T, ['--profile', 'code', withTrailer]);
+  assert.equal(r.code, 0, r.out);   // template's real "Risk level: low" wins; sections still found
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('pr-template gate: the real hub template passes under --profile hub', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', HUB_TPL]).code, 0);

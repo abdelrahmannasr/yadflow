@@ -118,6 +118,33 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
+// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+hub
+// wiring stay `missing` and remain excluded from update (no one-time setup on update).
+const { moduleActions } = await import('./plan.mjs');
+test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
+  const acts = moduleActions(T, ['.claude']);
+  const skills = acts.filter((a) => a.scope === '.claude');
+  const bmad = acts.filter((a) => a.scope === '_bmad');
+  assert.ok(skills.length && skills.every((a) => a.status === 'new'), 'every uninstalled skill is "new"');
+  assert.ok(bmad.length && bmad.every((a) => a.status === 'missing'), '_bmad files stay "missing"');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('update (scope=changed) installs a brand-new skill but NOT a missing wiring file', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true }); // full install
+  // Simulate a release that adds a new skill (delete one → it reads as "new") AND a dropped wiring file.
+  fs.rmSync(path.join(T, '.claude/skills/yad-review-companion'), { recursive: true, force: true });
+  fs.rmSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml')); // repo wiring → stays "missing"
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-review-companion/SKILL.md')), 'new skill installed by update');
+  assert.ok(!fs.existsSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml')), 'missing wiring NOT installed by update');
+  assert.ok(r.counts.new >= 1, 'counted as new');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // `yad setup` now migrates a pre-2.0 install too (project IDE targets + the opt-in global
 // ~/.claude/skills pass). Both reuse legacyModuleActions; the global pass calls it as
 // legacyModuleActions(os.homedir(), ['.claude']) so an old skill at <root>/.claude/skills/<old>
@@ -491,6 +518,32 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain labels (BUG-1/BUG-3)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  // bob is a hub reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', default_branch: 'main',
+    roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
+  }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', domain_owner: 'carol' }] }));
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/.sdlc/state.json'), JSON.stringify({
+    currentStep: 'stories-review',
+    steps: [{ id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'in_review', risk_tags: [] }],
+  }));
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/epic.md'), '---\nowner: x\nrepos: [backend]\n---\n');
+  fs.mkdirSync(path.join(T, 'epics/EP-demo/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nrepos: [backend]\n---\n');
+  let seen;
+  const creator = (_p, opts) => { seen = opts; return { ok: true, url: 'https://x/pr/1' }; };
+  await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator });
+  assert.deepEqual(seen.reviewers.sort(), ['bo', 'ca']); // carol requested via repos.json (BUG-1)
+  assert.deepEqual(seen.labels, ['domain:backend']);     // escalated step labels the touched domain
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit code (P2)', async () => {
   const prev = process.exitCode;
   const T = hubWithStoriesStep();
@@ -582,6 +635,26 @@ test('gatePredicate: solo still requires the merge and resolved threads', () => 
   const unresolved = gatePredicate({ step: baseStep, approvals: [], merged: true, threadsResolved: false, solo: true });
   assert.equal(unresolved.passed, false);
   assert.ok(unresolved.missing.includes('unresolved review comments'));
+});
+
+test('gatePredicate: requireEngagement counts only verified approvals (soft default counts both)', () => {
+  const approvals = [
+    appr({ approver: 'alice', role: 'owner', engagement: 'verified' }),
+    appr({ approver: 'bob', role: 'reviewer', engagement: 'none' }),
+  ];
+  // soft (default): the bare reviewer still counts → passes.
+  assert.equal(gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true }).passed, true);
+  // strict: bob's unengaged approval does not count → a reviewer is missing.
+  const strict = gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
+  assert.equal(strict.passed, false);
+  assert.ok(strict.missing.some((m) => /reviewer/.test(m)));
+  assert.ok(strict.missing.some((m) => /verified engagement/.test(m)));
+  // once bob's approval is engagement-verified, strict passes.
+  const ok = gatePredicate({
+    step: baseStep, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true,
+    approvals: [approvals[0], appr({ approver: 'bob', role: 'reviewer', engagement: 'verified' })],
+  });
+  assert.equal(ok.passed, true);
 });
 
 test('gatePredicate: solo passes an escalated step without any domain-owner approvals', () => {
@@ -941,6 +1014,127 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
   const again = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
   assert.equal(again.filter((a) => a.source === 'bridge').length, approvals.filter((a) => a.source === 'bridge').length);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: records engagement per approval; a noblock companion thread never blocks (2f)', async () => {
+  const { T, ep } = scaffoldEpic();
+  const reader = () => ({
+    ok: true, state: 'MERGED', merged: true, headOid: 'abc',
+    reviews: [
+      { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', body: '<!-- yad:engagement verified -->' },
+      { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },              // bare → none
+      { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', body: 'read it\n<!-- yad:engagement verified -->' },
+    ],
+    // An UNRESOLVED companion card thread — must NOT hold the gate (carries the noblock marker).
+    threads: [{ id: 't1', resolved: false, login: 'al', body: 'Card deck 🃏\n<!-- yad:noblock -->' }],
+  });
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader });
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done'); // noblock thread ignored
+  const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.equal(approvals.find((a) => a.approver === 'alice').engagement, 'verified');
+  assert.equal(approvals.find((a) => a.approver === 'bob').engagement, 'none');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a genuine unresolved thread still holds the gate in_review', async () => {
+  const { T, ep } = scaffoldEpic();
+  const reader = () => ({ ...fullApproval, threads: [{ id: 't', resolved: false, login: 'x', body: 'this section is wrong' }] });
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader });
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'in_review');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad review` — back-half companion + bridge (code PR/MR)
+// ---------------------------------------------------------------------------------------------
+const { reviewReconcile, reviewContext, reviewNudge } = await import('./review.mjs');
+
+test('review nudge: posts a friendly @-mention only on bare (un-engaged) approvals', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rnudge-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'main' }] }));
+  const reader = () => ({ ok: true, reviews: [
+    { login: 'al', state: 'APPROVED', body: '<!-- yad:engagement verified -->' }, // engaged → no nudge
+    { login: 'bo', state: 'APPROVED' },                                            // bare → nudge
+    { login: 'ca', state: 'COMMENTED' },                                           // not an approval → skip
+  ] });
+  const posted = [];
+  const poster = (_p, _n, body) => { posted.push(body); return { ok: true }; };
+  const res = await reviewNudge(T, { repo: 'backend', pr: 7, reader, poster });
+  assert.equal(res.nudged, 1);
+  assert.ok(posted[0].includes('@bo') && posted[0].includes('yad review chat') && posted[0].includes('yad:noblock'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review reconcile: stamps engagement onto the matching build-log ship record (back-half bridge)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-review-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github',
+    roster: [{ login: 'al', name: 'amelia', roles: { backend: ['owner'] } }, { login: 'ca', name: 'carol', roles: { backend: ['reviewer'] } }],
+  }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'main' }] }));
+  const ep = path.join(T, 'epics/EP-test/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'build-log.json'), JSON.stringify({
+    epic: 'EP-test',
+    ships: [{ story: 'EP-test-S01', task: 'T01', repo: 'backend', pr: 'http://x/pull/5', engineer_review: [] }],
+  }));
+  const reader = () => ({ ok: true, merged: true, headOid: 'h', reviews: [
+    { login: 'al', state: 'APPROVED', body: 'read it\n<!-- yad:engagement verified -->' },
+    { login: 'ca', state: 'APPROVED' },
+  ], threads: [] });
+  const res = await reviewReconcile(T, { epic: 'EP-test', repo: 'backend', pr: 5, reader });
+  assert.equal(res.written, true);
+  const bl = JSON.parse(fs.readFileSync(path.join(ep, 'build-log.json')));
+  const er = bl.ships[0].engineer_review;
+  assert.equal(er.find((e) => e.approver === 'amelia').engagement, 'verified');
+  assert.equal(er.find((e) => e.approver === 'carol').engagement, 'none');
+  assert.equal(er.find((e) => e.approver === 'amelia').role, 'owner');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review reconcile: matches a ship by exact PR number, never substring', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-recon2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'amelia', roles: { backend: ['owner'] } }] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github' }] }));
+  const ep = path.join(T, 'epics/EP-test/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  // A ship recorded against PR #15 must NOT be matched by --pr 5.
+  fs.writeFileSync(path.join(ep, 'build-log.json'), JSON.stringify({ epic: 'EP-test', ships: [{ story: 'S', task: 'T', repo: 'backend', pr: 'http://x/pull/15', engineer_review: [{ approver: 'old' }] }] }));
+  const reader = () => ({ ok: true, reviews: [{ login: 'al', state: 'APPROVED' }] });
+  const res = await reviewReconcile(T, { epic: 'EP-test', repo: 'backend', pr: 5, reader });
+  assert.equal(res.written, false, 'no false substring match against #15');
+  const bl = JSON.parse(fs.readFileSync(path.join(ep, 'build-log.json')));
+  assert.equal(bl.ships[0].engineer_review[0].approver, 'old', 'the #15 ship is untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review: an explicit --repo not in the registry fails fast (no silent cwd fallthrough)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rrepo-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github' }] }));
+  const prev = process.exitCode; process.exitCode = 0;
+  const r = await reviewContext(T, { repo: 'nope', pr: 1 });
+  assert.ok(!r, 'returns nothing');
+  assert.ok(process.exitCode, 'sets a non-zero exit code');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review context: prints the grounding bundle (diff cmd + code-map) for the companion', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctx-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'gitlab', default_branch: 'main' }] }));
+  const b = await reviewContext(T, { repo: 'backend', pr: 9 });
+  assert.equal(b.platform, 'gitlab');
+  assert.equal(b.pr, 9);
+  assert.ok(b.diffCmd.includes('main...HEAD'));
+  assert.ok(b.codeMap.endsWith('.sdlc/code-context/backend/code-map.md'));
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1741,7 +1935,57 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+
+test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
+  assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
+  assert.equal(prNumberFromUrl('https://gitlab.com/group/proj/-/merge_requests/45'), '45');
+  // a numeric segment BEFORE the MR path must not win
+  assert.equal(prNumberFromUrl('https://gitlab.example.com/team/123/-/merge_requests/45'), '45');
+  assert.equal(prNumberFromUrl('https://x/pull/5'), '5');
+  assert.equal(prNumberFromUrl('nonsense'), null);
+});
+
+test('resolveLogin credits a domain owner declared via repos.json domain_owners[] (symmetry)', () => {
+  const roster = [{ login: 'ca', name: 'carol' }];
+  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owners: ['carol', 'bob'] }], ['backend']);
+  assert.ok(recs.some((r) => r.role === 'domain-owner' && r.domain === 'backend'));
+});
+const { parseEngagement, isNoBlock, upsertTrailerBlock, nudgeMessage, engagementBody, noBlock, NOBLOCK_MARK } = await import('./companion.mjs');
+
+test('companion: engagement + noblock markers parse and round-trip', () => {
+  assert.equal(parseEngagement('looks good\n<!-- yad:engagement verified -->'), 'verified');
+  assert.equal(parseEngagement('<!-- yad:engagement none -->'), 'none');
+  assert.equal(parseEngagement('no marker here'), 'none');
+  assert.equal(parseEngagement(engagementBody('verified', 'hi')), 'verified');
+  assert.equal(parseEngagement(engagementBody('none')), 'none');
+  assert.ok(isNoBlock(noBlock('a companion card')));
+  assert.ok(!isNoBlock('a real concern'));
+  assert.ok(isNoBlock(nudgeMessage('ayman')) && nudgeMessage('ayman').includes('@ayman'));
+});
+
+test('companion: upsertTrailerBlock inserts once and replaces idempotently', () => {
+  const t1 = upsertTrailerBlock('existing description', 'TRAILER ONE');
+  assert.ok(t1.includes('TRAILER ONE') && t1.includes('existing description'));
+  assert.equal((t1.match(/<!-- yad:trailer -->/g) || []).length, 1);
+  const t2 = upsertTrailerBlock(t1, 'TRAILER TWO');
+  assert.ok(t2.includes('TRAILER TWO') && !t2.includes('TRAILER ONE')); // replaced, not duplicated
+  assert.equal((t2.match(/<!-- yad:trailer -->/g) || []).length, 1);
+  assert.ok(t2.includes('existing description')); // surrounding body preserved
+  // an earlier QUOTED end-marker in the body must not break idempotent replacement
+  const quoted = upsertTrailerBlock('quote: `<!-- /yad:trailer -->` in prose\n\n' + t1, 'TRAILER THREE');
+  assert.equal((quoted.match(/<!-- yad:trailer -->/g) || []).length, 1, 'still exactly one trailer block');
+  assert.ok(quoted.includes('TRAILER THREE') && !quoted.includes('TRAILER ONE'));
+});
+
+test('mapApprovers reads the engagement marker from the review body', () => {
+  const roster = [{ login: 'al', name: 'alice', role: 'owner' }];
+  const verified = mapApprovers([{ login: 'al', state: 'APPROVED', body: 'ok\n<!-- yad:engagement verified -->' }], { roster, repos: [], touchedDomains: [] });
+  assert.equal(verified[0].engagement, 'verified');
+  const bare = mapApprovers([{ login: 'al', state: 'APPROVED' }], { roster, repos: [], touchedDomains: [] });
+  assert.equal(bare[0].engagement, 'none');
+  assert.ok(NOBLOCK_MARK.includes('yad:noblock'));
+});
 
 test('detectPlatform / cliFor', () => {
   assert.equal(detectPlatform('git@github.com:o/r.git'), 'github');
@@ -1828,6 +2072,31 @@ test('reviewersForScopes picks reviewers + domain-owners and excludes the commit
   ];
   assert.deepEqual(reviewersForScopes(roster, ['hub'], {}).sort(), ['bo', 'ca']);
   assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { excludeLogin: 'bo' }).sort(), ['ca', 'dv']);
+});
+
+test('reviewersForScopes requests a repos.json-only domain owner (BUG-1 regression)', () => {
+  // carol owns backend ONLY via repos.json domain_owner — no roster role for the backend scope.
+  const roster = [
+    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },
+    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
+    { login: 'ca', name: 'carol' },                       // identity only, no roles map
+  ];
+  const repos = [{ name: 'backend', domain_owner: 'carol' }];
+  // Without repos: carol is never requested (the bug). With repos: she is.
+  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], {}).sort(), ['bo']);
+  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { repos }).sort(), ['bo', 'ca']);
+  // domain_owners[] (plural) is honored too, and excludeLogin still applies.
+  const repos2 = [{ name: 'backend', domain_owners: ['carol', 'bob'] }];
+  assert.deepEqual(reviewersForScopes(roster, ['backend'], { repos: repos2, excludeLogin: 'bo' }).sort(), ['ca']);
+});
+
+test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {
+  const gl = buildPrArgs('gitlab', { title: 't', body: 'b', base: 'main', head: 'f', reviewers: ['bo', 'ca', 'dv'] });
+  assert.equal(gl[gl.indexOf('--reviewer') + 1], 'bo');   // only the first; the rest get @-mentioned
+  assert.equal(gl.filter((a) => a === '--reviewer').length, 1);
+  // GitHub keeps the full comma list (multiple reviewers are supported there).
+  const gh = buildPrArgs('github', { title: 't', body: 'b', base: 'main', head: 'f', reviewers: ['bo', 'ca'] });
+  assert.equal(gh[gh.indexOf('--reviewer') + 1], 'bo,ca');
 });
 
 test('resolveCommitterLogin maps git identity through the roster', () => {

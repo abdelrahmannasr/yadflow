@@ -34,25 +34,31 @@ export function ideTargetsFor(root) {
   return present.length ? present : ['.claude'];
 }
 
+// A brand-new first-party skill is `missing` on every existing install. Relabel that to status `'new'`
+// so it rides `yad update` (--scope=changed) — like 'legacy'/'removed', the `changed` filter only
+// excludes literal 'missing', so 'new' survives. Scoped to SKILL installs ONLY: repo/hub wiring and
+// _bmad files stay 'missing' (excluded from update), so `update` never does one-time setup.
+const asNewSkill = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a);
+
 // Module = skills installed into each IDE target + the _bmad/sdlc registration.
 export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
   const actions = [];
   for (const ide of ideTargets) {
     if (ide === '.opencode') {
       for (const s of SKILLS) {
-        actions.push(fileAction(
+        actions.push(asNewSkill(fileAction(
           ide, s,
           asset('skills', s, 'SKILL.md'),
           path.join(root, IDE_OPENCODE_DIR, `${s}.md`),
-        ));
+        )));
       }
     } else {
       for (const s of SKILLS) {
-        actions.push(dirAction(
+        actions.push(asNewSkill(dirAction(
           ide, s,
           asset('skills', s),
           path.join(root, ide, 'skills', s),
-        ));
+        )));
       }
     }
   }

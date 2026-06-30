@@ -35,6 +35,40 @@ glab api projects/:id/merge_requests/:iid/notes          # discussion notes (com
 All commands run as the **local user**; the bridge stores no tokens. If the CLI is missing/unauthenticated
 or the remote is unreachable, the bridge stops and the gate falls back to file-only (no error).
 
+> **GitLab read parity (GAP-6).** `readPrGitLab` reads approvals (`approved_by[]`) and discussions but
+> does **not** map a "Request changes" reviewer state to `CHANGES_REQUESTED` — on GitLab the blocking
+> signal is an **unresolved discussion**. So on GitLab the gate is held by unresolved threads, not by a
+> reviewer state. (GitHub maps both.) If you need GitLab "Request changes" honored, read
+> `reviewers[].state` from the MR and map it to `CHANGES_REQUESTED`.
+
+## Open recipes (request the reviewers — used by `yad gate open` / `yad open-pr`)
+
+Opening the review PR/MR must **request the required reviewers**, or an escalated gate is opened with
+nobody asked. The CLI (`createPr` in `cli/platform.mjs`) does this; an agent opening a PR by hand uses:
+
+**GitHub** — create, then add each reviewer (a bad/non-collaborator login WARNS instead of aborting the
+whole create):
+```bash
+gh pr create --title "review: <artifact> (<epic>)" --body <body> --base <default> --head <branch> \
+  --assignee @me --label domain:<repo>
+gh pr edit <n> --add-reviewer <login>      # once per required reviewer
+```
+
+**GitLab** — a Free/Core MR carries a **single** reviewer field (multiple reviewers is Premium), so
+assign the first required reviewer and **@-mention the rest in a note** so they are still notified/routed:
+```bash
+glab mr create --title "review: <artifact> (<epic>)" --description <body> \
+  --target-branch <default> --source-branch <branch> --reviewer <first-login> --label domain:<repo> --yes
+glab mr note <iid> -m "Review requested (owner + reviewer rule): @<l2> @<l3> — please review and approve/comment on this MR (this drives the gate)."
+```
+The read side counts a mentioned reviewer normally: their eventual **approval** still appears in
+`…/approvals → approved_by[]`, and their **note** in `…/discussions` — so the single-reviewer-field cap
+loses only the native "Reviewers" UI chip, not the gate routing.
+
+Required reviewers = the hub's `reviewer`/`domain-owner` roster logins for the touched scopes, PLUS any
+repo whose ownership lives only in `repos.json` `domain_owner`/`domain_owners` (those are resolved to a
+login and requested too — otherwise an escalated step is structurally unsatisfiable through routing).
+
 ## Login → role resolution (order)
 
 1. Roster (`.sdlc/hub.json`) maps `login` → `name` + base `role` (owner/reviewer).

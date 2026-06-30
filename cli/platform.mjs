@@ -3,6 +3,7 @@
 // no tokens are stored. Pure mapping fns (resolveLogin/mapApprovers) are exported for unit tests;
 // readPr is injectable so the gate can be tested with a fake.
 import { run, has } from './lib.mjs';
+import { parseEngagement } from './companion.mjs';
 
 // github | gitlab | null, from a repo/remote.
 export function detectPlatform(remoteUrl = '') {
@@ -68,11 +69,22 @@ export function hasAnyRole(entry, scopes = [], wanted = []) {
 
 // Platform logins to auto-request as reviewers for the given scopes: everyone holding a `reviewer`
 // or `domain-owner` role in any scope, minus `excludeLogin` (you don't review your own PR), deduped.
-export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = null } = {}) {
+// `repos` (the registry) is consulted so a repo whose domain ownership lives ONLY in the legacy
+// `repos.json` `domain_owner`/`domain_owners` field — not the roster roles map — is still requested
+// as a reviewer for any scope that is its repo name. Without this the read side credits that login as
+// a domain-owner (resolveLogin's legacy fallback) but the open side never asks them, so an escalated
+// gate becomes structurally unsatisfiable through platform routing (BUG-1).
+export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = null, repos = [] } = {}) {
   const out = [];
+  const add = (login) => { if (login && login !== excludeLogin && !out.includes(login)) out.push(login); };
   for (const entry of roster) {
-    if (!entry.login || entry.login === excludeLogin) continue;
-    if (hasAnyRole(entry, scopes, ['reviewer', 'domain-owner']) && !out.includes(entry.login)) out.push(entry.login);
+    if (hasAnyRole(entry, scopes, ['reviewer', 'domain-owner'])) add(entry.login);
+  }
+  for (const scope of scopes) {
+    const repo = repos.find((r) => r.name === scope);
+    if (!repo) continue;
+    const names = repo.domain_owners || (repo.domain_owner ? [repo.domain_owner] : []);
+    for (const name of names) add(roster.find((r) => r.name === name)?.login);
   }
   return out;
 }
@@ -127,8 +139,11 @@ export function resolveLogin(login, roster = [], repos = [], touchedDomains = []
     for (const role of rolesForScope(entry, d)) {
       push(role === 'domain-owner' ? { name: entry.name, role, domain: d } : { name: entry.name, role });
     }
-    // Legacy fallback: a repo whose domain_owner is this name confers domain-owner for that domain.
-    const legacy = repos.find((repo) => repo.name === d && repo.domain_owner === entry.name);
+    // Legacy fallback: a repo whose domain_owner / domain_owners[] includes this name confers
+    // domain-owner for that domain. Both spellings are honored — symmetric with reviewersForScopes,
+    // which REQUESTS from both, so a person routed as a domain owner is also credited as one.
+    const legacy = repos.find((repo) => repo.name === d
+      && (repo.domain_owner === entry.name || (Array.isArray(repo.domain_owners) && repo.domain_owners.includes(entry.name))));
     if (legacy) push({ name: entry.name, role: 'domain-owner', domain: d });
   }
   // An identity-only entry (no roles map and no legacy `role`) still contributes a base reviewer
@@ -156,8 +171,11 @@ export function mapApprovers(reviews = [], { roster, repos, touchedDomains, head
     //                               commits" setting.
     if (r.commit === null) continue;
     if (headOid && r.commit !== undefined && r.commit !== headOid) continue;
+    // engagement rides in the APPROVE review body (`<!-- yad:engagement verified -->`); a bare UI
+    // click has no marker → 'none'. Gameable by design (it makes review quality visible, not provable).
+    const engagement = parseEngagement(r.body);
     for (const rec of resolveLogin(r.login, roster, repos, touchedDomains)) {
-      out.push({ ...rec, submittedAt: r.submittedAt || null });
+      out.push({ ...rec, submittedAt: r.submittedAt || null, engagement });
     }
   }
   return out;
@@ -182,7 +200,7 @@ function readPrGitHub(n, { cwd } = {}) {
     // latestReviews` does not expose the commit, so read it via GraphQL. Paginate so a PR with >100
     // reviewers never silently omits one; any page failure aborts to the commitless fallback below,
     // which fails closed rather than advancing on a partial read.
-    const rq = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{author{login} state submittedAt commit{oid}}}}}}`;
+    const rq = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{author{login} state submittedAt body commit{oid}}}}}}`;
     let rcursor = null;
     reviewsOk = true;
     for (let guard = 0; guard < 50; guard++) {
@@ -192,7 +210,7 @@ function readPrGitHub(n, { cwd } = {}) {
       if (!rg.ok) { reviewsOk = false; reviews = []; break; }
       const conn = JSON.parse(rg.stdout)?.data?.repository?.pullRequest?.latestReviews;
       for (const x of conn?.nodes || []) {
-        reviews.push({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, commit: x.commit?.oid || null });
+        reviews.push({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, body: x.body, commit: x.commit?.oid || null });
       }
       if (!conn?.pageInfo?.hasNextPage) break;
       rcursor = conn.pageInfo.endCursor;
@@ -224,7 +242,7 @@ function readPrGitHub(n, { cwd } = {}) {
   if (!reviewsOk) {
     const rev = run('gh', ['pr', 'view', String(n), '--json', 'latestReviews'], { cwd });
     if (rev.ok) reviews = (JSON.parse(rev.stdout).latestReviews || [])
-      .map((x) => ({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, commit: null }));
+      .map((x) => ({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, body: x.body, commit: null }));
   }
   return {
     ok: true,
@@ -243,19 +261,26 @@ function readPrGitLab(n, { cwd } = {}) {
   const mr = JSON.parse(view.stdout);
   const approvals = run('glab', ['api', `projects/:id/merge_requests/${mr.iid}/approvals`], { cwd });
   const approvedBy = approvals.ok ? (JSON.parse(approvals.stdout).approved_by || []) : [];
-  const reviews = approvedBy.map((a) => ({ login: a.user?.username, state: 'APPROVED' }));
   const disc = run('glab', ['api', `projects/:id/merge_requests/${mr.iid}/discussions`], { cwd });
-  let threads = [];
-  if (disc.ok) {
-    threads = (JSON.parse(disc.stdout) || [])
-      .filter((d) => d.notes?.some((nt) => nt.resolvable))
-      .map((d, i) => ({
-        id: d.id || `disc-${i}`,
-        resolved: !!d.notes.find((nt) => nt.resolvable)?.resolved,
-        login: d.notes[0]?.author?.username,
-        body: d.notes[0]?.body,
-      }));
+  const discussions = disc.ok ? (JSON.parse(disc.stdout) || []) : [];
+  // A GitLab approval carries no body, so the companion's engagement marker rides in a NOTE the
+  // reviewer posts; attach the latest engagement-bearing note per username to their approval so
+  // mapApprovers reads engagement uniformly with GitHub.
+  const engagementByUser = new Map();
+  for (const d of discussions) {
+    for (const nt of d.notes || []) {
+      if (/<!--\s*yad:engagement\s+\w+\s*-->/i.test(nt.body || '')) engagementByUser.set(nt.author?.username, nt.body);
+    }
   }
+  const reviews = approvedBy.map((a) => ({ login: a.user?.username, state: 'APPROVED', body: engagementByUser.get(a.user?.username) }));
+  const threads = discussions
+    .filter((d) => d.notes?.some((nt) => nt.resolvable))
+    .map((d, i) => ({
+      id: d.id || `disc-${i}`,
+      resolved: !!d.notes.find((nt) => nt.resolvable)?.resolved,
+      login: d.notes[0]?.author?.username,
+      body: d.notes[0]?.body,
+    }));
   return {
     ok: true,
     state: mr.state,
@@ -281,7 +306,9 @@ export function readPr(platform, n, opts = {}) {
 export function buildPrArgs(platform, { title, body, base, head, reviewers = [], labels = [], assignees = [] } = {}) {
   if (platform === 'gitlab') {
     const args = ['mr', 'create', '--title', title, '--description', body, '--target-branch', base, '--source-branch', head, '--yes'];
-    if (reviewers.length) args.push('--reviewer', reviewers.join(','));
+    // A Free/Core GitLab MR carries a SINGLE reviewer field (multiple reviewers is a Premium feature),
+    // so only the first reviewer goes in the field; createPr @-mentions the rest in a note (BUG-2).
+    if (reviewers.length) args.push('--reviewer', reviewers[0]);
     if (assignees.length) args.push('--assignee', assignees.join(','));
     if (labels.length) args.push('--label', labels.join(','));
     return args;
@@ -293,8 +320,107 @@ export function buildPrArgs(platform, { title, body, base, head, reviewers = [],
   return args;
 }
 
+// Number/IID from a PR/MR URL (…/pull/123, …/pulls/123, …/-/merge_requests/45). Anchored to the
+// PR/MR path segment so a numeric group/org/repo earlier in the URL is never mistaken for it; falls
+// back to a trailing number for non-standard URLs. null when unparsable.
+export function prNumberFromUrl(url = '') {
+  const s = String(url);
+  const m = s.match(/\/(?:pull|pulls|merge_requests)\/(\d+)/);
+  if (m) return m[1];
+  const tail = s.match(/\/(\d+)(?:[/?#]|$)/);
+  return tail ? tail[1] : null;
+}
+
+// Create a PR/MR and route the required reviewers, resiliently, on both platforms:
+//   GitHub — create WITHOUT reviewers, then add each via `gh pr edit --add-reviewer`. A bad/
+//            non-collaborator login then WARNS (dropped) instead of aborting the whole create (BUG-4).
+//   GitLab — assign the first reviewer to the MR field; @-mention the remaining required reviewers in
+//            an MR note so they are still notified/routed despite the single-reviewer-field cap (BUG-2).
+// Returns { ok, url, reviewers (assigned), mentioned, dropped }.
+// ---- post back to the platform (companion write helpers) ----------------------------------------
+// The reviewer/companion writes to the PLATFORM (PR/MR body + comments + approval), never the ledger —
+// so the ledger-guard check is never tripped. Each returns { ok, ... } and never throws.
+
+// Current PR/MR description (for idempotent trailer-block upsert). null when unreadable.
+export function getPrBody(platform, n, { cwd } = {}) {
+  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  if (platform === 'github') {
+    const r = run('gh', ['pr', 'view', String(n), '--json', 'body', '-q', '.body'], { cwd });
+    return { ok: r.ok, body: r.ok ? r.stdout : '', reason: r.stderr };
+  }
+  const r = run('glab', ['mr', 'view', String(n), '-F', 'json'], { cwd });
+  if (!r.ok) return { ok: false, body: '', reason: r.stderr };
+  try { return { ok: true, body: JSON.parse(r.stdout).description || '' }; } catch { return { ok: false, body: '', reason: 'unparseable mr json' }; }
+}
+
+// Replace the PR/MR description (used to upsert the trailer block).
+export function editPrBody(platform, n, body, { cwd } = {}) {
+  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  const r = platform === 'github'
+    ? run('gh', ['pr', 'edit', String(n), '--body', body], { cwd })
+    : run('glab', ['mr', 'update', String(n), '--description', body], { cwd });
+  return { ok: r.ok, reason: r.stderr };
+}
+
+// Post a top-level comment/note (companion card deck, chat log, nudge — pass a noBlock()-tagged body).
+export function postComment(platform, n, body, { cwd } = {}) {
+  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  const r = platform === 'github'
+    ? run('gh', ['pr', 'comment', String(n), '--body', body], { cwd })
+    : run('glab', ['mr', 'note', String(n), '-m', body], { cwd });
+  return { ok: r.ok, reason: r.stderr };
+}
+
+// Submit an APPROVE carrying the engagement marker. On GitLab an approval has no body, so the marker
+// is posted as a note (readPrGitLab attaches it to the approval); on GitHub it rides in the review body.
+export function submitApproval(platform, n, body = '', { cwd } = {}) {
+  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  if (platform === 'github') {
+    const r = run('gh', ['pr', 'review', String(n), '--approve', '--body', body], { cwd });
+    return { ok: r.ok, reason: r.stderr };
+  }
+  const a = run('glab', ['mr', 'approve', String(n)], { cwd });
+  if (!a.ok) return { ok: false, reason: a.stderr };
+  if (body) {
+    // The engagement marker rides in this note (GitLab approvals carry no body). If it fails to post,
+    // the approval landed but the engagement signal is lost — report failure so the caller can retry.
+    const note = run('glab', ['mr', 'note', String(n), '-m', body], { cwd });
+    if (!note.ok) return { ok: false, reason: `approved, but failed to post the engagement note: ${note.stderr || 'unknown'}` };
+  }
+  return { ok: true };
+}
+
 export function createPr(platform, opts = {}) {
   if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
-  const r = run(cliFor(platform), buildPrArgs(platform, opts), { cwd: opts.cwd });
-  return { ok: r.ok, url: r.stdout.split('\n').pop(), reason: r.stderr };
+  const reviewers = opts.reviewers || [];
+  if (platform === 'github') {
+    const r = run('gh', buildPrArgs('github', { ...opts, reviewers: [] }), { cwd: opts.cwd });
+    if (!r.ok) return { ok: false, reason: r.stderr };
+    const url = r.stdout.split('\n').pop();
+    const number = prNumberFromUrl(url);
+    const added = []; const dropped = [];
+    if (number) {
+      for (const rv of reviewers) {
+        (run('gh', ['pr', 'edit', number, '--add-reviewer', rv], { cwd: opts.cwd }).ok ? added : dropped).push(rv);
+      }
+    }
+    return { ok: true, url, reviewers: added, mentioned: [], dropped };
+  }
+  // gitlab
+  const r = run('glab', buildPrArgs('gitlab', opts), { cwd: opts.cwd });
+  if (!r.ok) return { ok: false, reason: r.stderr };
+  const url = r.stdout.split('\n').pop();
+  const iid = prNumberFromUrl(url);
+  const rest = reviewers.slice(1);
+  // Only report a reviewer as `mentioned` if the @-mention note actually posted; otherwise they were
+  // neither assigned (single-field cap) nor notified — surface them as `dropped` so the caller warns.
+  let mentioned = []; let dropped = [];
+  if (rest.length && iid) {
+    const ats = rest.map((m) => `@${m}`).join(' ');
+    const note = run('glab', ['mr', 'note', iid, '-m', `Review requested (owner + reviewer rule): ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
+    if (note.ok) mentioned = rest; else dropped = rest;
+  } else if (rest.length) {
+    dropped = rest; // could not parse the IID to post the note
+  }
+  return { ok: true, url, reviewers: reviewers.slice(0, 1), mentioned, dropped };
 }

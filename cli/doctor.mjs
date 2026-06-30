@@ -94,6 +94,17 @@ export function projectChecks(checks, root) {
           }
           if (bad.length) check(checks, 'roster', 'project', 'warn', `roster login(s) not found on ${hub.platform}: ${bad.join(', ')}`, 'fix the login or re-run `yad setup` (they cannot satisfy a gate)');
           else check(checks, 'roster', 'project', 'ok', `roster: ${(hub.roster || []).length} member(s) validated on ${hub.platform}`);
+          // GitLab API reachability: the gate reads MR state via `glab api …` (approvals, discussions).
+          // A present+authenticated glab whose token lacks api scope would still break readPrGitLab, so
+          // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
+          if (hub.platform === 'gitlab') {
+            // Scope the probe to the hub's own host (like the auth check above) so a multi-instance
+            // setup doesn't hit the wrong GitLab and emit a misleading warning.
+            const apiArgs = host ? ['api', 'version', '--hostname', host] : ['api', 'version'];
+            if (!run('glab', apiArgs).ok) {
+              check(checks, 'gitlab-api', 'project', 'warn', `glab is authenticated but \`glab api\` failed${host ? ` for ${host}` : ''} [YAD-ENV-002]`, 'ensure the token has `api` scope — the gate reads MR approvals/discussions via the API');
+            }
+          }
           // Solo + GitHub: a branch that "requires approvals" would block the solo dev's own merge
           // (they can't approve their own PR). Best-effort probe; a 404 (no protection) is fine.
           if (isSolo(hub) && hub.platform === 'github') {

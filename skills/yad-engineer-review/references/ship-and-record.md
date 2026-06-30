@@ -33,9 +33,10 @@ Append-only. One record per shipped task:
       "gates": ["spec-link", "contract-check", "build-test-lint"],
       "ai_review": "coderabbit (advisory)",
       "engineer_review": [
-        { "approver": "amelia", "role": "owner" },
-        { "approver": "carol", "role": "reviewer" }
+        { "approver": "amelia", "role": "owner", "engagement": "verified" },
+        { "approver": "carol", "role": "reviewer", "engagement": "none" }
       ],
+      "companion": { "trailer": true, "cards": true, "chat": false },
       "risk": "low",
       "shippedAt": "2026-06-06"
     }
@@ -45,6 +46,18 @@ Append-only. One record per shipped task:
 
 This is the back-half analogue of the front half's `approvals.json` — files only, no hidden state, so a
 future service can drive ship by writing the same records.
+
+**Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
+— `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)
+(`yad review trailer/context/nudge`, a real trailer/cards/chat session over the diff), `none` for a bare
+approve. The optional `companion` block records which faces ran. It is **soft by default** (both count;
+a bare approve draws a friendly `yad review nudge`); it only gates ship when
+`hub.review.requireEngagement: true`. `yad review reconcile --epic <id> --repo <r> --pr <n>` reads the
+code PR's approvals (with the engagement signal) and stamps them onto the matching ship record — the
+back-half **bridge**, the analogue of `yad gate sync`. The signal is gameable by design ("visible, not
+impossible"): it makes engineer-review quality visible, it does not prove a human read the diff. It sits
+**beside** the CI gates (build/test/lint/contract/verified-commits) — never above them; CI still
+decides machine safety, the merge is still the human act.
 
 ## Story state
 

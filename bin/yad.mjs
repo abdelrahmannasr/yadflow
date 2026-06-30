@@ -4,10 +4,11 @@ import { VERSION } from '../cli/manifest.mjs';
 import { c, log, closePrompts } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
-import { gateOpen, gateSync, gateComments, gateStatus, gateCi } from '../cli/gate.mjs';
+import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer } from '../cli/gate.mjs';
 import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
+import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile } from '../cli/review.mjs';
 import { runShip } from '../cli/ship.mjs';
 import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
@@ -26,7 +27,8 @@ ${c.bold('Setup & maintenance')}
   yad check            Report what is missing / drifted / stale / legacy (read-only)
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
-                       also migrates pre-2.0 sdlc-* installs to the yad-* names
+                       installs newly-added skills, updates changed skills + gate scripts,
+                       and migrates pre-2.0 sdlc-* installs to the yad-* names
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
   yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
@@ -51,6 +53,10 @@ ${c.bold('Review gate (front half)')}
   yad gate sync <epic> [artifact]      Pull PR state -> ledger; advance on approved+resolved+merged
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
+  yad gate review <epic> [artifact]    Print the grounding bundle for the review companion
+                                       (artifact + risk + contract + PR + code-maps) — fun, easy review
+  yad gate trailer <epic> [artifact] --body <text> [--pr <n>]
+                                       Upsert the companion's 60-sec briefing into the PR/MR description
   yad gate ci [--branch <head>] [--pr <n>] [--merged]
                         CI entry (hub workflow): pre-merge is read-only (nothing pushed);
                         --merged advances the step + flips artifact status on the default branch
@@ -61,6 +67,10 @@ ${c.bold('Build helpers')}
                                        branch opens the front-half artifact-review PR (delegates to
                                        gate open), any other hub branch uses the code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
+  yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
+  yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
+  yad review nudge --repo <r> --pr <n>                    Friendly @-mention on a bare code-PR approve
+  yad review reconcile --epic <id> --repo <r> --pr <n>    Bridge: stamp engagement onto the build-log ship
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name]              Re-pack a stale repo (a human decision)
 
@@ -97,7 +107,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -184,7 +194,7 @@ async function main() {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
       if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
-      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|ci> <epic> [artifact]')); process.exitCode = 1; break; }
+      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|review|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
@@ -194,7 +204,22 @@ async function main() {
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
-      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|ci)`)); process.exitCode = 1; }
+      else if (action === 'review') await gateReview(o.dir, { epic, artifact });
+      else if (action === 'trailer') await gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
+      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|review|trailer|ci)`)); process.exitCode = 1; }
+      break;
+    }
+    case 'review': {
+      const [, action] = o._;
+      if (action === 'trailer') await reviewTrailer(o.dir, { repo: o.repo, pr: o.pr, body: o.body || o.message });
+      else if (action === 'context' || action === 'chat' || action === 'cards') await reviewContext(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'nudge') await reviewNudge(o.dir, { repo: o.repo, pr: o.pr });
+      else if (action === 'reconcile') {
+        // The epic becomes a path segment under epics/ — reject anything but EP-<slug> (no `../` escape).
+        if (!o.epic || !isValidEpicId(o.epic)) { log(c.red(`invalid or missing --epic: ${o.epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+        await reviewReconcile(o.dir, { epic: o.epic, repo: o.repo, pr: o.pr });
+      }
+      else { log(c.red('usage: yad review <trailer|context|nudge|reconcile> --repo <name> --pr <n> [--epic <id>] [--body <text>]')); process.exitCode = 1; }
       break;
     }
     case 'commit':
