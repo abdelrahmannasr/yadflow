@@ -6,7 +6,7 @@
 // The CLI never calls an LLM: the skill (yad-review-companion / yad-engineer-review) generates the
 // trailer/cards/chat text and posts it via these primitives, all to the PLATFORM (never a ledger file).
 import path from 'node:path';
-import { log, ok, info, warn, fail, run, readJSON, writeJSON } from './lib.mjs';
+import { log, ok, info, warn, fail, note, run, readJSON, writeJSON } from './lib.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
 import { epicRoot } from './epic-state.mjs';
 import {
@@ -81,11 +81,13 @@ export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = 
   if (r.error) { fail(r.error); process.exitCode = 1; return; }
   const { bundle, repoRoot, base } = r;
   const diff = runner('git', ['-C', repoRoot, 'diff', `${base}...HEAD`]);
-  if (!diff.ok) { warn(`could not read the diff (${base}...HEAD) in ${repoRoot} — is the branch pushed and the base correct?`); }
+  // Diagnostics go to STDERR so STDOUT stays pure JSON (the skill / e2e parse it). The empty `stops: []`
+  // in the bundle already signals "nothing to walk".
+  if (!diff.ok) note(`could not read the diff (${base}...HEAD) in ${repoRoot} — is the branch pushed and the base correct?`);
   const stops = sequenceDiff(diff.ok ? diff.stdout : '', { contractPath: bundle.contract });
   const out = { ...bundle, stops };
   log(JSON.stringify(out, null, 2));
-  if (!stops.length) info('no stops — the diff is empty (nothing to walk through)');
+  if (!stops.length) note('no stops — the diff is empty (nothing to walk through)');
   return out;
 }
 

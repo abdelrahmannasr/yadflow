@@ -1190,6 +1190,26 @@ test('review walkthrough: prints the bundle PLUS ordered, risk-tagged stops (hig
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('review walkthrough: STDOUT stays pure JSON on the empty-diff and failed-diff paths (diagnostics → stderr)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rwalk-json-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'main' }] }));
+  const captureStdout = async (runner) => {
+    const realLog = console.log, realErr = console.error;
+    const out = []; console.log = (s = '') => out.push(String(s)); console.error = () => {};
+    try { await reviewWalkthrough(T, { repo: 'backend', pr: 1, runner }); }
+    finally { console.log = realLog; console.error = realErr; }
+    return out.join('\n');
+  };
+  // empty diff (branch == base) → stops [], but stdout must still parse
+  const empty = await captureStdout(() => ({ ok: true, stdout: '', code: 0, stderr: '' }));
+  assert.deepEqual(JSON.parse(empty).stops, [], 'empty-diff stdout is valid JSON');
+  // failed diff read (unpushed branch / bad base) → warn must NOT leak onto stdout
+  const failed = await captureStdout(() => ({ ok: false, stdout: '', code: 1, stderr: 'bad rev' }));
+  assert.deepEqual(JSON.parse(failed).stops, [], 'failed-diff stdout is still valid JSON');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('sequenceDiff: anchors line ranges, counts +/- lines, and one zero-size stop for a hunkless file', () => {
   const diff = [
     'diff --git a/payments/charge.js b/payments/charge.js',

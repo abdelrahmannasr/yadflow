@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, readJSONStrict, writeJSON, run,
+  c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run,
 } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import {
@@ -611,11 +611,14 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
     const diff = runner('git', ['-C', root, 'diff', `${defaultBranch}...HEAD`, '--', rel]);
     if (diff.ok && diff.stdout.trim()) {
       stops = sequenceDiff(diff.stdout, { contractPath: bundle.contractPath });
+    } else if (!diff.ok) {
+      note(`could not read the artifact diff (${defaultBranch}...HEAD) in ${root} — is the review branch checked out and the base correct?`);
     }
   }
   const out = { ...bundle, stops };
   log(JSON.stringify(out, null, 2));
-  if (!stops.length) info('no stops from the artifact diff — walk the artifact by section (see yad-pair-review)');
+  // Diagnostics to STDERR so STDOUT stays pure JSON (the skill / e2e parse it).
+  if (!stops.length) note('no stops from the artifact diff — walk the artifact by section (see yad-pair-review)');
   return out;
 }
 
