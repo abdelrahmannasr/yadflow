@@ -230,7 +230,7 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
 `demo-repos/README.md` explains regeneration). **Nothing auto-advances** — every gate is human-owned.
 
 > **Lost in the build half?** `yad next <epic>` reads each story's `build-state` and tells you the
-> next sub-step per repo (`spec → implement → checks → engineer-review`) plus the remaining chain and
+> next sub-step per repo (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and
 > the automation dial — so you never have to remember which step comes after `yad-spec`.
 
 1. **Spec** — `yad-spec` runs the heavy Spec Kit ceremony **once per story per repo**

@@ -2,7 +2,7 @@
 // file ledger and prints the ONE concrete, copy-pasteable next action (and a one-line why), so a user
 // never has to remember which of the 31 skills / gate commands comes next. "Guide, don't act" — the
 // front half still never auto-advances. Once an epic is `ready-for-build`, it reads each story's
-// build-state and prints the next BUILD sub-step per repo (spec → implement → checks → engineer-review)
+// build-state and prints the next BUILD sub-step per repo (spec → tasks → implement → checks → engineer-review)
 // plus the remaining chain — so the build half is guided too, not just hinted at.
 //
 //   yad next                  general orientation across the whole project
