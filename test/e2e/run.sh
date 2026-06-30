@@ -93,7 +93,7 @@ jassert "$HUB/.sdlc/testing.json" 'j.tool === "playwright" && j.auth === "user" 
 
 say "yad check is clean after setup"
 CHECK_OUT="$(yad check --dir "$HUB")" || die "yad check failed"
-echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 outdated, 0 stale, 0 legacy" \
+echo "$CHECK_OUT" | grep -q "summary: 0 missing, 0 new, 0 outdated, 0 stale, 0 legacy" \
   || die "yad check reports drift right after setup: $(echo "$CHECK_OUT" | grep summary)"
 # Land the wiring on the code repo's main (as a real team would) so feature branches diff clean.
 # This moves HEAD past syncedHead — `yad check` would now rightly call the code-context stale.
