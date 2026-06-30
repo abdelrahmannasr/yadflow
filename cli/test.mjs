@@ -118,6 +118,33 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
+// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+hub
+// wiring stay `missing` and remain excluded from update (no one-time setup on update).
+const { moduleActions } = await import('./plan.mjs');
+test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
+  const acts = moduleActions(T, ['.claude']);
+  const skills = acts.filter((a) => a.scope === '.claude');
+  const bmad = acts.filter((a) => a.scope === '_bmad');
+  assert.ok(skills.length && skills.every((a) => a.status === 'new'), 'every uninstalled skill is "new"');
+  assert.ok(bmad.length && bmad.every((a) => a.status === 'missing'), '_bmad files stay "missing"');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('update (scope=changed) installs a brand-new skill but NOT a missing wiring file', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true }); // full install
+  // Simulate a release that adds a new skill (delete one → it reads as "new") AND a dropped wiring file.
+  fs.rmSync(path.join(T, '.claude/skills/yad-review-companion'), { recursive: true, force: true });
+  fs.rmSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml')); // repo wiring → stays "missing"
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-review-companion/SKILL.md')), 'new skill installed by update');
+  assert.ok(!fs.existsSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml')), 'missing wiring NOT installed by update');
+  assert.ok(r.counts.new >= 1, 'counted as new');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // `yad setup` now migrates a pre-2.0 install too (project IDE targets + the opt-in global
 // ~/.claude/skills pass). Both reuse legacyModuleActions; the global pass calls it as
 // legacyModuleActions(os.homedir(), ['.claude']) so an old skill at <root>/.claude/skills/<old>

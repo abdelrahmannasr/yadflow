@@ -27,7 +27,8 @@ ${c.bold('Setup & maintenance')}
   yad check            Report what is missing / drifted / stale / legacy (read-only)
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
-                       also migrates pre-2.0 sdlc-* installs to the yad-* names
+                       installs newly-added skills, updates changed skills + gate scripts,
+                       and migrates pre-2.0 sdlc-* installs to the yad-* names
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
   yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
