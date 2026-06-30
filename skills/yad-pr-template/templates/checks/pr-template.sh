@@ -45,6 +45,15 @@ if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
   exit 1
 fi
 
+# The Review Companion injects a `<!-- yad:trailer --> … <!-- /yad:trailer -->` briefing block (and
+# `<!-- yad:noblock -->` notes) into the description. Strip those before the template check so the
+# AI-generated prose can never hide a required section heading or be mistaken for the `Risk level:`
+# value (the trailer is prepended, so an unstripped "risk level" mention would win `head -1`).
+STRIPPED="$(mktemp)"
+trap 'rm -f "$STRIPPED"' EXIT
+sed '/<!-- yad:trailer -->/,/<!-- \/yad:trailer -->/d; /<!-- yad:noblock -->/d' "$BODY" > "$STRIPPED"
+BODY="$STRIPPED"
+
 rc=0
 require_heading() {
   if ! grep -qiE "^[[:space:]]*$1[[:space:]]*$" "$BODY"; then

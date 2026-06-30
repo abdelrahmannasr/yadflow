@@ -457,6 +457,7 @@ descriptions of all 34 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
+| `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (front gate & code PRs). |
 | `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
