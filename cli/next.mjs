@@ -1,7 +1,9 @@
 // `yad next` — the unified next-step driver. Read-only: it never writes state or acts. It reads the
 // file ledger and prints the ONE concrete, copy-pasteable next action (and a one-line why), so a user
 // never has to remember which of the 31 skills / gate commands comes next. "Guide, don't act" — the
-// front half still never auto-advances.
+// front half still never auto-advances. Once an epic is `ready-for-build`, it reads each story's
+// build-state and prints the next BUILD sub-step per repo (spec → tasks → implement → checks → engineer-review)
+// plus the remaining chain — so the build half is guided too, not just hinted at.
 //
 //   yad next                  general orientation across the whole project
 //   yad next <epic>           the single next action for one epic
@@ -35,6 +37,36 @@ function listEpics(root) {
     .sort();
 }
 
+// EP-istifta-inquiries-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
+const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
+
+// Every per-repo lane across the build, flattened with its story id attached.
+const buildLanes = (builds = []) => builds.flatMap((b) => b.repos.map((r) => ({ ...r, story: b.story })));
+
+// The dial note for a build lane: a machine_advance lane is driven by yad-run; everything else stops
+// for a human (the locked engineer-review always does).
+function dialNote(r) {
+  if (r.locked) return c.dim('human merge gate');
+  return r.automation === 'machine_advance'
+    ? c.dim('machine_advance — yad-run auto-drives')
+    : c.dim('human_approve');
+}
+
+// The detailed per-story/per-repo build lanes for `printAction`. Each open lane is a 2-line block:
+// a header naming the active step + dial, then the actionable `▸` skill line with the remaining chain.
+function printBuildLanes(builds) {
+  for (const lane of buildLanes(builds)) {
+    const where = `${c.cyan(lane.story || '(story)')} / ${c.bold(lane.repo)}`;
+    if (lane.shipped) { log(`    ${where} ${c.green('— shipped ✓')}`); continue; }
+    // No resolvable next skill (an empty/half-seeded build-state file): show it as not-started, no ▸.
+    if (!lane.skill) { log(`    ${where} ${c.dim('— not started yet (no build steps recorded)')}`); continue; }
+    log(`    ${where} ${c.dim('—')} ${c.bold(lane.step)}  (${dialNote(lane)})`);
+    const rest = (lane.chain || []).slice(1);
+    const then = rest.length ? `   ${c.dim(`then → ${rest.join(' → ')}`)}` : '';
+    hand(`invoke the ${c.bold(lane.skill)} skill${then}`);
+  }
+}
+
 // A short, copy-pasteable line for one action — the `▸` line a user can act on directly.
 function actionLine(a, { solo } = {}) {
   switch (a.kind) {
@@ -45,8 +77,18 @@ function actionLine(a, { solo } = {}) {
     case 'review-open':
     case 'review-sync':
       return `${c.bold(a.command)}${solo ? c.dim('   (solo: no approval needed — just merge your own PR)') : ''}`;
-    case 'build':
+    case 'build': {
+      // In the build half: compact the lanes to "N lane(s) in build — next: <skill> @ <story>/<repo>".
+      if (a.builds?.length) {
+        const open = buildLanes(a.builds).filter((r) => !r.shipped);
+        if (!open.length) return c.dim('build half — every lane shipped');
+        // Headline the first lane with a resolvable next skill; if none, the half is started but unspecced.
+        const first = open.find((r) => r.skill);
+        if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet`);
+        return `${c.dim(`${open.length} lane(s) in build — next:`)} ${c.bold(first.skill)} ${c.dim(`@ ${shortStory(first.story)}/${first.repo}`)}`;
+      }
       return `${c.bold('yad-run')} ${c.dim('(or per story: yad-spec → yad-implement → yad ship → yad-engineer-review)')}`;
+    }
     case 'discovery-done':
       return `invoke the ${c.bold('yad-epic')} skill ${c.dim('(seed a feature epic from roadmap.md)')}`;
     default:
@@ -57,7 +99,10 @@ function actionLine(a, { solo } = {}) {
 // Full, friendly printout for a single epic.
 function printAction(a, { solo } = {}) {
   log(`\n  ${c.bold(a.epicId || '(epic)')} ${c.dim(`— ${a.why}`)}`);
-  hand(actionLine(a, { solo }));
+  // In the build half with live lanes, print each story/repo's next sub-step + remaining chain instead
+  // of the single static hint; otherwise the one actionable line.
+  if (a.kind === 'build' && a.builds?.length) printBuildLanes(a.builds);
+  else hand(actionLine(a, { solo }));
   if (a.kind === 'review-sync') info(c.dim(`unresolved comments? ${c.bold(`yad gate comments ${a.epicId} ${a.artifact}`)}`));
   if (a.parallel) hand(`parallel track: invoke the ${c.bold(a.parallel.skill)} skill ${c.dim(`(author ${a.parallel.artifact})`)}`);
 }

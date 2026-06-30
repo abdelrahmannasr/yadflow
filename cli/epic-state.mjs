@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import { readJSONStrict, writeJSON, fileSha } from './lib.mjs';
+import { readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { err } from './errors.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -147,6 +147,18 @@ function validateState(state, file) {
   return state;
 }
 
+// Every build-state/<story>.json under the epic, story-sorted. Missing dir = the build half hasn't
+// started yet, a normal state → []. The per-story files drive `yad next`'s build sub-step guidance —
+// advisory, read-only hints, NOT a source-of-truth ledger. So a corrupt file is skipped (non-throwing
+// `readJSON`), not fatal: `yad next` (and especially the all-epics roll-up) must still orient the user
+// even if one story's hint file is broken, rather than aborting the whole command.
+function loadBuildStates(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort()
+    .map((f) => readJSON(path.join(dir, f), null))
+    .filter((bs) => bs && typeof bs === 'object' && !Array.isArray(bs));
+}
+
 export function loadLedger(epicDir) {
   const f = epicFiles(epicDir);
   return {
@@ -156,6 +168,7 @@ export function loadLedger(epicDir) {
     comments: requireArray(readJSONStrict(f.comments, []), f.comments),
     hubPrs: requireArray(readJSONStrict(f.hubPrs, []), f.hubPrs),
     contractLock: readJSONStrict(f.contractLock, null),
+    buildStates: loadBuildStates(f.buildStateDir),
   };
 }
 
@@ -315,6 +328,74 @@ export const STEP_SKILL = {
   'test-cases': 'yad-test-cases',
 };
 
+// The skill that runs each BACK-half (build) step — the build-state analogue of STEP_SKILL. `spec`
+// and `tasks` are the two legs of the SAME yad-spec ceremony (run-loop.md), so both map to yad-spec;
+// the chain renderer collapses the consecutive duplicate. `engineer-review` is the human merge gate.
+export const BUILD_STEP_SKILL = {
+  spec: 'yad-spec',
+  tasks: 'yad-spec',
+  implement: 'yad-implement',
+  checks: 'yad-checks',
+  'engineer-review': 'yad-engineer-review',
+};
+
+// The fixed back-half order. Used to derive the "remaining chain" from the active step onward even if a
+// repo's `steps` array is partial or out of order.
+const BUILD_STEP_ORDER = ['spec', 'tasks', 'implement', 'checks', 'engineer-review'];
+
+// Collapse consecutive identical skills (spec+tasks → one yad-spec) so the rendered chain reads
+// yad-spec → yad-implement → yad-checks → yad-engineer-review, matching the build-half mental model.
+// Folds against the last KEPT element (not the raw neighbor) so a dropped null between duplicates can't
+// reintroduce one.
+function dedupeConsecutive(skills) {
+  const out = [];
+  for (const s of skills) if (s && s !== out[out.length - 1]) out.push(s);
+  return out;
+}
+
+// PURE: given ONE repo's build-state ({ currentStep, steps }), resolve the next build sub-step and the
+// remaining chain. The active step is `currentStep`'s entry, or the first step not yet `done`. Returns
+// `shipped: true` only when there ARE steps and every one is `done`; an empty/missing steps array is
+// `unknown` (not-started), NEVER shipped — otherwise a half-seeded file would render a false "shipped ✓".
+export function buildNextForRepo(repoState = {}) {
+  const steps = Array.isArray(repoState.steps) ? repoState.steps : [];
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  // Empty/half-seeded file ⇒ unknown (not-started), NEVER shipped. Every step done ⇒ shipped.
+  if (!steps.length) {
+    return { step: null, status: 'unknown', shipped: false, skill: null, automation: null, locked: false, chain: [] };
+  }
+  if (steps.every((s) => s.status === 'done')) {
+    return { step: null, status: 'done', shipped: true, skill: null, automation: null, locked: false, chain: [] };
+  }
+  // Active = the orchestrator's currentStep when it isn't already done, else the first not-done step
+  // (guaranteed to exist here — not every step is done). currentStep authority, with a done-step skip.
+  const cur = byId.get(repoState.currentStep);
+  const active = cur && cur.status !== 'done' ? cur : steps.find((s) => s.status !== 'done');
+  // The remaining chain: the active step + every later step in the canonical order, mapped to skills.
+  const from = BUILD_STEP_ORDER.indexOf(active.id);
+  const tail = from === -1 ? [active.id] : BUILD_STEP_ORDER.slice(from);
+  const chain = dedupeConsecutive(tail.map((id) => BUILD_STEP_SKILL[id] || null));
+  return {
+    step: active.id,
+    status: active.status || 'blocked',
+    automation: active.automation || 'human_approve',
+    locked: !!active.locked,
+    skill: BUILD_STEP_SKILL[active.id] || null,
+    shipped: false,
+    chain,
+  };
+}
+
+// PURE: map every parsed build-state object → its per-repo next sub-steps. `buildStates` is the array
+// `loadLedger` reads from build-state/*.json. Repos are sorted for a stable, machine-independent order.
+export function buildNextActions(buildStates = []) {
+  return buildStates.map((bs) => ({
+    story: bs.story || null,
+    repos: Object.keys(bs.repos || {}).sort()
+      .map((repo) => ({ repo, ...buildNextForRepo(bs.repos[repo]) })),
+  }));
+}
+
 // PURE precondition guard. Is `stepId` runnable right now? A step is runnable iff every step BEFORE it
 // in the chain is `done` and the step itself is not already `done`. With no state yet (greenfield), the
 // only runnable steps are the entry authoring steps (analysis | epic). Used by `yad next --check`
@@ -374,13 +455,29 @@ export function nextAction(ledger, { epic } = {}) {
   const parallel = tcOpen ? { step: 'test-cases', skill: STEP_SKILL['test-cases'], artifact: tc.artifact } : null;
 
   if (state.currentStep === 'ready-for-build') {
+    // Once stories enter the build half, surface each story/repo's CONCRETE next sub-step (spec →
+    // implement → checks → engineer-review) from build-state, not one static "run the build half" hint.
+    const builds = buildNextActions(ledger?.buildStates || []);
+    const lanes = builds.flatMap((b) => b.repos);
+    const open = lanes.filter((r) => !r.shipped);
+    if (builds.length) {
+      let why;
+      if (!lanes.length) why = 'build half started — no repo lanes recorded yet';
+      else if (!open.length) why = 'build half — every story/repo lane is shipped';
+      else why = `build half in progress — ${open.length} story/repo lane(s) still moving`;
+      return { epicId, kind: 'build', step: 'ready-for-build', status: 'ready-for-build', parallel, builds, why };
+    }
     return { epicId, kind: 'build', step: 'ready-for-build', status: 'ready-for-build', parallel,
       why: 'front half approved — the build half can run' };
   }
 
   const step = state.steps.find((s) => s.id === state.currentStep)
     || state.steps.find((s) => s.status !== 'done');
-  if (!step) return { epicId, kind: 'build', step: 'ready-for-build', parallel, why: 'all front steps are done' };
+  if (!step) {
+    const builds = buildNextActions(ledger?.buildStates || []);
+    return { epicId, kind: 'build', step: 'ready-for-build', parallel,
+      builds: builds.length ? builds : undefined, why: 'all front steps are done' };
+  }
 
   if (step.type === 'author') {
     return { epicId, kind: 'author', step: step.id, status: step.status, parallel,

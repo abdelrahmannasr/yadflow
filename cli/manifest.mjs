@@ -170,6 +170,8 @@ export const epicFiles = (epicRoot) => ({
   hubPrs: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,
   buildLog: `${epicRoot}/.sdlc/build-log.json`,
+  buildStateDir: `${epicRoot}/.sdlc/build-state`,       // Phase 4 — per-story, per-repo back-half state
+
   change: `${epicRoot}/.sdlc/change.json`,             // Phase 6 — change/defect intake + triage
   reconcileDebt: `${epicRoot}/.sdlc/reconcile-debt.json`, // Phase 6 — hotfix ship-first debt
 });

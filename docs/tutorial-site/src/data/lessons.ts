@@ -153,7 +153,7 @@ export const MODULES: Module[] = [
           { kind: 'callout', tone: 'info', text: 'Lost? `yad-status` is a read-only view of where any epic is and what is blocking it. Start there.' },
         ],
         commands: [
-          { cmd: 'yad next', note: 'project-wide: the one next action to take' },
+          { cmd: 'yad next', note: 'project-wide: the one next action to take — including the next build sub-step per story/repo once you reach the build half' },
           { cmd: 'yad-status', note: 'read-only: where every epic is and what is blocking it' },
         ],
       },
@@ -767,7 +767,7 @@ export const MODULES: Module[] = [
           { kind: 'p', text: 'A few commands you will reach for constantly:' },
           { kind: 'list', items: [
             '`yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole chain and what is blocking. Start here when stuck.',
-            '`yad next` — the single next action to take.',
+            '`yad next` — the single next action to take; in the build half it names the next build sub-step (spec → tasks → implement → checks → engineer-review) per story/repo.',
             '`yad doctor` — environment + state health check; attach `--json` to a bug report.',
             '`npx yadflow check --fix` — reconcile the install after any update.',
           ] },

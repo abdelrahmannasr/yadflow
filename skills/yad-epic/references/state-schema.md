@@ -184,6 +184,11 @@ Each `steps[]` entry:
 created when a story enters the build half; all dials start `human_approve` (the `config.yaml`
 `automation.default`).
 
+`yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
+story/repo's `currentStep` into the next build sub-step (`spec`/`tasks` → `yad-spec`, `implement` →
+`yad-implement`, `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`) and prints it with
+the remaining chain and the step's automation dial — so the build half is guided, not just hinted at.
+
 ## `trust-log.json`
 Append-only ledger (an array), the back-half analogue of `approvals.json`. **This is the evidence
 base** that decides when a step is safe to automate (build plan Step A). One entry per step run:

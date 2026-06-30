@@ -734,6 +734,89 @@ test('nextAction: ready-for-build → build; an open test-cases track is surface
   assert.equal(a.parallel.skill, 'yad-test-cases');
 });
 
+// --- build half: nextAction surfaces each story/repo's next sub-step from build-state ---
+const { buildNextForRepo, buildNextActions } = await import('./epic-state.mjs');
+// One repo's build-state at an arbitrary point: pass which steps are done + the active step.
+const repoBS = (currentStep, done = [], extra = {}) => ({
+  currentStep,
+  steps: ['spec', 'tasks', 'implement', 'checks', 'engineer-review'].map((id) => ({
+    id,
+    automation: extra[id]?.automation || 'human_approve',
+    locked: id === 'engineer-review',
+    status: done.includes(id) ? 'done' : (id === currentStep ? (extra[id]?.status || 'in_progress') : 'blocked'),
+  })),
+});
+
+test('buildNextForRepo: spec done → next is implement (yad-implement); spec+tasks collapse to one yad-spec', () => {
+  const fresh = buildNextForRepo(repoBS('spec'));
+  assert.equal(fresh.skill, 'yad-spec');
+  // spec → tasks both map to yad-spec, so the chain de-dupes the leading pair.
+  assert.deepEqual(fresh.chain, ['yad-spec', 'yad-implement', 'yad-checks', 'yad-engineer-review']);
+  const afterSpec = buildNextForRepo(repoBS('implement', ['spec', 'tasks']));
+  assert.equal(afterSpec.step, 'implement');
+  assert.equal(afterSpec.skill, 'yad-implement');
+  assert.deepEqual(afterSpec.chain, ['yad-implement', 'yad-checks', 'yad-engineer-review']);
+});
+
+test('buildNextForRepo: implement done → checks; checks done → engineer-review; all done → shipped', () => {
+  assert.equal(buildNextForRepo(repoBS('checks', ['spec', 'tasks', 'implement'])).skill, 'yad-checks');
+  const er = buildNextForRepo(repoBS('engineer-review', ['spec', 'tasks', 'implement', 'checks']));
+  assert.equal(er.skill, 'yad-engineer-review');
+  assert.equal(er.locked, true);
+  assert.deepEqual(er.chain, ['yad-engineer-review']);
+  const shipped = buildNextForRepo(repoBS('engineer-review', ['spec', 'tasks', 'implement', 'checks', 'engineer-review']));
+  assert.equal(shipped.shipped, true);
+  assert.equal(shipped.skill, null);
+});
+
+test('buildNextForRepo: an empty/missing steps array is NOT shipped (it is unknown/not-started)', () => {
+  const empty = buildNextForRepo({ currentStep: 'spec', steps: [] });
+  assert.equal(empty.shipped, false);
+  assert.equal(empty.status, 'unknown');
+  assert.equal(empty.skill, null);
+  const noSteps = buildNextForRepo({ currentStep: 'spec' }); // no steps key at all
+  assert.equal(noSteps.shipped, false);
+});
+
+test('buildNextActions: a build-state with no repos contributes no lanes (not a false all-shipped)', () => {
+  const out = buildNextActions([{ story: 'EP-x-S03' }]); // repos missing
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].repos, []);
+});
+
+test('buildNextForRepo: a machine_advance active step carries the dial through', () => {
+  const r = buildNextForRepo(repoBS('checks', ['spec', 'tasks', 'implement'], { checks: { automation: 'machine_advance' } }));
+  assert.equal(r.automation, 'machine_advance');
+});
+
+test('buildNextActions: maps every story/repo, repos sorted', () => {
+  const out = buildNextActions([
+    { story: 'EP-x-S03', repos: { mobile: repoBS('implement', ['spec', 'tasks']), backend: repoBS('checks', ['spec', 'tasks', 'implement']) } },
+  ]);
+  assert.equal(out.length, 1);
+  assert.deepEqual(out[0].repos.map((r) => r.repo), ['backend', 'mobile']); // sorted
+  assert.equal(out[0].repos[0].skill, 'yad-checks');
+  assert.equal(out[0].repos[1].skill, 'yad-implement');
+});
+
+test('nextAction: ready-for-build WITH build-state surfaces per-repo build sub-steps', () => {
+  const state = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
+  const buildStates = [{ story: 'EP-x-S03', repos: { backend: repoBS('checks', ['spec', 'tasks', 'implement']) } }];
+  const a = nextAction({ state, hubPrs: [], buildStates });
+  assert.equal(a.kind, 'build');
+  assert.equal(a.builds.length, 1);
+  assert.equal(a.builds[0].repos[0].skill, 'yad-checks');
+  assert.match(a.why, /in progress/);
+});
+
+test('nextAction: ready-for-build with NO build-state keeps the static start hint', () => {
+  const state = { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [S('stories-review', 'review+approve', 'done', 'stories/')] };
+  const a = nextAction({ state, hubPrs: [], buildStates: [] });
+  assert.equal(a.kind, 'build');
+  assert.equal(a.builds, undefined);
+  assert.match(a.why, /front half approved/);
+});
+
 test('nextAction: no state → kind new (seed with yad-epic)', () => {
   const a = nextAction({ state: null, hubPrs: [] }, { epic: 'EP-x' });
   assert.equal(a.kind, 'new');
@@ -842,6 +925,43 @@ test('runNext: build action surfaces the parallel test-cases track', async () =>
   const s = await grab(() => runNext(T, { epic: 'EP-x' }));
   assert.match(s, /yad-run|build/i);
   assert.match(s, /yad-test-cases/);
+});
+
+test('runNext: a ready-for-build epic with build-state prints each repo\'s next sub-step + chain', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextbuild-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', { epicId: 'EP-x', currentStep: 'ready-for-build', steps: [
+    S('stories-review', 'review+approve', 'done', 'stories/'),
+  ] });
+  const bsDir = path.join(T, 'epics/EP-x/.sdlc/build-state');
+  fs.mkdirSync(bsDir, { recursive: true });
+  fs.writeFileSync(path.join(bsDir, 'EP-x-S03.json'), JSON.stringify({
+    story: 'EP-x-S03',
+    repos: {
+      backend: { currentStep: 'checks', steps: [
+        { id: 'spec', automation: 'human_approve', locked: false, status: 'done' },
+        { id: 'tasks', automation: 'human_approve', locked: false, status: 'done' },
+        { id: 'implement', automation: 'machine_advance', locked: false, status: 'done' },
+        { id: 'checks', automation: 'machine_advance', locked: false, status: 'in_progress' },
+        { id: 'engineer-review', automation: 'human_approve', locked: true, status: 'blocked' },
+      ] },
+      mobile: { currentStep: 'implement', steps: [
+        { id: 'spec', automation: 'human_approve', locked: false, status: 'done' },
+        { id: 'tasks', automation: 'human_approve', locked: false, status: 'done' },
+        { id: 'implement', automation: 'human_approve', locked: false, status: 'in_progress' },
+        { id: 'checks', automation: 'human_approve', locked: false, status: 'blocked' },
+        { id: 'engineer-review', automation: 'human_approve', locked: true, status: 'blocked' },
+      ] },
+    },
+  }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /EP-x-S03/);
+  assert.match(s, /backend/);
+  assert.match(s, /yad-checks/);
+  assert.match(s, /yad-engineer-review/);      // backend's remaining chain
+  assert.match(s, /yad-implement/);            // mobile's next sub-step
+  assert.match(s, /machine_advance/);          // backend's dial note
 });
 
 test('runNext: set up greenfield with no epics suggests the yad-discovery front-zero, then yad-epic', async () => {
