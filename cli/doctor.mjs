@@ -304,12 +304,21 @@ export function threadChecks(checks, root) {
   }
 }
 
-export async function runDoctor(root, { json = false } = {}) {
+// Run every check section and return the diagnostic object without printing. This is the shared
+// core of `runDoctor` — the reporter (cli/report.mjs) consumes it to derive a *scrubbed* safe
+// subset (never the raw checks, which carry names + paths). Same shape `--json` prints.
+export function collectDoctor(root) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
+  const failed = checks.filter((x) => x.status === 'fail');
+  return { version: VERSION, ok: failed.length === 0, checks };
+}
+
+export async function runDoctor(root, { json = false } = {}) {
+  const { checks } = collectDoctor(root);
 
   const failed = checks.filter((x) => x.status === 'fail');
   const warned = checks.filter((x) => x.status === 'warn');

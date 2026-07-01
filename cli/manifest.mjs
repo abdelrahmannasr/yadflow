@@ -7,8 +7,15 @@ import { readFileSync } from 'node:fs';
 // tracks the semantic-release-managed version — never a hardcoded constant
 // that would drift after a release. package.json ships in the npm tarball and
 // sits at the package root, one level up from this cli/ dir.
-const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-export const VERSION = version;
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+export const VERSION = pkg.version;
+
+// The upstream yadflow repo, as `owner/name` — where `yad report` files issues. Derived from
+// package.json `bugs.url` (the single source of truth) so it tracks a fork/rename automatically;
+// falls back to the canonical slug if the field is ever malformed.
+export const UPSTREAM_REPO =
+  (pkg.bugs?.url || '').match(/github\.com\/([^/]+\/[^/]+?)(?:\/issues)?\/?$/i)?.[1]
+  || 'abdelrahmannasr/yadflow';
 
 // The hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
 export const SKILLS = [
@@ -44,6 +51,7 @@ export const SKILLS = [
   'yad-review-companion',
   'yad-pair-review',
   'yad-status',
+  'yad-report',
   'yad-change',
   'yad-timeline',
   'yad-defects',

@@ -2,6 +2,7 @@
 // skills/yad-hub-bridge/references/bridge.md. Everything runs as the local user (gh/glab own auth);
 // no tokens are stored. Pure mapping fns (resolveLogin/mapApprovers) are exported for unit tests;
 // readPr is injectable so the gate can be tested with a fake.
+import { URLSearchParams } from 'node:url';
 import { run, has } from './lib.mjs';
 import { parseEngagement } from './companion.mjs';
 
@@ -423,4 +424,72 @@ export function createPr(platform, opts = {}) {
     dropped = rest; // could not parse the IID to post the note
   }
   return { ok: true, url, reviewers: reviewers.slice(0, 1), mentioned, dropped };
+}
+
+// ---- issues (for `yad report`) ------------------------------------------------------------------
+// Filing a bug against the upstream yadflow repo. Same local-user auth as everything else: the call
+// inherits the user's own gh/glab session, no tokens handled. `repo` is an `owner/name` slug; the
+// upstream lives on GitHub, so the github path is the primary one (glab kept for symmetry).
+// `runner` is injectable so cli/report.mjs — and its tests — never shell out.
+
+// Is the platform CLI present AND authenticated? A best-effort probe (mirrors doctor's auth check).
+// Used to decide direct-file vs the URL fallback; a false here is not an error, just "use the URL".
+export function platformAuthed(platform, { runner = run } = {}) {
+  const cli = cliFor(platform);
+  if (!cli || !has(cli)) return false;
+  return runner(cli, ['auth', 'status']).ok;
+}
+
+// Open issues whose title/body match `query`. Returns { ok, matches: [{number, title, url}] }.
+// A failed/absent CLI returns ok:false so the caller can skip dedup rather than block filing.
+export function searchIssues(platform, repo, query, { runner = run, limit = 5 } = {}) {
+  if (platform === 'gitlab') {
+    const r = runner('glab', ['issue', 'list', '--repo', repo, '--search', query, '-P', String(limit), '-F', 'json']);
+    if (!r.ok) return { ok: false, matches: [] };
+    try {
+      const rows = JSON.parse(r.stdout || '[]');
+      return { ok: true, matches: rows.map((i) => ({ number: i.iid, title: i.title, url: i.web_url })) };
+    } catch { return { ok: false, matches: [] }; }
+  }
+  const r = runner('gh', ['issue', 'list', '--repo', repo, '--search', query, '--state', 'open', '--limit', String(limit), '--json', 'number,title,url']);
+  if (!r.ok) return { ok: false, matches: [] };
+  try {
+    return { ok: true, matches: JSON.parse(r.stdout || '[]') };
+  } catch { return { ok: false, matches: [] }; }
+}
+
+// The issue URL from a create command's stdout: the last line that looks like one (tolerates any
+// trailing notice the CLI may print after it), falling back to the last non-empty line.
+const urlFromStdout = (stdout = '') => {
+  const lines = stdout.split('\n').map((l) => l.trim()).filter(Boolean);
+  return [...lines].reverse().find((l) => /^https?:\/\//.test(l)) || lines.pop() || '';
+};
+
+// Create an issue. Returns { ok, url } or { ok:false, reason }. Mirrors createPr's shape.
+export function createIssue(platform, repo, { title, body, labels = [] } = {}, { runner = run } = {}) {
+  if (platform === 'gitlab') {
+    const args = ['issue', 'create', '--repo', repo, '--title', title, '--description', body];
+    for (const l of labels) args.push('--label', l);
+    const r = runner('glab', args);
+    if (!r.ok) return { ok: false, reason: r.stderr };
+    return { ok: true, url: urlFromStdout(r.stdout) };
+  }
+  const args = ['issue', 'create', '--repo', repo, '--title', title, '--body', body];
+  for (const l of labels) args.push('--label', l);
+  const r = runner('gh', args);
+  if (!r.ok) return { ok: false, reason: r.stderr };
+  return { ok: true, url: urlFromStdout(r.stdout) };
+}
+
+// The prefilled `issues/new` URL — the always-works fallback when the CLI is missing/unauthenticated.
+// GitHub honours ?title=&body= (and &labels=); GitLab uses issue[title]/issue[description].
+export function issueUrl(platform, repo, { title = '', body = '', labels = [] } = {}) {
+  if (platform === 'gitlab') {
+    const q = new URLSearchParams({ 'issue[title]': title, 'issue[description]': body });
+    if (labels.length) q.set('issue[label_names][]', labels.join(','));
+    return `https://gitlab.com/${repo}/-/issues/new?${q.toString()}`;
+  }
+  const q = new URLSearchParams({ title, body });
+  if (labels.length) q.set('labels', labels.join(','));
+  return `https://github.com/${repo}/issues/new?${q.toString()}`;
 }
