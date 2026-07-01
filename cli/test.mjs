@@ -1075,6 +1075,34 @@ test('runSetup: team + --tools records a team profile and configures the optiona
   assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'figma'); // configured (default)
 });
 
+test('runSetup: fresh write records git_url from the origin remote', async () => {
+  const { T } = scaffold();
+  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/hub.git');
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.platform, 'github', 'platform detected from origin');
+  assert.equal(hub.git_url, 'https://github.com/acme/hub.git', 'git_url recorded from origin');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runSetup: re-run backfills a missing git_url without clobbering the roster', async () => {
+  const { T } = scaffold();
+  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/hub.git');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice', roles: { hub: ['owner'] } }] }));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }); // keeps existing (no reconfigure)
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.git_url, 'https://github.com/acme/hub.git', 'missing git_url backfilled from origin');
+  assert.equal(hub.roster.length, 1, 'roster preserved');
+  assert.equal(hub.roster[0].login, 'al', 'roster entry untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
