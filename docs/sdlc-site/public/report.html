@@ -292,7 +292,7 @@
     <div class="lane">
       <div class="lane-title">0 · One-time setup (team lead, per project)</div>
       <div class="flow-v">
-        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 34 skills into your IDE dirs</small></div>
+        <div class="node plain"><strong>Install the module</strong><small><code>npx yadflow setup</code> — copies the 37 skills into your IDE dirs</small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Wire each repo</strong><small><code>yad-checks</code> · <code>yad-pr-template</code> (CI gates, PR template)</small></div>
         <div class="arrow-v">▼</div>
@@ -479,7 +479,7 @@ each code repo/
   <div class="term"><strong>State machine</strong><span class="badge b-core">core</span><br>The core design: the workflow is a fixed set of <em>states</em> (steps). Each state does its work and waits at a gate. The states never change — only the <em>trigger</em> (who moves work forward) changes. That is what lets the team start fully manual and automate gradually without rebuilding anything.</div>
   <div class="term"><strong>Product hub (product repo)</strong><span class="badge b-core">core</span><br>The git repo that holds the shared “thinking”: epics, architecture, the contract, UI design, stories, reviews and all state. The brain of the project. Code never lives here.</div>
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the hub.</div>
-  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 34 skills live and where you pull updates from. No real product work happens inside it.</div>
+  <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 37 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Front half (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the product hub: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside the build half. Permanently human-approved.</div>
   <div class="term"><strong>Back half / build half (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
@@ -572,8 +572,8 @@ each code repo/
   <div class="term"><strong>CodeRabbit</strong><span class="badge b-tool">tools</span><br>An AI code-review service used as the advisory first pass on PRs. Optional; never the merge authority.</div>
   <div class="term"><strong>Graceful degradation</strong><span class="badge b-tool">tools</span><br>The rule that every optional tool (Spec Kit, Impeccable, Repomix, CodeRabbit) can be absent: the workflow falls back to doing the work directly and <em>records</em> that the tool was missing. You can start with none of them.</div>
   <div class="term"><strong>Tool-agnostic rule</strong><span class="badge b-tool">tools</span><br>Talk to every tool through its commands and files, never through its internal code — so each tool stays swappable.</div>
-  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 34 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
-  <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>repo</code>).</div>
+  <div class="term"><strong>Skill</strong><span class="badge b-tool">tools</span><br>One of the 37 named agents (e.g. <code>yad-epic</code>) you invoke by name in your AI IDE. Each skill does one step’s work, writes files, and stops at its gate.</div>
+  <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>ship</code>, <code>repo</code>, <code>report</code>).</div>
 
   <h3>People &amp; AI roles</h3>
   <div class="term"><strong>analyst (“Mary”)</strong><span class="badge b-role">roles</span><br>The BMAD AI role for research, brainstorming and shaping the raw idea — drives the optional analysis step.</div>
@@ -715,7 +715,7 @@ each code repo/
 
 <!-- ======================================================= -->
 <section id="skills">
-  <h2>6. The 34 skills — what each does, how to use it, and when</h2>
+  <h2>6. The 37 skills — what each does, how to use it, and when</h2>
   <p>A <strong>skill</strong> is an agent you invoke <em>by name</em> in your AI IDE — you just ask in
   plain words, e.g. <em>“run <code>yad-epic</code>”</em>, adding any inputs the skill needs
   (<code>repo: backend</code>, <code>story: EP-…-S01</code>, <code>action: wire</code>, …).
@@ -748,6 +748,7 @@ each code repo/
     <tr><td><a href="#sk-backfill"><code>yad-backfill</code></a></td><td>Build G</td><td>Spec already-built / legacy code before changing it.</td></tr>
     <tr><td><a href="#sk-run"><code>yad-run</code></a></td><td>Automation</td><td>Drive the back half on the dials; set dials; kill switch.</td></tr>
     <tr><td><a href="#sk-status"><code>yad-status</code></a></td><td>Anytime</td><td>Read-only view: where everything is and what’s blocking.</td></tr>
+    <tr><td><a href="#sk-report"><code>yad-report</code></a></td><td>Anytime</td><td>File a bug in the yadflow repo with auto-scrubbed diagnostics when a flow breaks.</td></tr>
     <tr><td><a href="#sk-change"><code>yad-change</code></a></td><td>Phase 6</td><td>Post-lock change/defect/hotfix intake — a new epic threaded to its parent.</td></tr>
     <tr><td><a href="#sk-timeline"><code>yad-timeline</code></a></td><td>Phase 6</td><td>Feature-thread evolution view + the resolved current-truth map.</td></tr>
     <tr><td><a href="#sk-defects"><code>yad-defects</code></a></td><td>Phase 6</td><td>Quality-gap report by escape stage + root cause.</td></tr>
@@ -1011,6 +1012,17 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Any time, freely — it’s the “where are we and what’s blocking?” command. The best first move whenever you’re unsure what to do next.</div>
   </div>
 
+  <div class="skillcard" id="sk-report">
+    <h4><code>yad-report</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> The <strong>self issue reporter</strong>. When a <code>yad</code> flow breaks, it files a well-formed bug in the upstream yadflow repo so maintainers can fix it — with <strong>auto-scrubbed</strong> diagnostics. The payload is <em>allowlist-only</em>: the yadflow/node/os version, tool present+authenticated booleans, the hub platform enum, the error code/hint, a path-scrubbed message, and the failing command + flag <em>names</em>. It <strong>never</strong> posts absolute paths, hostnames, git URLs, repo names, roster logins/emails, epic/story IDs, branch names, or flag values. It searches open issues first (dedupe), shows you the exact payload and asks before posting, then files via an authenticated <code>gh</code>/<code>glab</code> or a prefilled <code>issues/new</code> URL. Reuses your local <code>gh</code>/<code>glab</code> session — no stored tokens. Never a gate; never touches epic state.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad report                          # file a bug (asks for a one-line summary)
+yad report -m "gate sync hangs"     # with a summary
+# also OFFERED automatically after an unexpected failure (interactive only)
+YAD_NO_REPORT=1 yad …               # opt out of the auto-offer</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Whenever a flow errors out and you want the maintainers to see it — or just accept the “Report this failure?” prompt after a crash. Disabled automatically in CI (<code>SDLC_NONINTERACTIVE</code>).</div>
+  </div>
+
   <div class="skillcard" id="sk-change">
     <h4><code>yad-change</code> <span class="badge b-gate">Phase 6</span></h4>
     <div class="row"><span class="lbl lbl-what">What</span> The <strong>post-lock change/defect/hotfix intake</strong>. After a feature's contract locks and its stories ship, you don't edit the locked artifacts — a change becomes a <strong>new epic threaded to its parent</strong>. <code>yad-change</code> triages the <em>depth</em> (defect-fix / behavioral-no-surface / contract-surface / new-capability), seeds the new <code>EP-&lt;slug&gt;</code> with lineage frontmatter, an inherited-step <code>state.json</code>, a pointer-lock <code>contract-lock.json</code>, and <code>change.json</code> (recording a defect's <code>escape_stage</code> + <code>root_cause</code>); a hotfix also opens <code>reconcile-debt.json</code>. It inherits the unchanged front artifacts by reference and re-authors only what changes — so artifacts are never stale, only <em>superseded</em>. Never auto-advances.</div>
@@ -1048,7 +1060,7 @@ yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
 
   <div class="skillcard">
     <h4><code>npx yadflow setup</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 34 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template), optionally write the AI-review config, and stamp the installed version.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The guided first-run wizard. Ten steps: preflight (git/node check), install all 37 skills into the IDE dirs you pick, detect the hub’s platform + record the reviewer roster, connect a design tool (Figma-first; optional), connect a testing tool (Playwright-first; optional), connect a learning tool (DeepTutor-first; optional), connect your code repos, wire each one (CI gates, PR template), optionally write the AI-review config, and stamp the installed version.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>cd &lt;product-hub-repo&gt;
 npx yadflow setup</code></pre>
