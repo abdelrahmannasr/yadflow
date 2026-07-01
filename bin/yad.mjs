@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `yad` — setup/maintenance + the PR-driven review gate + build helpers for the SDLC module.
 import { VERSION } from '../cli/manifest.mjs';
-import { c, log, closePrompts } from '../cli/lib.mjs';
+import { c, log, closePrompts, askYesNo } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough } from '../cli/gate.mjs';
@@ -17,6 +17,7 @@ import { runDoctor } from '../cli/doctor.mjs';
 import { runNext } from '../cli/next.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
+import { runReport } from '../cli/report.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -33,6 +34,9 @@ ${c.bold('Setup & maintenance')}
                        repo paths, epic ledgers (exit 1 on any failure)
   yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
                        from .sdlc/state.json — all epics if omitted (--dry-run to preview)
+  yad report [-m <text>]   File a bug in the yadflow repo with auto-scrubbed diagnostics
+                       (no paths/hosts/repo names/logins/flag values). Also offered
+                       automatically after an unexpected failure. YAD_NO_REPORT=1 disables.
 
 ${c.bold('Reviewer roster')}
   yad roster list                      Show every member + their roles per scope (hub + each repo)
@@ -181,6 +185,9 @@ async function main() {
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
       break;
+    case 'report':
+      await runReport(o.dir, { message: o.message });
+      break;
     case 'sync-status': {
       const [, epic] = o._;
       if (epic && !isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
@@ -279,11 +286,24 @@ async function main() {
 }
 
 main()
-  .catch((err) => {
+  .catch(async (err) => {
     const code = err?.code && /^YAD-/.test(err.code) ? ` [${err.code}]` : '';
     log(c.red(`\nyad failed${code}: ${err?.message || err}`));
     if (err?.hint) log(c.yellow(`  → ${err.hint}`));
     if (code) log(c.dim('  (see README "Troubleshooting" for this code, or run `yad doctor`)'));
     process.exitCode = 1;
+    // Offer to report the failure — but only interactively (never in CI), and opt-out via
+    // YAD_NO_REPORT. `report` failing on its own would land here, so never re-offer for it.
+    // Require a TTY on BOTH ends: stdout for the message, stdin so the y/N prompt can be answered
+    // (a TTY stdout with piped/closed stdin would otherwise hang on readline).
+    const offerReport = process.stdin.isTTY && process.stdout.isTTY && !process.env.SDLC_NONINTERACTIVE
+      && !process.env.YAD_NO_REPORT && process.argv[2] !== 'report';
+    if (offerReport) {
+      try {
+        if (await askYesNo('\nReport this failure to the yadflow team?', false)) {
+          await runReport(process.cwd(), { error: err });
+        }
+      } catch { /* reporting is best-effort — never mask the original failure */ }
+    }
   })
   .finally(closePrompts);

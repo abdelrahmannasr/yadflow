@@ -3473,3 +3473,149 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
   assert.equal((await syncStatuses(T, {})).changed, 0, 'second run is a no-op');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---- yad report (self issue reporter) ----------------------------------------------------------
+const { scrub, sanitizeArgv, sanitizeContext, buildBody, buildTitle, runReport } = await import('./report.mjs');
+const { UPSTREAM_REPO } = await import('./manifest.mjs');
+
+test('scrub removes paths, emails, and URLs from free text', () => {
+  const s = scrub('failed at /Users/amn/secret/.sdlc/hub.json for ceo@acme.com see https://gitlab.com/acme/backend and git@github.com:acme/x.git');
+  assert.ok(!s.includes('/Users/amn'), 'unix path scrubbed');
+  assert.ok(!s.includes('ceo@acme.com'), 'email scrubbed');
+  assert.ok(!s.includes('gitlab.com/acme'), 'https url scrubbed');
+  assert.ok(!s.includes('github.com:acme'), 'ssh remote scrubbed');
+});
+
+test('scrub removes branch refs / IDs, hostnames, IPs, ssh:// URLs, and UNC paths', () => {
+  const refs = scrub('branch feat/EP-secret-story exists; cannot push to origin/feature-secret; see EP-topsecret');
+  for (const leak of ['feat/EP-secret-story', 'EP-secret-story', 'origin/feature-secret', 'EP-topsecret', 'feature-secret']) {
+    assert.ok(!refs.includes(leak), `ref/id leak: ${leak}`);
+  }
+  const net = scrub('getaddrinfo ENOTFOUND gitlab.internal.acme.com; ECONNREFUSED 10.1.2.3:5432; ssh://git@vcs.internal.acme.com/team/secret.git');
+  for (const leak of ['gitlab.internal.acme.com', '10.1.2.3', 'vcs.internal.acme.com']) {
+    assert.ok(!net.includes(leak), `network leak: ${leak}`);
+  }
+  assert.ok(!scrub('cannot open \\\\FILESERVER\\share\\hub.json').includes('FILESERVER'), 'UNC host scrubbed');
+  // standard 2-label filenames are NOT over-redacted — the message stays useful
+  assert.match(scrub('corrupt JSON in hub.json'), /hub\.json/);
+});
+
+test('sanitizeArgv keeps the verb chain + flag names, drops IDs/paths/values', () => {
+  const out = sanitizeArgv(['gate', 'sync', 'EP-secret-epic', '--dir', '/Users/amn/x', '-m', 'my secret message', '--repo', 'backend-private']);
+  assert.equal(out, 'gate sync --dir -m --repo');
+  assert.ok(!out.includes('EP-secret-epic') && !out.includes('/Users') && !out.includes('secret') && !out.includes('backend-private'));
+});
+
+test('sanitizeArgv drops lowercase positional args — logins, repo names, roles', () => {
+  assert.equal(sanitizeArgv(['roster', 'add', 'joesmith']), 'roster add');
+  assert.equal(sanitizeArgv(['roster', 'grant', 'alice', 'backend-private', 'owner']), 'roster grant');
+  assert.equal(sanitizeArgv(['repo', 'refresh', 'backend-private']), 'repo refresh');
+  const g = sanitizeArgv(['roster', 'grant', 'alice', 'backend-private', 'owner']);
+  for (const leak of ['joesmith', 'alice', 'backend-private', 'owner']) assert.ok(!g.includes(leak), `argv leak: ${leak}`);
+});
+
+test('report body carries ONLY the safe allowlist — no private data leaks', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-report-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github',
+    git_url: 'https://github.com/acme/private-repo.git',
+    roster: [{ login: 'topsecretuser', email: 'ceo@acme.com', role: 'owner' }],
+  }));
+  const error = {
+    code: 'YAD-STATE-001',
+    message: 'corrupt JSON in /Users/amn/private/.sdlc/hub.json: bad token',
+    hint: 'restore /Users/amn/private/.sdlc/hub.json from git',
+  };
+  // A roster command whose positionals are a login + repo + role (the lowercase-positional vector).
+  const argv = ['roster', 'grant', 'topsecretuser', 'backend-private', 'owner', '--dir', '/Users/amn/private'];
+  const ctx = sanitizeContext(T, { error, argv });
+  const body = buildBody(ctx, scrub('branch feat/EP-secret failed on gitlab.internal.acme.com and 10.1.2.3'));
+  const title = buildTitle(ctx, '');
+  for (const leak of ['/Users/amn', 'private-repo', 'topsecretuser', 'backend-private', 'ceo@acme.com',
+    'EP-secret', 'github.com/acme', 'private/.sdlc', 'feat/EP-secret', 'gitlab.internal.acme.com', '10.1.2.3']) {
+    assert.ok(!body.includes(leak), `body must not leak "${leak}"`);
+    assert.ok(!title.includes(leak), `title must not leak "${leak}"`);
+  }
+  // ...but the safe facts ARE present.
+  assert.match(body, /YAD-STATE-001/);
+  assert.match(body, /platform: github/);
+  assert.match(body, /yad roster grant --dir/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('report: dedup offers an existing issue and never files a duplicate', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-report-'));
+  let filed = false;
+  const r = await runReport(T, {
+    error: { code: 'YAD-STATE-001', message: 'boom' },
+    interactive: true,
+    asker: async () => '',
+    prompter: async () => true, // "open an existing issue instead?" → yes
+    searcher: () => ({ ok: true, matches: [{ number: 42, title: 'existing', url: 'http://x/42' }] }),
+    filer: () => { filed = true; return { ok: true, url: 'http://x/new' }; },
+    opener: () => {},
+    authed: () => true,
+  });
+  assert.equal(filed, false, 'no duplicate filed');
+  assert.equal(r.deduped, true);
+  assert.equal(r.url, 'http://x/42');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('report: files directly via an authenticated CLI', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-report-'));
+  let call = null;
+  const r = await runReport(T, {
+    message: 'something broke',
+    interactive: true,
+    asker: async () => '',
+    prompter: async () => true, // "post this now?" → yes
+    searcher: () => ({ ok: true, matches: [] }),
+    filer: (platform, repo, payload) => { call = { platform, repo, payload }; return { ok: true, url: 'http://issue/1' }; },
+    opener: () => {},
+    authed: () => true,
+  });
+  assert.equal(r.filed, true);
+  assert.equal(r.url, 'http://issue/1');
+  assert.equal(call.repo, UPSTREAM_REPO);
+  assert.deepEqual(call.payload.labels, ['bug']);
+  assert.match(call.payload.body, /something broke/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('report: falls back to a prefilled URL when the CLI is not authenticated', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-report-'));
+  let opened = null;
+  const r = await runReport(T, {
+    message: 'broke',
+    interactive: true,
+    asker: async () => '',
+    prompter: async () => true,
+    searcher: () => ({ ok: true, matches: [] }),
+    filer: () => { throw new Error('must not file when unauthenticated'); },
+    opener: (url) => { opened = url; },
+    authed: () => false,
+  });
+  assert.equal(r.filed, false);
+  assert.ok(r.url.startsWith(`https://github.com/${UPSTREAM_REPO}/issues/new?`), 'prefilled issues/new URL');
+  assert.equal(opened, r.url, 'opened the fallback URL');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('report: non-interactive never posts — hands back a prefilled URL', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-report-'));
+  const r = await runReport(T, {
+    error: { code: 'YAD-ENV-001', message: 'no git' },
+    interactive: false,
+    asker: async () => { throw new Error('must not prompt'); },
+    prompter: async () => { throw new Error('must not prompt'); },
+    searcher: () => ({ ok: false, matches: [] }),
+    filer: () => { throw new Error('must not file'); },
+    opener: () => {},
+    authed: () => true,
+  });
+  assert.equal(r.filed, false);
+  assert.ok(r.url.includes('/issues/new?'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
