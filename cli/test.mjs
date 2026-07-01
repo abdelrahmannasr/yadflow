@@ -3122,6 +3122,36 @@ test('doctor: design.json recorded but MCP unconfirmed warns (points at yad-conn
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('doctor: hub with a platform but no git_url warns YAD-CFG-005 (not a misleading YAD-ENV-002)', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'hub-git-url' && x.status === 'warn' && /YAD-CFG-005/.test(x.message)), 'missing git_url must warn YAD-CFG-005');
+  assert.equal(r.failed, 0, 'the warning must never be a failure');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: hub with git_url present emits no hub-git-url warning', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [], git_url: 'https://gitlab.com/acme/hub.git' }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => x.id === 'hub-git-url'), 'a present git_url is silent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: no resolvable host (no git_url, no origin) skips the auth probe — never a fail', async () => {
+  const { T } = scaffold();
+  // scaffold's T has no origin remote, so neither git_url nor origin can resolve a host.
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  const pc = r.checks.find((x) => x.id === 'platform-cli');
+  assert.ok(pc && pc.status !== 'fail', 'the auth check must be skipped/warned, never failed');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: absent design.json is silent (markdown-only is the normal default)', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });

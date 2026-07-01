@@ -76,13 +76,25 @@ export function projectChecks(checks, root) {
       // platform CLI + auth (best-effort; auth probing is the user's own session)
       const cli = cliFor(hub.platform);
       if (cli) {
-        // Scope the auth probe to the hub's own host (derived from git_url). `${cli} auth status`
-        // without --hostname exits non-zero when ANY configured instance fails, so an unrelated
-        // stale login (e.g. a dead gitlab.com token) would falsely flag a working self-hosted hub.
-        const host = hostFromGitUrl(hub.git_url);
-        const authArgs = host ? ['auth', 'status', '--hostname', host] : ['auth', 'status'];
+        // git_url is required whenever a platform is set — doctor needs it to scope the auth probe
+        // and the bridge/PR flow needs it to open PRs. Warn on its absence directly (not on the
+        // resolved host), so it fires even when an origin remote can substitute: the field itself
+        // is required regardless.
+        if (!hostFromGitUrl(hub.git_url)) {
+          check(checks, 'hub-git-url', 'project', 'warn',
+            `${PROJECT_FILES.hubConfig} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
+            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the hub host');
+        }
+        // Scope the auth probe to the hub's own host (derived from git_url, falling back to the
+        // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
+        // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
+        // flag a working self-hosted hub — so we SKIP the probe entirely when no host resolves
+        // rather than run the flaky unscoped form.
+        const host = hostFromGitUrl(hub.git_url)
+          || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
         if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to file-only without it`);
-        else if (!run(cli, authArgs).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated${host ? ` for ${host}` : ''} [YAD-ENV-002]`, `run \`${cli} auth login${host ? ` --hostname ${host}` : ''}\``);
+        else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to hub.json so the auth probe can target the right host');
+        else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
           // Re-validate each roster login against the hub (warn-only). Skips when a login is already
@@ -99,10 +111,10 @@ export function projectChecks(checks, root) {
           // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
           if (hub.platform === 'gitlab') {
             // Scope the probe to the hub's own host (like the auth check above) so a multi-instance
-            // setup doesn't hit the wrong GitLab and emit a misleading warning.
-            const apiArgs = host ? ['api', 'version', '--hostname', host] : ['api', 'version'];
-            if (!run('glab', apiArgs).ok) {
-              check(checks, 'gitlab-api', 'project', 'warn', `glab is authenticated but \`glab api\` failed${host ? ` for ${host}` : ''} [YAD-ENV-002]`, 'ensure the token has `api` scope — the gate reads MR approvals/discussions via the API');
+            // setup doesn't hit the wrong GitLab. `host` is guaranteed truthy here (we skip the whole
+            // auth branch when it cannot be resolved), so the probe is always host-scoped.
+            if (!run('glab', ['api', 'version', '--hostname', host]).ok) {
+              check(checks, 'gitlab-api', 'project', 'warn', `glab is authenticated but \`glab api\` failed for ${host} [YAD-ENV-002]`, 'ensure the token has `api` scope — the gate reads MR approvals/discussions via the API');
             }
           }
           // Solo + GitHub: a branch that "requires approvals" would block the solo dev's own merge
