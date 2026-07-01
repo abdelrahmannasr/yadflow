@@ -31,7 +31,8 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "20", cache: "npm" }
+      - run: npm ci # install deps so the real lint/build/test toolchain can run (mirrors the GitLab template)
       - run: bash checks/build-test-lint.sh
 
   # Phase 6 — feature-thread gates. lineage-check: the change links a real threaded epic. epic-open:
