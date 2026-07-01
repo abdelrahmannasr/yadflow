@@ -1075,6 +1075,34 @@ test('runSetup: team + --tools records a team profile and configures the optiona
   assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'figma'); // configured (default)
 });
 
+test('runSetup: fresh write records git_url from the origin remote', async () => {
+  const { T } = scaffold();
+  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/hub.git');
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.platform, 'github', 'platform detected from origin');
+  assert.equal(hub.git_url, 'https://github.com/acme/hub.git', 'git_url recorded from origin');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runSetup: re-run backfills a missing git_url without clobbering the roster', async () => {
+  const { T } = scaffold();
+  git(T, 'remote', 'add', 'origin', 'https://github.com/acme/hub.git');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice', roles: { hub: ['owner'] } }] }));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }); // keeps existing (no reconfigure)
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  assert.equal(hub.git_url, 'https://github.com/acme/hub.git', 'missing git_url backfilled from origin');
+  assert.equal(hub.roster.length, 1, 'roster preserved');
+  assert.equal(hub.roster[0].login, 'al', 'roster entry untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
@@ -3119,6 +3147,36 @@ test('doctor: design.json recorded but MCP unconfirmed warns (points at yad-conn
   fs.writeFileSync(path.join(T, '.sdlc/design.json'), JSON.stringify({ tool: 'figma', source: null }));
   const r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'design' && x.status === 'warn' && /not confirmed/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: hub with a platform but no git_url warns YAD-CFG-005 (not a misleading YAD-ENV-002)', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'hub-git-url' && x.status === 'warn' && /YAD-CFG-005/.test(x.message)), 'missing git_url must warn YAD-CFG-005');
+  assert.equal(r.failed, 0, 'the warning must never be a failure');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: hub with git_url present emits no hub-git-url warning', async () => {
+  const { T } = scaffold();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [], git_url: 'https://gitlab.com/acme/hub.git' }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => x.id === 'hub-git-url'), 'a present git_url is silent');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: no resolvable host (no git_url, no origin) skips the auth probe — never a fail', async () => {
+  const { T } = scaffold();
+  // scaffold's T has no origin remote, so neither git_url nor origin can resolve a host.
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  const pc = r.checks.find((x) => x.id === 'platform-cli');
+  assert.ok(pc && pc.status !== 'fail', 'the auth check must be skipped/warned, never failed');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

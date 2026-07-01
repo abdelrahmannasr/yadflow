@@ -482,16 +482,24 @@ export async function runSetup(root, opts = {}) {
     // `bridge_enabled` is the canonical flag (hub-config schema); keep the legacy `bridge` spelling
     // for anything that still reads it.
     const enabled = platform !== 'none';
-    writeJSON(hubPath, { platform: enabled ? platform : null, bridge_enabled: enabled, bridge: enabled, default_branch, roster, solo, profile: { codebase, repo_layout, team_size } });
+    // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the bridge/PR flow
+    // needs it to open PRs. Derived from the origin remote already resolved above; null when local-only.
+    const git_url = enabled ? ((remote.ok && remote.stdout.trim()) || null) : null;
+    writeJSON(hubPath, { platform: enabled ? platform : null, git_url, bridge_enabled: enabled, bridge: enabled, default_branch, roster, solo, profile: { codebase, repo_layout, team_size } });
     ok(`wrote ${PROJECT_FILES.hubConfig} (${roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
   }
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.
+  // Also backfill a missing git_url from origin here (idempotent repair for the doctor's YAD-CFG-005).
   if (exists(hubPath)) {
     const cur = readJSON(hubPath, {}) || {};
-    if (cur.solo !== solo || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size })) {
-      writeJSON(hubPath, { ...cur, solo, profile: { codebase, repo_layout, team_size } });
-      info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
+    const backfillUrl = (cur.platform && !cur.git_url)
+      ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
+      : null;
+    if (cur.solo !== solo || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
+      writeJSON(hubPath, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), solo, profile: { codebase, repo_layout, team_size } });
+      if (backfillUrl) info(`backfilled hub git_url from origin: ${backfillUrl}`);
+      else info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
     }
   }
 

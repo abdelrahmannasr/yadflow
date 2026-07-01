@@ -341,6 +341,13 @@ export const ERROR_CODES: ErrorCode[] = [
     severity: 'info',
     visibleTo: BUILD,
   },
+  {
+    code: 'YAD-CFG-005',
+    cause: 'hub.json sets a platform but is missing git_url (needed to scope the auth probe and open PRs).',
+    resolution: 'Add git_url to .sdlc/hub.json, or re-run yad setup — it backfills it from the origin remote.',
+    severity: 'warn',
+    visibleTo: BUILD,
+  },
 ];
 
 // ─── Phase → artifact mapping (reference display) ───

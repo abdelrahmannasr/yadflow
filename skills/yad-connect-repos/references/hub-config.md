@@ -16,7 +16,7 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
 ```json
 {
   "platform": "github",                                       // github | gitlab (from the hub's own remote host); null when local-only
-  "git_url": "https://github.com/abdelrahmannasr/yadflow.git",
+  "git_url": "https://github.com/abdelrahmannasr/yadflow.git", // REQUIRED when platform is non-null (scopes auth + opens PRs); yad doctor warns YAD-CFG-005 if absent
   "default_branch": "main",
   "bridge_enabled": true,                                     // open review PRs/MRs on the hub for front-half reviews
   "review": { "requireEngagement": false },                   // Review Companion: false (soft) counts bare approves but nudges; true counts only verified-engagement approvals
@@ -68,6 +68,11 @@ run `git remote get-url origin` **on the hub itself** and read the host —
 `github.com` → `github`, `gitlab.com`/self-hosted GitLab → `gitlab`, no remote → `platform: null`.
 Auth is the **local user's own** `gh`/`glab`/git credentials; **no tokens are ever stored** (same rule
 as the registry). `detect-hub` upserts `hub.json` in place — it is idempotent and safe to re-run.
+
+**`git_url` is required whenever `platform` is non-null.** `yad doctor` uses it to scope the auth
+probe to the hub's own host (an unscoped `glab auth status` fails on any unrelated broken instance),
+and the bridge/PR flow uses it to open PRs. Doctor flags its absence with a warn (`YAD-CFG-005`);
+re-running `yad setup` backfills it from the origin remote (idempotent, non-interactive).
 
 ## Bridge enable / degradation
 

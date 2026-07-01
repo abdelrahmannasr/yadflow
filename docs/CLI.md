@@ -133,6 +133,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 | `YAD-CFG-002` | `design.json` names an unknown design tool | expected one of `config.yaml` `design.tools` (e.g. `figma`, `pencil`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
+| `YAD-CFG-005` | `hub.json` sets a platform but is missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/hub.json`, or re-run `yad setup` — it backfills it from the origin remote |
 
 Filing a bug? The fastest path is **`yad report`** — it files the issue for you in the yadflow repo
 with **auto-scrubbed** diagnostics (versions, tool present+authenticated booleans, the hub platform
