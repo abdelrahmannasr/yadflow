@@ -1,4 +1,4 @@
-# Agent skills (all 36)
+# Agent skills (all 37)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -176,6 +176,14 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 - **`yad-status`** — Read-only view of an epic: the current step, each step's dials (assistance/
   automation) and status, which approvals are still required, per-story back-half trust records, the
   kill-switch state, and a fleet roll-up across epics.
+- **`yad-report`** — Self issue reporter. When a `yad` flow breaks, files a bug in the upstream
+  yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool
+  present+authenticated booleans, the hub platform enum, the error code/hint, a path-scrubbed
+  message, and the failing command + flag *names*; never paths, hostnames, git URLs, repo names,
+  logins, epic/story IDs, branch names, or flag values. Searches open issues first (dedupe), previews
+  the exact payload and asks before posting, then files via an authenticated `gh`/`glab` or a
+  prefilled `issues/new` URL. Also **offered automatically** after an unexpected failure (interactive
+  only; `YAD_NO_REPORT=1` or `SDLC_NONINTERACTIVE` disables it). Never a gate; never touches epic state.
 
 ## Post-lock change management — feature threads (Phase 6)
 

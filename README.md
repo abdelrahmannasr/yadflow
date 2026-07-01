@@ -91,7 +91,7 @@ development, not another code generator.
 - **[Terminology & workflow report](https://abdelrahmannasr.github.io/yadflow/)** — every term, artifact, gate, and skill on one illustrated page.
 - **[TEAM-GUIDE.md](TEAM-GUIDE.md)** — the short, plain-language version for a developer team.
 - **[docs/CLI.md](docs/CLI.md)** — the full `yad` command reference, the PR-driven gate, and `yad doctor` codes.
-- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 36 agent skills.
+- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 37 agent skills.
 - **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — the by-hand, end-to-end path through every phase.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[RESEARCH-NOTES.md](RESEARCH-NOTES.md)** · **[RELEASING.md](RELEASING.md)**
 
