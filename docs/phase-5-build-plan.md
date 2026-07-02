@@ -60,6 +60,8 @@ This is **already built** in Phase 4b, so the Phase 5 decision is measured, not 
 - **Scale of read (gates Part 3).** `yad-status` prints a **fleet roll-up** across epics (one line per epic + fleet totals). When it stops fitting in one glance, that is the measured Part 3 bottleneck.
 - **Read/parse cost (gates Part 1).** Not yet instrumented because it lives in CI, not the SDLC files: record CI's clone+parse time of the product repo per run. When it is a meaningful, repeated cost, that is the Part 1 trigger. (If/when Part 2 pressure appears, the next pre-service increment is event-level logging of earned-step wait *time* in a sibling `automation-metrics.json` — build that only if the snapshot signals say it is needed.)
 
+- **Team adoption / behavior (`yad usage`).** A per-member report an EM/team-lead reads to see how the team uses the flow — *authored / commented / approved / shipped*, in order, with factual workflow-hygiene flags. Like the two signals above it is **read-only and derived** — reconstructed from the approval/comment/ship ledgers + git authorship already on disk, adding no new state file and hooking no commands — so it is allowed **before** any Phase 5 trigger. It is an output artifact (HTML/JSON/MD written to a path the caller picks), never a committed ledger and never a source of truth. If a future cross-project adoption view is wanted, it belongs in Part 3's read-only dashboard, built only when the scale-of-read trigger fires.
+
 These turn the Phase 5 decision from a gut call into a measured one — the entire point of how this system is built.
 
 ---

@@ -83,7 +83,10 @@ surfaces blocks like a normal review comment.
 
 Tech leads and engineering managers who want their team to move fast with AI **without** giving up
 review, architectural control, or an audit trail — the governance layer around AI-assisted
-development, not another code generator.
+development, not another code generator. And because the audit trail *is* the repo, `yad usage` turns
+it into a per-member **adoption & behavior report** (HTML/JSON/MD) — who authored, reviewed, approved,
+and shipped, with factual workflow-hygiene flags — derived read-only, so an EM can see how the team
+actually uses the flow.
 
 ## Documentation
 
