@@ -119,6 +119,10 @@ build half by hand"** below.
 
 - **`yad-status [EP-<slug>]`** — read-only: the front chain, each build step's dial + status, the
   trust record, and (across epics) the fleet roll-up. Start here to see what's blocking.
+- **`yad usage`** — read-only team-member adoption & behavior report for an EM/team-lead:
+  per-member *authored / commented / approved / shipped* with factual workflow-hygiene flags, derived
+  from git + the ledgers and written to a path you choose (`--out`, `--since/--until` or `--all`,
+  `--member`, `--format html|json|md`). Emits no emails or comment bodies.
 
 ---
 
