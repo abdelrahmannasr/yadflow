@@ -1047,7 +1047,7 @@ test('resolveProfile: carries a prior profile forward from hub.json on re-run', 
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
 });
 
-const { runSetup } = await import('./setup.mjs');
+const { runSetup, buildReconfiguredHub } = await import('./setup.mjs');
 
 test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers the optional tools', async () => {
   const { T } = scaffold();
@@ -1100,6 +1100,68 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
   assert.equal(hub.git_url, 'https://github.com/acme/hub.git', 'missing git_url backfilled from origin');
   assert.equal(hub.roster.length, 1, 'roster preserved');
   assert.equal(hub.roster[0].login, 'al', 'roster entry untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Regression for #97: a reconfigure that collects no reviewers (solo re-run) must NOT blank a populated
+// roster or drop the top-level verified_authors — both feed the verified-commits gate's allowlist.
+test('buildReconfiguredHub: empty collected roster preserves the existing roster + verified_authors', () => {
+  const cur = {
+    platform: 'github',
+    verified_authors: ['dev@acme.com'],
+    roster: [{ login: 'al', name: 'alice', email: 'al@acme.com', roles: { hub: ['owner'] } }],
+  };
+  const next = buildReconfiguredHub(cur, {
+    platform: 'github', git_url: 'https://github.com/acme/hub.git', bridge_enabled: true, bridge: true,
+    default_branch: 'main', roster: [], solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 },
+  });
+  assert.equal(next.git_url, 'https://github.com/acme/hub.git', 'git_url added');
+  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors preserved');
+  assert.equal(next.roster.length, 1, 'populated roster preserved when reconfigure collects none');
+  assert.equal(next.roster[0].login, 'al', 'roster entry untouched');
+  assert.equal(next.solo, true, 'reconfigured fields overlaid');
+});
+
+test('buildReconfiguredHub: a non-empty collected roster replaces cur.roster but keeps verified_authors', () => {
+  const cur = {
+    platform: 'github',
+    verified_authors: ['dev@acme.com'],
+    roster: [{ login: 'al', name: 'alice', roles: { hub: ['owner'] } }],
+  };
+  const next = buildReconfiguredHub(cur, {
+    platform: 'github', git_url: null, bridge_enabled: true, bridge: true, default_branch: 'main',
+    roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }], solo: false,
+    profile: { codebase: 'greenfield', repo_layout: 'monorepo', team_size: 2 },
+  });
+  assert.equal(next.roster.length, 1, 'new roster used');
+  assert.equal(next.roster[0].login, 'bo', 'roster replaced by the reconfigured entries');
+  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors still preserved on replace');
+});
+
+test('buildReconfiguredHub: no existing file produces a plain object with an empty roster', () => {
+  const next = buildReconfiguredHub(null, {
+    platform: 'none', git_url: null, bridge_enabled: false, bridge: false, default_branch: 'main',
+    roster: [], solo: true, profile: { codebase: 'greenfield', repo_layout: 'monorepo', team_size: 1 },
+  });
+  assert.deepEqual(next.roster, [], 'fresh write has an empty roster');
+  assert.equal(next.verified_authors, undefined, 'no verified_authors invented');
+  assert.equal(next.platform, 'none', 'reconfigured fields present');
+});
+
+// Wiring guard: a corrupt hub.json must abort the run (YAD-STATE-001), never fail-open to `{}` and get
+// rewritten with roster/verified_authors stripped — the same silent-loss hole via a parse failure.
+test('runSetup: a corrupt hub.json aborts instead of silently rewriting it stripped', async () => {
+  const { T } = scaffold();
+  const corrupt = '{ this is not valid json';
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), corrupt);
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await assert.rejects(
+      runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }),
+      /YAD-STATE-001|corrupt JSON/,
+    );
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), corrupt, 'corrupt file left untouched for the user to fix/restore');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
