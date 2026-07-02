@@ -52,7 +52,13 @@
     "cli",
     "spec-driven-development",
     "learning",
-    "deeptutor"
+    "deeptutor",
+    "ai-governance",
+    "ai-code-review",
+    "ai-assisted-development",
+    "gated-workflow",
+    "code-review",
+    "software-delivery"
   ],
   "devDependencies": {
     "@eslint/js": "^10.0.1",
