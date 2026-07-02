@@ -3816,3 +3816,27 @@ test('usage: --member recomputes totals to the shown member only', () => {
   assert.equal(model.totals.commented, 0, "bob's comment is excluded from the filtered totals");
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// --- CodeRabbit PR#98 follow-ups: legacy array roles + Markdown cell escaping ---
+const { renderMarkdown: renderMd } = await import('./usage.mjs');
+
+test('usage: isReviewerAnywhere handles the legacy hub-scope roles array (rolesForScope shape)', () => {
+  assert.equal(isReviewerAnywhere({ roles: ['reviewer'] }), true, 'roles: ["reviewer"] is a hub reviewer');
+  assert.equal(isReviewerAnywhere({ roles: ['owner'] }), false, 'roles: ["owner"] is not a reviewer');
+});
+
+test('usage: renderMarkdown escapes pipes/newlines so table structure survives hostile names', () => {
+  const model = {
+    window: { since: null, until: null }, generatedFrom: 'derived',
+    members: [{ name: 'a|b\nc', login: 'x|y', role: 'rev|iewer', rostered: true, counts: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 }, total: 0, firstActive: null, lastActive: null, epics: [], flags: ['dor|mant'], timeline: [] }],
+    totals: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 },
+    hygiene: [{ epic: 'EP-a|b', story: 'S0\n1', task: 'T|1', repo: 'back|end', shippedAt: '2026-01-01' }],
+  };
+  const md = renderMd(model, '2026-07-02');
+  // The single data row must not spawn extra columns: raw '|' escaped, newline flattened to a space.
+  const rows = md.split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('|---') && !l.startsWith('| member'));
+  assert.equal(rows.length, 1, 'exactly one data row (no newline split it in two)');
+  assert.ok(rows[0].includes('a\\|b'), 'pipe in the name is escaped');
+  assert.ok(!rows[0].includes('a|b'), 'no raw pipe leaks into the cell');
+  assert.ok(!md.includes('S0\n1'), 'newline in a hygiene value is flattened');
+});

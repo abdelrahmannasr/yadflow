@@ -227,6 +227,7 @@ export function analyze(events, roster, window = { since: null, until: null }) {
 export function isReviewerAnywhere(entry) {
   if (!entry) return false;
   if ((entry.role || '') === 'reviewer') return true;                            // legacy flat role
+  if (Array.isArray(entry.roles)) return entry.roles.includes('reviewer');       // legacy hub-scope array (rolesForScope shape)
   return Object.values(entry.roles || {}).some((list) => Array.isArray(list) && list.includes('reviewer'));
 }
 
@@ -321,16 +322,19 @@ ${hygiene}
 </div></body></html>\n`;
 }
 
-// A compact Markdown variant for quick reads / pasting into a PR.
+// A compact Markdown variant for quick reads / pasting into a PR. Dynamic values are sanitized so a
+// name/role/repo containing `|` or a newline can't corrupt the table or list structure.
 export function renderMarkdown(model, today = '') {
+  const mdCell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  const mdText = (s) => String(s ?? '').replace(/\r?\n/g, ' ');
   const L = [`# Team usage & behavior report`, ``, `- Range: **${rangeLabel(model.window)}**${today ? ` · generated ${today}` : ''}`, `- Members: ${model.members.length}`, `- Totals: ${ACTIONS.map((a) => `${a} ${model.totals[a]}`).join(' · ')}`, ``, `| member | role | ${ACTIONS.join(' | ')} | total | flags |`, `|---|---|${ACTIONS.map(() => '--:').join('|')}|--:|---|`];
   for (const m of model.members) {
-    L.push(`| ${m.name}${m.login ? ` (@${m.login})` : ''} | ${m.role || '—'} | ${ACTIONS.map((a) => m.counts[a]).join(' | ')} | ${m.total} | ${m.flags.join(', ') || '—'} |`);
+    L.push(`| ${mdCell(`${m.name}${m.login ? ` (@${m.login})` : ''}`)} | ${mdCell(m.role || '—')} | ${ACTIONS.map((a) => m.counts[a]).join(' | ')} | ${m.total} | ${mdCell(m.flags.join(', ') || '—')} |`);
   }
   L.push('', '## Workflow hygiene');
   if (model.hygiene?.length) {
     L.push('Ships with no recorded engineer review:');
-    for (const h of model.hygiene) L.push(`- **${h.epic}** ${h.story || ''}${h.task ? `/${h.task}` : ''} ${h.repo ? `(${h.repo})` : ''} — shipped ${h.shippedAt || '?'}`);
+    for (const h of model.hygiene) L.push(`- **${mdText(h.epic)}** ${mdText(h.story || '')}${h.task ? `/${mdText(h.task)}` : ''} ${h.repo ? `(${mdText(h.repo)})` : ''} — shipped ${mdText(h.shippedAt || '?')}`);
   } else {
     L.push('No ship-without-review gaps in range. ✓');
   }
