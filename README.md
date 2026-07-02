@@ -5,8 +5,16 @@
 [![node](https://img.shields.io/node/v/yadflow?logo=node.js)](https://github.com/abdelrahmannasr/yadflow/blob/main/package.json)
 [![report](https://img.shields.io/badge/docs-Yadflow%20report-2471a3)](https://abdelrahmannasr.github.io/yadflow/)
 
-**A gated software-development lifecycle where AI builds and a human approves every step.**
+**A governance layer for AI-assisted software engineering — a gated development lifecycle where
+AI builds and a human clears every gate.**
 *AI builds. The hand decides.* (*yad* — **يد**, Arabic for "hand".) On npm and GitHub as `yadflow`.
+
+> **Not another coding assistant — the governance layer around the one you already use.**
+> Yadflow doesn't write your code; it governs how AI-written code ships. Keep Cursor, GitHub Copilot,
+> Claude Code, Continue — or hand-written commits. The zero-dependency `yad` CLI and the CI gates
+> review the work **no matter who or what produced it.** The workflow skills run today in
+> **Claude Code** (plus `.agents`, Zencoder, and OpenCode), and **BMAD is the default packaging,
+> not a limitation.**
 
 ## The problem
 
@@ -18,8 +26,9 @@ AI, the harder it gets to keep control of quality, architecture, and accountabil
 ## What Yadflow is
 
 Yadflow puts a **human gate on every step** of the lifecycle. Each step does its work, writes its
-output to a plain file, and **waits** — it never advances until a human approves it (or, later, until
-a step has *earned* the right to auto-advance). Reviews ride real PR/MRs; all state lives in files you
+output to a plain file, and **waits** — it never advances until a human clears its gate (by approving,
+or in solo mode by merging your own PR), or, later, once a step has *earned* the right to auto-advance.
+Reviews ride real PR/MRs; all state lives in files you
 can read, diff, and edit — no database, nothing hidden. The result is a paper trail for every decision
 and a hard wall between "AI proposed" and "we shipped it."
 
@@ -54,39 +63,93 @@ Every step stops at a gate until a human approves. New here? **Walk it lesson-by
 [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/)**, or read the
 [team guide](TEAM-GUIDE.md).
 
+## What `npx yadflow setup` installs
+
+![npx yadflow setup — the guided wizard installs the yad-* skills, wires the CI gates, and stamps the .sdlc config](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
+
+The wizard is idempotent and profile-driven (solo/team, greenfield/brownfield, monorepo/separate).
+In one pass it produces:
+
+- **The `yad` CLI** — zero-dependency Node (`setup`, `gate`, `commit`, `open-pr`, `ship`, `repo`,
+  `thread`, `reconcile`, `usage`, `doctor`), run via `npx` or a global install.
+- **37 workflow skills** installed into your AI assistant — **Claude Code** (`.claude/`) first-class,
+  plus `.agents`, Zencoder, and OpenCode.
+- **`.sdlc/` config** — the product hub, connected repos, reviewer roster, and tool connections
+  (design, testing, learning), all as plain JSON you can read and diff.
+- **CI gates**, wired into every connected repo and the hub as **GitHub Actions or GitLab CI** —
+  spec-link, contract-check, verified-commits, build/test/lint, and the feature-thread gates, shipped
+  as CI-agnostic bash under `checks/`.
+- **PR/MR templates** and an opt-in CodeRabbit config.
+
+Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — state, approvals, and the contract lock —
+so the audit trail starts the moment you begin real work.
+
+## Your first five minutes
+
+<!-- IMAGE: docs/media/artifact-waiting.png — "A generated epic waits at its gate — nothing advances until a human approves." -->
+
+```text
+setup → AI drafts an artifact → ⛔ gate waits → you approve → next step → ⛔ gate waits → …
+```
+
+1. **`npx yadflow setup`** — the wizard installs skills, connects your repo, and wires the gates.
+2. **Run `yad-epic`** in your assistant — it drafts the epic, then **stops** and writes it to a file.
+3. **A gate waits.** Nothing advances until you review it.
+4. **You approve** — file-only, or by merging the review PR/MR.
+5. **The workflow continues** to the next step, which stops again.
+
+Every step is the same contract: *AI proposes → a human decides → the trail is recorded.*
+
 ## How it works (in five points)
 
 - **Front half = decide.** Once per epic, in the product hub: epic, architecture + a locked contract,
   UI, stories, test cases. Always human-gated — nothing auto-advances.
 - **Build half = build.** Once per story per code repo: spec → implement → checks → ship.
 - **Every step stops at a gate.** A human moves it forward (file-only, or by merging a review PR/MR).
+  <!-- IMAGE: docs/media/pr-gate.png — "The review gate rides a real PR/MR: approve to advance, comment to block." -->
 - **Automation is opt-in and earned.** A safe back-half step can earn auto-advance after it proves
   itself — and a one-command kill switch reverts everything to manual. The engineer review and all
   front states are never automatable.
 - **Everything is files.** State, approvals, the contract lock, the build log — all plain files under
   `epics/EP-<slug>/`. No database. The audit trail *is* the repo.
 
+## Why not just use Cursor?
+
+Because Yadflow lives in a different layer. Cursor, Claude Code, Copilot, Continue, Roo, and Cline
+*generate* code. Yadflow *governs* what happens to it — review, architectural control, and an audit
+trail — so you get AI speed without losing control of quality or accountability. They're
+complementary: bring your favorite, and Yadflow wraps the engineering process around it.
+
+|               | Your AI assistant        | **Yadflow**                                          |
+|---------------|--------------------------|------------------------------------------------------|
+| **Layer**     | Writes the code          | Governs how it ships                                 |
+| **Output**    | Diffs, completions       | Gated artifacts + a file-based audit trail           |
+| **Answers**   | "Write this for me"      | "Should this merge — and who approved it?"           |
+| **Review**    | You eyeball the diff     | Human-gated PR/MR, contract lock, earned automation  |
+| **Fit**       | Bring your own           | Wraps around all of them                             |
+
 ## Review, made a pairing — and a lesson
 
 Reviewing AI-generated code is where governance lives or dies, so Yadflow makes the honest review the
-*easiest* path — and, optionally, a **teaching** one. The **Review Companion** turns a PR/MR into a
-60-second trailer, swipe-through cards, and a grounded chat. On top of it, **Pair Review**
-(`yad pair-review`) runs a guided, two-way walkthrough: the AI walks the engineer through the change
-**one risk-ordered stop at a time**, explains each change in depth, then **asks them about it**; the
-engineer answers and asks back, until **both are satisfied**. The session doubles as a lesson — it
-demonstrates a transferable review method, scores the engineer against it, and records their review-skill
-growth in a **private, local-only** learning log (`yad status` rolls it up). It's **soft and additive**:
-it never blocks a merge, it rides the same `engagement: verified` signal, and any genuine concern it
-surfaces blocks like a normal review comment.
+*easiest* path. The **Review Companion** turns any PR/MR into a 60-second trailer, swipe-through cards,
+and a grounded chat. **Pair Review** (`yad pair-review`) goes further: the AI walks you through the
+change one risk-ordered stop at a time, explains each, then asks you about it — until both sides are
+satisfied.
+
+It doubles as a lesson: it teaches a transferable review method, scores you against it, and records
+your review-skill growth in a **private, local-only** learning log (`yad status` rolls it up). It's
+**soft and additive** — it never blocks a merge on its own, yet any genuine concern it surfaces blocks
+like a normal review comment.
 
 ## Who it's for
 
-Tech leads and engineering managers who want their team to move fast with AI **without** giving up
-review, architectural control, or an audit trail — the governance layer around AI-assisted
-development, not another code generator. And because the audit trail *is* the repo, `yad usage` turns
-it into a per-member **adoption & behavior report** (HTML/JSON/MD) — who authored, reviewed, approved,
-and shipped, with factual workflow-hygiene flags — derived read-only, so an EM can see how the team
-actually uses the flow.
+Tech leads and engineering managers who want their team to move fast with AI-assisted development
+**without** giving up review, architectural control, or an audit trail — the governance layer around
+AI-assisted software engineering, not another code generator.
+
+And because the audit trail *is* the repo, **`yad usage`** turns it into a per-member adoption &
+behavior report (HTML/JSON/MD): who authored, reviewed, approved, and shipped, with factual
+workflow-hygiene flags — derived read-only, so an EM can see how the team actually uses the flow.
 
 ## Documentation
 
