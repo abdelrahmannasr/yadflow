@@ -6,7 +6,7 @@
 [![report](https://img.shields.io/badge/docs-Yadflow%20report-2471a3)](https://abdelrahmannasr.github.io/yadflow/)
 
 **A governance layer for AI-assisted software engineering — a gated development lifecycle where
-AI builds and a human approves every step.**
+AI builds and a human clears every gate.**
 *AI builds. The hand decides.* (*yad* — **يد**, Arabic for "hand".) On npm and GitHub as `yadflow`.
 
 > **Not another coding assistant — the governance layer around the one you already use.**
@@ -26,8 +26,9 @@ AI, the harder it gets to keep control of quality, architecture, and accountabil
 ## What Yadflow is
 
 Yadflow puts a **human gate on every step** of the lifecycle. Each step does its work, writes its
-output to a plain file, and **waits** — it never advances until a human approves it (or, later, until
-a step has *earned* the right to auto-advance). Reviews ride real PR/MRs; all state lives in files you
+output to a plain file, and **waits** — it never advances until a human clears its gate (by approving,
+or in solo mode by merging your own PR), or, later, once a step has *earned* the right to auto-advance.
+Reviews ride real PR/MRs; all state lives in files you
 can read, diff, and edit — no database, nothing hidden. The result is a paper trail for every decision
 and a hard wall between "AI proposed" and "we shipped it."
 
