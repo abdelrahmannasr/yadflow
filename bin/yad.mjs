@@ -18,6 +18,7 @@ import { runNext } from '../cli/next.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
+import { runUsage } from '../cli/usage.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -45,6 +46,13 @@ ${c.bold('Reviewer roster')}
   yad roster grant <name> <repo> <role...>   Grant role(s) for a connected repo (domain-owner|reviewer|owner)
   yad roster revoke <name> <repo> <role...>  Remove role(s) for a repo
   yad roster remove <login>            Delete a member from the roster
+
+${c.bold('Team usage (EM adoption & behavior report)')}
+  yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
+                                       (derived, read-only — writes no tracked state)
+                                       flags: --out <path> (default ./usage-report.html),
+                                       --since <YYYY-MM-DD> --until <YYYY-MM-DD> | --all,
+                                       --member <name>, --format html|json|md, --repos (code commits)
 
 ${c.bold('Where am I / what next')}
   yad next                             Project-wide: the one next action to take (or run setup)
@@ -115,7 +123,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -141,6 +149,7 @@ function parseArgs(argv) {
     else if (a === '--separate') o.separate = true;
     else if (a === '--tools') o.tools = true;
     else if (a === '--refresh') o.refresh = true;
+    else if (a === '--repos') o.repos = true;
     else if (a === '--wire') o.wire = true;
     else if (a === '--dry-run') o.dryRun = true;
     else if (a === '--json') o.json = true;
@@ -187,6 +196,12 @@ async function main() {
       break;
     case 'report':
       await runReport(o.dir, { message: o.message });
+      break;
+    case 'usage':
+      runUsage(o.dir, {
+        out: o.out, since: o.since, until: o.until, all: o.all, member: o.member,
+        format: o.format, repos: o.repos, json: o.json, today,
+      });
       break;
     case 'sync-status': {
       const [, epic] = o._;

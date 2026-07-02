@@ -3677,3 +3677,142 @@ test('report: non-interactive never posts — hands back a prefilled URL', async
   assert.ok(r.url.includes('/issues/new?'));
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---- yad usage (derived team-member behavior report) --------------------------------------------
+const { buildModel, renderHtml, renderMarkdown, deriveEvents } = await import('./usage.mjs');
+
+// Scaffold a hub dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
+// []). `dormant` is in the roster with no activity so we can assert it surfaces at zero.
+function usageFixture() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github',
+    roster: [
+      { login: 'al', name: 'alice', email: 'alice@corp.io', roles: { hub: ['reviewer'] } },
+      { login: 'bo', name: 'bob', role: 'owner' },
+      { login: 'dg', name: 'dormant', roles: { hub: ['reviewer'] } },
+    ],
+  }));
+  const ep = path.join(T, 'epics/EP-x/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([
+    { artifact: 'epic.md', step: 'epic-review', approver: 'alice', role: 'reviewer', status: 'approved', date: '2026-01-10' },
+    { artifact: 'stories/', step: 'stories-review', approver: 'alice', role: 'reviewer', status: 'approved', date: '2026-05-20' },
+  ]));
+  fs.writeFileSync(path.join(ep, 'comments.json'), JSON.stringify([
+    { artifact: 'epic.md', step: 'epic-review', commenter: 'bob', role: 'owner', round: 1, count: 3, date: '2026-01-11' },
+  ]));
+  fs.writeFileSync(path.join(ep, 'build-log.json'), JSON.stringify({
+    epic: 'EP-x', ships: [
+      { story: 'EP-x-S01', task: 'T01', repo: 'backend', engineer_review: [{ approver: 'bob', role: 'owner' }], risk: 'low', shippedAt: '2026-01-12' },
+      { story: 'EP-x-S02', task: 'T02', repo: 'backend', engineer_review: [], risk: 'high', shippedAt: '2026-01-13' },
+    ],
+  }));
+  return T;
+}
+
+test('usage: attributes ledger events to roster members; dormant member surfaces at zero', () => {
+  const T = usageFixture();
+  const model = buildModel(T, {});
+  const by = Object.fromEntries(model.members.map((m) => [m.name, m]));
+  assert.equal(by.alice.counts.approved, 2, 'alice has both approvals all-time');
+  assert.equal(by.bob.counts.commented, 1, 'bob commented once');
+  assert.equal(by.bob.counts.shipped, 1, 'bob has one engineer-review ship');
+  assert.equal(by.dormant.total, 0, 'dormant member is present with zero activity');
+  assert.ok(by.dormant.flags.includes('dormant'), 'dormant flag raised');
+  assert.equal(model.totals.approved, 2);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: --since/--until window trims out-of-range events', () => {
+  const T = usageFixture();
+  const jan = buildModel(T, { since: '2026-01-01', until: '2026-01-31' });
+  const alice = jan.members.find((m) => m.name === 'alice');
+  assert.equal(alice.counts.approved, 1, 'only the January approval is in range (May excluded)');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: --member filters to one person', () => {
+  const T = usageFixture();
+  const model = buildModel(T, { member: 'alice' });
+  assert.equal(model.members.length, 1);
+  assert.equal(model.members[0].name, 'alice');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: a ship with no engineer review is flagged as a hygiene gap', () => {
+  const T = usageFixture();
+  const model = buildModel(T, {});
+  assert.equal(model.hygiene.length, 1, 'exactly the empty-review ship');
+  assert.equal(model.hygiene[0].story, 'EP-x-S02');
+  assert.equal(model.hygiene[0].shippedAt, '2026-01-13');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: rendered output never leaks emails or comment bodies', () => {
+  const T = usageFixture();
+  const model = buildModel(T, {});
+  const emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+  assert.ok(!emailRe.test(renderHtml(model, '2026-07-02')), 'no email in HTML');
+  assert.ok(!emailRe.test(renderMarkdown(model, '2026-07-02')), 'no email in Markdown');
+  assert.ok(!emailRe.test(JSON.stringify(model)), 'no email in JSON model');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: same fixture derives a byte-identical JSON model (deterministic)', () => {
+  const T = usageFixture();
+  const a = JSON.stringify(buildModel(T, { since: '2026-01-01', until: '2026-12-31' }), null, 2);
+  const b = JSON.stringify(buildModel(T, { since: '2026-01-01', until: '2026-12-31' }), null, 2);
+  assert.equal(a, b, 'no wall-clock / unstable ordering in the model');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: deriveEvents degrades to [] when the hub is not a git repo', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-nogit-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [] }));
+  const events = deriveEvents(T, { byNameOrLogin: () => null, byGitAuthor: () => null }, {});
+  assert.deepEqual(events, [], 'no epics, no git — empty stream, no throw');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// --- review-follow-up fixes: reviewer-any-scope, corrupt-ledger warn, --out mkdir, --member totals ---
+const { isReviewerAnywhere, runUsage } = await import('./usage.mjs');
+
+test('usage: isReviewerAnywhere detects repo-scoped, hub-scoped, and legacy reviewer roles', () => {
+  assert.equal(isReviewerAnywhere({ roles: { backend: ['reviewer'] } }), true, 'repo-scoped reviewer');
+  assert.equal(isReviewerAnywhere({ roles: { hub: ['reviewer'] } }), true, 'hub-scoped reviewer');
+  assert.equal(isReviewerAnywhere({ role: 'reviewer' }), true, 'legacy flat role');
+  assert.equal(isReviewerAnywhere({ roles: { backend: ['domain-owner'] }, role: 'owner' }), false, 'owner/domain-owner only');
+  assert.equal(isReviewerAnywhere(null), false, 'no entry');
+});
+
+test('usage: a corrupt ledger warns and is skipped, never throws or under-counts other ledgers', () => {
+  const T = usageFixture();
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/approvals.json'), '{ this is not json');
+  let model;
+  assert.doesNotThrow(() => { model = buildModel(T, {}); }, 'one corrupt ledger does not abort the view');
+  // approvals are gone (the file was unreadable) but comments/ships from the other ledgers survive.
+  const bob = model.members.find((m) => m.name === 'bob');
+  assert.equal(bob.counts.commented, 1, 'the intact comments ledger still counts');
+  assert.equal(bob.counts.shipped, 1, 'the intact build-log still counts');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: runUsage --out creates missing parent directories', () => {
+  const T = usageFixture();
+  const dest = path.join(T, 'nested/deep/report.html');
+  runUsage(T, { out: dest, all: true });
+  assert.ok(fs.existsSync(dest), 'report written into a directory that did not exist');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('usage: --member recomputes totals to the shown member only', () => {
+  const T = usageFixture();
+  const model = buildModel(T, { member: 'alice' });
+  assert.equal(model.members.length, 1);
+  assert.equal(model.totals.approved, 2, "totals reflect only alice's approvals");
+  assert.equal(model.totals.commented, 0, "bob's comment is excluded from the filtered totals");
+  fs.rmSync(T, { recursive: true, force: true });
+});
