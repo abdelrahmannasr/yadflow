@@ -1171,6 +1171,19 @@ yad roster remove carol-gh</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Setting up reviewers, onboarding a new team member, or fixing who owns a repo — without re-running the whole setup wizard.</div>
   </div>
 
+  <h3>Team usage</h3>
+
+  <div class="skillcard" id="cmd-usage">
+    <h4><code>yad usage</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> adoption &amp; behavior report for an EM/team-lead. It reconstructs each roster member's audit trail — <em>authored → commented → approved → shipped</em>, in order — entirely from data <strong>already in git</strong> (the approval/comment/ship ledgers + git authorship), then renders it to a path you choose as <strong>HTML</strong> (default), <strong>JSON</strong>, or <strong>Markdown</strong>. Derived and read-only: it hooks no commands and writes no tracked state, so it is rebuildable any time (like <code>yad-status</code>). It surfaces factual <strong>workflow-hygiene</strong> flags — a ship with no recorded engineer review, a dormant member, a reviewer who never reviews — never a judgmental score. It emits <strong>no emails, commit messages, or comment bodies</strong> (the guarantee is structural, not scrubbed). Never a gate; never touches epic state.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>yad usage                                  # HTML report → ./usage-report.html, all time
+yad usage --out reports/team.html --since 2026-01-01 --until 2026-03-31
+yad usage --member carol --format md       # one member, Markdown
+yad usage --format json --all              # machine-readable, to stdout</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> A team lead wants to see how the team actually uses the flow. <em>Note:</em> attributing <em>authored</em> git commits to a member needs their <code>email</code> in the roster; ledger events (approve/comment/ship) attribute by name regardless.</div>
+  </div>
+
   <h3>Global flags</h3>
   <table>
     <tr><th>Flag</th><th>Meaning</th></tr>

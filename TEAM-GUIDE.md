@@ -419,6 +419,13 @@ surfaces (`contract`, `auth`, `payments`):
   themselves. The engineer review and all five front steps are **never** automatable.
 - **Global "back to manual" switch:** `yad-run action: kill` forces every step to human approval
   instantly; `yad-run action: unkill` restores it.
+- **See how the team uses the flow (for a team lead / EM):** `yad usage` builds a per-member
+  adoption & behavior report — who *authored / commented / approved / shipped*, in order, with factual
+  workflow-hygiene flags (e.g. a ship with no recorded engineer review, a dormant member). It is
+  **derived and read-only** — reconstructed from the ledgers + git history already in the repo, hooking
+  no commands and writing no tracked state. Write it anywhere: `yad usage --out report.html --all` (or
+  `--since/--until`, `--member <name>`, `--format json|md`). No emails or comment bodies are ever
+  included. (To attribute *authored* artifacts to a member, give them an `email` in the roster.)
 - **Keep the install in sync with the CLI** (run from the product hub):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).
