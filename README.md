@@ -64,7 +64,7 @@ Every step stops at a gate until a human approves. New here? **Walk it lesson-by
 
 ## What `npx yadflow setup` installs
 
-<!-- IMAGE: docs/media/setup-wizard.gif — "npx yadflow setup: the guided wizard installs skills, connects repos, and wires CI gates." -->
+![npx yadflow setup — the guided wizard installs the yad-* skills, wires the CI gates, and stamps the .sdlc config](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
 
 The wizard is idempotent and profile-driven (solo/team, greenfield/brownfield, monorepo/separate).
 In one pass it produces:
