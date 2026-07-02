@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, has,
-  exists, readJSON, writeJSON,
+  exists, readJSON, readJSONStrict, writeJSON,
 } from './lib.mjs';
 import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
 import {
@@ -94,6 +94,21 @@ function normalizeRoles(entry) {
     delete entry.role;
   }
   return entry.roles;
+}
+
+// Build the hub.json object for a (re)configure write, preserving user-owned identity data the wizard
+// does not re-collect: top-level `verified_authors` (and any other existing fields), plus a previously
+// populated `roster` when this run collected none (solo re-runs skip the reviewer loop). Never blanks a
+// non-empty roster; never drops verified_authors. Mirrors the safe { ...cur } merge on the keep path.
+// Trade-off (deliberate, fail-safe): a reconfigure can no longer EMPTY a populated roster — collecting
+// zero reviewers keeps the existing entries. To actually remove members, use `yad roster remove` (or
+// edit hub.json directly); this flow only ever grows or replaces the roster, never silently clears it.
+export function buildReconfiguredHub(cur, fields) {
+  const { roster, ...rest } = fields;
+  const keptRoster = (Array.isArray(roster) && roster.length)
+    ? roster
+    : (Array.isArray(cur?.roster) ? cur.roster : []);
+  return { ...(cur || {}), ...rest, roster: keptRoster };
 }
 
 // Upsert one roster member into hub.json, keyed by `login`. Deep-merges the per-scope `roles` map so
@@ -485,14 +500,30 @@ export async function runSetup(root, opts = {}) {
     // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the bridge/PR flow
     // needs it to open PRs. Derived from the origin remote already resolved above; null when local-only.
     const git_url = enabled ? ((remote.ok && remote.stdout.trim()) || null) : null;
-    writeJSON(hubPath, { platform: enabled ? platform : null, git_url, bridge_enabled: enabled, bridge: enabled, default_branch, roster, solo, profile: { codebase, repo_layout, team_size } });
-    ok(`wrote ${PROJECT_FILES.hubConfig} (${roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
+    // Merge into the existing file, never clobber: roster + verified_authors are user-owned identity
+    // data (the verified-commits gate's allowlist derives from them). A reconfigure that collects no
+    // reviewers (e.g. solo mode skips the loop) must NOT blank a populated roster or drop verified_authors.
+    // Read strict so a corrupt hub aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
+    // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
+    const cur = readJSONStrict(hubPath, {}) || {};
+    const next = buildReconfiguredHub(cur, {
+      platform: enabled ? platform : null, git_url, bridge_enabled: enabled, bridge: enabled,
+      default_branch, roster, solo, profile: { codebase, repo_layout, team_size },
+    });
+    if (!roster.length && Array.isArray(cur.roster) && cur.roster.length) {
+      info(`kept existing roster (${cur.roster.length} member(s)) — reconfigure collected none`);
+    }
+    if (cur.verified_authors?.length) info(`preserved ${cur.verified_authors.length} verified_authors entry(ies)`);
+    writeJSON(hubPath, next);
+    ok(`wrote ${PROJECT_FILES.hubConfig} (${next.roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
   }
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.
   // Also backfill a missing git_url from origin here (idempotent repair for the doctor's YAD-CFG-005).
   if (exists(hubPath)) {
-    const cur = readJSON(hubPath, {}) || {};
+    // Strict read for the same reason as the reconfigure write above: a corrupt hub must abort, never
+    // fail-open to `{}` and get rewritten with roster/verified_authors stripped on a plain re-run.
+    const cur = readJSONStrict(hubPath, {}) || {};
     const backfillUrl = (cur.platform && !cur.git_url)
       ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
       : null;
