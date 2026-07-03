@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
+  isStubEpic, nextAction, preconditionsMet,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary } from './thread.mjs';
 
@@ -173,6 +174,95 @@ test('sealedEpic + openDebtOnThread + threadSummary reflect ship + debt state', 
   assert.equal(s.thread, 'EP-gen');
   assert.equal(s.openDebt.length, 1);
   assert.ok(s.nodes.find((n) => n.id === 'EP-gen').sealed);
+});
+
+// ── Brownfield stub genesis epics (yad-stub) ─────────────────────────────────
+
+test('isStubEpic: detects a stub genesis by the stub:backfill-pending marker; a normal epic is not', () => {
+  const T = hub();
+  writeEpic(T, 'EP-stub', { kind: 'feature', thread: 'EP-stub', verified: false, stub: 'backfill-pending' });
+  writeEpic(T, 'EP-real', { kind: 'feature', thread: 'EP-real' });
+  assert.equal(isStubEpic(T, 'EP-stub'), true);
+  assert.equal(isStubEpic(T, 'EP-real'), false);
+  assert.equal(isStubEpic(T, 'EP-missing'), false);  // missing-safe
+});
+
+test('a defect threads off a stub genesis: it resolves the thread and the rollup lists it', () => {
+  const T = hub();
+  writeEpic(T, 'EP-stub', { kind: 'feature', thread: 'EP-stub', verified: false, stub: 'backfill-pending' });
+  // A defect off the stub inherits only `epic` (the stub brief); no architecture/contract exist yet.
+  writeEpic(T, 'EP-bug', { kind: 'defect', parent: 'EP-stub', thread: 'EP-stub', inherits: ['epic'] });
+  const r = resolveThread(T, 'EP-bug');
+  assert.equal(r.rootId, 'EP-stub');
+  assert.equal(r.broken, null);                                   // a stub is a valid parent
+  assert.deepEqual(threadEpics(T, 'EP-stub'), ['EP-stub', 'EP-bug']);
+  // The stub owns `epic` (REPLACE base — it never inherited it); stories is ADDITIVE, so both the stub
+  // genesis and the defect are lineage-level contributors (file-level ownership is resolveCurrentStories).
+  const owner = resolveCurrentArtifacts(T, 'EP-stub');
+  assert.equal(owner.epic, 'EP-stub');
+  assert.deepEqual(owner.stories, ['EP-stub', 'EP-bug']);
+  // File-level: only the defect actually has a stories/ file → it alone owns a real story id.
+  writeEpic(T, 'EP-bug', { kind: 'defect', parent: 'EP-stub', thread: 'EP-stub', inherits: ['epic'] }, { stories: ['draft'] });
+  const stories = resolveCurrentStories(T, 'EP-stub');
+  assert.deepEqual(Object.keys(stories), ['EP-bug-S01']);
+  assert.equal(stories['EP-bug-S01'], 'EP-bug');
+  // The thread summary flags the stub node.
+  const s = threadSummary(T, 'EP-stub');
+  assert.equal(s.nodes.find((n) => n.id === 'EP-stub').stub, true);
+  assert.equal(s.nodes.find((n) => n.id === 'EP-bug').stub, false);
+});
+
+test('gatePredicate: a stub-parent inherited step with boundHash:null passes (nothing locked → no drift)', () => {
+  // A defect off a stub inherits the undocumented surface with a null boundHash — must not block.
+  const step = { id: 'architecture-review', inherited: true, inheritedFrom: 'EP-stub', boundHash: null };
+  const res = gatePredicate({ step, approvals: [], currentHash: null });
+  assert.equal(res.passed, true);
+  assert.equal(res.rule, 'inherited');
+  assert.deepEqual(res.missing, []);
+});
+
+test('nextAction: a stub epic routes to backfill-pending (not to authoring the epic)', () => {
+  const mkStub = (currentStep, kind) => ({
+    state: { epicId: 'EP-stub', kind, currentStep, steps: [{ id: 'epic', type: 'author', status: 'blocked' }] },
+    hubPrs: [], buildStates: [],
+  });
+  // Detected by state.kind === 'stub' ...
+  const a = nextAction(mkStub('backfill-pending', 'stub'), { epic: 'EP-stub' });
+  assert.equal(a.kind, 'backfill-pending');
+  assert.match(a.why, /backfill/i);
+  // ... and also by the currentStep sentinel alone (defensive).
+  const b = nextAction(mkStub('backfill-pending', undefined), { epic: 'EP-stub' });
+  assert.equal(b.kind, 'backfill-pending');
+});
+
+test('promote (light) clears BOTH sources: nextAction stops calling it a stub and isStubEpic agrees', () => {
+  // The regression guard for the promote desync bug: light promote clears epic.md `stub:` AND rewrites
+  // state.json (drop kind:stub, currentStep -> backfill-done). Both readers must then agree "not a stub".
+  const T = hub();
+  writeEpic(T, 'EP-promoted', { kind: 'feature', thread: 'EP-promoted', verified: true }); // stub: cleared
+  assert.equal(isStubEpic(T, 'EP-promoted'), false);                    // frontmatter reader
+  // A half-promoted epic left on the sentinel would misreport — assert the promoted state does NOT:
+  const promoted = { state: { epicId: 'EP-promoted', currentStep: 'backfill-done',
+    steps: [{ id: 'epic', type: 'author', status: 'blocked' }] }, hubPrs: [], buildStates: [] };
+  const a = nextAction(promoted, { epic: 'EP-promoted' });             // ledger reader
+  assert.equal(a.kind, 'backfill-done');                               // documented anchor, NOT backfill-pending
+  assert.match(a.why, /documented/i);
+  assert.doesNotMatch(a.why, /pending/i);
+});
+
+test('preconditionsMet: no front step is runnable on a stub or a documented anchor', () => {
+  const blockedChain = [{ id: 'epic', type: 'author', status: 'blocked' }];
+  // Un-promoted stub: `yad next EP-x --check epic` must NOT say "ready" (its blocked steps otherwise read as entry-ready).
+  const stub = preconditionsMet({ kind: 'stub', currentStep: 'backfill-pending', steps: blockedChain }, 'epic');
+  assert.equal(stub.ok, false);
+  assert.match(stub.reason, /stub \(backfill pending\)/);
+  // Light-promoted anchor: also not runnable — it evolves via yad-change.
+  const anchor = preconditionsMet({ currentStep: 'backfill-done', steps: blockedChain }, 'epic');
+  assert.equal(anchor.ok, false);
+  assert.match(anchor.reason, /documented backfill anchor/);
+  // Regression guard: a NORMAL epic entry step is still runnable (the short-circuit didn't over-reach).
+  const normal = preconditionsMet({ currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'in_progress' }] }, 'epic');
+  assert.equal(normal.ok, true);
 });
 
 test('epicLineage defaults an un-migrated genesis epic to kind:feature', () => {

@@ -405,6 +405,17 @@ export function preconditionsMet(state, stepId) {
     const ok = stepId === 'epic' || stepId === 'analysis' || stepId === 'discovery';
     return { ok, blockedBy: null, reason: ok ? 'entry step (no state seeded yet)' : `start with yad-epic — no epic state for '${stepId}'` };
   }
+  // A stub anchor (backfill-pending) or a light-promoted anchor (backfill-done) has NO runnable front
+  // step: its front chain is intentionally left `blocked`. It evolves via `yad-backfill promote` / a
+  // threaded `yad-change`, never by authoring `epic` against the anchor itself — so the precondition
+  // guard must not green-light one (its blocked steps would otherwise read as "entry step ready").
+  if (state.kind === 'stub' || state.currentStep === 'backfill-pending' || state.currentStep === 'backfill-done') {
+    const anchor = state.currentStep === 'backfill-done';
+    return { ok: false, blockedBy: null,
+      reason: anchor
+        ? `${stepId} is not runnable — this is a documented backfill anchor; evolve it with yad-change`
+        : `${stepId} is not runnable — this is a stub (backfill pending); run yad-backfill then promote, or thread a change with yad-change` };
+  }
   const i = state.steps.findIndex((s) => s.id === stepId);
   if (i === -1) return { ok: false, blockedBy: null, reason: `unknown step '${stepId}'` };
   if (state.steps[i].status === 'done') return { ok: false, blockedBy: null, reason: `${stepId} is already done` };
@@ -447,6 +458,24 @@ export function nextAction(ledger, { epic } = {}) {
       artifact: dstep.artifact, pr: dpr ? dpr.number : null,
       command: `yad gate ${dverb} ${epicId} ${dstep.artifact}`,
       why: dpr ? `review PR #${dpr.number} is open — sync its state to advance` : `${dstep.id} is open — create the review PR/MR` };
+  }
+
+  // A STUB genesis epic (yad-stub): a brownfield feature anchored so a change/defect can thread off it,
+  // but not yet documented. It has no build half until backfilled + promoted — so route to yad-backfill
+  // (not to authoring the epic), and remind that bugs can thread off it now with yad-change. A stub is
+  // (epic.md `stub:backfill-pending`) ⟺ (state.kind:stub + currentStep:backfill-pending); `yad-backfill
+  // promote` clears ALL of these atomically (see state-schema.md), so the sentinel here can never disagree
+  // with `isStubEpic` (which reads the frontmatter) on a correctly-promoted epic.
+  if (state.kind === 'stub' || state.currentStep === 'backfill-pending') {
+    return { epicId, kind: 'backfill-pending', step: 'backfill-pending', status: 'stub',
+      why: 'stub epic (backfill pending) — document the code with yad-backfill then `yad-backfill promote` to make it real; thread bugs now with yad-change' };
+  }
+  // A light-promoted brownfield anchor: `yad-backfill promote` documented the feature (verified) but did
+  // NOT wake the front chain (its docs live in the backfill spec). Terminal like `discovery-done` — no
+  // build half runs directly; the feature evolves by threading a change/defect off it.
+  if (state.currentStep === 'backfill-done') {
+    return { epicId, kind: 'backfill-done', step: 'backfill-done', status: 'documented',
+      why: 'backfilled anchor (documented) — no build half runs directly; evolve it by threading a change/defect with yad-change' };
   }
 
   // The parallel test-cases track stays workable even once the epic is ready-for-build.
@@ -525,6 +554,14 @@ export function epicLineage(root, epic) {
     inherits: asList(fm.inherits),
     supersedes: asList(fm.supersedes),
   };
+}
+
+// Is this a STUB genesis epic (minted by yad-stub as a brownfield thread anchor)? A stub is kind:feature
+// but carries `stub: backfill-pending` in epic.md frontmatter until `yad-backfill promote` flips it to a
+// real, verified epic (which clears the marker). Missing/greenfield-safe. Read by yad thread / yad-status
+// / the reconciler to render "stub (backfill pending)" and never treat it as a fully-specced feature.
+export function isStubEpic(root, epic) {
+  return readFrontmatter(path.join(epicRoot(root, epic), 'epic.md')).stub === 'backfill-pending';
 }
 
 // Walk `parent` to the thread root. Cycle- and missing-safe. Returns the genesis-first `chain`, the

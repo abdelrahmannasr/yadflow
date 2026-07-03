@@ -6,7 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -54,6 +54,7 @@ export function threadSummary(root, threadOrEpic) {
       id, kind: lin.kind, parent: lin.parent, inherits: lin.inherits,
       currentStep: state?.currentStep || 'unseeded',
       sealed: sealedEpic(root, id),
+      stub: isStubEpic(root, id),
       depth: change?.depth || null,
       defect: change?.defect || null,
       brokenThread: resolveThread(root, id).broken || null,
@@ -86,7 +87,8 @@ export async function runThread(root, { epic, json = false } = {}) {
     for (const r of [...roots].sort()) {
       const s = threadSummary(root, r);
       const debt = s.openDebt.length ? c.red(`  ⚠ ${s.openDebt.length} open reconcile-debt`) : '';
-      log(`  ${c.bold(r)}  ${c.dim(`${s.nodes.length} epic(s)`)}${debt}`);
+      const stub = s.nodes[0]?.stub ? c.yellow('  [stub · backfill pending]') : '';
+      log(`  ${c.bold(r)}  ${c.dim(`${s.nodes.length} epic(s)`)}${stub}${debt}`);
     }
     log(c.dim('\n  yad thread <epic>   show one thread in full'));
     return;
@@ -100,8 +102,9 @@ export async function runThread(root, { epic, json = false } = {}) {
   for (const n of s.nodes) {
     const tag = KIND_TAG[n.kind] || n.kind;
     const seal = n.sealed ? c.dim(' [sealed]') : '';
+    const stub = n.stub ? c.yellow(' [stub · backfill pending]') : '';
     const dep = n.depth ? c.dim(` ${n.depth}`) : '';
-    log(`  • ${c.bold(n.id)}  ${tag}${dep}  ${c.dim('@ ' + n.currentStep)}${seal}`);
+    log(`  • ${c.bold(n.id)}  ${tag}${dep}  ${c.dim('@ ' + n.currentStep)}${seal}${stub}`);
     if (n.parent) log(c.dim(`      parent: ${n.parent}   inherits: [${n.inherits.join(', ') || '—'}]`));
     if (n.defect) log(c.dim(`      defect: ${n.defect.severity || '?'} · escaped@${n.defect.escape_stage || '?'} · ${n.defect.root_cause || ''}`));
     if (n.brokenThread) log(c.red(`      ✗ ${n.brokenThread}`));
@@ -161,6 +164,8 @@ export async function runReconcile(root, { action = 'check', thread = null } = {
     log('');
     info('refresh is advisory: open a reconcile change-epic with `yad-change` (kind: change) threaded to');
     info('the affected feature, then pay any open debt (update artifacts + add a regression test).');
+    info('for shipped brownfield code with NO epic at all, anchor it first with `yad-stub`, then thread');
+    info('the change/defect off that stub (and run `yad-backfill` to make the anchor real).');
   }
   if (action === 'wire') {
     log('');
