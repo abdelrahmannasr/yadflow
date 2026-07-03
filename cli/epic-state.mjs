@@ -396,6 +396,18 @@ export function buildNextActions(buildStates = []) {
   }));
 }
 
+// Classify a stub / backfill anchor from its ledger state — the SINGLE source of truth so `nextAction`
+// and `preconditionsMet` can never disagree, even on a partially-applied `promote`. The `stub` check
+// takes precedence over `backfill-done`, so a half-cleared promote (`kind:stub` still set while
+// `currentStep` already moved) reads as still-a-stub — the conservative side (needs promoting). Returns
+// `'stub'` (un-promoted anchor), `'documented'` (light-promoted anchor), or `null` (a normal epic).
+export function backfillAnchorKind(state) {
+  if (!state) return null;
+  if (state.kind === 'stub' || state.currentStep === 'backfill-pending') return 'stub';
+  if (state.currentStep === 'backfill-done') return 'documented';
+  return null;
+}
+
 // PURE precondition guard. Is `stepId` runnable right now? A step is runnable iff every step BEFORE it
 // in the chain is `done` and the step itself is not already `done`. With no state yet (greenfield), the
 // only runnable steps are the entry authoring steps (analysis | epic). Used by `yad next --check`
@@ -409,8 +421,9 @@ export function preconditionsMet(state, stepId) {
   // step: its front chain is intentionally left `blocked`. It evolves via `yad-backfill promote` / a
   // threaded `yad-change`, never by authoring `epic` against the anchor itself — so the precondition
   // guard must not green-light one (its blocked steps would otherwise read as "entry step ready").
-  if (state.kind === 'stub' || state.currentStep === 'backfill-pending' || state.currentStep === 'backfill-done') {
-    const anchor = state.currentStep === 'backfill-done';
+  const anchorKind = backfillAnchorKind(state);
+  if (anchorKind) {
+    const anchor = anchorKind === 'documented';
     return { ok: false, blockedBy: null,
       reason: anchor
         ? `${stepId} is not runnable — this is a documented backfill anchor; evolve it with yad-change`
@@ -460,20 +473,22 @@ export function nextAction(ledger, { epic } = {}) {
       why: dpr ? `review PR #${dpr.number} is open — sync its state to advance` : `${dstep.id} is open — create the review PR/MR` };
   }
 
-  // A STUB genesis epic (yad-stub): a brownfield feature anchored so a change/defect can thread off it,
-  // but not yet documented. It has no build half until backfilled + promoted — so route to yad-backfill
-  // (not to authoring the epic), and remind that bugs can thread off it now with yad-change. A stub is
-  // (epic.md `stub:backfill-pending`) ⟺ (state.kind:stub + currentStep:backfill-pending); `yad-backfill
-  // promote` clears ALL of these atomically (see state-schema.md), so the sentinel here can never disagree
-  // with `isStubEpic` (which reads the frontmatter) on a correctly-promoted epic.
-  if (state.kind === 'stub' || state.currentStep === 'backfill-pending') {
+  // A STUB genesis epic (yad-stub) or a light-promoted anchor: classified by the SHARED
+  // `backfillAnchorKind` helper (the same one `preconditionsMet` uses), so the two readers can never
+  // disagree — even on a partially-applied `promote`. A stub is (epic.md `stub:backfill-pending`) ⟺
+  // (state.kind:stub + currentStep:backfill-pending); `yad-backfill promote` clears ALL of these
+  // atomically (see state-schema.md), keeping this sentinel in step with `isStubEpic` (frontmatter).
+  const anchorKind = backfillAnchorKind(state);
+  if (anchorKind === 'stub') {
+    // No build half until backfilled + promoted — route to yad-backfill (not to authoring the epic),
+    // and remind that bugs can thread off it now with yad-change.
     return { epicId, kind: 'backfill-pending', step: 'backfill-pending', status: 'stub',
       why: 'stub epic (backfill pending) — document the code with yad-backfill then `yad-backfill promote` to make it real; thread bugs now with yad-change' };
   }
-  // A light-promoted brownfield anchor: `yad-backfill promote` documented the feature (verified) but did
-  // NOT wake the front chain (its docs live in the backfill spec). Terminal like `discovery-done` — no
-  // build half runs directly; the feature evolves by threading a change/defect off it.
-  if (state.currentStep === 'backfill-done') {
+  if (anchorKind === 'documented') {
+    // `yad-backfill promote` documented the feature (verified) but did NOT wake the front chain (its docs
+    // live in the backfill spec). Terminal like `discovery-done` — no build half runs directly; the
+    // feature evolves by threading a change/defect off it.
     return { epicId, kind: 'backfill-done', step: 'backfill-done', status: 'documented',
       why: 'backfilled anchor (documented) — no build half runs directly; evolve it by threading a change/defect with yad-change' };
   }

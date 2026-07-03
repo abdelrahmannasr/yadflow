@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
-  isStubEpic, nextAction, preconditionsMet,
+  isStubEpic, nextAction, preconditionsMet, backfillAnchorKind,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary } from './thread.mjs';
 
@@ -263,6 +263,20 @@ test('preconditionsMet: no front step is runnable on a stub or a documented anch
   // Regression guard: a NORMAL epic entry step is still runnable (the short-circuit didn't over-reach).
   const normal = preconditionsMet({ currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'in_progress' }] }, 'epic');
   assert.equal(normal.ok, true);
+});
+
+test('backfillAnchorKind: one classifier drives nextAction + preconditionsMet — they cannot diverge', () => {
+  // Normal states.
+  assert.equal(backfillAnchorKind({ kind: 'stub', currentStep: 'backfill-pending' }), 'stub');
+  assert.equal(backfillAnchorKind({ currentStep: 'backfill-done' }), 'documented');
+  assert.equal(backfillAnchorKind({ currentStep: 'epic' }), null);
+  assert.equal(backfillAnchorKind(null), null);
+  // Corrupted / partially-applied promote (kind:stub AND currentStep:backfill-done): the `stub` check
+  // wins (conservative — "still needs promoting"), and BOTH readers agree, closing the divergence.
+  const corrupt = { kind: 'stub', currentStep: 'backfill-done', steps: [{ id: 'epic', type: 'author', status: 'blocked' }] };
+  assert.equal(backfillAnchorKind(corrupt), 'stub');
+  assert.equal(nextAction({ state: { epicId: 'EP-x', ...corrupt }, hubPrs: [], buildStates: [] }, { epic: 'EP-x' }).kind, 'backfill-pending');
+  assert.match(preconditionsMet(corrupt, 'epic').reason, /stub \(backfill pending\)/);  // NOT "documented anchor"
 });
 
 test('epicLineage defaults an un-migrated genesis epic to kind:feature', () => {
