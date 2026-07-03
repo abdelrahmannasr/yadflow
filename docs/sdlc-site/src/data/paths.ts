@@ -16,7 +16,7 @@ const setupSteps: FlowStep[] = [
     id: "install",
     title: "Install the Module",
     description:
-      "Run `npx yadflow setup` — the guided wizard copies all 37 yad-* skills into your IDE skill dirs and registers the sdlc module. Idempotent; re-run `check --fix` any time.",
+      "Run `npx yadflow setup` — the guided wizard copies all 38 yad-* skills into your IDE skill dirs and registers the sdlc module. Idempotent; re-run `check --fix` any time.",
     actor: "system",
     status: "installed",
     stepState: "_bmad/sdlc/ registered",
@@ -24,7 +24,7 @@ const setupSteps: FlowStep[] = [
     handler: "yad setup / install.sh",
     activeComponents: ["product-hub", "platform"],
     messages: [
-      { id: "in-1", from: "platform", to: "product-hub", label: "install 37 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "in-1", from: "platform", to: "product-hub", label: "install 38 yad-* skills", type: "write", color: "#2471a3", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: ".sdlc/cli-version.json stamped" },
   },
@@ -463,6 +463,23 @@ const automationSteps: FlowStep[] = [
 
 const changeSteps: FlowStep[] = [
   {
+    id: "stub",
+    title: "Brownfield Stub Anchor",
+    description:
+      "Brownfield entry to a thread: an already-built feature with no epic can't be a change parent (yad-change needs a real parent; lineage-check rejects a missing one). yad-stub mints the smallest real thread anchor — a stub genesis epic.md (kind:feature, thread:self, verified:false, stub:backfill-pending) + a seeded state.json (kind:stub / currentStep:backfill-pending) — never inventing behaviour. Defects thread off it immediately; yad-backfill promote later flips it to a real, verified epic.",
+    actor: "pm",
+    status: "draft",
+    stepState: "epic.md (stub) · state.json (backfill-pending)",
+    trigger: "yad-stub {feature}",
+    handler: "yad-stub",
+    activeComponents: ["product-hub", "state-json"],
+    messages: [
+      { id: "sb-1", from: "product-hub", to: "state-json", label: "seed stub genesis (kind:feature · stub:backfill-pending)", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "sb-2", from: "state-json", to: "product-hub", label: "anchor ready → thread a defect with yad-change", type: "event", color: "#1e8449", delay: 900, duration: 700 },
+    ],
+    sideEffects: { jobs: "epic.md (stub) · state.json · approvals.json · comments.json", notifications: "never auto-advances — thread bugs now; yad-backfill promote makes it real" },
+  },
+  {
     id: "change",
     title: "Change Intake & Triage",
     description:
@@ -540,7 +557,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: install the 37 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
+      "One-time setup: install the 38 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
     category: "setup",
     steps: setupSteps,
   },
@@ -590,7 +607,7 @@ export const PATHS: FlowPath[] = [
     icon: "manage_history",
     color: "#7d3c98",
     description:
-      "Post-lock evolution: a sealed epic can't be mutated in place, so a change becomes a new epic threaded to its parent — yad-change intake/triage, then yad-timeline, yad-defects, and the advisory yad-reconcile sweep. Locked artifacts are never mutated, only superseded.",
+      "Post-lock evolution: a sealed epic can't be mutated in place, so a change becomes a new epic threaded to its parent — yad-change intake/triage, then yad-timeline, yad-defects, and the advisory yad-reconcile sweep. For brownfield code with no epic, yad-stub mints a stub anchor to thread off. Locked artifacts are never mutated, only superseded.",
     category: "change",
     steps: changeSteps,
   },

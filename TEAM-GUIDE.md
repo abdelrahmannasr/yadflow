@@ -176,7 +176,7 @@ for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-case
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
-         yad-change yad-timeline yad-defects yad-reconcile \
+         yad-change yad-timeline yad-defects yad-reconcile yad-stub \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
@@ -257,7 +257,7 @@ for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-case
          yad-spec yad-implement yad-checks \
          yad-pr-template yad-hub-bridge \
          yad-commit yad-open-pr yad-ship yad-engineer-review yad-backfill \
-         yad-change yad-timeline yad-defects yad-reconcile \
+         yad-change yad-timeline yad-defects yad-reconcile yad-stub \
          yad-run yad-status; do
   rm -rf ~/.claude/skills/$s && cp -R skills/$s ~/.claude/skills/$s
 done
@@ -348,7 +348,9 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
 independently, all from the **one** locked contract.
 
 **Existing/legacy code?** Run `yad-backfill` first to produce a human-verified spec for the built
-feature before changing it.
+feature before changing it. If the feature has **no epic at all** and you just need to file a bug against
+it, run **`yad-stub`** to mint a stub genesis epic (a minimal thread anchor) — the defect threads off it
+immediately, and `yad-backfill` + `yad-backfill promote` make the anchor real later.
 
 ---
 
@@ -383,6 +385,10 @@ is fully shipped and a new change must go in its own threaded epic.
    defect's regression test is the durable memory of the bug.
 4. **A genesis epic from before this existed?** Add `kind: feature` and `thread: <its own id>` to its
    `epic.md` once (a one-line frontmatter add) before threading a change off it.
+5. **A brownfield feature with no epic at all?** `yad-change` will point you at **`yad-stub`** — mint a
+   stub genesis epic first (`kind: feature`, `stub: backfill-pending`), then thread the defect off it.
+   The bug is captured now; `yad-backfill promote` turns the stub into a real, verified epic later. The
+   list of bugs threaded off the stub is derived by `yad thread` — you never hand-maintain it.
 
 **Hotfixes** (`kind: hotfix`) may ship the fix **first** (an outage can't wait for the front gates), but
 `yad-change` opens **reconcile debt**: the thread's *next* change is blocked until you pay it — update the
@@ -453,7 +459,7 @@ Commits and PR titles follow Conventional Commits (lowercase after the type, e.g
 ## 11. The skills at a glance (what to invoke)
 
 The CLI installs and wires everything; these are the **agents you invoke by name** in your IDE. Full
-descriptions of all 37 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
+descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
@@ -484,6 +490,7 @@ descriptions of all 37 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-timeline` | Render a feature **thread** (its evolution) + resolve its current truth. |
 | `yad-defects` | Per-epic/per-thread **quality-gap report** by escape stage + root cause. |
 | `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
+| `yad-stub` | **Mint a stub genesis epic** for a brownfield feature with no epic, so a defect/change can thread off it now; `yad-backfill promote` makes it real. |
 | `yad-run` | Drive the back half on the automation dial; kill switch. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
 
@@ -493,6 +500,6 @@ descriptions of all 37 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 - **[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md)** — the complete reference for every phase, dial, and gate.
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
-- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 37 agent skills.
+- **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
 - **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.

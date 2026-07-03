@@ -1,4 +1,4 @@
-# Agent skills (all 37)
+# Agent skills (all 38)
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
@@ -165,7 +165,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   update the story state so the epic → story → task → PR chain stays traceable.
 - **`yad-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
   doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval
-  before it counts. A change is blocked only until the features it touches have approved specs.
+  before it counts. A change is blocked only until the features it touches have approved specs. Its
+  `promote` action flips a brownfield stub epic (`yad-stub`) to a real, verified feature epic once the
+  feature's backfill spec is approved.
 
 ## Automation & status
 
@@ -205,6 +207,10 @@ head of the thread. This is what keeps the SDLC a trusted source of truth for AI
   originating stage.
 - **`yad-reconcile`** — a read-only drift/orphan/debt sweep across threads (mirrors `yad-docs-sync`; never
   a gate). The hard block is the CI gates.
+- **`yad-stub`** — mint a **stub genesis epic** for a brownfield feature that has *no* epic, so a
+  defect/change can thread off it today (`yad-change` needs a real parent). The stub is the smallest real
+  thread anchor — `kind: feature`, `stub: backfill-pending`, `verified: false` — never inventing
+  behaviour; `yad-backfill promote` flips it to a real, verified feature epic once its spec is approved.
 
 Three CI gates (in `yad-checks`) enforce it: **lineage-check** (a change links a real threaded epic),
 **epic-open** (a *sealed* epic — all stories shipped — refuses new behaviour, forcing a change-epic so the

@@ -58,13 +58,18 @@ and `spec-link.sh` stay byte-for-byte unchanged.
 All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check)
 and degrade to a PASS-with-note when the hub is not reachable from CI.
 
-### 3. Four skills
+### 3. Five skills
 - **yad-change** — intake + triage; seeds the threaded change-epic (lineage, inherited state, pointer-lock,
   `change.json`, hotfix debt). Never auto-advances.
 - **yad-timeline** — render the thread as an evolution view + emit `thread-resolved.md` (the current-truth
   map). Output enrichment, never a gate.
 - **yad-defects** — per-epic/per-thread quality-gap report by `escape_stage` + `root_cause`. Enrichment.
 - **yad-reconcile** — read-only drift/orphan/debt sweep (mirrors `yad-docs-sync`). Never a gate.
+- **yad-stub** — brownfield helper: mint a **stub genesis epic** for an already-built feature that has no
+  epic, so a change/defect can thread off it *today*. A stub is the smallest real thread anchor
+  (`kind: feature`, `stub: backfill-pending`, `verified: false`, a `kind: stub` /
+  `currentStep: backfill-pending` state sentinel); `yad-backfill promote` flips it to a real, verified
+  epic. Never auto-advances.
 
 ### 4. The two unifying seams (the heart of it)
 - **Contract inheritance = a pointer-lock.** An inherited `architecture` writes a derived
@@ -74,6 +79,10 @@ and degrade to a PASS-with-note when the hub is not reachable from CI.
   contract-surface change-epic".
 - **Inherited steps don't get re-reviewed.** They are pre-`done` with `inherited: true` + a `boundHash`;
   the gate predicate short-circuits them as satisfied, so only the changed artifacts are re-reviewed.
+- **A brownfield stub rides the same inherit machinery.** A stub genesis has no locked contract yet, so a
+  change threaded off it inherits the undocumented surface bases with `boundHash: null` — which the gate
+  predicate already reads as "nothing locked → no drift → pass" — and writes no pointer-lock. No new gate
+  logic: the stub is just a genesis whose surface is documented later by `yad-backfill promote`.
 
 ## Definition of done (Phase 6)
 - A post-lock change is filed as a threaded change-epic; `yad thread` resolves the current-truth map
