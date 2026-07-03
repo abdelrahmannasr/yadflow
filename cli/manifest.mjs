@@ -56,6 +56,7 @@ export const SKILLS = [
   'yad-timeline',
   'yad-defects',
   'yad-reconcile',
+  'yad-stub',
 ];
 
 // Pre-2.0 skill names (the sdlc-* -> yad-* rename). `check`/`update` migrate any install

@@ -146,6 +146,7 @@ build:
     pack_flags: "--compress --include <globs> --include-logs --style markdown"   # one feature at a time; Secretlint by default
     spec_location: "specs/backfill/<feature>/spec.md"   # draft (verified: false) until a human approves
     gate_scope: touched-features   # block a change only until the features it touches have approved specs
+    promote: yad-stub   # `yad-backfill promote EP-<slug>` flips a brownfield stub epic (change.stub) to a real, verified feature epic once its spec is approved
 
 # Code context (yad-connect-repos) — the front/"brain" phases are made code-aware. Code repos are
 # connected to the product hub once (or any time a new repo is added), and an AI-readable picture of
@@ -317,6 +318,18 @@ change:
   # behaviour on a sealed epic -> the change must land in a new threaded change-epic (the front half is
   # forced to stay current; staleness is unshippable).
   seal_on: all-stories-shipped
+  # Brownfield stub anchor (yad-stub): an already-built feature with NO epic can't be a change parent
+  # (yad-change requires a real parent; lineage-check rejects a missing one). yad-stub mints the smallest
+  # real thread anchor — a genesis epic.md (kind:feature, thread:self) marked `stub: backfill-pending` /
+  # `verified: false`, with a state.json carrying `kind: stub` + `currentStep: backfill-pending`. A change
+  # threaded off a stub inherits only what exists (boundHash: null for the undocumented surface bases) and
+  # writes NO pointer-lock; change.json records `parentStub: true`. `yad-backfill promote` flips the stub
+  # to verified (clears the marker), at which point contract protection begins for the thread.
+  stub:
+    marker: backfill-pending            # epic.md `stub:` value while the anchor is un-promoted
+    state_kind: stub                    # state.json top-level `kind` + `currentStep: backfill-pending` sentinel
+    allow_stub_parent: true             # a change/defect MAY thread off an un-promoted stub (default on)
+    promote_by: yad-backfill            # `yad-backfill promote EP-<slug>` documents + flips the stub to real
   hotfix:
     ship_first: true                    # a hotfix may run the build half BEFORE its front gates approve
     debt_blocks_next_change: true       # but opens reconcile-debt.json; the next change on the thread is blocked until paid
