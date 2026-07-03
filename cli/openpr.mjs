@@ -62,7 +62,7 @@ function codeTaskTemplate(platform) {
   }
 }
 
-export function templateBody(repoRoot, platform, { task, risk, contract, domains, stage }) {
+export function templateBody(repoRoot, platform, { task, summary, risk, contract, domains, stage }) {
   // hub-tooling: the hub's own template is artifact-review — use the bundled code-task template so the
   // body matches the shape the hub `pr-template` gate demands for a non-review head.
   let base;
@@ -74,12 +74,24 @@ export function templateBody(repoRoot, platform, { task, risk, contract, domains
       : path.join(repoRoot, '.github/pull_request_template.md');
     base = exists(tplPath) ? fs.readFileSync(tplPath, 'utf8') : codeTaskTemplate(platform);
   }
+  // The Spec line's placeholder is the STORY dir `specs/EP-<slug>-S0N/` (no `-T0N`), so the task
+  // regex below never touches it — derive the story from the task (task minus its `-T0N` suffix).
+  const story = task ? task.replace(/-T\d+$/i, '') : null;
   // Fill the obvious fields; leave the rest of the committed template intact for the author.
-  return base
-    .replace(/EP-<slug>-S0N-T0N/g, task || 'EP-<slug>-S0N-T0N')
-    .replace(/(\*\*Risk level:\*\*)\s*\w+/i, `$1 ${risk}`)
-    .replace(/(\*\*Contract surface touched:\*\*)\s*\w+/i, `$1 ${contract ? 'yes' : 'no'}`)
-    .replace(/(\*\*Domains \/ repos touched:\*\*).*/i, `$1 ${domains || '<repo>'}`);
+  // Function replacers (not string replacements) so a `$` in interpolated free text — a commit-derived
+  // summary or a repo name — is inserted verbatim, never read as a `$1`/`$&` replacement token.
+  let out = base
+    .replace(/EP-<slug>-S0N-T0N/g, () => task || 'EP-<slug>-S0N-T0N')
+    .replace(/specs\/EP-<slug>-S0N\//g, () => `specs/${story || 'EP-<slug>-S0N'}/`)
+    .replace(/(\*\*Risk level:\*\*)\s*\w+/i, (_m, g1) => `${g1} ${risk}`)
+    .replace(/(\*\*Contract surface touched:\*\*)\s*\w+/i, (_m, g1) => `${g1} ${contract ? 'yes' : 'no'}`)
+    .replace(/(\*\*Domains \/ repos touched:\*\*).*/i, (_m, g1) => `${g1} ${domains || '<repo>'}`);
+  if (summary) {
+    // Replace the "## Summary" heading + its optional guidance comment with the real summary.
+    // `\r?\n` tolerates a CRLF-checked-out template (Windows core.autocrlf) so the fill never no-ops.
+    out = out.replace(/(## Summary\r?\n)(?:<!--[\s\S]*?-->\r?\n)?/, (_m, g1) => `${g1}${summary}\n`);
+  }
+  return out;
 }
 
 export async function runOpenPr(root, opts = {}) {
@@ -124,9 +136,20 @@ export async function runOpenPr(root, opts = {}) {
   if (!push.ok) { fail(`git push failed — ${push.stderr.split('\n')[0] || 'unknown'}`); process.exitCode = 1; return; }
 
   const task = opts.task || taskFromBranch(branch);
-  const title = opts.title || run('git', ['log', '-1', '--format=%s'], { cwd: repoRoot }).stdout || `task ${task || branch}`;
+  const subject = run('git', ['log', '-1', '--format=%s'], { cwd: repoRoot }).stdout;
+  const title = opts.title || subject || `task ${task || branch}`;
+  // Summary = commit subject (Conventional-Commits "type:" prefix stripped) + body paragraphs,
+  // dropping the Task / Contract-Change / Co-Authored-By trailer lines. `run().stdout` is trimmed
+  // but keeps internal newlines, so a multi-line body survives.
+  const subjectText = subject.replace(/^[a-z]+(\([^)]*\))?!?:\s*/i, '');
+  const bodyText = run('git', ['log', '-1', '--format=%b'], { cwd: repoRoot }).stdout
+    .split('\n')
+    .filter((l) => !/^(Task|Contract-Change|Co-Authored-By):/i.test(l.trim()))
+    .join('\n')
+    .trim();
+  const summary = [subjectText, bodyText].filter(Boolean).join('\n\n') || undefined;
   const body = templateBody(repoRoot, platform, {
-    task, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
+    task, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
   });
 
   // Auto-assign from the hub roster, scoped to this repo: assignee = the committer (resolved from

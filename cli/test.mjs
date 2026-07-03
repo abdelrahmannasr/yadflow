@@ -486,6 +486,47 @@ test('templateBody: hub-tooling on gitlab uses the bundled MR template, not the 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('templateBody: fills the Spec dir from the task and the Summary from the commit (stale-placeholder fix)', () => {
+  const T = hubDir(); // hub-tooling loads the real bundled template (carries the Spec + Summary placeholders)
+  const b = templateBody(T, 'github', {
+    task: 'EP-resident-portal-v1-S06-T08', summary: 'Add the thing', risk: 'low', stage: 'hub-tooling',
+  });
+  // Story/task line is the task; the Spec line is the STORY dir (task minus its -T0N suffix), not the placeholder
+  assert.match(b, /- Story \/ task: `EP-resident-portal-v1-S06-T08`/);
+  assert.match(b, /- Spec: `specs\/EP-resident-portal-v1-S06\/`/);
+  assert.doesNotMatch(b, /specs\/EP-<slug>-S0N\//); // the default placeholder is gone
+  // Summary carries the real text and the guidance comment is replaced
+  assert.match(b, /## Summary\nAdd the thing/);
+  assert.doesNotMatch(b, /What this PR does/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: a `$` in the summary is inserted verbatim, not read as a $1/$& replacement token', () => {
+  const T = hubDir();
+  const b = templateBody(T, 'github', { summary: 'use $1 as the fallback and $& too', risk: 'low', stage: 'hub-tooling' });
+  assert.match(b, /## Summary\nuse \$1 as the fallback and \$& too\n/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: a CRLF-checked-out template still gets its Summary filled (Windows autocrlf)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
+  fs.mkdirSync(path.join(T, '.github'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.github/pull_request_template.md'),
+    '## Summary\r\n<!-- What this PR does. -->\r\n\r\n- **Risk level:** low\r\n');
+  const b = templateBody(T, 'github', { summary: 'Wire the thing', risk: 'low', stage: 'code-repo' });
+  assert.match(b, /## Summary\r?\nWire the thing/);
+  assert.doesNotMatch(b, /What this PR does/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('templateBody: without a task/summary the Spec + Summary placeholders degrade in place', () => {
+  const T = hubDir();
+  const b = templateBody(T, 'github', { risk: 'low', stage: 'hub-tooling' });
+  assert.match(b, /specs\/EP-<slug>-S0N\//); // no task => story placeholder preserved
+  assert.match(b, /What this PR does/);       // no summary => guidance comment preserved
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------------------------
 // gateOpen head override (P1) + runOpenPr hub-front delegation failure signalling (P2)
 // ---------------------------------------------------------------------------------------------
