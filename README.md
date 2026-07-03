@@ -72,7 +72,7 @@ In one pass it produces:
 
 - **The `yad` CLI** — zero-dependency Node (`setup`, `gate`, `commit`, `open-pr`, `ship`, `repo`,
   `thread`, `reconcile`, `usage`, `doctor`), run via `npx` or a global install.
-- **37 workflow skills** installed into your AI assistant — **Claude Code** (`.claude/`) first-class,
+- **38 workflow skills** installed into your AI assistant — **Claude Code** (`.claude/`) first-class,
   plus `.agents`, Zencoder, and OpenCode.
 - **`.sdlc/` config** — the product hub, connected repos, reviewer roster, and tool connections
   (design, testing, learning), all as plain JSON you can read and diff.
@@ -157,7 +157,7 @@ workflow-hygiene flags — derived read-only, so an EM can see how the team actu
 - **[Terminology & workflow report](https://abdelrahmannasr.github.io/yadflow/)** — every term, artifact, gate, and skill on one illustrated page.
 - **[TEAM-GUIDE.md](TEAM-GUIDE.md)** — the short, plain-language version for a developer team.
 - **[docs/CLI.md](docs/CLI.md)** — the full `yad` command reference, the PR-driven gate, and `yad doctor` codes.
-- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 37 agent skills.
+- **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
 - **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — the by-hand, end-to-end path through every phase.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[RESEARCH-NOTES.md](RESEARCH-NOTES.md)** · **[RELEASING.md](RELEASING.md)**
 

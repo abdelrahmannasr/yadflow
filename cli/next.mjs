@@ -1,6 +1,6 @@
 // `yad next` — the unified next-step driver. Read-only: it never writes state or acts. It reads the
 // file ledger and prints the ONE concrete, copy-pasteable next action (and a one-line why), so a user
-// never has to remember which of the 37 skills / gate commands comes next. "Guide, don't act" — the
+// never has to remember which of the 38 skills / gate commands comes next. "Guide, don't act" — the
 // front half still never auto-advances. Once an epic is `ready-for-build`, it reads each story's
 // build-state and prints the next BUILD sub-step per repo (spec → tasks → implement → checks → engineer-review)
 // plus the remaining chain — so the build half is guided too, not just hinted at.
@@ -91,6 +91,10 @@ function actionLine(a, { solo } = {}) {
     }
     case 'discovery-done':
       return `invoke the ${c.bold('yad-epic')} skill ${c.dim('(seed a feature epic from roadmap.md)')}`;
+    case 'backfill-pending':
+      return `invoke the ${c.bold('yad-backfill')} skill ${c.dim('(document the code, then `yad-backfill promote` — or thread bugs now with yad-change)')}`;
+    case 'backfill-done':
+      return `invoke the ${c.bold('yad-change')} skill ${c.dim('(documented anchor — evolve it by threading a change/defect off it)')}`;
     default:
       return c.dim('nothing to do');
   }

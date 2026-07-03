@@ -263,6 +263,47 @@ locked `state.json` step shape. Genesis epics are backfilled once with `kind: fe
 | `severity` | `sev1` … `sev4` | **defect/hotfix only.** |
 | `escape_stage` | an SDLC stage id (`stories`, `test-cases`, `architecture`, …) | **defect/hotfix only.** The gate that *should* have caught it — feeds the `yad-defects` quality report. |
 | `root_cause` | short tag | **defect/hotfix only.** e.g. `missing-negative-test`. |
+| `stub` | `backfill-pending` | **stub genesis only** (`yad-stub`). A brownfield feature anchored so a change can thread off it before it is documented. Cleared by `yad-backfill promote`. |
+| `verified` | `true` \| `false` | `false` on a stub genesis (not yet documented/human-authored); `yad-backfill promote` sets it `true`. Absent ⇒ treated as a normal (verified) epic. |
+
+## Stub genesis epics (brownfield anchors — `yad-stub`)
+
+In a brownfield repo not every already-built feature has an epic, so a defect/change has no parent to
+thread from (`yad-change` requires one; `lineage-check` rejects a missing parent). `yad-stub` mints the
+smallest **real** node — a **stub genesis epic** — so the bug can be captured now and formalized later.
+
+A stub is a normal genesis (`kind: feature`, `thread == id`, no `parent`) whose `epic.md` carries
+`stub: backfill-pending` + `verified: false` and whose `state.json` uses a **sentinel**, mirroring
+`EP-discovery` / `discovery-done`:
+- top-level `kind: "stub"` and `currentStep: "backfill-pending"`;
+- the **same 10-step front chain** as a normal epic, every step `status: "blocked"` (so `validateState`
+  passes and `promote` can "wake" the chain into normal authoring with no re-seed);
+- empty `approvals.json` / `comments.json`; **no** `contract-lock.json` (no surface locked yet).
+
+`nextAction` routes a stub to a `backfill-pending` action (`yad-backfill` → `yad-backfill promote`), never
+to authoring. A change threaded off a stub inherits only what exists — the undocumented surface bases are
+marked `inherited: true` with `boundHash: null` (the gate predicate reads `null` as "nothing locked → no
+drift → pass"), no pointer-lock is written, and `change.json` records `parentStub: true`.
+
+**The stub invariant (two files, kept in lockstep).** A stub is encoded in *both* `epic.md`
+(`stub: backfill-pending`) *and* `state.json` (top-level `kind: "stub"` + `currentStep:
+"backfill-pending"`), because two readers use different sources: `isStubEpic` / `yad thread` / `yad-status`
+read the frontmatter, while `nextAction` / `yad next` is pure-ledger and reads `state.json`. So:
+
+> **A stub ⟺ `epic.md stub:backfill-pending` AND `state.kind:stub` AND `currentStep:backfill-pending`.**
+> Any promote MUST clear all three atomically, or the two readers disagree.
+
+`yad-backfill promote` enforces this: it sets `epic.md` `verified: true`, removes `stub:`, links the
+approved backfill spec, **and** rewrites `state.json` — removing `kind: "stub"` and moving `currentStep`
+off the sentinel:
+- **light promote (default)** → `currentStep: "backfill-done"`, a **terminal sentinel** (like
+  `discovery-done`): the feature is a real, verified anchor documented by its backfill spec; `nextAction`
+  reports "documented anchor — evolve it by threading a change/defect", never a pending stub, and no build
+  half runs directly against it;
+- **full promote (opt-in)** → `currentStep: "epic"`, `epic.status: "in_progress"`, to run the normal front
+  half and lock a real contract.
+
+From promotion on, the thread's contract protection is live.
 
 ## Inherited steps in `state.json`
 
@@ -324,7 +365,9 @@ Intake + triage record, one per change/defect/hotfix epic (sibling of `approvals
 
 `depth` ∈ `defect-fix | behavioral-no-surface | contract-surface | new-capability` (`config.yaml`
 `change.depths`). `defect` is `null` for a plain `change`; `hotfix` is `{ "shipFirst": true }` only for
-a `hotfix`. Thread-level rollups (`yad-timeline` / `yad-defects`) are **derived** — walk every epic
+a `hotfix`. `parentStub: true` is added when the epic threads off an un-promoted stub genesis
+(`yad-stub`) — a brownfield feature not yet documented, so no contract surface is inherited yet.
+Thread-level rollups (`yad-timeline` / `yad-defects`) are **derived** — walk every epic
 sharing `thread` and read each `change.json`; there is no duplicated thread registry.
 
 ## `reconcile-debt.json`

@@ -500,6 +500,17 @@
 - **Reports are enrichment, never gates.** `yad-timeline` / `yad-defects` reuse the `yad-docs` shell and
   degrade to markdown; `yad-reconcile` mirrors `yad-docs-sync` (check/refresh/wire, advisory). The hard
   block is the three CI gates; the reconciler only discovers.
+- **Brownfield intake: a stub genesis, not an empty id (`yad-stub`).** A defect against an already-built
+  feature with no epic used to dead-end (`yad-change` requires a real parent; `lineage-check` rejects a
+  missing one). The fix is *not* an id-only reservation — in yad an epic **is** a dir + `epic.md`, and the
+  tooling skips a dir with no `epic.md`. Instead mint the smallest **real** node: a stub genesis
+  (`kind: feature`, `thread: self`, `stub: backfill-pending`, `verified: false`) with a `kind: stub` /
+  `currentStep: backfill-pending` state sentinel (mirroring `EP-discovery`/`discovery-done`). Defects
+  thread off it immediately and the bug list is derived by the thread rollup — no hand-kept index. It
+  rides the existing inherit machinery: the undocumented surface bases inherit with `boundHash: null`
+  (predicate: no lock → no drift → pass), no pointer-lock, `change.json` records `parentStub: true`.
+  `yad-backfill promote` documents the code and flips the stub to real — the missing seam between a
+  backfilled spec and an epic to thread from. No new gate logic.
 - **Validated:** `cli/test-threads.mjs` (resolveThread linear/cycle/missing/cache-mismatch;
   resolveCurrentArtifacts; the inherited short-circuit; seal + debt); the worked demo
   `EP-istifta-inquiries → EP-istifta-queue-filter` (epic-open FAILs a further change to the sealed

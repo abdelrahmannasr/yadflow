@@ -63,11 +63,13 @@ flowchart LR
 
     subgraph THREAD["D · Post-lock change management — feature threads"]
       direction TB
+      stub["yad-stub<br/>brownfield: feature with no epic<br/>mint stub genesis (kind:feature · stub:backfill-pending)<br/>yad-backfill promote → verified feature epic"]:::artifact
       chg["yad-change<br/>intake + triage depth<br/>seed threaded change-epic (kind/parent/thread)<br/>inherit by reference · re-author only what changes"]:::artifact
       cepic(["change-epic EP-&lt;slug&gt;<br/>pointer-lock · change.json · reconcile-debt.json"]):::sentinel
       tl["yad-timeline<br/>evolution view + thread-resolved.md (current truth)"]
       df["yad-defects<br/>quality-gap report by escape_stage"]
       rec["yad-reconcile<br/>drift / orphan / debt sweep (advisory)"]
+      stub -. thread a defect off the anchor .-> chg
       chg --> cepic
       cepic -. timeline + resolved truth .-> tl
       cepic -. defect escape analysis .-> df

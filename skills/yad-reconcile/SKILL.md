@@ -49,6 +49,12 @@ shipped, and pay any open debt (update the artifacts + add a regression test, th
 `reconcile-debt.json` entry `status: paid`). It never seeds the epic itself — opening a change-epic is a
 human, triaged act (`yad-change` Step 2).
 
+**Orphan code with no epic at all (brownfield):** when the drift is shipped code that belongs to a
+feature with **no owning epic in any thread**, there is nothing to thread a change off yet. Point the
+human at **`yad-stub`** first — mint a stub genesis epic (a minimal `kind: feature` thread anchor) for
+that feature — then thread the reconcile change off that stub (and run `yad-backfill` +
+`yad-backfill promote` to make the anchor real). The reconciler never mints the stub itself.
+
 ### Step 3 — `wire` (advisory CI, no block)
 Commit an advisory CI job that runs `yad reconcile --check` on push, carrying `[skip ci]` on any commit
 it makes and a concurrency group — the same loop-prevention `yad-docs-sync` uses. The job **reports**;
@@ -72,4 +78,5 @@ the reconciler is advisory.
 - The drift/refresh/wire discipline this mirrors: `../yad-docs-sync/SKILL.md`.
 - The thread model + ledgers: `../yad-epic/references/state-schema.md` (Phase 6).
 - The change-epic this hands off to: `../yad-change/SKILL.md`.
+- Anchoring brownfield code that has no epic (before a change can thread off it): `../yad-stub/SKILL.md`.
 - The gates that block at merge: `../yad-checks/` (lineage-check, epic-open, reconcile-debt).

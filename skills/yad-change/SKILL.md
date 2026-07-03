@@ -54,6 +54,13 @@ lineage is broken (a cycle, or a `thread` cache ≠ the computed root) — fix t
 parent is a **genesis epic not yet migrated** (no `kind:`), migrate it now: add `kind: feature` and
 `thread: <its own id>` to its `epic.md` (a one-line, non-gated frontmatter add).
 
+**Missing parent (brownfield) — never silent.** If the requested `parent` does **not exist at all**
+because the feature was built before it had an epic, do NOT dead-end: point the user at **`yad-stub`** to
+mint a stub genesis epic (a minimal `kind: feature` thread anchor) for that feature first, then re-run
+this skill with that stub as the `parent`. A change MUST still thread to a real parent — `yad-stub` just
+creates the smallest real one so the defect can be captured now (the `yad-reconcile` → anchor → change
+discipline).
+
 The new epic's `thread` = the parent's thread (the genesis id). Its `parent` = the given `parent` (the
 immediate predecessor — usually the current tip; if the parent is not the tip, see "concurrent changes"
 in `references/triage.md`).
@@ -132,11 +139,25 @@ When `architecture` is **inherited**, materialize the **pointer-lock** `.sdlc/co
 There is no `contract.md` in the change-epic, so the surface cannot drift, and `contract-check` passes
 unchanged because the hash is identical. (Exact recipe + field shapes: `references/triage.md`.)
 
+**Stub parent (brownfield, no locked surface yet).** When the `parent` is a **stub**
+(`stub: backfill-pending` / `verified: false`, minted by `yad-stub`), it has no `architecture.md` /
+`contract.md` / `ui-design.md` to inherit — the surface has not been documented yet. So for the bases the
+stub lacks, mark the inherited steps `"inherited": true, "inheritedFrom": "<stub>", "boundHash": null`
+(a `null` boundHash is treated as "nothing locked upstream → no drift" by the gate predicate, so the step
+passes and never blocks), and write **NO** `contract-lock.json` (there is no surface to point at — the
+child never touches `specs/*/contracts/**`, so `contract-check` passes trivially). Contract protection on
+this thread begins only after `yad-backfill promote` documents and locks the feature. Record
+`"parentStub": true` in `change.json` so it is auditable that the change threaded off an undocumented
+stub. Prefer the `defect-fix` / `behavioral-no-surface` depth against a stub — a `contract-surface`
+change against an undocumented feature should wait until the stub is promoted (backfilled + a real
+contract locked).
+
 ### Step 6 — Write `.sdlc/change.json` (intake + triage record)
 Record the intake: `epicId`, `thread`, `parent`, `kind`, `depth`, `intakeBy`, `intakeDate`, `title`,
 `description`, `affectedArtifacts`, `reauthors`, `inherits`, and for a defect/hotfix the `defect` block
 (`origin`, `severity`, `escape_stage`, `root_cause`). This is what `yad-defects` reads to attribute the
-defect to the gate that should have caught it.
+defect to the gate that should have caught it. Add `"parentStub": true` when the parent is an
+un-promoted stub (Step 5) — omit it (or `false`) otherwise.
 
 ### Step 7 — Hotfix only: record the ship-first exception + open reconcile debt
 If `kind: hotfix`, the build half MAY run before these front gates approve (severity demands it). Record
@@ -165,6 +186,7 @@ Report: the new `EP-<slug>`, its thread + parent, the re-author-vs-inherit split
 - **Never auto-advances.** This skill seeds + records; humans author and approve via the normal gates.
 
 ## Reference
+- Minting a stub genesis epic when the feature has no epic (brownfield): `../yad-stub/SKILL.md`.
 - Depth triage details, the exact seeding shape, the pointer-lock recipe, genesis migration, and the
   concurrent-change (re-parent) rule: `references/triage.md`.
 - The lineage frontmatter + ledger schemas: `../yad-epic/references/state-schema.md` (Phase 6).
