@@ -6,8 +6,9 @@
 // The CLI never calls an LLM: the skill (yad-review-companion / yad-engineer-review) generates the
 // trailer/cards/chat text and posts it via these primitives, all to the PLATFORM (never a ledger file).
 import path from 'node:path';
-import { log, ok, info, warn, fail, note, run, readJSON, writeJSON } from './lib.mjs';
-import { PROJECT_FILES, epicFiles } from './manifest.mjs';
+import { log, ok, info, warn, fail, note, run, readJSON } from './lib.mjs';
+import { PROJECT_FILES } from './manifest.mjs';
+import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
 import {
   detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
@@ -161,18 +162,19 @@ export async function reviewReconcile(root, { epic, repo, dir, pr, reader = read
     engineerReview.push({ approver: r.name, role: r.role, ...(r.domain ? { domain: r.domain } : {}), engagement: r.engagement === 'verified' ? 'verified' : 'none' });
   }
 
-  const file = epicFiles(epicRoot(root, epic)).buildLog;
-  const ledger = readJSON(file, null);
   // Match by exact PR number — never substring (`--pr 5` must not match a ship recorded against #15).
-  const ship = ledger?.ships?.find((s) => s.pr != null
-    && (String(s.pr) === String(pr) || prNumberFromUrl(s.pr) === String(pr)));
-  if (!ship) {
+  // build-log is shard-then-fold now: updateShip mutates the ship's own loose shard (authoritative
+  // until `yad tidy up` folds it), or the folded file if already folded — never both.
+  const res = updateShip(
+    epicRoot(root, epic),
+    (s) => s.pr != null && (String(s.pr) === String(pr) || prNumberFromUrl(s.pr) === String(pr)),
+    (s) => { s.engineer_review = engineerReview; },
+  );
+  if (!res.found) {
     warn(`no build-log ship record matches PR #${pr} in ${epic} — attach this at ship time:`);
     log(JSON.stringify({ engineer_review: engineerReview }, null, 2));
     return { engineerReview, written: false };
   }
-  ship.engineer_review = engineerReview;
-  writeJSON(file, ledger);
-  ok(`stamped engagement onto ${epic} ship ${ship.story || ''}${ship.task ? '/' + ship.task : ''} (PR #${pr})`);
+  ok(`stamped engagement onto ${epic} ship ${res.ship.story || ''}${res.ship.task ? '/' + res.ship.task : ''} (PR #${pr})`);
   return { engineerReview, written: true };
 }

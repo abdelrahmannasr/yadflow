@@ -5,6 +5,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
+import { readShips } from './ledger.mjs';
 import {
   epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
@@ -17,7 +18,9 @@ export const loadDebt = (root, epic) => {
   const v = readJSON(path.join(epicRoot(root, epic), '.sdlc', 'reconcile-debt.json'), []);
   return Array.isArray(v) ? v : [];
 };
-export const loadBuildLog = (root, epic) => readJSON(path.join(epicRoot(root, epic), '.sdlc', 'build-log.json'), null);
+// The build ledger is shard-then-fold now (cli/ledger.mjs): union the folded file + loose ship shards
+// so a caller sees every ship whether or not `yad tidy up` has folded them yet.
+export const loadBuildLog = (root, epic) => ({ epic, ships: readShips(epicRoot(root, epic)) });
 
 // An epic is SEALED once every authored story is `shipped` (config.yaml change.seal_on). A sealed epic
 // refuses new behaviour (epic-open.sh) — a further change must open a new threaded change-epic, which is

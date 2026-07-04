@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
 import { PROJECT_FILES, epicFiles } from './manifest.mjs';
+import { readShips } from './ledger.mjs';
 import { rolesForScope } from './platform.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -105,8 +106,7 @@ function ledgerEvents(root, epic, resolver) {
   };
   for (const a of readLedger(f.approvals, []) || []) emit(a.approver, 'approved', a.date, { artifact: a.artifact, role: a.role });
   for (const cm of readLedger(f.comments, []) || []) emit(cm.commenter, 'commented', cm.date, { artifact: cm.artifact, role: cm.role });
-  const bl = readLedger(f.buildLog, null);
-  for (const s of bl?.ships || []) {
+  for (const s of readShips(path.join(root, 'epics', epic))) {
     for (const er of s.engineer_review || []) emit(er.approver, 'shipped', s.shippedAt, { story: s.story, task: s.task, repo: s.repo, risk: s.risk });
   }
   return events;
@@ -246,8 +246,7 @@ function memberFlags(m) {
 export function shipHygiene(root, { since, until } = {}) {
   const items = [];
   for (const epic of listEpics(root)) {
-    const bl = readLedger(epicFiles(path.join(root, 'epics', epic)).buildLog, null);
-    for (const s of bl?.ships || []) {
+    for (const s of readShips(path.join(root, 'epics', epic))) {
       if (!inWindow(s.shippedAt, since, until)) continue;
       if (!Array.isArray(s.engineer_review) || s.engineer_review.length === 0) {
         items.push({ epic, story: s.story || null, task: s.task || null, repo: s.repo || null, shippedAt: s.shippedAt || null });
