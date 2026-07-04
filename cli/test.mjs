@@ -4462,6 +4462,10 @@ test('THE POINT: two writers add different shards to the SAME epic and both push
   // origin seeded from clone A
   const A = hubForCheckpoint();
   git(A, 'remote', 'add', 'origin', bare); git(A, 'push', '-q', 'origin', 'main');
+  // Point the bare's HEAD at main so a clone checks it out. A fresh `git init --bare` defaults HEAD to
+  // `master` where init.defaultBranch is unset (CI runners) — without this, clone B lands on an unborn
+  // branch with an EMPTY tree (no hub.json) and its checkpoint silently no-ops.
+  git(bare, 'symbolic-ref', 'HEAD', 'refs/heads/main');
   const B = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-conc-B-'));
   git(B, 'clone', '-q', bare, B); // clone into B
   git(B, 'config', 'user.email', 'a.nasr@x.com'); git(B, 'config', 'user.name', 'abdelrahman');
