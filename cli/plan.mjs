@@ -11,17 +11,28 @@ import {
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES,
 } from './manifest.mjs';
 
-// status: 'ok' | 'missing' | 'outdated'
-const fileAction = (scope, item, src, dest, opts = {}) => ({
+// A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
+// these so `yad update --push` can stage an EXPLICIT allowlist of exactly what it wrote per repo —
+// never `git add -A` (see cli/update-commit.mjs). A directory pathspec stages every added/changed/
+// removed file underneath it, so a dirAction needs only its top-level dest.
+const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
+
+// status: 'ok' | 'missing' | 'outdated'. `root` is the repo the write lands in (the hub for module
+// installs, a connected repo for its wiring); `paths` is the pathspec(s) touched, for the push stage.
+const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
   scope,
   item,
   status: !exists(dest) ? 'missing' : sameContent(src, dest) ? 'ok' : 'outdated',
-  apply: () => copyFile(src, dest, opts),
+  root,
+  paths: root ? [rel(root, dest)] : [],
+  apply: () => copyFile(src, dest, { exec }),
 });
-const dirAction = (scope, item, src, dest) => ({
+const dirAction = (scope, item, src, dest, { root } = {}) => ({
   scope,
   item,
   status: !exists(dest) ? 'missing' : dirMatches(src, dest) ? 'ok' : 'outdated',
+  root,
+  paths: root ? [rel(root, dest)] : [],
   apply: () => copyDir(src, dest),
 });
 
@@ -50,6 +61,7 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
           ide, s,
           asset('skills', s, 'SKILL.md'),
           path.join(root, IDE_OPENCODE_DIR, `${s}.md`),
+          { root },
         )));
       }
     } else {
@@ -58,6 +70,7 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
           ide, s,
           asset('skills', s),
           path.join(root, ide, 'skills', s),
+          { root },
         )));
       }
     }
@@ -67,6 +80,7 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
       '_bmad', f,
       asset('skills', 'sdlc', f),
       path.join(root, '_bmad', 'sdlc', f),
+      { root },
     ));
   }
   return actions;
@@ -83,26 +97,32 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
     for (const [skill, old] of Object.entries(LEGACY_SKILLS)) {
       if (ide === '.opencode') {
         const oldDest = path.join(root, IDE_OPENCODE_DIR, `${old}.md`);
+        const newDest = path.join(root, IDE_OPENCODE_DIR, `${skill}.md`);
         if (!exists(oldDest)) continue;
         actions.push({
           scope: ide,
           item: `${old}.md → ${skill}.md`,
           status: 'legacy',
+          root,
+          paths: [rel(root, oldDest), rel(root, newDest)],
           apply: () => {
             fs.rmSync(oldDest, { force: true });
-            copyFile(asset('skills', skill, 'SKILL.md'), path.join(root, IDE_OPENCODE_DIR, `${skill}.md`));
+            copyFile(asset('skills', skill, 'SKILL.md'), newDest);
           },
         });
       } else {
         const oldDest = path.join(root, ide, 'skills', old);
+        const newDest = path.join(root, ide, 'skills', skill);
         if (!exists(oldDest)) continue;
         actions.push({
           scope: ide,
           item: `${old} → ${skill}`,
           status: 'legacy',
+          root,
+          paths: [rel(root, oldDest), rel(root, newDest)],
           apply: () => {
             fs.rmSync(oldDest, { recursive: true, force: true });
-            copyDir(asset('skills', skill), path.join(root, ide, 'skills', skill));
+            copyDir(asset('skills', skill), newDest);
           },
         });
       }
@@ -127,6 +147,8 @@ export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
           scope: ide,
           item: `${skill}.md (removed)`,
           status: 'removed',
+          root,
+          paths: [rel(root, dest)],
           apply: () => fs.rmSync(dest, { force: true }),
         });
       } else {
@@ -136,6 +158,8 @@ export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
           scope: ide,
           item: `${skill} (removed)`,
           status: 'removed',
+          root,
+          paths: [rel(root, dest)],
           apply: () => fs.rmSync(dest, { recursive: true, force: true }),
         });
       }
@@ -162,10 +186,17 @@ function legacyFileActions(scope, baseRoot, fileMap, wiring) {
     if (!ownedByOldInstall(oldPath)) continue;
     const w = wiring.find((x) => x.dest === newDest);
     if (!w) continue; // never delete a working file without a replacement to install
+    // Only claim the root .gitlab-ci.yml when apply() will actually rewrite it (it references the old
+    // fragment) — else a --push would sweep the user's unrelated edits to that shared-ownership file
+    // into the chore(yad-update) commit. The old (deletion) + new (add) paths are always ours.
+    let rewritesRootCi = false;
+    try { rewritesRootCi = fs.readFileSync(path.join(baseRoot, '.gitlab-ci.yml'), 'utf8').includes(oldDest); } catch { /* no root ci */ }
     actions.push({
       scope,
       item: `${oldDest} → ${newDest}`,
       status: 'legacy',
+      root: baseRoot,
+      paths: rewritesRootCi ? [oldDest, newDest, '.gitlab-ci.yml'] : [oldDest, newDest],
       apply: () => {
         fs.rmSync(oldPath, { force: true });
         copyFile(asset(w.src), path.join(baseRoot, newDest), { exec: !!w.exec });
@@ -195,7 +226,7 @@ export function legacyHubActions(root) {
 export function repoActions(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
   return wiringFor(repo.platform).map((w) =>
-    fileAction(repo.name, w.dest, asset(w.src), path.join(repoRoot, w.dest), { exec: !!w.exec }),
+    fileAction(repo.name, w.dest, asset(w.src), path.join(repoRoot, w.dest), { root: repoRoot, exec: !!w.exec }),
   );
 }
 
@@ -207,7 +238,7 @@ export function hubActions(root) {
   // wrote `bridge` — accept an explicit true in either spelling, wire nothing otherwise.
   if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
   return [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])].map((w) =>
-    fileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { exec: !!w.exec }),
+    fileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec }),
   );
 }
 
@@ -238,13 +269,18 @@ export function authorsActions(root, repos = []) {
     ...emails,
   ].join('\n') + '\n';
   const targets = [
-    { scope: 'hub', dest: path.join(root, '.sdlc', 'verified-authors') },
-    ...repos.map((r) => ({ scope: r.name, dest: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+    { scope: 'hub', root, dest: path.join(root, '.sdlc', 'verified-authors') },
+    ...repos.map((r) => {
+      const repoRoot = path.resolve(root, r.path);
+      return { scope: r.name, root: repoRoot, dest: path.join(repoRoot, '.sdlc', 'verified-authors') };
+    }),
   ];
-  return targets.map(({ scope, dest }) => ({
+  return targets.map(({ scope, root: targetRoot, dest }) => ({
     scope,
     item: '.sdlc/verified-authors',
     status: !exists(dest) ? 'missing' : fs.readFileSync(dest, 'utf8') === desired ? 'ok' : 'outdated',
+    root: targetRoot,
+    paths: [rel(targetRoot, dest)],
     apply: () => {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, desired);

@@ -33,6 +33,11 @@ ${c.bold('Setup & maintenance')}
   yad update           Apply drift only (alias for: check --fix --scope=changed);
                        installs newly-added skills, updates changed skills + gate scripts,
                        and migrates pre-2.0 sdlc-* installs to the yad-* names
+  yad update --push    Also commit each repo's applied changes and push them straight to the
+                       default branch of the hub + every connected repo (a chore(yad-update)
+                       commit; no PR — the push-on-main yad-update-guard runs verified-commits
+                       + commit-message). Announce the team & pause merges first. Also works as
+                       'yad check --fix --push'; --allow-branch permits a non-default branch
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
   yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
@@ -130,6 +135,8 @@ ${c.bold('Options')}
   --pr <n>              gate ci: the PR/MR number from the CI event
   --merged              gate ci: merge phase — advance the step on the default branch
   --no-push             gate ci: commit the ledger but do not push
+  --push                check --fix / update: commit + push applied changes to the default branch
+  --allow-branch        check --fix --push / update --push: allow committing on a non-default branch
   -h, --help            Show this help
   -v, --version         Print version`;
 
@@ -198,10 +205,10 @@ async function main() {
       });
       break;
     case 'check':
-      await reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, today });
+      await reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, today });
       break;
     case 'update':
-      await reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, today });
+      await reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, today });
       break;
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
