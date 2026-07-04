@@ -147,3 +147,19 @@ export function run(cmd, args = [], opts = {}) {
   };
 }
 export const has = (cmd) => run(process.platform === 'win32' ? 'where' : 'which', [cmd]).ok;
+
+// Push HEAD to origin/<target>, rebasing onto it and retrying on rejection — both the front-half gate
+// sync and the back-half checkpoint push append-only ledgers to the default branch, so a concurrent
+// push is a normal race, not an error. Returns { ok } after up to `attempts` tries; logs each retry.
+// A failed `pull --rebase` is aborted so we never leave a wedged rebase for the next command.
+export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
+  const git = (...args) => run('git', args, { cwd });
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (git('push', 'origin', `HEAD:${target}`).ok) return { ok: true };
+    if (attempt < attempts) {
+      info(`push rejected — rebasing onto origin/${target} and retrying (${attempt}/${attempts})`);
+      if (!git('pull', '--rebase', 'origin', target).ok) git('rebase', '--abort');
+    }
+  }
+  return { ok: false };
+}

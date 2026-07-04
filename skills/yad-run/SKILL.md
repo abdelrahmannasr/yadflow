@@ -31,8 +31,15 @@ signal to seed them from, so they are earned only on real runs.
 - Automation config is `skills/sdlc/config.yaml` → `automation:` (`back_steps`, `default`,
   `trust_threshold`, `locked_steps`, `kill_switch`).
 - Per-story build-half state: `epics/<epic>/.sdlc/build-state/<story-id>.json` (per repo).
-- Trust ledger: `epics/<epic>/.sdlc/trust-log.json` (append-only). Schemas:
+- Trust ledger: **shard-then-fold** — each run is its own shard file
+  `epics/<epic>/.sdlc/trust-log/<story>-<repo>-<step>-<uid>.json` (a fresh `uid` per run, so concurrent
+  writers never conflict); readers UNION the folded `trust-log.json` with every loose shard, and
+  `yad tidy up` folds finished shards back into `trust-log.json`. Schemas:
   `../yad-epic/references/state-schema.md`.
+- These machine-written back-half files (`build-state/<story>.json`, the `trust-log/` shards) are
+  committed by **`yad checkpoint`** — the back-half analogue of the front-half `yad gate` sync; the loop
+  calls it each iteration so the state is durable and shared without a human commit. (`yad checkpoint`
+  stages the shard dirs; `yad tidy up` later folds finished shards — loose objects + `git gc`.)
 - The orchestrator **calls the existing step skills unchanged** — `yad-spec` (A), `yad-implement`
   (B), `yad-checks` (C). It owns only the *advance decision*, never what a step does.
 - To see (read-only, without driving the loop) the next build sub-step per story/repo, use
@@ -59,9 +66,10 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 
 1. **Run the step's skill** — `spec`→`yad-spec`, `tasks`→ the tasks leg of `yad-spec`,
    `implement`→`yad-implement`, `checks`→`yad-checks (action: run)`. Capture its result.
-2. **Derive trust signals & append a trust-log entry** (`ranBy: machine` if this advance was
-   automated, else `human`) — see `references/run-loop.md` for the derivation. Do this for *every*
-   step run, pass or fail; the log is the evidence base.
+2. **Derive trust signals & write a trust-log shard** — write the entry to its own file
+   `trust-log/<story>-<repo>-<step>-<uid>.json` (a fresh `uid` per run; never append to a shared file),
+   with `ranBy: machine` if this advance was automated, else `human` — see `references/run-loop.md` for
+   the derivation. Do this for *every* step run, pass or fail; the log is the evidence base.
 3. **Compute the effective dial.** Start from the step's `automation` in build-state, then **force it
    to `human_approve`** if `automation.kill_switch` is true OR the step is `locked` OR the step id is
    in `automation.locked_steps`. (So a kill switch or a lock always wins.)
@@ -76,12 +84,21 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 5. **Always stop at `engineer-review`** (it is `locked`): hand off to `yad-engineer-review` for the human merge
    gate, which finalizes the trust verdict (confirm/override the provisional one).
 
+**Commit the machine-written state.** After each iteration's writes (the trust-log shard in 2 and the
+build-state change in 4), run `yad checkpoint --push` from `{project-root}`. It commits *only* the
+`trust-log/` shards + `build-state/<story>.json` (never a front-half gate file) as one `chore(hub): …`
+audit-trail commit, and only ever on the default branch. It is a safe no-op when nothing changed, so
+call it every iteration — teammates don't review these machine writes, but CI and `yad status` on
+other machines must see current trust evidence. Never run it off the default branch (it will refuse):
+an unpushed or branch-stranded trust log quietly undermines the "earned automation" premise.
+
 ### `action: set-dial` — earn (or revert) a step's automation
 Flip `step`'s `automation` to `to` in build-state. Enforce, in order:
 - **Refuse** if `step` is in `automation.locked_steps` or is a front state or `engineer-review` —
   these can never be `machine_advance` (front-state lock, build plan §E). Report the refusal reason.
-- For `to: machine_advance`, **refuse unless the trust threshold is met**: the step's slice of
-  `trust-log.json` has `>= trust_threshold.min_runs` entries AND the fraction with
+- For `to: machine_advance`, **refuse unless the trust threshold is met**: the step's slice of the trust
+  ledger — the **union** of the folded `trust-log.json` `runs` PLUS every `trust-log/` shard, filtered to
+  this step (and repo) — has `>= trust_threshold.min_runs` entries AND the fraction with
   `verdict == "approved-unchanged"` is `>= trust_threshold.min_approved_unchanged`. If it is not met,
   report the current evidence (runs, % unchanged) and how far short it is — "it seems fine" is not
   evidence.

@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run,
+  c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run, pushWithRebase,
 } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import {
@@ -83,7 +83,7 @@ function warnIncompleteDiscovery(epicDir, artifact) {
 
 // Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
 // every gate to file-only without anyone noticing, and a typo'd platform would read as "no bridge".
-function loadHub(root) {
+export function loadHub(root) {
   const hubFile = path.join(root, PROJECT_FILES.hubConfig);
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   // Distinguish an ABSENT hub.json (null default → fine, file-only gate) from one that exists but
@@ -441,13 +441,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced };
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    if (git('push', 'origin', `HEAD:${target}`).ok) { ok(`pushed to origin/${target}`); return { synced }; }
-    if (attempt < 3) {
-      info(`push rejected — rebasing onto origin/${target} and retrying (${attempt}/3)`);
-      if (!git('pull', '--rebase', 'origin', target).ok) git('rebase', '--abort'); // never leave a wedged rebase
-    }
-  }
+  if (pushWithRebase(root, target).ok) { ok(`pushed to origin/${target}`); return { synced }; }
   fail(`could not push to origin/${target}${merged ? ' — protected default branch? allow the gate bot to push the merge advance (see yad-hub-bridge references/bridge.md)' : ''} — or run \`yad gate sync\` locally`);
   process.exitCode = 1;
   return { synced };

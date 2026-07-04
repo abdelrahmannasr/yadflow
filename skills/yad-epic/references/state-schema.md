@@ -149,6 +149,15 @@ Phase 3 recorded build progress only *after the fact* in `build-log.json`. Phase
 steps to carry their own `automation` dial so the orchestrator (`yad-run`) can read it and decide
 whether to advance on its own. Two new files under `.sdlc/` do this.
 
+> **Who commits these.** `build-state/<story-id>.json`, `trust-log.json`, and `build-log.json` are
+> **machine-written** by the back half (`yad-run`, `yad-engineer-review`) and committed by
+> **`yad checkpoint`** — the back-half analogue of the front-half `yad gate ci` sync. It lands them as
+> one `chore(hub): sync back-half state — <epic>/<story> by @<login>` audit-trail commit, on the
+> default branch, staging **only** these three ledgers by an explicit allowlist (never a front-half
+> gate file — `state/approvals/comments/hub-prs.json`, `reviews/*.md` — so `ledger-guard` never trips).
+> Teammates don't review these machine writes; the commit exists so CI, `yad status`, and other
+> machines always see current trust evidence.
+
 ## `build-state/<story-id>.json`
 One file per story that has entered the build half. The build half is **per-story, per-repo**, so the
 steps live under each repo (mirrors the per-repo shape of `build-log.json`).
@@ -189,15 +198,37 @@ story/repo's `currentStep` into the next build sub-step (`spec`/`tasks` → `yad
 `yad-implement`, `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`) and prints it with
 the remaining chain and the step's automation dial — so the build half is guided, not just hinted at.
 
-## `trust-log.json`
-Append-only ledger (an array), the back-half analogue of `approvals.json`. **This is the evidence
-base** that decides when a step is safe to automate (build plan Step A). One entry per step run:
+## `trust-log.json` (shard-then-fold)
+Append-only ledger, the back-half analogue of `approvals.json`. **This is the evidence base** that
+decides when a step is safe to automate (build plan Step A). One entry per step run.
+
+**Storage — loose shards + a folded file (the "loose objects + `git gc`" model).** Two people driving
+different stories of the same epic used to both append to one `trust-log.json` → a git merge conflict on
+push. So each writer now writes ONE small shard file per entry under a shard dir, and readers union it
+back:
+- **Shard dir & name:** `epics/<epic>/.sdlc/trust-log/<story>-<repo>-<step>-<uid>.json` — each file is
+  ONE trust entry object. `uid` is a short unique token the writer generates fresh per run (never
+  reused), so re-runs of the same `(story, repo, step)` stay distinct files → concurrent writers touch
+  different files → zero conflict by construction.
+- **Folded file:** `epics/<epic>/.sdlc/trust-log.json` = `{ "epic": "<id>", "runs": [ <entry>, … ] }`
+  (also the legacy single-file layout, and the output of `yad tidy up`).
+- **Union-read rule:** to read the ledger, take the folded file's `runs` array PLUS every file in the
+  `trust-log/` shard dir, and **concatenate** — every entry is a distinct run and the trust threshold
+  counts re-runs, so **never dedup by `(story, repo, step)`**. (The only guard: a shard whose FULL
+  identity `(story, repo, step, uid)` already appears in the folded `runs` is a half-applied tidy and is
+  skipped — keying on `uid` alone would wrongly drop a different run that happened to reuse a token.) A legacy epic with only
+  the folded file and no shard dir still reads correctly — nothing to union.
+- **`yad tidy up`** (manual, one person) folds a SHIPPED story's finished shards into the folded file's
+  `runs` and deletes them. Writers never fold — they only add shards; `yad checkpoint` commits the shard
+  dir, and `yad tidy up` is the back-half analogue of `git gc` folding loose objects.
+- The **threshold slice** (below) reads this same union, filtered to the step (and repo).
 
 ```json
 {
   "story": "EP-<slug>-S0N",
   "repo": "backend",
   "step": "checks",
+  "uid": "<short-unique-token>",
   "automation": "human_approve",
   "verdict": "approved-unchanged",
   "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false },
@@ -210,6 +241,7 @@ base** that decides when a step is safe to automate (build plan Step A). One ent
 | Field | Values | Meaning |
 |-------|--------|---------|
 | `step` | a `back_steps` id | Which step this run is recorded against. |
+| `uid` | short unique token | Generated fresh per run (never reused) — makes each shard file and each re-run distinct; also the folded/loose de-dup guard. Legacy folded entries may lack it. |
 | `automation` | dial in force at run time | So the log shows whether the run was a manual or an automated advance. |
 | `verdict` | `approved-unchanged` \| `approved-with-edits` \| `rejected` | The trust signal. **Provisional verdict is derived** (below); the human gate for that step confirms or overrides it and finalizes the entry. |
 | `signals` | object | The raw inputs the provisional verdict was derived from. The fields present depend on the step (table below). |
@@ -231,9 +263,24 @@ same three-way shape, anchored to each step's human gate, never self-graded):
 - accepted as produced → `approved-unchanged`.
 
 **Trust threshold** (from `config.yaml` `automation.trust_threshold`): a step is a candidate for
-`machine_advance` only when its slice of `trust-log.json` (same `step`, this story's repo or the
-project) has `>= min_runs` entries AND the fraction with `verdict == "approved-unchanged"` is
+`machine_advance` only when its slice of the trust ledger — the **union** of the folded `trust-log.json`
+`runs` plus every `trust-log/` shard, filtered to the same `step` (this story's repo or the project) —
+has `>= min_runs` entries AND the fraction with `verdict == "approved-unchanged"` is
 `>= min_approved_unchanged`. The dial-setter in `yad-run` enforces this; `yad-status` surfaces it.
+
+## `build-log.json` (shard-then-fold)
+The build ledger records one ship per merged task. Its schema and the ship record's fields are
+documented authoritatively in `../../yad-engineer-review/references/ship-and-record.md`; only its
+storage layout is noted here (it mirrors `trust-log.json`):
+- **Shard dir & name:** `epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json` — each file is ONE
+  ship object. `(story, task, repo)` is already a natural unique key, so no `uid` is needed.
+- **Folded file:** `epics/<epic>/.sdlc/build-log.json` = `{ "epic": "<id>", "ships": [ <ship>, … ] }`
+  (also the legacy single-file layout, and the output of `yad tidy up`).
+- **Union-read rule:** union the folded `ships` with every `build-log/` shard, **deduping by
+  `(story, task, repo)`** — a shard WINS over a stale folded ship (so a `yad review reconcile` edit to a
+  ship's shard is authoritative until it is folded).
+- `yad checkpoint` commits the shard dir; `yad tidy up` folds a shipped story's finished shards into the
+  folded file (loose objects + `git gc`).
 
 ---
 

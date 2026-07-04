@@ -8,6 +8,18 @@
 > `human_approve` — they have no historical evidence to seed from and are earned only on genuine runs
 > (never fabricated). The kill switch + front-state/engineer-review locks are enforced throughout. See
 > `docs/phase-4b-build-plan.md`. The most dangerous phase is taken one earned step at a time.
+>
+> The machine-written back-half ledgers (`trust-log.json`, `build-state/<story>.json`, `build-log.json`)
+> are committed by **`yad checkpoint`** — the back-half analogue of the front-half `yad gate ci` sync.
+> `yad-run` / `yad-engineer-review` call it to land one `chore(hub)` audit-trail commit per iteration on
+> the default branch (allowlist-scoped to those ledgers, never a front-half gate file), so the shared
+> trust evidence stays current without a human commit.
+>
+> The two back-half ledgers (`trust-log.json`, `build-log.json`) use **shard-then-fold** storage: each
+> writer writes one small shard file per entry under a shard dir, so concurrent stories of the same epic
+> never conflict, and readers union the folded file + loose shards. **`yad tidy up`** folds a shipped
+> story's finished shards back into the single folded file on demand (the "loose objects → `git gc`"
+> pattern).
 
 Builds on Phases 0–3 (research; module + gate; full front half; full build half shipping real code through check gates, reviews, multi-repo, and backfill).
 

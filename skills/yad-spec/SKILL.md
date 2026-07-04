@@ -101,9 +101,10 @@ verdict is **anchored to the human who accepts the spec**, never self-graded:
   `human_edited_spec: true`);
 - the spec is rejected or the ceremony re-run → `rejected`.
 `yad-run` records a provisional entry when the spec is generated; this acceptance finalizes it (same
-pattern as the engineer review finalizing `implement` at `yad-engineer-review`). Append the finalized entry to
-`epics/<epic>/.sdlc/trust-log.json` (schema:
-`../yad-epic/references/state-schema.md`). **Run standalone, no trust entry is written** — the
+pattern as the engineer review finalizing `implement` at `yad-engineer-review`). Write/finalize the
+entry in its own shard `epics/<epic>/.sdlc/trust-log/<story>-<repo>-spec-<uid>.json` (a fresh `uid` per
+run; readers union the folded `trust-log.json` + the loose shards). Schema:
+`../yad-epic/references/state-schema.md`. **Run standalone, no trust entry is written** — the
 log measures orchestrated runs. `spec` stays `human_approve` until its slice clears the threshold;
 this step only *gathers* the evidence, it does not flip the dial.
 

@@ -178,7 +178,13 @@ export const epicFiles = (epicRoot) => ({
   comments: `${epicRoot}/.sdlc/comments.json`,
   hubPrs: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,
-  buildLog: `${epicRoot}/.sdlc/build-log.json`,
+  // The two append-only back-half ledgers use shard-then-fold storage (cli/ledger.mjs): writers add
+  // one loose shard per entry under the *Dir path (conflict-free concurrent writes); `yad tidy up`
+  // folds finished shards back into the single *Log file. Readers union the folded file + loose shards.
+  buildLog: `${epicRoot}/.sdlc/build-log.json`,         // folded ships (also the legacy single file)
+  buildLogDir: `${epicRoot}/.sdlc/build-log`,           // one <story>-<task>-<repo>.json per ship
+  trustLog: `${epicRoot}/.sdlc/trust-log.json`,         // folded runs (also the legacy single file)
+  trustLogDir: `${epicRoot}/.sdlc/trust-log`,           // one <story>-<repo>-<step>-<uid>.json per run
   buildStateDir: `${epicRoot}/.sdlc/build-state`,       // Phase 4 — per-story, per-repo back-half state
 
   change: `${epicRoot}/.sdlc/change.json`,             // Phase 6 — change/defect intake + triage
