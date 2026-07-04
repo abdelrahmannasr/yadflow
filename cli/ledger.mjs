@@ -18,8 +18,15 @@ import { epicFiles } from './manifest.mjs';
 // story ids already contain hyphens; the filename is just a unique handle (the entry inside carries
 // the fields), so no parsing-back is needed. A trust entry needs `uid` to stay unique across re-runs
 // of the same (story, repo, step); a ship is unique by (story, task, repo) already.
-export const trustShardName = (e) => `${e.story}-${e.repo}-${e.step}-${e.uid}.json`;
-export const buildShardName = (e) => `${e.story}-${e.task}-${e.repo}.json`;
+//
+// Each component is sanitized to a filename-safe charset FIRST: a `/`, `..`, or other separator in an
+// id would otherwise be a real path element under `path.join(dir, name)` + `writeJSON`, letting a
+// malformed shard escape the shard dir (and then vanish from `readShardDir`). Anything outside
+// [A-Za-z0-9_-] collapses to `_` (dots dropped too, so `.`/`..` can never form); an empty component
+// becomes `_` so a segment is never blank.
+const safe = (c) => String(c ?? '').replace(/[^A-Za-z0-9_-]/g, '_') || '_';
+export const trustShardName = (e) => `${safe(e.story)}-${safe(e.repo)}-${safe(e.step)}-${safe(e.uid)}.json`;
+export const buildShardName = (e) => `${safe(e.story)}-${safe(e.task)}-${safe(e.repo)}.json`;
 
 // Read every shard object under `dir` (each file = ONE entry object). Sorted for determinism; a
 // corrupt/non-object shard is skipped (these ledgers are advisory evidence, never fatal).
