@@ -148,7 +148,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   (every change links a real story/spec), **contract-check** (a contract-surface diff without a
   re-locked contract FAILS), **build/test/lint**, **verified-commits** (signed + roster-known authors),
   and the **pattern gates** — **commit-message** (Conventional subject + trailer order), **pr-title**,
-  and **pr-template** (the PR/MR body uses the template). Profile-aware (`code`|`hub`), so they run on
+  and **pr-template** (the PR/MR body uses the template). Also wires **yad-update-guard** — a
+  push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
+  with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
   both code repos and the product hub. CI-agnostic bash for GitHub Actions and GitLab CI.
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
   an Impact & Risk block; high risk (or a contract/auth/payments surface) routes the review to domain

@@ -66,7 +66,7 @@ Per-story, per-repo: `spec → tasks → implement → checks → engineer-revie
 |--------------|------------------------|
 | `yad-spec` | `specs/<story-id>/` (Spec Kit layout), `link.md` |
 | `yad-implement` | a branch + commit per atomic task |
-| `yad-checks` | `checks/*.sh`, CI workflows — the gate set: `spec-link · contract-check · build-test-lint · verified-commits · commit-message · pr-title · pr-template · lineage-check · epic-open · reconcile-debt` |
+| `yad-checks` | `checks/*.sh`, CI workflows — the gate set: `spec-link · contract-check · build-test-lint · verified-commits · commit-message · pr-title · pr-template · lineage-check · epic-open · reconcile-debt`, plus `yad-update-guard` (push-on-default: re-checks any direct-to-default commit with `verified-commits · commit-message`) |
 | `yad-pr-template` | PR/MR template + routing helpers |
 | `yad-commit` / `yad-open-pr` / `yad-ship` | one commit / one PR/MR |
 | `yad-engineer-review` | engineer review + ship recorded in `build-log.json` |

@@ -77,8 +77,10 @@ In one pass it produces:
 - **`.sdlc/` config** — the product hub, connected repos, reviewer roster, and tool connections
   (design, testing, learning), all as plain JSON you can read and diff.
 - **CI gates**, wired into every connected repo and the hub as **GitHub Actions or GitLab CI** —
-  spec-link, contract-check, verified-commits, build/test/lint, and the feature-thread gates, shipped
-  as CI-agnostic bash under `checks/`.
+  spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, and the
+  push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
+  `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
+  under `checks/`.
 - **PR/MR templates** and an opt-in CodeRabbit config.
 
 Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — state, approvals, and the contract lock —

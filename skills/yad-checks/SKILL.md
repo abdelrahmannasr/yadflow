@@ -96,6 +96,10 @@ Copy from this skill's `templates/`:
   - A **foreign** file occupies that path/name → write to a non-colliding filename
     (`yad-checks.gen.yml`) and ensure its `name:` does not clash. Never merge jobs into a foreign
     workflow; never edit one.
+  - Also install `templates/github/yad-update-guard.yml` → `.github/workflows/yad-update-guard.yml`
+    (marker `# yad-managed: yad-checks`) — the push-on-main integrity gate for direct-to-default
+    commits (`yad update --push`); it runs only `verified-commits` + `commit-message`. Same
+    own-a-file rules as above.
 
   **GitLab** (detect by a root `.gitlab-ci.yml` and/or `.gitlab/ci/*.yml`): install the includable
   fragment `templates/gitlab/yad-checks.gitlab-ci.yml` → `<repo>/.gitlab/ci/yad-checks.yml` (its jobs
@@ -105,6 +109,9 @@ Copy from this skill's `templates/`:
   - Root exists → read its top-level `include:`. Add the `include:` key if absent; append
     `- local: '.gitlab/ci/yad-checks.yml'` if the key exists but the entry is missing; **no-op** if it
     is already listed. Touch nothing else in the root.
+  - Also install `templates/gitlab/yad-update-guard.gitlab-ci.yml` → `<repo>/.gitlab/ci/yad-update-guard.yml`
+    (marker `# yad-managed-include: yad-checks`) — the push-on-default integrity gate — and append
+    `- local: '.gitlab/ci/yad-update-guard.yml'` to the root `include:` the same additive, idempotent way.
   - If the existing YAML cannot be parsed safely → **STOP** and print the exact include snippet for the
     human to paste (graceful degradation — never guess-edit a pipeline you cannot parse).
   - The legacy standalone `templates/gitlab/.gitlab-ci.yml` is retained only for a clean greenfield repo
