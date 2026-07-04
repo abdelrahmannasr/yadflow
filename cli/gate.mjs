@@ -645,7 +645,7 @@ export async function gateTrailer(root, { epic, artifact, body, number, getBody 
 // ---- helpers ------------------------------------------------------------------------------------
 const base = (artifact) => artifactBase(artifact);
 
-function fillHubTemplate({ epic, artifact, step, owner, domains }) {
+export function fillHubTemplate({ epic, artifact, step, owner, domains }) {
   return [
     '## Artifact under review',
     `- Epic: \`${epic}\``,
@@ -660,6 +660,15 @@ function fillHubTemplate({ epic, artifact, step, owner, domains }) {
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
     '- This step advances when approvals are satisfied, all threads are resolved, and this PR is merged.',
+    '',
+    // Required by the hub `pr-template` gate (check_hub_body). Mirrors the Checklist block of the
+    // committed static template (yad-pr-template/templates/hub/<platform>/) so the generated body
+    // passes on the first CI run.
+    '## Checklist',
+    '- [ ] `owner` set in the artifact frontmatter (inherited from `epic.md`)',
+    '- [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only)',
+    '- [ ] Risk tags reflect the real surface touched (contract/auth/payments escalate)',
+    '- [ ] No secrets or tokens in the artifact or this description',
   ].join('\n');
 }
 
