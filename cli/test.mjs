@@ -3976,3 +3976,527 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
   assert.ok(!rows[0].includes('a|b'), 'no raw pipe leaks into the cell');
   assert.ok(!md.includes('S0\n1'), 'newline in a hygiene value is flattened');
 });
+
+// ---------------------------------------------------------------------------------------------
+// yad checkpoint — commit the machine-written back-half hub state (trust-log/build-log/build-state)
+// ---------------------------------------------------------------------------------------------
+const {
+  runCheckpoint, backHalfPathspecs, summarizeStaged, checkpointAuthor, buildCheckpointMessage,
+} = await import('./checkpoint.mjs');
+
+// A hub (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
+// exists. The roster email matches the git identity so resolveCommitterLogin yields @abdelrahmannasr.
+function hubForCheckpoint() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-'));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a.nasr@x.com');
+  git(T, 'config', 'user.name', 'abdelrahman');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', default_branch: 'main',
+    roster: [{ login: 'abdelrahmannasr', name: 'abdelrahman', email: 'a.nasr@x.com', role: 'owner' }],
+  }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main');
+  return T;
+}
+
+// Dirty the back-half ledgers for one story, plus a FRONT-half state.json that checkpoint must never
+// stage (it is the CI-owned ledger guarded by ledger-guard).
+function writeBackHalf(T, epic, story) {
+  const sdlc = path.join(T, 'epics', epic, '.sdlc');
+  fs.mkdirSync(path.join(sdlc, 'build-state'), { recursive: true });
+  fs.writeFileSync(path.join(sdlc, 'trust-log.json'), JSON.stringify({ epic, runs: [] }));
+  fs.writeFileSync(path.join(sdlc, 'build-state', `${story}.json`), JSON.stringify({ story }));
+  fs.writeFileSync(path.join(sdlc, 'state.json'), JSON.stringify({ step: 'x' })); // front-half — must stay out
+}
+
+test('summarizeStaged labels one story, N stories, or the epic when only ledgers changed', () => {
+  const one = summarizeStaged(['epics/EP-a/.sdlc/trust-log.json', 'epics/EP-a/.sdlc/build-state/EP-a-S03.json']);
+  assert.equal(one.label, 'EP-a/EP-a-S03');
+  assert.deepEqual(one.basenames, ['trust-log.json', 'build-state/EP-a-S03.json']);
+  assert.equal(summarizeStaged(['epics/EP-a/.sdlc/build-state/EP-a-S01.json', 'epics/EP-a/.sdlc/build-state/EP-a-S02.json']).label, '2 stories');
+  assert.equal(summarizeStaged(['epics/EP-a/.sdlc/trust-log.json']).label, 'EP-a'); // no build-state => epic-level
+  assert.equal(summarizeStaged(['epics/EP-a/.sdlc/build-log.json', 'epics/EP-b/.sdlc/build-log.json']).label, '2 epics');
+});
+
+test('checkpointAuthor prefers the @login, falls back to git name, then a placeholder', () => {
+  assert.equal(checkpointAuthor('abdelrahmannasr', 'abdelrahman'), '@abdelrahmannasr');
+  assert.equal(checkpointAuthor(null, 'abdelrahman'), 'abdelrahman');
+  assert.equal(checkpointAuthor(null, '   '), 'unknown');
+});
+
+test('buildCheckpointMessage: chore(hub) subject, no trailing period, no AI footer, body lists files', () => {
+  const msg = buildCheckpointMessage({
+    label: 'EP-a/EP-a-S03', author: '@abdelrahmannasr',
+    basenames: ['trust-log.json', 'build-state/EP-a-S03.json'],
+  });
+  assert.equal(msg.split('\n')[0], 'chore(hub): sync back-half state — EP-a/EP-a-S03 by @abdelrahmannasr [skip ci]');
+  assert.ok(!/\.$/.test(msg.split('\n')[0]), 'subject must not end with a period');
+  assert.ok(!/Co-Authored-By/.test(msg), 'no AI co-author footer');
+  assert.match(msg, /\nUpdated: trust-log\.json, build-state\/EP-a-S03\.json$/);
+});
+
+test('backHalfPathspecs lists only the back-half ledgers that exist — never the front-half', () => {
+  const T = hubForCheckpoint();
+  writeBackHalf(T, 'EP-a', 'EP-a-S03');
+  const specs = backHalfPathspecs(T);
+  assert.ok(specs.includes('epics/EP-a/.sdlc/trust-log.json'));
+  assert.ok(specs.includes('epics/EP-a/.sdlc/build-state'));
+  assert.ok(!specs.some((s) => s.endsWith('build-log.json')), 'absent build-log is not listed');
+  assert.ok(!specs.some((s) => s.endsWith('state.json')), 'front-half state.json is never listed');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint commits ONLY the back-half ledgers with a chore(hub) audit subject', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeBackHalf(T, 'EP-istifta-inquiries', 'EP-istifta-inquiries-S03');
+  await grab(() => runCheckpoint(T, {}));
+  const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
+  assert.equal(subject, 'chore(hub): sync back-half state — EP-istifta-inquiries/EP-istifta-inquiries-S03 by @abdelrahmannasr [skip ci]');
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only back-half: ${files.join()}`);
+  assert.ok(!files.some((f) => f.endsWith('state.json')), 'front-half state.json must not be committed');
+  assert.ok(fs.existsSync(path.join(T, 'epics/EP-istifta-inquiries/.sdlc/state.json')), 'state.json still present, uncommitted');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint commits ONLY the allowlist even when an unrelated file is already staged', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  fs.writeFileSync(path.join(T, 'unrelated.txt'), 'hi'); // stage something outside the allowlist
+  git(T, 'add', 'unrelated.txt');
+  await grab(() => runCheckpoint(T, {}));
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(!files.includes('unrelated.txt'), 'the unrelated staged file must not ride in the checkpoint commit');
+  assert.ok(files.every((f) => f.startsWith('epics/')), `only back-half files committed: ${files.join()}`);
+  assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), 'unrelated.txt', 'the unrelated file stays staged, uncommitted');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint is a clean no-op when nothing changed', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  await grab(() => runCheckpoint(T, {}));
+  const head1 = git(T, 'rev-parse', 'HEAD').toString().trim();
+  const out = await grab(() => runCheckpoint(T, {}));
+  assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), head1, 'no new commit on a clean tree');
+  assert.match(out, /unchanged/);
+  assert.ok(!process.exitCode, 'a no-op does not set a non-zero exit code');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint refuses off the default branch, and --allow-branch overrides', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  git(T, 'checkout', '-q', '-b', 'wip/side');
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  const before = git(T, 'rev-parse', 'HEAD').toString().trim();
+  const out = await grab(() => runCheckpoint(T, {}));
+  assert.match(out, /not the default branch/);
+  assert.ok(process.exitCode, 'the guard sets a non-zero exit code');
+  assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), before, 'nothing committed while blocked');
+  process.exitCode = 0;
+  await grab(() => runCheckpoint(T, { allowBranch: true }));
+  assert.notEqual(git(T, 'rev-parse', 'HEAD').toString().trim(), before, '--allow-branch lets the commit land');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --dry-run prints the message but commits nothing and leaves the index clean', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  const head0 = git(T, 'rev-parse', 'HEAD').toString().trim();
+  const out = await grab(() => runCheckpoint(T, { dryRun: true }));
+  assert.match(out, /chore\(hub\): sync back-half state/);
+  assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), head0, 'dry run makes no commit');
+  assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'dry run leaves the index clean');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --push lands the commit on the bare remote default branch', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-bare-'));
+  git(bare, 'init', '-q', '--bare');
+  git(T, 'remote', 'add', 'origin', bare);
+  git(T, 'push', '-q', 'origin', 'main');
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  await grab(() => runCheckpoint(T, { push: true }));
+  assert.equal(
+    git(T, 'rev-parse', 'HEAD').toString().trim(),
+    git(bare, 'rev-parse', 'main').toString().trim(),
+    'the checkpoint commit is on origin/main',
+  );
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(bare, { recursive: true, force: true });
+});
+
+test('runCheckpoint aborts on a non-hub dir (no .sdlc/hub.json)', async () => {
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-nohub-'));
+  git(T, 'init', '-q');
+  const out = await grab(() => runCheckpoint(T, {}));
+  assert.match(out, /no \.sdlc\/hub\.json/);
+  assert.ok(process.exitCode, 'a non-hub dir sets a non-zero exit code');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// --- regression tests for the Fable5 review findings ---
+
+test('runCheckpoint guard fires even with hub.default_branch UNSET — never trusts the current branch (HIGH-2)', async () => {
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-nodef-'));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a.nasr@x.com');
+  git(T, 'config', 'user.name', 'abdelrahman');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [] })); // NO default_branch
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed'); git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'feat/side'); // no origin/HEAD ⇒ derives 'main'; we sit on feat/side
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  const before = git(T, 'rev-parse', 'HEAD').toString().trim();
+  const out = await grab(() => runCheckpoint(T, {}));
+  assert.match(out, /not the default branch/);
+  assert.ok(process.exitCode, 'the guard still fires when default_branch is unconfigured');
+  assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), before, 'nothing committed on the WIP branch');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --force does NOT bypass the branch guard — only --allow-branch does (MEDIUM-5)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  git(T, 'checkout', '-q', '-b', 'wip/x');
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  const out = await grab(() => runCheckpoint(T, { force: true }));
+  assert.match(out, /not the default branch/);
+  assert.ok(process.exitCode, '--force must not disable the safety guard');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --allow-branch --push pushes the CURRENT branch, never the default branch (HIGH-1)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint(); // default_branch main, on main
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-bare2-'));
+  git(bare, 'init', '-q', '--bare');
+  git(T, 'remote', 'add', 'origin', bare);
+  git(T, 'push', '-q', 'origin', 'main');
+  const mainAtStart = git(bare, 'rev-parse', 'main').toString().trim();
+  git(T, 'checkout', '-q', '-b', 'wip/side');
+  fs.writeFileSync(path.join(T, 'wip.txt'), 'half done'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'feat: wip');
+  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  await grab(() => runCheckpoint(T, { push: true, allowBranch: true }));
+  assert.equal(git(bare, 'rev-parse', 'main').toString().trim(), mainAtStart, 'origin/main is NOT advanced by a WIP-branch checkpoint');
+  assert.equal(
+    git(bare, 'rev-parse', 'wip/side').toString().trim(),
+    git(T, 'rev-parse', 'HEAD').toString().trim(),
+    'the WIP branch is pushed to its OWN ref',
+  );
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(bare, { recursive: true, force: true });
+});
+
+test('runCheckpoint commits cleanly when build-state/ exists but is empty — no pathspec crash (HIGH-3)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  const sdlc = path.join(T, 'epics/EP-a/.sdlc');
+  fs.mkdirSync(path.join(sdlc, 'build-state'), { recursive: true }); // empty dir, no story JSON yet
+  fs.writeFileSync(path.join(sdlc, 'trust-log.json'), JSON.stringify({ epic: 'EP-a', runs: [] }));
+  const out = await grab(() => runCheckpoint(T, {}));
+  assert.doesNotMatch(out, /git commit failed/);
+  assert.ok(!process.exitCode, 'an empty build-state/ dir does not crash the commit');
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.deepEqual(files, ['epics/EP-a/.sdlc/trust-log.json'], 'committed the trust log, not the empty dir spec');
+  assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'index left clean');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('buildCheckpointMessage subject matches the hub commit-message gate regex and collapses injection (NIT-8)', () => {
+  const TYPES = 'feat|fix|docs|refactor|test|perf|build|ci|chore|revert';
+  const gate = new RegExp(`^(${TYPES})(\\([a-z0-9._-]+\\))?!?: .+`);
+  const subj = buildCheckpointMessage({ label: 'EP-a/EP-a-S03', author: '@x', basenames: ['trust-log.json'] }).split('\n')[0];
+  assert.match(subj, gate);
+  assert.doesNotMatch(subj, /\.$/);
+  // a hostile git user.name with a newline + a fake trailer must collapse into the single subject line
+  const msg = buildCheckpointMessage({ label: 'EP-a/EP-a-S01', author: 'evil\nCo-Authored-By: X <x@x>', basenames: ['trust-log.json'] });
+  assert.ok(!msg.split('\n\n')[0].includes('\n'), 'the subject stays one line — no forged trailer');
+  assert.match(msg.split('\n')[0], gate);
+});
+
+// ---------------------------------------------------------------------------------------------
+// cli/ledger.mjs — shard-then-fold union reader + fold (the conflict-free ledger storage)
+// ---------------------------------------------------------------------------------------------
+const { readTrustRuns, readShips, updateShip, foldTrust, trustShardName, buildShardName } = await import('./ledger.mjs');
+
+// Build an epic dir with a .sdlc/. Returns the epicDir (what the ledger fns take).
+function ledgerEpic() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ledger-'));
+  const epicDir = path.join(T, 'epics', 'EP-x');
+  fs.mkdirSync(path.join(epicDir, '.sdlc'), { recursive: true });
+  return { T, epicDir };
+}
+const writeTrustShard = (epicDir, e) => {
+  const dir = path.join(epicDir, '.sdlc/trust-log'); fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, trustShardName(e)), JSON.stringify(e));
+};
+const writeBuildShard = (epicDir, s) => {
+  const dir = path.join(epicDir, '.sdlc/build-log'); fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, buildShardName(s)), JSON.stringify(s));
+};
+const writeFolded = (epicDir, name, obj) => fs.writeFileSync(path.join(epicDir, '.sdlc', name), JSON.stringify(obj));
+
+test('readTrustRuns: folded-only epic reads unchanged (migration-free)', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeFolded(epicDir, 'trust-log.json', { epic: 'EP-x', runs: [{ story: 'EP-x-S01', repo: 'be', step: 'checks', verdict: 'approved-unchanged' }] });
+  assert.equal(readTrustRuns(epicDir).length, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('readTrustRuns: unions folded + loose shards, and never dedups distinct re-runs of a step', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeFolded(epicDir, 'trust-log.json', { epic: 'EP-x', runs: [{ story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'f1', verdict: 'approved-unchanged' }] });
+  writeTrustShard(epicDir, { story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 's1', verdict: 'approved-unchanged' }); // a SECOND checks run
+  writeTrustShard(epicDir, { story: 'EP-x-S02', repo: 'be', step: 'implement', uid: 's2', verdict: 'rejected' });
+  const runs = readTrustRuns(epicDir);
+  assert.equal(runs.length, 3, 'folded 1 + 2 shards = 3 — re-runs of the same (story,repo,step) are all kept (the threshold counts them)');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('readTrustRuns: a shard whose uid is already folded is skipped (half-applied tidy)', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeFolded(epicDir, 'trust-log.json', { epic: 'EP-x', runs: [{ story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'dup', verdict: 'approved-unchanged' }] });
+  writeTrustShard(epicDir, { story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'dup', verdict: 'approved-unchanged' });
+  assert.equal(readTrustRuns(epicDir).length, 1, 'same uid in folded + shard counts once');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('readShips: unions folded + shards; a shard WINS over a stale folded ship of the same key', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeFolded(epicDir, 'build-log.json', { epic: 'EP-x', ships: [{ story: 'EP-x-S01', task: 'T01', repo: 'be', engineer_review: [] }] });
+  writeBuildShard(epicDir, { story: 'EP-x-S01', task: 'T01', repo: 'be', engineer_review: [{ approver: 'amelia' }] }); // reconcile-updated
+  writeBuildShard(epicDir, { story: 'EP-x-S02', task: 'T01', repo: 'be', engineer_review: [] });
+  const ships = readShips(epicDir);
+  assert.equal(ships.length, 2, 'same (story,task,repo) deduped; the S02 ship added');
+  const s01 = ships.find((s) => s.story === 'EP-x-S01');
+  assert.equal(s01.engineer_review.length, 1, 'the shard (with engagement) won over the stale folded ship');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('updateShip: mutates the ship\'s own loose shard; finds the folded ship when no shard', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeBuildShard(epicDir, { story: 'EP-x-S01', task: 'T01', repo: 'be', pr: '7', engineer_review: [] });
+  const r1 = updateShip(epicDir, (s) => String(s.pr) === '7', (s) => { s.engineer_review = [{ approver: 'a' }]; });
+  assert.equal(r1.where, 'shard');
+  assert.equal(readShips(epicDir).find((s) => s.pr === '7').engineer_review.length, 1, 'shard mutation persisted');
+  // no shard, only folded
+  const { T: T2, epicDir: e2 } = ledgerEpic();
+  writeFolded(e2, 'build-log.json', { epic: 'EP-x', ships: [{ story: 'EP-x-S01', task: 'T01', repo: 'be', pr: '9', engineer_review: [] }] });
+  const r2 = updateShip(e2, (s) => String(s.pr) === '9', (s) => { s.engineer_review = [{ approver: 'b' }]; });
+  assert.equal(r2.where, 'folded');
+  assert.equal(updateShip(e2, (s) => String(s.pr) === '404', () => {}).found, false, 'no match writes nothing');
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(T2, { recursive: true, force: true });
+});
+
+test('foldTrust/foldBuild: fold picked shards into the folded file + delete them; dry-run mutates nothing', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeTrustShard(epicDir, { story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'k1', date: '2026-07-01' });
+  writeTrustShard(epicDir, { story: 'EP-x-S02', repo: 'be', step: 'checks', uid: 'k2', date: '2026-07-02' });
+  const onlyS01 = (e) => e.story === 'EP-x-S01';
+  // dry run: reports what WOULD fold, writes/deletes nothing
+  const dry = foldTrust(epicDir, onlyS01, { dryRun: true });
+  assert.equal(dry.folded, 1);
+  assert.equal(fs.readdirSync(path.join(epicDir, '.sdlc/trust-log')).length, 2, 'dry run left both shards');
+  assert.ok(!fs.existsSync(path.join(epicDir, '.sdlc/trust-log.json')), 'dry run wrote no folded file');
+  // real fold
+  const res = foldTrust(epicDir, onlyS01);
+  assert.equal(res.folded, 1);
+  assert.equal(fs.readdirSync(path.join(epicDir, '.sdlc/trust-log')).length, 1, 'S01 shard deleted, S02 kept');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/trust-log.json'))).runs.length, 1, 'S01 folded in');
+  // idempotent: S01 already gone, nothing more to fold
+  assert.equal(foldTrust(epicDir, onlyS01).folded, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('readTrustRuns/foldTrust key on FULL identity — two runs that share a uid are BOTH kept (Fable HIGH-2)', () => {
+  const { T, epicDir } = ledgerEpic();
+  // same uid 'dup', DIFFERENT stories — a token collision must NOT fuse them
+  writeTrustShard(epicDir, { story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'dup', verdict: 'rejected', date: '2026-07-01' });
+  writeTrustShard(epicDir, { story: 'EP-x-S02', repo: 'be', step: 'checks', uid: 'dup', verdict: 'approved-unchanged', date: '2026-07-01' });
+  assert.equal(readTrustRuns(epicDir).length, 2, 'both distinct runs survive the union read (uid alone must not dedup)');
+  // fold S01 then S02 — neither may drop the other (the dropped one was a rejected verdict → would inflate trust)
+  foldTrust(epicDir, (e) => e.story === 'EP-x-S01');
+  foldTrust(epicDir, (e) => e.story === 'EP-x-S02');
+  const runs = JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/trust-log.json'))).runs;
+  assert.equal(runs.length, 2, 'both runs folded — no evidence silently deleted');
+  assert.ok(runs.some((r) => r.verdict === 'rejected') && runs.some((r) => r.verdict === 'approved-unchanged'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a corrupt folded ledger ABORTS (never silently rebuilt, which would erase history) (Fable HIGH-3)', () => {
+  const { T, epicDir } = ledgerEpic();
+  fs.writeFileSync(path.join(epicDir, '.sdlc/trust-log.json'), '{ this is not json'); // truncated/corrupt
+  writeTrustShard(epicDir, { story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'a1' });
+  assert.throws(() => readTrustRuns(epicDir), /corrupt JSON/i, 'read throws rather than under-report');
+  assert.throws(() => foldTrust(epicDir, () => true), /corrupt JSON/i, 'fold throws rather than rebuild from scratch');
+  // the corrupt file is untouched — no data destroyed
+  assert.equal(fs.readFileSync(path.join(epicDir, '.sdlc/trust-log.json'), 'utf8'), '{ this is not json');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// yad tidy up + the conflict-free concurrency guarantee
+// ---------------------------------------------------------------------------------------------
+const { runTidy, shippedStories } = await import('./tidy.mjs');
+
+// A hub on main with a story of the given frontmatter status + a trust shard and a build shard for it.
+function hubWithShards(statusByStory) {
+  const T = hubForCheckpoint(); // from the checkpoint suite: hub.json (default_branch main) + seed on main
+  const ep = path.join(T, 'epics/EP-demo');
+  fs.mkdirSync(path.join(ep, 'stories'), { recursive: true });
+  fs.mkdirSync(path.join(ep, '.sdlc/trust-log'), { recursive: true });
+  fs.mkdirSync(path.join(ep, '.sdlc/build-log'), { recursive: true });
+  for (const [story, status] of Object.entries(statusByStory)) {
+    fs.writeFileSync(path.join(ep, 'stories', `${story}.md`), `---\nstatus: ${status}\n---\n`);
+    fs.writeFileSync(path.join(ep, '.sdlc/trust-log', `${story}-be-checks-${story.slice(-1)}.json`),
+      JSON.stringify({ story, repo: 'be', step: 'checks', uid: `u${story.slice(-1)}`, verdict: 'approved-unchanged', date: '2026-07-01' }));
+    fs.writeFileSync(path.join(ep, '.sdlc/build-log', `${story}-T01-be.json`),
+      JSON.stringify({ story, task: 'T01', repo: 'be', shippedAt: '2026-07-01', engineer_review: [{ approver: 'a', role: 'owner' }] }));
+  }
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed shards');
+  return T;
+}
+
+test('shippedStories reads only frontmatter status:shipped', () => {
+  const T = hubWithShards({ 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'in-build' });
+  const set = shippedStories(T, 'EP-demo');
+  assert.ok(set.has('EP-demo-S01') && !set.has('EP-demo-S02'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, commits, and is idempotent', async () => {
+  const prev = process.exitCode;
+  const T = hubWithShards({ 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'in-build' });
+  const ep = path.join(T, 'epics/EP-demo');
+  await grab(() => runTidy(T, {}));
+  // S01 shards folded + deleted; S02 shard stays loose
+  assert.deepEqual(fs.readdirSync(path.join(ep, '.sdlc/trust-log')), ['EP-demo-S02-be-checks-2.json'], 'only the in-progress trust shard remains');
+  assert.deepEqual(fs.readdirSync(path.join(ep, '.sdlc/build-log')), ['EP-demo-S02-T01-be.json'], 'the shipped build shard folded away; the in-progress one stays loose');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/trust-log.json'))).runs.length, 1, 'S01 run folded in');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/build-log.json'))).ships.length, 1, 'S01 ship folded in');
+  // the union reader still sees BOTH the folded S01 and the loose S02
+  assert.equal(readTrustRuns(ep).length, 2, 'union: folded S01 + loose S02');
+  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy back-half ledgers — EP-demo by @abdelrahmannasr [skip ci]');
+  const out = await grab(() => runTidy(T, {}));
+  assert.match(out, /nothing to tidy/);
+  assert.ok(!process.exitCode);
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runTidy --dry-run previews but mutates nothing', async () => {
+  const prev = process.exitCode;
+  const T = hubWithShards({ 'EP-demo-S01': 'shipped' });
+  const ep = path.join(T, 'epics/EP-demo');
+  const head0 = git(T, 'rev-parse', 'HEAD').toString().trim();
+  const out = await grab(() => runTidy(T, { dryRun: true }));
+  assert.match(out, /would fold/);
+  assert.equal(fs.readdirSync(path.join(ep, '.sdlc/trust-log')).length, 1, 'dry run left the shard');
+  assert.ok(!fs.existsSync(path.join(ep, '.sdlc/trust-log.json')), 'dry run wrote no folded file');
+  assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), head0, 'dry run made no commit');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runTidy refuses off the default branch', async () => {
+  const prev = process.exitCode;
+  const T = hubWithShards({ 'EP-demo-S01': 'shipped' });
+  git(T, 'checkout', '-q', '-b', 'wip/x');
+  const out = await grab(() => runTidy(T, {}));
+  assert.match(out, /not the default branch/);
+  assert.ok(process.exitCode);
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runTidy does not crash when a touched epic has only build shards (no trust ledger at all) (Fable HIGH-1)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  const ep = path.join(T, 'epics/EP-demo');
+  fs.mkdirSync(path.join(ep, 'stories'), { recursive: true });
+  fs.mkdirSync(path.join(ep, '.sdlc/build-log'), { recursive: true }); // build shard only — NO trust-log file or dir
+  fs.writeFileSync(path.join(ep, 'stories/EP-demo-S01.md'), '---\nstatus: shipped\n---\n');
+  fs.writeFileSync(path.join(ep, '.sdlc/build-log/EP-demo-S01-T01-be.json'), JSON.stringify({ story: 'EP-demo-S01', task: 'T01', repo: 'be', shippedAt: '2026-07-01' }));
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed build shard');
+  const out = await grab(() => runTidy(T, {}));
+  assert.doesNotMatch(out, /git add failed/, 'missing trust-log path must not make git add fatal');
+  assert.ok(!process.exitCode, 'clean exit');
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
+  assert.match(files, /build-log\.json/, 'the build shard folded + committed');
+  assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'nothing stranded staged');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('THE POINT: two writers add different shards to the SAME epic and both push with ZERO conflict', async () => {
+  const prev = process.exitCode;
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-conc-bare-'));
+  git(bare, 'init', '-q', '--bare');
+  // origin seeded from clone A
+  const A = hubForCheckpoint();
+  git(A, 'remote', 'add', 'origin', bare); git(A, 'push', '-q', 'origin', 'main');
+  const B = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-conc-B-'));
+  git(B, 'clone', '-q', bare, B); // clone into B
+  git(B, 'config', 'user.email', 'a.nasr@x.com'); git(B, 'config', 'user.name', 'abdelrahman');
+  // A writes a trust shard for S01; B writes one for S02 — same epic, DIFFERENT files
+  const shard = (root, story, uid) => {
+    const d = path.join(root, 'epics/EP-demo/.sdlc/trust-log'); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, `EP-demo-${story}-be-checks-${uid}.json`), JSON.stringify({ story: `EP-demo-${story}`, repo: 'be', step: 'checks', uid, verdict: 'approved-unchanged', date: '2026-07-01' }));
+  };
+  shard(A, 'S01', 'a1'); shard(B, 'S02', 'b1');
+  // A checkpoints + pushes first
+  await grab(() => runCheckpoint(A, { push: true }));
+  // B checkpoints + pushes — push is rejected (A moved main), pushWithRebase rebases and retries; the
+  // two commits touch DIFFERENT files so the rebase is clean and B lands with no conflict.
+  await grab(() => runCheckpoint(B, { push: true }));
+  git(A, 'pull', '-q', '--rebase', 'origin', 'main');
+  // both shards are present on origin/main (pulled into A)
+  assert.ok(fs.existsSync(path.join(A, 'epics/EP-demo/.sdlc/trust-log/EP-demo-S01-be-checks-a1.json')), 'S01 survived');
+  assert.ok(fs.existsSync(path.join(A, 'epics/EP-demo/.sdlc/trust-log/EP-demo-S02-be-checks-b1.json')), 'S02 survived — no conflict, no lost write');
+  process.exitCode = prev;
+  fs.rmSync(A, { recursive: true, force: true }); fs.rmSync(B, { recursive: true, force: true }); fs.rmSync(bare, { recursive: true, force: true });
+});
+
+test('runCheckpoint commits trust-log/ + build-log/ shard files (allowlist widened) and labels the story', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  const d = path.join(T, 'epics/EP-demo/.sdlc');
+  fs.mkdirSync(path.join(d, 'trust-log'), { recursive: true });
+  fs.mkdirSync(path.join(d, 'build-log'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'trust-log/EP-demo-S01-be-checks-a1.json'), JSON.stringify({ story: 'EP-demo-S01', repo: 'be', step: 'checks', uid: 'a1' }));
+  fs.writeFileSync(path.join(d, 'build-log/EP-demo-S01-T01-be.json'), JSON.stringify({ story: 'EP-demo-S01', task: 'T01', repo: 'be' }));
+  await grab(() => runCheckpoint(T, {}));
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(files.includes('epics/EP-demo/.sdlc/trust-log/EP-demo-S01-be-checks-a1.json'), 'trust shard committed');
+  assert.ok(files.includes('epics/EP-demo/.sdlc/build-log/EP-demo-S01-T01-be.json'), 'build shard committed');
+  assert.match(git(T, 'log', '-1', '--format=%s').toString(), /EP-demo\/EP-demo-S01 by @abdelrahmannasr/, 'subject label derived from the shard filename');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
