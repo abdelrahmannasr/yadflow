@@ -117,7 +117,7 @@ build half by hand"** below.
     front state / the engineer review).
 16. Drive a story's back half on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
     earned steps and stops for a human otherwise, always halting at the engineer review. Each iteration
-    it runs `yad checkpoint --push` to commit the `trust-log.json` + `build-state/` it just wrote (a
+    it runs `yad checkpoint --push` to commit the new `trust-log/` shard + `build-state/` it just wrote (a
     `chore(hub)` commit, default branch only) — so the shared trust evidence stays current with no human commit.
 17. **Kill switch any time:** `yad-run action: kill` (everything → manual) / `action: unkill`.
     Details: **"Run the back half on the dial"** below.

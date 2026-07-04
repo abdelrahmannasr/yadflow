@@ -4335,6 +4335,16 @@ test('foldTrust/foldBuild: fold picked shards into the folded file + delete them
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('trust/buildShardName sanitize path-traversal components — a shard can never escape its dir (CodeRabbit)', () => {
+  const n = trustShardName({ story: '../../etc/passwd', repo: 'a/b', step: 'checks', uid: 'x.y' });
+  assert.ok(!n.includes('/') && !n.includes('..'), `no separators or traversal: ${n}`);
+  assert.equal(n, '______etc_passwd-a_b-checks-x_y.json');
+  const b = buildShardName({ story: 'EP-x-S01', task: '..', repo: 'r' });
+  assert.ok(!b.includes('/') && !b.includes('..'), `no traversal: ${b}`);
+  // normal ids are untouched (only unsafe chars change)
+  assert.equal(trustShardName({ story: 'EP-x-S01', repo: 'be', step: 'checks', uid: 'a1' }), 'EP-x-S01-be-checks-a1.json');
+});
+
 test('readTrustRuns/foldTrust key on FULL identity — two runs that share a uid are BOTH kept (Fable HIGH-2)', () => {
   const { T, epicDir } = ledgerEpic();
   // same uid 'dup', DIFFERENT stories — a token collision must NOT fuse them
