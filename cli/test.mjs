@@ -409,6 +409,7 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 // detectStage / templateBody — stage-aware open-pr (fix #80)
 // ---------------------------------------------------------------------------------------------
 const { detectStage, templateBody } = await import('./openpr.mjs');
+const { fillHubTemplate } = await import('./gate.mjs');
 
 // A bare dir that IS a hub (carries .sdlc/hub.json) vs one that is not.
 function hubDir() {
@@ -461,6 +462,38 @@ test('templateBody: the hub-tooling body passes the real pr-template hub gate on
   // before the fix this body was the artifact-review template and the gate FAILED it.
   const code = (() => {
     try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'ci/some-fix', bodyFile], { stdio: 'pipe' }); return 0; }
+    catch (e) { return e.status; }
+  })();
+  assert.equal(code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('fillHubTemplate: the generated review-PR body carries every section the hub gate requires (#103)', () => {
+  const b = fillHubTemplate({
+    epic: 'EP-demo', artifact: 'architecture.md',
+    step: { id: 'architecture-review', risk_tags: ['contract'] },
+    owner: 'alice', domains: ['backend', 'mobile'],
+  });
+  // check_hub_body requires all four; `## Checklist` was the one missing before the fix.
+  assert.match(b, /^## Artifact under review$/m);
+  assert.match(b, /^## Impact & Risk \(front-half\)$/m);
+  assert.match(b, /^## Checklist$/m);
+  assert.match(b, /Risk tags:/);
+});
+
+test('fillHubTemplate: the generated body passes the real pr-template hub gate (#103 regression)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbody-'));
+  const b = fillHubTemplate({
+    epic: 'EP-demo', artifact: 'architecture.md',
+    step: { id: 'architecture-review', risk_tags: [] },
+    owner: 'alice', domains: ['backend'],
+  });
+  const bodyFile = path.join(T, 'pr-body.md');
+  fs.writeFileSync(bodyFile, b);
+  const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+  // before the fix the generated body omitted `## Checklist` and the gate FAILED it on a review/EP-* head.
+  const code = (() => {
+    try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return 0; }
     catch (e) { return e.status; }
   })();
   assert.equal(code, 0);
