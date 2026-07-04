@@ -403,6 +403,23 @@
   run with a derived verdict (`rejected` on any check FAIL / scope overrun / contract touch;
   `approved-with-edits` if a human edited the diff; else `approved-unchanged`). The engineer review in
   `yad-engineer-review` confirms/overrides the provisional verdict — a human always has the last word on trust.
+- **These machine writes commit themselves.** `build-state/<story>.json`, `trust-log.json`, and
+  `build-log.json` are landed by **`yad checkpoint`** (`cli/checkpoint.mjs`) — the back-half analogue of
+  the front-half `yad gate ci` sync. `yad-run` / `yad-engineer-review` call it each iteration; it makes
+  one `chore(hub): sync back-half state — <epic>/<story> by @<login>` commit, on the default branch,
+  staging **only** those three ledgers by an explicit allowlist (never a front-half gate file, so the
+  `ledger-guard` gate never trips). Teammates don't review these audit writes; the commit exists so CI,
+  `yad status`, and other machines always see current trust evidence.
+- **The two back-half ledgers are now shard-then-fold.** `trust-log.json` and `build-log.json` were one
+  file per epic, so two people driving different stories of the *same* epic conflicted on them. Each
+  writer now writes one small **shard file per entry** under a shard dir
+  (`epics/<epic>/.sdlc/trust-log/<story>-<repo>-<step>-<uid>.json`,
+  `epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json`) — concurrent writers touch different files,
+  so parallel stories never conflict; readers **union** the folded file + the loose shards.
+  `yad checkpoint` commits the shard dirs, and the new **`yad tidy up [<epic>] [--push]`** folds a
+  *shipped* story's finished shards back into the single folded file on demand (the manual "pack it up",
+  the analogue of loose git objects → `git gc`). `build-state/<story>.json` is unchanged (already one
+  file per story).
 - **Earned per step, with evidence.** A step may be flipped to `machine_advance` only once its
   trust-log slice clears `config.yaml` `automation.trust_threshold` (default `min_runs: 5`,
   `min_approved_unchanged: 0.8`). `yad-run action: set-dial` enforces it and refuses front states /

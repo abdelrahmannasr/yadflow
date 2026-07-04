@@ -404,14 +404,15 @@ const automationSteps: FlowStep[] = [
     messages: [
       { id: "rn-1", from: "state-json", to: "product-hub", label: "read each step's dial", type: "event", color: "#1e8449", delay: 0, duration: 700 },
       { id: "rn-2", from: "product-hub", to: "trust-log", label: "advance / halt + record run", type: "job", color: "#b7950b", delay: 800, duration: 700 },
+      { id: "rn-3", from: "trust-log", to: "product-hub", label: "yad checkpoint --push (chore(hub) commit)", type: "job", color: "#b7950b", delay: 1600, duration: 700 },
     ],
-    sideEffects: { jobs: "build-state/<story-id>.json", notifications: "halts on FAIL / scope overrun / contract touch; always stops at engineer review" },
+    sideEffects: { jobs: "build-state/<story-id>.json · yad checkpoint commits the back-half ledgers (chore(hub))", notifications: "halts on FAIL / scope overrun / contract touch; always stops at engineer review" },
   },
   {
     id: "trust-log",
     title: "Trust Log",
     description:
-      "Records every run's verdict (approved-unchanged / approved-with-edits / rejected) — the evidence base for earning automation. yad-status rolls it up: runs, % approved-unchanged, and whether it clears the threshold.",
+      "Records every run's verdict (approved-unchanged / approved-with-edits / rejected) — the evidence base for earning automation. yad-status rolls it up: runs, % approved-unchanged, and whether it clears the threshold. yad checkpoint commits this ledger (chore(hub), default branch, allowlist-scoped).",
     actor: "system",
     status: "gathering-evidence",
     stepState: "trust-log.json",

@@ -7,6 +7,10 @@
 > (Step C) has its hook + gate but stays `human_approve`: there is no historical signal to seed it
 > from, so it is earned only on genuine runs (never fabricated). Front states and the engineer review
 > stay `human_approve` permanently.
+>
+> The trust log and build log both use **shard-then-fold** storage — one shard file per entry, so
+> parallel stories of the same epic write conflict-free — with **`yad tidy up`** folding a shipped
+> story's finished shards back into the single ledger on demand (the "loose objects → `git gc`" pattern).
 
 ## Context
 

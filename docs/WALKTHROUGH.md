@@ -101,7 +101,12 @@ build half by hand"** below.
     runs the `pr-title` and `pr-template` gates; `yad-pr-template repo:<repo> action: route` prints the
     required reviewers from the Impact & Risk block.
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
-    record in `build-log.json`, update story status to `in-build`/`shipped`).
+    record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
+    ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**
+    — a `chore(hub)` audit-trail commit the back half runs for you, so no one hand-commits this state.
+    The `trust-log`/`build-log` entries are written as per-entry **shard files** (so parallel stories of one
+    epic never conflict on them); once the story ships, **`yad tidy up [<epic>] [--push]`** folds its
+    finished shards back into the single ledger file (the manual "pack it up", like `git gc`).
     - **Multi-repo:** repeat 10–14 in each repo, all from the **one** locked contract.
     - **Existing code:** `yad-backfill` first, to produce a human-verified spec for a built feature.
 
@@ -111,7 +116,9 @@ build half by hand"** below.
     `yad-run action: set-dial step:<step> to: machine_advance` (refused if evidence is short or for a
     front state / the engineer review).
 16. Drive a story's back half on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
-    earned steps and stops for a human otherwise, always halting at the engineer review.
+    earned steps and stops for a human otherwise, always halting at the engineer review. Each iteration
+    it runs `yad checkpoint --push` to commit the `trust-log.json` + `build-state/` it just wrote (a
+    `chore(hub)` commit, default branch only) — so the shared trust evidence stays current with no human commit.
 17. **Kill switch any time:** `yad-run action: kill` (everything → manual) / `action: unkill`.
     Details: **"Run the back half on the dial"** below.
 

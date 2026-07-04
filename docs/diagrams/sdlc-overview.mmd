@@ -57,7 +57,10 @@ flowchart LR
     subgraph AUTO["C · Automation — earned & reversible"]
       direction TB
       run["yad-run<br/>reads automation dial + trust-log.json"]:::earns
+      cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state<br/>chore(hub) · default branch · allowlist-scoped"]:::artifact
+      tdy["yad tidy up --push<br/>fold a shipped story's trust-log · build-log shards<br/>into the folded ledger (loose objects → git gc)"]:::artifact
       kill["kill switch → everything human_approve"]
+      run --> cpt --> tdy
       run --- kill
     end
 
@@ -81,6 +84,7 @@ flowchart LR
     dd -. roadmap frames each epic .-> ep
     rfb --> sp
     merged -. story pipeline repeats · next story .-> sp
+    merged -. build-log committed by .-> cpt
     merged -. next epic · front pipeline repeats .-> ep
     merged -. sealed epic · post-lock change .-> chg
     cepic -. re-author only the changed artifacts .-> ar

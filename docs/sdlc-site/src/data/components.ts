@@ -148,7 +148,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#b7950b",
     position: { x: 88, y: 67 },
     description:
-      "Every back-half run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation.",
+      "Every back-half run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
   },
   // Phase 6 — the feature-thread ledgers (post-lock change management).
   {
@@ -176,6 +176,6 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#1e8449",
     position: { x: 58, y: 92 },
     description:
-      "The per-epic ship ledger — every merged story recorded at merge time. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic.",
+      "The per-epic ship ledger — every merged story recorded at merge time. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
   },
 ];

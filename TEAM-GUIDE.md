@@ -107,7 +107,9 @@ flowchart TD
     subgraph AUTO["C · Automation — earned & reversible"]
       direction TB
       run["yad-run<br/>automation dial + trust-log.json"]:::earns
+      cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state (chore(hub))"]
       kill["kill switch → all human_approve"]
+      run --> cpt
       run --- kill
     end
 
@@ -343,6 +345,13 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    to print the required reviewers.
 5. **Engineer review + merge** — `yad-engineer-review` → AI review (advisory) → **engineer approval (a
    human)** → merge. The ship is recorded in `build-log.json` and the story moves to `in-build` → `shipped`.
+   The machine-written ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed for you
+   by **`yad checkpoint`** — a `chore(hub)` audit-trail commit the back half runs so you never hand-commit
+   this state; you don't review these machine writes, but CI and `yad status` on other machines must see them.
+   The `trust-log`/`build-log` entries are written as small **shard files** (one per entry), so two people
+   driving different stories of the same epic never conflict; once a story ships, **`yad checkpoint`**'s
+   companion **`yad tidy up`** folds its finished shards back into the single ledger file (the manual
+   "pack it up", like `git gc`).
 
 **Multi-repo story?** A story tagged `repos: [backend, mobile]` just runs steps 1–5 in *each* repo,
 independently, all from the **one** locked contract.
@@ -492,6 +501,8 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
 | `yad-stub` | **Mint a stub genesis epic** for a brownfield feature with no epic, so a defect/change can thread off it now; `yad-backfill promote` makes it real. |
 | `yad-run` | Drive the back half on the automation dial; kill switch. |
+| `yad checkpoint` *(CLI)* | Commit the machine-written back-half ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(hub)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
+| `yad tidy up` *(CLI)* | Fold a shipped story's finished `trust-log`/`build-log` **shards** back into the single ledger file — the manual "pack it up" companion to the shard-then-fold storage (like `git gc`). Default branch only, `--push` to push; a no-op when nothing is foldable. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
 
 ---
