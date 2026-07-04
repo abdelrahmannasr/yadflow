@@ -10,6 +10,8 @@ import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile, reviewWalkthrough } from '../cli/review.mjs';
 import { runShip } from '../cli/ship.mjs';
+import { runCheckpoint } from '../cli/checkpoint.mjs';
+import { runTidy } from '../cli/tidy.mjs';
 import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
@@ -81,6 +83,14 @@ ${c.bold('Build helpers')}
                                        branch opens the front-half artifact-review PR (delegates to
                                        gate open), any other hub branch uses the code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
+  yad checkpoint [--push]              Commit the machine-written back-half hub state
+                                       (trust-log/build-log/build-state) as one audit-trail
+                                       chore(hub) commit — default branch only (--allow-branch
+                                       to override); a no-op when nothing changed
+  yad tidy up [<epic>] [--push]        Fold FINISHED back-half shards (a shipped story's
+                                       trust-log/build-log entries) back into the single folded
+                                       ledger, as one chore(hub) commit — the manual "pack it up"
+                                       for the shard files; a no-op when nothing is foldable
   yad review trailer --repo <r> --pr <n> --body <text>   Post the companion's 60-sec briefing to a code PR/MR
   yad review context --repo <r> --pr <n>                  Print the grounding bundle for cards/chat
   yad review walkthrough --repo <r> --pr <n>              Bundle + ordered risk-tagged stops for the
@@ -133,6 +143,8 @@ function parseArgs(argv) {
     else if (a === '--force') o.force = true;
     else if (a === '--contract-change') o.contractChange = true;
     else if (a === '--no-push') o.noPush = true;
+    else if (a === '--push') o.push = true;
+    else if (a === '--allow-branch') o.allowBranch = true;
     else if (a === '--merged') o.merged = true;
     else if (a === '--overview') o.overview = true;
     // `--check` is a bare boolean for `docs sync --check`, but takes a value for
@@ -259,6 +271,15 @@ async function main() {
     case 'ship':
       await runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
       break;
+    case 'checkpoint':
+      await runCheckpoint(o.dir, { push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });
+      break;
+    case 'tidy': {
+      const [, action, epic] = o._;
+      if (action !== 'up') { log(`usage: yad tidy up [<epic>] [--push] [--dry-run]`); process.exitCode = action ? 1 : 0; break; }
+      await runTidy(o.dir, { epic: epic || o.epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });
+      break;
+    }
     case 'repo': {
       const [, action, name] = o._;
       await runRepo(o.dir, { action: action || 'list', name, today });
