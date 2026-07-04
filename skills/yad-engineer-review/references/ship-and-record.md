@@ -15,9 +15,24 @@ ship. Shipping records the merge and updates the story state so the whole chain 
    - **escalated:** when the PR's Impact & Risk is `high`, or it touches contract/auth/payments — base
      PLUS one `domain-owner` per touched domain (exactly what `risk-route.sh` prints).
 
-## The build ledger — `epics/<epic>/.sdlc/build-log.json`
+## The build ledger — shard-then-fold (`epics/<epic>/.sdlc/build-log/` → `build-log.json`)
 
-Append-only. One record per shipped task:
+Append-only, one record per shipped task. **Storage mirrors the trust log's "loose objects + `git gc`"
+model** so two people shipping different tasks of the same epic never collide on one file:
+- **Per-ship shard:** each ship is its own file `epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json`
+  = ONE ship object (the record below). `(story, task, repo)` is already unique, so no `uid` is needed;
+  concurrent shippers write different files → zero merge conflict.
+- **Folded file:** `epics/<epic>/.sdlc/build-log.json` = `{ "epic": "<id>", "ships": [ … ] }` — the
+  legacy single-file layout, and where `yad tidy up` folds finished shards.
+- **Union-read rule:** to read the ledger, union the folded `ships` with every `build-log/` shard,
+  **deduping by `(story, task, repo)`** — a loose shard WINS over a stale folded ship of the same key.
+- `yad review reconcile` stamps the engagement signal by **mutating the ship's shard** where it lives
+  (or the folded entry if the story was already tidied) — see below.
+- `yad checkpoint` commits the shard dir; `yad tidy up` (manual, one person) folds a shipped story's
+  finished shards into `build-log.json`.
+
+The folded file is shown below; a **shard** file is just one element of `ships` (the bare ship object,
+without the `{ epic, ships }` wrapper):
 
 ```json
 {
@@ -45,7 +60,11 @@ Append-only. One record per shipped task:
 ```
 
 This is the back-half analogue of the front half's `approvals.json` — files only, no hidden state, so a
-future service can drive ship by writing the same records.
+future service can drive ship by writing the same records. Like the trust log and build-state, it is a
+machine-written ledger committed by **`yad checkpoint`** (the back-half analogue of `yad gate` sync),
+not by hand: after recording the ship, `yad checkpoint --push` lands the new `build-log/` shard as a
+`chore(hub): …` audit-trail commit on the default branch (allowlist-scoped to the back-half ledgers,
+never a front-half gate file); `yad tidy up` folds finished shards into `build-log.json` later.
 
 **Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
 — `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)
@@ -53,7 +72,8 @@ future service can drive ship by writing the same records.
 approve. The optional `companion` block records which faces ran. It is **soft by default** (both count;
 a bare approve draws a friendly `yad review nudge`); it only gates ship when
 `hub.review.requireEngagement: true`. `yad review reconcile --epic <id> --repo <r> --pr <n>` reads the
-code PR's approvals (with the engagement signal) and stamps them onto the matching ship record — the
+code PR's approvals (with the engagement signal) and stamps them onto the matching ship record — writing
+back into the ship's shard where it lives (or its folded entry if the story was already tidied) — the
 back-half **bridge**, the analogue of `yad gate sync`. The signal is gameable by design ("visible, not
 impossible"): it makes engineer-review quality visible, it does not prove a human read the diff. It sits
 **beside** the CI gates (build/test/lint/contract/verified-commits) — never above them; CI still

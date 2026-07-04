@@ -28,17 +28,19 @@ while step is a back step (not engineer-review):
 
     signals = derive_signals(step, result)            # see "Deriving signals"
     verdict = derive_verdict(signals)                 # rejected | approved-with-edits | approved-unchanged
-    append trust-log entry { story, repo, step, automation: bs.step.automation,
-                             verdict, signals, ranBy, date }
+    uid = fresh_short_token()                          # e.g. `openssl rand -hex 4` — unique per run,
+                                                       #   never reuse; a collision would fuse two runs
+    write trust-log/<story>-<repo>-<step>-<uid>.json   # ONE shard file = ONE entry (never append to a shared file)
+      = { story, repo, step, uid, automation: bs.step.automation, verdict, signals, ranBy, date }
 
     eff = effective_dial(step, bs, cfg)               # see "Effective dial"
 
     if result is a HALT (failed / scope overrun / contract touch / ambiguous):
-        bs.step.status = "blocked"; persist; STOP and report the human action needed
+        bs.step.status = "blocked"; persist; checkpoint; STOP and report the human action needed
     elif eff == "machine_advance":
-        bs.step.status = "done"; advance bs.currentStep to next; persist; continue   # Step B advance
+        bs.step.status = "done"; advance bs.currentStep to next; persist; checkpoint; continue  # Step B advance
     else:  # human_approve
-        bs.step.status = "done"; persist; STOP and report "waiting for human at <next>"
+        bs.step.status = "done"; persist; checkpoint; STOP and report "waiting for human at <next>"
 
 # reached engineer-review: always stop, hand to yad-engineer-review (human gate, finalizes the verdict)
 ```
@@ -46,6 +48,18 @@ while step is a back step (not engineer-review):
 `ranBy` is `machine` when the *previous* step's effective dial caused this step to run without a human
 nudge; otherwise `human`. Persist build-state after every transition so a halt leaves an accurate,
 resumable record.
+
+`checkpoint` = run `yad checkpoint --push` from `{project-root}`. It commits the machine-written
+back-half ledgers (in this loop, the loose `trust-log/` shards this run wrote + `build-state/<story>.json`;
+also the `build-log/` shards at engineer-review) — the shard dirs are what checkpoint stages, the same
+way `git gc` folds loose objects later (`yad tidy up` folds finished shards into the folded
+`trust-log.json` / `build-log.json`) — as one `chore(hub): sync back-half state — <epic>/<story> by @<login> [skip ci]`
+audit-trail commit, on the default branch only,
+staging *only* those files by an explicit allowlist (never a front-half gate file — so `ledger-guard`
+never trips). It is idempotent (a no-op when nothing changed), so calling it after every transition —
+including a halt — is safe and keeps the shared trust evidence current for CI, teammates, and
+`yad status` on other machines. It refuses to run off the default branch (an unsigned `[skip ci]`
+commit inside a future PR range would fail `verified-commits` and strand the PR).
 
 ## Effective dial (kill switch & locks always win)
 
@@ -100,7 +114,10 @@ A step is a **candidate** for `machine_advance` only when its trust evidence cle
 to `machine_advance`:
 
 ```
-slice = trust-log entries for this step (this story's repo; widen to the project if you track it there)
+# read the ledger by UNION: the folded trust-log.json `runs` array PLUS every loose trust-log/ shard
+# (concatenate — every shard is a distinct run; never dedup by story/repo/step, the threshold counts re-runs)
+all   = trust-log.json.runs + [read each file in trust-log/]
+slice = entries in `all` for this step (this story's repo; widen to the project if you track it there)
 runs  = len(slice)
 unchanged = count(e.verdict == "approved-unchanged" in slice)
 earned = runs >= trust_threshold.min_runs

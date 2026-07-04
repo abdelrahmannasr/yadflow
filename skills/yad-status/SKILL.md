@@ -21,7 +21,12 @@ report all if the user asked for an overview).
 ### Step 2 — Read state
 Read `.sdlc/state.json`, `.sdlc/approvals.json`, `epic.md` frontmatter (for `repos`), and — if present
 — `.sdlc/contract-lock.json`. For the build half (Phase 4), also read — if present — every
-`.sdlc/build-state/<story-id>.json`, `.sdlc/trust-log.json`, and the `automation` block of
+`.sdlc/build-state/<story-id>.json`, and the trust ledger read as the **union** of the folded
+`.sdlc/trust-log.json` `runs` PLUS every loose `.sdlc/trust-log/` shard (concatenate — every shard is a
+distinct run; never dedup by story/repo/step — but DO skip a shard whose full identity
+`(story,repo,step,uid)` already appears in the folded `runs`, i.e. a half-applied `yad tidy up`). All are committed by `yad checkpoint` (so a fresh clone
+or another machine sees current evidence; `yad tidy up` folds finished shards into `trust-log.json`).
+Also read the `automation` block of
 `skills/sdlc/config.yaml` (`back_steps`, `trust_threshold`, `locked_steps`, `kill_switch`). For the
 cross-cutting learning layer, also read — if present — the **local-only** `.sdlc/learning-records.json`
 (the per-epic learning ledger, gitignored) and the project-wide `{project-root}/.sdlc/learning-records.json`.
@@ -72,8 +77,9 @@ Print, in this order:
    reads the same `build-state` files.)
 8. **Automation & trust** — print the system-wide **kill switch** state from `config.yaml`
    `automation.kill_switch` (when `on`, note that every step is forced to `human_approve`). Then, for
-   each back-half step that has entries in `.sdlc/trust-log.json`, print its **trust record**: number
-   of runs, the fraction with `verdict == "approved-unchanged"`, and whether that clears
+   each back-half step that has entries in the trust ledger — the **union** of the folded
+   `.sdlc/trust-log.json` `runs` plus every loose `.sdlc/trust-log/` shard — print its **trust record**:
+   number of runs, the fraction with `verdict == "approved-unchanged"`, and whether that clears
    `automation.trust_threshold` (`min_runs`, `min_approved_unchanged`) — i.e. whether the step is
    **earned** (eligible to be flipped to `machine_advance`) or still **gathering evidence**. Restate
    the predicate (self-contained): `earned = runs >= min_runs AND unchanged/runs >= min_approved_unchanged`.

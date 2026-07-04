@@ -121,8 +121,9 @@ finalize a `tasks` trust entry, anchored to what the human/dev actually did with
 - the task is **re-scoped** first (its `Files:`/boundary edited) → `approved-with-edits`
   (signal `task_rescoped: true`);
 - the task list is discarded / regenerated → `rejected`.
-Append the entry to `epics/<epic>/.sdlc/trust-log.json` (schema:
-`../yad-epic/references/state-schema.md`). `tasks` stays `human_approve` until its slice clears
+Write the entry to its own shard `epics/<epic>/.sdlc/trust-log/<story>-<repo>-tasks-<uid>.json` (a fresh
+`uid` per run, so concurrent writers never conflict; readers union the folded `trust-log.json` + the
+loose shards). Schema: `../yad-epic/references/state-schema.md`. `tasks` stays `human_approve` until its slice clears
 the threshold — this only *gathers* evidence. (The `implement` step's own verdict is finalized later,
 at the engineer review in `yad-engineer-review`: merged as authored → `approved-unchanged`; edited first →
 `approved-with-edits`; scope/contract/checks halt → `rejected`.)
