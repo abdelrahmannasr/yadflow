@@ -31,6 +31,7 @@ const GROUPS = [
       'yad open-pr [--repo <name>] — open a task PR/MR from the repo template',
       'yad ship --type <t> -m <subject> — commit AND open the PR/MR in one step',
       'yad repo list / yad repo refresh [name] — fresh/stale code-context',
+      'yad repo refresh [name] --push — publish refreshed code-maps + the registry to the hub default branch (chore(hub): sync code-context [skip ci])',
     ],
   },
 ];

@@ -52,6 +52,8 @@ not under any `epics/EP-<slug>/.sdlc/`.
 
 Commit the **registry** (`repos.json`) and each repo's **`code-map.md`** — they are small, reviewable,
 and are what the front phases actually read (a diff on a code-map shows when a repo's surface moved).
+`yad repo refresh --push` commits and pushes exactly these (never `pack.md`) to the hub's default
+branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
 **Ignore** the full Repomix `pack.md` — it is large and regenerable (`action: refresh`). The product
 hub's `.gitignore` carries `.sdlc/code-context/*/pack.md` for this. This mirrors how the per-epic
 `.sdlc/` state (state.json, approvals.json, build-log.json) is committed.

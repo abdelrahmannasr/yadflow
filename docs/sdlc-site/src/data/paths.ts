@@ -43,7 +43,7 @@ const setupSteps: FlowStep[] = [
       { id: "cr-1", from: "code-repos", to: "repos-json", label: "register repo", type: "write", color: "#b7950b", delay: 0, duration: 700 },
       { id: "cr-2", from: "code-repos", to: "product-hub", label: "cache pack.md + code-map.md", type: "write", color: "#2471a3", delay: 800, duration: 800 },
     ],
-    sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md" },
+    sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md · yad repo refresh --push publishes the code-maps to the hub (chore(hub): sync code-context)" },
   },
   {
     id: "connect-design",

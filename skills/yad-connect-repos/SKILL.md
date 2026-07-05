@@ -1,6 +1,6 @@
 ---
 name: yad-connect-repos
-description: 'Connects code repos to the product hub so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", or "list connected repos".'
+description: 'Connects code repos to the product hub so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the hub default branch as a chore(hub): sync code-context [skip ci] audit commit. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
 ---
 
 # SDLC — Connect Code Repos (make the brain code-aware)
@@ -109,7 +109,13 @@ the front phases will now load this repo's code-map. Nothing auto-advances; this
 ## Other actions
 
 - **`refresh`** — re-run Steps 2–4 for an already-connected repo (after its code moves). Updates
-  `syncedHead` + `lastSyncedAt`. Same machinery as `connect`.
+  `syncedHead` + `lastSyncedAt`. Same machinery as `connect`. Once the AI has regenerated the
+  `code-map.md` (Step 3), publish it to the product hub with **`yad repo refresh <repo> --push`**: it
+  commits the tracked code-maps + `.sdlc/repos.json` (never the gitignored `pack.md`) as one
+  audit-trail commit `chore(hub): sync code-context — <repos> by @<login> [skip ci]` and pushes it
+  straight to the hub's **default branch** (add `--allow-branch` to commit on a non-default branch).
+  This is the code-context analogue of `yad checkpoint` — human-owned machine state, no Task trailer,
+  no Co-Authored-By.
 - **`list`** — print every registry entry with a **fresh/stale** flag: compare each repo's current HEAD
   (`git -C <path> rev-parse HEAD`) to its `syncedHead`; differ ⇒ **stale** (suggest `refresh`).
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo

@@ -103,7 +103,9 @@ ${c.bold('Build helpers')}
   yad review nudge --repo <r> --pr <n>                    Friendly @-mention on a bare code-PR approve
   yad review reconcile --epic <id> --repo <r> --pr <n>    Bridge: stamp engagement onto the build-log ship
   yad repo list                        Show connected repos (fresh / stale)
-  yad repo refresh [name]              Re-pack a stale repo (a human decision)
+  yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
+                       refreshed code-maps + registry as a chore(hub): sync code-context … [skip ci]
+                       audit commit and pushes it to the hub default branch (--allow-branch to override)
 
 ${c.bold('Feature threads (post-lock change management)')}
   yad thread                           List every feature thread (genesis → changes → defects)
@@ -136,7 +138,7 @@ ${c.bold('Options')}
   --merged              gate ci: merge phase — advance the step on the default branch
   --no-push             gate ci: commit the ledger but do not push
   --push                check --fix / update: commit + push applied changes to the default branch
-  --allow-branch        check --fix --push / update --push: allow committing on a non-default branch
+  --allow-branch        check --fix --push / update --push / repo refresh --push: allow committing on a non-default branch
   -h, --help            Show this help
   -v, --version         Print version`;
 
@@ -289,7 +291,7 @@ async function main() {
     }
     case 'repo': {
       const [, action, name] = o._;
-      await runRepo(o.dir, { action: action || 'list', name, today });
+      await runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
       break;
     }
     case 'roster': {

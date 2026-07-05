@@ -80,7 +80,9 @@ This is for a one-off look at a specific area. **Staleness is a human decision, 
 side-effect:** when a repo is stale (HEAD ≠ `syncedHead`), the phase **flags it and stops** —
 "`<repo>` is stale; run `yad repo refresh <repo>` to re-pack the cache + `syncedHead`" — rather than
 silently re-packing the whole repo. A phase never refreshes the registry on its own; the human runs
-`yad repo refresh` (or `yad check --fix`).
+`yad repo refresh` (or `yad check --fix`). After the AI regenerates the code-map, `yad repo refresh
+--push` publishes the refreshed code-maps + registry to the hub's default branch as a `chore(hub): sync
+code-context … [skip ci]` audit commit (never `pack.md`; `--allow-branch` overrides the branch guard).
 
 ## Why this stays DRY with backfill
 
