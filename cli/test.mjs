@@ -232,6 +232,33 @@ test('gitlab fragments declare tags: [$YAD_RUNNER_TAGS] on their docker jobs', (
   }
 });
 
+// `glab api` has NO built-in --jq flag (unlike `gh api`); passing it errors "unknown flag: --jq"
+// and the swallowed error surfaces as "could not resolve merged MR IID" (issue #108). glab output
+// must be filtered by piping to a real jq. `gh api --jq` is fine, so scope this to glab lines only.
+test('gitlab fragments never pass --jq to glab api (glab has no such flag)', () => {
+  // Discover every GitLab CI template dynamically so a new one can't slip through unscanned.
+  const walk = (dir) =>
+    fs.existsSync(dir)
+      ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+          const full = path.join(dir, e.name);
+          return e.isDirectory() ? walk(full) : [full];
+        })
+      : [];
+  const templates = walk(path.join(ROOT, 'skills'))
+    .filter((f) => f.includes(`${path.sep}templates${path.sep}gitlab${path.sep}`) && f.endsWith('.yml'))
+    .map((f) => path.relative(ROOT, f))
+    .sort();
+  assert.ok(templates.length > 0, 'expected to discover GitLab CI templates under skills/');
+  for (const rel of templates) {
+    const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const offenders = txt
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .filter((l) => l.includes('glab api') && l.includes('--jq'));
+    assert.equal(offenders.length, 0, `${rel}: glab api does not support --jq; pipe to jq instead:\n${offenders.join('\n')}`);
+  }
+});
+
 // A file at an old wired path that we did NOT install (no `# sdlc-managed` first line) belongs
 // to the user — migration must leave it untouched.
 test('update leaves a user-authored file at an old wired path alone', async () => {
