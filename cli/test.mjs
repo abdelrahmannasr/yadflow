@@ -236,11 +236,20 @@ test('gitlab fragments declare tags: [$YAD_RUNNER_TAGS] on their docker jobs', (
 // and the swallowed error surfaces as "could not resolve merged MR IID" (issue #108). glab output
 // must be filtered by piping to a real jq. `gh api --jq` is fine, so scope this to glab lines only.
 test('gitlab fragments never pass --jq to glab api (glab has no such flag)', () => {
-  for (const rel of [
-    'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml',
-    'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml',
-    'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml',
-  ]) {
+  // Discover every GitLab CI template dynamically so a new one can't slip through unscanned.
+  const walk = (dir) =>
+    fs.existsSync(dir)
+      ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+          const full = path.join(dir, e.name);
+          return e.isDirectory() ? walk(full) : [full];
+        })
+      : [];
+  const templates = walk(path.join(ROOT, 'skills'))
+    .filter((f) => f.includes(`${path.sep}templates${path.sep}gitlab${path.sep}`) && f.endsWith('.yml'))
+    .map((f) => path.relative(ROOT, f))
+    .sort();
+  assert.ok(templates.length > 0, 'expected to discover GitLab CI templates under skills/');
+  for (const rel of templates) {
     const txt = fs.readFileSync(path.join(ROOT, rel), 'utf8');
     const offenders = txt
       .split('\n')
