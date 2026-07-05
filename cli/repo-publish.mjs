@@ -93,8 +93,28 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
 
   const add = git('add', '--', ...pathspecs);
   if (!add.ok) { fail(`git add failed — ${add.stderr.split('\n')[0] || add.code}`); process.exitCode = 1; return; }
+
+  // Push HEAD to its OWN branch — on the default branch this is the same; with --allow-branch it keeps a
+  // WIP branch from being force-published onto the default branch. Shared by the fresh-commit path and
+  // the retry-after-failed-push path below.
+  const pushHead = () => {
+    if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return true; }
+    fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
+    hand(`run \`git pull --rebase\` and re-run \`yad repo refresh --push\``);
+    process.exitCode = 1;
+    return false;
+  };
+
   if (git('diff', '--cached', '--quiet', '--', ...pathspecs).ok) {
-    info('code-context unchanged — nothing to commit');
+    // Nothing new to commit. A non-push run is simply done. But on a push run a PRIOR run may have
+    // committed and then FAILED to push (the commit sits ahead of origin) — a plain re-run must land
+    // that commit, not silently no-op and exit 0 while it stays stranded. Push any unpushed commit(s).
+    if (!push) { info('code-context unchanged — nothing to commit'); return; }
+    const rev = git('rev-list', '--count', `origin/${branch}..HEAD`);
+    const ahead = rev.ok ? (Number(rev.stdout) || 0) : 1; // no upstream ref yet -> attempt the push
+    if (!ahead) { info('code-context unchanged and already published — nothing to do'); return; }
+    info(`code-context unchanged — pushing ${ahead} already-committed change(s) not yet on origin/${branch}`);
+    pushHead();
     return;
   }
   // The exact files staged from the allowlist — scopes the commit to ONLY the allowlist, so any
@@ -120,11 +140,6 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   ok(`published ${staged.length} file(s): ${c.dim(label)}`);
 
   if (!push) return { message };
-  // Push HEAD to its OWN branch — on the default branch this is the same; with --allow-branch it keeps
-  // a WIP branch from being force-published onto the default branch.
-  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { message }; }
-  fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
-  hand(`run \`git pull --rebase\` and re-run \`yad repo refresh --push\``);
-  process.exitCode = 1;
+  pushHead();
   return { message };
 }

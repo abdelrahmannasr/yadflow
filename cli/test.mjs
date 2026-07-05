@@ -4776,10 +4776,10 @@ test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main
     assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(hub\): sync code-context/, 'pushed to origin/main');
     assert.ok(!process.exitCode, 'clean push -> zero exit code');
 
-    // idempotent: a re-run with no code-context change commits nothing
+    // idempotent: a re-run with nothing new and already pushed is a clean no-op (no second commit)
     const count = git(T, 'rev-list', '--count', 'HEAD').toString().trim();
     const out2 = await grab(() => publishCodeContext(T, { push: true }));
-    assert.match(out2, /nothing to commit/i, 'unchanged code-context -> nothing to commit');
+    assert.match(out2, /already published — nothing to do/, 'unchanged + already pushed -> no-op');
     assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), count, 'no second commit');
   } finally {
     process.exitCode = prev;
@@ -4807,6 +4807,34 @@ test('publishCodeContext: a named refresh publishes only that repo\'s code-map, 
     assert.doesNotMatch(committed, /code-context\/mobile\/code-map\.md/, 'unrelated repo code-map NOT swept in');
     assert.ok(fs.existsSync(path.join(T, '.sdlc/code-context/mobile/code-map.md')), 'mobile map still present, left unpublished');
     assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context — backend by /, 'label scoped to the named repo, not "2 repos"');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('publishCodeContext: a re-run pushes a commit that a prior run committed but failed to push', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    git(T, 'push', '-q', 'origin', 'HEAD:main'); // origin/main exists (tracking ref set)
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# map\n');
+    // 1st run commits locally but does NOT push (simulates a push that failed and left the commit ahead)
+    await grab(() => publishCodeContext(T, { push: false }));
+    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, 'commit landed locally');
+    assert.doesNotMatch(git(hubBare, 'log', '--oneline', '--all').toString(), /sync code-context/, 'not yet on origin');
+
+    // re-run with --push: index is unchanged (already committed) but the unpushed commit must still land
+    const out = await grab(() => publishCodeContext(T, { push: true }));
+    assert.match(out, /pushing 1 already-committed change/, 'detects the unpushed commit and pushes it');
+    assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /sync code-context/, 'existing commit reaches origin/main on the re-run');
+    assert.ok(!process.exitCode, 'successful retry -> zero exit code');
+
+    // a further re-run with nothing unpushed is a clean no-op
+    const out2 = await grab(() => publishCodeContext(T, { push: true }));
+    assert.match(out2, /already published — nothing to do/, 'fully-published re-run no-ops');
   } finally {
     process.exitCode = prev;
     for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });

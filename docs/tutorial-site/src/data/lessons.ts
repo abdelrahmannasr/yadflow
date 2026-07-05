@@ -215,7 +215,7 @@ export const MODULES: Module[] = [
           { cmd: 'yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>' },
           { cmd: 'yad repo list', note: 'show connected repos as fresh / stale' },
           { cmd: 'yad repo refresh <repo>', note: 're-pack a repo whose code has moved' },
-          { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps to the hub default branch (chore(hub) audit commit)' },
+          { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the hub default branch (chore(hub) audit commit)' },
         ],
         produces: ['.sdlc/repos.json', '.sdlc/code-context/<repo>/pack.md', '.sdlc/code-context/<repo>/code-map.md'],
       },
