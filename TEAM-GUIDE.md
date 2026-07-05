@@ -166,6 +166,20 @@ npx yadflow setup
 > (e.g. `yad-review-companion`), updates changed skills, and re-copies updated gate scripts into your
 > connected repos. All new review-gate fields are optional and default-off, so your in-flight epics,
 > `hub.json`, open review PRs, and ledgers keep working with no migration.
+>
+> **Landing the upgrade for the whole team:** `npx yadflow update` only writes the changed files into
+> the working trees — someone still has to commit them across every repo. Run `npx yadflow update
+> --push` to have yadflow **commit each repo's changes and push them straight to the default branch**
+> of the hub and every connected repo, as one `chore(yad-update): sync SDLC install to yadflow
+> vX.Y.Z` commit per repo. It stages only what it wrote (never `git add -A`) and only commits on a
+> repo's default branch — a repo on a feature branch is skipped with a warning, never disturbed.
+> Because it pushes directly to the default branch there is **no PR/MR**, so the normal gate suite is
+> skipped; a dedicated push-on-default-branch **`yad-update-guard`** (a GitHub workflow / GitLab CI
+> fragment) re-checks just two things on the commit — that it is **signed by a known author**
+> (`verified-commits`) and follows the **commit convention** (`commit-message`). yadflow prints an
+> announce banner before it starts: **tell the team and pause merges on those repos until it
+> finishes**, so the direct-to-default-branch pushes don't collide with in-flight work. (Direct pushes
+> to the default branch must be permitted for the committer — adjust branch protection accordingly.)
 
 <details>
 <summary>Manual fallback (no CLI)</summary>
@@ -445,6 +459,8 @@ surfaces (`contract`, `auth`, `payments`):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).
   - `npx yadflow update` — apply drift + install newly-added skills (the upgrade command).
+  - `npx yadflow update --push` — the same, then commit + push each repo's changes straight to its
+    default branch (a `chore(yad-update)` commit; announce the team & pause merges first).
   - `npx yadflow --version` — the installed CLI version.
 
 ---

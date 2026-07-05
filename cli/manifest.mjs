@@ -209,10 +209,13 @@ export const REPO_WIRING = {
   ],
   github: [
     { src: 'skills/yad-checks/templates/github/yad-checks.yml', dest: '.github/workflows/yad-checks.yml' },
+    // Integrity gate for direct-to-default pushes (`yad update --push`): verified-commits + commit-message.
+    { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
     { src: 'skills/yad-pr-template/templates/github/pull_request_template.md', dest: '.github/pull_request_template.md' },
   ],
   gitlab: [
     { src: 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml', dest: '.gitlab/ci/yad-checks.yml' },
+    { src: 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml', dest: '.gitlab/ci/yad-update-guard.yml' },
     { src: 'skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md', dest: '.gitlab/merge_request_templates/Default.md' },
   ],
 };
@@ -240,10 +243,14 @@ export const HUB_WIRING = {
     { src: 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/github/yad-verified-commits.yml', dest: '.github/workflows/yad-verified-commits.yml' },
     { src: 'skills/yad-checks/templates/github/yad-hub-checks.yml', dest: '.github/workflows/yad-hub-checks.yml' },
+    // Integrity gate for the hub's own direct-to-default pushes (`yad update --push`; the machine-
+    // state `yad checkpoint`/`gate ci` commits carry [skip ci] and are intentionally not re-checked).
+    { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
   ],
   gitlab: [
     { src: 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml', dest: '.gitlab/ci/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/gitlab/yad-verified-commits.gitlab-ci.yml', dest: '.gitlab/ci/yad-verified-commits.yml' },
     { src: 'skills/yad-checks/templates/gitlab/yad-hub-checks.gitlab-ci.yml', dest: '.gitlab/ci/yad-hub-checks.yml' },
+    { src: 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml', dest: '.gitlab/ci/yad-update-guard.yml' },
   ],
 };

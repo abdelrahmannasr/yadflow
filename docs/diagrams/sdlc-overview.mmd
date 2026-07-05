@@ -46,7 +46,7 @@ flowchart LR
       sp["yad-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
       shp["yad-ship<br/>yad-commit + yad-open-pr"]
-      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template<br/>lineage-check · epic-open · reconcile-debt"]:::earns
+      ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template<br/>lineage-check · epic-open · reconcile-debt<br/>yad-update-guard (push-on-default)"]:::earns
       prm["yad-pr-template route<br/>required reviewers"]
       air["yad-engineer-review<br/>AI review (advisory)"]
       eng{{"engineer review<br/>human · never automated"}}:::locked

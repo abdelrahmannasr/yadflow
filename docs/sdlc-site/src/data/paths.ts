@@ -337,7 +337,7 @@ const buildSteps: FlowStep[] = [
     id: "checks",
     title: "Check Gates (Step C)",
     description:
-      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), and the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt). Blocking in CI.",
+      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt), and yad-update-guard (push-on-default: re-checks any direct-to-default commit — e.g. from `yad update --push` — with verified-commits + commit-message). Blocking in CI.",
     actor: "system",
     status: "checks-passing",
     stepState: "checks/*.sh · yad-checks.yml",

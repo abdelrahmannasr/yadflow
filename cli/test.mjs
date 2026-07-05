@@ -3091,6 +3091,28 @@ test('verified-commits gate: the gate-sync bot is allowlist-waived (signature st
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('verified-commits gate: a merge commit is allowlist-waived (author = merger, not a roster human)', () => {
+  // The push-on-default yad-update-guard sees merge commits (the PR-triggered gates never do). A merge
+  // commit is authored by whoever pressed merge — often a platform noreply, not an allowlisted email —
+  // so it must be waived (signature still governs), else every routine PR merge reddens the branch.
+  const T = scaffoldGateRepo(); // on `feature`, allowlist = alice@corp.io only, no remote → sig skipped
+  git(T, 'checkout', '-q', '-b', 'topic');
+  fs.writeFileSync(path.join(T, 'd.txt'), '4');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'feat: work on topic'); // alice-authored, allowlisted
+  git(T, 'checkout', '-q', 'main');
+  // a real 2-parent merge commit authored by a NON-allowlisted merger
+  git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub',
+    'merge', '-q', '--no-ff', '-m', 'Merge pull request #1 from topic', 'topic');
+  // runGate diffs main..HEAD, but here HEAD IS main — check the pushed range from the pre-merge tip.
+  const preMerge = git(T, 'rev-parse', 'HEAD^1').toString().trim();
+  const out = (() => { try { return execFileSync('bash', [GATE, preMerge], { cwd: T, stdio: 'pipe' }).toString(); }
+    catch (e) { return (e.stdout || '').toString() + `\nEXIT ${e.status}`; } })();
+  assert.match(out, /merge commit — allowlist waived/, out);
+  assert.doesNotMatch(out, /unverified user/, 'the merger email must NOT fail the allowlist');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('verified-commits gate: unresolvable base fails closed', () => {
   const T = scaffoldGateRepo();
   try {
@@ -4513,4 +4535,151 @@ test('runCheckpoint commits trust-log/ + build-log/ shard files (allowlist widen
   assert.match(git(T, 'log', '-1', '--format=%s').toString(), /EP-demo\/EP-demo-S01 by @abdelrahmannasr/, 'subject label derived from the shard filename');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
+// `yad update --push` — commit + push applied drift straight to the default branch
+// ---------------------------------------------------------------------------------------------
+const { buildUpdateMessage, groupByRoot, repoLabel } = await import('./update-commit.mjs');
+const { VERSION: PKG_VERSION } = await import('./manifest.mjs');
+
+test('buildUpdateMessage: valid chore(yad-update) subject, version-stamped, no [skip ci]/Task/Co-Authored-By', () => {
+  const m = buildUpdateMessage({ version: '3.7.0', items: ['hub/checks/verified-commits.sh', 'backend/checks/spec-link.sh'] });
+  const subject = m.split('\n')[0];
+  assert.equal(subject, 'chore(yad-update): sync SDLC install to yadflow v3.7.0');
+  assert.doesNotMatch(m, /\[skip ci\]/i, 'must NOT skip CI — the yad-update-guard has to run');
+  assert.doesNotMatch(m, /^Task:/mi);
+  assert.doesNotMatch(m, /Co-Authored-By/i);
+  assert.doesNotMatch(subject, /\.$/, 'no trailing period (commit-message gate)');
+  assert.match(m, /- hub\/checks\/verified-commits\.sh/, 'body lists changed items as bullets');
+});
+
+test('buildUpdateMessage: defaults to package version and a bodyless subject with no items', () => {
+  const m = buildUpdateMessage();
+  assert.equal(m, `chore(yad-update): sync SDLC install to yadflow v${PKG_VERSION}`);
+  assert.ok(!m.includes('\n'), 'no body when there are no items');
+});
+
+test('buildUpdateMessage: collapses newlines in an item so it cannot forge a trailer line', () => {
+  const m = buildUpdateMessage({ version: '1.0.0', items: ['x\nTask: EP-evil-S01-T01'] });
+  // the injected newline is collapsed, so the item stays a single `- ` bullet, not a Task trailer
+  assert.doesNotMatch(m, /^Task: EP-evil/mi);
+  assert.match(m, /- x Task: EP-evil-S01-T01/);
+});
+
+test('groupByRoot: groups paths + item labels by root, dedups paths, ignores rootless actions', () => {
+  const groups = groupByRoot([
+    { scope: 'hub', item: 'a', root: '/hub', paths: ['x', 'y'] },
+    { scope: 'hub', item: 'b', root: '/hub', paths: ['y', 'z'] },
+    { scope: 'be', item: 'c', root: '/repo', paths: ['p'] },
+    { scope: 'x', item: 'd' }, // no root/paths -> ignored
+  ]);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups[0].root, '/hub');
+  assert.deepEqual([...groups[0].paths].sort(), ['x', 'y', 'z']);
+  assert.deepEqual(groups[0].items, ['hub/a', 'hub/b']);
+  assert.deepEqual(groups[1].root, '/repo');
+});
+
+test('repoLabel: hub root -> "hub", connected repo -> its relative path', () => {
+  assert.equal(repoLabel('/hub', '/hub'), 'hub');
+  assert.equal(repoLabel('/hub', '/hub/demo/backend'), 'demo/backend');
+});
+
+// Scaffold a hub + connected backend, each with a bare origin on `main`, hub.json bridge-enabled.
+function scaffoldWithRemotes() {
+  const { T, backend } = scaffold();
+  const hubBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbare-')); git(hubBare, 'init', '-q', '--bare');
+  const beBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bebare-')); git(beBare, 'init', '-q', '--bare');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', bridge_enabled: true, roster: [] }));
+  // hub: seed a commit, name the branch main, wire origin
+  fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A');
+  git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', hubBare);
+  // backend: already has an init commit; name main + wire origin
+  git(backend, 'branch', '-q', '-M', 'main'); git(backend, 'remote', 'add', 'origin', beBare);
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  git(backend, 'config', 'user.name', 'x');
+  return { T, backend, hubBare, beBare };
+}
+
+test('reconcile --push: commits chore(yad-update) on hub + connected repo and pushes to origin/main', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    await grab(() => reconcile(T, { fix: true, push: true }));
+
+    // hub commit
+    const hubSubject = git(T, 'log', '-1', '--format=%s').toString().trim();
+    assert.match(hubSubject, new RegExp(`^chore\\(yad-update\\): sync SDLC install to yadflow v${PKG_VERSION.replace(/\./g, '\\.')}$`), 'hub subject');
+    assert.doesNotMatch(git(T, 'log', '-1', '--format=%B').toString(), /\[skip ci\]/i, 'no [skip ci] on hub commit');
+    // the version stamp + new guard workflow rode the hub commit
+    const hubFiles = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
+    assert.match(hubFiles, /\.sdlc\/cli-version\.json/, 'version stamp committed on hub');
+    assert.match(hubFiles, /\.github\/workflows\/yad-update-guard\.yml/, 'new guard workflow committed on hub');
+
+    // backend commit + new guard workflow installed
+    const beSubject = git(backend, 'log', '-1', '--format=%s').toString().trim();
+    assert.match(beSubject, /^chore\(yad-update\): sync SDLC install to yadflow v/, 'backend subject');
+    assert.ok(fs.existsSync(path.join(backend, '.github/workflows/yad-update-guard.yml')), 'backend guard workflow installed');
+
+    // both pushed to their bare origins
+    assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'hub pushed to origin/main');
+    assert.match(git(beBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'backend pushed to origin/main');
+    assert.ok(!process.exitCode, 'clean push -> zero exit code');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('commitAndPush: a path that is NOT its own repo top (nested plain dir) is skipped, never committed into the enclosing repo', async () => {
+  const { commitAndPush } = await import('./update-commit.mjs');
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nest-'));
+  try {
+    process.exitCode = 0;
+    git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(T, 'seed'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed'); git(T, 'branch', '-q', '-M', 'main');
+    // a registered repo whose clone is GONE: just a plain dir inside the hub, with recreated wiring
+    const fake = path.join(T, 'demo/backend'); fs.mkdirSync(path.join(fake, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(fake, 'checks/spec-link.sh'), '# wired\n');
+    const out = await grab(() => {
+      const r = commitAndPush({ root: fake, paths: ['checks/spec-link.sh'], items: ['backend/x'] },
+        { push: false, hubRoot: T, defaultBranch: 'main' });
+      assert.equal(r.committed, false); assert.equal(r.skipped, true);
+    });
+    assert.match(out, /not its own git repo/, 'nested plain dir is refused');
+    // the enclosing hub must NOT have gained a commit or a staged backend file
+    assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), '1', 'hub still has only the seed commit');
+    assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'nothing staged into the hub index');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('reconcile --push: a connected repo on a non-default branch is skipped, not disrupted', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    git(backend, 'checkout', '-q', '-b', 'feature/wip'); // backend off its default branch
+    const out = await grab(() => reconcile(T, { fix: true, push: true }));
+    assert.match(out, /not the default branch 'main' — skipped/, 'backend skipped with a warning');
+    // backend HEAD is still the original init commit — no yad-update commit forced onto the feature branch
+    assert.doesNotMatch(git(backend, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'no commit on the feature branch');
+    // and nothing was pushed to the backend remote
+    assert.doesNotMatch(git(beBare, 'log', '--oneline', '--all').toString(), /chore\(yad-update\)/, 'backend remote untouched');
+    // the hub itself (on main) still committed + pushed — one repo being skipped doesn't block the rest
+    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'hub still published');
+    // and the summary must NOT claim "merges can resume" when a repo was skipped (CodeRabbit fix)
+    assert.match(out, /update incomplete/, 'skipped repo => incomplete summary');
+    assert.doesNotMatch(out, /merges can resume/);
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
 });

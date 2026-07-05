@@ -1,0 +1,48 @@
+# yad-managed: yad-checks
+# yad-update-guard — integrity gate for DIRECT pushes to the default branch.
+#
+# `yad update --push` commits the applied SDLC drift (skills, gate scripts, CI wiring, verified-
+# authors) and pushes it straight to the default branch with NO pull request — so the pull_request
+# gate suite never fires. This workflow is the "skipped from CI EXCEPT verified-commits + the pattern
+# gate" contract: on every push to the default branch it runs ONLY those two gates over the pushed
+# range. It is not scoped to yad-update commits on purpose — ANY direct-to-main commit (a hotfix, a
+# force-push) then gets signature + subject-format checked, which is a strictly-good invariant. A
+# normal PR merge sails through: a GitHub merge/squash commit is platform-Verified, verified-commits.sh
+# waives the allowlist for merge commits (whose author is whoever clicked merge), and commit-message.sh
+# skips merges. CAVEAT: a *rebase-merge* recreates the PR commits WITHOUT GitHub's signature, so they
+# lose the Verified badge and fail the signature check on the direct push — teams using rebase-merge
+# should sign their commits or not wire this guard.
+name: yad-update-guard
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  update-guard:
+    # Only the default branch — pushes to feature branches are reviewed via their PR gate suite.
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }} # read-only: gh api commits/<sha> for the Verified badge
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Resolve the pushed range base
+        id: base
+        run: |
+          before="${{ github.event.before }}"
+          # First push / branch create / an unfetched before-SHA: fall back to the commit's parent.
+          # This checks only the tip commit (HEAD~1..HEAD) — a rare fail-open for the multi-commit
+          # first-push case, preferred over failing closed on a missing ref.
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ] \
+             || ! git rev-parse --verify --quiet "${before}^{commit}" >/dev/null; then
+            before="$(git rev-parse --verify --quiet HEAD~1 || git rev-parse HEAD)"
+          fi
+          echo "base=$before" >> "$GITHUB_OUTPUT"
+      - name: verified-commits
+        run: bash checks/verified-commits.sh "${{ steps.base.outputs.base }}"
+      - name: commit-message
+        run: bash checks/commit-message.sh "${{ steps.base.outputs.base }}"

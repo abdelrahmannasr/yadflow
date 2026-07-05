@@ -1,0 +1,48 @@
+# yad-managed-include: yad-checks
+# yad-update-guard — integrity gate for DIRECT pushes to the default branch, as an INCLUDABLE
+# fragment. Pulled into the root .gitlab-ci.yml via:
+#   include:
+#     - local: '.gitlab/ci/yad-update-guard.yml'
+#
+# `yad update --push` commits the applied SDLC drift and pushes it straight to the default branch with
+# NO merge request — so the MR gate suite never fires. This fragment is the "skipped from CI EXCEPT
+# verified-commits + the pattern gate" contract: on a push pipeline for the default branch it runs
+# ONLY those two gates over the pushed range ($CI_COMMIT_BEFORE_SHA..HEAD). Not scoped to yad-update
+# commits on purpose — ANY direct-to-default commit gets signature + subject-format checked.
+#
+# verified-commits needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope —
+# CI_JOB_TOKEN cannot read the commit-signature API (same requirement as yad-verified-commits).
+# Job names are yad-prefixed with `needs: []` and no `stage:` so they coexist with any other fragment.
+.yad_update_guard_rules:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+.yad_update_guard_base: &yad_update_guard_base
+  tags: [$YAD_RUNNER_TAGS]
+  image: node:20
+  variables:
+    GIT_DEPTH: "0" # full history so the gates can diff the pushed range
+  before_script:
+    # First push / an unresolvable before-SHA: fall back to the commit's parent (tip commit only —
+    # a rare fail-open for a multi-commit first push, preferred over failing closed).
+    - |
+      BASE="$CI_COMMIT_BEFORE_SHA"
+      if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] \
+         || ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
+        BASE="$(git rev-parse --verify --quiet HEAD~1 || git rev-parse HEAD)"
+      fi
+      export BASE
+
+yad-update-guard-verified-commits:
+  <<: *yad_update_guard_base
+  extends: .yad_update_guard_rules
+  needs: []
+  script:
+    - bash checks/verified-commits.sh "$BASE"
+
+yad-update-guard-commit-message:
+  <<: *yad_update_guard_base
+  extends: .yad_update_guard_rules
+  needs: []
+  script:
+    - bash checks/commit-message.sh "$BASE"

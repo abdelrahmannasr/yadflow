@@ -88,8 +88,11 @@ repo. For each commit in `<base>..HEAD`, two independent checks:
 - **Known author** — the commit's **author email** must appear in `.sdlc/verified-authors`, generated
   by `yad check --fix` from the hub roster's `email`/`emails` fields plus hub.json's
   `verified_authors` list (edit hub.json, never the generated file). Only the author is checked:
-  platform-generated merge/squash commits set the platform as committer, and their integrity is
-  covered by the signature check.
+  platform-generated squash commits keep the PR author (who is on the roster). Two identities are
+  **allowlist-waived but still signature-covered**: the `yad-gate-sync` bot, and any **merge commit**
+  (2+ parents) — a merge's author is whoever pressed merge (often a platform noreply), not a roster
+  human, and its content already passed the PR gate suite. This waiver matters for the push-on-default
+  `yad-update-guard` (§9), which — unlike this PR-triggered gate — sees merge commits.
 
 Degradation is explicit, never silent: a missing allowlist SKIPs the author check with a warning
 (configure roster emails, re-wire); no GitHub/GitLab remote SKIPs the signature check (the badge is a
@@ -173,6 +176,38 @@ that path, and spec-link still proves the story link.
   scans every thread epic's `reconcile-debt.json`. An **open** entry the current epic does not own
   **FAILS** the change (the thread is frozen until the hotfix debt is paid: artifacts updated + a
   regression test added, then `status: paid`). Thread-scoped — only the affected thread freezes.
+
+## 9. yad-update-guard (`templates/github/yad-update-guard.yml`, `templates/gitlab/yad-update-guard.gitlab-ci.yml`)
+
+The **integrity gate for direct pushes to the default branch**. `yad update --push` (`cli/update-commit.mjs`)
+commits the applied SDLC drift (skills, gate scripts, CI wiring, `verified-authors`) and pushes it
+**straight to the default branch with no PR/MR** — so the `pull_request`/`merge_request` gate suite never
+fires. This workflow is the "skipped from CI **except** verified-commits + the pattern gate" contract: on a
+**push** to the default branch it runs **only** `verified-commits` and `commit-message` over the pushed
+range (`github.event.before..HEAD` / `$CI_COMMIT_BEFORE_SHA..HEAD`, falling back to `HEAD~1` when the
+before-SHA is a zero/unresolvable ref). It is deliberately **not** scoped to `chore(yad-update)` commits:
+**any** direct-to-default commit (a hotfix, a force-push) is then signature- + subject-format-checked, a
+strictly-good invariant. Normal PR merges sail through — merge commits are platform-Verified and
+`commit-message` skips merges. The `yad update --push` commit itself carries **no `[skip ci]`** (unlike the
+machine-state `yad checkpoint`/`gate ci` commits) precisely so this guard runs on it.
+
+Wired into **every connected repo and the hub** (`REPO_WIRING`/`HUB_WIRING` in `cli/manifest.mjs`). On
+GitHub it is a self-contained workflow (`.github/workflows/yad-update-guard.yml`, marker `# yad-managed:
+yad-checks`), gated to the default branch by a job-level `if: github.ref_name ==
+github.event.repository.default_branch`. On GitLab it is an includable fragment
+(`.gitlab/ci/yad-update-guard.yml`, marker `# yad-managed-include: yad-checks`) whose jobs run on
+`$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH`; its `include:` line
+(`- local: '.gitlab/ci/yad-update-guard.yml'`) is added to the root `.gitlab-ci.yml` the same additive way
+as the other fragments (see *Sync with existing CI* below). **On GitLab the fragment is inert until that
+include line exists** — `yad update --push` warns when it pushes to a gitlab repo whose root pipeline
+lacks it.
+
+**Prerequisites / caveats.** Direct pushes to the default branch must be permitted for the committer
+(adjust branch protection). The commits `yad update --push` creates must be **signed** and their author
+**allowlisted**, or this guard rejects them — `yad update --push` runs a pre-flight that warns when local
+commit signing is unset or the operator's git email is not in `.sdlc/verified-authors`. Ordinary PR merges
+pass (merge commits are allowlist-waived + Verified), but a **rebase-merge** recreates the PR commits
+without the platform signature, so a rebase-merge team should sign commits or not wire this guard.
 
 ## CI wiring (both platforms)
 

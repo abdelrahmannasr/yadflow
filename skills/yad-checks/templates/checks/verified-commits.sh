@@ -100,7 +100,15 @@ while IFS= read -r sha; do
   is_bot=0
   case "${author}|$(git log -1 --format=%an "$sha" | tr '[:upper:]' '[:lower:]')" in *yad-gate-sync*) is_bot=1 ;; esac
 
-  if [ "$authors_on" = 1 ] && [ "$is_bot" = 0 ]; then
+  # A merge commit (2+ parents) is authored by whoever pressed "merge" — often a platform noreply
+  # address, not a roster human — while its CONTENT already passed the PR gate suite. Waive the
+  # allowlist for it (like the bot), but STILL require the signature below: a platform merge commit is
+  # Verified, so a locally-forged merge pushed direct-to-default cannot dodge the check. This matters
+  # for the push-on-default yad-update-guard, which (unlike the PR-triggered gates) sees merge commits.
+  is_merge=0
+  [ "$(git log -1 --format=%P "$sha" | wc -w | tr -d '[:space:]')" -ge 2 ] && is_merge=1
+
+  if [ "$authors_on" = 1 ] && [ "$is_bot" = 0 ] && [ "$is_merge" = 0 ]; then
     # tolerate CRLF / stray surrounding whitespace in a hand-edited allowlist
     if grep -vE '^[[:space:]]*(#|$)' "$ALLOWLIST" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
         | tr '[:upper:]' '[:lower:]' | grep -qxF "$author"; then
@@ -111,6 +119,8 @@ while IFS= read -r sha; do
     fi
   elif [ "$is_bot" = 1 ]; then
     echo "PASS [verified-commits]: ${short} gate-sync bot — allowlist waived (signature still required)"
+  elif [ "$is_merge" = 1 ]; then
+    echo "PASS [verified-commits]: ${short} merge commit — allowlist waived (signature still required)"
   fi
 
   if [ -n "$platform" ]; then
