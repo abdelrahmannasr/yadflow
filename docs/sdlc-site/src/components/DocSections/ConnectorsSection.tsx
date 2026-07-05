@@ -23,6 +23,7 @@ const FACTS = [
   'Every connector is idempotent and refreshable; most are one-per-project (repos can be many).',
   'A connector is never a gated state — it never touches epic state, approvals, or the contract lock.',
   'Staleness for code repos is tracked by HEAD sha and is a human decision: yad repo list / yad repo refresh.',
+  'yad repo refresh --push publishes the refreshed code-maps + registry to the hub default branch as a chore(hub): sync code-context [skip ci] audit commit.',
 ];
 
 export function ConnectorsSection() {

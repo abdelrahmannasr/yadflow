@@ -4710,3 +4710,143 @@ test('reconcile --push: a connected repo on a non-default branch is skipped, not
     for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------------------------
+// `yad repo refresh --push` — publish the connected-repo code-context to the hub default branch
+// ---------------------------------------------------------------------------------------------
+const { buildCodeMapMessage, codeMapPathspecs, summarizeCodeContext, publishCodeContext } = await import('./repo-publish.mjs');
+
+test('buildCodeMapMessage: valid chore(hub) code-context subject with [skip ci], no Task/Co-Authored-By', () => {
+  const m = buildCodeMapMessage({ label: 'backend', author: '@amn', basenames: ['.sdlc/code-context/backend/code-map.md', '.sdlc/repos.json'] });
+  const subject = m.split('\n')[0];
+  assert.equal(subject, 'chore(hub): sync code-context — backend by @amn [skip ci]');
+  assert.doesNotMatch(m, /^Task:/mi);
+  assert.doesNotMatch(m, /Co-Authored-By/i);
+  assert.match(m, /Updated: .*code-map\.md/, 'body lists the staged files');
+});
+
+test('buildCodeMapMessage: collapses newlines in the author so it cannot forge a trailer line', () => {
+  const m = buildCodeMapMessage({ label: 'backend', author: 'x\nTask: EP-evil-S01-T01', basenames: [] });
+  assert.doesNotMatch(m, /^Task: EP-evil/mi);
+  assert.match(m.split('\n')[0], /by x Task: EP-evil-S01-T01 \[skip ci\]$/);
+});
+
+test('summarizeCodeContext: labels single repo / N repos / registry-only', () => {
+  assert.equal(summarizeCodeContext(['.sdlc/code-context/backend/code-map.md']).label, 'backend');
+  assert.equal(summarizeCodeContext(['.sdlc/code-context/a/code-map.md', '.sdlc/code-context/b/code-map.md']).label, '2 repos');
+  assert.equal(summarizeCodeContext(['.sdlc/repos.json']).label, 'registry');
+});
+
+test('codeMapPathspecs: only existing code-maps + the registry (never the gitignored pack, never a missing map)', () => {
+  const { T } = scaffold();
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# map\n');
+    const registry = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+    registry.repos.push({ name: 'mobile', path: 'demo/mobile', codeMap: '.sdlc/code-context/mobile/code-map.md' });
+    const specs = codeMapPathspecs(T, registry);
+    assert.ok(specs.includes('.sdlc/code-context/backend/code-map.md'), 'existing code-map included');
+    assert.ok(specs.includes('.sdlc/repos.json'), 'registry included');
+    assert.ok(!specs.includes('.sdlc/code-context/mobile/code-map.md'), 'a repo with no on-disk map is excluded');
+    assert.ok(!specs.some((s) => s.includes('pack.md')), 'gitignored pack never staged');
+    // name filter: a scoped refresh only stages the named repo's map (+ the registry)
+    const scoped = codeMapPathspecs(T, registry, 'backend');
+    assert.ok(scoped.includes('.sdlc/code-context/backend/code-map.md'), 'named repo map included');
+    assert.deepEqual(codeMapPathspecs(T, registry, 'mobile'), ['.sdlc/repos.json'], 'scoping to a repo with no on-disk map leaves only the registry');
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main, then is idempotent', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // a freshly (AI-)regenerated code-map in the hub working tree
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# backend code-map\n');
+    await grab(() => publishCodeContext(T, { push: true }));
+
+    const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
+    assert.match(subject, /^chore\(hub\): sync code-context — backend by .+ \[skip ci\]$/, 'audit-trail subject');
+    const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
+    assert.match(files, /\.sdlc\/code-context\/backend\/code-map\.md/, 'code-map committed');
+    assert.doesNotMatch(files, /pack\.md/, 'the gitignored pack never rides along');
+    assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(hub\): sync code-context/, 'pushed to origin/main');
+    assert.ok(!process.exitCode, 'clean push -> zero exit code');
+
+    // idempotent: a re-run with no code-context change commits nothing
+    const count = git(T, 'rev-list', '--count', 'HEAD').toString().trim();
+    const out2 = await grab(() => publishCodeContext(T, { push: true }));
+    assert.match(out2, /nothing to commit/i, 'unchanged code-context -> nothing to commit');
+    assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), count, 'no second commit');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('publishCodeContext: a named refresh publishes only that repo\'s code-map, not others', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // register a second repo and give both an on-disk (uncommitted) code-map in the hub
+    const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+    reg.repos.push({ name: 'mobile', path: 'demo/mobile', default_branch: 'main', codeMap: '.sdlc/code-context/mobile/code-map.md' });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(reg));
+    for (const n of ['backend', 'mobile']) {
+      fs.mkdirSync(path.join(T, `.sdlc/code-context/${n}`), { recursive: true });
+      fs.writeFileSync(path.join(T, `.sdlc/code-context/${n}/code-map.md`), `# ${n} map\n`);
+    }
+    await grab(() => publishCodeContext(T, { push: false, name: 'backend' }));
+
+    const committed = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
+    assert.match(committed, /code-context\/backend\/code-map\.md/, 'named repo code-map committed');
+    assert.doesNotMatch(committed, /code-context\/mobile\/code-map\.md/, 'unrelated repo code-map NOT swept in');
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/code-context/mobile/code-map.md')), 'mobile map still present, left unpublished');
+    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context — backend by /, 'label scoped to the named repo, not "2 repos"');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('publishCodeContext: non-default branch is skipped unless --allow-branch', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# map\n');
+    git(T, 'checkout', '-q', '-b', 'chore/wip'); // hub off its default branch
+    const out = await grab(() => publishCodeContext(T, { push: false }));
+    assert.match(out, /not the default branch 'main'/, 'guard refuses a non-default branch');
+    assert.doesNotMatch(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, 'no commit on the wip branch');
+    assert.ok(process.exitCode, 'guard sets a non-zero exit code');
+
+    // --allow-branch overrides: the commit lands on the current branch
+    process.exitCode = 0;
+    await grab(() => publishCodeContext(T, { push: false, allowBranch: true }));
+    assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, '--allow-branch commits on the wip branch');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('publishCodeContext: outside a hub (no hub.json) fails with a non-zero exit code', async () => {
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nohub-'));
+  try {
+    process.exitCode = 0;
+    git(T, 'init', '-q');
+    const out = await grab(() => publishCodeContext(T, { push: false }));
+    assert.match(out, /hub\.json/, 'refuses to publish outside the product hub');
+    assert.ok(process.exitCode, 'sets a non-zero exit code');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});

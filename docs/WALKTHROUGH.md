@@ -47,7 +47,9 @@ states stay `human_approve` forever.
    (existing endpoints/events/data-models/modules, secret-scanned). Clones/fetches as the **local user**
    (SSH or credential helper; GitHub or GitLab; no stored tokens). Re-run for any new repo. Freshness is a
    **human decision**: `yad repo list` shows fresh/stale, `yad repo refresh [name]` re-packs a moved repo
-   (skills flag staleness and point here — they never silently re-pack). Greenfield → skip it.
+   (skills flag staleness and point here — they never silently re-pack). Greenfield → skip it. Once the
+   AI has regenerated the code-map, `yad repo refresh [name] --push` publishes the refreshed code-maps +
+   registry to the hub's default branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
 6. **(Optional) Connect tools** so the matching steps do real work (each degrades gracefully and is
    recorded if absent): `yad-connect-design action: connect` (Figma-first → `design.json`, lets
    `yad-ui` materialize screens), `yad-connect-testing action: connect` (Playwright-first →

@@ -4,27 +4,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, readJSON, writeJSON, exists, run,
+  c, log, ok, info, warn, hand, readJSON, writeJSON, exists,
 } from './lib.mjs';
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
-// The yad-update-guard will reject the very commits `--push` is about to create unless they are
-// signed AND their author email is allowlisted. Warn up front (never block) so the operator isn't
-// surprised by a reddened default branch across every repo. Best-effort, hub-identity based.
-function preflightGuardReadiness(root) {
-  const gitcfg = (k) => run('git', ['config', '--get', k], { cwd: root }).stdout;
-  // Only commit.gpgsign actually enables signing — user.signingkey merely picks WHICH key once
-  // signing is on, so it must not count (it would hide the warning while commits stay unsigned).
-  const signing = run('git', ['config', '--bool', '--get', 'commit.gpgsign'], { cwd: root }).stdout === 'true';
-  if (!signing) warn('commit signing is not enabled (git config commit.gpgsign true) — the yad-update-guard requires a platform-Verified signature; unsigned pushes will fail the gate.');
-  const email = gitcfg('user.email').toLowerCase();
-  const allow = readFileSafe(path.join(root, '.sdlc', 'verified-authors'));
-  const known = allow.split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#'));
-  if (known.length && email && !known.includes(email)) {
-    warn(`your git email <${email}> is not in .sdlc/verified-authors — the yad-update-guard will reject these commits (add it to the hub roster and re-run \`yad check --fix\`).`);
-  }
-}
+import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, authorsActions,
