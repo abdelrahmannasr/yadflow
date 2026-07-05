@@ -55,6 +55,11 @@ yad-gate-sync:
     # Pinned glab binary (node:20 has no glab). Alternative: image registry.gitlab.com/gitlab-org/cli.
     - GLAB_VERSION=1.55.0
     - curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_linux_amd64.deb" -o /tmp/glab.deb && dpkg -i /tmp/glab.deb
+    # Pinned jq binary (node:20 has none, and `glab api` has NO built-in --jq like `gh api` does —
+    # it errors "unknown flag: --jq"). We fetch raw JSON from glab and filter it through real jq;
+    # jq streams glab's concatenated per-page --paginate arrays natively.
+    - JQ_VERSION=1.7.1
+    - curl -fsSL "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64" -o /usr/local/bin/jq && chmod +x /usr/local/bin/jq
     - git config user.name "yad-gate-sync" && git config user.email "yad-gate-sync@noreply.${CI_SERVER_HOST}"
     - git remote set-url origin "https://oauth2:${SDLC_GATE_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
     - export GITLAB_TOKEN="$SDLC_GATE_TOKEN" GITLAB_HOST="$CI_SERVER_URL"
@@ -73,8 +78,8 @@ yad-gate-sync:
         # runs in a subshell, losing rc). An MR stuck beyond the window needs manual recovery — run
         # `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default branch.
         SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
-        glab api --paginate "projects/:id/merge_requests?state=merged&updated_after=${SINCE}&per_page=100&order_by=updated_at" \
-          --jq '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' > /tmp/yad-merged-mrs || rc=1
+        glab api --paginate "projects/:id/merge_requests?state=merged&updated_after=${SINCE}&per_page=100&order_by=updated_at" > /tmp/yad-raw-mrs 2>/dev/null || rc=1
+        jq -r '.[] | select(.source_branch | startswith("review/EP-")) | "\(.iid) \(.source_branch)"' /tmp/yad-raw-mrs > /tmp/yad-merged-mrs || rc=1
         while read -r IID REF; do
           [ -n "$IID" ] || continue
           git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
@@ -85,7 +90,9 @@ yad-gate-sync:
         # IID from its source branch so `gate ci` can re-read approvals, then advance there.
         REVIEW_BRANCH="$(printf '%s' "$CI_COMMIT_MESSAGE" | grep -oE 'review/EP-[A-Za-z0-9._/-]+' | head -n1 || true)"
         if [ -n "$REVIEW_BRANCH" ]; then
-          IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" --jq '.[0].iid' 2>/dev/null || true)"
+          # `.[0].iid // empty` so an empty MR array yields an empty IID (jq prints "null" otherwise),
+          # which keeps the "could not resolve" branch below correct.
+          IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" 2>/dev/null | jq -r '.[0].iid // empty' || true)"
           if [ -n "$IID" ]; then
             # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
             npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
