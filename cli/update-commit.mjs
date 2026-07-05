@@ -148,8 +148,10 @@ export function commitAndPush(group, { push = false, allowBranch = false, hubRoo
 
   if (!push) return { label, committed: true };
   if (pushWithRebase(root, branch).ok) { ok(`${label}: pushed to origin/${branch}`); return { label, committed: true, pushed: true }; }
+  // The commit already landed locally — a re-run of `yad update --push` would see no drift and skip
+  // this repo, so point the operator at the direct push of the commit that already exists.
   fail(`${label}: could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
-  hand(`resolve it in ${label === 'hub' ? '.' : label}, then re-run \`yad update --push\``);
+  hand(`resolve it in ${label === 'hub' ? '.' : label}, then push the existing commit with \`git push origin ${branch}\``);
   process.exitCode = 1;
   return { label, committed: true, pushed: false, error: true };
 }
@@ -177,8 +179,17 @@ export function commitUpdates(hubRoot, groups, { push = false, allowBranch = fal
 
   const pushed = results.filter((r) => r.pushed).length;
   const committed = results.filter((r) => r.committed).length;
+  const errored = results.filter((r) => r.error).length;
+  const skipped = results.filter((r) => r.skipped).length;
   log('');
-  if (push) ok(`update published — ${pushed}/${groups.length} repo(s) pushed; merges can resume`);
-  else ok(`update committed locally — ${committed}/${groups.length} repo(s); push with \`yad update --push\``);
+  if (push) {
+    if (errored || skipped) {
+      // Some repos did NOT receive the update (a push/commit failure, or a branch/clone skip) — do not
+      // signal "all clear". commitAndPush already set process.exitCode on hard errors.
+      warn(`update incomplete — ${pushed}/${groups.length} repo(s) pushed, ${errored} failed, ${skipped} skipped; keep merges paused and finish the rest (see above).`);
+    } else {
+      ok(`update published — ${pushed}/${groups.length} repo(s) pushed; merges can resume`);
+    }
+  } else ok(`update committed locally — ${committed}/${groups.length} repo(s); push with \`yad update --push\``);
   return results;
 }

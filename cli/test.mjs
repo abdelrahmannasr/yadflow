@@ -4675,6 +4675,9 @@ test('reconcile --push: a connected repo on a non-default branch is skipped, not
     assert.doesNotMatch(git(beBare, 'log', '--oneline', '--all').toString(), /chore\(yad-update\)/, 'backend remote untouched');
     // the hub itself (on main) still committed + pushed — one repo being skipped doesn't block the rest
     assert.match(git(T, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'hub still published');
+    // and the summary must NOT claim "merges can resume" when a repo was skipped (CodeRabbit fix)
+    assert.match(out, /update incomplete/, 'skipped repo => incomplete summary');
+    assert.doesNotMatch(out, /merges can resume/);
   } finally {
     process.exitCode = prev;
     for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });

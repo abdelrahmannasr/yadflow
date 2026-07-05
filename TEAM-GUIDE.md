@@ -173,13 +173,13 @@ npx yadflow setup
 > of the hub and every connected repo, as one `chore(yad-update): sync SDLC install to yadflow
 > vX.Y.Z` commit per repo. It stages only what it wrote (never `git add -A`) and only commits on a
 > repo's default branch — a repo on a feature branch is skipped with a warning, never disturbed.
-> Because it pushes directly to the default branch there is **no PR**, so the normal gate suite is
-> skipped; a dedicated push-on-main **`yad-update-guard`** workflow re-checks just two things on the
-> commit — that it is **signed by a known author** (`verified-commits`) and follows the **commit
-> convention** (`commit-message`). yadflow prints an announce banner before it starts: **tell the team
-> and pause merges on those repos until it finishes**, so the direct-to-main pushes don't collide with
-> in-flight work. (Direct pushes to the default branch must be permitted for the committer — adjust
-> branch protection accordingly.)
+> Because it pushes directly to the default branch there is **no PR/MR**, so the normal gate suite is
+> skipped; a dedicated push-on-default-branch **`yad-update-guard`** (a GitHub workflow / GitLab CI
+> fragment) re-checks just two things on the commit — that it is **signed by a known author**
+> (`verified-commits`) and follows the **commit convention** (`commit-message`). yadflow prints an
+> announce banner before it starts: **tell the team and pause merges on those repos until it
+> finishes**, so the direct-to-default-branch pushes don't collide with in-flight work. (Direct pushes
+> to the default branch must be permitted for the committer — adjust branch protection accordingly.)
 
 <details>
 <summary>Manual fallback (no CLI)</summary>

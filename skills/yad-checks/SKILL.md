@@ -97,7 +97,7 @@ Copy from this skill's `templates/`:
     (`yad-checks.gen.yml`) and ensure its `name:` does not clash. Never merge jobs into a foreign
     workflow; never edit one.
   - Also install `templates/github/yad-update-guard.yml` → `.github/workflows/yad-update-guard.yml`
-    (marker `# yad-managed: yad-checks`) — the push-on-main integrity gate for direct-to-default
+    (marker `# yad-managed: yad-checks`) — the push-on-default integrity gate for direct-to-default
     commits (`yad update --push`); it runs only `verified-commits` + `commit-message`. Same
     own-a-file rules as above.
 

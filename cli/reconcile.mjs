@@ -14,8 +14,10 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 // surprised by a reddened default branch across every repo. Best-effort, hub-identity based.
 function preflightGuardReadiness(root) {
   const gitcfg = (k) => run('git', ['config', '--get', k], { cwd: root }).stdout;
-  const signing = gitcfg('commit.gpgsign') === 'true' || !!gitcfg('user.signingkey');
-  if (!signing) warn('commit signing is not configured (git config commit.gpgsign) — the yad-update-guard requires a platform-Verified signature; unsigned pushes will fail the gate.');
+  // Only commit.gpgsign actually enables signing — user.signingkey merely picks WHICH key once
+  // signing is on, so it must not count (it would hide the warning while commits stay unsigned).
+  const signing = run('git', ['config', '--bool', '--get', 'commit.gpgsign'], { cwd: root }).stdout === 'true';
+  if (!signing) warn('commit signing is not enabled (git config commit.gpgsign true) — the yad-update-guard requires a platform-Verified signature; unsigned pushes will fail the gate.');
   const email = gitcfg('user.email').toLowerCase();
   const allow = readFileSafe(path.join(root, '.sdlc', 'verified-authors'));
   const known = allow.split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#'));
