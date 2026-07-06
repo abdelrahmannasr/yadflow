@@ -45,7 +45,9 @@ no clone needed.
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
-bypasses the commit atomic guard). Commit flags: `--type`, `-m/--message`, `--task`, `--ai
+bypasses the commit atomic guard). Commit flags: `--type`, `-m/--message`, `--task` (a
+`<story>-T<NN>` id — an explicit value is validated against the spec-link gate and `yad commit`
+fails locally if it is malformed), `--ai
 <claude\|copilot\|cursor\|coderabbit\|none>`, `--contract-change`, `--dry-run`. `open-pr` flags:
 `--repo`, `--risk <low\|medium\|high>`, `--contract-change`. `ship` takes the union of the `commit`
 and `open-pr` flags (it runs `open-pr` only if the commit lands).

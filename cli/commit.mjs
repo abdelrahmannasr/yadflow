@@ -2,12 +2,14 @@
 // Subject is Conventional Commits; trailers are emitted in the fixed order
 // Task -> Contract-Change -> Co-Authored-By. The human git author OWNS the commit; the AI is only a
 // co-author (flagged with --ai, or `none` for human-only). An atomic-commit guard keeps diffs small.
+// An explicit --task id is validated against the spec-link gate contract (<story>-T<NN>) so a
+// malformed trailer fails locally rather than after a push.
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, run, exists } from './lib.mjs';
 import {
   COMMIT_TYPES, AI_COAUTHORS, ATOMIC_FILE_LIMIT,
-  TASK_TRAILER, CONTRACT_CHANGE_TRAILER, COAUTHOR_TRAILER, PROJECT_FILES,
+  TASK_TRAILER, CONTRACT_CHANGE_TRAILER, COAUTHOR_TRAILER, PROJECT_FILES, TASK_ID_RE,
 } from './manifest.mjs';
 
 // PURE — unit tested directly. Build the full commit message text.
@@ -16,6 +18,13 @@ export function buildCommitMessage({ type, subject, task, contractChange = false
   if (!subject || !subject.trim()) throw new Error('commit subject is required');
   if (!(ai in AI_COAUTHORS)) throw new Error(`unknown --ai "${ai}" (one of: ${Object.keys(AI_COAUTHORS).join(', ')})`);
   if (/\.$/.test(subject.trim())) throw new Error('subject must not end with a period');
+  // A malformed task id (e.g. a bare story `EP-x-S01` with no -T<NN>) commits fine locally but
+  // then fails the spec-link CI gate — forcing a history rewrite + force-push. Reject it here so
+  // it never enters a trailer. Well-formed branch-derived ids (taskFromBranch) are stricter and pass;
+  // a lowercase-suffix branch is caught here, matching the case-sensitive spec-link grep.
+  if (task && !TASK_ID_RE.test(task)) {
+    throw new Error(`invalid --task "${task}" (expected <story>-T<NN>, e.g. EP-x-S01-T02) — the spec-link CI gate would reject it`);
+  }
 
   const trailers = [];
   if (task) trailers.push(`${TASK_TRAILER}: ${task}`);
