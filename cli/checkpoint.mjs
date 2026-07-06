@@ -4,10 +4,19 @@
 // working tree but never commits them, so teammates/CI/`yad status` on other machines see stale trust
 // evidence. checkpoint lands them with a `chore(hub): ...` message.
 //
+// It also carries the back-half story `status:` flip (approved → in-build/shipped) that
+// yad-engineer-review writes into stories/<id>.md but no command committed — the #112 drift where
+// build-log said shipped while the story artifact still said approved. Only story files with build-log
+// ship evidence are carried (storyStatusPathspecs), AND only when their staged change is the `status:`
+// line alone (stagedStoryIsStatusOnly) — so it stays a back-half record, never a raw edit that would
+// slip prose onto the default branch under a `[skip ci]` commit that bypasses review.
+//
 // Two invariants keep it out of the gates' way:
-//   1. It stages ONLY the three back-half ledgers by an explicit allowlist — never `git add -A`,
-//      which would sweep the CI-owned front-half ledger (state/approvals/comments/hub-prs.json,
-//      reviews/*.md) and trip the ledger-guard gate.
+//   1. It stages ONLY the back-half ledgers + build-log-backed story flips by an explicit allowlist —
+//      never `git add -A`, which would sweep the CI-owned front-half ledger (state/approvals/
+//      comments/hub-prs.json, reviews/*.md) and trip the ledger-guard gate. (ledger-guard does NOT
+//      protect stories/*.md, and this commits to the default branch, never a PR range, so the carried
+//      story flip is safe.)
 //   2. It commits ONLY on the default branch (mirroring gate.mjs), so the commit never enters a PR's
 //      base..HEAD range — where verified-commits would fail an unsigned commit and its [skip ci]
 //      marker would strand the PR's required checks.
@@ -18,6 +27,8 @@ import { PROJECT_FILES } from './manifest.mjs';
 import { loadHub } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 import { hubGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { readShips } from './ledger.mjs';
+import { readFrontmatter } from './epic-state.mjs';
 
 // The machine-written back-half ledgers, relative to an epic's dir. The two append-only logs are
 // shard-then-fold (cli/ledger.mjs): each is a folded file PLUS a shard dir of loose per-entry files —
@@ -44,6 +55,50 @@ export function backHalfPathspecs(root) {
   return out;
 }
 
+// The two back-half story statuses. `in-build` = some of a story's tasks shipped; `shipped` = all did.
+// Both are set ONLY by the build half (yad-engineer-review), never by the front-gate ladder
+// (cli/artifact-status.mjs PRESERVEs them). See #112.
+const BACK_HALF_STATUSES = new Set(['in-build', 'shipped']);
+
+// The repo-relative pathspecs for story files whose back-half `status:` flip we carry alongside the
+// ledgers (#112). The flip is authored by yad-engineer-review into the working tree but no command
+// committed it, so it drifted (build-log said shipped, stories/<id>.md still said approved) and the
+// only recovery was a raw git-to-main push. A story is a CANDIDATE iff BOTH hold:
+//   1. it has >=1 ship recorded in build-log (the build-half evidence), and
+//   2. its current frontmatter `status:` is a back-half value (in-build | shipped).
+// A candidate is only actually carried when its staged diff is the `status:` line ALONE — runCheckpoint
+// drops any candidate whose working tree also changed prose/other frontmatter (stagedStoryIsStatusOnly),
+// so an unrelated edit can never ride into a `chore(hub) … [skip ci]` commit that bypasses review.
+// The shared `git add`/`diff --cached` machinery then commits ONLY the ones that actually differ from
+// HEAD (so a story already committed at shipped is a no-op).
+//
+// A corrupt build-log in one epic must not block checkpointing every OTHER epic's ledgers, so a
+// readShips throw is caught per epic (that epic simply carries no story flip; its corrupt ledger is
+// still staged by backHalfPathspecs for a human to see).
+export function storyStatusPathspecs(root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!fs.existsSync(epicsDir)) return [];
+  const out = [];
+  for (const e of fs.readdirSync(epicsDir, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const epicDir = path.join(epicsDir, e.name);
+    const storiesDir = path.join(epicDir, 'stories');
+    if (!fs.existsSync(storiesDir)) continue;
+    let shipped;
+    try { shipped = new Set(readShips(epicDir).map((s) => s.story)); }
+    catch { continue; } // corrupt build-log — skip story-carry for this epic, leave its ledger to a human
+    for (const d of fs.readdirSync(storiesDir, { withFileTypes: true })) {
+      if (!d.isFile() || !d.name.endsWith('.md')) continue;
+      const storyId = d.name.slice(0, -3);
+      if (!shipped.has(storyId)) continue;
+      if (BACK_HALF_STATUSES.has(readFrontmatter(path.join(storiesDir, d.name)).status)) {
+        out.push(path.posix.join('epics', e.name, 'stories', d.name));
+      }
+    }
+  }
+  return out;
+}
+
 // PURE — turn the staged pathspecs into the subject label + the body's file list. A story id is pulled
 // from any file that carries one (`build-state/<story>.json`, a `trust-log/`/`build-log/` shard whose
 // name starts with the story id); the folded logs are epic-scoped. Prefer the most specific label.
@@ -52,9 +107,11 @@ export function summarizeStaged(files = []) {
   const epics = new Set();
   const basenames = [];
   for (const f of files) {
-    const m = f.match(/^epics\/([^/]+)\/\.sdlc\/(.+)$/);
+    // A back-half ledger (…/.sdlc/…) or a carried story-status flip (…/stories/<id>.md, #112).
+    const m = f.match(/^epics\/([^/]+)\/(?:\.sdlc\/(.+)|stories\/(.+\.md))$/);
     if (!m) continue;
-    const [, epic, rest] = m;
+    const [, epic] = m;
+    const rest = m[2] ?? m[3];
     epics.add(epic);
     // the first `…-S0N` token in the filename is the story id (ids contain hyphens; `[\w-]` stops at `/`)
     const s = rest.match(/([A-Za-z][\w-]*?-S\d+)/);
@@ -91,6 +148,24 @@ export function buildCheckpointMessage({ label, author, basenames = [] }) {
   return body ? `${subject}\n\n${body}` : subject;
 }
 
+// True iff a story file's STAGED diff changes ONLY the frontmatter `status:` line — every added or
+// removed content line is a `status:` line. A newly-added file (all lines added) or any prose/other
+// edit fails, so only a clean flip is carried into the `[skip ci]` chore commit; anything broader is
+// left for a reviewed change (#112 review-bypass guard). `git` is a hubGit-style accessor.
+export function stagedStoryIsStatusOnly(git, file) {
+  const d = git('diff', '--cached', '-U0', '--', file);
+  if (!d.ok) return false;
+  let changes = 0;
+  for (const ln of d.stdout.split('\n')) {
+    if (ln.startsWith('+++') || ln.startsWith('---') || ln.startsWith('@@')) continue; // headers/hunks
+    if (ln.startsWith('+') || ln.startsWith('-')) {
+      if (!/^status:\s*\S/.test(ln.slice(1).trimStart())) return false; // a non-status change ⇒ not status-only
+      changes++;
+    }
+  }
+  return changes > 0;
+}
+
 export async function runCheckpoint(root, opts = {}) {
   log(c.bold('\nyad checkpoint'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
@@ -108,7 +183,9 @@ export async function runCheckpoint(root, opts = {}) {
   // Default-branch guard (invariant 2) — shared with `yad tidy up`.
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad checkpoint' })) return;
 
-  const pathspecs = backHalfPathspecs(root);
+  // The machine ledgers PLUS any build-log-backed story `status:` flip (#112) — one commit records
+  // both, so the story artifact never drifts from build-log and no raw git-to-main push is needed.
+  const pathspecs = [...backHalfPathspecs(root), ...storyStatusPathspecs(root)];
   if (!pathspecs.length) { info('no back-half ledgers found — nothing to checkpoint'); return; }
 
   // Stage the allowlist. `git add -- <spec>` picks up new + modified files, and deletions of tracked
@@ -117,6 +194,19 @@ export async function runCheckpoint(root, opts = {}) {
   // append-only audit ledger vanishing is an anomaly a human should see, not something to auto-commit.
   const add = git('add', '--', ...pathspecs);
   if (!add.ok) { fail(`git add failed — ${add.stderr.split('\n')[0] || add.code}`); process.exitCode = 1; return; }
+
+  // #112 review-bypass guard: a story is only carried when its staged change is the `status:` line
+  // ALONE. Unstage any candidate whose working tree also touched prose/other frontmatter — those
+  // belong in a reviewed change, not a `[skip ci]` chore commit. Ledgers and clean flips are untouched.
+  const storyStaged = git('diff', '--cached', '--name-only', '--', ...pathspecs).stdout
+    .split('\n').filter((f) => /\/stories\/[^/]+\.md$/.test(f));
+  for (const f of storyStaged) {
+    if (!stagedStoryIsStatusOnly(git, f)) {
+      git('reset', '-q', '--', f);
+      info(`skipped ${f} — its change is more than the status: line; commit it through review`);
+    }
+  }
+
   if (git('diff', '--cached', '--quiet', '--', ...pathspecs).ok) {
     info('back-half state unchanged — nothing to commit');
     return;

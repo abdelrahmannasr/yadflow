@@ -97,9 +97,11 @@ engineer-review rule is satisfied (Step 2). Then:
   the back-half ledgers just written (the `build-log/` shard, and the `trust-log/` shard /
   `build-state/<story>.json` if the story ran through `yad-run`) as one `chore(hub): …` audit-trail
   commit — default branch only, staging the shard dirs (`yad tidy up` folds finished shards later),
-  never a front-half gate file. It is the back-half analogue of the front-half `yad gate` sync; the
-  reviewable state (the story frontmatter `status`, the code-repo `tasks.md`) is committed as usual
-  alongside — checkpoint only lands the machine audit ledgers.
+  never a front-half gate file. It is the back-half analogue of the front-half `yad gate` sync. The
+  same commit also **carries the story `status:` flip** you just wrote (`approved → in-build/shipped`,
+  #112) — because that story now has a build-log ship, checkpoint stages `stories/<story>.md` alongside
+  the ledgers, so the artifact never drifts from build-log and you never fall back to a raw git-to-main
+  push. (The code-repo `tasks.md` is committed in its own repo as usual.)
 
 ### Step 4 — Stop
 Report what shipped and the story's state. Do not advance anything else; the front-half `state.json`

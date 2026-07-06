@@ -4030,8 +4030,9 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
 // yad checkpoint — commit the machine-written back-half hub state (trust-log/build-log/build-state)
 // ---------------------------------------------------------------------------------------------
 const {
-  runCheckpoint, backHalfPathspecs, summarizeStaged, checkpointAuthor, buildCheckpointMessage,
+  runCheckpoint, backHalfPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage,
 } = await import('./checkpoint.mjs');
+const { hubGit } = await import('./hubcommit.mjs');
 
 // A hub (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
 // exists. The roster email matches the git identity so resolveCommitterLogin yields @abdelrahmannasr.
@@ -4201,6 +4202,152 @@ test('runCheckpoint aborts on a non-hub dir (no .sdlc/hub.json)', async () => {
   assert.ok(process.exitCode, 'a non-hub dir sets a non-zero exit code');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// --- #112: checkpoint carries the build-log-backed story `status:` flip ---
+
+// Write stories/<story>.md with a `status:` frontmatter, and (unless ship===false) a build-log ship
+// for that story — the two conditions storyStatusPathspecs gates on. The ship goes in a per-story
+// shard (build-log/<story>-<task>-<repo>.json) so multiple stories in one epic accumulate instead of
+// clobbering a shared build-log.json.
+function writeStory(T, epic, story, status, { ship = true } = {}) {
+  const epicDir = path.join(T, 'epics', epic);
+  fs.mkdirSync(path.join(epicDir, 'stories'), { recursive: true });
+  fs.writeFileSync(path.join(epicDir, 'stories', `${story}.md`), `---\nstatus: ${status}\nrepos: [web]\n---\n\n# ${story}\n`);
+  if (ship) {
+    fs.mkdirSync(path.join(epicDir, '.sdlc/build-log'), { recursive: true });
+    fs.writeFileSync(path.join(epicDir, '.sdlc/build-log', `${story}-T01-web.json`),
+      JSON.stringify({ story, task: 'T01', repo: 'web' }));
+  }
+}
+
+test('storyStatusPathspecs lists ONLY ship-backed stories at a back-half status', () => {
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'shipped');           // ship + shipped ⇒ carried
+  writeStory(T, 'EP-a', 'EP-a-S02', 'in-build');          // ship + in-build ⇒ carried
+  writeStory(T, 'EP-a', 'EP-a-S03', 'approved');          // ship but front-gate status ⇒ excluded
+  writeStory(T, 'EP-b', 'EP-b-S01', 'shipped', { ship: false }); // shipped but no ship evidence ⇒ excluded
+  const specs = storyStatusPathspecs(T);
+  assert.ok(specs.includes('epics/EP-a/stories/EP-a-S01.md'), 'shipped + ship is carried');
+  assert.ok(specs.includes('epics/EP-a/stories/EP-a-S02.md'), 'in-build + ship is carried');
+  assert.ok(!specs.includes('epics/EP-a/stories/EP-a-S03.md'), 'approved is a front-gate status, never carried');
+  assert.ok(!specs.includes('epics/EP-b/stories/EP-b-S01.md'), 'no build-log ship ⇒ never carried');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('summarizeStaged recognizes a carried story file (labels the story, lists its basename)', () => {
+  const s = summarizeStaged(['epics/EP-a/.sdlc/build-log.json', 'epics/EP-a/stories/EP-a-S01.md']);
+  assert.equal(s.label, 'EP-a/EP-a-S01');
+  assert.deepEqual(s.basenames, ['build-log.json', 'EP-a-S01.md']);
+});
+
+test('runCheckpoint carries the story status flip (approved → shipped) alongside the ledgers (#112)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  // Baseline: the story sits at `approved` on the default branch with its ship already recorded.
+  writeStory(T, 'EP-a', 'EP-a-S01', 'approved');
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed story + build-log');
+  // The engineer-review skill flips the frontmatter in the working tree; nothing has committed it yet.
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
+  await grab(() => runCheckpoint(T, {}));
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.deepEqual(files, ['epics/EP-a/stories/EP-a-S01.md'], 'the story flip rides in the checkpoint commit');
+  const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
+  assert.match(subject, /^chore\(hub\): sync back-half state — EP-a\/EP-a-S01 by @abdelrahmannasr \[skip ci\]$/);
+  assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'nothing left uncommitted — no raw git-to-main needed');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint does NOT carry a story flip lacking a build-log ship, even while committing ledgers', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  // A story flipped to shipped but with NO ship evidence — must never ride along.
+  writeStory(T, 'EP-a', 'EP-a-S09', 'approved', { ship: false });
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed unshipped story');
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S09.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S09\n`);
+  writeBackHalf(T, 'EP-a', 'EP-a-S01'); // give checkpoint a real ledger change so it commits
+  await grab(() => runCheckpoint(T, {}));
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(files.length, 'the ledger change was committed');
+  assert.ok(!files.includes('epics/EP-a/stories/EP-a-S09.md'), 'an unshipped story flip must not ride along');
+  assert.match(git(T, 'status', '--porcelain').toString(), /EP-a-S09\.md/, 'the unshipped flip stays in the working tree');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('stagedStoryIsStatusOnly: true for a lone status flip, false for a prose edit or a new file', () => {
+  const T = hubForCheckpoint();
+  const rel = 'epics/EP-a/stories/EP-a-S01.md';
+  const abs = path.join(T, rel);
+  writeStory(T, 'EP-a', 'EP-a-S01', 'approved');
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  const g = hubGit(T); // the production git accessor: returns { ok, stdout, stderr, code }
+  // lone status flip
+  fs.writeFileSync(abs, `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
+  git(T, 'add', '--', rel);
+  assert.equal(stagedStoryIsStatusOnly(g, rel), true, 'a status-only flip is carriable');
+  git(T, 'reset', '-q');
+  // status flip + a prose edit
+  fs.writeFileSync(abs, `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01 (reworded)\n`);
+  git(T, 'add', '--', rel);
+  assert.equal(stagedStoryIsStatusOnly(g, rel), false, 'a prose edit alongside the flip is NOT carriable');
+  git(T, 'reset', '-q');
+  // a brand-new (untracked→added) story file: every line is an addition ⇒ not status-only
+  const rel2 = 'epics/EP-a/stories/EP-a-S02.md';
+  fs.writeFileSync(path.join(T, rel2), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S02\n`);
+  git(T, 'add', '--', rel2);
+  assert.equal(stagedStoryIsStatusOnly(g, rel2), false, 'a newly-added story file is NOT status-only');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint drops a ship-backed story whose change is MORE than the status line (review-bypass guard)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'approved');
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  // The flip AND an unrelated prose edit in the same file — the prose must NOT ride a [skip ci] commit.
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01 — secretly reworded\n`);
+  writeBackHalf(T, 'EP-a', 'EP-a-S02'); // a real ledger change so checkpoint still commits something
+  const out = await grab(() => runCheckpoint(T, {}));
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(!files.includes('epics/EP-a/stories/EP-a-S01.md'), 'the mixed prose+status edit must not ride the chore commit');
+  assert.ok(files.some((f) => f.includes('.sdlc/')), 'the ledger change still committed');
+  assert.match(out, /skipped .*EP-a-S01\.md/);
+  assert.match(git(T, 'status', '--porcelain').toString(), /EP-a-S01\.md/, 'the mixed edit stays in the working tree for review');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint: a corrupt build-log in one epic does not block checkpointing another epic', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  // EP-bad has a corrupt folded build-log; EP-ok has a clean ledger change to checkpoint.
+  fs.mkdirSync(path.join(T, 'epics/EP-bad/.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(T, 'epics/EP-bad/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-bad/.sdlc/build-log.json'), '{ this is not json');
+  fs.writeFileSync(path.join(T, 'epics/EP-bad/stories/EP-bad-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-bad-S01\n`);
+  writeBackHalf(T, 'EP-ok', 'EP-ok-S01');
+  const out = await grab(() => runCheckpoint(T, {}));
+  assert.doesNotMatch(out, /yad failed|YAD-STATE/, 'a corrupt build-log must not abort the whole checkpoint');
+  const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(files.some((f) => f.startsWith('epics/EP-ok/')), 'the healthy epic ledger was still committed');
+  assert.ok(!files.includes('epics/EP-bad/stories/EP-bad-S01.md'), 'the corrupt epic carries no story flip');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('storyStatusPathspecs: a ship-backed story with NO frontmatter is excluded (no crash)', () => {
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'shipped'); // ship recorded
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), '# EP-a-S01 with no frontmatter\n');
+  assert.deepEqual(storyStatusPathspecs(T), [], 'no frontmatter ⇒ no status ⇒ excluded, and no throw');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('summarizeStaged labels "2 stories" across two carried story files', () => {
+  const s = summarizeStaged(['epics/EP-a/stories/EP-a-S01.md', 'epics/EP-a/stories/EP-a-S02.md']);
+  assert.equal(s.label, '2 stories');
 });
 
 // --- regression tests for the Fable5 review findings ---
