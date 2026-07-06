@@ -53,7 +53,9 @@ resumable record.
 back-half ledgers (in this loop, the loose `trust-log/` shards this run wrote + `build-state/<story>.json`;
 also the `build-log/` shards at engineer-review) — the shard dirs are what checkpoint stages, the same
 way `git gc` folds loose objects later (`yad tidy up` folds finished shards into the folded
-`trust-log.json` / `build-log.json`) — as one `chore(hub): sync back-half state — <epic>/<story> by @<login> [skip ci]`
+`trust-log.json` / `build-log.json`) — plus any story `status:` flip (→ in-build/shipped) once that
+story has a build-log ship (#112) — as one
+`chore(hub): sync back-half state — <epic>/<story> by @<login> [skip ci]`
 audit-trail commit, on the default branch only,
 staging *only* those files by an explicit allowlist (never a front-half gate file — so `ledger-guard`
 never trips). It is idempotent (a no-op when nothing changed), so calling it after every transition —

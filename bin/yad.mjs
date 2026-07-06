@@ -89,9 +89,10 @@ ${c.bold('Build helpers')}
                                        gate open), any other hub branch uses the code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
   yad checkpoint [--push]              Commit the machine-written back-half hub state
-                                       (trust-log/build-log/build-state) as one audit-trail
-                                       chore(hub) commit — default branch only (--allow-branch
-                                       to override); a no-op when nothing changed
+                                       (trust-log/build-log/build-state) — plus any story
+                                       status: flip (→ in-build/shipped) backed by a build-log
+                                       ship — as one audit-trail chore(hub) commit; default
+                                       branch only (--allow-branch to override); no-op when clean
   yad tidy up [<epic>] [--push]        Fold FINISHED back-half shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
                                        ledger, as one chore(hub) commit — the manual "pack it up"
