@@ -20,7 +20,9 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
 - **Subject** — `<type>: <lowercase imperative description, no trailing period>`; types are
   `feat|fix|docs|refactor|test|perf|build|ci|chore|revert`; proper nouns/acronyms keep their case.
 - **Task trailer** — required on a code repo (anchors the `spec-link` + `commit-message` gates). Given
-  with `--task`, else derived from the branch (`feat/<story>-<task>-…`). Hub commits are not
+  with `--task` (a `<story>-T<NN>` id — an explicit value is validated against the `spec-link`
+  contract, so a malformed id like a bare `EP-x-S01` fails locally instead of after a push), else
+  derived from the branch (`feat/<story>-<task>-…`). Hub commits are not
   task-scoped, so the trailer is optional there — a missing-Task warning is informational on the hub
   (`spec-link` is a code-repo gate) and only flags a real gate failure in a code repo.
 - **Contract-Change trailer** — `--contract-change` only when the diff touches the locked contract

@@ -124,7 +124,7 @@ ${c.bold('Options')}
   --dir <path>          Target project root (default: cwd)
   --type <t>            commit: feat|fix|docs|refactor|test|perf|build|ci|chore|revert
   -m, --message <s>     commit: subject / PR title
-  --task <id>           commit: Task trailer (else derived from the branch)
+  --task <id>           commit: Task trailer, a <story>-T<NN> id (else derived from the branch)
   --ai <id>             commit: co-author — claude|copilot|cursor|coderabbit|none (default none)
   --contract-change     commit/open-pr: mark the contract surface touched
   --risk <level>        open-pr: low|medium|high (default low)

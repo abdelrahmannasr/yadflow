@@ -385,6 +385,13 @@ test('buildCommitMessage omits co-author for ai=none and rejects bad input', () 
   assert.throws(() => buildCommitMessage({ type: 'feat', subject: 'x', ai: 'ghost' }), /unknown --ai/);
 });
 
+test('buildCommitMessage rejects a malformed --task the spec-link gate would fail', () => {
+  // Bare story with no -T<NN> — commits fine locally today, fails spec-link in CI (#113).
+  assert.throws(() => buildCommitMessage({ type: 'feat', subject: 'x', task: 'EP-demo-S01' }), /invalid --task/);
+  // Gate contract is `.+-T<NN>$` (not the stricter branch -S..-T..), so a non-story -T id passes.
+  assert.ok(/Task: foo-T3/.test(buildCommitMessage({ type: 'feat', subject: 'x', task: 'foo-T3' })));
+});
+
 test('taskFromBranch derives the story-task id', () => {
   assert.equal(taskFromBranch('feat/EP-istifta-inquiries-S01-T01-create-inquiry'), 'EP-istifta-inquiries-S01-T01');
   assert.equal(taskFromBranch('main'), null);
