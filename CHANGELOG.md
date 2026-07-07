@@ -1,3 +1,5 @@
+## [3.9.4](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.3...v3.9.4) (2026-07-07)
+
 ## [3.9.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.2...v3.9.3) (2026-07-07)
 
 
