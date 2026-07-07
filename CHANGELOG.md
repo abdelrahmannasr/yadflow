@@ -1,3 +1,10 @@
+## [3.9.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.2...v3.9.3) (2026-07-07)
+
+
+_Maintenance release — CHANGELOG backfill and dependency-audit fixes (`chore`/`docs` commits carry no user-facing changes)._
+
+
+
 ## [3.9.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.1...v3.9.2) (2026-07-06)
 
 
