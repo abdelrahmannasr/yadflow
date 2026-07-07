@@ -122,8 +122,11 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
   **public** source repo. Make the repo public, or set `publishConfig.provenance: false` to publish
   without an attestation.
 - **PR won't merge ("review required"):** `main` is branch-protected with a required review. Approve the
-  PR, or admin-merge: `gh pr merge <n> --squash --admin`. The release workflow itself does not push to
-  `main`, so it is never blocked by this.
+  PR, or admin-merge: `gh pr merge <n> --squash --admin`. This gate is separate from the release job's
+  own `chore(release)` commit, which bypasses protection via `RELEASE_TOKEN` (step D).
+- **Release fails at the commit-back / `git push` step ("protected branch" / 403):** `RELEASE_TOKEN` is
+  missing, expired, or its owner isn't in `main`'s branch-protection bypass list. Re-check step D. The
+  job falls back to `GITHUB_TOKEN`, which cannot bypass the required-PR rule.
 - **No release was cut:** the merged commits were all non-releasing types (`chore:`, `ci:`, `test:`,
   `refactor:`). That's expected — only `feat`/`fix`/`perf`/`docs`/breaking trigger a version.
 - **A `2FA` prompt blocks automated publish:** it shouldn't — OIDC trusted publishing satisfies the
