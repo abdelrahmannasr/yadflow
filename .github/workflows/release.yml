@@ -23,7 +23,13 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
-          persist-credentials: false
+          # Persist the release PAT so @semantic-release/git can push the
+          # chore(release) commit to protected main. The PAT must belong to a
+          # user in main's branch-protection bypass list; the default
+          # GITHUB_TOKEN cannot bypass the required-PR rule. Falls back to
+          # GITHUB_TOKEN only so non-release CI still checks out.
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -46,5 +52,9 @@ jobs:
 
       - name: Semantic Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Release PAT (bypasses branch protection) so @semantic-release/git
+          # can commit CHANGELOG.md + package.json back to main. Also used by
+          # @semantic-release/github for the release/tag. npm publish stays
+          # tokenless via OIDC (id-token: write), independent of this token.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: npx semantic-release

@@ -19,24 +19,29 @@ steady state. This doc covers the one-time bootstrap and the ongoing flow.
      (`docs:`/`fix:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major),
    - regenerates `CHANGELOG.md` and ships it **inside the npm tarball**,
    - **publishes to npm via tokenless Trusted Publishing (OIDC) with build provenance** — no `NPM_TOKEN`,
+   - commits the regenerated `CHANGELOG.md` + `package.json` + `package-lock.json` back to `main`
+     (`@semantic-release/git`, authenticated with `RELEASE_TOKEN` — see step D),
    - pushes the `vX.Y.Z` git tag and cuts a GitHub release with the notes.
 
 Auth is the `id-token: write` permission in the workflow plus the npm trusted-publisher entry — there is
 no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs the Node 18/20/22 test matrix and a
 tarball-leak smoke on every PR.
 
-> **Note — no commit back to `main`.** The pipeline deliberately omits `@semantic-release/git`, so it
-> never pushes a `chore(release)` commit to `main`. That keeps it compatible with branch protection
-> (the required-review rule on `main` would otherwise reject the bot's push) and needs no PAT. The
-> consequence: `package.json`'s `version` field on `main` is **not** auto-bumped — git **tags** are the
-> source of truth, and the CLI reads its version from the `package.json` that semantic-release writes
-> into the published tarball. If you ever want the version/CHANGELOG committed back, add
-> `@semantic-release/git` plus a release PAT (or a branch-protection bypass) — the hardened path from
-> `abdelrahmannasr/wa-cloud-sdk`.
+> **Note — commit back to `main` (hardened path).** The pipeline includes `@semantic-release/git`, so
+> after publishing it commits the regenerated `CHANGELOG.md`, `package.json`, and `package-lock.json`
+> back to `main` as a `chore(release): X.Y.Z [skip ci]` commit. This keeps the in-repo changelog and
+> `version` field in lockstep with the git tags and the published npm artifact.
+>
+> Because `main` is protected with a required-PR rule that the default `GITHUB_TOKEN` **cannot** bypass,
+> the release job authenticates with a **`RELEASE_TOKEN`** secret (see step D) — a PAT owned by a user in
+> the branch-protection bypass list. The `[skip ci]` marker on the release commit stops it from
+> re-triggering the workflow (a PAT push, unlike a `GITHUB_TOKEN` push, would otherwise start a new run).
+> If `RELEASE_TOKEN` is unset the job falls back to `GITHUB_TOKEN` and the commit-back push will be
+> **rejected**, failing the release — so provision the secret before relying on this path.
 
 Because `main` is protected with a required review, **merging each release PR needs an approval or an
-admin merge** (`gh pr merge --squash --admin`). The release workflow itself no longer touches `main`, so
-it is not blocked.
+admin merge** (`gh pr merge --squash --admin`). The release job's own `chore(release)` commit is the only
+automated write to `main`, and it bypasses protection via `RELEASE_TOKEN`.
 
 ## One-time setup (already done once per package)
 
@@ -74,6 +79,22 @@ Repo → **Settings → Actions → General → Workflow permissions** → **Rea
 check **Allow GitHub Actions to create and approve pull requests**. (Needed for the git tag push and the
 GitHub release.) The source repo must also be **public** — npm provenance is rejected for private repos.
 
+### D. Release PAT for the commit-back (`RELEASE_TOKEN`)
+
+`@semantic-release/git` pushes the `chore(release)` commit to `main`, which the required-PR rule blocks
+for the default `GITHUB_TOKEN`. Provision a bypass token:
+
+1. Create a **fine-grained PAT** (GitHub → Settings → Developer settings → Fine-grained tokens), scoped
+   to the `yadflow` repo, with **Contents: Read and write**, **Pull requests: Read and write**, and
+   **Issues: Read and write** (the last two let `@semantic-release/github` comment on released PRs/issues).
+   The token owner must be a user that **bypasses `main`'s branch protection** (a repo admin does).
+2. Add it as a repo secret: **Settings → Secrets and variables → Actions → New repository secret**, named
+   **`RELEASE_TOKEN`**.
+3. Ensure the bypass list for `main` includes that user (Settings → Branches/Rules).
+
+Rotate the PAT before it expires; until `RELEASE_TOKEN` exists the release will fail at the commit-back
+step (the workflow falls back to `GITHUB_TOKEN`, which cannot bypass protection).
+
 ## Cutting a release (ongoing)
 
 1. Merge a PR to `main` with a Conventional-Commit title (**squash-merge** keeps the PR title as the
@@ -101,8 +122,11 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
   **public** source repo. Make the repo public, or set `publishConfig.provenance: false` to publish
   without an attestation.
 - **PR won't merge ("review required"):** `main` is branch-protected with a required review. Approve the
-  PR, or admin-merge: `gh pr merge <n> --squash --admin`. The release workflow itself does not push to
-  `main`, so it is never blocked by this.
+  PR, or admin-merge: `gh pr merge <n> --squash --admin`. This gate is separate from the release job's
+  own `chore(release)` commit, which bypasses protection via `RELEASE_TOKEN` (step D).
+- **Release fails at the commit-back / `git push` step ("protected branch" / 403):** `RELEASE_TOKEN` is
+  missing, expired, or its owner isn't in `main`'s branch-protection bypass list. Re-check step D. The
+  job falls back to `GITHUB_TOKEN`, which cannot bypass the required-PR rule.
 - **No release was cut:** the merged commits were all non-releasing types (`chore:`, `ci:`, `test:`,
   `refactor:`). That's expected — only `feat`/`fix`/`perf`/`docs`/breaking trigger a version.
 - **A `2FA` prompt blocks automated publish:** it shouldn't — OIDC trusted publishing satisfies the
