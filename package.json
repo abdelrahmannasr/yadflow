@@ -1,6 +1,6 @@
 {
   "name": "yadflow",
-  "version": "1.0.2",
+  "version": "3.9.2",
   "description": "Yadflow — the gated, team, multi-repo SDLC: author → review → build with a PR-driven review gate and a zero-dependency `yad` CLI (setup, gate, commit, open-pr, ship, repo, thread, reconcile). A BMAD module + 38 yad-* skills.",
   "type": "module",
   "author": "AbdelRahman Nasr",
