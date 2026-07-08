@@ -63,6 +63,30 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #125 — a PR body/title fix must re-run the pattern gates without a close/reopen. The code-repo
+// checks workflow needs the `edited` pull_request type; the commit-range jobs skip a bare edit.
+test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs skip it, pattern gates do not', () => {
+  const yml = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  assert.match(yml, /types:\s*\[opened,\s*synchronize,\s*reopened,\s*edited\]/, 'trigger carries the edited type');
+  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
+  // Extract a single job's YAML block: from its `  <name>:` header up to the next top-level job key.
+  const jobBlock = (name) => {
+    const start = yml.indexOf(`\n  ${name}:\n`);
+    const rest = yml.slice(start + 1);
+    const end = rest.search(/\n {2}\w[\w-]*:\n/);
+    return end >= 0 ? rest.slice(0, end) : rest;
+  };
+  const SKIP_GUARD = /if:\s*github\.event\.action != 'edited'/;
+  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
+  for (const gate of ['pr-title', 'pr-template']) {
+    assert.doesNotMatch(jobBlock(gate), SKIP_GUARD, `${gate} must re-run on an edit (no skip guard)`);
+  }
+  // commit-range jobs must skip a bare edit
+  for (const job of ['spec-link', 'contract-check', 'build-test-lint', 'commit-message', 'verified-commits']) {
+    assert.match(jobBlock(job), SKIP_GUARD, `${job} must skip a bare edited event`);
+  }
+});
+
 test('check detects exactly one missing, one outdated, one stale', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
