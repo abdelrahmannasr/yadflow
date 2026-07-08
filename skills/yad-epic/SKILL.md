@@ -156,6 +156,12 @@ Notes:
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
   `[]`, and the `reviews/` directory. (`comments.json` is the machine-readable counterpart to the
   `reviews/*--comments.md` markdown — `yad-review-gate` appends to it on every `comment`.)
+- **No UI?** Seed the chain **as-is** (always include the two `ui-design` steps). If this epic has no
+  user-facing surface (a backend/API service, data pipeline, infra), the `ui-design` step is optional
+  and can be marked N/A now with `yad skip EP-<slug> ui-design --reason "<why>"` — it stays visible,
+  short-circuits its gate, and advances straight to `stories` when architecture is approved. It is
+  reversible with `--undo` until the stories review opens. Don't hand-edit the seed to drop the steps;
+  the skip is the single, auditable mechanism (see `references/state-schema.md` → "ui-design is optional").
 
 ### Step 5b — Advance the authoring step — analysis-ran only
 *(Only when analysis ran — `state.json` already exists from `yad-analysis`.)*

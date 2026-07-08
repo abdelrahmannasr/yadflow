@@ -19,6 +19,7 @@ export const CODES = {
   'YAD-STATE-001': 'a ledger/config JSON file exists but does not parse',
   'YAD-STATE-002': 'a ledger/config JSON file parses but has the wrong shape',
   'YAD-STATE-003': 'a registered repo path is missing or not a git repository',
+  'YAD-STATE-004': 'an epic step cannot be skipped / un-skipped in its current state',
   'YAD-CFG-001': 'hub.json names an unknown platform (expected github, gitlab, or null)',
   'YAD-CFG-002': 'design.json names an unknown design tool (expected one of config.yaml design.tools, or none)',
   'YAD-CFG-003': 'testing.json names an unknown testing tool (expected one of config.yaml testing.tools, or none)',

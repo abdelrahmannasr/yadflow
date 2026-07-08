@@ -243,7 +243,7 @@ const frontSteps: FlowStep[] = [
     id: "ui",
     title: "Author UI Design",
     description:
-      "Front state 5: with the ux-designer, author ui-design.md and DESIGN.md, driving Impeccable slash-commands when installed. When a design tool is connected, materializes the screens; degrades to markdown-only.",
+      "Front state 5 (optional): with the ux-designer, author ui-design.md and DESIGN.md, driving Impeccable slash-commands when installed. When a design tool is connected, materializes the screens; degrades to markdown-only. A UI-less epic (backend/API, data, infra) skips it with `yad skip <epic> ui-design --reason …`, keeping the step visible and auditable.",
     actor: "ux",
     status: "draft",
     stepState: "ui-design.md · DESIGN.md",

@@ -27,7 +27,7 @@ flowchart LR
       an["yad-analysis<br/>optional → analysis.md · once per epic"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
       ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
-      ui["yad-ui<br/>ui-design.md + DESIGN.md + design tool screens"]:::artifact
+      ui["yad-ui<br/>optional · ui-design.md + DESIGN.md + design tool screens<br/>skippable N/A for UI-less epics"]:::artifact
       st["yad-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
       tc["yad-test-cases<br/>test-cases.md + automation tests<br/>(parallel · non-blocking)"]:::artifact
       gAn{{"gate · analysis"}}:::gated

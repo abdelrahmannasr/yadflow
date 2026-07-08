@@ -99,6 +99,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   directly when not. When a design tool is connected (`yad-connect-design`), also **materializes the
   feature design** — mobile screens / web pages — in the tool (generate or link), recording the
   screen→frame map in `design-links.json`; degrades to markdown-only otherwise. Reads epic + architecture.
+  **Optional** — an epic with no user-facing surface (backend/API, data, infra) skips it, keeping the
+  step visible and auditable, with `yad skip <epic> ui-design --reason "<why>"` (reverse with `--undo`
+  until the stories review opens).
 - **`yad-stories`** — Front state 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI.
