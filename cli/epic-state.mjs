@@ -341,7 +341,11 @@ export function isSkippableStep(id) {
 
 // Strip the skip-provenance fields off a step — the inverse of the stamp `skipStep` applies.
 function withoutSkip(step) {
-  const { skipped, skipReason, skippedBy, skippedAt, ...rest } = step;
+  const rest = { ...step };
+  delete rest.skipped;
+  delete rest.skipReason;
+  delete rest.skippedBy;
+  delete rest.skippedAt;
   return rest;
 }
 

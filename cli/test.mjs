@@ -2926,6 +2926,57 @@ test('unskipStep: an UPSTREAM skip un-skips back to blocked and leaves currentSt
   assert.equal(state.currentStep, 'architecture-review', 'un-skip upstream does not move currentStep');
 });
 
+// The `yad skip` CLI wrapper (cli/skip.mjs): load → mutate → write, with attribution + arg guards.
+const { runSkip } = await import('./skip.mjs');
+const uiStateFile = (T) => path.join(T, 'epics', 'EP-x', '.sdlc', 'state.json');
+const readUiState = (T) => JSON.parse(fs.readFileSync(uiStateFile(T), 'utf8'));
+
+test('runSkip: marks the step N/A, persists state.json, and advances currentStep', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-'));
+  seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+  const out = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only', today: '2026-07-08' }));
+  assert.match(out, /N\/A/);
+  const s = readUiState(T);
+  assert.equal(s.currentStep, 'stories');
+  assert.equal(s.steps.find((x) => x.id === 'ui-design').skipped, true);
+  assert.equal(s.steps.find((x) => x.id === 'ui-design').skipReason, 'backend-only');
+  assert.equal(s.steps.find((x) => x.id === 'ui-design-review').skipped, true);
+});
+
+test('runSkip --undo: reverses a skip and rewrites state.json', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-undo-'));
+  seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+  await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', today: '2026-07-08' }));
+  const out = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true }));
+  assert.match(out, /un-skipped/);
+  const s = readUiState(T);
+  assert.equal(s.currentStep, 'ui-design');
+  assert.equal(s.steps.find((x) => x.id === 'ui-design').skipped, undefined);
+});
+
+test('runSkip: missing step arg and an unseeded epic both fail with exit 1 (no throw)', async () => {
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-arg-'));
+  seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+  const noStep = await grab(() => runSkip(T, { epic: 'EP-x', reason: 'x' }));
+  assert.match(noStep, /usage/);
+  assert.equal(process.exitCode, 1);
+  process.exitCode = 0;
+  const noState = await grab(() => runSkip(T, { epic: 'EP-missing', step: 'ui-design', reason: 'x' }));
+  assert.match(noState, /no epic state/);
+  assert.equal(process.exitCode, 1);
+  process.exitCode = prev; // do not leak a failing exit code into the test runner
+});
+
+test('runSkip: a guard violation propagates as a YadError (to bin\'s top-level catch)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-guard-'));
+  seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+  await assert.rejects(
+    () => runSkip(T, { epic: 'EP-x', step: 'architecture', reason: 'x' }),
+    (e) => e.code === 'YAD-STATE-004',
+  );
+});
+
 test('upsertHubPr replaces by artifact, never duplicates', () => {
   const a = upsertHubPr([], { artifact: 'epic.md', number: 1 });
   const b = upsertHubPr(a, { artifact: 'epic.md', number: 2 });
