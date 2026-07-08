@@ -1,3 +1,11 @@
+## [3.10.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.10.0...v3.10.1) (2026-07-08)
+
+
+### Bug Fixes
+
+* re-run pr-template gate on an edited PR body ([17ad94a](https://github.com/abdelrahmannasr/yadflow/commit/17ad94a4881610b4b653700be50a4eddd7036c5d))
+* stop yad repo refresh --push stranding the regenerated pack.md ([f0b5f4c](https://github.com/abdelrahmannasr/yadflow/commit/f0b5f4ce9f22afcd6078aae3ea1dd5a64885be35))
+
 # [3.10.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.4...v3.10.0) (2026-07-08)
 
 
