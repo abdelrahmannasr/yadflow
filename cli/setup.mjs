@@ -740,12 +740,40 @@ export async function runSetup(root, opts = {}) {
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
 }
 
+// The repomix pack is a large, regenerable artifact — the hub tracks the AI-authored code-map, not the
+// pack. `yad repo refresh --push` relies on the pack being gitignored (repo-publish.mjs never stages it);
+// this makes that assumption true in every hub, so a regenerated pack never strands as a dirty tree.
+export const PACK_IGNORE_GLOB = '.sdlc/code-context/*/pack.md';
+
+// The exact lines ensurePackIgnored appends — a comment pair + the glob. Kept as data (not inline
+// strings) so the publish gate can verify a staged `.gitignore` change is ONLY this managed block and
+// never sweep an unrelated user edit into the audit commit (repo-publish.mjs, invariant 1).
+export const PACK_IGNORE_BLOCK = [
+  '# Repomix code-context packs are large, regenerable artifacts (yad repo refresh) — the',
+  '# tracked code-map.md is the reviewed AI output; the pack itself is never committed.',
+  PACK_IGNORE_GLOB,
+];
+
+// Idempotently ensure the hub `.gitignore` ignores the repomix pack. No-op (returns false) if the line
+// is already present (as its own entry); otherwise appends the managed block to a fresh or existing file
+// and returns true.
+export function ensurePackIgnored(root) {
+  const gi = path.join(root, '.gitignore');
+  const lines = exists(gi) ? fs.readFileSync(gi, 'utf8').split('\n') : [];
+  if (lines.some((l) => l.trim() === PACK_IGNORE_GLOB)) return false;
+  const body = lines.join('\n').replace(/\n*$/, '');
+  const prefix = body ? `${body}\n\n` : '';
+  fs.writeFileSync(gi, `${prefix}${PACK_IGNORE_BLOCK.join('\n')}\n`);
+  return true;
+}
+
 // Deterministic repomix pack (code-map generation itself is an AI step, handed off).
 export function packRepo(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
   const out = path.join(root, repo.contextPack);
   if (!has('npx')) { warn(`${repo.name}: npx missing — skipped repomix pack`); return false; }
   fs.mkdirSync(path.dirname(out), { recursive: true });
+  ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${repo.name}: packing with repomix …`);
   const r = run('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
   if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in Claude Code (yad-connect-repos)`); return true; }
