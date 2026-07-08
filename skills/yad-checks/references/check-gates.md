@@ -215,7 +215,11 @@ The gates run identically under either CI; the config just invokes the scripts w
 
 - **GitHub Actions** — `templates/github/yad-checks.yml` → `.github/workflows/yad-checks.yml`. The
   jobs run on `pull_request` with `fetch-depth: 0`, passing `origin/${{ github.base_ref }}` as base
-  (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The pattern jobs
+  (verified-commits also gets a read-only `GH_TOKEN` for the Verified-badge lookup). The trigger sets
+  `types: [opened, synchronize, reopened, edited]` — the extra `edited` so a title/body correction
+  re-runs the pattern gates without a close/reopen (a plain re-run replays the frozen original payload).
+  The commit-range jobs carry `if: github.event.action != 'edited'` so a bare body/title edit only
+  re-runs `pr-title`/`pr-template`, not the whole suite. The pattern jobs
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
   The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) run as their own jobs with

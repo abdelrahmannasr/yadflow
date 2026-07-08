@@ -6,11 +6,16 @@
 name: yad-checks
 on:
   pull_request:
+    # `edited` (beyond the opened/synchronize/reopened defaults) so a PR title/body correction
+    # re-runs the pattern gates without a close/reopen — e.g. fixing a body the pr-template gate held.
+    # The commit-range jobs below skip a bare `edited` (only pr-title/pr-template need to re-check).
+    types: [opened, synchronize, reopened, edited]
     branches: ["**"]
 
 jobs:
   spec-link:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -18,6 +23,7 @@ jobs:
 
   contract-check:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -25,6 +31,7 @@ jobs:
 
   build-test-lint:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     env:
       YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
     steps:
@@ -41,6 +48,7 @@ jobs:
   # story->epic resolution and degrade to a note when the product repo is not reachable from CI.
   lineage-check:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -48,6 +56,7 @@ jobs:
 
   epic-open:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -55,14 +64,17 @@ jobs:
 
   reconcile-debt:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - run: bash checks/reconcile-debt-check.sh "origin/${{ github.base_ref }}"
 
   # Pattern gates: commit subject + PR title + PR body all follow the convention (profile: code).
+  # commit-message reads the commit range, not the title/body — skip it on a bare `edited` event.
   commit-message:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -88,8 +100,10 @@ jobs:
           bash checks/pr-template.sh --profile code "$body"
 
   # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
+  # Reads the commit range, not the title/body — skip it on a bare `edited` event.
   verified-commits:
     runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
     permissions:
       contents: read
     env:

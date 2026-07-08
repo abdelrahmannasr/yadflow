@@ -63,6 +63,30 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #125 — a PR body/title fix must re-run the pattern gates without a close/reopen. The code-repo
+// checks workflow needs the `edited` pull_request type; the commit-range jobs skip a bare edit.
+test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs skip it, pattern gates do not', () => {
+  const yml = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  assert.match(yml, /types:\s*\[opened,\s*synchronize,\s*reopened,\s*edited\]/, 'trigger carries the edited type');
+  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
+  // Extract a single job's YAML block: from its `  <name>:` header up to the next top-level job key.
+  const jobBlock = (name) => {
+    const start = yml.indexOf(`\n  ${name}:\n`);
+    const rest = yml.slice(start + 1);
+    const end = rest.search(/\n {2}\w[\w-]*:\n/);
+    return end >= 0 ? rest.slice(0, end) : rest;
+  };
+  const SKIP_GUARD = /if:\s*github\.event\.action != 'edited'/;
+  // pattern gates that read the title/body must NOT be guarded (they re-run on an edit)
+  for (const gate of ['pr-title', 'pr-template']) {
+    assert.doesNotMatch(jobBlock(gate), SKIP_GUARD, `${gate} must re-run on an edit (no skip guard)`);
+  }
+  // commit-range jobs must skip a bare edit
+  for (const job of ['spec-link', 'contract-check', 'build-test-lint', 'commit-message', 'verified-commits']) {
+    assert.match(jobBlock(job), SKIP_GUARD, `${job} must skip a bare edited event`);
+  }
+});
+
 test('check detects exactly one missing, one outdated, one stale', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
@@ -5069,7 +5093,8 @@ test('reconcile --push: a connected repo on a non-default branch is skipped, not
 // ---------------------------------------------------------------------------------------------
 // `yad repo refresh --push` — publish the connected-repo code-context to the hub default branch
 // ---------------------------------------------------------------------------------------------
-const { buildCodeMapMessage, codeMapPathspecs, summarizeCodeContext, publishCodeContext } = await import('./repo-publish.mjs');
+const { buildCodeMapMessage, codeMapPathspecs, packPathspecs, summarizeCodeContext, publishCodeContext } = await import('./repo-publish.mjs');
+const { ensurePackIgnored, PACK_IGNORE_GLOB } = await import('./setup.mjs');
 
 test('buildCodeMapMessage: valid chore(hub) code-context subject with [skip ci], no Task/Co-Authored-By', () => {
   const m = buildCodeMapMessage({ label: 'backend', author: '@amn', basenames: ['.sdlc/code-context/backend/code-map.md', '.sdlc/repos.json'] });
@@ -5110,6 +5135,146 @@ test('codeMapPathspecs: only existing code-maps + the registry (never the gitign
     assert.deepEqual(codeMapPathspecs(T, registry, 'mobile'), ['.sdlc/repos.json'], 'scoping to a repo with no on-disk map leaves only the registry');
   } finally {
     fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+// #126 — the pack strand: setup/refresh must gitignore the pack, and publish must self-heal a hub that
+// tracked it before that ignore existed.
+test('ensurePackIgnored: idempotently adds the pack glob to the hub .gitignore', () => {
+  const { T } = scaffold();
+  try {
+    // no .gitignore yet -> the glob is written
+    assert.ok(!fs.existsSync(path.join(T, '.gitignore')), 'scaffold has no .gitignore');
+    assert.equal(ensurePackIgnored(T), true, 'first call writes the entry');
+    const gi = fs.readFileSync(path.join(T, '.gitignore'), 'utf8');
+    assert.ok(gi.split('\n').some((l) => l.trim() === PACK_IGNORE_GLOB), 'pack glob present');
+    // second call is a no-op (does not duplicate the line)
+    assert.equal(ensurePackIgnored(T), false, 'second call is a no-op');
+    const occurrences = fs.readFileSync(path.join(T, '.gitignore'), 'utf8').split('\n').filter((l) => l.trim() === PACK_IGNORE_GLOB).length;
+    assert.equal(occurrences, 1, 'glob appears exactly once');
+    // an existing .gitignore is appended to, preserving prior content
+    fs.writeFileSync(path.join(T, '.gitignore'), 'node_modules/\n');
+    assert.equal(ensurePackIgnored(T), true, 'appends to a pre-existing .gitignore');
+    const gi2 = fs.readFileSync(path.join(T, '.gitignore'), 'utf8');
+    assert.match(gi2, /node_modules\//, 'prior content preserved');
+    assert.ok(gi2.split('\n').some((l) => l.trim() === PACK_IGNORE_GLOB), 'pack glob appended');
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('packPathspecs: on-disk pack paths per repo, scoped by name', () => {
+  const { T } = scaffold();
+  try {
+    const registry = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+    registry.repos.push({ name: 'mobile', path: 'demo/mobile', contextPack: '.sdlc/code-context/mobile/pack.md' });
+    assert.deepEqual(packPathspecs(T, registry), [], 'no on-disk packs -> empty');
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/pack.md'), '# pack\n');
+    assert.deepEqual(packPathspecs(T, registry), ['.sdlc/code-context/backend/pack.md'], 'existing pack included');
+    assert.deepEqual(packPathspecs(T, registry, 'mobile'), [], 'named scope excludes the other repo\'s pack');
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('publishCodeContext: self-heals a pre-ignore TRACKED pack — commits its removal, tree ends clean', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // A hub created before the ignore existed: pack.md was committed (tracked), no .gitignore for it.
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/pack.md'), '# stale pack\n');
+    git(T, 'add', '.sdlc/code-context/backend/pack.md');
+    git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'legacy: track pack');
+    assert.ok(git(T, 'ls-files', '.sdlc/code-context/backend/pack.md').toString().trim(), 'pack is tracked to start');
+
+    // The refresh regenerates the pack (dirty) and scaffolds the ignore, then publishes.
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/pack.md'), '# regenerated pack\n');
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# backend code-map\n');
+    ensurePackIgnored(T); // packRepo does this in the real flow
+    await grab(() => publishCodeContext(T, { push: true }));
+
+    // the commit records the pack REMOVAL alongside the code-map + the .gitignore that makes it stick
+    const files = git(T, 'diff-tree', '--no-commit-id', '--name-status', '-r', 'HEAD').toString();
+    assert.match(files, /^D\s+\.sdlc\/code-context\/backend\/pack\.md$/m, 'pack removal committed');
+    assert.match(files, /code-context\/backend\/code-map\.md/, 'code-map committed');
+    assert.match(files, /\.gitignore/, '.gitignore committed so the ignore is durable');
+    // pack is no longer tracked, and with the ignore in place the working tree is clean
+    assert.equal(git(T, 'ls-files', '.sdlc/code-context/backend/pack.md').toString().trim(), '', 'pack untracked');
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/code-context/backend/pack.md')), 'working-tree pack kept');
+    assert.equal(git(T, 'check-ignore', '.sdlc/code-context/backend/pack.md').toString().trim(), '.sdlc/code-context/backend/pack.md', 'pack now ignored');
+    assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'no stranded dirty tree');
+    assert.ok(!process.exitCode, 'clean run -> zero exit code');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// Invariant 1: the audit commit must never sweep unrelated work — not a pre-staged file, and not an
+// unrelated edit to the hub `.gitignore` (which a naive `git add .gitignore` would combine with the
+// managed pack glob). Invariant: the user's INDEX is left untouched (no whole-index reset), matching
+// runCheckpoint — a pre-staged file stays staged, not silently unstaged.
+test('publishCodeContext: never sweeps unrelated work and leaves the user index staged (checkpoint-consistent)', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // A healthy hub: the pack glob is already committed in .gitignore.
+    fs.writeFileSync(path.join(T, '.gitignore'), '.sdlc/code-context/*/pack.md\n');
+    git(T, 'add', '.gitignore');
+    git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: ignore pack');
+    // The AI regenerated a code-map (the legitimate change to publish) ...
+    fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# backend code-map\n');
+    // ... but the user ALSO has unrelated in-flight work: a pre-staged file, and a hand edit to .gitignore.
+    fs.writeFileSync(path.join(T, 'scratch.txt'), 'wip\n');
+    git(T, 'add', 'scratch.txt');
+    fs.appendFileSync(path.join(T, '.gitignore'), '.env.local\nmy-scratch/\n');
+
+    await grab(() => publishCodeContext(T, { push: true }));
+
+    const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
+    assert.match(files, /code-context\/backend\/code-map\.md/, 'the code-map is published');
+    assert.doesNotMatch(files, /scratch\.txt/, 'the pre-staged unrelated file never rides the audit commit');
+    assert.doesNotMatch(files, /\.gitignore/, 'the unrelated .gitignore edit is NOT swept in');
+    // the user's staged file stays STAGED (index untouched — no whole-index reset), matching checkpoint
+    assert.match(git(T, 'diff', '--cached', '--name-only').toString(), /scratch\.txt/, 'pre-staged file remains staged');
+    assert.match(fs.readFileSync(path.join(T, '.gitignore'), 'utf8'), /\.env\.local/, 'the user\'s .gitignore edit is kept on disk');
+    // and the pushed commit on origin carries no .gitignore either
+    assert.doesNotMatch(git(hubBare, 'show', '--name-only', '--format=', 'main').toString(), /\.gitignore/, 'nothing about the user edit reached origin');
+    assert.ok(!process.exitCode, 'clean run -> zero exit code');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// Concern 2(a): a no-op publish (nothing to publish) must NOT touch the user's staged work either.
+test('publishCodeContext: a nothing-to-publish run leaves unrelated staged work staged', async () => {
+  const prev = process.exitCode;
+  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  try {
+    process.exitCode = 0;
+    // A hub already ignoring the pack (so ensurePackIgnored is a no-op) with nothing new to publish.
+    fs.writeFileSync(path.join(T, '.gitignore'), '.sdlc/code-context/*/pack.md\n');
+    git(T, 'add', '.gitignore');
+    git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: ignore pack');
+    git(T, 'push', '-q', 'origin', 'HEAD:main'); // origin/main exists; nothing new to publish
+    // user has unrelated staged work in flight
+    fs.writeFileSync(path.join(T, 'scratch.txt'), 'wip\n');
+    git(T, 'add', 'scratch.txt');
+
+    const out = await grab(() => publishCodeContext(T, { push: true }));
+    assert.match(out, /nothing to (commit|do)/, 'run is a no-op (no code-context changed)');
+    assert.match(git(T, 'diff', '--cached', '--name-only').toString(), /scratch\.txt/, 'staged work untouched by a no-op run');
+    assert.doesNotMatch(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, 'no audit commit created');
+    assert.ok(!process.exitCode, 'no-op -> zero exit code');
+  } finally {
+    process.exitCode = prev;
+    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
