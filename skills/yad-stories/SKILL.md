@@ -45,6 +45,11 @@ Read `epic.md` (scope, acceptance signals, `repos`), `architecture.md` (componen
 `contract.md` (the shared surface stories must honour), and `ui-design.md` (screens/flows). Stories
 must collectively satisfy the epic's acceptance signals and stay within the contract surface.
 
+- **UI-optional-safe:** `ui-design.md` may be absent — the `ui-design` step is optional and can be
+  marked N/A for an epic with no user-facing surface (state.json shows it `skipped`). When there is no
+  UI design, proceed without UI screens; the epic's acceptance signals + contract remain the source of
+  truth for the stories.
+
 ### Step 2b — Load existing-code context (make the brain code-aware)
 Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context`). For **each repo in
 `epic.repos`**, load the code-map `{project-root}/.sdlc/code-context/<repo>/code-map.md` so each story's

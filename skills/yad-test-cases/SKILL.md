@@ -60,6 +60,10 @@ Read `epic.md` (user-level acceptance signals, scope), `architecture.md` (flows,
 **all** approved `stories/EP-<slug>-S0N.md`. Each story's **acceptance criteria are the source of truth**
 for the cases — the test cases must collectively verify every story's criteria.
 
+- **UI-optional-safe:** `ui-design.md` may be absent — the `ui-design` step is optional and can be
+  marked N/A for a UI-less epic (state.json shows it `skipped`). When there is no UI design, there are
+  simply no screens to exercise; the stories' acceptance criteria remain the source of truth.
+
 ### Step 2b — Load existing-code context (make the brain code-aware)
 Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context`). For **each repo in
 `epic.repos`**, load the code-map `{project-root}/.sdlc/code-context/<repo>/code-map.md` so the

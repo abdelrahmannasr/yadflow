@@ -37,6 +37,32 @@ existing `state.json` and does **not** re-seed.
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
 owner + 1 reviewer).
 
+### `ui-design` is optional (skippable)
+
+The `ui-design` step (and its `ui-design-review` gate) is **optional** for an epic with no
+user-facing surface — a backend/API service, a data pipeline, infra work. Unlike `analysis` (which is
+optional by being **omitted** from the chain at seed time), `ui-design` is **always seeded** and then
+**marked N/A in place** so the skip stays visible and auditable. The single mechanism is
+`yad skip EP-<slug> ui-design --reason "<why>"` (reverse with `--undo`), usable at epic-authoring time
+or any point **up to authoring the `ui-design` step** — the skip is refused once its review gate has
+opened (the UI work is committed by then) or once `stories` has started. `--undo` is allowed until the
+`stories` review opens.
+
+A skipped step gets four extra fields and is pre-marked `done`:
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `skipped` | `true` | This step is N/A for this epic; pre-marked `done`, short-circuited by `gatePredicate` (`rule: "skipped"`) so no review is required. |
+| `skipReason` | string | Why it was skipped (e.g. "backend-only service, no UI"). |
+| `skippedBy` | login/name or `null` | Who marked it N/A (best-effort, from the roster/git identity). |
+| `skippedAt` | `YYYY-MM-DD` or `null` | When it was marked N/A. |
+
+Both the `ui-design` **and** `ui-design-review` entries carry these fields. `advanceState` steps over
+any `skipped` step, so approving `architecture-review` on a UI-less epic lands directly on `stories`;
+`preconditionsMet` treats the pre-`done` steps as satisfied. `unskipStep` (via `yad skip … --undo`)
+strips the fields and restores the chain, refused once `stories-review` has opened. Only `ui-design` is
+skippable today (engine `SKIPPABLE_STEPS`).
+
 ### `test-cases` is a parallel, non-blocking track
 
 `test-cases` (and its `test-cases-review` gate) sit in `steps[]` after `stories-review`, but they are a

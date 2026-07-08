@@ -17,6 +17,7 @@ import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 import { runNext } from '../cli/next.mjs';
+import { runSkip } from '../cli/skip.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
@@ -66,6 +67,10 @@ ${c.bold('Where am I / what next')}
   yad next <epic>                      The single next action for one epic (skill or yad command)
   yad next <epic> --check <step>       Exit 0 if <step> is runnable now, else 1 (precondition guard)
   yad next --all                       Every active epic's next action at once
+  yad skip <epic> ui-design --reason <text>   Mark an optional step N/A for this epic (only
+                                       ui-design today) — a backend/API/data epic with no UI.
+                                       Stays visible & auditable (pre-done, gate short-circuited);
+                                       --undo reverses it until the stories review opens
 
 ${c.bold('Review gate (front half)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
@@ -143,7 +148,7 @@ ${c.bold('Options')}
   -h, --help            Show this help
   -v, --version         Print version`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -163,6 +168,7 @@ function parseArgs(argv) {
     // positional. `o._[0]` is the command, already pushed by the time `--check` is seen in normal use.
     else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
+    else if (a === '--undo') o.undo = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
     else if (a === '--greenfield') o.greenfield = true;
@@ -236,6 +242,12 @@ async function main() {
       // `--check` with no step is a malformed guard call — fail loudly rather than silently print.
       if (o.check === true) { log(c.red('usage: yad next <epic> --check <step>')); process.exitCode = 1; break; }
       await runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all });
+      break;
+    }
+    case 'skip': {
+      const [, epic, step] = o._;
+      if (!epic || !isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      await runSkip(o.dir, { epic, step, reason: o.reason, undo: o.undo, today });
       break;
     }
     case 'gate': {

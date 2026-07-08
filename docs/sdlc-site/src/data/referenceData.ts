@@ -364,7 +364,7 @@ export const STATUS_MAPPINGS: StatusMapping[] = [
   { step: 'analysis (optional)', writes: 'analysis.md', category: 'Front', visibleTo: ALL },
   { step: 'epic', writes: 'epic.md', category: 'Front', visibleTo: ALL },
   { step: 'architecture', writes: 'architecture.md · contract.md · contract-lock.json', category: 'Front', visibleTo: ALL },
-  { step: 'ui-design', writes: 'ui-design.md · DESIGN.md', category: 'Front', visibleTo: ALL },
+  { step: 'ui-design (optional)', writes: 'ui-design.md · DESIGN.md', category: 'Front', visibleTo: ALL },
   { step: 'stories', writes: 'stories/EP-<slug>-S0N.md', category: 'Front', visibleTo: ALL },
   { step: 'test-cases', writes: 'test-cases.md · test-links.json', category: 'Front (parallel)', visibleTo: ALL },
   { step: 'spec', writes: 'specs/<story-id>/', category: 'Build', visibleTo: ALL },

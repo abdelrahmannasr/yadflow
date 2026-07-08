@@ -42,6 +42,19 @@ it passes.
 This passes when `ui-design` is the next runnable step per the state sequence — every prior step
 (through the architecture review) is `done` and `ui-design` is not already `done`.
 
+**This step is OPTIONAL.** If the epic has no user-facing surface (a backend/API service, a data
+pipeline, infra work), it does not need a UI design. Two signals to watch for:
+
+- **Already skipped:** if `ui-design.status` is `done` with `skipped: true` in `state.json` (the
+  `--check` above will report `ui-design is already done`), the step was marked N/A — **STOP**, there
+  is nothing to author; point the user at `yad next EP-<slug>` (the next step is `stories`).
+- **Should be skipped:** if you reach this step and the epic clearly produces no screens, do **not**
+  invent a hollow UI artifact. Offer to mark it N/A instead:
+  `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That pre-marks both the
+  `ui-design` and `ui-design-review` steps `done` (recorded reason + actor), short-circuits the review
+  gate, and advances to `stories`. It is reversible with `yad skip EP-<slug> ui-design --undo` until the
+  stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional".
+
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note

@@ -33,7 +33,8 @@ output_folder: "{project-root}/_bmad-output"
 defaults:
   assistance: review          # none | review | heavy
   automation: human_approve   # human_approve | machine_advance
-  # Front steps (discovery [optional front-zero], analysis [optional], epic, architecture, ui-design,
+  # Front steps (discovery [optional front-zero], analysis [optional], epic, architecture,
+  # ui-design [optional — skippable N/A for UI-less epics via `yad skip <epic> ui-design`],
   # stories, test-cases) are locked to human_approve and may NOT be set to machine_advance in this
   # version (build plan §1, §8.7).
   front_steps_locked: true

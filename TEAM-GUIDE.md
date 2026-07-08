@@ -80,7 +80,7 @@ flowchart TD
       an["yad-analysis<br/>optional → analysis.md"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
       ar["yad-architecture<br/>architecture.md + locked contract.md"]:::artifact
-      ui["yad-ui<br/>ui-design.md + DESIGN.md"]:::artifact
+      ui["yad-ui<br/>optional · ui-design.md + DESIGN.md<br/>skippable N/A for UI-less epics"]:::artifact
       st["yad-stories<br/>repo-tagged stories"]:::artifact
       tc["yad-test-cases<br/>test-cases.md + automation tests"]:::artifact
       gAn{{"gate · analysis"}}:::gated
@@ -297,7 +297,7 @@ Do these in order. After each author step, the matching review opens and **waits
 | 0 *(optional)* | `yad-analysis` | `analysis.md` — the analyst's discovery brief (assigns the `EP-<slug>` ID, seeds state) | analysis review |
 | 1 | `yad-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
 | 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
-| 3 | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review |
+| 3 *(optional)* | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review — skip N/A for a UI-less epic with `yad skip <epic> ui-design --reason …` |
 | 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
 | 5 *(parallel)* | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
 
@@ -496,7 +496,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
 | `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
-| `yad-ui` | Author `ui-design.md` + `DESIGN.md`; materialize the screens in the connected design tool. |
+| `yad-ui` | Author `ui-design.md` + `DESIGN.md`; materialize the screens in the connected design tool. **Optional** — a UI-less epic skips it with `yad skip <epic> ui-design --reason …`. |
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |

@@ -782,6 +782,14 @@ test('gatePredicate: discovery-review is a base-rule gate (owner + 1 reviewer, n
   assert.equal(p.rule, 'base');
 });
 
+test('gatePredicate: a SKIPPED step short-circuits — passes with zero approvals (rule: skipped)', () => {
+  const step = { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', risk_tags: [], skipped: true, skipReason: 'no UI', status: 'done' };
+  const p = gatePredicate({ step, approvals: [], merged: false, threadsResolved: false });
+  assert.equal(p.passed, true, 'a skipped step is satisfied regardless of merge/threads/approvals');
+  assert.equal(p.rule, 'skipped');
+  assert.deepEqual(p.missing, []);
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
 // ---------------------------------------------------------------------------------------------
@@ -2662,7 +2670,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, SKIPPABLE_STEPS, isSkippableStep } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -2774,6 +2782,148 @@ test('markInReview: the parallel test-cases-review does not pull currentStep bac
   markInReview(state, state.steps[0]);
   assert.equal(state.steps[0].status, 'in_review', 'the step still goes in_review');
   assert.equal(state.currentStep, 'ready-for-build', 'currentStep stays at ready-for-build (build keeps running)');
+});
+
+// ---------------------------------------------------------------------------------------------
+// Optional (skippable) steps — ui-design N/A for an epic with no user-facing surface
+// ---------------------------------------------------------------------------------------------
+// A front chain sitting at `currentStep`, with the ui-design pair present. Steps before ui-design
+// are `done`; ui-design onward take the caller-supplied statuses.
+const uiChain = (currentStep, { ui = 'blocked', uiReview = 'blocked', stories = 'blocked' } = {}) => ({
+  epicId: 'EP-x', currentStep,
+  steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' },
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done' },
+    { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: currentStep === 'architecture-review' ? 'in_review' : 'done' },
+    { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: ui },
+    { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: uiReview },
+    { id: 'stories', type: 'author', artifact: 'stories', status: stories },
+    { id: 'stories-review', type: 'review+approve', artifact: 'stories', status: 'blocked' },
+  ],
+});
+const byId = (state, id) => state.steps.find((s) => s.id === id);
+
+test('SKIPPABLE_STEPS: only ui-design is optional today', () => {
+  assert.ok(SKIPPABLE_STEPS.has('ui-design'));
+  assert.equal(SKIPPABLE_STEPS.has('architecture'), false);
+  assert.equal(SKIPPABLE_STEPS.has('stories'), false);
+});
+
+test('skipStep: at the ui-design step marks both ui steps N/A (done) and advances currentStep to stories', () => {
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  skipStep(state, 'ui-design', { reason: 'backend-only epic', by: '@me', at: '2026-07-08' });
+  const ui = byId(state, 'ui-design'), uir = byId(state, 'ui-design-review');
+  assert.equal(ui.skipped, true);
+  assert.equal(ui.status, 'done');
+  assert.equal(ui.skipReason, 'backend-only epic');
+  assert.equal(ui.skippedBy, '@me');
+  assert.equal(ui.skippedAt, '2026-07-08');
+  assert.equal(uir.skipped, true);
+  assert.equal(uir.status, 'done');
+  assert.equal(state.currentStep, 'stories', 'currentStep steps past the skipped pair');
+  assert.equal(byId(state, 'stories').status, 'in_progress');
+});
+
+test('skipStep: upstream of ui-design leaves currentStep put; the later architecture-review advance steps over the skipped pair', () => {
+  const state = uiChain('architecture-review');
+  skipStep(state, 'ui-design', { reason: 'no UI' });
+  assert.equal(state.currentStep, 'architecture-review', 'skipping upstream does not move currentStep');
+  assert.equal(byId(state, 'ui-design').skipped, true);
+  // Approving architecture-review now lands directly on stories, never the skipped ui-design.
+  advanceState(state, byId(state, 'architecture-review'));
+  assert.equal(state.currentStep, 'stories');
+  assert.equal(byId(state, 'stories').status, 'in_progress');
+});
+
+test('skipStep: is idempotent and defaults skip attribution to null', () => {
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  skipStep(state, 'ui-design', { reason: 'no UI' });
+  assert.equal(byId(state, 'ui-design').skippedBy, null);
+  assert.equal(byId(state, 'ui-design').skippedAt, null);
+  const before = JSON.stringify(state);
+  skipStep(state, 'ui-design', { reason: 'a different reason' }); // no-op on an already-skipped step
+  assert.equal(JSON.stringify(state), before, 'a second skip is a no-op (keeps the original reason)');
+});
+
+test('skipStep: rejects a non-optional step, a missing reason, and skipping after stories start', () => {
+  assert.throws(() => skipStep(uiChain('architecture'), 'architecture', { reason: 'x' }), /not optional/);
+  assert.throws(() => skipStep(uiChain('ui-design', { ui: 'in_progress' }), 'ui-design', { reason: '  ' }), /reason/);
+  // stories under way while ui-design is not itself done → the stories guard (not the done guard) fires.
+  const started = uiChain('stories', { ui: 'in_progress', uiReview: 'blocked', stories: 'in_progress' });
+  assert.throws(() => skipStep(started, 'ui-design', { reason: 'too late' }), /stories have already started/);
+});
+
+test('unskipStep: restores the ui pair and re-points currentStep back to ui-design (before stories authoring)', () => {
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  skipStep(state, 'ui-design', { reason: 'no UI' });
+  assert.equal(state.currentStep, 'stories');
+  unskipStep(state, 'ui-design');
+  assert.equal(byId(state, 'ui-design').skipped, undefined, 'skip fields are stripped');
+  assert.equal(byId(state, 'ui-design').status, 'in_progress', 'ui-design is the active step again');
+  assert.equal(byId(state, 'ui-design-review').status, 'blocked');
+  assert.equal(byId(state, 'stories').status, 'blocked', 'the auto-opened downstream is pushed back behind ui-design');
+  assert.equal(state.currentStep, 'ui-design');
+});
+
+test('unskipStep: rejects un-skipping a step that is not skipped and once the stories review is under way', () => {
+  assert.throws(() => unskipStep(uiChain('ui-design', { ui: 'in_progress' }), 'ui-design'), /not skipped/);
+  const state = uiChain('architecture-review');
+  skipStep(state, 'ui-design', { reason: 'no UI' });
+  byId(state, 'stories-review').status = 'in_review'; // stories authored & now under review
+  assert.throws(() => unskipStep(state, 'ui-design'), /stories review has already opened/);
+});
+
+test('skipStep: refuses once the ui-design review has opened (would orphan a live review PR)', () => {
+  // yad-ui authored ui-design and opened its review: author done, ui-design-review in_review.
+  const state = uiChain('ui-design-review', { ui: 'done', uiReview: 'in_review' });
+  assert.throws(() => skipStep(state, 'ui-design', { reason: 'changed my mind' }), /already authored|review has already opened/);
+});
+
+test('skipStep: refuses a malformed chain missing the ui-design-review gate', () => {
+  const state = {
+    epicId: 'EP-x', currentStep: 'ui-design',
+    steps: [
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' },
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'in_progress' },
+      { id: 'stories', type: 'author', artifact: 'stories', status: 'blocked' },
+    ],
+  };
+  assert.throws(() => skipStep(state, 'ui-design', { reason: 'no UI' }), /malformed chain/);
+  assert.equal(byId(state, 'ui-design').skipped, undefined, 'a rejected skip mutates nothing');
+});
+
+test('skipStep: a repeat skip with NO reason is still a no-op (idempotency precedes the reason check)', () => {
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  skipStep(state, 'ui-design', { reason: 'no UI' });
+  const before = JSON.stringify(state);
+  skipStep(state, 'ui-design', {}); // no reason — must not throw on an already-skipped step
+  assert.equal(JSON.stringify(state), before);
+});
+
+test('gatePredicate: a corrupted `skipped:true` on a NON-skippable step does NOT bypass its gate', () => {
+  const step = { id: 'stories-review', type: 'review+approve', artifact: 'stories/', risk_tags: [], skipped: true, status: 'done' };
+  const p = gatePredicate({ step, approvals: [], merged: false, threadsResolved: false });
+  assert.equal(p.passed, false, 'the skip short-circuit is only honoured for genuinely skippable steps');
+  assert.notEqual(p.rule, 'skipped');
+});
+
+test('isSkippableStep: matches the ui-design author step and its review gate only', () => {
+  assert.equal(isSkippableStep('ui-design'), true);
+  assert.equal(isSkippableStep('ui-design-review'), true);
+  assert.equal(isSkippableStep('stories-review'), false);
+  assert.equal(isSkippableStep('architecture-review'), false);
+});
+
+test('unskipStep: an UPSTREAM skip un-skips back to blocked and leaves currentStep put', () => {
+  const state = uiChain('architecture-review'); // ui-design not yet the active step
+  skipStep(state, 'ui-design', { reason: 'no UI' });
+  assert.equal(state.currentStep, 'architecture-review', 'skip upstream left currentStep put');
+  unskipStep(state, 'ui-design');
+  assert.equal(byId(state, 'ui-design').skipped, undefined);
+  assert.equal(byId(state, 'ui-design').status, 'blocked', 'prior step not done → author returns to blocked');
+  assert.equal(byId(state, 'ui-design-review').status, 'blocked');
+  assert.equal(state.currentStep, 'architecture-review', 'un-skip upstream does not move currentStep');
 });
 
 test('upsertHubPr replaces by artifact, never duplicates', () => {
