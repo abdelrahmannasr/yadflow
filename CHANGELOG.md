@@ -1,3 +1,15 @@
+# [3.10.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.4...v3.10.0) (2026-07-08)
+
+
+### Bug Fixes
+
+* **sdlc:** satisfy lint gate and cover the yad skip CLI ([838eabc](https://github.com/abdelrahmannasr/yadflow/commit/838eabc0ba597eaeac3e9249c514e3d479de4830))
+
+
+### Features
+
+* **sdlc:** make the ui-design step optional (skippable N/A) ([2bc5583](https://github.com/abdelrahmannasr/yadflow/commit/2bc5583b58626ee0cf8f8cc993a8566e4b206221))
+
 ## [3.9.4](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.3...v3.9.4) (2026-07-07)
 
 ## [3.9.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.9.2...v3.9.3) (2026-07-07)
