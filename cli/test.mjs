@@ -2197,20 +2197,55 @@ test('registerRepo rejects a missing path and a non-git directory — nothing wr
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('registerRepo rejects paths that resolve outside the project root', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-outside-'));
-  git(outside, 'init', '-q'); // a real git repo — still rejected, because it is outside
+// Containment is to the WORKSPACE (the hub root's parent), not the hub root: the standard layout puts
+// code repos BESIDE the hub (project/{product,backend}), so `../backend` must register (issue #129).
+// The workspace has to be a real nested dir here — with the root sitting directly in os.tmpdir(), every
+// tmp dir would be a legal sibling and the rejection cases could not be expressed.
+test('registerRepo accepts a sibling repo inside the workspace, and stores the path as typed', () => {
+  const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ws-'));
+  const T = path.join(WS, 'product'); // the hub root
+  fs.mkdirSync(T);
+  const backend = path.join(WS, 'backend'); // the sibling code repo
+  fs.mkdirSync(backend);
+  git(backend, 'init', '-q');
+  git(backend, 'commit', '-q', '--allow-empty', '-m', 'init');
+  // a nested repo (the demo layout) still works
+  const nested = path.join(T, 'demo-repos', 'api');
+  fs.mkdirSync(nested, { recursive: true });
+  git(nested, 'init', '-q');
+  git(nested, 'commit', '-q', '--allow-empty', '-m', 'init');
+
   const registry = { repos: [] };
-  assert.equal(registerRepo(T, registry, { name: 'esc', rpath: '../' + path.basename(outside) }), null);
-  assert.equal(registerRepo(T, registry, { name: 'abs', rpath: outside }), null);
+  assert.ok(registerRepo(T, registry, { name: 'backend', rpath: '../backend', pack: false }), 'a sibling repo registers');
+  assert.ok(registerRepo(T, registry, { name: 'api', rpath: 'demo-repos/api', pack: false }), 'a nested repo still registers');
+  assert.equal(registry.repos.length, 2);
+  // stored EXACTLY as typed (relative) — every consumer re-resolves via path.resolve(root, repo.path),
+  // and an absolutised path would not survive being cloned onto another machine.
+  assert.equal(registry.repos[0].path, '../backend');
+  fs.rmSync(WS, { recursive: true, force: true });
+});
+
+test('registerRepo rejects paths that resolve outside the workspace', () => {
+  const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
+  const T = path.join(WS, 'product');
+  fs.mkdirSync(T);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-outside-'));
+  git(outside, 'init', '-q'); // a real git repo — still rejected, because it escapes the workspace
+  const registry = { repos: [] };
+  assert.equal(registerRepo(T, registry, { name: 'esc', rpath: '../../' + path.basename(outside) }), null, 'escaping the workspace is rejected');
+  assert.equal(registerRepo(T, registry, { name: 'abs', rpath: outside }), null, 'an absolute path outside the workspace is rejected');
   assert.equal(registry.repos.length, 0);
-  // the prefix trap: a sibling dir sharing the root's name prefix must not pass containment
-  const evil = `${T}-evil`;
+  // the prefix trap, now one level up: a sibling of the WORKSPACE sharing its name prefix must not pass
+  const evil = `${WS}-evil`;
   fs.mkdirSync(evil);
   git(evil, 'init', '-q');
   assert.equal(registerRepo(T, registry, { name: 'evil', rpath: evil }), null);
-  fs.rmSync(T, { recursive: true, force: true });
+  // the workspace DIRECTORY itself contains the hub — registering it would aim repomix and the CI
+  // writes at the whole tree. Strict descendants only (plus the hub root itself, for a monorepo).
+  git(WS, 'init', '-q');
+  assert.equal(registerRepo(T, registry, { name: 'ws', rpath: '..' }), null, 'the workspace root itself is not a registrable repo');
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/repos.json')), 'no registry written for rejected repos');
+  fs.rmSync(WS, { recursive: true, force: true });
   fs.rmSync(outside, { recursive: true, force: true });
   fs.rmSync(evil, { recursive: true, force: true });
 });
@@ -3718,6 +3753,32 @@ test('doctor: registered repo path gone fails with YAD-STATE-003', async () => {
   fs.rmSync(path.join(T, 'demo/backend'), { recursive: true, force: true });
   const r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'repo:backend' && x.status === 'fail' && /YAD-STATE-003/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// issue #129: a code repo may be a SIBLING of the hub. Wherever only the hub is checked out (hub CI, a
+// fresh clone) that path is legitimately absent — a warn, not the YAD-STATE-003 corruption failure.
+test('doctor: an absent repo path OUTSIDE the project root warns instead of failing (#129)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // re-point the registry at a sibling that does not exist in this checkout
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: '../backend', platform: 'github', domain_owner: 'x', default_branch: 'main' }],
+  }));
+  const r = await doctorOn(T);
+  const chk = r.checks.find((x) => x.id === 'repo:backend');
+  assert.equal(chk.status, 'warn', 'an absent sibling is expected, not corruption');
+  assert.match(chk.message, /sibling repo, outside the hub/);
+  assert.ok(!r.checks.some((x) => /YAD-STATE-003/.test(x.message)), 'no YAD-STATE-003 for a sibling');
+
+  // …but a hand-edited registry pointing clean out of the workspace is corruption, not a sibling —
+  // it must not be reassured away by the same warn.
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: '../../elsewhere', platform: 'github', domain_owner: 'x', default_branch: 'main' }],
+  }));
+  const escaped = (await doctorOn(T)).checks.find((x) => x.id === 'repo:backend');
+  assert.equal(escaped.status, 'fail');
+  assert.match(escaped.message, /YAD-STATE-003/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

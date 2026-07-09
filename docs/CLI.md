@@ -160,7 +160,7 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 | `YAD-ENV-003` | Node.js older than the supported range | install Node >= 18 |
 | `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
-| `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo |
+| `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo. A repo *outside* the project root (a sibling, `../backend`) that is simply absent from this checkout is a **warn**, not this failure |
 | `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | only `ui-design` is optional, needs a `--reason`, and can be skipped only up to authoring it (before its review opens / before `stories` start); `--undo` before the stories review opens |
 | `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |

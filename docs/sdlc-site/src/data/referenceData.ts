@@ -332,7 +332,7 @@ export const ERROR_CODES: ErrorCode[] = [
   {
     code: 'YAD-STATE-003',
     cause: 'A registered repo path is missing or not a git repo.',
-    resolution: 'Fix the path in .sdlc/repos.json or re-connect the repo.',
+    resolution: 'Fix the path in .sdlc/repos.json or re-connect the repo. A sibling repo (../backend) that is simply absent from this checkout only warns.',
     severity: 'warn',
     visibleTo: BUILD,
   },

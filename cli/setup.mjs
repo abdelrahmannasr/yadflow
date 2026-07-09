@@ -43,14 +43,28 @@ export function detectPlatform(remoteUrl = '') {
 }
 export const gitHead = (cwd) => run('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
 
-// Containment: every repo path must live inside the project root — the registry path is later
-// joined and executed against (repomix cwd, CI wiring), and even the read-only remote probe must
-// not run against an arbitrary outside path. The path.sep-suffixed compare avoids the
-// /proj vs /proj-evil prefix trap.
-export function insideRoot(root, rpath) {
+// Containment: a repo path must live inside the WORKSPACE — the hub root's parent. The standard
+// multi-repo layout puts the code repos BESIDE the hub, not under it (project/{product,backend,frontend}),
+// so `../backend` has to register; containing to the hub root instead forced separate git repos to nest
+// inside the hub's own repo (issue #129). A nested path (demo-repos/api) still works.
+//
+// The bound stays real: the registry path is later joined and executed against (repomix cwd,
+// .coderabbit.yaml + CI wiring), and even the read-only remote probe must not run against an arbitrary
+// outside path — so `../../elsewhere` and absolute-outside paths are still rejected. The path.sep-suffixed
+// compare avoids the /project vs /project-evil prefix trap, now one level up at the workspace.
+// A sibling of the hub (../product-evil) is, correctly, indistinguishable from ../backend: both are
+// ordinary workspace members. The workspace DIRECTORY ITSELF (`..`) is not: it contains the hub, so
+// registering it as a code repo would point repomix and the CI writes at the whole tree. Only the hub
+// root itself (a monorepo, `.`) and strict descendants of the workspace pass.
+//
+// Place the hub one level below the workspace root (project/product), not directly in $HOME — the
+// workspace is the trust boundary, and a shallow hub makes every sibling of it registerable.
+export function insideWorkspace(root, rpath) {
   const projectRoot = path.resolve(root);
+  const parent = path.dirname(projectRoot);
+  const workspace = parent === projectRoot ? projectRoot : parent; // degenerate: root is the fs root
   const resolved = path.resolve(projectRoot, rpath);
-  return resolved === projectRoot || resolved.startsWith(projectRoot + path.sep);
+  return resolved === projectRoot || resolved.startsWith(workspace + path.sep);
 }
 
 // Validate + record one code repo into the registry (the testable half of the connect loop).
@@ -192,8 +206,8 @@ export function reconcileRepoRoles(root, name, repo, current = [], want = []) {
 }
 
 export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', domain_owners = null, default_branch = 'main', today = null, pack = true }) {
-  if (!insideRoot(root, rpath)) {
-    warn(`${rpath} resolves outside the project root — skipped`);
+  if (!insideWorkspace(root, rpath)) {
+    warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`);
     return null;
   }
   const repoRoot = path.resolve(root, rpath);
@@ -633,8 +647,9 @@ export async function runSetup(root, opts = {}) {
       const name = await ask('  repo name (blank to finish)', '');
       if (!name) break;
       if (known.has(name)) { warn(`${name} already registered — skipping`); continue; }
-      const rpath = await ask('    path (relative to project root)', `demo-repos/${name}`);
-      if (!insideRoot(root, rpath)) { warn(`${rpath} resolves outside the project root — skipped`); continue; }
+      // Siblings of the hub are the common layout (project/{product,backend}) — `../backend` is valid.
+      const rpath = await ask('    path (relative to project root, e.g. ../backend)', `demo-repos/${name}`);
+      if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();
       // Domain owners route the per-repo review. Solo (no roster) and monorepo (one repo = one owner)

@@ -34,6 +34,24 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
   `roles` map, e.g. `roles: hub=owner,reviewer backend=domain-owner`). Validate the login against the
   hub (`gh api users/<login>` / `glab api users?username=`); a miss is flagged `unverified` (warn-only).
 - `path` — local path to the code repo (relative to `{project-root}` or absolute). For local repos.
+  It must resolve inside the **workspace** — the project root's parent — so the standard layout, where
+  the code repos sit **beside** the hub rather than under it, registers as `../backend`:
+
+  ```
+  project/          <- the workspace (containment boundary)
+    product/        <- the hub repo; `yad setup` runs here
+    backend/        <- ../backend
+    frontend/       <- ../frontend
+  ```
+
+  A nested path (`demo-repos/api`, the demo layout) also works. A path that escapes the workspace
+  (`../../elsewhere`, or an absolute path outside it) is rejected and skipped — the registry path is
+  later used as a working directory (repomix) and written into (`.coderabbit.yaml`, CI wiring).
+  It is stored **exactly as typed**; every consumer re-resolves it against the project root.
+
+  The workspace is the trust boundary, so **put the hub one level below it** (`project/product`), not
+  directly in `$HOME` — with the hub at `~/product` the workspace becomes `~` and every home-dir
+  sibling turns into a registrable repo. The workspace directory itself (`..`) is never registrable.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
 - `domain_owners` — the engineer(s) who own this repo's domain (a repo may have several; drives per-repo
   review routing). Each name is also written into that person's `roles[<repo>]` map in `hub.json`.
