@@ -5804,13 +5804,15 @@ test('fetchLatest returns null instead of throwing when the runtime has no globa
   try {
     assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: 'http://127.0.0.1:1' } }), null);
     const root = installedRoot();
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
     try {
       assert.equal(await notice.maybeNotifyUpdate({
-        env: cleanEnv({ YAD_CACHE_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-')) }),
+        env: cleanEnv({ YAD_CACHE_DIR: cache }),
         pkgRoot: root, current: '3.10.1', out: () => {},
       }), false, 'maybeNotifyUpdate resolves false rather than rejecting');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(cache, { recursive: true, force: true });
     }
   } finally {
     if (saved) Object.defineProperty(globalThis, 'fetch', saved);
