@@ -121,6 +121,28 @@ input you already gave; re-running `setup` carries your profile forward.
 > ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No manual `npm publish`. See
 > [`RELEASING.md`](../RELEASING.md).
 
+## Staying up to date
+
+Every `yad` command checks — at most once a day, and never in CI — whether a newer `yadflow` has been
+published to npm. When one has, it prints a notice on **stderr** after the command finishes:
+
+```text
+  ! yadflow update available — 3.10.1 → 3.11.0
+    Changelog:  https://github.com/abdelrahmannasr/yadflow/releases/tag/v3.11.0
+    Update:     npm install yadflow -g
+    Then:       yad update   (re-sync this project's yad-* skills)
+```
+
+Both lines matter. `npm install yadflow -g` upgrades the CLI; `yad update` then re-syncs the installed
+`yad-*` skills and gate scripts in your project, which are still stamped at the old version in
+`.sdlc/cli-version.json` (`yad doctor` flags the mismatch until you do).
+
+The notice never touches stdout or the exit code, so `--json` output, the grounding bundles, and
+`yad next <epic> --check <step>` are unaffected. It is silent when `CI` is set, when
+`YAD_NO_UPDATE_NOTIFIER=1` or `SDLC_NONINTERACTIVE` is set, and when `yad` is run from a source
+checkout. If the registry is unreachable the check fails silently — it can never fail your command.
+The last result is cached in `$XDG_CACHE_HOME/yadflow/update-check.json` (override with `YAD_CACHE_DIR`).
+
 ## Troubleshooting (`yad doctor` + error codes)
 
 When something is off, run `yad doctor` first — it checks the environment (git, gh/glab auth, node

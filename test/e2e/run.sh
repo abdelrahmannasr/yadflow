@@ -43,6 +43,11 @@ echo "   $TARBALL"
 say "install into a throwaway prefix"
 npm install -g --prefix "$WORK/prefix" "$TARBALL" >/dev/null 2>&1
 export PATH="$WORK/prefix/bin:$PATH"
+# The installed tarball has no .git, so the update notifier's dev-checkout guard does not apply and it
+# would reach the real npm registry on the first command. The banner goes to stderr and would not
+# corrupt these stdout assertions, but an e2e run must never depend on the network.
+export YAD_NO_UPDATE_NOTIFIER=1
+export YAD_CACHE_DIR="$WORK/cache"
 command -v yad >/dev/null || die "yad not on PATH after install"
 yad --version >/dev/null || die "yad --version failed"
 

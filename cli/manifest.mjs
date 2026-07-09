@@ -10,6 +10,10 @@ import { readFileSync } from 'node:fs';
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 export const VERSION = pkg.version;
 
+// The published npm package name — the registry path the update check queries, and the name in the
+// `npm install <name> -g` line it prints. Read from package.json so a rename can never desync them.
+export const PKG_NAME = pkg.name;
+
 // The upstream yadflow repo, as `owner/name` — where `yad report` files issues. Derived from
 // package.json `bugs.url` (the single source of truth) so it tracks a fork/rename automatically;
 // falls back to the canonical slug if the field is ever malformed.

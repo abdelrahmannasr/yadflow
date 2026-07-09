@@ -22,6 +22,7 @@ import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
 import { runUsage } from '../cli/usage.mjs';
+import { maybeNotifyUpdate } from '../cli/update-notice.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
 
@@ -146,7 +147,11 @@ ${c.bold('Options')}
   --push                check --fix / update: commit + push applied changes to the default branch
   --allow-branch        check --fix --push / update --push / repo refresh --push: allow committing on a non-default branch
   -h, --help            Show this help
-  -v, --version         Print version`;
+  -v, --version         Print version
+
+${c.bold('Environment')}
+  YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
+  YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
 const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason']);
 
@@ -364,4 +369,15 @@ main()
       } catch { /* reporting is best-effort — never mask the original failure */ }
     }
   })
-  .finally(closePrompts);
+  // Runs for every command, success or failure, after any report prompt. Prints to stderr and never
+  // touches process.exitCode, so a command's stdout contract and exit status are unaffected.
+  // The try/finally is load-bearing, not defensive noise: a rejection here would escape as an
+  // unhandled rejection (exit 1 on an otherwise successful command) AND skip closePrompts(), leaving
+  // the readline handle open so the process never exits.
+  .finally(async () => {
+    try {
+      await maybeNotifyUpdate();
+    } catch { /* the notice is never worth failing or hanging a command over */ } finally {
+      closePrompts();
+    }
+  });
