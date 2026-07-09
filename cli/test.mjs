@@ -2208,12 +2208,14 @@ test('registerRepo accepts a sibling repo inside the workspace, and stores the p
   const backend = path.join(WS, 'backend'); // the sibling code repo
   fs.mkdirSync(backend);
   git(backend, 'init', '-q');
-  git(backend, 'commit', '-q', '--allow-empty', '-m', 'init');
+  // Identity per command: a CI runner has no global git config, and GIT_ENV strips the ambient
+  // GIT_AUTHOR_*/GIT_COMMITTER_* — so a bare `git commit` here dies with "Author identity unknown".
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'init');
   // a nested repo (the demo layout) still works
   const nested = path.join(T, 'demo-repos', 'api');
   fs.mkdirSync(nested, { recursive: true });
   git(nested, 'init', '-q');
-  git(nested, 'commit', '-q', '--allow-empty', '-m', 'init');
+  git(nested, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'init');
 
   const registry = { repos: [] };
   assert.ok(registerRepo(T, registry, { name: 'backend', rpath: '../backend', pack: false }), 'a sibling repo registers');
