@@ -5398,3 +5398,440 @@ test('publishCodeContext: outside a hub (no hub.json) fails with a non-zero exit
     fs.rmSync(T, { recursive: true, force: true });
   }
 });
+
+// ---- update notice ------------------------------------------------------
+// The notifier is the CLI's only network call. These tests pin the three properties that make it
+// safe to run after every command: it never hits the real registry (env-injected base URL), never
+// writes the real ~/.cache (env-injected dir), and never throws.
+
+const notice = await import('./update-notice.mjs');
+
+// A pkgRoot with no .git — otherwise the dev-checkout guard suppresses everything.
+function installedRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'yad-installed-'));
+}
+// An env with none of the suppression signals the ambient shell (or CI) may carry.
+const cleanEnv = (over = {}) => ({ YAD_CACHE_DIR: '', ...over });
+
+test('parseVersion accepts x.y.z (with optional v/prerelease) and rejects garbage', () => {
+  assert.deepEqual(notice.parseVersion('3.10.1'), { major: 3, minor: 10, patch: 1, pre: null });
+  assert.deepEqual(notice.parseVersion('v3.10.1'), { major: 3, minor: 10, patch: 1, pre: null });
+  assert.equal(notice.parseVersion('4.0.0-rc.1').pre, 'rc.1');
+  for (const bad of ['', '3.10', 'latest', '^3.0.0', null, undefined, 42, '3.10.1.2']) {
+    assert.equal(notice.parseVersion(bad), null, `rejects ${JSON.stringify(bad)}`);
+  }
+});
+
+test('isNewer compares precedence, ignores prereleases, and is false on garbage', () => {
+  assert.ok(notice.isNewer('4.0.0', '3.10.1'), 'major');
+  assert.ok(notice.isNewer('3.11.0', '3.10.1'), 'minor');
+  assert.ok(notice.isNewer('3.10.2', '3.10.1'), 'patch');
+  assert.ok(!notice.isNewer('3.10.1', '3.10.1'), 'equal is not newer');
+  assert.ok(!notice.isNewer('3.9.9', '3.10.1'), 'older is not newer');
+  assert.ok(notice.isNewer('3.10.0', '3.9.20'), 'minor outranks a larger patch (numeric, not lexical)');
+  assert.ok(notice.isNewer('3.10.1', '3.9.9'), 'segments compare numerically: 10 > 9');
+  assert.ok(!notice.isNewer('4.0.0-rc.1', '3.10.1'), 'a prerelease never nags a stable user');
+  assert.ok(!notice.isNewer('garbage', '3.10.1'), 'unparseable latest');
+  assert.ok(!notice.isNewer('4.0.0', 'garbage'), 'unparseable current');
+});
+
+test('cacheFile honors YAD_CACHE_DIR, then XDG, then LOCALAPPDATA on win32, else ~/.cache', () => {
+  const home = '/home/u';
+  assert.equal(notice.cacheFile({ env: { YAD_CACHE_DIR: '/tmp/c' }, home }), path.join('/tmp/c', 'update-check.json'));
+  assert.equal(notice.cacheFile({ env: { XDG_CACHE_HOME: '/xdg' }, home }), path.join('/xdg', 'yadflow', 'update-check.json'));
+  assert.equal(
+    notice.cacheFile({ env: { LOCALAPPDATA: 'C:\\AppData' }, platform: 'win32', home }),
+    path.join('C:\\AppData', 'yadflow', 'update-check.json'),
+  );
+  assert.equal(notice.cacheFile({ env: {}, platform: 'linux', home }), path.join(home, '.cache', 'yadflow', 'update-check.json'));
+});
+
+test('shouldSuppress fires on the opt-out, CI, non-interactive, and a dev checkout — but never on a pipe', () => {
+  const root = installedRoot();
+  try {
+    assert.ok(!notice.shouldSuppress({ env: {}, pkgRoot: root }), 'a plain global install notifies');
+    assert.ok(notice.shouldSuppress({ env: { YAD_NO_UPDATE_NOTIFIER: '1' }, pkgRoot: root }));
+    assert.ok(notice.shouldSuppress({ env: { CI: 'true' }, pkgRoot: root }));
+    assert.ok(notice.shouldSuppress({ env: { SDLC_NONINTERACTIVE: '1' }, pkgRoot: root }));
+    // `CI=false`/`0` are common in shells that always export the name — they must not suppress.
+    assert.ok(!notice.shouldSuppress({ env: { CI: 'false' }, pkgRoot: root }));
+    assert.ok(!notice.shouldSuppress({ env: { CI: '0' }, pkgRoot: root }));
+    // The repo checkout itself: a maintainer editing this version is not nagged about it.
+    assert.ok(notice.shouldSuppress({ env: {}, pkgRoot: ROOT }), 'a .git at pkgRoot means dev');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('formatBanner names both versions, the release-tag changelog, and the global install command', () => {
+  const b = notice.formatBanner('3.10.1', '3.11.0');
+  assert.match(b, /3\.10\.1/);
+  assert.match(b, /3\.11\.0/);
+  assert.match(b, /https:\/\/github\.com\/[^/]+\/yadflow\/releases\/tag\/v3\.11\.0/, 'per-version release notes');
+  assert.match(b, /npm install yadflow -g/);
+  assert.match(b, /yad update/, 'the follow-up that re-syncs the project skills');
+});
+
+test('registryBase prefers YAD_REGISTRY_URL, then npm_config_registry, and strips trailing slashes', () => {
+  assert.equal(notice.registryBase({ env: { YAD_REGISTRY_URL: 'http://a/', npm_config_registry: 'http://b' } }), 'http://a');
+  assert.equal(notice.registryBase({ env: { npm_config_registry: 'http://b//' } }), 'http://b');
+  assert.equal(notice.registryBase({ env: {} }), 'https://registry.npmjs.org');
+});
+
+// Serves dist-tags from localhost so no test ever reaches registry.npmjs.org.
+async function withRegistry(handler, fn) {
+  const http = await import('node:http');
+  const server = http.createServer(handler);
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    return await fn(url);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+}
+
+test('fetchLatest reads dist-tags.latest over real HTTP', async () => {
+  await withRegistry((req, res) => {
+    assert.equal(req.url, '/-/package/yadflow/dist-tags');
+    res.setHeader('content-type', 'application/json');
+    res.end('{"latest":"9.9.9"}');
+  }, async (url) => {
+    assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: url } }), '9.9.9');
+  });
+});
+
+test('fetchLatest returns null on a 500, on malformed JSON, and on a dead port', async () => {
+  await withRegistry((_req, res) => { res.statusCode = 500; res.end('nope'); }, async (url) => {
+    assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: url } }), null, '500');
+  });
+  await withRegistry((_req, res) => res.end('not json'), async (url) => {
+    assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: url } }), null, 'malformed body');
+  });
+  // 127.0.0.1:1 refuses instantly — the offline path, without waiting out the timeout.
+  assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: 'http://127.0.0.1:1' } }), null, 'dead port');
+});
+
+test('fetchLatest gives up at the timeout rather than hanging the command', async () => {
+  await withRegistry(() => { /* never respond */ }, async (url) => {
+    const t0 = Date.now();
+    assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: url }, timeoutMs: 60 }), null);
+    assert.ok(Date.now() - t0 < 2000, 'aborted, did not hang');
+  });
+});
+
+// The orchestrator. `fetchImpl` is stubbed here so we can count calls (the cache-hit assertion).
+function stubFetch(latest, calls = { n: 0 }) {
+  const impl = async () => {
+    calls.n++;
+    return { ok: true, json: async () => ({ latest }) };
+  };
+  return [impl, calls];
+}
+
+test('maybeNotifyUpdate prints the banner and caches the result when a newer version exists', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    const [fetchImpl, calls] = stubFetch('9.9.9');
+    let out = '';
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      now: 1_000_000, out: (s) => { out += s; }, fetchImpl,
+    });
+    assert.ok(shown, 'banner shown');
+    assert.match(out, /9\.9\.9/);
+    assert.match(out, /npm install yadflow -g/);
+    assert.equal(calls.n, 1, 'one registry call');
+    const written = JSON.parse(fs.readFileSync(path.join(cache, 'update-check.json'), 'utf8'));
+    assert.deepEqual(written, { lastCheck: 1_000_000, latest: '9.9.9' });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate stays quiet when the installed version is current', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    const [fetchImpl] = stubFetch('3.10.1');
+    let out = '';
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      out: (s) => { out += s; }, fetchImpl,
+    });
+    assert.ok(!shown);
+    assert.equal(out, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate serves a fresh cache without touching the network', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    fs.writeFileSync(path.join(cache, 'update-check.json'), JSON.stringify({ lastCheck: 1_000_000, latest: '9.9.9' }));
+    const [fetchImpl, calls] = stubFetch('9.9.9');
+    let out = '';
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      now: 1_000_000 + 1000, ttlMs: notice.DAY_MS, out: (s) => { out += s; }, fetchImpl,
+    });
+    assert.ok(shown, 'still nags from cache');
+    assert.match(out, /9\.9\.9/, 'the banner comes from the cached value');
+    assert.equal(calls.n, 0, 'no registry call inside the TTL');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate refetches once the TTL expires', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    fs.writeFileSync(path.join(cache, 'update-check.json'), JSON.stringify({ lastCheck: 0, latest: '3.10.1' }));
+    const [fetchImpl, calls] = stubFetch('9.9.9');
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      now: notice.DAY_MS + 1, out: () => {}, fetchImpl,
+    });
+    assert.equal(calls.n, 1, 'stale cache triggers a refetch');
+    assert.ok(shown);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate falls back to the stale latest when the registry is down, and backs off', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    fs.writeFileSync(path.join(cache, 'update-check.json'), JSON.stringify({ lastCheck: 0, latest: '9.9.9' }));
+    let out = '';
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      now: notice.DAY_MS + 1, out: (s) => { out += s; },
+      fetchImpl: async () => { throw new Error('offline'); },
+    });
+    assert.ok(shown, 'a known-newer version still nags while offline');
+    assert.match(out, /9\.9\.9/);
+    const written = JSON.parse(fs.readFileSync(path.join(cache, 'update-check.json'), 'utf8'));
+    // lastCheck advances even though the fetch failed — otherwise an offline user pays the full
+    // network timeout on every single command.
+    assert.equal(written.lastCheck, notice.DAY_MS + 1);
+    assert.equal(written.latest, '9.9.9', 'the stale value survives the outage');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate is silent under every suppression signal', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    for (const over of [{ CI: 'true' }, { YAD_NO_UPDATE_NOTIFIER: '1' }, { SDLC_NONINTERACTIVE: '1' }]) {
+      const [fetchImpl, calls] = stubFetch('9.9.9');
+      let out = '';
+      const shown = await notice.maybeNotifyUpdate({
+        env: cleanEnv({ YAD_CACHE_DIR: cache, ...over }), pkgRoot: root, current: '3.10.1',
+        out: (s) => { out += s; }, fetchImpl,
+      });
+      assert.ok(!shown, `suppressed by ${Object.keys(over)[0]}`);
+      assert.equal(out, '');
+      assert.equal(calls.n, 0, 'suppression short-circuits before the network');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate survives an unwritable cache dir and a corrupt cache file', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    // Corrupt cache: readJSON defaults to null, so we simply refetch.
+    fs.writeFileSync(path.join(cache, 'update-check.json'), '{ not json');
+    const [fetchImpl] = stubFetch('9.9.9');
+    assert.ok(await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1', out: () => {}, fetchImpl,
+    }), 'corrupt cache is recoverable');
+
+    // Unwritable cache dir: the banner must still print, the command must not fail.
+    const locked = path.join(cache, 'locked');
+    fs.mkdirSync(locked);
+    fs.chmodSync(locked, 0o500);
+    const [fetchImpl2] = stubFetch('9.9.9');
+    let out = '';
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: path.join(locked, 'sub') }), pkgRoot: root, current: '3.10.1',
+      out: (s) => { out += s; }, fetchImpl: fetchImpl2,
+    });
+    fs.chmodSync(locked, 0o700);
+    assert.ok(shown, 'still notifies without a cache');
+    assert.match(out, /9\.9\.9/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate never throws and never sets an exit code', async () => {
+  const prev = process.exitCode;
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    process.exitCode = 0;
+    // A fresh cache holding a newer version, so the banner path is actually reached and the printer
+    // itself explodes — this is what exercises the outer catch. (With no cache and a failing fetch,
+    // `latest` stays null and isNewer short-circuits before `out` is ever called.)
+    fs.writeFileSync(path.join(cache, 'update-check.json'), JSON.stringify({ lastCheck: 5_000, latest: '9.9.9' }));
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1', now: 5_001,
+      out: () => { throw new Error('printer exploded'); },
+      fetchImpl: async () => { throw new Error('boom'); },
+    });
+    assert.equal(shown, false, 'a throwing printer is swallowed');
+    assert.ok(!process.exitCode, 'a broken notifier leaves the command exit code alone');
+
+    // And a cacheFile() that throws outright (a NUL byte in the path) is equally survivable.
+    assert.equal(await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: '\0invalid' }), pkgRoot: root, current: '3.10.1',
+      out: () => {}, fetchImpl: async () => { throw new Error('boom'); },
+    }), false);
+    assert.ok(!process.exitCode, 'still no exit code');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('maybeNotifyUpdate treats a future lastCheck as expired (clock skew cannot pin a stale latest)', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    // A cache stamped ten years ahead — a clock jump, an NTP correction, or a cache copied from
+    // another machine. A naive `now - lastCheck < ttl` reads negative and calls this "fresh",
+    // pinning the stale `latest` until real time catches up.
+    fs.writeFileSync(path.join(cache, 'update-check.json'),
+      JSON.stringify({ lastCheck: 5_000_000, latest: '3.10.1' }));
+    const [fetchImpl, calls] = stubFetch('9.9.9');
+    const shown = await notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      now: 1_000, out: () => {}, fetchImpl,
+    });
+    assert.equal(calls.n, 1, 'a future stamp forces a refetch');
+    assert.ok(shown, 'and the fresh answer is used');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('a poisoned cache cannot inject escape sequences or a bogus URL into the banner', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    const ESC = String.fromCharCode(27);
+    for (const evil of [`9.9.9${ESC}[31mPWNED`, '9.9.9 https://evil.example', '../../etc/passwd', '9.9.9\nUpdate: curl x | sh']) {
+      fs.writeFileSync(path.join(cache, 'update-check.json'), JSON.stringify({ lastCheck: 1_000, latest: evil }));
+      let out = '';
+      const shown = await notice.maybeNotifyUpdate({
+        env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1', now: 1_500,
+        out: (s) => { out += s; }, fetchImpl: async () => { throw new Error('offline'); },
+      });
+      // isNewer() gates the print on the strict parseVersion regex, so nothing but digits and dots
+      // can ever reach formatBanner's URL interpolation.
+      assert.ok(!shown, `refuses to print ${JSON.stringify(evil)}`);
+      assert.equal(out, '');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('concurrent yad processes never corrupt the cache or leave stray tmp files', async () => {
+  const root = installedRoot();
+  const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+  try {
+    const [fetchImpl] = stubFetch('9.9.9');
+    await Promise.all(Array.from({ length: 20 }, () => notice.maybeNotifyUpdate({
+      env: cleanEnv({ YAD_CACHE_DIR: cache }), pkgRoot: root, current: '3.10.1',
+      out: () => {}, fetchImpl,
+    })));
+    const parsed = JSON.parse(fs.readFileSync(path.join(cache, 'update-check.json'), 'utf8'));
+    assert.equal(parsed.latest, '9.9.9', 'atomic rename leaves a complete file');
+    assert.deepEqual(fs.readdirSync(cache).filter((f) => f.includes('.tmp')), [], 'no stray tmp files');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(cache, { recursive: true, force: true });
+  }
+});
+
+test('normalizeVersion canonicalizes a v-prefix so the changelog URL is never vv3.11.0', () => {
+  assert.equal(notice.normalizeVersion('v3.11.0'), '3.11.0');
+  assert.equal(notice.normalizeVersion('3.11.0'), '3.11.0');
+  assert.equal(notice.normalizeVersion('v4.0.0-rc.1'), '4.0.0-rc.1');
+  assert.equal(notice.normalizeVersion('junk'), null);
+  const b = notice.formatBanner('3.10.1', 'v3.11.0');
+  assert.match(b, /releases\/tag\/v3\.11\.0/);
+  assert.doesNotMatch(b, /tag\/vv/, 'no doubled v in the release-tag URL');
+  assert.doesNotMatch(b, /→ v3/, 'the displayed version is canonical too');
+});
+
+test('isNewer announces the stable release to a user sitting on its prerelease', () => {
+  assert.ok(notice.isNewer('4.0.0', '4.0.0-rc.1'), 'rc.1 -> final ships');
+  assert.ok(notice.isNewer('4.0.1', '4.0.0-rc.1'), 'and a later patch too');
+  assert.ok(!notice.isNewer('4.0.0-rc.2', '4.0.0-rc.1'), 'prereleases are not ordered against each other');
+  assert.ok(!notice.isNewer('4.0.0-rc.1', '4.0.0'), 'a stable user is never pulled back to an rc');
+  assert.ok(!notice.isNewer('4.0.0', '4.0.0'), 'still not newer than itself');
+});
+
+test('fetchLatest returns null instead of throwing when the runtime has no global fetch', async () => {
+  // Default parameters evaluate BEFORE the function body's try/catch, so `fetchImpl = fetch` would
+  // have thrown a ReferenceError past every guard on a runtime without a global fetch (Node 18 with
+  // --no-experimental-fetch). Simulate that by deleting the global for the duration of the call.
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
+  delete globalThis.fetch;
+  try {
+    assert.equal(await notice.fetchLatest({ env: { YAD_REGISTRY_URL: 'http://127.0.0.1:1' } }), null);
+    const root = installedRoot();
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-cache-'));
+    try {
+      assert.equal(await notice.maybeNotifyUpdate({
+        env: cleanEnv({ YAD_CACHE_DIR: cache }),
+        pkgRoot: root, current: '3.10.1', out: () => {},
+      }), false, 'maybeNotifyUpdate resolves false rather than rejecting');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(cache, { recursive: true, force: true });
+    }
+  } finally {
+    if (saved) Object.defineProperty(globalThis, 'fetch', saved);
+  }
+});
+
+test('yad still succeeds on a runtime with no global fetch (--no-experimental-fetch)', () => {
+  // The end-to-end proof of the above: the real binary, fetch removed, must exit 0 and still print.
+  // Run from a .git-less copy so the dev-checkout guard does not mask the code path.
+  const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-nofetch-'));
+  try {
+    for (const d of ['bin', 'cli']) fs.cpSync(path.join(ROOT, d), path.join(pkg, d), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(pkg, 'package.json'));
+    const out = execFileSync(process.execPath, ['--no-experimental-fetch', path.join(pkg, 'bin/yad.mjs'), '--version'], {
+      encoding: 'utf8',
+      env: { ...process.env, CI: '', YAD_NO_UPDATE_NOTIFIER: '', SDLC_NONINTERACTIVE: '', YAD_CACHE_DIR: path.join(pkg, 'cache') },
+    });
+    assert.match(out.trim(), /^\d+\.\d+\.\d+$/, 'exits 0 and prints a bare version');
+  } finally {
+    fs.rmSync(pkg, { recursive: true, force: true });
+  }
+});

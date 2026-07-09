@@ -17,6 +17,11 @@ export default [
         Buffer: 'readonly',
         URL: 'readonly',
         __dirname: 'readonly',
+        // Node >=18 web globals used by the dependency-free update check. `fetch` is reached via
+        // globalThis (a bare reference would throw where it is unavailable), so only AbortSignal
+        // is named here — and that one is only ever touched inside a try/catch.
+        globalThis: 'readonly',
+        AbortSignal: 'readonly',
       },
     },
     rules: {

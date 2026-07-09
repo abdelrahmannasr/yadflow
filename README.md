@@ -63,6 +63,9 @@ Every step stops at a gate until a human approves. New here? **Walk it lesson-by
 [guided tutorial](https://abdelrahmannasr.github.io/yadflow/tutorial/)**, or read the
 [team guide](TEAM-GUIDE.md).
 
+Running `yad` tells you when a new release is out — upgrade with `npm install yadflow -g`, then
+`yad update` to re-sync this project's skills. See [staying up to date](docs/CLI.md#staying-up-to-date).
+
 ## What `npx yadflow setup` installs
 
 ![npx yadflow setup — the guided wizard installs the yad-* skills, wires the CI gates, and stamps the .sdlc config](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/media/setup-wizard.gif)
