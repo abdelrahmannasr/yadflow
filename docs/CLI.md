@@ -141,7 +141,9 @@ The notice never touches stdout or the exit code, so `--json` output, the ground
 `yad next <epic> --check <step>` are unaffected. It is silent when `CI` is set, when
 `YAD_NO_UPDATE_NOTIFIER=1` or `SDLC_NONINTERACTIVE` is set, and when `yad` is run from a source
 checkout. If the registry is unreachable the check fails silently — it can never fail your command.
-The last result is cached in `$XDG_CACHE_HOME/yadflow/update-check.json` (override with `YAD_CACHE_DIR`).
+The last result is cached in `update-check.json`, resolved in this order: `$YAD_CACHE_DIR/` (the
+override), else `$XDG_CACHE_HOME/yadflow/`, else `%LOCALAPPDATA%\yadflow\` on Windows, else
+`~/.cache/yadflow/`. On macOS `XDG_CACHE_HOME` is normally unset, so the file lands in `~/.cache/yadflow/`.
 
 ## Troubleshooting (`yad doctor` + error codes)
 
