@@ -6,7 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -270,6 +270,13 @@ export function epicChecks(checks, root) {
       if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`, 'author it via yad-epic, or remove the directory');
       else {
         check(checks, `epic:${e}`, 'epics', 'ok', `${e}: currentStep ${ledger.state.currentStep}`);
+        // Chain consistency: a passed review gate whose author step was never closed. currentStep alone
+        // cannot see this, yet it blocks every later step (including the parallel test-cases track).
+        for (const v of stateInvariants(ledger.state)) {
+          check(checks, `epic:${e}:${v.authorStep}`, 'epics', 'fail',
+            `${e}: ${v.message} [${v.code}]`,
+            `run \`yad gate repair ${e}\` to close it`);
+        }
         // Migration guard (pre-3.0 model): under the current model CI records the ledger on the
         // default branch only at merge (when the step is already done), and writes nothing during
         // review — so an OPEN (non-done) review PR recorded here means it was opened under an older

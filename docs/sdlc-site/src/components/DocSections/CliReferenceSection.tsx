@@ -21,6 +21,7 @@ const GROUPS = [
       'yad gate sync <epic> [artifact] — pull approvals/threads, auto-advance on merge',
       'yad gate comments <epic> — fetch the unresolved review comments',
       'yad gate status <epic> — show each review step and its approvals',
+      'yad gate repair <epic> — close an author step stranded behind a passed gate (YAD-STATE-005)',
     ],
   },
   {

@@ -337,6 +337,13 @@ export const ERROR_CODES: ErrorCode[] = [
     visibleTo: BUILD,
   },
   {
+    code: 'YAD-STATE-005',
+    cause: 'An authoring step is stranded behind its completed review gate — it blocks every later step, including the parallel test-cases track.',
+    resolution: 'Run yad gate repair <epic> (add --push to commit the fix to the default branch).',
+    severity: 'critical',
+    visibleTo: BUILD,
+  },
+  {
     code: 'YAD-CFG-001',
     cause: 'hub.json names an unknown platform.',
     resolution: 'Expected github, gitlab, or null — fix it or re-run yad setup.',

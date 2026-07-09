@@ -4,7 +4,7 @@ import { VERSION } from '../cli/manifest.mjs';
 import { c, log, closePrompts, askYesNo } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
-import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough } from '../cli/gate.mjs';
+import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
@@ -78,6 +78,8 @@ ${c.bold('Review gate (front half)')}
   yad gate sync <epic> [artifact]      Pull PR state -> ledger; advance on approved+resolved+merged
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
+  yad gate repair <epic> [--push]      Close an author step stranded behind a passed review gate
+                                       (YAD-STATE-005); --push commits state.json to the default branch
   yad gate review <epic> [artifact]    Print the grounding bundle for the review companion
                                        (artifact + risk + contract + PR + code-maps) — fun, easy review
   yad gate walkthrough <epic> [artifact]  Grounding bundle + ordered risk-tagged stops for the
@@ -259,7 +261,7 @@ async function main() {
       const [, action, epic, artifact] = o._;
       // `gate ci` takes no positionals — epic/artifact come from --branch (or a sweep of all PRs).
       if (action === 'ci') { await gateCi(o.dir, { branch: o.branch, pr: o.pr, merged: o.merged, push: !o.noPush, today }); break; }
-      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|review|walkthrough|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
+      if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|repair|review|walkthrough|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
@@ -269,10 +271,11 @@ async function main() {
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
+      else if (action === 'repair') await gateRepair(o.dir, { epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });
       else if (action === 'review') await gateReview(o.dir, { epic, artifact });
       else if (action === 'walkthrough') await gateWalkthrough(o.dir, { epic, artifact });
       else if (action === 'trailer') await gateTrailer(o.dir, { epic, artifact, body: o.body || o.message, number: o.pr });
-      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|review|walkthrough|trailer|ci)`)); process.exitCode = 1; }
+      else { log(c.red(`unknown gate action: ${action} (open|sync|comments|status|repair|review|walkthrough|trailer|ci)`)); process.exitCode = 1; }
       break;
     }
     case 'review': {

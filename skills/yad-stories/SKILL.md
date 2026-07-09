@@ -104,6 +104,10 @@ As a <role>, I want <capability>, so that <outcome>.
 In `state.json`: set `stories.status: "done"`, set `stories-review.status: "in_review"`, and set
 `currentStep: "stories-review"`. Write `state.json`. Do **not** touch `approvals.json`.
 
+> Since 3.11 the CLI also closes the authoring step when its review gate opens or advances, so this
+> edit is a no-op once `yad gate open` has run. A `stories` step left `in_progress` behind a passed
+> `stories-review` used to block the parallel `test-cases` track (`YAD-STATE-005`).
+
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the story IDs created, the repos each touches, and that the next action is **review** via
 `yad-review-gate`. Note that this review routes **per-repo reviewers**: owner + 1 reviewer **plus**, for

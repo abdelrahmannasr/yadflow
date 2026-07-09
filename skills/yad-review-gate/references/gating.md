@@ -55,7 +55,9 @@ re-approve. (Hash recipe: `yad-architecture/references/contract-format.md`.)
 4. `action: approve` approver *bob* role *reviewer* → ledger entry added. Predicate:
    `|owners|=1, |reviewers|=1` → **base pass**.
 5. `action: advance` → `epic-review.status=done`, `architecture.status=in_progress`,
-   `currentStep=architecture`. Gate reports the advance.
+   `currentStep=architecture`. Gate reports the advance. The paired authoring step (`epic`) is closed
+   too, if it was not already — a gate cannot have passed on an unauthored artifact. `doctor` reports
+   any surviving violation as `YAD-STATE-005`; `yad gate repair <epic>` heals it.
 
 ## Participation record (comments.json)
 `approvals.json` answers "who approved"; `.sdlc/comments.json` answers "who reviewed/commented". The
