@@ -1,3 +1,10 @@
+# [3.11.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.10.1...v3.11.0) (2026-07-09)
+
+
+### Features
+
+* notify when a newer yadflow is published ([9b7a5bf](https://github.com/abdelrahmannasr/yadflow/commit/9b7a5bfca4f27ab08ce4e3e48f2ba331c3e8bfd5))
+
 ## [3.10.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.10.0...v3.10.1) (2026-07-08)
 
 
