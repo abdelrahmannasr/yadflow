@@ -710,7 +710,9 @@ test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit co
 // ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
-const { gatePredicate, artifactHash, nextAction, preconditionsMet } = await import('./epic-state.mjs');
+// `stateInvariants` is pulled in HERE, not with the epic-state block further down: top-level `await
+// import` yields, and node:test may already be running the gate tests that assert on it by then.
+const { gatePredicate, artifactHash, nextAction, preconditionsMet, stateInvariants } = await import('./epic-state.mjs');
 
 const baseStep = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: [] };
 const escStep = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
@@ -1308,7 +1310,7 @@ test('runSetup: a corrupt hub.json aborts instead of silently rewriting it strip
 // ---------------------------------------------------------------------------------------------
 // `yad gate sync` — platform state -> ledger -> advance (with an injected fake reader)
 // ---------------------------------------------------------------------------------------------
-const { gateSync, gateStatus } = await import('./gate.mjs'); // gateOpen imported earlier (P1/P2 block)
+const { gateSync, gateStatus, gateRepair, buildRepairMessage } = await import('./gate.mjs'); // gateOpen imported earlier (P1/P2 block)
 
 function scaffoldEpic() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-'));
@@ -1364,6 +1366,30 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
   const again = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
   assert.equal(again.filter((a) => a.source === 'bridge').length, approvals.filter((a) => a.source === 'bridge').length);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// issue #131, end to end: in SOLO mode the predicate waives approvals, so a merge advances the review
+// step with an empty approvals.json — and (pre-fix) left the authoring step at in_progress forever.
+test('gate sync: a solo merge advances the gate AND closes its authoring step (#131)', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+    platform: 'github', default_branch: 'main', solo: true, roster: [{ login: 'al', name: 'alice', role: 'owner' }],
+  }));
+  // the exact damaged shape the reporter hit: authoring never closed, review open, PR merged, no reviews
+  const state0 = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  state0.steps.find((s) => s.id === 'architecture').status = 'in_progress';
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state0));
+
+  const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', reviews: [], threads: [] };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => merged });
+
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done', 'solo: merge advances the gate');
+  assert.equal(state.steps.find((s) => s.id === 'architecture').status, 'done', 'the authoring step is closed, not stranded');
+  assert.equal(state.currentStep, 'ui-design');
+  // and the chain is now internally consistent — doctor would report nothing
+  assert.deepEqual(stateInvariants(state), []);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1925,6 +1951,109 @@ test('gate open without an artifact fails cleanly (no throw)', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------------------------------------------------
+// `yad gate repair` — heal an epic damaged by a pre-fix gate sync (issue #131). A repo already
+// corrupted never self-heals: gate sync skips a step that is already `done`.
+// ---------------------------------------------------------------------------------------------
+// A hub git repo on `main` with an origin, carrying one epic whose `stories` step is stranded.
+function hubWithStrandedEpic() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-repair-'));
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-repair-bare-'));
+  git(bare, 'init', '-q', '--bare');
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.name', 'alice');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [] }));
+  const ep = path.join(T, 'epics/EP-x/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({
+    epicId: 'EP-x', currentStep: 'ready-for-build',
+    steps: [
+      { id: 'stories', type: 'author', artifact: 'stories/', status: 'in_progress' },
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+      { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'in_progress' },
+    ],
+  }, null, 2));
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'remote', 'add', 'origin', bare);
+  return { T, bare, statePath: path.join(ep, 'state.json') };
+}
+
+test('buildRepairMessage: a chore(gate) audit-trail subject with [skip ci] and no AI co-author footer', () => {
+  const m = buildRepairMessage({ epic: 'EP-x', steps: ['stories'] });
+  assert.match(m.split('\n')[0], /^chore\(gate\): repair epic state — close stranded author step\(s\) \[skip ci\]$/);
+  assert.match(m, /Epic: EP-x/);
+  assert.match(m, /Closed: stories/);
+  assert.match(m, /YAD-STATE-005/);
+  assert.ok(!/Co-Authored-By/i.test(m), 'machine state a human corrected — never an AI co-author footer');
+});
+
+test('gate repair: closes the stranded author step, is idempotent, and writes nothing when consistent', async () => {
+  const { T, statePath } = hubWithStrandedEpic();
+  const r = await gateRepair(T, { epic: 'EP-x' });
+  assert.deepEqual(r.closed, ['stories']);
+  const state = JSON.parse(fs.readFileSync(statePath));
+  assert.equal(state.steps[0].status, 'done');
+  assert.equal(state.steps[2].status, 'in_progress', 'the parallel test-cases track is left alone');
+  // a second run finds nothing — and the epic now passes its own invariant
+  const again = await gateRepair(T, { epic: 'EP-x' });
+  assert.deepEqual(again.closed, []);
+  assert.deepEqual(stateInvariants(JSON.parse(fs.readFileSync(statePath))), []);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate repair --dry-run reports the violation but writes nothing', async () => {
+  const { T, statePath } = hubWithStrandedEpic();
+  const before = fs.readFileSync(statePath, 'utf8');
+  const r = await gateRepair(T, { epic: 'EP-x', dryRun: true });
+  assert.deepEqual(r.closed, ['stories']);
+  assert.equal(fs.readFileSync(statePath, 'utf8'), before, 'a dry run leaves state.json byte-identical');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate repair --push commits ONLY state.json to the default branch and pushes it', async () => {
+  const prev = process.exitCode;
+  const { T } = hubWithStrandedEpic();
+  try {
+    // an unrelated file must NOT ride into the [skip ci] chore commit — and the property that actually
+    // protects an in-progress index is that a PRE-STAGED file is excluded too (git's pathspec-limited
+    // commit ignores the rest of the index), not merely an unstaged one.
+    fs.writeFileSync(path.join(T, 'unrelated.md'), 'do not commit me');
+    git(T, 'add', 'unrelated.md');
+    process.exitCode = 0;
+    await gateRepair(T, { epic: 'EP-x', push: true });
+    assert.equal(process.exitCode, 0, 'a successful repair does not set a non-zero exit code');
+    const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
+    assert.match(subject, /^chore\(gate\): repair epic state/);
+    const files = git(T, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n');
+    assert.deepEqual(files, ['epics/EP-x/.sdlc/state.json'], 'only the repaired ledger is committed');
+    assert.ok(fs.existsSync(path.join(T, 'unrelated.md')), 'the unrelated file is left in the working tree');
+    assert.match(git(T, 'status', '--short').toString(), /^A\s+unrelated\.md/m, 'and is still staged, not swept into the commit');
+    // it reached origin/main
+    assert.equal(
+      git(T, 'rev-parse', 'HEAD').toString().trim(),
+      git(T, 'rev-parse', 'origin/main').toString().trim(),
+    );
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate repair --push refuses off the default branch unless --allow-branch', async () => {
+  const prev = process.exitCode;
+  const { T, statePath } = hubWithStrandedEpic();
+  try {
+    git(T, 'checkout', '-q', '-b', 'wip/side');
+    process.exitCode = 0;
+    await gateRepair(T, { epic: 'EP-x', push: true });
+    assert.equal(process.exitCode, 1, 'the default-branch guard refuses and flags the run');
+    // the heal itself still landed on disk; only the commit was withheld
+    assert.equal(JSON.parse(fs.readFileSync(statePath)).steps[0].status, 'done');
+    assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'seed', 'nothing committed');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('gate status counts only non-stale approvals after an artifact change', async () => {
   const { T, ep } = scaffoldEpic();
   // record approvals bound to the current contract surface, not yet merged
@@ -2068,20 +2197,57 @@ test('registerRepo rejects a missing path and a non-git directory — nothing wr
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('registerRepo rejects paths that resolve outside the project root', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-outside-'));
-  git(outside, 'init', '-q'); // a real git repo — still rejected, because it is outside
+// Containment is to the WORKSPACE (the hub root's parent), not the hub root: the standard layout puts
+// code repos BESIDE the hub (project/{product,backend}), so `../backend` must register (issue #129).
+// The workspace has to be a real nested dir here — with the root sitting directly in os.tmpdir(), every
+// tmp dir would be a legal sibling and the rejection cases could not be expressed.
+test('registerRepo accepts a sibling repo inside the workspace, and stores the path as typed', () => {
+  const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ws-'));
+  const T = path.join(WS, 'product'); // the hub root
+  fs.mkdirSync(T);
+  const backend = path.join(WS, 'backend'); // the sibling code repo
+  fs.mkdirSync(backend);
+  git(backend, 'init', '-q');
+  // Identity per command: a CI runner has no global git config, and GIT_ENV strips the ambient
+  // GIT_AUTHOR_*/GIT_COMMITTER_* — so a bare `git commit` here dies with "Author identity unknown".
+  git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'init');
+  // a nested repo (the demo layout) still works
+  const nested = path.join(T, 'demo-repos', 'api');
+  fs.mkdirSync(nested, { recursive: true });
+  git(nested, 'init', '-q');
+  git(nested, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'init');
+
   const registry = { repos: [] };
-  assert.equal(registerRepo(T, registry, { name: 'esc', rpath: '../' + path.basename(outside) }), null);
-  assert.equal(registerRepo(T, registry, { name: 'abs', rpath: outside }), null);
+  assert.ok(registerRepo(T, registry, { name: 'backend', rpath: '../backend', pack: false }), 'a sibling repo registers');
+  assert.ok(registerRepo(T, registry, { name: 'api', rpath: 'demo-repos/api', pack: false }), 'a nested repo still registers');
+  assert.equal(registry.repos.length, 2);
+  // stored EXACTLY as typed (relative) — every consumer re-resolves via path.resolve(root, repo.path),
+  // and an absolutised path would not survive being cloned onto another machine.
+  assert.equal(registry.repos[0].path, '../backend');
+  fs.rmSync(WS, { recursive: true, force: true });
+});
+
+test('registerRepo rejects paths that resolve outside the workspace', () => {
+  const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
+  const T = path.join(WS, 'product');
+  fs.mkdirSync(T);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-outside-'));
+  git(outside, 'init', '-q'); // a real git repo — still rejected, because it escapes the workspace
+  const registry = { repos: [] };
+  assert.equal(registerRepo(T, registry, { name: 'esc', rpath: '../../' + path.basename(outside) }), null, 'escaping the workspace is rejected');
+  assert.equal(registerRepo(T, registry, { name: 'abs', rpath: outside }), null, 'an absolute path outside the workspace is rejected');
   assert.equal(registry.repos.length, 0);
-  // the prefix trap: a sibling dir sharing the root's name prefix must not pass containment
-  const evil = `${T}-evil`;
+  // the prefix trap, now one level up: a sibling of the WORKSPACE sharing its name prefix must not pass
+  const evil = `${WS}-evil`;
   fs.mkdirSync(evil);
   git(evil, 'init', '-q');
   assert.equal(registerRepo(T, registry, { name: 'evil', rpath: evil }), null);
-  fs.rmSync(T, { recursive: true, force: true });
+  // the workspace DIRECTORY itself contains the hub — registering it would aim repomix and the CI
+  // writes at the whole tree. Strict descendants only (plus the hub root itself, for a monorepo).
+  git(WS, 'init', '-q');
+  assert.equal(registerRepo(T, registry, { name: 'ws', rpath: '..' }), null, 'the workspace root itself is not a registrable repo');
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/repos.json')), 'no registry written for rejected repos');
+  fs.rmSync(WS, { recursive: true, force: true });
   fs.rmSync(outside, { recursive: true, force: true });
   fs.rmSync(evil, { recursive: true, force: true });
 });
@@ -2694,7 +2860,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, SKIPPABLE_STEPS, isSkippableStep } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, SKIPPABLE_STEPS, isSkippableStep, authorStepFor, repairState } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
@@ -2794,6 +2960,110 @@ test('advanceState: completing the parallel test-cases-review keeps the epic at 
   advanceState(state, state.steps[2]);
   assert.equal(state.steps[2].status, 'done');
   assert.equal(state.currentStep, 'ready-for-build', 'the parallel track never regresses currentStep');
+});
+
+// ---------------------------------------------------------------------------------------------
+// issue #131 — a passed review gate must never leave its authoring step behind
+// ---------------------------------------------------------------------------------------------
+const chainWithAuthor = (authorStatus, reviewStatus) => ({
+  epicId: 'EP-x', currentStep: 'stories-review',
+  steps: [
+    { id: 'stories', type: 'author', artifact: 'stories/', status: authorStatus },
+    { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: reviewStatus },
+    { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'blocked' },
+    { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'blocked' },
+  ],
+});
+
+test('authorStepFor: resolves the paired author step by id, and is null when the chain omits it', () => {
+  const state = chainWithAuthor('in_progress', 'in_review');
+  assert.equal(authorStepFor(state, state.steps[1]).id, 'stories');
+  // an author step is not itself paired with anything
+  assert.equal(authorStepFor(state, state.steps[0]), null);
+  // a chain carrying only the gate (a change-epic) has no author step — never fall back to steps[i-1]
+  const gateOnly = { steps: [{ id: 'stories-review', type: 'review+approve', status: 'in_review' }] };
+  assert.equal(authorStepFor(gateOnly, gateOnly.steps[0]), null);
+});
+
+test('advanceState: closes an authoring step stranded at in_progress behind its review gate (#131)', () => {
+  const state = chainWithAuthor('in_progress', 'in_review');
+  advanceState(state, state.steps[1]);
+  assert.equal(state.steps[0].status, 'done', 'the author step is closed, not left in_progress');
+  assert.equal(state.steps[1].status, 'done');
+  // and the parallel track it was silently blocking now opens
+  assert.equal(state.steps[2].status, 'in_progress', 'test-cases opens');
+  assert.equal(state.currentStep, 'ready-for-build');
+});
+
+test('advanceState: the stranded-author repair unblocks every later step via preconditionsMet (#131)', () => {
+  const state = chainWithAuthor('in_progress', 'in_review');
+  advanceState(state, state.steps[1]);
+  // before the fix `stories` stayed in_progress and preconditionsMet found it as the blocker
+  assert.deepEqual(preconditionsMet(state, 'test-cases'), { ok: true, blockedBy: null, reason: 'ready' });
+});
+
+test('advanceState: closing the author step is idempotent and never disturbs a done/skipped one', () => {
+  const already = chainWithAuthor('done', 'in_review');
+  advanceState(already, already.steps[1]);
+  assert.equal(already.steps[0].status, 'done');
+  // a skipped ui-design pair is pre-marked done and carries skip provenance — leave it exactly as is
+  const skipped = {
+    epicId: 'EP-x', currentStep: 'ui-design-review',
+    steps: [
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'done', skipped: true, skipReason: 'backend-only' },
+      { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'in_review', skipped: true },
+      { id: 'stories', type: 'author', artifact: 'stories/', status: 'blocked' },
+    ],
+  };
+  advanceState(skipped, skipped.steps[1]);
+  assert.equal(skipped.steps[0].status, 'done');
+  assert.equal(skipped.steps[0].skipReason, 'backend-only', 'skip provenance survives');
+});
+
+test('advanceState: a chain with no author step advances the gate alone and does not corrupt steps[i-1]', () => {
+  // the real shape guarded here: stories-review is steps[0] — a positional lookup would walk off the chain
+  const state = {
+    epicId: 'EP-x', currentStep: 'stories-review',
+    steps: [
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'in_review' },
+      { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'blocked' },
+    ],
+  };
+  advanceState(state, state.steps[0]);
+  assert.equal(state.steps[0].status, 'done');
+  assert.equal(state.steps[1].status, 'in_progress', 'test-cases is opened, not closed');
+});
+
+test('markInReview: opening the review gate closes its authoring step (#131)', () => {
+  const state = chainWithAuthor('in_progress', 'blocked');
+  markInReview(state, state.steps[1]);
+  assert.equal(state.steps[0].status, 'done', 'authoring is finished once its review opens');
+  assert.equal(state.steps[1].status, 'in_review');
+  assert.equal(state.currentStep, 'stories-review');
+});
+
+test('stateInvariants: flags YAD-STATE-005 only for an author step behind a DONE gate', () => {
+  const broken = chainWithAuthor('in_progress', 'done');
+  const [v, ...rest] = stateInvariants(broken);
+  assert.equal(rest.length, 0);
+  assert.equal(v.code, 'YAD-STATE-005');
+  assert.equal(v.authorStep, 'stories');
+  assert.equal(v.reviewStep, 'stories-review');
+  // a gate still in_review is not a violation — the author step legitimately trails it
+  assert.deepEqual(stateInvariants(chainWithAuthor('in_progress', 'in_review')), []);
+  assert.deepEqual(stateInvariants(chainWithAuthor('done', 'done')), []);
+  // the parallel test-cases track sitting in_progress after stories-review passed is NOT a violation
+  const parallel = chainWithAuthor('done', 'done');
+  parallel.steps[2].status = 'in_progress';
+  assert.deepEqual(stateInvariants(parallel), []);
+  assert.deepEqual(stateInvariants(null), [], 'a missing chain is loadLedger\'s problem, not ours');
+});
+
+test('repairState: closes stranded author steps, returns their ids, and is idempotent', () => {
+  const state = chainWithAuthor('in_progress', 'done');
+  assert.deepEqual(repairState(state), ['stories']);
+  assert.equal(state.steps[0].status, 'done');
+  assert.deepEqual(repairState(state), [], 'a second run has nothing to close');
 });
 
 test('markInReview: the parallel test-cases-review does not pull currentStep back from ready-for-build', () => {
@@ -3485,6 +3755,57 @@ test('doctor: registered repo path gone fails with YAD-STATE-003', async () => {
   fs.rmSync(path.join(T, 'demo/backend'), { recursive: true, force: true });
   const r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'repo:backend' && x.status === 'fail' && /YAD-STATE-003/.test(x.message)));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// issue #129: a code repo may be a SIBLING of the hub. Wherever only the hub is checked out (hub CI, a
+// fresh clone) that path is legitimately absent — a warn, not the YAD-STATE-003 corruption failure.
+test('doctor: an absent repo path OUTSIDE the project root warns instead of failing (#129)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // re-point the registry at a sibling that does not exist in this checkout
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: '../backend', platform: 'github', domain_owner: 'x', default_branch: 'main' }],
+  }));
+  const r = await doctorOn(T);
+  const chk = r.checks.find((x) => x.id === 'repo:backend');
+  assert.equal(chk.status, 'warn', 'an absent sibling is expected, not corruption');
+  assert.match(chk.message, /sibling repo, outside the hub/);
+  assert.ok(!r.checks.some((x) => /YAD-STATE-003/.test(x.message)), 'no YAD-STATE-003 for a sibling');
+
+  // …but a hand-edited registry pointing clean out of the workspace is corruption, not a sibling —
+  // it must not be reassured away by the same warn.
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
+    repos: [{ name: 'backend', path: '../../elsewhere', platform: 'github', domain_owner: 'x', default_branch: 'main' }],
+  }));
+  const escaped = (await doctorOn(T)).checks.find((x) => x.id === 'repo:backend');
+  assert.equal(escaped.status, 'fail');
+  assert.match(escaped.message, /YAD-STATE-003/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: an authoring step stranded behind a done review gate fails with YAD-STATE-005 (#131)', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-x/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  const chain = (authorStatus) => JSON.stringify({
+    epicId: 'EP-x', currentStep: 'ui-design',
+    steps: [
+      { id: 'stories', type: 'author', artifact: 'stories/', status: authorStatus },
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+    ],
+  });
+  fs.writeFileSync(path.join(ep, 'state.json'), chain('in_progress'));
+  let r = await doctorOn(T);
+  const bad = r.checks.find((x) => x.id === 'epic:EP-x:stories');
+  assert.equal(bad.status, 'fail');
+  assert.match(bad.message, /YAD-STATE-005/);
+  assert.match(bad.hint, /yad gate repair EP-x/);
+
+  // the healed chain reports nothing — the check is not a permanent tax on a healthy epic
+  fs.writeFileSync(path.join(ep, 'state.json'), chain('done'));
+  r = await doctorOn(T);
+  assert.ok(!r.checks.some((x) => /YAD-STATE-005/.test(x.message)));
   fs.rmSync(T, { recursive: true, force: true });
 });
 

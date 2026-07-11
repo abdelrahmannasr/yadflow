@@ -6,9 +6,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
-import { gitHead } from './setup.mjs';
+import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
 
 const MIN_NODE = 18;
@@ -18,6 +18,18 @@ const MIN_NODE = 18;
 const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 // owner/repo slug from a git url (https or ssh), for the branch-protection probe.
 const repoSlug = (url) => ((url || '').match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/) || [])[1] || null;
+// Is an already-resolved path nested under the project root? Repo paths are contained to the WORKSPACE
+// (the root's parent, see setup.insideWorkspace), so a registered sibling resolves outside the root —
+// which is what distinguishes "absent because it lives elsewhere" from "absent because it is broken".
+// The path.sep suffix keeps /proj-evil from reading as inside /proj.
+const underProjectRoot = (root, p) => {
+  const projectRoot = path.resolve(root);
+  return p === projectRoot || p.startsWith(projectRoot + path.sep);
+};
+// An absent path is only excused as "a sibling that lives elsewhere" when it is one the connect step
+// would actually accept. A hand-edited registry pointing outside the workspace entirely (../../x) is
+// corruption, and must not be reassured away as an expected sibling.
+const isRegistrableSibling = (root, rpath) => insideWorkspace(root, rpath);
 
 // Each check: { id, section, status: 'ok'|'warn'|'fail', message, hint? }
 function check(checks, id, section, status, message, hint = '') {
@@ -213,7 +225,15 @@ export function projectChecks(checks, root) {
       // would read as "healthy") — an entry with no path is malformed.
       if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
       const repoRoot = path.resolve(root, repo.path);
-      if (!exists(repoRoot)) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo'); continue; }
+      // A registered repo may be a SIBLING of the hub (`../backend`, the standard multi-repo layout).
+      // Such a checkout is legitimately absent wherever only the hub is checked out — hub CI, a fresh
+      // clone — so its absence is a warn, not corruption. A missing path INSIDE the project root is
+      // still a hard fail: nothing but damage explains it.
+      if (!exists(repoRoot)) {
+        if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo');
+        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the hub)`, 'expected when only the hub is checked out; clone it alongside the hub to work on it here');
+        continue;
+      }
       const head = gitHead(repoRoot);
       if (!head) { check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: ${repo.path} is not a git repository (or has no commits) [YAD-STATE-003]`, 'init/clone the repo, then re-connect it'); continue; }
       if (!repo.syncedHead) check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: registered without a code-context pack (greenfield)`, 'run `yad repo refresh ' + repo.name + '` once it has code');
@@ -270,6 +290,13 @@ export function epicChecks(checks, root) {
       if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`, 'author it via yad-epic, or remove the directory');
       else {
         check(checks, `epic:${e}`, 'epics', 'ok', `${e}: currentStep ${ledger.state.currentStep}`);
+        // Chain consistency: a passed review gate whose author step was never closed. currentStep alone
+        // cannot see this, yet it blocks every later step (including the parallel test-cases track).
+        for (const v of stateInvariants(ledger.state)) {
+          check(checks, `epic:${e}:${v.authorStep}`, 'epics', 'fail',
+            `${e}: ${v.message} [${v.code}]`,
+            `run \`yad gate repair ${e}\` to close it`);
+        }
         // Migration guard (pre-3.0 model): under the current model CI records the ledger on the
         // default branch only at merge (when the step is already done), and writes nothing during
         // review — so an OPEN (non-done) review PR recorded here means it was opened under an older

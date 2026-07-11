@@ -169,6 +169,11 @@ In `state.json`: set `epic.status: "done"`, set `epic-review.status: "in_review"
 `currentStep: "epic-review"`. Write `state.json`. Do **not** re-seed and do **not** touch
 `approvals.json` — only real reviewers approve, through the gate.
 
+> Since 3.11 the CLI closes the authoring step itself whenever its review gate opens or advances
+> (`yad gate open` / `sync`), so this edit is a no-op when the gate has already run. Keep making it —
+> it keeps `state.json` truthful before the gate opens — but it is no longer load-bearing: an epic
+> whose author step is left `in_progress` used to strand forever (`YAD-STATE-005`).
+
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via
 `yad-review-gate`. **Never mark the epic-review step approved here** — only real reviewers do that

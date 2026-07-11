@@ -184,6 +184,29 @@ export function findReviewStep(state, artifact) {
 export const isEscalated = (step) =>
   (step?.risk_tags || []).some((t) => RISK_ESCALATORS.includes(t)) || step?.id === 'stories-review';
 
+// The authoring step paired with a review gate: `stories-review` -> `stories`. Resolved BY ID (the
+// same `-review` suffix convention `isSkippableStep` uses), never positionally — a chain may legally
+// omit the author step (a change-epic that carries only the gate), and `steps[i-1]` would then point
+// at an unrelated step. Returns null when the chain has no such step.
+export function authorStepFor(state, reviewStep) {
+  const id = String(reviewStep?.id || '');
+  if (!id.endsWith('-review')) return null;
+  return state?.steps?.find((s) => s.id === id.replace(/-review$/, '')) || null;
+}
+
+// Closing a review gate implies its artifact was authored — so the CLI, not the authoring skill, is
+// what makes `<step>.status = done` true. Without this an author step left at `in_progress` strands
+// forever: `preconditionsMet` requires every PRIOR step done, so the parallel `test-cases` track (and
+// every later step) stays blocked behind a review that already passed. Idempotent; a no-op on an
+// absent step and on a `skipped` one (already `done`, carrying its skip provenance).
+// Returns the id it closed, or null.
+function closeAuthorStep(state, reviewStep) {
+  const author = authorStepFor(state, reviewStep);
+  if (!author || author.status === 'done') return null;
+  author.status = 'done';
+  return author.id;
+}
+
 const uniqueBy = (arr, key) => {
   const seen = new Set();
   return arr.filter((x) => (seen.has(x[key]) ? false : seen.add(x[key])));
@@ -293,6 +316,10 @@ export function gatePredicate({
 export function advanceState(state, step) {
   const i = state.steps.findIndex((s) => s.id === step.id);
   state.steps[i] = { ...state.steps[i], status: 'done' };
+  // Defensive: `markInReview` normally closed the author step when the gate opened, but the CI bridge
+  // advances on a merge event without ever running it locally. Close it here too, so a passed gate can
+  // never leave its author step behind (issue #131).
+  closeAuthorStep(state, step);
   if (step.id === 'stories-review') {
     const tc = state.steps.find((s) => s.id === 'test-cases');
     if (tc && tc.status === 'blocked') tc.status = 'in_progress';
@@ -442,6 +469,9 @@ export function unskipStep(state, stepId) {
 export function markInReview(state, step) {
   const i = state.steps.findIndex((s) => s.id === step.id);
   if (state.steps[i].status !== 'done') state.steps[i].status = 'in_review';
+  // Opening a review gate means the artifact was authored — close the paired author step rather than
+  // trusting the authoring skill to have hand-edited state.json (issue #131).
+  closeAuthorStep(state, step);
   if (state.currentStep !== 'ready-for-build') state.currentStep = step.id;
   return state;
 }
@@ -565,6 +595,43 @@ export function preconditionsMet(state, stepId) {
   const blocker = state.steps.slice(0, i).find((s) => s.status !== 'done');
   if (blocker) return { ok: false, blockedBy: blocker.id, reason: `${blocker.id} has not passed yet` };
   return { ok: true, blockedBy: null, reason: 'ready' };
+}
+
+// PURE. Consistency invariants over a chain, for `doctor` (report) and `gate repair` (heal). Today one
+// rule: a `review+approve` step that is `done` must have its paired author step `done` too — a gate
+// cannot have passed on an unauthored artifact. Violations are epics damaged by a pre-fix `gate sync`
+// (issue #131); they read as healthy to a `currentStep`-only check while silently blocking every later
+// step through `preconditionsMet`.
+//
+// Deliberately NOT the broader "no non-done step precedes a done one": the parallel `test-cases` track
+// legitimately sits `in_progress` after `stories-review` advanced the epic to ready-for-build.
+// No FS / network. Returns [] on a missing or malformed chain (loadLedger already reports that).
+export function stateInvariants(state) {
+  if (!state || !Array.isArray(state.steps)) return [];
+  const violations = [];
+  for (const step of state.steps) {
+    if (step.type !== 'review+approve' || step.status !== 'done') continue;
+    const author = authorStepFor(state, step);
+    if (!author || author.status === 'done') continue;
+    violations.push({
+      code: 'YAD-STATE-005',
+      reviewStep: step.id,
+      authorStep: author.id,
+      message: `${author.id} is '${author.status}' behind a completed ${step.id}`,
+    });
+  }
+  return violations;
+}
+
+// Apply the repair `stateInvariants` describes: close every author step stranded behind a done review
+// gate. Mutates `state` and returns the ids it closed (empty when already consistent — idempotent).
+export function repairState(state) {
+  const closed = [];
+  for (const v of stateInvariants(state)) {
+    const author = state.steps.find((s) => s.id === v.authorStep);
+    if (author && author.status !== 'done') { author.status = 'done'; closed.push(author.id); }
+  }
+  return closed;
 }
 
 // PURE next-action resolver for ONE epic's ledger — what `yad next <epic>` prints. Reads state + the

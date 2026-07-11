@@ -169,6 +169,13 @@ opens the PR only; local `yad gate sync` is advisory in bridge mode (writes noth
 everyone `git checkout <default> && git pull`. (Without the bridge, humans own the ledger locally and
 these guards are no-ops.)
 
+**The one sanctioned human ledger write: `yad gate repair`.** It heals a `YAD-STATE-005` chain (an
+authoring step stranded behind a review gate that already advanced) by writing `state.json` alone. This
+is not a `ledger-guard` gap: the repair commits to the **default branch**, where `ledger-guard` — which
+only inspects review PRs — never runs, and where the `yad-update-guard` (platform-Verified signature +
+roster-allowlisted author) vets it instead, exactly as it does for `yad checkpoint` and `yad update`.
+The command refuses to commit off the default branch unless `--allow-branch` is passed.
+
 **Loop prevention & races.** The only ledger commit lands on the **default branch** at merge, which
 fires no PR trigger; it carries `[skip ci]` to guard sibling workflows. Because CI never pushes the
 review branch, there is no `synchronize` / MR-pipeline loop to prevent — and it is now **safe to enable**

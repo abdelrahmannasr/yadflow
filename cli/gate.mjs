@@ -11,8 +11,9 @@ import { PROJECT_FILES } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
-  upsertHubPr, DISCOVERY_FILES,
+  upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
 } from './epic-state.mjs';
+import { hubGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
   getPrBody, editPrBody, postComment,
@@ -484,6 +485,70 @@ export async function gateStatus(root, { epic } = {}) {
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
     log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s)${tags}`)}`);
   }
+}
+
+// PURE — the audit-trail commit message for a state repair (mirrors buildCheckpointMessage). The
+// subject passes the hub commit-message gate (valid type `chore`, scope `gate`, no trailing period)
+// and carries [skip ci]: the repair lands on the default branch, where a re-triggered gate workflow
+// would have nothing to do. No Task trailer and no Co-Authored-By footer — this is machine state a
+// human corrected, not an authored code change.
+export function buildRepairMessage({ epic, steps }) {
+  const subject = 'chore(gate): repair epic state — close stranded author step(s) [skip ci]';
+  return `${subject}\n\nEpic: ${epic}\nClosed: ${steps.join(', ')}\nReason: YAD-STATE-005 — author step(s) left behind a completed review gate`;
+}
+
+// `yad gate repair <epic>` — heal the chain inconsistency `doctor` reports as YAD-STATE-005: an author
+// step stranded at in_progress behind a review gate that already advanced (issue #131). A pre-fix
+// `gate sync` could leave this, and it never self-heals — sync skips a step that is already `done` — so
+// the damage needs an explicit, auditable correction.
+//
+// Only state.json is touched, and `--push` commits ONLY that file: a `[skip ci]` chore commit must never
+// sweep up an unrelated edit. It lands on the DEFAULT branch, where `ledger-guard` (which polices the
+// machine-written ledger on review PRs) does not apply — so this stays compatible with "CI is the sole
+// writer of the ledger" during review.
+export async function gateRepair(root, { epic, push = false, allowBranch = false, dryRun = false } = {}) {
+  const epicDir = epicRoot(root, epic);
+  const ledger = loadLedger(epicDir);
+  if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { closed: [] }; }
+
+  log(c.bold(`\nyad gate repair  ${c.dim(epic)}`));
+  const violations = stateInvariants(ledger.state);
+  if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { closed: [] }; }
+  for (const v of violations) warn(`${v.message} [${v.code}]`);
+
+  const closed = repairState(ledger.state);
+  if (dryRun) { info('dry run — nothing written'); return { closed }; }
+  writeJSON(ledger.files.state, ledger.state);
+  ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
+  if (!push) { hand('re-run `yad doctor` to confirm, then commit epics/*/.sdlc/state.json (or re-run with --push)'); return { closed }; }
+
+  // --- publish: narrow, default-branch-only commit of the one repaired file ---
+  preflightGuardReadiness(root);
+  const git = hubGit(root);
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
+  const defaultBranch = resolveDefaultBranch(git, loadHub(root).hub);
+  if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return { closed };
+
+  const spec = path.relative(root, ledger.files.state);
+  if (!git('add', '--', spec).ok) { fail(`git add failed for ${spec}`); process.exitCode = 1; return { closed }; }
+  if (git('diff', '--cached', '--quiet', '--', spec).ok) { info('state.json unchanged on disk — nothing to commit'); return { closed }; }
+
+  const message = buildRepairMessage({ epic, steps: closed });
+  const cm = git('commit', '-m', message, '--', spec);
+  if (!cm.ok) {
+    git('reset', '-q', '--', spec); // never leave it staged for an unrelated commit to sweep up
+    fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
+    process.exitCode = 1;
+    return { closed };
+  }
+  ok(`committed the repair: ${c.dim(message.split('\n')[0])}`);
+  // Push HEAD to its OWN branch — with --allow-branch we are not on the default branch, and pushing
+  // HEAD:defaultBranch would publish a WIP branch straight to it.
+  if (pushWithRebase(root, branch).ok) { ok(`pushed to origin/${branch}`); return { closed }; }
+  fail(`could not push to origin/${branch} — a protected branch, or an unresolvable rebase conflict`);
+  hand('run `git pull --rebase` and re-run `yad gate repair <epic> --push`');
+  process.exitCode = 1;
+  return { closed };
 }
 
 // `head` overrides the review branch the PR is opened against — `open-pr` delegates here after pushing

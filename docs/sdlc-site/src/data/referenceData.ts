@@ -332,8 +332,15 @@ export const ERROR_CODES: ErrorCode[] = [
   {
     code: 'YAD-STATE-003',
     cause: 'A registered repo path is missing or not a git repo.',
-    resolution: 'Fix the path in .sdlc/repos.json or re-connect the repo.',
+    resolution: 'Fix the path in .sdlc/repos.json or re-connect the repo. A sibling repo (../backend) that is simply absent from this checkout only warns.',
     severity: 'warn',
+    visibleTo: BUILD,
+  },
+  {
+    code: 'YAD-STATE-005',
+    cause: 'An authoring step is stranded behind its completed review gate — it blocks every later step, including the parallel test-cases track.',
+    resolution: 'Run yad gate repair <epic> (add --push to commit the fix to the default branch).',
+    severity: 'critical',
     visibleTo: BUILD,
   },
   {

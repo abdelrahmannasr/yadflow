@@ -31,6 +31,7 @@ no clone needed.
 | `yad gate sync <epic> [artifact]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
 | `yad gate status <epic>` | Show each review step and its recorded approvals. |
+| `yad gate repair <epic>` | Close an authoring step left stranded behind a review gate that already passed (`YAD-STATE-005`). Writes only `state.json`. `--push` commits it to the default branch with a `chore(gate): repair…[skip ci]` audit-trail message (`--allow-branch` to override the default-branch guard, `--dry-run` to preview). |
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the hub workflow calls on review/merge events: derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the hub default branch (sweep every open review PR when no `--branch`). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
 | `yad open-pr [--repo <name>]` | Open a **task** PR/MR from the platform template (build half). **Stage-aware on the hub:** a `review/EP-*` branch opens the front-half artifact-review PR (delegates to `yad gate open`); any other hub branch uses the code-task template (so hub tooling PRs pass the `pr-template` gate). |
@@ -159,8 +160,9 @@ with a fix-it hint per finding. Failures carry stable, greppable codes, also pri
 | `YAD-ENV-003` | Node.js older than the supported range | install Node >= 18 |
 | `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
-| `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo |
+| `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo. A repo *outside* the project root (a sibling, `../backend`) that is simply absent from this checkout is a **warn**, not this failure |
 | `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | only `ui-design` is optional, needs a `--reason`, and can be skipped only up to authoring it (before its review opens / before `stories` start); `--undo` before the stories review opens |
+| `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
 | `YAD-CFG-002` | `design.json` names an unknown design tool | expected one of `config.yaml` `design.tools` (e.g. `figma`, `pencil`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`), or `none` — fix it or re-run `yad setup` |
