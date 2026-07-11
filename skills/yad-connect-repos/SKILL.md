@@ -37,7 +37,7 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
   It must resolve inside the **workspace** — the project root's parent — so the standard layout, where
   the code repos sit **beside** the hub rather than under it, registers as `../backend`:
 
-  ```
+  ```text
   project/          <- the workspace (containment boundary)
     product/        <- the hub repo; `yad setup` runs here
     backend/        <- ../backend
