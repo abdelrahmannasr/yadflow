@@ -1,3 +1,10 @@
+# [3.12.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.11.1...v3.12.0) (2026-07-11)
+
+
+### Features
+
+* render an epic's kind as its noun in next/thread/status ([42e80e1](https://github.com/abdelrahmannasr/yadflow/commit/42e80e19e20e129a2a3941c85db6777a66ab00cc))
+
 ## [3.11.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.11.0...v3.11.1) (2026-07-11)
 
 
