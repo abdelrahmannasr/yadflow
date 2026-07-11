@@ -1,3 +1,11 @@
+## [3.11.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.11.0...v3.11.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **gate:** close the authoring step when its review gate advances ([8baaed9](https://github.com/abdelrahmannasr/yadflow/commit/8baaed9416a063013b5e6acf1ae36c5a1b3c920b))
+* **setup:** contain repo paths to the workspace so sibling repos connect ([265a7ae](https://github.com/abdelrahmannasr/yadflow/commit/265a7ae543fccf8697ff89726ecb1a6aadde62ce))
+
 # [3.11.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.10.1...v3.11.0) (2026-07-09)
 
 
