@@ -755,6 +755,13 @@ export function readFrontmatter(file) {
 
 const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 
+// The human-facing noun for a lineage kind. Presentation only — the artifact is always an epic
+// (`EP-<slug>`); this just renders WHAT KIND of work it is so `yad next`/`yad thread`/`yad status`
+// read as "Defect EP-…" / "Change request EP-…" instead of a generic "Epic". `feature` (and any
+// unknown/absent kind) falls back to "Epic". A bug is a defect (kind:defect) — no separate noun.
+export const KIND_NOUN = { feature: 'Epic', change: 'Change request', defect: 'Defect', hotfix: 'Hotfix' };
+export const kindNoun = (kind) => KIND_NOUN[kind] || 'Epic';
+
 // The lineage of an epic from epic.md frontmatter. `kind` defaults to `feature` (genesis) when absent,
 // so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {

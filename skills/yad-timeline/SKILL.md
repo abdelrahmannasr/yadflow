@@ -48,7 +48,9 @@ deterministically; theme from the design system). The thread maps onto the shell
   = what it re-authored, its side-effects = the ships it produced + any contract re-lock.
 - **System components** = the artifacts (epic/architecture/contract/ui/stories/test-cases), each labelled
   with the epic that currently **owns** it (from the resolved map).
-- Colour nodes by `kind` (feature/change/defect/hotfix); mark sealed epics and open debt.
+- Label and colour nodes by `kind` — render each node's kind noun (**Change request** / **Defect** /
+  **Hotfix** / **Epic** for feature) alongside its id, not the generic word "epic"; mark sealed epics and
+  open debt. (A bug is a defect — `kind: defect`. Presentation only; every node is still an epic.)
 
 ### Step 4 — Emit `thread-resolved.md` (the current-truth map — derived, non-authoritative)
 Write `epics/<thread>/thread-resolved.md`: for each artifact base, the **owning epic** (the latest in the
@@ -58,7 +60,7 @@ is the file the next `yad-change` / `yad-epic` reads as "the feature's current t
 
 ### Step 5 — Emit `TIMELINE.md` + (optional) deploy
 Write a short `epics/<thread>/TIMELINE.md` (the chain, what each node changed, ships, open debt) for a
-plain-text read. On `action: deploy`, `yad docs deploy` the site (build-only when no target).
+plain-text read — head each node with its kind noun (Change request / Defect / Hotfix / Epic) + id. On `action: deploy`, `yad docs deploy` the site (build-only when no target).
 
 ## Hard rules
 

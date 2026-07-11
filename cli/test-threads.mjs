@@ -6,9 +6,18 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
-  isStubEpic, nextAction, preconditionsMet, backfillAnchorKind,
+  isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, KIND_NOUN, kindNoun,
 } from './epic-state.mjs';
-import { sealedEpic, openDebtOnThread, threadSummary } from './thread.mjs';
+import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
+
+// Capture console.log output produced while running fn (the CLI commands print via console.log).
+async function grab(fn) {
+  const orig = console.log;
+  const out = [];
+  console.log = (...a) => out.push(a.map(String).join(' '));
+  try { await fn(); } finally { console.log = orig; }
+  return out.join('\n');
+}
 
 // Minimal hub builder: write an epic with lineage frontmatter (+ optional stories/lock/debt).
 function hub() {
@@ -277,6 +286,25 @@ test('backfillAnchorKind: one classifier drives nextAction + preconditionsMet �
   assert.equal(backfillAnchorKind(corrupt), 'stub');
   assert.equal(nextAction({ state: { epicId: 'EP-x', ...corrupt }, hubPrs: [], buildStates: [] }, { epic: 'EP-x' }).kind, 'backfill-pending');
   assert.match(preconditionsMet(corrupt, 'epic').reason, /stub \(backfill pending\)/);  // NOT "documented anchor"
+});
+
+test('kindNoun renders the human noun per kind and falls back to Epic', () => {
+  assert.equal(kindNoun('feature'), 'Epic');
+  assert.equal(kindNoun('change'), 'Change request');
+  assert.equal(kindNoun('defect'), 'Defect');   // a bug is a defect — same noun
+  assert.equal(kindNoun('hotfix'), 'Hotfix');
+  assert.equal(kindNoun(undefined), 'Epic');     // absent kind → Epic
+  assert.equal(kindNoun('nonsense'), 'Epic');    // unknown kind → Epic
+  assert.equal(KIND_NOUN.defect, 'Defect');
+});
+
+test('runThread renders each node with its kind noun, not the generic word "epic"', async () => {
+  const T = hub();
+  writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
+  writeEpic(T, 'EP-fix', { kind: 'defect', parent: 'EP-gen', thread: 'EP-gen', inherits: ['epic'] });
+  const out = await grab(() => runThread(T, { epic: 'EP-gen' }));
+  assert.match(out, /EP-gen\s+Epic/);     // the feature genesis reads "Epic"
+  assert.match(out, /EP-fix\s+Defect/);   // the defect node reads "Defect"
 });
 
 test('epicLineage defaults an un-migrated genesis epic to kind:feature', () => {

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import { readShips } from './ledger.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, kindNoun,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -73,7 +73,10 @@ export function threadSummary(root, threadOrEpic) {
   };
 }
 
-const KIND_TAG = { feature: c.green('feature'), change: c.cyan('change'), defect: c.yellow('defect'), hotfix: c.red('hotfix') };
+// Colour a node's kind noun for the tree render. The noun words live in one place (`kindNoun`); this
+// only layers the per-kind colour on top, so the two never drift. Unknown kind → uncoloured noun.
+const KIND_COLOR = { feature: c.green, change: c.cyan, defect: c.yellow, hotfix: c.red };
+const kindTag = (kind) => (KIND_COLOR[kind] || ((s) => s))(kindNoun(kind));
 
 export async function runThread(root, { epic, json = false } = {}) {
   if (!epic) {
@@ -103,7 +106,7 @@ export async function runThread(root, { epic, json = false } = {}) {
   log(c.bold(`\nThread ${s.thread}`) + c.dim('  (genesis → tip)'));
   if (s.broken) log(c.red(`  ✗ broken lineage: ${s.broken}`));
   for (const n of s.nodes) {
-    const tag = KIND_TAG[n.kind] || n.kind;
+    const tag = kindTag(n.kind);
     const seal = n.sealed ? c.dim(' [sealed]') : '';
     const stub = n.stub ? c.yellow(' [stub · backfill pending]') : '';
     const dep = n.depth ? c.dim(` ${n.depth}`) : '';
