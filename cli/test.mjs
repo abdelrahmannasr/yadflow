@@ -1127,6 +1127,29 @@ test('runNext: an open EP-discovery is surfaced (its gate action), not mixed int
   assert.match(s, /yad gate (open|sync) EP-discovery discovery\//);
 });
 
+test('runNext: a defect epic renders the "Defect" kind noun in its header', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextnoun-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '---\nid: EP-x\nkind: defect\nrepos: [backend]\n---\n');
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /Defect EP-x/);   // header reads the noun, not a bare id
+});
+
+test('runNext: the EP-discovery front-zero is never prefixed with a kind noun', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextdnoun-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-discovery', { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review', steps: [
+    S('discovery', 'author', 'done', 'discovery/'),
+    S('discovery-review', 'review+approve', 'in_review', 'discovery/'),
+  ] });
+  const s = await grab(() => runNext(T, { epic: 'EP-discovery' }));   // the direct path that hits the guard
+  assert.doesNotMatch(s, /Epic EP-discovery/);   // guarded: discovery is not a feature epic
+  assert.match(s, /EP-discovery/);
+});
+
 test('runNext: several epics list each action, and --all expands them', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next6-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
