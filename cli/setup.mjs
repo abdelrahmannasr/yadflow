@@ -10,7 +10,7 @@ import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TEST
 import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
-  safeIdeTargetsFor,
+  safeIdeTargetsFor, detectedIdeTargetStateFor,
 } from './plan.mjs';
 import { validateLogin, rolesForScope } from './platform.mjs';
 
@@ -39,7 +39,9 @@ export function parseRolesSpec(s) {
 // canonical target. Both paths return the same trimmed, ordered, deduplicated representation.
 export async function selectIdeTargets(root, provided, asker = ask) {
   if (provided !== undefined) return safeIdeTargetsFor(root, provided);
-  const present = IDE_TARGETS.filter((d) => exists(path.join(root, d)));
+  const detected = detectedIdeTargetStateFor(root);
+  const present = detected.targets;
+  for (const unsafe of detected.unsafe) warn(`${unsafe.message}; excluded from IDE defaults`);
   const def = (present.length ? present : ['.claude']).join(',');
   for (;;) {
     const answer = await asker(`IDE targets to install ${c.dim('(comma-separated: ' + IDE_TARGETS.join(', ') + ')')}`, def);
@@ -48,7 +50,7 @@ export async function selectIdeTargets(root, provided, asker = ask) {
     try {
       return safeIdeTargetsFor(root, values);
     } catch (e) {
-      if (process.env.SDLC_NONINTERACTIVE) throw e;
+      if (process.env.SDLC_NONINTERACTIVE || e?.code !== 'YAD_IDE_TARGET') throw e;
       warn(e.message);
     }
   }

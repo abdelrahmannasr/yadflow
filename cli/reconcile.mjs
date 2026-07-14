@@ -103,7 +103,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const shownInvalid = ideState.invalid.map((v) => {
     try { return JSON.stringify(v) ?? String(v); } catch { return String(v); }
   });
-  if (ideState.hasStamp && !ideState.hasField) {
+  if (ideState.hasStamp && !ideState.recordIsObject) {
+    warn(`${PROJECT_FILES.version}: version stamp is unreadable or not a JSON object; using safe targets: ${ideTargets.join(', ')}`);
+  } else if (ideState.hasStamp && !ideState.hasField) {
     warn(`${PROJECT_FILES.version}: ideTargets is missing; using safe targets: ${ideTargets.join(', ')}`);
   } else if (ideState.hasStamp && !ideState.shapeValid) {
     warn(`${PROJECT_FILES.version}: ideTargets is not an array; ignored persisted value: ${shownInvalid.join(', ')}; using safe targets: ${ideTargets.join(', ')}`);
@@ -115,6 +117,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   }
   if (ideState.repaired.length) {
     warn(`${PROJECT_FILES.version}: persisted .cluade target will be repaired to .claude`);
+  }
+  for (const unsafe of ideState.unsafeDetected) {
+    warn(`${PROJECT_FILES.version}: ignored unsafe detected IDE path '${unsafe.target}'; ${unsafe.message}; using safe targets: ${ideTargets.join(', ')}`);
   }
   if (exists(path.join(root, '.cluade'))) {
     warn('existing .cluade path was left untouched; review its contents and remove it manually');
