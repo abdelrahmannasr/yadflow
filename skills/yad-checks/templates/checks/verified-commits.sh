@@ -11,6 +11,12 @@
 # commits set the platform itself as the committer (e.g. noreply@github.com), and their integrity is
 # covered by the signature check (the platform signs them).
 #
+# Merge-commit signature exemption: a merge that introduces NO content of its own (its combined diff
+# is empty — no conflict-resolution / evil-merge hunks) is signature-waived, because every change it
+# carries already lives in its individually author+signature-checked parents. This unblocks self-hosted
+# GitLab, which does not sign UI-created merge commits (the signature API returns 404). A merge that
+# DOES introduce content of its own still requires a verified signature (fail-closed).
+#
 # Degradation is explicit, never silent:
 #   - no allowlist file        -> author check SKIPPED with a warning (configure emails, re-wire)
 #   - no GitHub/GitLab remote  -> signature check SKIPPED with a warning (no platform, no badge)
@@ -88,6 +94,19 @@ signature_verified() {
   esac
 }
 
+# 0 when a merge commit introduced NO content of its own. The combined diff (--cc) lists only hunks
+# that differ from ALL parents, so empty output means every change lives in an individually-checked
+# parent — there is no conflict-resolution or evil-merge content unique to the merge commit, hence
+# nothing an unverified author could smuggle in past the per-parent author+signature checks.
+merge_introduces_no_content() {
+  # `local` on its own line: `local out=$(...)` would mask the substitution's exit status (local
+  # always returns 0). A git error (e.g. a parent tree missing in a shallow clone) must fail closed —
+  # an empty stdout from a *failed* command is not evidence the merge is content-free.
+  local out
+  out="$(git diff-tree --cc --no-commit-id -r "$1")" || return 1
+  [ -z "$out" ]
+}
+
 rc=0
 while IFS= read -r sha; do
   [ -z "$sha" ] && continue
@@ -126,6 +145,11 @@ while IFS= read -r sha; do
   if [ -n "$platform" ]; then
     if signature_verified "$sha"; then
       echo "PASS [verified-commits]: ${short} signature verified by ${platform}"
+    elif [ "$is_merge" = 1 ] && merge_introduces_no_content "$sha"; then
+      # Content-free merge: nothing to protect. Self-hosted GitLab does not sign UI merge commits, so
+      # requiring a signature here would block every routine merge. An evil merge (content of its own)
+      # falls through to FAIL below.
+      echo "WARN [verified-commits]: ${short} unsigned merge commit — introduces no content of its own (covered by verified parents); signature waived. (Self-hosted GitLab does not sign UI merge commits; on a platform that signs its merges an unsigned content-free merge is unusual but still harmless.)"
     else
       echo "FAIL [verified-commits]: ${short} signature missing/unverified — sign commits (GPG/SSH key registered on ${platform}), or the signature API was unreachable (GitLab: set GITLAB_TOKEN/SDLC_API_TOKEN with read_api)."
       rc=1

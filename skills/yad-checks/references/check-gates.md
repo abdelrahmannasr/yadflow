@@ -93,6 +93,13 @@ repo. For each commit in `<base>..HEAD`, two independent checks:
   (2+ parents) — a merge's author is whoever pressed merge (often a platform noreply), not a roster
   human, and its content already passed the PR gate suite. This waiver matters for the push-on-default
   `yad-update-guard` (§9), which — unlike this PR-triggered gate — sees merge commits.
+  A merge commit is **additionally signature-waived when it introduces no content of its own** (its
+  combined diff — `git diff-tree --cc` — is empty, i.e. no conflict-resolution or evil-merge hunks):
+  every change it carries already lives in an individually author+signature-checked parent, so there
+  is nothing to protect. This unblocks **self-hosted GitLab**, which does not sign UI-created merge
+  commits (the signature API returns 404) — without it every routine merge would red the branch. A
+  merge that *does* introduce content of its own still requires a verified signature (fail-closed),
+  so an evil merge pushed direct-to-default cannot smuggle in unverified changes.
 
 Degradation is explicit, never silent: a missing allowlist SKIPs the author check with a warning
 (configure roster emails, re-wire); no GitHub/GitLab remote SKIPs the signature check (the badge is a
