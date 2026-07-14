@@ -39,11 +39,48 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
 // Persisted state gets one deliberately narrow compatibility repair. Explicit setup/planner input
 // does not: a caller typo is an error, while the known v3.11.1 `.cluade` stamp is safely migrated.
 const PERSISTED_IDE_ALIASES = new Map([['.cluade', '.claude']]);
+const IDE_TARGET_ERROR_CODE = 'YAD_IDE_TARGET';
 const sameTargets = (a, b) => Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);
 const displayTarget = (value) => {
   if (value === undefined) return 'undefined';
   try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
 };
+const ideTargetError = (message) => Object.assign(new Error(message), { code: IDE_TARGET_ERROR_CODE });
+const lstatIfPresent = (full) => {
+  try {
+    return fs.lstatSync(full);
+  } catch (e) {
+    if (e?.code === 'ENOENT') return null;
+    throw e;
+  }
+};
+const ideContainers = (ide) => ide === '.opencode'
+  ? [ide, IDE_OPENCODE_DIR]
+  : [ide, path.join(ide, 'skills')];
+
+function assertSafeIdeContainers(root, ide) {
+  for (const relPath of ideContainers(ide)) {
+    const stat = lstatIfPresent(path.join(root, relPath));
+    if (!stat) continue;
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      const kind = stat.isSymbolicLink() ? 'a symbolic link' : 'not a directory';
+      throw ideTargetError(`unsafe IDE target '${ide}': ${relPath} is ${kind}`);
+    }
+  }
+}
+
+function assertSafeOpenCodeWriteDestinations(root, skills) {
+  for (const skill of new Set(skills)) {
+    const relPath = path.join(IDE_OPENCODE_DIR, `${skill}.md`);
+    const stat = lstatIfPresent(path.join(root, relPath));
+    if (!stat) continue;
+    let kind = null;
+    if (stat.isSymbolicLink()) kind = 'a symbolic link';
+    else if (!stat.isFile()) kind = 'not a regular file';
+    else if (stat.nlink > 1) kind = 'linked to multiple paths';
+    if (kind) throw ideTargetError(`unsafe IDE target '.opencode': ${relPath} is ${kind}`);
+  }
+}
 
 // Pure target inspection. Valid entries are trimmed and deduplicated in input order; unsupported
 // entries are returned to the caller for reporting rather than ever becoming filesystem paths.
@@ -69,13 +106,13 @@ export function normalizeIdeTargets(input, { repairAliases = false } = {}) {
 export function canonicalIdeTargets(input) {
   const state = normalizeIdeTargets(input);
   if (!state.shapeValid) {
-    throw new Error(`IDE targets must be a non-empty array (supported: ${IDE_TARGETS.join(', ')})`);
+    throw ideTargetError(`IDE targets must be a non-empty array (supported: ${IDE_TARGETS.join(', ')})`);
   }
   if (state.invalid.length) {
-    throw new Error(`unsupported IDE target(s): ${state.invalid.map(displayTarget).join(', ')} (supported: ${IDE_TARGETS.join(', ')})`);
+    throw ideTargetError(`unsupported IDE target(s): ${state.invalid.map(displayTarget).join(', ')} (supported: ${IDE_TARGETS.join(', ')})`);
   }
   if (!state.targets.length) {
-    throw new Error(`at least one IDE target is required (supported: ${IDE_TARGETS.join(', ')})`);
+    throw ideTargetError(`at least one IDE target is required (supported: ${IDE_TARGETS.join(', ')})`);
   }
   return state.targets;
 }
@@ -85,26 +122,27 @@ export function canonicalIdeTargets(input) {
 // every target before constructing ANY actions, so a bad later target cannot cause a partial install.
 export function safeIdeTargetsFor(root, input) {
   const targets = canonicalIdeTargets(input);
-  for (const ide of targets) {
-    const containers = ide === '.opencode'
-      ? [ide, IDE_OPENCODE_DIR]
-      : [ide, path.join(ide, 'skills')];
-    for (const relPath of containers) {
-      const full = path.join(root, relPath);
-      let stat;
-      try {
-        stat = fs.lstatSync(full);
-      } catch (e) {
-        if (e?.code === 'ENOENT') continue;
-        throw e;
-      }
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        const kind = stat.isSymbolicLink() ? 'a symbolic link' : 'not a directory';
-        throw new Error(`unsafe IDE target '${ide}': ${relPath} is ${kind}`);
-      }
+  for (const ide of targets) assertSafeIdeContainers(root, ide);
+  return targets;
+}
+
+// Fallback discovery must not promote a supported-looking file/symlink into an install target.
+// Keep unsafe entries for diagnostics, while returning only real IDE directories with safe install
+// containers. Unexpected filesystem errors remain fatal instead of being mistaken for bad input.
+export function detectedIdeTargetStateFor(root) {
+  const targets = [];
+  const unsafe = [];
+  for (const ide of IDE_TARGETS) {
+    if (!lstatIfPresent(path.join(root, ide))) continue;
+    try {
+      assertSafeIdeContainers(root, ide);
+      targets.push(ide);
+    } catch (e) {
+      if (e?.code !== IDE_TARGET_ERROR_CODE) throw e;
+      unsafe.push({ target: ide, message: e.message });
     }
   }
-  return targets;
+  return { targets, unsafe };
 }
 
 // Which IDE targets this project wants. Persisted values are recovery-oriented: repair the one known
@@ -120,17 +158,21 @@ export function ideTargetStateFor(root) {
   const normalized = normalizeIdeTargets(raw, { repairAliases: true });
   let targets = normalized.targets;
   let usedFallback = false;
+  let unsafeDetected = [];
   if (!targets.length) {
-    const present = IDE_TARGETS.filter((d) => exists(path.join(root, d)));
-    targets = present.length ? present : ['.claude'];
+    const detected = detectedIdeTargetStateFor(root);
+    targets = detected.targets.length ? detected.targets : ['.claude'];
+    unsafeDetected = detected.unsafe;
     usedFallback = true;
   }
   return {
     ...normalized,
     targets,
     hasStamp,
+    recordIsObject,
     hasField,
     usedFallback,
+    unsafeDetected,
     needsRepair: hasStamp && !sameTargets(raw, targets),
   };
 }
@@ -148,6 +190,7 @@ const asNewSkill = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a)
 // Module = skills installed into each IDE target + the _bmad/sdlc registration.
 export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
   const targets = safeIdeTargetsFor(root, ideTargets);
+  if (targets.includes('.opencode')) assertSafeOpenCodeWriteDestinations(root, SKILLS);
   const actions = [];
   for (const ide of targets) {
     if (ide === '.opencode') {
@@ -188,6 +231,12 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
 // skipped as missing-scope.
 export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
   const targets = safeIdeTargetsFor(root, ideTargets);
+  if (targets.includes('.opencode')) {
+    const writes = Object.entries(LEGACY_SKILLS)
+      .filter(([, old]) => exists(path.join(root, IDE_OPENCODE_DIR, `${old}.md`)))
+      .map(([skill]) => skill);
+    assertSafeOpenCodeWriteDestinations(root, writes);
+  }
   const actions = [];
   for (const ide of targets) {
     for (const [skill, old] of Object.entries(LEGACY_SKILLS)) {

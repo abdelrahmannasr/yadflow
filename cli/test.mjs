@@ -137,6 +137,39 @@ test('issue #134: an empty persisted ideTargets array explains the safe fallback
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('issue #134: fallback ignores unsafe detected IDE paths and repairs into a safe default', async () => {
+  const { T } = scaffold();
+  const stampPath = path.join(T, '.sdlc/cli-version.json');
+  fs.writeFileSync(stampPath, JSON.stringify({ version: '3.11.1', ideTargets: ['../escape'] }));
+  fs.writeFileSync(path.join(T, '.agents'), 'user-owned-file');
+  const originalStamp = fs.readFileSync(stampPath, 'utf8');
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.match(checked.out, /ignored unsafe detected IDE path '\.agents'/);
+  assert.equal(fs.readFileSync(stampPath, 'utf8'), originalStamp, 'read-only check leaves the stamp alone');
+  assert.equal(fs.readFileSync(path.join(T, '.agents'), 'utf8'), 'user-owned-file');
+  assert.ok(!fs.existsSync(path.join(T, '.claude')), 'read-only fallback installs nothing');
+
+  await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')), 'repair uses the safe default');
+  assert.deepEqual(JSON.parse(fs.readFileSync(stampPath, 'utf8')).ideTargets, ['.claude']);
+  assert.equal(fs.readFileSync(path.join(T, '.agents'), 'utf8'), 'user-owned-file', 'unsafe detected path is untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('issue #134: a malformed top-level version stamp gets an accurate read-only diagnostic', async () => {
+  const { T } = scaffold();
+  const stampPath = path.join(T, '.sdlc/cli-version.json');
+  fs.writeFileSync(stampPath, JSON.stringify(['not', 'a', 'record']));
+  const originalStamp = fs.readFileSync(stampPath, 'utf8');
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.match(checked.out, /version stamp is unreadable or not a JSON object/);
+  assert.doesNotMatch(checked.out, /ideTargets is missing/);
+  assert.equal(fs.readFileSync(stampPath, 'utf8'), originalStamp, 'diagnostic mode is non-mutating');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // #125 — a PR body/title fix must re-run the pattern gates without a close/reopen. The code-repo
 // checks workflow needs the `edited` pull_request type; the commit-range jobs skip a bare edit.
 test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs skip it, pattern gates do not', () => {
@@ -360,6 +393,45 @@ test('module action builders reject file and symlink IDE roots before constructi
   }
   assert.deepEqual(fs.readdirSync(outside), ['sentinel.txt']);
   assert.equal(fs.readFileSync(path.join(outside, 'sentinel.txt'), 'utf8'), 'safe');
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('OpenCode write actions reject unsafe command leaves before constructing actions', () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-opencode-leaf-'));
+  const T = path.join(parent, 'hub');
+  const commands = path.join(T, '.opencode/commands');
+  const currentDest = path.join(commands, 'yad-discovery.md');
+  const outside = path.join(parent, 'outside.txt');
+  fs.mkdirSync(commands, { recursive: true });
+  fs.writeFileSync(outside, 'outside-safe');
+
+  fs.mkdirSync(currentDest);
+  assert.throws(() => moduleActions(T, ['.opencode']), /yad-discovery\.md is not a regular file/);
+  fs.rmSync(currentDest, { recursive: true });
+
+  if (process.platform !== 'win32') {
+    fs.symlinkSync(outside, currentDest);
+    assert.throws(() => moduleActions(T, ['.opencode']), /yad-discovery\.md is a symbolic link/);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'outside-safe');
+    fs.rmSync(currentDest);
+
+    fs.linkSync(outside, currentDest);
+    assert.throws(() => moduleActions(T, ['.opencode']), /yad-discovery\.md is linked to multiple paths/);
+    assert.equal(fs.readFileSync(outside, 'utf8'), 'outside-safe');
+    fs.rmSync(currentDest);
+
+    const typoDir = path.join(T, '.cluade');
+    const typoFile = path.join(typoDir, 'user.txt');
+    const oldDest = path.join(commands, 'sdlc-author-analysis.md');
+    const newDest = path.join(commands, 'yad-analysis.md');
+    fs.mkdirSync(typoDir);
+    fs.writeFileSync(typoFile, 'user-owned');
+    fs.writeFileSync(oldDest, 'legacy');
+    fs.symlinkSync(typoFile, newDest);
+    assert.throws(() => legacyModuleActions(T, ['.opencode']), /yad-analysis\.md is a symbolic link/);
+    assert.equal(fs.readFileSync(typoFile, 'utf8'), 'user-owned', '.cluade content remains untouched');
+  }
+
   fs.rmSync(parent, { recursive: true, force: true });
 });
 
@@ -1377,6 +1449,21 @@ test('selectIdeTargets: interactive input re-prompts, then trims and deduplicate
     /selection ended before a valid choice/,
     'EOF/cancel does not loop forever',
   );
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('selectIdeTargets: noninteractive unsafe default fails instead of retrying forever', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-noninteractive-'));
+  fs.writeFileSync(path.join(T, '.claude'), 'not-a-directory');
+  const prior = process.env.SDLC_NONINTERACTIVE;
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await assert.rejects(selectIdeTargets(T), /unsafe IDE target.*not a directory/);
+  } finally {
+    if (prior === undefined) delete process.env.SDLC_NONINTERACTIVE;
+    else process.env.SDLC_NONINTERACTIVE = prior;
+  }
+  assert.equal(fs.readFileSync(path.join(T, '.claude'), 'utf8'), 'not-a-directory');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
