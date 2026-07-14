@@ -7,7 +7,7 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON,
 } from './lib.mjs';
 import {
-  SKILLS, IDE_FOLDER_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
+  SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES,
 } from './manifest.mjs';
 
@@ -36,13 +36,107 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   apply: () => copyDir(src, dest),
 });
 
-// Which IDE targets this project wants. Recorded at setup time; falls back to
-// whichever IDE base dirs already exist, else .claude.
+// Persisted state gets one deliberately narrow compatibility repair. Explicit setup/planner input
+// does not: a caller typo is an error, while the known v3.11.1 `.cluade` stamp is safely migrated.
+const PERSISTED_IDE_ALIASES = new Map([['.cluade', '.claude']]);
+const sameTargets = (a, b) => Array.isArray(a) && a.length === b.length && a.every((v, i) => v === b[i]);
+const displayTarget = (value) => {
+  if (value === undefined) return 'undefined';
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+};
+
+// Pure target inspection. Valid entries are trimmed and deduplicated in input order; unsupported
+// entries are returned to the caller for reporting rather than ever becoming filesystem paths.
+export function normalizeIdeTargets(input, { repairAliases = false } = {}) {
+  const shapeValid = Array.isArray(input);
+  const invalid = shapeValid ? [] : [input];
+  const repaired = [];
+  const targets = [];
+  const seen = new Set();
+  for (const raw of shapeValid ? input : []) {
+    if (typeof raw !== 'string') { invalid.push(raw); continue; }
+    const trimmed = raw.trim();
+    const target = repairAliases ? (PERSISTED_IDE_ALIASES.get(trimmed) || trimmed) : trimmed;
+    if (!IDE_TARGETS.includes(target)) { invalid.push(raw); continue; }
+    if (target !== trimmed) repaired.push({ from: trimmed, to: target });
+    if (!seen.has(target)) { seen.add(target); targets.push(target); }
+  }
+  return { targets, invalid, repaired, shapeValid };
+}
+
+// Strict boundary for every explicit action-builder/setup input. Returning only canonical values
+// makes path construction below safe by construction.
+export function canonicalIdeTargets(input) {
+  const state = normalizeIdeTargets(input);
+  if (!state.shapeValid) {
+    throw new Error(`IDE targets must be a non-empty array (supported: ${IDE_TARGETS.join(', ')})`);
+  }
+  if (state.invalid.length) {
+    throw new Error(`unsupported IDE target(s): ${state.invalid.map(displayTarget).join(', ')} (supported: ${IDE_TARGETS.join(', ')})`);
+  }
+  if (!state.targets.length) {
+    throw new Error(`at least one IDE target is required (supported: ${IDE_TARGETS.join(', ')})`);
+  }
+  return state.targets;
+}
+
+// A canonical relative name is necessary but not sufficient: an existing IDE root (or its install
+// container) could be a file or symlink that redirects writes/removals outside the project. Validate
+// every target before constructing ANY actions, so a bad later target cannot cause a partial install.
+export function safeIdeTargetsFor(root, input) {
+  const targets = canonicalIdeTargets(input);
+  for (const ide of targets) {
+    const containers = ide === '.opencode'
+      ? [ide, IDE_OPENCODE_DIR]
+      : [ide, path.join(ide, 'skills')];
+    for (const relPath of containers) {
+      const full = path.join(root, relPath);
+      let stat;
+      try {
+        stat = fs.lstatSync(full);
+      } catch (e) {
+        if (e?.code === 'ENOENT') continue;
+        throw e;
+      }
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        const kind = stat.isSymbolicLink() ? 'a symbolic link' : 'not a directory';
+        throw new Error(`unsafe IDE target '${ide}': ${relPath} is ${kind}`);
+      }
+    }
+  }
+  return targets;
+}
+
+// Which IDE targets this project wants. Persisted values are recovery-oriented: repair the one known
+// alias, filter everything else, then fall back to supported IDE dirs already present (or .claude).
+// The full state lets reconcile report drift without mutating during a read-only check.
+export function ideTargetStateFor(root) {
+  const stampPath = path.join(root, PROJECT_FILES.version);
+  const hasStamp = exists(stampPath);
+  const rec = readJSON(stampPath);
+  const recordIsObject = !!rec && typeof rec === 'object' && !Array.isArray(rec);
+  const hasField = recordIsObject && Object.hasOwn(rec, 'ideTargets');
+  const raw = hasField ? rec.ideTargets : undefined;
+  const normalized = normalizeIdeTargets(raw, { repairAliases: true });
+  let targets = normalized.targets;
+  let usedFallback = false;
+  if (!targets.length) {
+    const present = IDE_TARGETS.filter((d) => exists(path.join(root, d)));
+    targets = present.length ? present : ['.claude'];
+    usedFallback = true;
+  }
+  return {
+    ...normalized,
+    targets,
+    hasStamp,
+    hasField,
+    usedFallback,
+    needsRepair: hasStamp && !sameTargets(raw, targets),
+  };
+}
+
 export function ideTargetsFor(root) {
-  const rec = readJSON(path.join(root, PROJECT_FILES.version));
-  if (rec?.ideTargets?.length) return rec.ideTargets;
-  const present = [...IDE_FOLDER_TARGETS, '.opencode'].filter((d) => exists(path.join(root, d)));
-  return present.length ? present : ['.claude'];
+  return ideTargetStateFor(root).targets;
 }
 
 // A brand-new first-party skill is `missing` on every existing install. Relabel that to status `'new'`
@@ -53,8 +147,9 @@ const asNewSkill = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a)
 
 // Module = skills installed into each IDE target + the _bmad/sdlc registration.
 export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
+  const targets = safeIdeTargetsFor(root, ideTargets);
   const actions = [];
-  for (const ide of ideTargets) {
+  for (const ide of targets) {
     if (ide === '.opencode') {
       for (const s of SKILLS) {
         actions.push(asNewSkill(fileAction(
@@ -92,8 +187,9 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
 // one, so a single update completes the rename even when the new copy would otherwise be
 // skipped as missing-scope.
 export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
+  const targets = safeIdeTargetsFor(root, ideTargets);
   const actions = [];
-  for (const ide of ideTargets) {
+  for (const ide of targets) {
     for (const [skill, old] of Object.entries(LEGACY_SKILLS)) {
       if (ide === '.opencode') {
         const oldDest = path.join(root, IDE_OPENCODE_DIR, `${old}.md`);
@@ -137,8 +233,9 @@ export function legacyModuleActions(root, ideTargets = ideTargetsFor(root)) {
 // clean tree yields nothing and the purge is idempotent. apply() just deletes the install (no
 // replacement — that is what makes this a removal, not a rename).
 export function removedModuleActions(root, ideTargets = ideTargetsFor(root)) {
+  const targets = safeIdeTargetsFor(root, ideTargets);
   const actions = [];
-  for (const ide of ideTargets) {
+  for (const ide of targets) {
     for (const skill of REMOVED_SKILLS) {
       if (ide === '.opencode') {
         const dest = path.join(root, IDE_OPENCODE_DIR, `${skill}.md`);

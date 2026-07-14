@@ -6,10 +6,11 @@ import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, has,
   exists, readJSON, readJSONStrict, writeJSON,
 } from './lib.mjs';
-import { VERSION, IDE_FOLDER_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
+import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
+  safeIdeTargetsFor,
 } from './plan.mjs';
 import { validateLogin, rolesForScope } from './platform.mjs';
 
@@ -34,7 +35,24 @@ export function parseRolesSpec(s) {
   return out;
 }
 
-const ALL_IDES = [...IDE_FOLDER_TARGETS, '.opencode'];
+// Programmatic setup is strict; interactive setup keeps asking until it receives at least one valid
+// canonical target. Both paths return the same trimmed, ordered, deduplicated representation.
+export async function selectIdeTargets(root, provided, asker = ask) {
+  if (provided !== undefined) return safeIdeTargetsFor(root, provided);
+  const present = IDE_TARGETS.filter((d) => exists(path.join(root, d)));
+  const def = (present.length ? present : ['.claude']).join(',');
+  for (;;) {
+    const answer = await asker(`IDE targets to install ${c.dim('(comma-separated: ' + IDE_TARGETS.join(', ') + ')')}`, def);
+    if (answer === undefined || answer === null) throw new Error('IDE target selection ended before a valid choice was provided');
+    const values = String(answer ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+    try {
+      return safeIdeTargetsFor(root, values);
+    } catch (e) {
+      if (process.env.SDLC_NONINTERACTIVE) throw e;
+      warn(e.message);
+    }
+  }
+}
 
 export function detectPlatform(remoteUrl = '') {
   if (/gitlab/i.test(remoteUrl)) return 'gitlab';
@@ -416,13 +434,7 @@ export async function runSetup(root, opts = {}) {
     'Copies the yad-* skills into your AI tool(s) so they appear in Claude Code / agents / opencode.',
     'Enter the IDE folders to install into, comma-separated; default = whatever is already present.',
   ]);
-  let ideTargets = opts.ideTargets;
-  if (!ideTargets) {
-    const present = ALL_IDES.filter((d) => exists(path.join(root, d)));
-    const def = (present.length ? present : ['.claude']).join(',');
-    const answer = await ask(`IDE targets to install ${c.dim('(comma-separated: ' + ALL_IDES.join(', ') + ')')}`, def);
-    ideTargets = answer.split(',').map((s) => s.trim()).filter(Boolean);
-  }
+  const ideTargets = await selectIdeTargets(root, opts.ideTargets);
   applyActions(moduleActions(root, ideTargets), { force: true });
   // Migrate any pre-2.0 install in place: remove the old sdlc-* skill copies in the project's
   // IDE targets and install their yad-* renames. Without this, setup only ADDED yad-* and left

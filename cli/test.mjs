@@ -38,6 +38,17 @@ function scaffold() {
   return { T, backend, head };
 }
 
+async function captureConsole(fn) {
+  const orig = console.log;
+  const lines = [];
+  console.log = (...args) => lines.push(args.map(String).join(' '));
+  try {
+    return { value: await fn(), out: lines.join('\n') };
+  } finally {
+    console.log = orig;
+  }
+}
+
 // Import after env is irrelevant (reconcile is non-interactive).
 const { reconcile } = await import('./reconcile.mjs');
 
@@ -60,6 +71,69 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   const r2 = await reconcile(T, { fix: false });
   assert.equal(r2.counts.missing, 0);
   assert.equal(r2.counts.outdated, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('issue #134: update repairs .cluade safely, drops corrupt targets, and preserves leftovers', async () => {
+  const { T } = scaffold();
+  const outside = path.join(path.dirname(T), `${path.basename(T)}-outside`);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'sentinel.txt'), 'outside-safe');
+  fs.mkdirSync(path.join(T, '.cluade'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.cluade/user.txt'), 'user-owned');
+  const originalTypoEntries = fs.readdirSync(path.join(T, '.cluade'));
+  const badTarget = `../${path.basename(outside)}`;
+  const stampPath = path.join(T, '.sdlc/cli-version.json');
+  fs.writeFileSync(stampPath, JSON.stringify({
+    version: '3.11.1',
+    ideTargets: ['.cluade', ' .claude ', '.claude', badTarget, 42],
+    updatedAt: 'kept',
+  }));
+  const originalStamp = fs.readFileSync(stampPath, 'utf8');
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.equal(checked.value.counts.outdated, 1, 'target repair is reported as reconcile drift');
+  assert.equal(fs.readFileSync(stampPath, 'utf8'), originalStamp, 'read-only check does not rewrite the stamp');
+  assert.ok(!fs.existsSync(path.join(T, '.claude')), 'read-only check installs nothing');
+  assert.equal(fs.readFileSync(path.join(outside, 'sentinel.txt'), 'utf8'), 'outside-safe');
+  assert.match(checked.out, /ignored unsupported persisted IDE target/);
+  assert.match(checked.out, /\.cluade target will be repaired to \.claude/);
+  assert.match(checked.out, /\.cluade path was left untouched/);
+
+  const fixed = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+  assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')), 'skills installed under canonical .claude');
+  const repaired = JSON.parse(fs.readFileSync(stampPath, 'utf8'));
+  assert.deepEqual(repaired.ideTargets, ['.claude']);
+  assert.equal(repaired.updatedAt, 'kept', 'unrelated stamp fields are preserved');
+  assert.equal(fs.readFileSync(path.join(T, '.cluade/user.txt'), 'utf8'), 'user-owned');
+  assert.deepEqual(fs.readdirSync(path.join(T, '.cluade')), originalTypoEntries, 'no content added under .cluade');
+  assert.equal(fs.readFileSync(path.join(outside, 'sentinel.txt'), 'utf8'), 'outside-safe');
+  assert.deepEqual(fs.readdirSync(outside), ['sentinel.txt'], 'no traversal content added outside the project');
+  assert.match(fixed.out, /\.cluade path was left untouched/);
+
+  const again = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.equal(again.value.counts.outdated, 0, 'canonical stamp has no target-repair drift');
+  assert.equal(again.value.counts.new, 0, 'canonical target is not reinstalled as new');
+
+  fs.writeFileSync(stampPath, JSON.stringify({ version: '3.11.1', ideTargets: '../escape' }));
+  const malformedStamp = fs.readFileSync(stampPath, 'utf8');
+  const malformed = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.match(malformed.out, /ignored persisted value: "\.\.\/escape"/, 'wrong-shaped value is reported');
+  assert.equal(fs.readFileSync(stampPath, 'utf8'), malformedStamp, 'malformed read-only check stays non-mutating');
+
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(outside, { recursive: true, force: true });
+});
+
+test('issue #134: an empty persisted ideTargets array explains the safe fallback', async () => {
+  const { T } = scaffold();
+  const stampPath = path.join(T, '.sdlc/cli-version.json');
+  fs.writeFileSync(stampPath, JSON.stringify({ version: '3.11.1', ideTargets: [] }));
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.match(checked.out, /ideTargets is empty; using safe targets/);
+  assert.doesNotMatch(checked.out, /ideTargets is missing/);
+  assert.doesNotMatch(checked.out, /is not an array/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -116,6 +190,11 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
   fs.writeFileSync(path.join(T, '.claude/skills/sdlc-author-epic/SKILL.md'), '---\nname: sdlc-author-epic\n---\n');
   fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
   fs.writeFileSync(path.join(T, '.opencode/commands/sdlc-run.md'), '---\nname: sdlc-run\n---\n');
+  // The persisted target list is now canonical and authoritative, so model an install that selected
+  // opencode explicitly rather than relying on the old missing-ideTargets fallback behavior.
+  const stampPath = path.join(T, '.sdlc/cli-version.json');
+  const stamp = JSON.parse(fs.readFileSync(stampPath, 'utf8'));
+  fs.writeFileSync(stampPath, JSON.stringify({ ...stamp, ideTargets: ['.claude', '.opencode'] }));
   // Old wired CI files, first line carrying the old ownership marker.
   fs.rmSync(path.join(T, 'demo/backend/.github/workflows/yad-checks.yml'));
   fs.writeFileSync(path.join(T, 'demo/backend/.github/workflows/sdlc-checks.yml'), '# sdlc-managed: sdlc-checks\nname: sdlc-checks\n');
@@ -145,7 +224,7 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 // A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
 // `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+hub
 // wiring stay `missing` and remain excluded from update (no one-time setup on update).
-const { moduleActions } = await import('./plan.mjs');
+const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
 test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
   const acts = moduleActions(T, ['.claude']);
@@ -153,6 +232,28 @@ test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay
   const bmad = acts.filter((a) => a.scope === '_bmad');
   assert.ok(skills.length && skills.every((a) => a.status === 'new'), 'every uninstalled skill is "new"');
   assert.ok(bmad.length && bmad.every((a) => a.status === 'missing'), '_bmad files stay "missing"');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ideTargetStateFor: normalizes order/deduplication and safely falls back from malformed state', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-state-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({
+    ideTargets: [' .agents ', '.cluade', '.agents', '../escape', null],
+  }));
+  const mixed = ideTargetStateFor(T);
+  assert.deepEqual(mixed.targets, ['.agents', '.claude'], 'valid and repaired targets keep first-seen order');
+  assert.equal(mixed.invalid.length, 2);
+  assert.deepEqual(mixed.repaired, [{ from: '.cluade', to: '.claude' }]);
+  assert.equal(mixed.needsRepair, true);
+
+  fs.mkdirSync(path.join(T, '.opencode'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: '../escape' }));
+  const malformed = ideTargetStateFor(T);
+  assert.equal(malformed.shapeValid, false);
+  assert.deepEqual(malformed.targets, ['.opencode'], 'wrong-shaped state falls back to a detected supported root');
+  assert.equal(malformed.usedFallback, true);
+
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -217,6 +318,49 @@ test('setup purge: removedModuleActions deletes lingering yad-review-comments in
   // Idempotent: a clean tree yields no further removal actions.
   assert.equal(removedModuleActions(T, ['.claude', '.opencode']).length, 0, 'purge is idempotent');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('module action builders reject unknown, alias, absolute, traversal, non-string, and empty targets', () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-boundary-'));
+  const T = path.join(parent, 'hub');
+  const sentinel = path.join(parent, 'sentinel.txt');
+  fs.mkdirSync(T);
+  fs.writeFileSync(sentinel, 'safe');
+  const builders = [moduleActions, legacyModuleActions, removedModuleActions];
+  const invalid = [
+    ['.cluade'],
+    ['../escape'],
+    [path.join(parent, 'absolute')],
+    [42],
+    [],
+    '.claude',
+  ];
+  for (const build of builders) {
+    for (const targets of invalid) assert.throws(() => build(T, targets), /IDE target|at least one/);
+  }
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'safe', 'validation constructs no outside action');
+  fs.rmSync(parent, { recursive: true, force: true });
+});
+
+test('module action builders reject file and symlink IDE roots before constructing actions', {
+  skip: process.platform === 'win32',
+}, () => {
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-root-'));
+  const T = path.join(parent, 'hub');
+  const outside = path.join(parent, 'outside');
+  fs.mkdirSync(T);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'sentinel.txt'), 'safe');
+  fs.symlinkSync(outside, path.join(T, '.claude'));
+  fs.writeFileSync(path.join(T, '.agents'), 'not-a-directory');
+
+  for (const build of [moduleActions, legacyModuleActions, removedModuleActions]) {
+    assert.throws(() => build(T, ['.claude']), /unsafe IDE target.*symbolic link/);
+    assert.throws(() => build(T, ['.agents']), /unsafe IDE target.*not a directory/);
+  }
+  assert.deepEqual(fs.readdirSync(outside), ['sentinel.txt']);
+  assert.equal(fs.readFileSync(path.join(outside, 'sentinel.txt'), 'utf8'), 'safe');
+  fs.rmSync(parent, { recursive: true, force: true });
 });
 
 // GitLab fragments are referenced by path from the root .gitlab-ci.yml include (written by the
@@ -1212,7 +1356,52 @@ test('resolveProfile: carries a prior profile forward from hub.json on re-run', 
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
 });
 
-const { runSetup, buildReconfiguredHub } = await import('./setup.mjs');
+const { runSetup, buildReconfiguredHub, selectIdeTargets } = await import('./setup.mjs');
+
+test('selectIdeTargets: interactive input re-prompts, then trims and deduplicates valid targets', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-prompt-'));
+  const answers = ['.cluade', ' .zencoder, .claude, .zencoder '];
+  let calls = 0;
+  const selected = await captureConsole(() => selectIdeTargets(T, undefined, async () => answers[calls++]));
+  assert.equal(calls, 2, 'invalid interactive selection is asked again');
+  assert.deepEqual(selected.value, ['.zencoder', '.claude']);
+  assert.match(selected.out, /unsupported IDE target/);
+
+  assert.deepEqual(
+    await selectIdeTargets(T, [' .agents ', '.claude', '.agents']),
+    ['.agents', '.claude'],
+    'programmatic valid input is canonicalized',
+  );
+  await assert.rejects(
+    selectIdeTargets(T, undefined, async () => undefined),
+    /selection ended before a valid choice/,
+    'EOF/cancel does not loop forever',
+  );
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runSetup: invalid programmatic IDE target aborts before skills or stamp are written', async () => {
+  const { T } = scaffold();
+  const outside = path.join(path.dirname(T), `${path.basename(T)}-setup-outside`);
+  const priorNoninteractive = process.env.SDLC_NONINTERACTIVE;
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await assert.rejects(
+      runSetup(T, {
+        solo: true, greenfield: true, monorepo: true,
+        ideTargets: [`../${path.basename(outside)}`],
+      }),
+      /unsupported IDE target/,
+    );
+  } finally {
+    if (priorNoninteractive === undefined) delete process.env.SDLC_NONINTERACTIVE;
+    else process.env.SDLC_NONINTERACTIVE = priorNoninteractive;
+  }
+  assert.ok(!fs.existsSync(path.join(T, '.claude')), 'no skills copied');
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/cli-version.json')), 'no version stamp written');
+  assert.ok(!fs.existsSync(outside), 'no traversal destination created');
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers the optional tools', async () => {
   const { T } = scaffold();
@@ -1225,6 +1414,7 @@ test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers th
   assert.equal(hub.profile.codebase, 'greenfield');
   assert.equal(hub.profile.repo_layout, 'monorepo');
   assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'none'); // deferred
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/cli-version.json'), 'utf8')).ideTargets, ['.claude']);
 });
 
 test('runSetup: team + --tools records a team profile and configures the optional tools', async () => {

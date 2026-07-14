@@ -116,8 +116,10 @@ export const LEGACY_HUB_FILES = {
 };
 
 // IDE install targets (relative to the target project root).
-export const IDE_FOLDER_TARGETS = ['.claude', '.agents', '.zencoder']; // <ide>/skills/<skill>/ (folder copy)
-export const IDE_OPENCODE_DIR = '.opencode/commands'; // <skill>.md (flat SKILL.md copy)
+export const IDE_FOLDER_TARGETS = Object.freeze(['.claude', '.agents', '.zencoder']); // <ide>/skills/<skill>/ (folder copy)
+export const IDE_OPENCODE_TARGET = '.opencode';
+export const IDE_TARGETS = Object.freeze([...IDE_FOLDER_TARGETS, IDE_OPENCODE_TARGET]);
+export const IDE_OPENCODE_DIR = `${IDE_OPENCODE_TARGET}/commands`; // <skill>.md (flat SKILL.md copy)
 
 // Module registration files copied from skills/sdlc/ into _bmad/sdlc/.
 export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
