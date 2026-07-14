@@ -1,3 +1,10 @@
+## [3.12.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.12.1...v3.12.2) (2026-07-14)
+
+
+### Bug Fixes
+
+* **checks:** waive verified-commits signature for content-free merge commits ([1e73837](https://github.com/abdelrahmannasr/yadflow/commit/1e738372f821e93020069b565d40315cd7be2591)), closes [#138](https://github.com/abdelrahmannasr/yadflow/issues/138)
+
 ## [3.12.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.12.0...v3.12.1) (2026-07-14)
 
 
