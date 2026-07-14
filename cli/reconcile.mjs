@@ -14,6 +14,7 @@ import { VERSION, PROJECT_FILES } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
+  ideTargetStateFor,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
 import { groupByRoot, commitUpdates } from './update-commit.mjs';
@@ -31,14 +32,36 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
 
+  // Resolve untrusted persisted IDE targets once, before any filesystem action is constructed.
+  // The returned list contains canonical allowlisted roots only.
+  const ideState = ideTargetStateFor(root);
+  const ideTargets = ideState.targets;
+  const stampPath = path.join(root, PROJECT_FILES.version);
+  const writeCanonicalStamp = () => {
+    const current = readJSON(stampPath, {});
+    const record = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+    writeJSON(stampPath, { ...record, version: VERSION, ideTargets });
+  };
+
   // --- deterministic file actions (module + hub CI + author allowlists + every registered repo),
   //     plus pre-2.0 sdlc-* -> yad-* migrations ('legacy': old name installed; rename in place)
   //     and purge of skills removed in a later release ('removed': delete the lingering install) ---
   const actions = [
-    ...moduleActions(root), ...legacyModuleActions(root), ...removedModuleActions(root),
+    ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     ...hubActions(root), ...legacyHubActions(root),
     ...authorsActions(root, registry.repos),
   ];
+  if (ideState.needsRepair) {
+    actions.push({
+      scope: 'hub',
+      item: `${PROJECT_FILES.version} ideTargets`,
+      status: 'outdated',
+      root,
+      paths: [PROJECT_FILES.version],
+      // The canonical stamp is written once, after every filesystem action succeeds below.
+      apply: () => undefined,
+    });
+  }
   for (const repo of registry.repos) actions.push(...repoActions(root, repo), ...legacyRepoActions(root, repo));
 
   // --- stale code-context (HEAD moved since last pack) ---
@@ -77,6 +100,25 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     for (const i of notOk) log(`    ${MARK[i.status]}  ${i.item}`);
   }
   for (const g of gaps) warn(g);
+  const shownInvalid = ideState.invalid.map((v) => {
+    try { return JSON.stringify(v) ?? String(v); } catch { return String(v); }
+  });
+  if (ideState.hasStamp && !ideState.hasField) {
+    warn(`${PROJECT_FILES.version}: ideTargets is missing; using safe targets: ${ideTargets.join(', ')}`);
+  } else if (ideState.hasStamp && !ideState.shapeValid) {
+    warn(`${PROJECT_FILES.version}: ideTargets is not an array; ignored persisted value: ${shownInvalid.join(', ')}; using safe targets: ${ideTargets.join(', ')}`);
+  } else if (ideState.hasStamp && ideState.usedFallback && !ideState.invalid.length) {
+    warn(`${PROJECT_FILES.version}: ideTargets is empty; using safe targets: ${ideTargets.join(', ')}`);
+  }
+  if (ideState.invalid.length && ideState.shapeValid) {
+    warn(`${PROJECT_FILES.version}: ignored unsupported persisted IDE target(s): ${shownInvalid.join(', ')}`);
+  }
+  if (ideState.repaired.length) {
+    warn(`${PROJECT_FILES.version}: persisted .cluade target will be repaired to .claude`);
+  }
+  if (exists(path.join(root, '.cluade'))) {
+    warn('existing .cluade path was left untouched; review its contents and remove it manually');
+  }
 
   const fixable = actions.filter((a) =>
     a.status !== 'ok' && (scope === 'all' ? true : a.status !== 'missing'),
@@ -103,9 +145,9 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   if (force) {
     for (const a of actions.filter((a) => a.status === 'ok')) { a.apply(); appliedActions.push(a); }
   }
-  // refresh the version stamp (preserve recorded ideTargets) and let it ride the hub's update commit
-  const rec = readJSON(path.join(root, PROJECT_FILES.version), {});
-  writeJSON(path.join(root, PROJECT_FILES.version), { ...rec, version: VERSION });
+  // Refresh the version stamp and persist only the canonical targets used to build actions. This also
+  // completes legacy/corrupt target migration even when no skill content itself needed an update.
+  writeCanonicalStamp();
   appliedActions.push({ scope: 'hub', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
   applied ? ok(`reconciled ${applied} item(s)`) : info('nothing to fix');
   if (gaps.length) hand('one-time setup still missing — run `yad setup`.');
