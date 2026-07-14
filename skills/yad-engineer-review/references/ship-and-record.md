@@ -66,6 +66,26 @@ not by hand: after recording the ship, `yad checkpoint --push` lands the new `bu
 `chore(hub): …` audit-trail commit on the default branch (allowlist-scoped to the back-half ledgers,
 never a front-half gate file); `yad tidy up` folds finished shards into `build-log.json` later.
 
+### Retroactive ship — a pre-tracking story (#142)
+
+A story that was merged and shipped **before** the back-half ledger existed has no build-log ship, so
+`yad checkpoint` can't carry its `status: shipped` flip (the flip is only carried when a ship backs it,
+#112) — leaving a raw `git push origin main` as the only way to land it, against the never-raw-git
+convention. To reconcile it through yad, record a **retroactive** ship, then checkpoint carries the flip
+in the same commit:
+
+```
+yad checkpoint --retro-ship <epic>/<story> --repo <r> [--task <t>] [--merge-commit <sha>] [--push]
+```
+
+It writes ONE minimal ship shard marked `retroactive: true` (`task` defaults to the sentinel `retro`;
+`mergeCommit` is written only if you pass `--merge-commit`; `shippedAt` is the backfill date), then runs
+the normal checkpoint so the story's already-made `status:` flip rides along in the **same** commit. It
+refuses when the story already has a real ship (then it isn't pre-tracking — use the normal flow). It
+does **not** author the story frontmatter — and to keep evidence and the flip atomic (the no-drift
+invariant), it **refuses** unless you have already set `status: shipped` in `stories/<story>.md`, so a
+ship shard is never committed while the artifact still says `approved`.
+
 **Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
 — `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)
 (`yad review trailer/context/nudge`, a real trailer/cards/chat session over the diff), `none` for a bare

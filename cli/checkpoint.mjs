@@ -27,7 +27,7 @@ import { PROJECT_FILES } from './manifest.mjs';
 import { loadHub } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 import { hubGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
-import { readShips } from './ledger.mjs';
+import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter } from './epic-state.mjs';
 
 // The machine-written back-half ledgers, relative to an epic's dir. The two append-only logs are
@@ -166,6 +166,48 @@ export function stagedStoryIsStatusOnly(git, file) {
   return changes > 0;
 }
 
+// --retro-ship orchestration (#142): validate the target, then write the retroactive ship shard so the
+// normal checkpoint path carries the story's already-made `status:` flip. Returns { ok, file } — ok:false
+// (with a printed reason) aborts the commit; `file` is the shard just written, so a dry run can delete it
+// and leave no side effect. Does NOT author the story frontmatter — it only supplies the missing
+// evidence, and the human must have ALREADY flipped `status:` to a back-half value in the working tree.
+export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, today }) {
+  if (!epic || !story) { fail('--retro-ship needs <epic>/<story> (e.g. --retro-ship EP-foo/EP-foo-S01)'); return { ok: false }; }
+  if (!repo) { fail('--retro-ship needs --repo <name> (the repo the story shipped in)'); return { ok: false }; }
+  const epicDir = path.join(root, 'epics', epic);
+  const storyRel = path.posix.join('epics', epic, 'stories', `${story}.md`);
+  const storyFile = path.join(epicDir, 'stories', `${story}.md`);
+  if (!exists(epicDir)) { fail(`no epic ${epic} under epics/`); return { ok: false }; }
+  if (!exists(storyFile)) { fail(`no story ${story} under epics/${epic}/stories/`); return { ok: false }; }
+
+  // Evidence and the flip must land TOGETHER — the #112 no-drift invariant. Refuse unless the human has
+  // already flipped the story frontmatter to a back-half status in the working tree; otherwise the ship
+  // shard would commit while the artifact still says e.g. `approved` — the very drift #112 prevents.
+  if (!BACK_HALF_STATUSES.has(readFrontmatter(storyFile).status)) {
+    fail(`${story} frontmatter is not at in-build|shipped`);
+    hand(`set \`status: shipped\` in ${storyRel} first, then re-run — the ship and the flip land in one commit`);
+    return { ok: false };
+  }
+
+  let res;
+  try { res = writeRetroShip(epicDir, { story, repo, task, mergeCommit, shippedAt: today }); }
+  catch (e) { fail(`could not record retroactive ship — ${e.message}`); return { ok: false }; }
+  if (!res.written) {
+    fail(`${story} already has a build-log ship — it is not pre-tracking; use the normal ship/checkpoint flow`);
+    return { ok: false };
+  }
+  ok(`recorded retroactive ship for ${story} (${repo})${mergeCommit ? ` @ ${mergeCommit}` : ''}`);
+  return { ok: true, file: res.file };
+}
+
+// Undo a retro shard a dry run wrote so the preview leaves NO side effect: delete the shard, and if its
+// `.sdlc/build-log/` dir was created just for it (now empty), drop that too. Best-effort — a non-empty
+// dir (pre-existing shards) or a benign rmdir race is ignored.
+function cleanupRetroShard(file) {
+  fs.rmSync(file, { force: true });
+  try { fs.rmdirSync(path.dirname(file)); } catch { /* not empty / already gone — leave it */ }
+}
+
 export async function runCheckpoint(root, opts = {}) {
   log(c.bold('\nyad checkpoint'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
@@ -182,6 +224,17 @@ export async function runCheckpoint(root, opts = {}) {
 
   // Default-branch guard (invariant 2) — shared with `yad tidy up`.
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad checkpoint' })) return;
+
+  // --retro-ship (#142): record a retroactive build-log ship for a PRE-TRACKING story (merged before
+  // the back-half ledger existed, so it has no ship and its `status:` flip can't be carried). Done
+  // AFTER the branch guard so we never leave a dangling shard on the wrong branch; the flip the human
+  // already wrote is then carried by the normal storyStatusPathspecs path below — no raw git needed.
+  let retroFile;
+  if (opts.retroShip) {
+    const r = recordRetroShip(root, opts.retroShip);
+    if (!r.ok) { process.exitCode = 1; return; }
+    retroFile = r.file;
+  }
 
   // The machine ledgers PLUS any build-log-backed story `status:` flip (#112) — one commit records
   // both, so the story artifact never drifts from build-log and no raw git-to-main push is needed.
@@ -224,6 +277,9 @@ export async function runCheckpoint(root, opts = {}) {
   if (opts.dryRun) {
     log('\n' + c.dim(message) + '\n');
     git('reset', '-q', '--', ...pathspecs); // restore the index — a dry run must not leave things staged
+    // A --retro-ship dry run wrote a shard so the flip could be PREVIEWED above; undo it now so the dry
+    // run leaves no side effect on disk (git reset only unstaged it, back to untracked).
+    if (retroFile) cleanupRetroShard(retroFile);
     info('dry run — not committed');
     return { message };
   }
@@ -231,6 +287,8 @@ export async function runCheckpoint(root, opts = {}) {
   const cm = git('commit', '-m', message, '--', ...staged);
   if (!cm.ok) {
     git('reset', '-q', '--', ...pathspecs); // don't leave the ledgers staged for an unrelated commit to sweep up
+    // The retro shard stays on disk (untracked) — a follow-up `yad checkpoint` picks it up and carries
+    // the flip; re-running `--retro-ship` would refuse ("already has a build-log ship").
     fail(`git commit failed — ${cm.stderr.split('\n')[0] || cm.code}`);
     process.exitCode = 1;
     return { message };
