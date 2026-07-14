@@ -1,3 +1,11 @@
+## [3.12.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.12.0...v3.12.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **cli:** reject unsafe detected IDE targets and opencode write destinations ([792a40b](https://github.com/abdelrahmannasr/yadflow/commit/792a40b399b92f8db9d560e314110c432b98d93e)), closes [#134](https://github.com/abdelrahmannasr/yadflow/issues/134)
+* **cli:** repair and validate persisted IDE targets ([81242ed](https://github.com/abdelrahmannasr/yadflow/commit/81242ed9a075ea067acb2f4497a745ee40e540a6))
+
 # [3.12.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.11.1...v3.12.0) (2026-07-11)
 
 
