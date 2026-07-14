@@ -3942,6 +3942,51 @@ test('verified-commits gate: a merge commit is allowlist-waived (author = merger
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('verified-commits gate: an unsigned content-free merge is signature-waived; an evil merge fails (issue #138)', () => {
+  // Self-hosted GitLab does not sign UI-created merge commits (the signature API returns 404). A merge
+  // that introduces NO content of its own carries nothing an unverified author could smuggle in past
+  // the per-parent checks, so the gate waives the signature (WARN) instead of blocking every merge.
+  // An evil merge (content in neither parent) still requires a verified signature and fails closed.
+  const T = scaffoldGateRepo(); // on `feature`; allowlist = alice@corp.io
+  // A shimmed `glab` that always fails simulates the 404/no-signature response hermetically (no
+  // network). CI_* are cleared so the gate takes the glab path even when the suite runs in GitLab CI.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bin-'));
+  fs.writeFileSync(path.join(bin, 'glab'), '#!/usr/bin/env bash\nexit 1\n');
+  fs.chmodSync(path.join(bin, 'glab'), 0o755);
+  const gitlabEnv = { SDLC_PLATFORM: 'gitlab', CI_API_V4_URL: '', CI_PROJECT_ID: '', PATH: `${bin}:${process.env.PATH}` };
+  const runFrom = (base) => {
+    try { return { code: 0, out: execFileSync('bash', [GATE, base], { cwd: T, env: { ...process.env, ...gitlabEnv }, stdio: 'pipe' }).toString() }; }
+    catch (e) { return { code: e.status, out: (e.stdout || '').toString() + (e.stderr || '').toString() }; }
+  };
+
+  git(T, 'checkout', '-q', '-b', 'topic');
+  fs.writeFileSync(path.join(T, 'd.txt'), '4');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'feat: topic work'); // alice-authored, allowlisted, unsigned
+  git(T, 'checkout', '-q', 'main');
+  const base = git(T, 'rev-parse', 'HEAD').toString().trim(); // pre-merge main tip
+  // A trivial (clean auto) merge by a NON-allowlisted merger, unsigned.
+  git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub',
+    'merge', '-q', '--no-ff', '-m', 'Merge topic', 'topic');
+  const mergeSha = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+  let r = runFrom(base);
+  assert.match(r.out, new RegExp(`${mergeSha} unsigned merge commit .* signature waived`), r.out);
+  assert.doesNotMatch(r.out, new RegExp(`FAIL \\[verified-commits\\]: ${mergeSha} signature`),
+    'a content-free merge must not fail the signature check');
+
+  // Turn it into an evil merge: content that is in neither parent (amend preserves both parents).
+  fs.writeFileSync(path.join(T, 'evil.txt'), 'smuggled');
+  git(T, 'add', '-A');
+  git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub', 'commit', '-q', '--amend', '--no-edit');
+  const evilSha = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+  r = runFrom(base);
+  assert.equal(r.code, 1, 'an evil merge with no signature must fail closed');
+  assert.match(r.out, new RegExp(`FAIL \\[verified-commits\\]: ${evilSha} signature missing/unverified`), r.out);
+
+  fs.rmSync(bin, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('verified-commits gate: unresolvable base fails closed', () => {
   const T = scaffoldGateRepo();
   try {
