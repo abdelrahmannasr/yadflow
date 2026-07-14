@@ -1,3 +1,10 @@
+# [3.13.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.12.2...v3.13.0) (2026-07-14)
+
+
+### Features
+
+* **checkpoint:** add --retro-ship to reconcile pre-tracking shipped stories ([#142](https://github.com/abdelrahmannasr/yadflow/issues/142)) ([d7988a3](https://github.com/abdelrahmannasr/yadflow/commit/d7988a335da7d675dd7b53456c12610c3f442d97)), closes [#112](https://github.com/abdelrahmannasr/yadflow/issues/112) [#112](https://github.com/abdelrahmannasr/yadflow/issues/112)
+
 ## [3.12.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.12.1...v3.12.2) (2026-07-14)
 
 
