@@ -101,6 +101,10 @@ ${c.bold('Build helpers')}
                                        status: flip (→ in-build/shipped) backed by a build-log
                                        ship — as one audit-trail chore(hub) commit; default
                                        branch only (--allow-branch to override); no-op when clean
+  yad checkpoint --retro-ship <epic>/<story> --repo <r>
+                                       Record a retroactive build-log ship for a PRE-TRACKING story
+                                       (merged before ledger tracking), then carry its status: shipped
+                                       flip in the same commit (--merge-commit <sha>, --task <t> opt.)
   yad tidy up [<epic>] [--push]        Fold FINISHED back-half shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
                                        ledger, as one chore(hub) commit — the manual "pack it up"
@@ -155,7 +159,7 @@ ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--retro-ship', '--merge-commit']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -301,9 +305,20 @@ async function main() {
     case 'ship':
       await runShip(o.dir, { type: o.type, message: o.message, task: o.task, ai: o.ai, contractChange: o.contractChange, dryRun: o.dryRun, force: o.force, repo: o.repo, platform: o.platform, base: o.base, title: o.title, risk: o.risk });
       break;
-    case 'checkpoint':
-      await runCheckpoint(o.dir, { push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });
+    case 'checkpoint': {
+      let retroShip;
+      if (o['retro-ship']) {
+        const [epic, story] = String(o['retro-ship']).split('/');
+        if (!epic || !isValidEpicId(epic)) { log(c.red(`invalid --retro-ship: expected <epic>/<story> with epic EP-<slug> (got ${o['retro-ship']})`)); process.exitCode = 1; break; }
+        // The story id becomes a path element (stories/<story>.md) — pin it to the id shape (and to its
+        // own epic) so a `..` or a slash can never traverse out of the epic's stories dir, and a typo'd
+        // cross-epic id is caught here rather than failing obscurely later.
+        if (!story || !/^EP-[a-z0-9-]+-S\d+$/.test(story) || !story.startsWith(`${epic}-S`)) { log(c.red(`invalid --retro-ship: expected <epic>/<story> with story <epic>-S<NN> (got ${o['retro-ship']})`)); process.exitCode = 1; break; }
+        retroShip = { epic, story, repo: o.repo, task: o.task, mergeCommit: o['merge-commit'], today };
+      }
+      await runCheckpoint(o.dir, { push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun, retroShip });
       break;
+    }
     case 'tidy': {
       const [, action, epic] = o._;
       if (action !== 'up') { log(`usage: yad tidy up [<epic>] [--push] [--dry-run]`); process.exitCode = action ? 1 : 0; break; }

@@ -79,6 +79,32 @@ export function readShips(epicDir) {
   return [...byKey.values()];
 }
 
+// Record a RETROACTIVE ship for a pre-tracking story — one merged & shipped before the back-half
+// ledger existed, so it has no build-log ship and `yad checkpoint` can't carry its `status:` flip
+// (issue #142). Writes ONE minimal ship shard, marked `retroactive: true`, so `readShips` now proves
+// the story shipped and checkpoint carries the human's already-made flip. It is NOT a fabricated real
+// ship: `task` defaults to the sentinel `retro`, `mergeCommit` is written only when the caller supplies
+// it (never invented), and `shippedAt` is the backfill date (the `retroactive` flag marks it as such).
+//
+// Guard: refuse when the story ALREADY has ANY build-log ship — then it isn't pre-tracking and the
+// normal ship/checkpoint flow applies; a retro record would only muddy the ledger. Returns
+// { written: false, reason } in that case, else { written: true, file, ship }.
+export function writeRetroShip(epicDir, { story, repo, task = 'retro', mergeCommit, shippedAt }) {
+  if (!story) throw new Error('writeRetroShip: story is required');
+  if (!repo) throw new Error('writeRetroShip: repo is required');
+  if (readShips(epicDir).some((s) => s.story === story)) {
+    return { written: false, reason: 'exists' };
+  }
+  const t = task || 'retro';
+  const ship = { story, task: t, repo, retroactive: true, note: 'pre-tracking backfill' };
+  if (mergeCommit) ship.mergeCommit = mergeCommit;
+  if (shippedAt) ship.shippedAt = shippedAt;
+  const f = epicFiles(epicDir);
+  const file = path.join(f.buildLogDir, buildShardName({ story, task: t, repo }));
+  writeJSON(file, ship);
+  return { written: true, file, ship };
+}
+
 // Find the ship matching `match(ship)` across loose shards (authoritative until folded) then the
 // folded file, apply `update(ship)`, and write back ONLY the file that holds it. Returns
 // { found, where, file, ship }; found:false writes nothing (the caller warns).
