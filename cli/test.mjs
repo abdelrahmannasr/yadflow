@@ -2371,6 +2371,15 @@ test('gate open: an unreachable origin is "unknown", never a block', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-branch-'));
   git(T, 'init', '-q');
   assert.equal(branchExists(T, 'review/EP-test/architecture'), null, 'no origin configured → cannot ask');
+  // An origin that exists in config but cannot be reached: distinct from ls-remote's exit 2, so it
+  // must read as "could not ask", not as a definite absence that would block `gate open`.
+  git(T, 'remote', 'add', 'origin', path.join(T, 'no-such-remote.git'));
+  const started = process.hrtime.bigint();
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), null, 'broken origin → cannot ask');
+  // And it must come back promptly — this sits on the synchronous `gate open` path, so a probe that
+  // blocks (a credential prompt, an ssh host-key question) is a hung command, not a null.
+  const ms = Number((process.hrtime.bigint() - started) / 1_000_000n);
+  assert.ok(ms < 15_000, `the probe must be bounded, took ${ms}ms`);
   fs.rmSync(T, { recursive: true, force: true });
   assert.equal(branchExists(fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-')), 'x'), null, 'not a checkout → cannot ask');
 });

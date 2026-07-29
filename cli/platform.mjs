@@ -356,9 +356,21 @@ export function prBranch(platform, n, { cwd } = {}) {
 // must never read as "missing" and block.
 export function branchExists(cwd, branch) {
   if (!run('git', ['rev-parse', '--git-dir'], { cwd }).ok) return null;
-  // GIT_TERMINAL_PROMPT=0: an origin needing credentials must fail fast, not sit on a hidden prompt.
+  // This runs synchronously on the `gate open` path, so "cannot ask" has to be FAST — a blocked probe
+  // is a hung command, not the intended null. Three separate ways it could block:
+  //   GIT_TERMINAL_PROMPT=0  — git's own credential prompt (https origins)
+  //   GIT_SSH_COMMAND        — ssh's passphrase / host-key prompts, which git's flag does NOT cover
+  //                            (an unset host key otherwise waits on "Are you sure…?" forever)
+  //   timeout                — anything else that stalls: a black-holed host, a wedged helper
+  // A caller's own GIT_SSH_COMMAND wins; we only supply the default.
   const remote = run('git', ['ls-remote', '--exit-code', '--heads', 'origin', branch], {
-    cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    cwd,
+    timeout: 10_000,
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new',
+    },
   });
   if (remote.ok) return true;
   // exit 2 is ls-remote's own "no matching ref" — the only definite negative. Anything else (no
