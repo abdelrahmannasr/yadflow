@@ -2131,6 +2131,33 @@ test('gate sync: a re-approval on a new PR re-binds even without review timestam
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate sync: a done step never loses the approvals that passed it', async () => {
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  const before = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.ok(before.length >= 3, 'the gate passed on real approvals');
+
+  // A later read that returns cleanly but maps NO approvers — an ordinary roster edit (a login
+  // changed or a member left), a GitLab approval reset, or a degraded-but-ok read. On an OPEN step
+  // this correctly drops them; on a step that already advanced it would erase the record of WHY it
+  // advanced, leaving `done` with zero approvals.
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => ({ ...fullApproval, reviews: [] }) });
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.deepEqual(after, before, 'a closed gate keeps its approval record when the platform reports none');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an OPEN step still drops an approval the platform no longer reports', async () => {
+  const { T, ep } = scaffoldEpic();
+  // Not merged → the step stays in_review, so the platform remains the live source of truth.
+  const held = { ...fullApproval, merged: false };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => held });
+  assert.ok(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'))).length >= 3);
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => ({ ...held, reviews: [] }) });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'))), [], 'a dismissal on an open step still vanishes');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: re-syncing a done step twice is a byte-identical no-op', async () => {
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });

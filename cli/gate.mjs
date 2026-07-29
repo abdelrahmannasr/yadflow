@@ -127,13 +127,24 @@ const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === 
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
 // reviewer first approved against unless their review is newer (a genuine re-approval) — that is what
 // makes "revoke only when the artifact changed" work.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null }) {
+// `closed`: the step already advanced. Drop-and-re-add is what makes a dismissal or revocation vanish
+// idempotently on an OPEN step — the platform is the live source of truth there. On a CLOSED step it
+// is destructive instead: the gate passed, and the approvals that passed it are the audit record of
+// why. A roster edit, a GitLab approval reset, or any degraded-but-`ok` read yields an empty `recs`
+// and would erase them, leaving `done` with zero approvals — the very state issue #156 is about,
+// reached from the other side. So a closed step's record is only ever added to or refreshed in place.
+function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false }) {
   const keyOf = (name, role, domain) => `${stepId}|${name}|${role}|${domain || ''}`;
   const prior = new Map(
     approvals.filter((a) => a.step === stepId && a.source === 'bridge')
       .map((a) => [keyOf(a.approver, a.role, a.domain), a]),
   );
-  const kept = approvals.filter((a) => !(a.step === stepId && a.source === 'bridge'));
+  const seen = new Set(recs.map((r) => keyOf(r.name, r.role, r.domain)));
+  const kept = approvals.filter((a) => {
+    if (!(a.step === stepId && a.source === 'bridge')) return true;
+    // Closed step: keep a prior approval the platform no longer reports. It is history, not state.
+    return closed && !seen.has(keyOf(a.approver, a.role, a.domain));
+  });
   for (const r of recs) {
     const was = prior.get(keyOf(r.name, r.role, r.domain));
     let artHash = curHash;            // first time we see this approval => bind to current content
@@ -281,7 +292,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
