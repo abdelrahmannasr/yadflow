@@ -39,6 +39,15 @@ variables:
 
 yad-gate-sync:
   needs: []
+  # Serialize every advance: the merge-push pipeline and the scheduled sweep both commit the ledger
+  # and push the DEFAULT branch, and the sweep's 7-day window covers MRs the merge path is still
+  # processing — so without this they race on the same MR. Both produce the advance, one pushes, the
+  # loser rebases onto it and pushes the same commit message under a different SHA. That is where the
+  # duplicate `chore(gate): advance …` commits with shifting SHAs come from, and every one of them
+  # carries [skip ci] and lands directly on the default branch, so nothing validates the churn.
+  # `resource_group` is GitLab's equivalent of the `concurrency` group the GitHub workflow sets on both
+  # of its jobs: at most one instance runs at a time, the rest queue.
+  resource_group: yad-gate-mergesync
   # Runner selection: set the YAD_RUNNER_TAGS CI/CD variable (e.g. `dind_runner`) to route this
   # docker job on instances whose runners are tag-locked (run_untagged: false) — it lives in
   # project Settings → CI/CD → Variables, so it survives every `yad` sync. When unset, current

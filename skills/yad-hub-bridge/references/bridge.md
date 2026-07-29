@@ -213,6 +213,14 @@ yad gate sync EP-x architecture.md --pr 42   # advisory in bridge mode; the writ
 The bridge rule is unchanged — the resolved pointer is adopted into the ledger only on the writer
 path, so a human never leaves a gate-state file in their working tree for `ledger-guard` to reject.
 
+**Serialization.** Both wired jobs push the ledger to the default branch, and on GitLab the scheduled
+sweep's recent-MR window overlaps whatever the merge-push pipeline is handling — so they are pinned to
+one at a time (`concurrency: yad-gate-mergesync` on GitHub, `resource_group: yad-gate-mergesync` on
+GitLab). Without it both runs produce the same advance, one pushes, and the other rebases onto it and
+lands a duplicate `chore(gate): advance …` commit under a different SHA — unreviewed churn, since
+those commits carry `[skip ci]` and go straight to the default branch. An already-wired GitLab hub
+picks the `resource_group` up on the next `yad update` / `yad check --fix`.
+
 **`yad gate open` does not create the review branch.** It opens a PR/MR *against* `review/<epic>/<artifact>`,
 so that branch must already exist locally or on origin; `yad open-pr`, run from the branch, pushes it
 and then delegates here. Opening with no branch is refused up front rather than failing inside `gh`/`glab`.
