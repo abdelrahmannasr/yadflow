@@ -17,7 +17,7 @@ const GROUPS = [
     phase: 'Front-half review gate',
     color: '#ca6f1e',
     items: [
-      'yad gate open <epic> <artifact> — open the review PR/MR, mark in_review',
+      'yad gate open <epic> <artifact> — open the review PR/MR (branch must be on origin), mark in_review',
       'yad gate sync <epic> [artifact] [--pr <n>] — pull approvals/threads, auto-advance on merge',
       'yad gate comments <epic> — fetch the unresolved review comments',
       'yad gate status <epic> — show each review step and its approvals',

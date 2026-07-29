@@ -131,8 +131,9 @@ via the local user's `gh`/`glab`. For each:
 - an `APPROVED` review / MR approval → append an `approved` record to `approvals.json` tagged
   `"source": "bridge"`; a `COMMENTED`/`CHANGES_REQUESTED`/note → write to
   `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` + `comments.json` (never an approval).
-**Idempotent:** upsert bridge approvals by `(step, approver, role, domain)`, supersede revoked ones, and
-key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
+**Idempotent:** upsert bridge approvals by `(step, approver, role, domain)`, supersede revoked ones
+**while the step is open** (a step already `done` keeps its approvals — they are the record of why it
+passed), and key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
 before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
 roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. Under the PR-driven CLI (`yad

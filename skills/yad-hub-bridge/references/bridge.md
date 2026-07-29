@@ -10,7 +10,7 @@ predicate (`../yad-review-gate/references/gating.md`) runs unchanged. The bridge
 |---|---|
 | GitHub review `APPROVED` / GitLab MR approval (`approved_by`) | an `approved` record in `approvals.json`, role resolved from the roster (owner/reviewer) or derived domain-owner, tagged `"source": "bridge"` |
 | GitHub `COMMENTED` / `CHANGES_REQUESTED`; GitLab discussions/notes | a line under `## <name> (<role>)` in `reviews/<artifact>--<date>--comments.md` + a `comments.json` record; **never** an approval. `CHANGES_REQUESTED` is also flagged as blocking in the comments file |
-| GitHub review dismissed / GitLab approval revoked | the prior bridge `approved` record for that approver is removed on re-sync (see idempotency) |
+| GitHub review dismissed / GitLab approval revoked | the prior bridge `approved` record for that approver is removed on re-sync **while the step is open**; once the step is `done` the record is kept as the audit trail of why it passed (see idempotency) |
 
 `approvals.json` records from the bridge carry `"source": "bridge"`; **manual** approvals have no such
 tag and are **never** touched by `sync` — the two coexist.
@@ -82,10 +82,21 @@ login and requested too — otherwise an escalated step is structurally unsatisf
 ## Idempotent re-sync
 
 - Key bridge approvals on `(step, approver, role, domain)`. On re-sync, **upsert** — do not append a
-  duplicate. Remove any bridge approval whose platform review was dismissed/revoked.
-- Key synced comments on the platform comment id so the same comment is not appended twice.
-- Update the step's `hub-prs.json` `lastSyncedAt` after a successful sync.
-- Running `sync` twice with no platform change is a no-op on the ledger.
+  duplicate.
+- **On an OPEN step**, remove any bridge approval whose platform review was dismissed/revoked: the
+  platform is the live source of truth while the review is in flight.
+- **On a step already `done`**, the record is only added to or refreshed in place — an approval the
+  platform no longer reports is **kept**. Those approvals are the audit record of *why* the gate
+  passed; a roster edit, an approval reset, or a degraded-but-successful read would otherwise erase
+  them and leave the step `done` with zero approvals.
+- Key synced comments on the platform comment id so the same comment is not appended twice. Comment
+  rounds are recorded for an **open** step only, so re-visiting a merged review does not append a new
+  round per pass.
+- Update the step's `hub-prs.json` `lastSyncedAt` when the sync **learned something** — every sync on
+  an open step, and on a closed one only when the approval record actually changed (a re-opened review
+  that was re-approved). An identical re-sync leaves it alone, so the ledger does not churn.
+- Running `sync` twice with no platform change is a no-op on the ledger — byte-identical, including
+  `comments.json` and the dated `reviews/*.md` side files.
 
 ## Contract re-lock invalidates prior platform approvals too
 

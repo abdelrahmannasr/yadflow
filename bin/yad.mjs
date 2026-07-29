@@ -74,7 +74,8 @@ ${c.bold('Where am I / what next')}
                                        --undo reverses it until the stories review opens
 
 ${c.bold('Review gate (front half)')}
-  yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
+  yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
+                                       branch must already be on origin (it is never created here)
   yad gate sync <epic> [artifact] [--pr <n>]
                                        Pull PR state -> ledger; advance on approved+resolved+merged.
                                        With no recorded PR, resolves it from the review branch; --pr

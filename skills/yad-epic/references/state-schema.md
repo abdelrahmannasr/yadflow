@@ -112,6 +112,19 @@ Append-only ledger (an array). Each entry:
 `source: "bridge"` marks an approval synced from a hub review PR/MR by `yad-review-gate action: sync`
 (via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`.
 
+A **bridge** approval carries four more fields, all written by `sync` and all about *what was approved*
+rather than *who approved*:
+
+| Field | Meaning |
+|-------|---------|
+| `artifactHash` | the content fingerprint the approval is bound to (`sha256:…`). The gate drops any approval whose hash ≠ the artifact's current one — this is revoke-on-change. For architecture it is the locked contract surface, for stories the whole `stories/` set. |
+| `approvedAt` | when the platform says the review was submitted. Used to tell a genuine re-approval from the same review read again; **absent on GitLab**, which exposes no per-approval timestamp. |
+| `pr` | the PR/MR number the approval arrived on. The second proof of a genuine re-approval, and the only one available on GitLab: a re-opened review is always a new PR, so an approval on a different number cannot be the old one re-read. Records written before this field existed are stamped once, from the `hub-prs.json` pointer they were recorded against. |
+| `engagement` | `verified` when the approval carried the companion's engagement marker, else `none`. Advisory unless `hub.review.requireEngagement` is on. |
+
+`date` is when the sync **recorded** the approval, not when it was given — it is preserved across an
+unchanged re-sync so that re-reading a review never churns the ledger.
+
 ## `comments.json`
 Append-only ledger (an array), the machine-readable counterpart to the `reviews/*--comments.md` markdown
 ("who reviewed/commented", as `approvals.json` is "who approved"). Written by `yad-review-gate`'s
