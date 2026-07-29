@@ -26,6 +26,10 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 - Maintenance commits are **exempt**: a Conventional-Commits subject of type `ci`, `chore`, `build`,
   or `test` (optional `(scope)` / breaking `!`) **PASSes** without a link — CI wiring, dependency
   bumps, and test-infra changes legitimately link no story.
+- The exemption waives the **requirement** for a link, never the **validity** of one that is claimed.
+  A maintenance commit that *does* carry a `Task:` trailer is resolved like any other: a malformed id
+  or a missing `specs/<story>/link.md` **FAILS**. Otherwise the trailer is decorative on exempt
+  commits and an unlinked `chore:` is indistinguishable from one naming a story that never existed.
 - For every other commit, requires a `Task: <story>-<task>` trailer. **FAIL** if absent.
 - The trailer must be a well-formed `<story>-T<NN>` id. **FAIL** on a malformed trailer (e.g.
   `EP-demo-S01` with no `-T<NN>`) rather than letting it slip through the suffix-strip.

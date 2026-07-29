@@ -3,8 +3,11 @@
 # Every NON-MAINTENANCE commit must link a real story/spec: it must carry a
 # `Task: <story>-<task>` trailer whose <story> resolves to a specs/<story>/link.md.
 # Maintenance commits (ci/chore/build/test) are EXEMPT — CI wiring, dependency bumps,
-# and test-infra changes legitimately link no story. Checked per commit (not aggregated
-# across the range), so the report names every offending commit.
+# and test-infra changes legitimately link no story. The exemption covers the ABSENCE of
+# a link, never a BROKEN one: a maintenance commit that carries a Task trailer is still
+# resolved, so `chore: x` + `Task: EP-ghost-S01-T01` fails exactly like any other commit
+# claiming a story that does not exist. Checked per commit (not aggregated across the
+# range), so the report names every offending commit.
 set -euo pipefail
 
 BASE="${1:-${SDLC_BASE:-origin/main}}"
@@ -32,11 +35,20 @@ while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
+  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
+  exempt=0
+  note=''
   if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: "; then
-    echo "PASS [spec-link]: ${short} '${subject}' — maintenance commit (exempt)"
+    exempt=1
+    note=' (maintenance commit, trailer resolved anyway)'
+  fi
+  # The type exemption waives the REQUIREMENT for a link, not the VALIDITY of one that is claimed.
+  # Exempting on the subject alone left an unlinked `chore:` and a `chore:` naming a story that does
+  # not exist indistinguishable — both PASSed, so the trailer was decorative on every exempt commit.
+  if [ "$exempt" = 1 ] && [ -z "$task" ]; then
+    echo "PASS [spec-link]: ${short} '${subject}' — maintenance commit, no Task trailer (exempt)"
     continue
   fi
-  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
   if [ -z "$task" ]; then
     echo "FAIL [spec-link]: ${short} '${subject}' has no 'Task:' trailer"
     rc=1
@@ -52,7 +64,7 @@ while IFS= read -r sha; do
   fi
   story="$(printf '%s' "$task" | sed -E 's/-T[0-9]+$//')"
   if [ -f "specs/${story}/link.md" ]; then
-    echo "PASS [spec-link]: ${short} ${task} -> specs/${story}/link.md"
+    echo "PASS [spec-link]: ${short} ${task} -> specs/${story}/link.md${note}"
   else
     echo "FAIL [spec-link]: ${short} ${task} references specs/${story}/ but link.md is missing."
     rc=1

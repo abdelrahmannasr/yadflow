@@ -86,7 +86,41 @@ test('spec-link gate: maintenance commit (ci/chore/build/test) is exempt', () =>
   commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
   const r = runGate(SPEC_LINK, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'chore\(deps\): bump x' — maintenance commit \(exempt\)/);
+  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'chore\(deps\): bump x' — maintenance commit, no Task trailer \(exempt\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: an exempt commit that CLAIMS a story still resolves it (issue #157)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore(spec): tidy the spec\n\nTask: EP-demo-S01-T01', {
+    'specs/EP-demo-S01/link.md': 'story: EP-demo-S01\n',
+  });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /EP-demo-S01-T01 -> specs\/EP-demo-S01\/link\.md \(maintenance commit, trailer resolved anyway\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: an exempt commit whose Task trailer resolves to nothing FAILS (issue #157)', () => {
+  const T = scaffoldRepo();
+  // The exemption waives the REQUIREMENT for a link, never the VALIDITY of one that is claimed —
+  // otherwise a `chore:` subject makes the trailer decorative and an unlinked commit of the same
+  // shape is indistinguishable from a linked one.
+  commit(T, 'chore(ci): rewire\n\nTask: EP-ghost-S01-T01', { '.github/x.yml': 'x' });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 1, 'a dangling story claim must fail even on an exempt commit');
+  assert.match(r.out, /specs\/EP-ghost-S01\/ but link\.md is missing/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: an exempt commit with a MALFORMED Task trailer FAILS (issue #157)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'test(spec): add a case\n\nTask: EP-demo-S01', {
+    'specs/EP-demo-S01/link.md': 'story: EP-demo-S01\n',
+  });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 1, 'a malformed trailer must fail even on an exempt commit');
+  assert.match(r.out, /malformed Task trailer 'EP-demo-S01'/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
