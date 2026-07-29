@@ -178,9 +178,14 @@ that path, and spec-link still proves the story link.
 
 **Resolving `product-repo` (shared by all four hub-reading gates, contract-check included).** An
 **absolute** value is used as-is; a **relative** value is joined to the `link.md`'s own directory,
-`specs/<story>/`. Every gate applies the identical rule — when they disagree, a value one gate can
-resolve becomes an unreachable path for another, and "unreachable" is a PASS-with-note, so the gate
-silently stops gating (issue #149).
+`specs/<story>/`, falling back to a repo-root reading when only that resolves (what contract-check
+historically did, so `link.md` files written for it keep working). The `link.md` itself is read from
+its frontmatter block, falling back to a whole-file scan for a pre-frontmatter one. Every gate applies
+the identical rule — when they disagree, a value one gate can resolve becomes an unreachable path for
+another, and "unreachable" is a PASS-with-note, so the gate silently stops gating (issue #149). Each
+gate now **prints that note**, so a deferred check is never mistaken for a passed one. The block is
+duplicated verbatim across the four scripts (they are standalone by design) and a test asserts the
+four copies stay byte-identical.
 
 - **lineage-check** — reads the hub epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
   passes. A `change`/`defect`/`hotfix` epic **FAILS** unless it declares a `parent:` that resolves to a

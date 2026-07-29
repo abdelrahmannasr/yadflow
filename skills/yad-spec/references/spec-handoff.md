@@ -90,8 +90,11 @@ back to the architecture gate in the product repo — it is never widened from t
 reconcile-debt all read it). Every gate resolves it the SAME way: an **absolute** path is used as-is; a
 **relative** path is joined to this `link.md`'s own directory, `specs/<story>/` — `../../` climbs out
 of the story dir and out of `specs/` to the code-repo root, so a hub checked out beside the code repo
-is `../../../<hub-dir>`. Write it in whichever form the CI checkout can actually reach; an unreachable
-path degrades the hub-reading gates to a PASS-with-note rather than failing them.
+is `../../../<hub-dir>`. A relative value that only resolves from the **repo root** still works too
+(what contract-check historically did), so older `link.md` files keep gating. Write it as an
+**unquoted scalar** — `"..."` or `'...'` is taken literally, and a leading `~`/`$VAR` is never
+expanded. An unreachable path degrades the hub-reading gates to a PASS-with-note rather than failing
+them, and each one now says so in its output.
 
 ## Do not re-invent the contract
 

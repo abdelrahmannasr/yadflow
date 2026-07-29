@@ -19,13 +19,37 @@ fi
 RANGE="${BASE}..HEAD"
 EXEMPT='ci|chore|build|test'
 
-fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
+# --- shared link.md resolution (byte-identical in contract-check / lineage-check / epic-open /
+# --- reconcile-debt-check; the gates are deliberately standalone, so it is duplicated, not sourced) ---
+# Read one frontmatter value from the FIRST --- … --- block only. awk bounds to the first block (stops
+# at the first closing fence), so a body `---` or an absent key can never leak a body line. Plain
+# scalars only; trailing spaces/CR are stripped so they never become part of a path.
+fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r' | sed -E 's/[[:space:]]+$//'; }
 
-# The product checkout `product-repo` points at. ABSOLUTE values are used as-is; a RELATIVE value is
-# joined to the link.md's own directory (specs/<story>/), which is what it is written relative to.
-# Every gate that reads product-repo resolves it this way — a disagreement here silently defers the
-# gate to a vacuous PASS instead of running it (issue #149).
-resolve_product() { case "$1" in /*) printf '%s' "$1" ;; *) printf 'specs/%s/%s' "$2" "$1" ;; esac; }
+# Same, for a link.md field. yad-spec writes link.md WITH frontmatter, but code repos still carry
+# pre-frontmatter ones that contract-check used to read with a whole-file scan — so fall back to that
+# rather than silently reading an empty value and skipping the check it guards. Deliberately separate
+# from fm_val: hub artifacts (epic.md, stories/*.md) stay bounded to their first block.
+link_val() {
+  _v="$(fm_val "$1" "$2")"
+  [ -n "$_v" ] || _v="$(sed -nE "s/^$1:[[:space:]]*(.*)\$/\1/p" "$2" 2>/dev/null | head -1 | tr -d '\r' | sed -E 's/[[:space:]]+$//')"
+  printf '%s' "$_v"
+}
+
+# Resolve link.md's `product-repo` to a path in THIS checkout. An ABSOLUTE value is used as-is. A
+# RELATIVE value is written relative to the link.md's own directory (specs/<story>/) — the canonical
+# form — but contract-check historically read it from the repo root, so a link.md authored against that
+# reading still resolves: prefer the canonical join, fall back to the root-relative one when only it
+# exists. All four gates share this verbatim, so a value one gate can reach is reachable from every
+# gate (issue #149). An unexpanded ~ or $VAR is returned untouched, so it fails the reachability test
+# loudly instead of being joined into a nonsense path.
+resolve_product() {
+  case "$1" in
+    '') return ;;
+    /*|'~'*|'$'*) printf '%s' "$1" ;;
+    *) if [ -d "specs/$2/$1" ] || [ ! -d "$1" ]; then printf 'specs/%s/%s' "$2" "$1"; else printf '%s' "$1"; fi ;;
+  esac
+}
 
 # Thread ROOT of an epic: walk `parent:` to the genesis (no parent). COMPUTED — never trusts the
 # denormalized `thread:` cache, so a missing/wrong cache cannot bypass the freeze. Cycle-safe.
@@ -79,8 +103,8 @@ while IFS= read -r sha; do
   story="$(printf '%s' "$task" | sed -E 's/-T[0-9]+$//')"
   link="specs/${story}/link.md"
   [ -f "$link" ] || continue
-  product_rel="$(fm_val product-repo "$link")"
-  epic="$(fm_val epic "$link")"
+  product_rel="$(link_val product-repo "$link")"
+  epic="$(link_val epic "$link")"
   prod="$(resolve_product "$product_rel" "$story")"
   ep_dir="${prod}/epics/${epic}"
   if [ -z "$product_rel" ] || [ ! -d "$ep_dir" ]; then

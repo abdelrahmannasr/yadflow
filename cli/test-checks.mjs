@@ -260,24 +260,8 @@ test('contract-check gate: Contract-Change with link.md matching the product loc
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('contract-check gate: an ABSOLUTE product-repo resolves (issue #149)', () => {
-  const T = scaffoldRepo();
-  // The hub lives entirely outside the code repo — the form that used to be unreachable for the three
-  // phase-6 gates and is the only one contract-check ever handled.
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-  seedProductLock(hub, 'EP-demo', 'd'.repeat(64), '.');
-  commit(T, 'feat: widen API\n\nContract-Change: yes', {
-    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
-    'specs/EP-demo-S01/link.md': linkMd({
-      story: 'EP-demo-S01', 'product-repo': hub, 'contract-lock': `sha256:${'a'.repeat(64)}`,
-    }),
-  });
-  const r = runGate(CONTRACT, T);
-  assert.equal(r.code, 1, 'an absolute hub path must still be read, not skipped');
-  assert.match(r.out, /still pins/);
-  fs.rmSync(hub, { recursive: true, force: true });
-  fs.rmSync(T, { recursive: true, force: true });
-});
+// (contract-check's product-repo forms are covered by the four-gate matrix below — an absolute path
+// was already the one form it handled, so a bespoke case here pinned nothing.)
 
 test('contract-check gate: unresolvable base fails closed', () => {
   const T = scaffoldRepo();
@@ -320,26 +304,114 @@ const linkedCommit = (T, productRepo, epic = 'EP-demo') => commit(
   },
 );
 
-test('lineage-check gate: an ABSOLUTE product-repo reaches the hub and catches an orphan thread', () => {
+// The invariant is that all four hub-reading gates resolve `product-repo` IDENTICALLY — a value one
+// gate can reach must be reachable from every gate, or the unreachable ones degrade to a
+// PASS-with-note and silently stop gating (issue #149). So this is a matrix, not four bespoke cases:
+// every gate × every path form a link.md in the wild can carry, each fixture rigged so the gate FAILs
+// iff it actually read the hub.
+//
+// `link-relative` is the canonical form yad-spec writes; `root-relative` is what contract-check
+// historically resolved, so link.md files authored against it must keep working; `unfenced` is a
+// pre-frontmatter link.md, which the whole-file `sed` used to read and the frontmatter reader alone
+// would silently see as empty.
+const GATES = [
+  {
+    name: 'lineage-check',
+    script: LINEAGE,
+    seed: (hub) => seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change' } }), // kind:change, no parent
+    expect: /is kind:change but declares no 'parent:'/,
+  },
+  {
+    name: 'epic-open',
+    script: EPIC_OPEN,
+    seed: (hub) => seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } }), // sealed
+    expect: /targets SEALED epic EP-demo/,
+  },
+  {
+    name: 'reconcile-debt',
+    script: DEBT,
+    seed: (hub) => {
+      seedHubEpic(hub, 'EP-root');
+      seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
+      seedHubEpic(hub, 'EP-fix', { fm: { kind: 'hotfix', parent: 'EP-root' }, debt: [{ status: 'open' }] });
+    },
+    expect: /carries OPEN hotfix debt/,
+  },
+  {
+    name: 'contract-check',
+    script: CONTRACT,
+    seed: (hub) => seedProductLock(hub, 'EP-demo', 'b'.repeat(64), '.'),
+    // contract-check needs a surface change + the claim trailer; its link.md also pins a hash.
+    files: {
+      'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    },
+    subject: 'feat: widen API\n\nContract-Change: yes',
+    extraLink: { 'contract-lock': `sha256:${'a'.repeat(64)}` },
+    expect: /still pins/,
+  },
+];
+
+// Where the hub lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
+const FORMS = [
+  { name: 'absolute', hub: (T, out) => out, value: (T, out) => out },
+  { name: 'link-relative', hub: (T) => path.join(T, 'product'), value: () => '../../product' },
+  { name: 'root-relative', hub: (T) => path.join(T, 'product'), value: () => 'product' },
+  { name: 'unfenced link.md', hub: (T) => path.join(T, 'product'), value: () => '../../product', unfenced: true },
+];
+
+for (const g of GATES) {
+  for (const form of FORMS) {
+    test(`${g.name} gate: reaches the hub with a ${form.name} product-repo (issue #149)`, () => {
+      const T = scaffoldRepo();
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+      const hub = form.hub(T, outside);
+      g.seed(hub);
+      const fields = { story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': form.value(T, outside), ...(g.extraLink || {}) };
+      commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+        'src/thing.js': 'x',
+        ...(g.files || {}),
+        // An unfenced link.md is the pre-frontmatter shape still committed in code repos.
+        'specs/EP-demo-S01/link.md': form.unfenced
+          ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n') + '\n'
+          : linkMd(fields),
+      });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `a ${form.name} product-repo must be READ, not deferred to a vacuous PASS:\n${r.out}`);
+      assert.match(r.out, g.expect);
+      fs.rmSync(outside, { recursive: true, force: true });
+      fs.rmSync(T, { recursive: true, force: true });
+    });
+  }
+}
+
+test('contract-check gate: says so when the product lock is not reachable', () => {
   const T = scaffoldRepo();
-  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
-  seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change' } }); // kind:change with no parent = orphan
-  linkedCommit(T, hub);
-  const r = runGate(LINEAGE, T);
-  assert.equal(r.code, 1, 'an absolute hub path must be read, not deferred to a vacuous PASS');
-  assert.match(r.out, /is kind:change but declares no 'parent:'/);
-  fs.rmSync(hub, { recursive: true, force: true });
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  // A skipped fidelity check used to be indistinguishable from a passed one — which is how a
+  // mis-resolved product-repo turned a stale-pin FAIL into a silent PASS.
+  assert.match(r.out, /product lock not reachable at .*nowhere.* — fidelity check deferred/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('lineage-check gate: a RELATIVE product-repo resolves against the link.md dir', () => {
-  const T = scaffoldRepo();
-  seedHubEpic(path.join(T, 'product'), 'EP-demo', { fm: { kind: 'change' } });
-  linkedCommit(T, '../../product');
-  const r = runGate(LINEAGE, T);
-  assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /declares no 'parent:'/);
-  fs.rmSync(T, { recursive: true, force: true });
+test('all four hub-reading gates carry the SAME resolution block, byte for byte', () => {
+  // The gates are standalone by design, so the block is duplicated rather than sourced — and issue
+  // #149 was caused by exactly that duplication drifting. Pin it.
+  const region = (file) => {
+    const src = fs.readFileSync(path.join(CHECKS, file), 'utf8');
+    const start = src.indexOf('# --- shared link.md resolution');
+    const end = src.indexOf('\nresolve_product() {');
+    assert.ok(start >= 0 && end > start, `${file}: shared block not found`);
+    return src.slice(start, src.indexOf('\n}\n', end) + 3);
+  };
+  const canonical = region('contract-check.sh');
+  for (const f of ['lineage-check.sh', 'epic-open.sh', 'reconcile-debt-check.sh']) {
+    assert.equal(region(f), canonical, `${f} drifted from the canonical resolution block`);
+  }
 });
 
 test('epic-open gate: an ABSOLUTE product-repo reaches the hub and refuses a SEALED epic', () => {
