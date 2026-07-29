@@ -79,7 +79,11 @@ if [ -f "$link" ]; then
   pinned="$(printf '%s' "$(link_val contract-lock "$link")" | sed -E 's/^sha256:([0-9a-f]+).*$/\1/')"
   epic="$(printf '%s' "$story" | sed -E 's/-S[0-9]+$//')"   # story EP-<slug>-S0N -> epic EP-<slug>
   prod="$(resolve_product "$product_rel" "$story")"
-  lock="${prod}/epics/${epic}/.sdlc/contract-lock.json"
+  # Only build the lock path when the product repo actually resolved. With an empty `prod` the
+  # interpolation yields "/epics/<epic>/…" — a path rooted at the filesystem root, which is both a
+  # misleading thing to print and, on a machine that happened to have /epics, a foreign file to read.
+  lock=""
+  [ -n "$prod" ] && lock="${prod}/epics/${epic}/.sdlc/contract-lock.json"
   if [ -n "$product_rel" ] && [ -f "$lock" ]; then
     current="$(sed -nE 's/.*"hash":[[:space:]]*"sha256:([0-9a-f]+)".*/\1/p' "$lock" | head -1)"
     if [ -n "$current" ] && [ "$current" != "$pinned" ]; then

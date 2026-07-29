@@ -384,6 +384,21 @@ for (const g of GATES) {
   }
 }
 
+test('contract-check gate: a link.md with no product-repo defers by name, not by a /-rooted path', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01' }), // no product-repo at all
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  // An empty resolution used to interpolate to "/epics/<epic>/…" — a path at the filesystem root,
+  // which both reads as a real location in the note and could match a foreign file on some hosts.
+  assert.match(r.out, /not reachable at <no product-repo in link\.md>/);
+  assert.doesNotMatch(r.out, /at \/epics\//);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('contract-check gate: says so when the product lock is not reachable', () => {
   const T = scaffoldRepo();
   commit(T, 'feat: widen API\n\nContract-Change: yes', {
