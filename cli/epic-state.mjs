@@ -57,11 +57,19 @@ export function upsertHubPr(hubPrs = [], rec) {
   return [...hubPrs.filter((p) => p.artifact !== rec.artifact), rec];
 }
 
-// SHA-256 of the contract surface block (architecture only). Mirrors
-// yad-architecture/references/contract-format.md (awk markers + sha256).
-// Line endings are normalized to LF so the same surface hashes identically across
-// platforms (a CRLF re-save must not revoke approvals). A BEGIN without an END is
-// malformed and yields null — never a silent hash of everything to end-of-file.
+// SHA-256 of the contract surface block (architecture only). Byte-for-byte identical to the recipe
+// yad-architecture/references/contract-format.md publishes — the one the architect runs to write
+// contract-lock.json:
+//
+//   awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' contract.md \
+//     | tr -d '\r' | shasum -a 256
+//
+// Canonicalization, in the order awk applies it: every line strictly between the markers, CRLF
+// normalized to LF (so a CRLF re-save never revokes approvals), joined by LF, and TERMINATED by a
+// trailing LF — awk emits a newline after every line it prints, so that last newline is part of the
+// hashed bytes. Omitting it made the CLI digest and the documented recipe disagree by exactly one
+// byte on every surface, so contract-lock.json could never equal what approvals bind to (issue #156).
+// A BEGIN without an END is malformed and yields null — never a silent hash of everything to EOF.
 export function contractSurfaceHash(epicDir) {
   const file = path.join(epicDir, 'contract.md');
   if (!fs.existsSync(file)) return null;
@@ -75,7 +83,7 @@ export function contractSurfaceHash(epicDir) {
     if (inside) body.push(ln);
   }
   if (!terminated || !body.length) return null;
-  return 'sha256:' + createHash('sha256').update(body.join('\n')).digest('hex');
+  return 'sha256:' + createHash('sha256').update(body.join('\n') + '\n').digest('hex');
 }
 
 // Deterministic fingerprint of the whole stories/ set: hash each story file, sort, combine. Lets an

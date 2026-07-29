@@ -155,8 +155,11 @@ themselves) and write `{project-root}/epics/EP-<slug>/.sdlc/contract-lock.json`:
 ```
 
 Canonicalization (so the hash round-trips): hash the surface region as written between the markers,
-LF line endings, no leading/trailing blank-line normalization beyond what is in the file. Recompute
-the same way later; if it differs, the contract surface changed. The reference command:
+LF line endings, including the newline that terminates the last surface line, and no leading/trailing
+blank-line normalization beyond what is in the file. Recompute the same way later; if it differs, the
+contract surface changed. The command below **is** the definition — `yad` computes the identical
+digest, so `yad doctor` can verify `contract-lock.json` against the live `contract.md` and FAIL when
+the surface drifted from its lock:
 
 ```bash
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \

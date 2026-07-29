@@ -2184,6 +2184,33 @@ test('contractSurfaceHash: CRLF and LF files with the same surface hash identica
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('contractSurfaceHash: equals the documented awk | shasum recipe byte for byte (issue #156)', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-recipe-'));
+  const contract = path.join(T, 'contract.md');
+  fs.writeFileSync(contract, [
+    '# Contract', '',
+    '<!-- CONTRACT-SURFACE:BEGIN -->',
+    'POST /inquiries { subject, body }',
+    'GET  /inquiries?status=<open|closed>',
+    '',
+    'status: open -> assigned -> answered',
+    '<!-- CONTRACT-SURFACE:END -->',
+    '', '## Notes outside the surface', '',
+  ].join('\n'));
+  // The recipe the architect runs to write contract-lock.json (yad-architecture Step 5 /
+  // references/contract-format.md). If the CLI disagrees, the lock can never equal the hash approvals
+  // bind to and the lock file is decorative.
+  // `shasum -a 256` (BSD/macOS) and `sha256sum` (GNU) are the two forms the docs name; use whichever
+  // this host has so the cross-check runs on both CI images.
+  const recipe = execFileSync('bash', ['-c',
+    `awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' "$1" | tr -d '\\r' \
+       | { command -v shasum >/dev/null && shasum -a 256 || sha256sum; } | cut -d' ' -f1`,
+    'bash', contract], { encoding: 'utf8' }).trim();
+  assert.equal(surfHash(T), `sha256:${recipe}`, 'the CLI digest IS the documented recipe');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('contractSurfaceHash: BEGIN without END is malformed — null, never a hash to end-of-file', async () => {
   const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-noend-'));
@@ -4061,6 +4088,70 @@ test('doctor: warns on an open review PR recorded on the default branch (pre-3.0
   writeState('done');
   const r2 = await doctorOn(T);
   assert.ok(!r2.checks.some((x) => x.id === 'epic:EP-mig:migration'), 'a done review does not warn');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a contract surface that drifted from its lock FAILS (issue #156)', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-lock');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-lock', currentStep: 'architecture-review',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review' }],
+  }));
+  const surface = (body) => `<!-- CONTRACT-SURFACE:BEGIN -->\n${body}\n<!-- CONTRACT-SURFACE:END -->\n`;
+  fs.writeFileSync(path.join(ep, 'contract.md'), surface('POST /x'));
+  // Locked against the surface as it stands → clean.
+  fs.writeFileSync(path.join(ep, '.sdlc/contract-lock.json'),
+    JSON.stringify({ artifact: 'contract.md', hash: surfHash(ep), lockedAt: '2026-06-09' }));
+  const clean = await doctorOn(T);
+  assert.ok(clean.checks.some((x) => x.id === 'epic:EP-lock:contract-lock' && x.status === 'ok'), 'a matching lock is ok');
+
+  // Widen the surface without re-locking → the lock no longer describes it.
+  fs.writeFileSync(path.join(ep, 'contract.md'), surface('POST /x\nPOST /y'));
+  const drifted = await doctorOn(T);
+  const hit = drifted.checks.find((x) => x.id === 'epic:EP-lock:contract-lock');
+  assert.equal(hit?.status, 'fail', 'a surface edited without a re-lock must not read as locked');
+  assert.match(hit.message, /drifted from its lock/);
+
+  // A BEGIN with no END: nothing to verify the lock against — also a failure, never a silent pass.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n');
+  const broken = await doctorOn(T);
+  assert.match(broken.checks.find((x) => x.id === 'epic:EP-lock:contract-lock').message, /no readable CONTRACT-SURFACE block/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a pointer-lock is verified against the parent lock it copies, not a contract.md', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const seed = (id) => {
+    fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/state.json'), JSON.stringify({
+      epicId: id, currentStep: 'ready-for-build',
+      steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+    }));
+    return path.join(T, 'epics', id);
+  };
+  const genesis = seed('EP-gen');
+  fs.writeFileSync(path.join(genesis, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  const hash = surfHash(genesis);
+  fs.writeFileSync(path.join(genesis, '.sdlc/contract-lock.json'), JSON.stringify({ artifact: 'contract.md', hash }));
+  // The change-epic inherits architecture: no contract.md of its own, just the parent's hash verbatim.
+  const child = seed('EP-chg');
+  const pointer = (h) => JSON.stringify({
+    artifact: 'contract.md', hash: h, inheritedFrom: 'EP-gen', ref: '../../EP-gen/.sdlc/contract-lock.json',
+  });
+  fs.writeFileSync(path.join(child, '.sdlc/contract-lock.json'), pointer(hash));
+  const clean = await doctorOn(T);
+  assert.equal(clean.checks.find((x) => x.id === 'epic:EP-chg:contract-lock')?.status, 'ok', 'a missing contract.md is normal for a pointer-lock');
+
+  // The parent re-locked; the copy is now stale.
+  fs.writeFileSync(path.join(child, '.sdlc/contract-lock.json'), pointer('sha256:' + 'a'.repeat(64)));
+  const stale = await doctorOn(T);
+  const hit = stale.checks.find((x) => x.id === 'epic:EP-chg:contract-lock');
+  assert.equal(hit?.status, 'fail');
+  assert.match(hit.message, /pointer-lock pins .* but EP-gen now locks/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
