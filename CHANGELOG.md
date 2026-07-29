@@ -1,3 +1,26 @@
+## [3.13.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.13.0...v3.13.1) (2026-07-29)
+
+
+### Bug Fixes
+
+* **checks:** apply the Task-trailer rule to the thread gates too ([18aed8d](https://github.com/abdelrahmannasr/yadflow/commit/18aed8df958718483fe929cea84275ca86ae67be)), closes [#157](https://github.com/abdelrahmannasr/yadflow/issues/157)
+* **checks:** do not build a /-rooted lock path when product-repo is absent ([0d2a214](https://github.com/abdelrahmannasr/yadflow/commit/0d2a214a30c7fc31ad087fa127277b50637a00de))
+* **checks:** keep product-repo resolution backward-compatible and loud ([4c00c92](https://github.com/abdelrahmannasr/yadflow/commit/4c00c928642fbab4517805be14a1c6926f41b84c)), closes [#149](https://github.com/abdelrahmannasr/yadflow/issues/149) [#149](https://github.com/abdelrahmannasr/yadflow/issues/149)
+* **checks:** resolve link.md product-repo the same way in every gate ([47c9b30](https://github.com/abdelrahmannasr/yadflow/commit/47c9b30548153ef5be607cf760c3e9ec9e73699f)), closes [#149](https://github.com/abdelrahmannasr/yadflow/issues/149)
+* **checks:** spec-link resolves a Task trailer even on a maintenance commit ([d24dd83](https://github.com/abdelrahmannasr/yadflow/commit/d24dd83abadc63bb00e8c8d6d7c6008e32344db8)), closes [#157](https://github.com/abdelrahmannasr/yadflow/issues/157)
+* **doctor:** refuse a decorative contract lock, and report a gate that went stale ([1ee3296](https://github.com/abdelrahmannasr/yadflow/commit/1ee3296dbddfdd308949b8013b3bf678f638fc80)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** bound the review-branch probe so it can never hang gate open ([afa5416](https://github.com/abdelrahmannasr/yadflow/commit/afa54167efd5879537c4bc19ab29531fe08ed31b))
+* **gate:** hash the contract surface exactly as the documented recipe does ([f29e781](https://github.com/abdelrahmannasr/yadflow/commit/f29e78183b92c7baf33b46dbdfa7a4776aa06e4e)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** keep the recorded PR entry when --pr names that same PR ([b1febe1](https://github.com/abdelrahmannasr/yadflow/commit/b1febe184278109f0bafc2968648da362d68483a))
+* **gate:** make a merged review PR reachable by hand ([4ccbd17](https://github.com/abdelrahmannasr/yadflow/commit/4ccbd1736640935175d63bac15a01a94e381b44e)), closes [#158](https://github.com/abdelrahmannasr/yadflow/issues/158)
+* **gate:** never drop a done step's approval record on re-sync ([1a5e434](https://github.com/abdelrahmannasr/yadflow/commit/1a5e4348d00edd4e775a735a49fc0a86a3f0e391)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** re-bind approvals recorded before PR provenance existed ([6b7e816](https://github.com/abdelrahmannasr/yadflow/commit/6b7e816638a329d9365c6e727b2c12debdbd24aa)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156) [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** re-sync a re-opened review so its approvals re-bind ([28eabd2](https://github.com/abdelrahmannasr/yadflow/commit/28eabd222214ad2af7d18ef20c56795c9eb171d1)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** require the review branch on origin, and check before writing state ([27f0d92](https://github.com/abdelrahmannasr/yadflow/commit/27f0d92ce680c26df6ea7ff6510879a11f05d00f)), closes [#158](https://github.com/abdelrahmannasr/yadflow/issues/158)
+* **gate:** stop a done-step re-sync from churning the ledger ([68462a6](https://github.com/abdelrahmannasr/yadflow/commit/68462a622753c0d30b458d22d9e1ad890ad8e61f)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+* **gate:** validate --pr and confirm it names this artifact's review ([f5d7773](https://github.com/abdelrahmannasr/yadflow/commit/f5d7773da474784a43cc3e24298da94c8f38bbdb)), closes [#7](https://github.com/abdelrahmannasr/yadflow/issues/7) [#158](https://github.com/abdelrahmannasr/yadflow/issues/158)
+* **hub-bridge:** serialize the GitLab gate-sync job ([4294979](https://github.com/abdelrahmannasr/yadflow/commit/4294979f80cb4491d074fe27e74f9af454a2f62a)), closes [#156](https://github.com/abdelrahmannasr/yadflow/issues/156)
+
 # [3.13.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.12.2...v3.13.0) (2026-07-14)
 
 
