@@ -2158,21 +2158,50 @@ test('gate sync: an OPEN step still drops an approval the platform no longer rep
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gate sync: re-syncing a done step twice is a byte-identical no-op', async () => {
+test('gate sync: re-syncing a done step is a byte-identical no-op, threads and all', async () => {
   const { T, ep } = scaffoldEpic();
+  // A merged review that still carries ONE unresolved thread — the ordinary case, and the one that
+  // churns: `recordComments` allocates a fresh round per call, so an unguarded re-sync appends a
+  // record set (and therefore a default-branch gate commit) on every pass of the 15-minute sweep.
+  const merged1thread = {
+    ...fullApproval,
+    threads: [{ id: 't', resolved: false, login: 'x', body: 'a nit nobody resolved' }],
+  };
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
-  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => fullApproval });
   const snapshot = () => ({
     approvals: fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'),
+    comments: fs.readFileSync(path.join(ep, '.sdlc/comments.json'), 'utf8'),
     hubPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
     reviews: fs.readdirSync(path.join(ep, 'reviews')).sort(),
   });
+  // Baseline BEFORE any re-sync, so a write by the first re-sync cannot be baked into it.
   const before = snapshot();
-  // The scheduled sweep re-visits every recently-merged review; a later day must not churn the ledger.
-  await gateSync(T, { epic: 'EP-test', today: '2026-06-21', reader: () => fullApproval });
+  for (const day of ['2026-06-20', '2026-06-21', '2026-06-22']) {
+    await gateSync(T, { epic: 'EP-test', today: day, reader: () => merged1thread });
+  }
   assert.deepEqual(snapshot(), before, 'a re-sync of an already-done step must write nothing new');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('gate sync: a done step never posts engagement nudges on its merged PR', async () => {
+  const { T } = scaffoldEpic();
+  const posted = [];
+  const poster = (_p, n, body) => { posted.push([n, body]); return { ok: true }; };
+  // The nudge is a PLATFORM write. Re-running it on a closed review would @-mention reviewers on an
+  // already-merged PR every time the sweep comes round. Bare approvals (no engagement marker) are
+  // exactly what triggers it. The step is NOT merged on the first pass, so the nudges land while the
+  // review is genuinely open.
+  const bare = { ...fullApproval, merged: false, reviews: fullApproval.reviews.map(({ login, state }) => ({ login, state })) };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => bare, poster });
+  assert.ok(posted.length > 0, 'an open review does nudge bare approvals');
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => ({ ...bare, merged: true }), poster });
+  const afterMerge = posted.length;
+  // Now the step is done; every later sweep pass must stay silent on the platform.
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => ({ ...bare, merged: true }), poster });
+  assert.equal(posted.length, afterMerge, 'no further platform writes once the step is done');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 
 // Under the bridge the ledger records the PR pointer only at merge, so a review a human must push
 // through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.

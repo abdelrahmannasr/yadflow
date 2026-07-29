@@ -235,7 +235,7 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
   return { targets: entry(found.number, found.url), discovered: true };
 }
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, number = null, local = false, dryRun = false } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
   const { hub, repos } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -291,6 +291,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
+    const approvalsBefore = JSON.stringify(approvals);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone });
 
@@ -304,21 +305,28 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       ...changeRequested.map((r) => ({ login: r.login, changesRequested: true })),
       ...unresolved,
     ];
-    // Advisory (read-only) sync must not touch the working tree — defer the reviews/*.md write. An
-    // already-done step is re-synced for its approvals only: the dated reviews/*.md side files would
-    // otherwise accumulate one new file per day for every historical review the scheduled sweep
-    // re-visits.
-    if (!readOnly && !alreadyDone) writeComments(epicDir, base(pr.artifact), today, blocking);
-    comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
+    // Advisory (read-only) sync must not touch the working tree — defer the reviews/*.md write.
+    //
+    // An already-done step is re-synced for its APPROVALS ONLY. Everything else here is per-round
+    // bookkeeping for a review still in flight, and re-running it on a closed one is pure churn: both
+    // wired sweeps drive `gate ci --branch … --merged` (event mode) over a 7-day window, so a merged
+    // review that still carries one unresolved thread would append a fresh comment round — and a fresh
+    // `chore(gate): advance … [skip ci]` commit on the default branch — every 15 minutes for a week.
+    // That is the same churn the resource_group fix exists to stop, so it must not be reintroduced here.
+    if (!alreadyDone) {
+      if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
+      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
+    }
 
     // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
     // posts a friendly public @-mention inviting the reviewer to run the companion. Idempotent via
-    // pr.nudged; only on the writer path (a platform comment, not a ledger write).
-    if (!readOnly) {
+    // pr.nudged; only on the writer path (a platform comment, not a ledger write) — and never on a
+    // closed step, where it would @-mention reviewers on an already-merged PR.
+    if (!readOnly && !alreadyDone) {
       const nudged = new Set(pr.nudged || []);
       for (const rv of pull.reviews) {
         if (rv.state !== 'APPROVED' || parseEngagement(rv.body) === 'verified' || !rv.login || nudged.has(rv.login)) continue;
-        if (postComment(platform, pr.number, nudgeMessage(rv.login), { cwd: root }).ok) nudged.add(rv.login);
+        if (poster(platform, pr.number, nudgeMessage(rv.login), { cwd: root }).ok) nudged.add(rv.login);
       }
       pr.nudged = [...nudged];
     }
@@ -334,8 +342,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       // next step, and moving it back to in_review would un-ship work already built on it. What this
       // pass DOES do is record the approvals that arrived, so `gate status` tells the truth about how
       // many of them are live against the current artifact.
-      const state_ = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
-      info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${state_}`);
+      const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
+      info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${verdict}`);
       for (const m of pred.missing) hand(`recorded gap: ${m}`);
     } else if (pred.passed) {
       state = advanceState(state, step);
@@ -345,7 +353,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       state = markInReview(state, step);
       for (const m of pred.missing) hand(`still needed: ${m}`);
     }
+    // Stamp when this run actually learned something: an open step every time, and a closed one only
+    // when the approval record genuinely changed (a re-opened review that was re-approved). Otherwise
+    // an identical re-sync would rewrite the date daily and churn the ledger, while a real re-review
+    // would leave no trace of when it was reconciled.
     if (!alreadyDone) { pr.lastSyncedAt = today; open.push(pr); }
+    else if (JSON.stringify(approvals) !== approvalsBefore) pr.lastSyncedAt = today;
     synced++;
   }
 
