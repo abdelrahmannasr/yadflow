@@ -16,7 +16,7 @@ import {
 import { hubGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
-  getPrBody, editPrBody, postComment, findPrForBranch, branchExists,
+  getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
@@ -220,22 +220,43 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
 // (`--pr`), else resolve it from the review branch on the platform. Without this, `gate sync` reported
 // "no open review PR recorded" for a PR sitting merged on the platform and the advance was
 // unreachable by hand (issue #158).
-function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, cwd }) {
+// `--pr` is a recovery flag, so an explicit one WINS over the recorded pointer (a re-opened review is a
+// new PR the ledger has not seen). It is also the one number a human types, so it is checked before it
+// can bind approvals: it must be a positive integer, and — when the platform can be asked — it must be
+// the PR for this artifact's review branch. Without that confirmation a typo'd number naming some
+// unrelated merged-and-approved PR would have its reviewers bound to this artifact's hash and satisfy
+// the gate.
+function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd }) {
   const recorded = hubPrs.filter((p) => !artifact || p.artifact === artifact);
-  if (recorded.length) return { targets: recorded, discovered: false };
+  const named = number == null || number === '' ? null : Number(number);
+  if (named !== null && (!Number.isInteger(named) || named <= 0)) {
+    return { targets: [], discovered: false, reason: `--pr must be a positive integer, got '${number}'` };
+  }
+  if (named === null && recorded.length) return { targets: recorded, discovered: false };
   if (!artifact) return { targets: [], discovered: false, reason: 'name the artifact to resolve its review PR' };
   const step = findReviewStep(state, artifact);
   if (!step) return { targets: [], discovered: false, reason: `no review step for ${artifact}` };
   const branch = `review/${epic}/${base(artifact)}`;
   const entry = (n, url) => [{ step: step.id, artifact, platform, number: n, url, branch, lastSyncedAt: null }];
-  if (number) return { targets: entry(Number(number), null), discovered: true };
+  if (named !== null) {
+    // Confirm the number names THIS artifact's review before its reviewers are bound to this
+    // artifact's hash. A platform that cannot answer (no CLI, no auth, offline) is not evidence
+    // against it — warn and take the human at their word — but a definite mismatch is refused.
+    const head = branchOf(platform, named, { cwd });
+    if (head.ok && head.branch !== branch) {
+      return { targets: [], discovered: false, reason: `#${named} is on '${head.branch}', not this artifact's review branch '${branch}'` };
+    }
+    if (!head.ok) warn(`could not confirm #${named} belongs to ${branch} (${head.reason}) — using it as given`);
+    if (recorded.length && recorded[0].number !== named) info(`--pr #${named} overrides the recorded review PR #${recorded[0].number}`);
+    return { targets: entry(named, null), discovered: true };
+  }
   const found = finder(platform, branch, { cwd });
   if (!found.ok) return { targets: [], discovered: false, reason: found.reason };
-  info(`no recorded review PR — resolved #${found.number} from ${branch}`);
+  info(`no recorded review PR — resolved #${found.number}${found.state ? ` (${found.state})` : ''} from ${branch}`);
   return { targets: entry(found.number, found.url), discovered: true };
 }
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
   const { hub, repos } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -254,7 +275,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
-  const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, cwd: root });
+  const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
   const targets = resolved.targets;
   if (!targets.length) {
     warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);

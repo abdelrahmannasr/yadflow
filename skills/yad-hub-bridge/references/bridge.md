@@ -210,8 +210,16 @@ recorded pointer, `yad gate sync <epic> <artifact>` resolves the PR/MR from the 
 yad gate sync EP-x architecture.md --pr 42   # advisory in bridge mode; the writer without the bridge
 ```
 
-The bridge rule is unchanged — the resolved pointer is adopted into the ledger only on the writer
-path, so a human never leaves a gate-state file in their working tree for `ledger-guard` to reject.
+An explicit `--pr` also **overrides** a recorded pointer, since a re-opened review is a new PR the
+ledger has not seen. Before its reviewers are bound to the artifact's hash, the number is confirmed to
+be the PR for that artifact's review branch — a mismatch is refused, and a platform that cannot answer
+warns and proceeds. The bridge rule is unchanged: the resolved pointer is adopted into the ledger only
+on the writer path, so a human never leaves a gate-state file in their working tree for `ledger-guard`
+to reject.
+
+**In bridge mode `gate sync` stays advisory even with `--pr`** — it prints the predicate and writes
+nothing, because CI owns the ledger. The recovery that actually writes is the command CI itself runs,
+on the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged`.
 
 **Serialization.** Both wired jobs push the ledger to the default branch, and on GitLab the scheduled
 sweep's recent-MR window overlaps whatever the merge-push pipeline is handling — so they are pinned to

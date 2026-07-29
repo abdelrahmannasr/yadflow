@@ -328,6 +328,26 @@ export function findPrForBranch(platform, branch, { cwd } = {}) {
   return { ok: true, number: Number(pr.number), url: pr.url || null };
 }
 
+// The head/source branch of a PR/MR, so a caller can confirm a number a human typed actually belongs
+// to the review it is about to bind approvals to. Returns { ok, branch }; never throws.
+export function prBranch(platform, n, { cwd } = {}) {
+  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  if (platform === 'gitlab') {
+    const r = run('glab', ['api', `projects/:id/merge_requests/${Number(n)}`], { cwd });
+    if (!r.ok) return { ok: false, reason: r.stderr || 'glab api merge_request failed' };
+    try {
+      const mr = JSON.parse(r.stdout);
+      return mr?.source_branch ? { ok: true, branch: mr.source_branch } : { ok: false, reason: `MR !${n} has no source_branch` };
+    } catch { return { ok: false, reason: 'unreadable glab api response' }; }
+  }
+  const r = run('gh', ['pr', 'view', String(n), '--json', 'headRefName'], { cwd });
+  if (!r.ok) return { ok: false, reason: r.stderr || 'gh pr view failed' };
+  try {
+    const pr = JSON.parse(r.stdout);
+    return pr?.headRefName ? { ok: true, branch: pr.headRefName } : { ok: false, reason: `PR #${n} has no headRefName` };
+  } catch { return { ok: false, reason: 'unreadable gh pr view response' }; }
+}
+
 // Does `branch` exist locally, or on origin? `gate open` opens a PR against the review branch but does
 // not create it, so a missing branch otherwise surfaces as an opaque platform error. Returns null when
 // git cannot answer at all (not a checkout / no git) — "unknown" must not read as "missing" and block.

@@ -77,8 +77,9 @@ ${c.bold('Review gate (front half)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
   yad gate sync <epic> [artifact] [--pr <n>]
                                        Pull PR state -> ledger; advance on approved+resolved+merged.
-                                       With no recorded PR, resolves it from the review branch (or
-                                       use --pr to name it)
+                                       With no recorded PR, resolves it from the review branch; --pr
+                                       names one (and overrides a stale recorded pointer). Advisory
+                                       in bridge mode — there, recover with 'yad gate ci' below
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
   yad gate repair <epic> [--push]      Close an author step stranded behind a passed review gate

@@ -2219,13 +2219,82 @@ test('gate sync: resolves an unrecorded review PR from the review branch (issue 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gate sync: --pr names the review PR directly, without a platform lookup', async () => {
+test('gate sync: --pr names the review PR directly, without a branch lookup', async () => {
   const { T, ep } = scaffoldEpic();
   fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
   const finder = () => { throw new Error('must not be called when --pr is given'); };
-  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: '42', reader: () => fullApproval, finder });
+  const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: '42', reader: () => fullApproval, finder, branchOf });
   const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr overrides the recorded pointer (a re-opened review is a new PR)', async () => {
+  const { T, ep } = scaffoldEpic(); // ledger records #7
+  const seen = [];
+  const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
+  await gateSync(T, {
+    epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 11, branchOf,
+    reader: (_p, n) => { seen.push(n); return fullApproval; },
+  });
+  assert.deepEqual(seen, [11], 'the named PR is what gets read, not the stale recorded one');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')))[0].number, 11);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr naming a PR on another branch is refused, not bound to this artifact', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    // A typo lands on some unrelated merged-and-approved PR. Binding its reviewers to this artifact's
+    // hash would satisfy this gate with approvals nobody gave it.
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 999,
+      reader: () => fullApproval, branchOf: () => ({ ok: true, branch: 'feature/unrelated' }),
+    });
+  } finally { console.log = restore; }
+  assert.match(out.join('\n'), /#999 is on 'feature\/unrelated', not this artifact's review branch/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')))
+    .steps.find((s) => s.id === 'architecture-review').status, 'in_review', 'the gate did not advance');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a non-numeric --pr is rejected before it reaches the platform', async () => {
+  const { T } = scaffoldEpic();
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 'abc',
+      reader: () => { throw new Error('must not read the platform with a bad --pr'); },
+      branchOf: () => { throw new Error('must not query the platform with a bad --pr'); },
+    });
+  } finally { console.log = restore; }
+  assert.match(out.join('\n'), /--pr must be a positive integer, got 'abc'/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an unconfirmable --pr warns but is taken at the human\'s word', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    // Offline / unauthenticated / no CLI: "cannot ask" is not evidence the number is wrong.
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 42,
+      reader: () => fullApproval, branchOf: () => ({ ok: false, reason: 'gh not authenticated' }),
+    });
+  } finally { console.log = restore; }
+  assert.match(out.join('\n'), /could not confirm #42 belongs to review\/EP-test\/architecture/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')))
+    .steps.find((s) => s.id === 'architecture-review').status, 'done', 'recovery still works offline');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
