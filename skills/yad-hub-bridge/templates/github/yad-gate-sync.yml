@@ -17,8 +17,10 @@
 #   RECONCILE (schedule, every 15 min): the safety net. The merge job's `closed` event fires once and
 #   never repeats, so a transient API/GraphQL/push failure (or a fail-closed degraded approval read)
 #   would otherwise strand a merged review until someone reran it by hand. This periodic job discovers
-#   recently-merged review PRs from the API and advances any not yet done (idempotent — a step already
-#   `done` is skipped). On GitHub a scheduled workflow runs automatically once committed (no setup).
+#   recently-merged review PRs from the API and advances any not yet done. Idempotent: a step that is
+#   already `done` is never re-advanced (the chain is one-way), and re-syncing it writes nothing unless
+#   its approvals genuinely changed — so re-visiting a merged review for a week costs one no-op read per
+#   pass, not a commit. On GitHub a scheduled workflow runs automatically once committed (no setup).
 #
 # CI never approves and never merges — the merge click is the human approval act.
 #
@@ -73,7 +75,8 @@ jobs:
 
   reconcile:
     # Safety net: recover any merged review PR whose merge-time run failed transiently (the `closed`
-    # event never re-fires). Idempotent — `yad gate ci` skips a step that is already `done`.
+    # event never re-fires). Idempotent — `yad gate ci` never re-advances a step that is already `done`,
+    # and a re-sync of one writes nothing unless its approvals actually changed.
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     concurrency:

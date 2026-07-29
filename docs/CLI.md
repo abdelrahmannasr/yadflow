@@ -23,7 +23,7 @@ no clone needed.
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. |
 | `npx yadflow update --push` | Everything `update` does, **then commits each repo's applied changes and pushes them straight to the default branch** of the hub and every connected repo — one `chore(yad-update): sync SDLC install to yadflow vX.Y.Z` commit per repo, so a version upgrade "just lands" instead of leaving dirty trees to hand-commit across N repos. Stages an **explicit per-repo allowlist** (never `git add -A`); commits **only on each repo's default branch** (a repo on a feature branch is **skipped with a warning**, never disrupted; `--allow-branch` overrides). No PR/MR — so the `pull_request`/`merge_request` gate suite never fires; the push-on-default-branch **`yad-update-guard`** workflow/fragment runs **only** `verified-commits` + `commit-message` over it (deliberately **no** `[skip ci]`). Prints an announce banner first — **announce the team & pause merges until it completes**. Also spelled `check --fix --push`. |
-| `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads. Exit 1 on any failure; `--json` for CI and bug reports. |
+| `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads, **each epic's `contract-lock.json` still matches its surface**, and **no completed review gate is left with only stale approvals**. Exit 1 on any failure; `--json` for CI and bug reports. |
 | `yad report [-m <text>]` | **Self issue reporter.** File a bug in the yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool present+authenticated booleans, the hub platform enum, the error code/hint, a path-scrubbed message, and the failing command + flag *names*. Never posts paths, hostnames, git URLs, repo names, logins, epic IDs, branch names, or flag values. Searches open issues first (dedupe), shows the exact payload, and asks before posting; files via an authenticated `gh`/`glab` or a prefilled `issues/new` URL. Also **offered automatically** after an unexpected failure (interactive only). `YAD_NO_REPORT=1` (or `SDLC_NONINTERACTIVE`) disables it. |
 | `yad roster list` / `yad roster add <login>` | Manage the reviewer roster + per-repo roles **any time** (not just at setup). `add` upserts a member then walks each connected repo asking for their role; `grant`/`revoke <name> <repo> <role>` and `remove <login>` round it out. A `domain-owner` grant keeps `repos.json` `domain_owners` in sync. |
 | `yad usage` | **Team-member usage & behavior report (for an EM/team-lead).** Reconstructs each roster member's audit trail — *authored / commented / approved / shipped*, in order — entirely from data **already in git** (the approval/comment/ship ledgers + git authorship), then renders it as a portable **HTML** report (also `--format json\|md`). Derived and **read-only**: it hooks no commands and writes no tracked state (rebuildable any time, like `yad-status`). Flags: `--out <path>` (default `./usage-report.html`), `--since <YYYY-MM-DD> --until <YYYY-MM-DD>` or `--all`, `--member <name>`, `--repos` (include connected-repo commits). Surfaces factual **workflow-hygiene** flags (e.g. a ship with no recorded engineer review, a dormant roster member) — never a judgmental score. Emits **no emails, commit messages, or comment bodies**. (Attributing git-authored artifacts needs a member's `email` in the roster; ledger events attribute by name regardless.) |
@@ -154,6 +154,24 @@ When something is off, run `yad doctor` first — it checks the environment (git
 version), the project state (`.sdlc/*.json` parse and point at real repos), and every epic ledger,
 with a fix-it hint per finding. Failures carry stable, greppable codes, also printed by any failing
 `yad` command:
+
+### Gate-integrity findings (no code — the message names the epic and step)
+
+Three checks verify that what the ledger *claims* is still true of the files on disk. They carry no
+`YAD-*` code because each is about one epic's contents, not a malformed install:
+
+| Finding | Meaning | Fix |
+|---------|---------|-----|
+| `contract surface drifted from its lock` (**fail**) | `contract.md`'s `CONTRACT-SURFACE` block no longer hashes to what `.sdlc/contract-lock.json` pins — the surface was edited without a re-lock, so the lock proves nothing and every downstream `contract-check` compares against a stale value | re-run the `yad-architecture` Step 5 recipe and re-open the architecture gate |
+| `contract-lock.json exists but carries no usable sha256 hash` (**fail**) | the lock file is present but empty/`null`/malformed. An epic that simply has not locked yet has **no file**, so "present but unusable" is a decorative lock, never a pre-lock state | re-lock the surface, or delete the file |
+| `pointer-lock` findings (**fail**) | a change-epic that inherited architecture copies its parent's hash verbatim; this fires when the parent re-locked (the copy is stale), when the referenced lock is missing, or when `ref` resolves outside `epics/` | re-copy the parent hash, or re-author architecture in this epic (`yad-change`) |
+| `<step> is done, but all N approval(s) are bound to an older <artifact>` (**warn**) | the artifact changed after the gate passed. The chain is one-way by design, so nothing pulls the step back — this is the only place that state is visible | re-open the review (a fresh PR/MR) so the record matches what shipped |
+
+> **Upgrading to the aligned contract hash?** The CLI used to omit the trailing newline the documented
+> `awk … | shasum` recipe includes, so its digest differed from every lock file's. Lock files are now
+> verifiable, but architecture approvals recorded under the old digest go stale once — expect the
+> `…all N approval(s) are bound to an older…` warn on a step that already passed, and a re-approval on
+> one still in review. See `skills/yad-architecture/SKILL.md` Step 5.
 
 | Code | Meaning | Fix |
 |------|---------|-----|
