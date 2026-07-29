@@ -348,17 +348,21 @@ export function prBranch(platform, n, { cwd } = {}) {
   } catch { return { ok: false, reason: 'unreadable gh pr view response' }; }
 }
 
-// Does `branch` exist locally, or on origin? `gate open` opens a PR against the review branch but does
-// not create it, so a missing branch otherwise surfaces as an opaque platform error. Returns null when
-// git cannot answer at all (not a checkout / no git) — "unknown" must not read as "missing" and block.
+// Is `branch` on ORIGIN? `gate open` opens a PR against the review branch but never creates or pushes
+// it — and neither does the platform CLI, since `gh pr create --head <b>` explicitly disables its
+// automatic push. So a branch that exists only locally is just as unusable as one that does not exist
+// at all, and checking locally would wave it through into the opaque platform error this replaces.
+// Returns null when git cannot answer (not a checkout, no origin, network/auth failure) — "unknown"
+// must never read as "missing" and block.
 export function branchExists(cwd, branch) {
   if (!run('git', ['rev-parse', '--git-dir'], { cwd }).ok) return null;
-  if (run('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).ok) return true;
-  const remote = run('git', ['ls-remote', '--exit-code', '--heads', 'origin', branch], { cwd });
+  // GIT_TERMINAL_PROMPT=0: an origin needing credentials must fail fast, not sit on a hidden prompt.
+  const remote = run('git', ['ls-remote', '--exit-code', '--heads', 'origin', branch], {
+    cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  });
   if (remote.ok) return true;
-  // exit 2 is ls-remote's "no matching ref"; anything else (no remote, network/auth failure) is a
-  // question we could not ask, so leave the local answer as the only evidence: not found, but only
-  // definitively so when origin was actually reachable.
+  // exit 2 is ls-remote's own "no matching ref" — the only definite negative. Anything else (no
+  // remote configured, auth, offline) is a question we could not ask.
   return remote.code === 2 ? false : null;
 }
 

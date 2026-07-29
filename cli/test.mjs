@@ -838,6 +838,7 @@ test('templateBody: without a task/summary the Spec + Summary placeholders degra
 // gateOpen head override (P1) + runOpenPr hub-front delegation failure signalling (P2)
 // ---------------------------------------------------------------------------------------------
 const { gateOpen } = await import('./gate.mjs');
+const { branchExists } = await import('./platform.mjs');
 const { runOpenPr } = await import('./openpr.mjs');
 
 // A hub with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
@@ -2318,13 +2319,14 @@ test('gate sync: an unresolvable review PR reports the recovery, not a bare refu
 
 // `gate open` opens a PR against review/<epic>/<artifact>; it never creates or pushes that branch, so
 // a missing one used to surface as an opaque platform error (issue #158).
-test('gate open: refuses a review branch that does not exist, and names how to create it', async () => {
-  const { T } = scaffoldEpic();
+test('gate open: refuses a review branch that is not on origin, and leaves the ledger alone', async () => {
+  const { T, ep } = scaffoldEpic();
   const out = [];
   const restore = console.log;
   console.log = (s = '') => out.push(String(s));
   let created = false;
   const before = process.exitCode;
+  const stateBefore = fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8');
   try {
     await gateOpen(T, {
       epic: 'EP-test', artifact: 'architecture.md',
@@ -2334,9 +2336,43 @@ test('gate open: refuses a review branch that does not exist, and names how to c
   } finally { console.log = restore; process.exitCode = before; }
   assert.equal(created, false, 'no PR is opened against a branch that is not there');
   const text = out.join('\n');
-  assert.match(text, /review branch 'review\/EP-test\/architecture' does not exist/);
+  assert.match(text, /review branch 'review\/EP-test\/architecture' is not on origin/);
   assert.match(text, /yad open-pr/);
+  // The guard runs BEFORE the ledger write — otherwise state.json would claim a review is open that
+  // was never opened.
+  assert.equal(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'), stateBefore, 'no in_review written');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate open: a branch that exists only LOCALLY is still refused', () => {
+  // gh pr create --head does not push, so a local-only branch fails inside the platform CLI — exactly
+  // the opaque error the guard replaces. Pin that branchExists asks origin, not refs/heads.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-branch-'));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.name', 'a');
+  fs.writeFileSync(path.join(T, 'f.txt'), 'x');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'checkout', '-q', '-b', 'review/EP-test/architecture');
+  // A real, reachable origin that simply does not carry the branch.
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+  git(origin, 'init', '-q', '--bare');
+  git(T, 'remote', 'add', 'origin', origin);
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), false, 'local-only is not "on origin"');
+  git(T, 'push', '-q', 'origin', 'review/EP-test/architecture');
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), true, 'pushed → present');
+  assert.equal(branchExists(T, 'review/EP-test/nope'), false, 'a reachable origin gives a definite no');
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(origin, { recursive: true, force: true });
+});
+
+test('gate open: an unreachable origin is "unknown", never a block', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-branch-'));
+  git(T, 'init', '-q');
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), null, 'no origin configured → cannot ask');
+  fs.rmSync(T, { recursive: true, force: true });
+  assert.equal(branchExists(fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-')), 'x'), null, 'not a checkout → cannot ask');
 });
 
 test('gate open: an existing branch opens normally; an explicit head is never re-checked', async () => {

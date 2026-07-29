@@ -229,9 +229,11 @@ lands a duplicate `chore(gate): advance …` commit under a different SHA — un
 those commits carry `[skip ci]` and go straight to the default branch. An already-wired GitLab hub
 picks the `resource_group` up on the next `yad update` / `yad check --fix`.
 
-**`yad gate open` does not create the review branch.** It opens a PR/MR *against* `review/<epic>/<artifact>`,
-so that branch must already exist locally or on origin; `yad open-pr`, run from the branch, pushes it
-and then delegates here. Opening with no branch is refused up front rather than failing inside `gh`/`glab`.
+**`yad gate open` does not create or push the review branch.** It opens a PR/MR *against*
+`review/<epic>/<artifact>`, so that branch must already be **on origin** — a local-only branch is no
+use, because `gh pr create --head` does not push either. `yad open-pr`, run from the branch, pushes it
+and then delegates here. Opening with the branch absent is refused up front, before any ledger write,
+rather than failing inside `gh`/`glab`; an origin that cannot be reached at all only warns.
 
 ### Manual end-to-end verification (GitHub)
 

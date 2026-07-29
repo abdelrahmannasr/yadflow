@@ -707,6 +707,27 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   warnIncompleteDiscovery(epicDir, artifact);
 
   const bridge = isBridge(hub);
+  // The review branch must exist ON ORIGIN: this command opens a PR against it, it never creates or
+  // pushes it, and `gh pr create --head` explicitly does NOT push either — so a branch that is only
+  // local still fails inside the platform CLI, which is the opaque error this guard exists to replace.
+  // `open-pr` pushes the checked-out branch first and passes it as `head`, so that path is unaffected;
+  // only the branch this command COMPUTED is checked. A null answer means git could not be asked (no
+  // checkout, unreachable origin) — not evidence of absence, so it warns rather than blocks.
+  //
+  // Checked BEFORE any state is written: marking the step in_review and then refusing would leave the
+  // ledger claiming a review is open that was never opened.
+  if (!head && hub?.platform) {
+    const present = hasBranch(root, branch);
+    if (present === false) {
+      fail(`review branch '${branch}' is not on origin`);
+      hand(`git push -u origin ${branch}`);
+      hand('or run `yad open-pr` from the branch — it pushes, then opens the review PR');
+      process.exitCode = 1;
+      return;
+    }
+    if (present === null) warn(`could not verify that '${branch}' is on origin — opening the PR against it anyway`);
+  }
+
   // Outside bridge mode (file-only, OR a platform with no gate-sync CI) there is no CI to write the
   // ledger, so the local command marks the step in_review. In bridge mode CI is the sole writer.
   if (!bridge) {
@@ -717,22 +738,6 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     warn('no hub platform — marked in_review file-only (no PR opened)');
     ok(`${step.id} → in_review`);
     return;
-  }
-
-  // The review branch must already exist: this command opens a PR against it, it does not create or
-  // push it. `open-pr` pushes the checked-out branch first and passes it as `head`, so that path is
-  // unaffected — only the branch this command COMPUTED is guarded. A null answer means git could not
-  // be asked (no checkout, unreachable origin); that is not evidence of absence, so it never blocks.
-  if (!head) {
-    const present = hasBranch(root, branch);
-    if (present === false) {
-      fail(`review branch '${branch}' does not exist locally or on origin`);
-      hand(`git checkout -b ${branch}`);
-      hand('then run `yad open-pr` from it — it pushes the branch, then opens the review PR');
-      process.exitCode = 1;
-      return;
-    }
-    if (present === null) warn(`could not verify that '${branch}' exists — opening the PR against it anyway`);
   }
 
   // Open the PR. In bridge mode CI records the hub-prs entry (and advances) on the default branch at
