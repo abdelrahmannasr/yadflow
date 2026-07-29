@@ -182,6 +182,20 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   return kept;
 }
 
+// Mutates in place, returns how many it stamped. Backfill `pr` on this step's bridge approvals that
+// predate approvals recording which PR they arrived on. `prNumber` must be the pointer they were
+// recorded against — callers stamp only at the moment that pointer is about to be replaced, so nothing
+// is invented: it is exactly the PR those approvals came from.
+export function stampLegacyPr(approvals, stepId, prNumber) {
+  let n = 0;
+  for (const a of approvals) {
+    if (a.step !== stepId || a.source !== 'bridge' || a.pr != null) continue;
+    a.pr = prNumber;
+    n++;
+  }
+  return n;
+}
+
 function writeComments(epicDir, base, today, blocking) {
   if (!blocking.length) return;
   const file = path.join(epicDir, 'reviews', `${base}--${today}--comments.md`);
@@ -275,6 +289,14 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
+  // Migration (see stampLegacyPr): an approval written before PR provenance existed carries no `pr`,
+  // so it can never be told apart from one arriving on a replacement PR — and on GitLab, with no
+  // submittedAt either, the other proof is unavailable too. The pointer recorded here IS the PR those
+  // approvals came from, so stamp them before anything replaces it.
+  for (const p of hubPrs) {
+    const s = p.number != null ? findReviewStep(state, p.artifact) : null;
+    if (s) stampLegacyPr(approvals, s.id, p.number);
+  }
   const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
   const targets = resolved.targets;
   if (!targets.length) {
@@ -475,6 +497,16 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // build the entry from the event itself so the advance commit carries it onto the default branch.
     const existing = (ledger.hubPrs || []).find((x) => x.artifact === job.artifact);
     const number = Number(job.pr) || existing?.number || null;
+    // Same migration as gateSync, at the one point CI knows the OLD pointer: stamp the approvals it
+    // recorded before replacing it, or a re-review on the replacement PR can never be told from a
+    // re-read of the old one and stays permanently stale.
+    if (existing?.number != null && number !== existing.number) {
+      const stamped = stampLegacyPr(ledger.approvals, step.id, existing.number);
+      if (stamped) {
+        writeJSON(ledger.files.approvals, ledger.approvals);
+        info(`${job.epic}: recorded PR #${existing.number} on ${stamped} approval(s) that predate PR provenance`);
+      }
+    }
     if (!existing || existing.number !== number || existing.branch !== job.branch) {
       ledger.hubPrs = upsertHubPr(ledger.hubPrs, {
         step: step.id, artifact: job.artifact, platform: hub.platform, number,

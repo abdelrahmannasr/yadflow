@@ -2352,6 +2352,32 @@ test('gate open: an existing branch opens normally; an explicit head is never re
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate sync: an approval predating PR provenance is stamped, then re-binds (issue #156)', async () => {
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  // Rewrite the ledger into the pre-upgrade shape: no `pr`, and (like GitLab) no `approvedAt` either,
+  // so NEITHER proof of a newer review is available. This is what is on disk in the hubs issue #156
+  // was filed from. The pointer still names the PR they were recorded against (#7).
+  const legacy = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')))
+    .map((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== 'pr' && k !== 'approvedAt')));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(legacy));
+  assert.ok(legacy.every((a) => a.pr === undefined), 'fixture really is legacy-shaped');
+
+  // Re-lock the surface, then a fresh MR approved by the same people, merged.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+  const { artifactHash } = await import('./epic-state.mjs');
+  const newHash = artifactHash(ep, 'architecture.md');
+  const noTimestamps = fullApproval.reviews.map(({ login, state }) => ({ login, state }));
+  await gateSync(T, {
+    epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-20', number: 11,
+    reader: () => ({ ...fullApproval, reviews: noTimestamps }),
+  });
+
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.ok(after.some((a) => a.artifactHash === newHash), `a legacy ledger must re-bind on a replacement MR, got ${JSON.stringify(after)}`);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: a re-sync after advance does not clobber the next step', async () => {
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
