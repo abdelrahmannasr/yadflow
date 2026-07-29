@@ -127,7 +127,7 @@ const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === 
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
 // reviewer first approved against unless their review is newer (a genuine re-approval) — that is what
 // makes "revoke only when the artifact changed" work.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today }) {
+function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null }) {
   const keyOf = (name, role, domain) => `${stepId}|${name}|${role}|${domain || ''}`;
   const prior = new Map(
     approvals.filter((a) => a.step === stepId && a.source === 'bridge')
@@ -138,21 +138,32 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today }) {
     const was = prior.get(keyOf(r.name, r.role, r.domain));
     let artHash = curHash;            // first time we see this approval => bind to current content
     let approvedAt = r.submittedAt || today;
+    let recordedOn = today;
     if (was) {
-      // We only adopt the new hash when the platform PROVES a genuinely newer review (a later
-      // submittedAt). Otherwise — same review, or a platform that gives no timestamp (GitLab) — we
-      // KEEP the hash they originally approved, so a later artifact change still revokes the approval.
-      const genuinelyNewer = r.submittedAt && was.approvedAt && r.submittedAt > was.approvedAt;
-      if (!genuinelyNewer) {
+      // We only adopt the new hash when the platform PROVES a genuinely newer review. Otherwise —
+      // the same review read again — we KEEP the hash they originally approved, so a later artifact
+      // change still revokes the approval. Two independent proofs, because one platform lacks each:
+      //   - a later submittedAt (GitHub; GitLab approvals carry no timestamp at all), or
+      //   - a DIFFERENT PR/MR than the one this approval was recorded against. A re-opened review is
+      //     always a new PR, so an approval arriving on it cannot be the old one read again. Without
+      //     this, a GitLab re-review after a re-lock re-recorded the pre-edit hash and stayed
+      //     permanently stale — the step read `done` with zero live approvals (issue #156).
+      const newerReview = r.submittedAt && was.approvedAt && r.submittedAt > was.approvedAt;
+      const newerPr = prNumber != null && was.pr != null && was.pr !== prNumber;
+      if (!newerReview && !newerPr) {
         artHash = was.artifactHash ?? curHash;
         approvedAt = was.approvedAt ?? approvedAt;
+        // Same review, re-read: keep the date it was RECORDED too, so re-syncing an unchanged
+        // approval is a byte-identical no-op instead of a daily one-line ledger commit.
+        recordedOn = was.date ?? recordedOn;
       }
     }
     kept.push({
       artifact, step: stepId, approver: r.name, role: r.role,
       ...(r.domain ? { domain: r.domain } : {}),
-      status: 'approved', date: today, source: 'bridge',
+      status: 'approved', date: recordedOn, source: 'bridge',
       artifactHash: artHash, approvedAt,
+      ...(prNumber != null ? { pr: prNumber } : {}),
       engagement: r.engagement === 'verified' ? 'verified' : 'none',
       ...(r.unverified ? { unverified: true } : {}),
     });
@@ -216,12 +227,20 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
 
   let synced = 0;
   let advanced = 0;
+  // Targets whose step is still open. The dated approval-roster file is regenerated only for these —
+  // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
+  // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
+  const open = [];
   for (const pr of targets) {
     const step = findReviewStep(state, pr.artifact);
     if (!step) { warn(`no review step for ${pr.artifact}`); continue; }
-    // Already advanced: a re-sync must not re-run advance (it would reset the next step's status /
-    // currentStep backward). The gate is one-way per step.
-    if (step.status === 'done') { info(`${pr.artifact}: ${step.id} already done — skipping`); continue; }
+    // A step that already advanced is never advanced AGAIN (that would reset the next step's status /
+    // currentStep backward) — the gate is one-way per step. But it is still SYNCED: in bridge mode
+    // nothing ever moves a step back to in_review (CI is the sole ledger writer), so a re-opened
+    // review — surface re-locked, fresh PR, fresh approvals, merged — used to hit a blanket skip here
+    // and write nothing but the PR pointer. The step then read `done` while its approvals were all
+    // stale: work proceeded on an audit trail saying the re-review never happened (issue #156).
+    const alreadyDone = step.status === 'done';
     const domains = touchedDomains(epicDir, step);
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
@@ -232,7 +251,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
@@ -244,8 +263,11 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
       ...changeRequested.map((r) => ({ login: r.login, changesRequested: true })),
       ...unresolved,
     ];
-    // Advisory (read-only) sync must not touch the working tree — defer the reviews/*.md write.
-    if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
+    // Advisory (read-only) sync must not touch the working tree — defer the reviews/*.md write. An
+    // already-done step is re-synced for its approvals only: the dated reviews/*.md side files would
+    // otherwise accumulate one new file per day for every historical review the scheduled sweep
+    // re-visits.
+    if (!readOnly && !alreadyDone) writeComments(epicDir, base(pr.artifact), today, blocking);
     comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
 
     // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
@@ -266,7 +288,15 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     });
 
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule})`)}`);
-    if (pred.passed) {
+    if (alreadyDone) {
+      // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
+      // next step, and moving it back to in_review would un-ship work already built on it. What this
+      // pass DOES do is record the approvals that arrived, so `gate status` tells the truth about how
+      // many of them are live against the current artifact.
+      const state_ = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
+      info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${state_}`);
+      for (const m of pred.missing) hand(`recorded gap: ${m}`);
+    } else if (pred.passed) {
       state = advanceState(state, step);
       advanced++;
       ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);
@@ -274,7 +304,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
       state = markInReview(state, step);
       for (const m of pred.missing) hand(`still needed: ${m}`);
     }
-    pr.lastSyncedAt = today;
+    if (!alreadyDone) { pr.lastSyncedAt = today; open.push(pr); }
     synced++;
   }
 
@@ -286,7 +316,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   writeJSON(ledger.files.comments, comments);
   writeJSON(ledger.files.hubPrs, hubPrs);
   writeJSON(ledger.files.state, state);
-  refreshRoster(epicDir, targets, approvals, today);
+  refreshRoster(epicDir, open, approvals, today);
   return { synced, advanced };
 }
 

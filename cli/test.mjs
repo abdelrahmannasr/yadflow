@@ -2080,6 +2080,73 @@ test('gate sync advisory (bridge, local): unresolved comments do not dirty revie
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// The re-open loop (issue #156): an already-approved architecture step is re-opened, the contract
+// surface is edited + re-locked, a FRESH review PR is opened, the same reviewers approve it, and it is
+// merged. In bridge mode nothing ever moves the step back to `in_review` (CI is the sole ledger
+// writer), so the merge-time sync used to hit a blanket "already done — skipping" and write only the
+// PR pointer: the step read `done` with every approval bound to the pre-edit hash.
+async function reopenAndReapprove(reviews) {
+  const { T, ep } = scaffoldEpic();
+  const first = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', reviews, threads: [] };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => first });
+  const state0 = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state0.steps.find((s) => s.id === 'architecture-review').status, 'done', 'first review advanced');
+
+  // Widen the surface + re-lock: every prior approval is now bound to a stale hash.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+  const stale = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  const { artifactHash } = await import('./epic-state.mjs');
+  const newHash = artifactHash(ep, 'architecture.md');
+  assert.ok(stale.every((a) => a.artifactHash !== newHash), 'the re-lock revoked the prior approvals');
+
+  // A NEW review MR/PR for the re-opened step, approved by the same reviewers, merged.
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 11, url: 'http://x/11', branch: 'review/EP-test/architecture', lastSyncedAt: null },
+  ]));
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => first });
+  return { T, ep, newHash };
+}
+
+test('gate sync: a re-opened, re-approved review re-binds its approvals (issue #156)', async () => {
+  const { T, ep, newHash } = await reopenAndReapprove(fullApproval.reviews);
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  const live = after.filter((a) => a.status === 'approved' && a.artifactHash === newHash);
+  assert.ok(live.length >= 3, `the new approvals must bind to the re-locked surface, got ${JSON.stringify(after)}`);
+  // The chain is NOT re-advanced: the step stays done and the next step keeps its own progress.
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  assert.equal(state.currentStep, 'ui-design');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a re-approval on a new PR re-binds even without review timestamps (GitLab)', async () => {
+  // GitLab approvals carry no submittedAt at all, so "is this a newer review?" cannot be answered by
+  // time. A different PR/MR number is the proof: a re-opened review is always a new MR.
+  const noTimestamps = fullApproval.reviews.map(({ login, state }) => ({ login, state }));
+  const { T, ep, newHash } = await reopenAndReapprove(noTimestamps);
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  const live = after.filter((a) => a.status === 'approved' && a.artifactHash === newHash);
+  assert.ok(live.length >= 3, `a timestampless re-approval on MR #11 must re-bind, got ${JSON.stringify(after)}`);
+  assert.ok(after.every((a) => a.pr === 11), 'each approval records the PR/MR it arrived on');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: re-syncing a done step twice is a byte-identical no-op', async () => {
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => fullApproval });
+  const snapshot = () => ({
+    approvals: fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'),
+    hubPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
+    reviews: fs.readdirSync(path.join(ep, 'reviews')).sort(),
+  });
+  const before = snapshot();
+  // The scheduled sweep re-visits every recently-merged review; a later day must not churn the ledger.
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-21', reader: () => fullApproval });
+  assert.deepEqual(snapshot(), before, 'a re-sync of an already-done step must write nothing new');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: a re-sync after advance does not clobber the next step', async () => {
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });

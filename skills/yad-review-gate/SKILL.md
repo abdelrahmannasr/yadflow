@@ -179,6 +179,13 @@ Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rul
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and
 unblocks the next step. (Until those three hold, the step stays `in_review`.)
 
+**Re-reviewing a step that already advanced.** A step is advanced **once** — the chain is never pulled
+backward. But a step that is `done` is still *synced*: when the artifact is edited (for architecture, a
+re-locked contract surface) its prior approvals go stale, and the approvals arriving on the new review
+PR/MR are recorded and bound to the new content. `yad gate status` then shows the truth — how many
+approvals are live against what is in the file today, and how many were revoked — instead of a `done`
+step whose approvals all belong to the version before the edit.
+
 The flow is **merge-driven** (wired by `yad-hub-bridge` `wire`): during review CI writes nothing — the
 platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review
 branch (so an in-flight approval is never dismissed and required checks never strand). On the human
