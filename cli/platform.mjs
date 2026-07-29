@@ -298,6 +298,50 @@ export function readPr(platform, n, opts = {}) {
   return platform === 'gitlab' ? readPrGitLab(n, opts) : readPrGitHub(n, opts);
 }
 
+// ---- find the PR/MR for a branch ----------------------------------------------------------------
+// The review PR/MR opened for `review/EP-<slug>/<artifact>`, by HEAD/source branch. Under the bridge
+// the ledger records that pointer only at merge (CI is the sole writer), so without this a human has
+// no way to name the review a merged PR belongs to — `gate sync` would just report "no open review PR
+// recorded" for a PR that is sitting merged on the platform (issue #158).
+//
+// State is deliberately UNfiltered: the interesting case is a MERGED PR that never advanced. Newest
+// first, so a re-opened review resolves to its current PR and not a superseded one. Returns
+// { ok, number, url } — never throws; `ok:false` carries the reason.
+export function findPrForBranch(platform, branch, { cwd } = {}) {
+  if (!branch) return { ok: false, reason: 'no branch given' };
+  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  if (platform === 'gitlab') {
+    const r = run('glab', ['api', `projects/:id/merge_requests?source_branch=${encodeURIComponent(branch)}&order_by=updated_at&sort=desc&per_page=1`], { cwd });
+    if (!r.ok) return { ok: false, reason: r.stderr || 'glab api merge_requests failed' };
+    let rows;
+    try { rows = JSON.parse(r.stdout); } catch { return { ok: false, reason: 'unreadable glab api response' }; }
+    const mr = Array.isArray(rows) ? rows[0] : null;
+    if (!mr?.iid) return { ok: false, reason: `no merge request found for source branch ${branch}` };
+    return { ok: true, number: Number(mr.iid), url: mr.web_url || null };
+  }
+  const r = run('gh', ['pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,url'], { cwd });
+  if (!r.ok) return { ok: false, reason: r.stderr || 'gh pr list failed' };
+  let rows;
+  try { rows = JSON.parse(r.stdout); } catch { return { ok: false, reason: 'unreadable gh pr list response' }; }
+  const pr = Array.isArray(rows) ? rows[0] : null;
+  if (!pr?.number) return { ok: false, reason: `no pull request found for head branch ${branch}` };
+  return { ok: true, number: Number(pr.number), url: pr.url || null };
+}
+
+// Does `branch` exist locally, or on origin? `gate open` opens a PR against the review branch but does
+// not create it, so a missing branch otherwise surfaces as an opaque platform error. Returns null when
+// git cannot answer at all (not a checkout / no git) — "unknown" must not read as "missing" and block.
+export function branchExists(cwd, branch) {
+  if (!run('git', ['rev-parse', '--git-dir'], { cwd }).ok) return null;
+  if (run('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd }).ok) return true;
+  const remote = run('git', ['ls-remote', '--exit-code', '--heads', 'origin', branch], { cwd });
+  if (remote.ok) return true;
+  // exit 2 is ls-remote's "no matching ref"; anything else (no remote, network/auth failure) is a
+  // question we could not ask, so leave the local answer as the only evidence: not found, but only
+  // definitively so when origin was actually reachable.
+  return remote.code === 2 ? false : null;
+}
+
 // ---- create a PR/MR -----------------------------------------------------------------------------
 // `assignees` = the committer/PR-opener (always set, so the PR is owned by whoever pushed it);
 // `reviewers` = the scope's reviewers + domain-owners (computed by reviewersForScopes). On GitHub an

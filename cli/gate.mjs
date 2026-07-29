@@ -16,7 +16,7 @@ import {
 import { hubGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
-  getPrBody, editPrBody, postComment,
+  getPrBody, editPrBody, postComment, findPrForBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
@@ -203,7 +203,28 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
 
 // ---- actions ------------------------------------------------------------------------------------
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, local = false, dryRun = false } = {}) {
+// The review PR/MR(s) to sync. Normally the ledger's own pointer — but under the bridge the ledger
+// records that pointer only at merge (CI is the sole writer), so a review a human needs to push
+// through by hand has NO recorded pointer at all. Fall back to the PR number the caller named
+// (`--pr`), else resolve it from the review branch on the platform. Without this, `gate sync` reported
+// "no open review PR recorded" for a PR sitting merged on the platform and the advance was
+// unreachable by hand (issue #158).
+function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, cwd }) {
+  const recorded = hubPrs.filter((p) => !artifact || p.artifact === artifact);
+  if (recorded.length) return { targets: recorded, discovered: false };
+  if (!artifact) return { targets: [], discovered: false, reason: 'name the artifact to resolve its review PR' };
+  const step = findReviewStep(state, artifact);
+  if (!step) return { targets: [], discovered: false, reason: `no review step for ${artifact}` };
+  const branch = `review/${epic}/${base(artifact)}`;
+  const entry = (n, url) => [{ step: step.id, artifact, platform, number: n, url, branch, lastSyncedAt: null }];
+  if (number) return { targets: entry(Number(number), null), discovered: true };
+  const found = finder(platform, branch, { cwd });
+  if (!found.ok) return { targets: [], discovered: false, reason: found.reason };
+  info(`no recorded review PR — resolved #${found.number} from ${branch}`);
+  return { targets: entry(found.number, found.url), discovered: true };
+}
+
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, number = null, local = false, dryRun = false } = {}) {
   const { hub, repos } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -222,8 +243,17 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
-  const targets = hubPrs.filter((p) => !artifact || p.artifact === artifact);
-  if (!targets.length) { warn(`no open review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''} (run \`yad gate open\` first)`); return { synced: 0 }; }
+  const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, cwd: root });
+  const targets = resolved.targets;
+  if (!targets.length) {
+    warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);
+    hand(`run \`yad gate open ${epic} ${artifact || '<artifact>'}\`, or name the PR: \`yad gate sync ${epic} ${artifact || '<artifact>'} --pr <n>\``);
+    return { synced: 0 };
+  }
+  // A pointer resolved from the platform is adopted into the ledger on the WRITER path only. In
+  // bridge mode this run is advisory and writes nothing, so the human never ends up with a gate-state
+  // file in their working tree for the ledger-guard check to reject.
+  if (resolved.discovered && !readOnly) hubPrs = upsertHubPr(hubPrs, targets[0]);
 
   let synced = 0;
   let advanced = 0;
@@ -585,7 +615,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 // the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
-export async function gateOpen(root, { epic, artifact, head, creator = createPr } = {}) {
+export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists } = {}) {
   const { hub, repos } = loadHub(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -610,6 +640,22 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr 
     warn('no hub platform — marked in_review file-only (no PR opened)');
     ok(`${step.id} → in_review`);
     return;
+  }
+
+  // The review branch must already exist: this command opens a PR against it, it does not create or
+  // push it. `open-pr` pushes the checked-out branch first and passes it as `head`, so that path is
+  // unaffected — only the branch this command COMPUTED is guarded. A null answer means git could not
+  // be asked (no checkout, unreachable origin); that is not evidence of absence, so it never blocks.
+  if (!head) {
+    const present = hasBranch(root, branch);
+    if (present === false) {
+      fail(`review branch '${branch}' does not exist locally or on origin`);
+      hand(`git checkout -b ${branch}`);
+      hand('then run `yad open-pr` from it — it pushes the branch, then opens the review PR');
+      process.exitCode = 1;
+      return;
+    }
+    if (present === null) warn(`could not verify that '${branch}' exists — opening the PR against it anyway`);
   }
 
   // Open the PR. In bridge mode CI records the hub-prs entry (and advances) on the default branch at

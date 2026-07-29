@@ -170,7 +170,9 @@ If the predicate **passes**:
 
 ### PR-driven automation (the `yad gate` CLI)
 When the hub has a platform, **CI is the sole writer of the ledger**. `yad gate open` opens the review
-PR only; CI (`yad gate ci`) writes the `.sdlc/` + `reviews/` records this skill describes. The skill's
+PR only — against the `review/<epic>/<artifact>` branch, which must already exist (create it and run
+`yad open-pr` from it, which pushes it first). CI (`yad gate ci`) writes the `.sdlc/` + `reviews/`
+records this skill describes. The skill's
 job is the human half: presenting the artifact, helping the owner address comments, and narrating the
 gate. Local `yad gate sync` is advisory in bridge mode (reads the platform, prints status, writes
 nothing); a human must never commit gate-state files (the `ledger-guard` check rejects it).

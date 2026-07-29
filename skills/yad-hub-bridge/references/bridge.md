@@ -201,6 +201,22 @@ the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (th
 unlike advisory `yad gate sync`). File-only mode (no platform) keeps `yad gate sync` as the local writer.
 The file ledger is still the source of truth.
 
+Because CI records the `hub-prs.json` pointer only at merge, a review the ledger has never seen still
+has to be nameable — otherwise `sync` refuses a PR that is sitting merged on the platform. With no
+recorded pointer, `yad gate sync <epic> <artifact>` resolves the PR/MR from the review branch
+(`review/<epic>/<artifact>`) itself, and `--pr <n>` names it outright:
+
+```bash
+yad gate sync EP-x architecture.md --pr 42   # advisory in bridge mode; the writer without the bridge
+```
+
+The bridge rule is unchanged — the resolved pointer is adopted into the ledger only on the writer
+path, so a human never leaves a gate-state file in their working tree for `ledger-guard` to reject.
+
+**`yad gate open` does not create the review branch.** It opens a PR/MR *against* `review/<epic>/<artifact>`,
+so that branch must already exist locally or on origin; `yad open-pr`, run from the branch, pushes it
+and then delegates here. Opening with no branch is refused up front rather than failing inside `gh`/`glab`.
+
 ### Manual end-to-end verification (GitHub)
 
 1. On a scratch hub: `yad setup` (platform github, roster with a second account) → `yad check --fix`

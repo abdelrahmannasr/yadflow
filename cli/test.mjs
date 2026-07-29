@@ -2147,6 +2147,86 @@ test('gate sync: re-syncing a done step twice is a byte-identical no-op', async 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// Under the bridge the ledger records the PR pointer only at merge, so a review a human must push
+// through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.
+test('gate sync: resolves an unrecorded review PR from the review branch (issue #158)', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the bridge case
+  const seen = [];
+  const finder = (platform, branch) => { seen.push([platform, branch]); return { ok: true, number: 42, url: 'http://x/42' }; };
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => fullApproval, finder });
+  assert.deepEqual(seen, [['github', 'review/EP-test/architecture']], 'looked the PR up by its review branch');
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done', 'the merged review advances');
+  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  assert.equal(hubPrs[0].number, 42, 'the resolved pointer is adopted on the writer path');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr names the review PR directly, without a platform lookup', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const finder = () => { throw new Error('must not be called when --pr is given'); };
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: '42', reader: () => fullApproval, finder });
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an unresolvable review PR reports the recovery, not a bare refusal', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09',
+      reader: () => fullApproval, finder: () => ({ ok: false, reason: 'no pull request found for head branch review/EP-test/architecture' }),
+    });
+  } finally { console.log = restore; }
+  const text = out.join('\n');
+  assert.match(text, /no pull request found for head branch/);
+  assert.match(text, /--pr <n>/, 'names the flag that recovers it by hand');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// `gate open` opens a PR against review/<epic>/<artifact>; it never creates or pushes that branch, so
+// a missing one used to surface as an opaque platform error (issue #158).
+test('gate open: refuses a review branch that does not exist, and names how to create it', async () => {
+  const { T } = scaffoldEpic();
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  let created = false;
+  const before = process.exitCode;
+  try {
+    await gateOpen(T, {
+      epic: 'EP-test', artifact: 'architecture.md',
+      creator: () => { created = true; return { ok: true, url: 'http://x/1' }; },
+      hasBranch: () => false,
+    });
+  } finally { console.log = restore; process.exitCode = before; }
+  assert.equal(created, false, 'no PR is opened against a branch that is not there');
+  const text = out.join('\n');
+  assert.match(text, /review branch 'review\/EP-test\/architecture' does not exist/);
+  assert.match(text, /yad open-pr/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate open: an existing branch opens normally; an explicit head is never re-checked', async () => {
+  const { T } = scaffoldEpic();
+  let checks = 0;
+  const hasBranch = () => { checks++; return true; };
+  const creator = () => ({ ok: true, url: 'http://x/5' });
+  assert.equal((await gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', creator, hasBranch }))?.url, 'http://x/5');
+  assert.equal(checks, 1);
+  // open-pr pushes the branch itself and passes it as `head` — that path must not be second-guessed.
+  await gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', head: 'review/EP-test/architecture-v2', creator, hasBranch });
+  assert.equal(checks, 1, 'an explicit head is taken as given');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: a re-sync after advance does not clobber the next step', async () => {
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
