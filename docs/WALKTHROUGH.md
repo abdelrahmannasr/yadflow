@@ -232,7 +232,7 @@ ls  epics/EP-istifta-inquiries/reviews/
 ls  epics/EP-istifta-inquiries/stories/
 # re-verify the contract surface still matches its lock:
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-istifta-inquiries/contract.md | shasum -a 256
+  epics/EP-istifta-inquiries/contract.md | tr -d '\r' | shasum -a 256
 ```
 
 ## Run the full build half by hand (Phase 3)

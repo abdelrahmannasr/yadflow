@@ -163,10 +163,19 @@ the surface drifted from its lock:
 
 ```bash
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-<slug>/contract.md | shasum -a 256
+  epics/EP-<slug>/contract.md | tr -d '\r' | shasum -a 256
 ```
 
 (See `references/contract-format.md` for the altitude rule and the exact hashing recipe.)
+
+> **Upgrading from a yadflow before this recipe and the CLI agreed.** The CLI used to omit the final
+> newline, so the digest it bound approvals to differed from the one the recipe above wrote into
+> `contract-lock.json` — always, on every surface. Lock files are unaffected (they were written by the
+> recipe and are now verifiable), but **architecture approvals recorded under the old CLI are bound to
+> the old digest and go stale once**. An in-flight `architecture-review` therefore needs re-approval
+> after the upgrade; a step already `done` stays done and is reported by `yad doctor` (see the
+> `…:stale` check) rather than silently re-opened. Nothing else re-binds on its own — that is the point
+> of hash-binding.
 
 ### Step 6 — Advance the authoring step (NOT the gate)
 In `state.json`: set `architecture.status: "done"`, set `architecture-review.status: "in_review"`, and

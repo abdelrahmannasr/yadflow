@@ -103,7 +103,7 @@ matches the lock, run from the **product** repo:
 
 ```bash
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-<slug>/contract.md | shasum -a 256
+  epics/EP-<slug>/contract.md | tr -d '\r' | shasum -a 256
 # compare against epics/EP-<slug>/.sdlc/contract-lock.json
 ```
 

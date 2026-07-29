@@ -35,7 +35,7 @@ export function ContractLockSection() {
         </ul>
         <div className="mt-3">
           <code className="block text-[11px] text-slate-300 code-block">
-            {"awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' contract.md | shasum -a 256"}
+            {"awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' contract.md | tr -d '\\r' | shasum -a 256"}
           </code>
         </div>
       </div>

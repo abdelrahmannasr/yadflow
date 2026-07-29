@@ -2537,9 +2537,11 @@ test('contractSurfaceHash: equals the documented awk | shasum recipe byte for by
   // bind to and the lock file is decorative.
   // `shasum -a 256` (BSD/macOS) and `sha256sum` (GNU) are the two forms the docs name; use whichever
   // this host has so the cross-check runs on both CI images.
+  // An explicit if/else, not `cmd && a || b`: with the short-circuit form a present-but-failing shasum
+  // would silently fall through to sha256sum and quietly change what is being compared.
   const recipe = execFileSync('bash', ['-c',
     `awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' "$1" | tr -d '\\r' \
-       | { command -v shasum >/dev/null && shasum -a 256 || sha256sum; } | cut -d' ' -f1`,
+       | if command -v shasum >/dev/null; then shasum -a 256; else sha256sum; fi | cut -d' ' -f1`,
     'bash', contract], { encoding: 'utf8' }).trim();
   assert.equal(surfHash(T), `sha256:${recipe}`, 'the CLI digest IS the documented recipe');
   fs.rmSync(T, { recursive: true, force: true });
