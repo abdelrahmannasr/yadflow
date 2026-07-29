@@ -2244,6 +2244,28 @@ test('gate sync: --pr overrides the recorded pointer (a re-opened review is a ne
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate sync: --pr naming the recorded PR keeps its url and nudge history', async () => {
+  const { T, ep } = scaffoldEpic(); // ledger records #7
+  const posted = [];
+  const poster = (_p, n, body) => { posted.push([n, body]); return { ok: true }; };
+  const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
+  const bare = { ...fullApproval, merged: false, reviews: fullApproval.reviews.map(({ login, state }) => ({ login, state })) };
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => bare, poster });
+  const first = posted.length;
+  assert.ok(first > 0, 'bare approvals are nudged once');
+  const recorded = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')))[0];
+  assert.ok(recorded.nudged?.length, 'the nudge idempotency set was recorded');
+
+  // Naming the SAME PR must not rebuild the entry from scratch: `nudged` is what stops the bot
+  // @-mentioning every bare approver again, and it is a platform write, not just a ledger one.
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-10', number: 7, reader: () => bare, poster, branchOf });
+  assert.equal(posted.length, first, 'no reviewer is nudged twice for the same approval');
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')))[0];
+  assert.deepEqual(after.nudged?.sort(), recorded.nudged.sort(), 'nudge history survives --pr');
+  assert.equal(after.url, recorded.url, 'the recorded url is not churned to null');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: --pr naming a PR on another branch is refused, not bound to this artifact', async () => {
   const { T, ep } = scaffoldEpic();
   fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');

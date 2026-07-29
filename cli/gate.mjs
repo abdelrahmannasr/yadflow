@@ -251,7 +251,15 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
   const step = findReviewStep(state, artifact);
   if (!step) return { targets: [], discovered: false, reason: `no review step for ${artifact}` };
   const branch = `review/${epic}/${base(artifact)}`;
-  const entry = (n, url) => [{ step: step.id, artifact, platform, number: n, url, branch, lastSyncedAt: null }];
+  // `upsertHubPr` replaces the whole entry for an artifact, so a record built from scratch DROPS
+  // whatever the recorded one carried. That matters when `--pr` names the PR already on file: `nudged`
+  // is the idempotency set for the engagement nudge, so losing it makes the next writer run
+  // re-@-mention every bare approver on the PR — a platform write, not just a ledger one — and `url`
+  // would churn to null. Carry the recorded entry forward whenever the number is the same one.
+  const entry = (n, url) => {
+    const prev = recorded.find((p) => p.number === n) || {};
+    return [{ ...prev, step: step.id, artifact, platform, number: n, url: url ?? prev.url ?? null, branch, lastSyncedAt: prev.lastSyncedAt ?? null }];
+  };
   if (named !== null) {
     // Confirm the number names THIS artifact's review before its reviewers are bound to this
     // artifact's hash. A platform that cannot answer (no CLI, no auth, offline) is not evidence
