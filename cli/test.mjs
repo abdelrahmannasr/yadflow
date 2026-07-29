@@ -4489,6 +4489,73 @@ test('doctor: a pointer-lock is verified against the parent lock it copies, not 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('doctor: a contract-lock.json with no usable hash FAILs, it does not read as "not locked yet"', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-bad');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-bad', currentStep: 'architecture-review',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review' }],
+  }));
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  for (const bad of ['{}', 'null', '{"hash": ""}', '{"hash": "nonsense"}', '{"hash": 42}']) {
+    fs.writeFileSync(path.join(ep, '.sdlc/contract-lock.json'), bad);
+    const r = await doctorOn(T);
+    const hit = r.checks.find((x) => x.id === 'epic:EP-bad:contract-lock');
+    assert.equal(hit?.status, 'fail', `a lock of ${bad} must not pass as unlocked`);
+    assert.match(hit.message, /no usable sha256 hash/);
+  }
+  // An epic that genuinely has not locked yet has NO file, and stays silent.
+  fs.rmSync(path.join(ep, '.sdlc/contract-lock.json'));
+  const clean = await doctorOn(T);
+  assert.ok(!clean.checks.some((x) => x.id === 'epic:EP-bad:contract-lock'), 'pre-lock epics are not nagged');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a pointer-lock ref that escapes epics/ is refused', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-esc');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-esc', currentStep: 'ready-for-build',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+  }));
+  fs.writeFileSync(path.join(ep, '.sdlc/contract-lock.json'), JSON.stringify({
+    hash: `sha256:${'a'.repeat(64)}`, inheritedFrom: 'EP-gen', ref: '../../../../../../etc/somewhere.json',
+  }));
+  const r = await doctorOn(T);
+  const hit = r.checks.find((x) => x.id === 'epic:EP-esc:contract-lock');
+  assert.equal(hit?.status, 'fail');
+  assert.match(hit.message, /resolves outside epics\//);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a done review whose approvals all went stale is reported', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-stale');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-stale', currentStep: 'ready-for-build',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+  }));
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  const approved = surfHash(ep);
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
+    { step: 'architecture-review', approver: 'alice', role: 'owner', status: 'approved', artifactHash: approved },
+    { step: 'architecture-review', approver: 'bob', role: 'reviewer', status: 'approved', artifactHash: approved },
+  ]));
+  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'epic:EP-stale:architecture-review:stale'), 'bound approvals are fine');
+
+  // The surface moved after it was approved. The gate is one-way by design, so nothing pulls the step
+  // back — which is exactly why it has to be reported somewhere.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+  const hit = (await doctorOn(T)).checks.find((x) => x.id === 'epic:EP-stale:architecture-review:stale');
+  assert.equal(hit?.status, 'warn');
+  assert.match(hit.message, /done, but all 2 approval\(s\) are bound to an older architecture\.md/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: untagged GitLab fragment warns with YAD-CI-001; tagged is silent', async () => {
   const { T } = scaffold();
   const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
