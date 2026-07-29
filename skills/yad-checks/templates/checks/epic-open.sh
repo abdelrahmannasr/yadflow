@@ -79,11 +79,15 @@ while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
-  if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: "; then
-    echo "PASS [epic-open]: ${short} '${subject}' — maintenance commit (exempt)"
+  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
+  # The type exemption waives the REQUIREMENT for an owning epic, not the VALIDITY of one that is
+  # claimed — same rule spec-link applies. Exempting on the subject alone would let `chore(x): …` plus
+  # a Task trailer pointing at a SEALED epic add behaviour to it, which is exactly what this gate exists
+  # to refuse.
+  if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: " && [ -z "$task" ]; then
+    echo "PASS [epic-open]: ${short} '${subject}' — maintenance commit, no Task trailer (exempt)"
     continue
   fi
-  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
   if ! printf '%s' "$task" | grep -qE '.+-T[0-9]+$'; then
     echo "note [epic-open]: ${short} has no resolvable Task trailer — deferring to spec-link."
     continue

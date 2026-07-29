@@ -398,6 +398,32 @@ test('contract-check gate: says so when the product lock is not reachable', () =
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// The exemption rule has to hold in every gate that has one, or `chore(x): …` + a Task trailer walks
+// past the sealed-epic / orphan-thread / frozen-thread checks while spec-link happily resolves it.
+for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
+  test(`${g.name} gate: an exempt commit that CLAIMS a story is still gated (issue #157)`, () => {
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product'));
+    commit(T, 'chore(deps): bump x\n\nTask: EP-demo-S01-T01', {
+      'package.json': '{}',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, `a maintenance subject must not buy a pass past this gate:\n${r.out}`);
+    assert.match(r.out, g.expect);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a maintenance commit with no Task trailer stays exempt`, () => {
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product'));
+    commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 0, r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('all four hub-reading gates carry the SAME resolution block, byte for byte', () => {
   // The gates are standalone by design, so the block is duplicated rather than sourced — and issue
   // #149 was caused by exactly that duplication drifting. Pin it.

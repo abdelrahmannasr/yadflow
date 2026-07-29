@@ -95,10 +95,13 @@ while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
-  if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: "; then
+  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
+  # The type exemption waives the REQUIREMENT for an owning epic, not the VALIDITY of one that is
+  # claimed — same rule spec-link applies. Exempting on the subject alone would let `chore(x): …` plus
+  # a Task trailer ship a change onto a thread that is frozen for open hotfix debt.
+  if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: " && [ -z "$task" ]; then
     continue
   fi
-  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
   printf '%s' "$task" | grep -qE '.+-T[0-9]+$' || continue
   story="$(printf '%s' "$task" | sed -E 's/-T[0-9]+$//')"
   link="specs/${story}/link.md"

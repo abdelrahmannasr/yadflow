@@ -172,7 +172,9 @@ After the contract locks and code ships, a change must not mutate a locked artif
 epic threaded to its parent (`config.yaml` `change:`). These three gates keep that discipline. All three
 resolve the owning epic the same way: `Task:` trailer → `specs/<story>/link.md` (`epic` + `product-repo`)
 → the hub epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
-commits are exempt. When the **product hub is not reachable** from CI (the usual case for a code-repo
+commits **with no `Task:` trailer** are exempt — like spec-link, the exemption waives the requirement
+for an owning epic, never the validity of one that is claimed, so a maintenance subject cannot buy a
+pass past the sealed-epic / orphan-thread / frozen-thread checks. When the **product hub is not reachable** from CI (the usual case for a code-repo
 PR), each degrades to a **PASS-with-note** — the hub-side check (`yad doctor` / `yad reconcile`) covers
 that path, and spec-link still proves the story link.
 

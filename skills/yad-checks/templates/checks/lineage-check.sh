@@ -62,11 +62,14 @@ while IFS= read -r sha; do
   [ -z "$sha" ] && continue
   short="$(git log -1 --format=%h "$sha")"
   subject="$(git log -1 --format=%s "$sha")"
-  if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: "; then
-    echo "PASS [lineage-check]: ${short} '${subject}' — maintenance commit (exempt)"
+  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
+  # The type exemption waives the REQUIREMENT for an owning epic, not the VALIDITY of one that is
+  # claimed — same rule spec-link applies. Exempting on the subject alone would let `chore(x): …` plus
+  # a Task trailer pointing at an orphaned/sealed epic bypass this gate entirely.
+  if printf '%s' "$subject" | grep -qE "^(${EXEMPT})(\([a-z0-9._-]+\))?!?: " && [ -z "$task" ]; then
+    echo "PASS [lineage-check]: ${short} '${subject}' — maintenance commit, no Task trailer (exempt)"
     continue
   fi
-  task="$(git log -1 --format='%(trailers:key=Task,valueonly)' "$sha" | sed '/^$/d' | head -1)"
   # No / malformed Task trailer is spec-link's job to FAIL; here we only skip what we can't resolve.
   if ! printf '%s' "$task" | grep -qE '.+-T[0-9]+$'; then
     echo "note [lineage-check]: ${short} has no resolvable Task trailer — deferring to spec-link."
