@@ -24,6 +24,12 @@ EXEMPT='ci|chore|build|test'
 # scalars only.
 fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
 
+# The product checkout `product-repo` points at. ABSOLUTE values are used as-is; a RELATIVE value is
+# joined to the link.md's own directory (specs/<story>/), which is what it is written relative to.
+# Every gate that reads product-repo resolves it this way — a disagreement here silently defers the
+# gate to a vacuous PASS instead of running it (issue #149).
+resolve_product() { case "$1" in /*) printf '%s' "$1" ;; *) printf 'specs/%s/%s' "$2" "$1" ;; esac; }
+
 commits="$(git rev-list --no-merges "$RANGE")"
 if [ -z "$commits" ]; then
   echo "PASS [lineage-check]: no non-merge commits in ${RANGE}"
@@ -58,8 +64,7 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
-  # product-repo is relative to the link.md's directory (specs/<story>/), so join it there.
-  prod="specs/${story}/${product_rel}"
+  prod="$(resolve_product "$product_rel" "$story")"
   epicmd="${prod}/epics/${epic}/epic.md"
   # Defer ONLY when the product checkout itself is unreachable. A reachable hub whose epic is missing is
   # an orphaned story link — FAIL, do not pass it off as "not reachable".

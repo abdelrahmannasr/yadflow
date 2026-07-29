@@ -68,7 +68,7 @@ story: EP-<slug>-S0N
 epic: EP-<slug>
 repo: <repo>
 feature-id: EP-<slug>-S0N
-product-repo: <absolute or relative path to the product repo>
+product-repo: <path to the product repo — absolute, or relative to THIS file's dir (specs/<story>/)>
 contract-lock: sha256:<hex copied from epics/EP-<slug>/.sdlc/contract-lock.json>
 speckit: installed | not-installed
 generated: <YYYY-MM-DD>
@@ -85,6 +85,13 @@ This spec implements story **EP-<slug>-S0N** of epic **EP-<slug>** for the **<re
 The contract surface above is **referenced, not re-defined**. Any change to the shared surface must go
 back to the architecture gate in the product repo — it is never widened from this code repo.
 ```
+
+`product-repo` is the one field CI resolves on disk (contract-check, lineage-check, epic-open,
+reconcile-debt all read it). Every gate resolves it the SAME way: an **absolute** path is used as-is; a
+**relative** path is joined to this `link.md`'s own directory, `specs/<story>/` — `../../` climbs out
+of the story dir and out of `specs/` to the code-repo root, so a hub checked out beside the code repo
+is `../../../<hub-dir>`. Write it in whichever form the CI checkout can actually reach; an unreachable
+path degrades the hub-reading gates to a PASS-with-note rather than failing them.
 
 ## Do not re-invent the contract
 

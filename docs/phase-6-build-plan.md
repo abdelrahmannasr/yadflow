@@ -55,8 +55,9 @@ and `spec-link.sh` stay byte-for-byte unchanged.
   change-epic. This is the staleness preventer.
 - **reconcile-debt** — a thread with open hotfix debt is frozen for new changes until paid.
 
-All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check)
-and degrade to a PASS-with-note when the hub is not reachable from CI.
+All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check
+— absolute as-is, relative to the `link.md`'s own dir) and degrade to a PASS-with-note when the hub is
+not reachable from CI.
 
 ### 3. Five skills
 - **yad-change** — intake + triage; seeds the threaded change-epic (lineage, inherited state, pointer-lock,

@@ -172,6 +172,12 @@ commits are exempt. When the **product hub is not reachable** from CI (the usual
 PR), each degrades to a **PASS-with-note** — the hub-side check (`yad doctor` / `yad reconcile`) covers
 that path, and spec-link still proves the story link.
 
+**Resolving `product-repo` (shared by all four hub-reading gates, contract-check included).** An
+**absolute** value is used as-is; a **relative** value is joined to the `link.md`'s own directory,
+`specs/<story>/`. Every gate applies the identical rule — when they disagree, a value one gate can
+resolve becomes an unreachable path for another, and "unreachable" is a PASS-with-note, so the gate
+silently stops gating (issue #149).
+
 - **lineage-check** — reads the hub epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
   passes. A `change`/`defect`/`hotfix` epic **FAILS** unless it declares a `parent:` that resolves to a
   real `epics/<parent>/` in the hub (no orphan threads). This is the "every code change has an owning

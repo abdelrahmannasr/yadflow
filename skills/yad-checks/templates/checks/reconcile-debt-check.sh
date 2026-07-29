@@ -21,6 +21,12 @@ EXEMPT='ci|chore|build|test'
 
 fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
 
+# The product checkout `product-repo` points at. ABSOLUTE values are used as-is; a RELATIVE value is
+# joined to the link.md's own directory (specs/<story>/), which is what it is written relative to.
+# Every gate that reads product-repo resolves it this way — a disagreement here silently defers the
+# gate to a vacuous PASS instead of running it (issue #149).
+resolve_product() { case "$1" in /*) printf '%s' "$1" ;; *) printf 'specs/%s/%s' "$2" "$1" ;; esac; }
+
 # Thread ROOT of an epic: walk `parent:` to the genesis (no parent). COMPUTED — never trusts the
 # denormalized `thread:` cache, so a missing/wrong cache cannot bypass the freeze. Cycle-safe.
 thread_root() {
@@ -75,8 +81,7 @@ while IFS= read -r sha; do
   [ -f "$link" ] || continue
   product_rel="$(fm_val product-repo "$link")"
   epic="$(fm_val epic "$link")"
-  # product-repo is relative to the link.md's directory (specs/<story>/), so join it there.
-  prod="specs/${story}/${product_rel}"
+  prod="$(resolve_product "$product_rel" "$story")"
   ep_dir="${prod}/epics/${epic}"
   if [ -z "$product_rel" ] || [ ! -d "$ep_dir" ]; then
     echo "PASS [reconcile-debt]: ${short} ${task} -> ${epic} (product repo not reachable — debt check deferred)."

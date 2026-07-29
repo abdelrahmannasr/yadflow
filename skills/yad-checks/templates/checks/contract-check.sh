@@ -38,15 +38,26 @@ if ! printf '%s\n' "$cc" | grep -qx 'yes'; then
   exit 1
 fi
 
+# Read one frontmatter value from the FIRST --- … --- block only (awk stops at the first closing fence),
+# the same reader lineage-check/epic-open/reconcile-debt use — so a body line can never leak in.
+fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && index($0, k":")==1 {sub("^" k ":[ \t]*", ""); print; exit}' "$2" 2>/dev/null | tr -d '\r'; }
+
+# The product checkout `product-repo` points at. ABSOLUTE values are used as-is; a RELATIVE value is
+# joined to the link.md's own directory (specs/<story>/), which is what it is written relative to.
+# Every gate that reads product-repo resolves it this way — a disagreement here silently defers the
+# gate to a vacuous PASS instead of running it (issue #149).
+resolve_product() { case "$1" in /*) printf '%s' "$1" ;; *) printf 'specs/%s/%s' "$2" "$1" ;; esac; }
+
 # Fidelity check (best-effort): when the product repo is reachable, the story's link.md must pin the
 # CURRENT product lock — proof the contract was actually updated/re-locked upstream, not just flagged.
 story="$(printf '%s\n' "$surface" | head -1 | sed -E 's#^specs/([^/]+)/contracts/.*#\1#')"
 link="specs/${story}/link.md"
 if [ -f "$link" ]; then
-  product_rel="$(sed -nE 's/^product-repo:[[:space:]]*(.*)$/\1/p' "$link" | head -1)"
+  product_rel="$(fm_val product-repo "$link")"
   pinned="$(sed -nE 's/^contract-lock:[[:space:]]*sha256:([0-9a-f]+).*$/\1/p' "$link" | head -1)"
   epic="$(printf '%s' "$story" | sed -E 's/-S[0-9]+$//')"   # story EP-<slug>-S0N -> epic EP-<slug>
-  lock="${product_rel}/epics/${epic}/.sdlc/contract-lock.json"
+  prod="$(resolve_product "$product_rel" "$story")"
+  lock="${prod}/epics/${epic}/.sdlc/contract-lock.json"
   if [ -n "$product_rel" ] && [ -f "$lock" ]; then
     current="$(sed -nE 's/.*"hash":[[:space:]]*"sha256:([0-9a-f]+)".*/\1/p' "$lock" | head -1)"
     if [ -n "$current" ] && [ "$current" != "$pinned" ]; then
