@@ -16,7 +16,7 @@ import {
 import { hubGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
-  getPrBody, editPrBody, postComment,
+  getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
@@ -127,37 +127,73 @@ const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === 
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
 // reviewer first approved against unless their review is newer (a genuine re-approval) — that is what
 // makes "revoke only when the artifact changed" work.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today }) {
+// `closed`: the step already advanced. Drop-and-re-add is what makes a dismissal or revocation vanish
+// idempotently on an OPEN step — the platform is the live source of truth there. On a CLOSED step it
+// is destructive instead: the gate passed, and the approvals that passed it are the audit record of
+// why. A roster edit, a GitLab approval reset, or any degraded-but-`ok` read yields an empty `recs`
+// and would erase them, leaving `done` with zero approvals — the very state issue #156 is about,
+// reached from the other side. So a closed step's record is only ever added to or refreshed in place.
+function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false }) {
   const keyOf = (name, role, domain) => `${stepId}|${name}|${role}|${domain || ''}`;
   const prior = new Map(
     approvals.filter((a) => a.step === stepId && a.source === 'bridge')
       .map((a) => [keyOf(a.approver, a.role, a.domain), a]),
   );
-  const kept = approvals.filter((a) => !(a.step === stepId && a.source === 'bridge'));
+  const seen = new Set(recs.map((r) => keyOf(r.name, r.role, r.domain)));
+  const kept = approvals.filter((a) => {
+    if (!(a.step === stepId && a.source === 'bridge')) return true;
+    // Closed step: keep a prior approval the platform no longer reports. It is history, not state.
+    return closed && !seen.has(keyOf(a.approver, a.role, a.domain));
+  });
   for (const r of recs) {
     const was = prior.get(keyOf(r.name, r.role, r.domain));
     let artHash = curHash;            // first time we see this approval => bind to current content
     let approvedAt = r.submittedAt || today;
+    let recordedOn = today;
     if (was) {
-      // We only adopt the new hash when the platform PROVES a genuinely newer review (a later
-      // submittedAt). Otherwise — same review, or a platform that gives no timestamp (GitLab) — we
-      // KEEP the hash they originally approved, so a later artifact change still revokes the approval.
-      const genuinelyNewer = r.submittedAt && was.approvedAt && r.submittedAt > was.approvedAt;
-      if (!genuinelyNewer) {
+      // We only adopt the new hash when the platform PROVES a genuinely newer review. Otherwise —
+      // the same review read again — we KEEP the hash they originally approved, so a later artifact
+      // change still revokes the approval. Two independent proofs, because one platform lacks each:
+      //   - a later submittedAt (GitHub; GitLab approvals carry no timestamp at all), or
+      //   - a DIFFERENT PR/MR than the one this approval was recorded against. A re-opened review is
+      //     always a new PR, so an approval arriving on it cannot be the old one read again. Without
+      //     this, a GitLab re-review after a re-lock re-recorded the pre-edit hash and stayed
+      //     permanently stale — the step read `done` with zero live approvals (issue #156).
+      const newerReview = r.submittedAt && was.approvedAt && r.submittedAt > was.approvedAt;
+      const newerPr = prNumber != null && was.pr != null && was.pr !== prNumber;
+      if (!newerReview && !newerPr) {
         artHash = was.artifactHash ?? curHash;
         approvedAt = was.approvedAt ?? approvedAt;
+        // Same review, re-read: keep the date it was RECORDED too, so re-syncing an unchanged
+        // approval is a byte-identical no-op instead of a daily one-line ledger commit.
+        recordedOn = was.date ?? recordedOn;
       }
     }
     kept.push({
       artifact, step: stepId, approver: r.name, role: r.role,
       ...(r.domain ? { domain: r.domain } : {}),
-      status: 'approved', date: today, source: 'bridge',
+      status: 'approved', date: recordedOn, source: 'bridge',
       artifactHash: artHash, approvedAt,
+      ...(prNumber != null ? { pr: prNumber } : {}),
       engagement: r.engagement === 'verified' ? 'verified' : 'none',
       ...(r.unverified ? { unverified: true } : {}),
     });
   }
   return kept;
+}
+
+// Mutates in place, returns how many it stamped. Backfill `pr` on this step's bridge approvals that
+// predate approvals recording which PR they arrived on. `prNumber` must be the pointer they were
+// recorded against — callers stamp only at the moment that pointer is about to be replaced, so nothing
+// is invented: it is exactly the PR those approvals came from.
+export function stampLegacyPr(approvals, stepId, prNumber) {
+  let n = 0;
+  for (const a of approvals) {
+    if (a.step !== stepId || a.source !== 'bridge' || a.pr != null) continue;
+    a.pr = prNumber;
+    n++;
+  }
+  return n;
 }
 
 function writeComments(epicDir, base, today, blocking) {
@@ -192,7 +228,57 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
 
 // ---- actions ------------------------------------------------------------------------------------
 
-export async function gateSync(root, { epic, artifact, today, reader = readPr, local = false, dryRun = false } = {}) {
+// The review PR/MR(s) to sync. Normally the ledger's own pointer — but under the bridge the ledger
+// records that pointer only at merge (CI is the sole writer), so a review a human needs to push
+// through by hand has NO recorded pointer at all. Fall back to the PR number the caller named
+// (`--pr`), else resolve it from the review branch on the platform. Without this, `gate sync` reported
+// "no open review PR recorded" for a PR sitting merged on the platform and the advance was
+// unreachable by hand (issue #158).
+// `--pr` is a recovery flag, so an explicit one WINS over the recorded pointer (a re-opened review is a
+// new PR the ledger has not seen). It is also the one number a human types, so it is checked before it
+// can bind approvals: it must be a positive integer, and — when the platform can be asked — it must be
+// the PR for this artifact's review branch. Without that confirmation a typo'd number naming some
+// unrelated merged-and-approved PR would have its reviewers bound to this artifact's hash and satisfy
+// the gate.
+function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd }) {
+  const recorded = hubPrs.filter((p) => !artifact || p.artifact === artifact);
+  const named = number == null || number === '' ? null : Number(number);
+  if (named !== null && (!Number.isInteger(named) || named <= 0)) {
+    return { targets: [], discovered: false, reason: `--pr must be a positive integer, got '${number}'` };
+  }
+  if (named === null && recorded.length) return { targets: recorded, discovered: false };
+  if (!artifact) return { targets: [], discovered: false, reason: 'name the artifact to resolve its review PR' };
+  const step = findReviewStep(state, artifact);
+  if (!step) return { targets: [], discovered: false, reason: `no review step for ${artifact}` };
+  const branch = `review/${epic}/${base(artifact)}`;
+  // `upsertHubPr` replaces the whole entry for an artifact, so a record built from scratch DROPS
+  // whatever the recorded one carried. That matters when `--pr` names the PR already on file: `nudged`
+  // is the idempotency set for the engagement nudge, so losing it makes the next writer run
+  // re-@-mention every bare approver on the PR — a platform write, not just a ledger one — and `url`
+  // would churn to null. Carry the recorded entry forward whenever the number is the same one.
+  const entry = (n, url) => {
+    const prev = recorded.find((p) => p.number === n) || {};
+    return [{ ...prev, step: step.id, artifact, platform, number: n, url: url ?? prev.url ?? null, branch, lastSyncedAt: prev.lastSyncedAt ?? null }];
+  };
+  if (named !== null) {
+    // Confirm the number names THIS artifact's review before its reviewers are bound to this
+    // artifact's hash. A platform that cannot answer (no CLI, no auth, offline) is not evidence
+    // against it — warn and take the human at their word — but a definite mismatch is refused.
+    const head = branchOf(platform, named, { cwd });
+    if (head.ok && head.branch !== branch) {
+      return { targets: [], discovered: false, reason: `#${named} is on '${head.branch}', not this artifact's review branch '${branch}'` };
+    }
+    if (!head.ok) warn(`could not confirm #${named} belongs to ${branch} (${head.reason}) — using it as given`);
+    if (recorded.length && recorded[0].number !== named) info(`--pr #${named} overrides the recorded review PR #${recorded[0].number}`);
+    return { targets: entry(named, null), discovered: true };
+  }
+  const found = finder(platform, branch, { cwd });
+  if (!found.ok) return { targets: [], discovered: false, reason: found.reason };
+  info(`no recorded review PR — resolved #${found.number}${found.state ? ` (${found.state})` : ''} from ${branch}`);
+  return { targets: entry(found.number, found.url), discovered: true };
+}
+
+export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
   const { hub, repos } = loadHub(root);
   if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
@@ -211,17 +297,42 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
-  const targets = hubPrs.filter((p) => !artifact || p.artifact === artifact);
-  if (!targets.length) { warn(`no open review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''} (run \`yad gate open\` first)`); return { synced: 0 }; }
+  // Migration (see stampLegacyPr): an approval written before PR provenance existed carries no `pr`,
+  // so it can never be told apart from one arriving on a replacement PR — and on GitLab, with no
+  // submittedAt either, the other proof is unavailable too. The pointer recorded here IS the PR those
+  // approvals came from, so stamp them before anything replaces it.
+  for (const p of hubPrs) {
+    const s = p.number != null ? findReviewStep(state, p.artifact) : null;
+    if (s) stampLegacyPr(approvals, s.id, p.number);
+  }
+  const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
+  const targets = resolved.targets;
+  if (!targets.length) {
+    warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);
+    hand(`run \`yad gate open ${epic} ${artifact || '<artifact>'}\`, or name the PR: \`yad gate sync ${epic} ${artifact || '<artifact>'} --pr <n>\``);
+    return { synced: 0 };
+  }
+  // A pointer resolved from the platform is adopted into the ledger on the WRITER path only. In
+  // bridge mode this run is advisory and writes nothing, so the human never ends up with a gate-state
+  // file in their working tree for the ledger-guard check to reject.
+  if (resolved.discovered && !readOnly) hubPrs = upsertHubPr(hubPrs, targets[0]);
 
   let synced = 0;
   let advanced = 0;
+  // Targets whose step is still open. The dated approval-roster file is regenerated only for these —
+  // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
+  // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
+  const open = [];
   for (const pr of targets) {
     const step = findReviewStep(state, pr.artifact);
     if (!step) { warn(`no review step for ${pr.artifact}`); continue; }
-    // Already advanced: a re-sync must not re-run advance (it would reset the next step's status /
-    // currentStep backward). The gate is one-way per step.
-    if (step.status === 'done') { info(`${pr.artifact}: ${step.id} already done — skipping`); continue; }
+    // A step that already advanced is never advanced AGAIN (that would reset the next step's status /
+    // currentStep backward) — the gate is one-way per step. But it is still SYNCED: in bridge mode
+    // nothing ever moves a step back to in_review (CI is the sole ledger writer), so a re-opened
+    // review — surface re-locked, fresh PR, fresh approvals, merged — used to hit a blanket skip here
+    // and write nothing but the PR pointer. The step then read `done` while its approvals were all
+    // stale: work proceeded on an audit trail saying the re-review never happened (issue #156).
+    const alreadyDone = step.status === 'done';
     const domains = touchedDomains(epicDir, step);
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
@@ -231,8 +342,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
+    const approvalsBefore = JSON.stringify(approvals);
     const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
@@ -245,17 +357,27 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
       ...unresolved,
     ];
     // Advisory (read-only) sync must not touch the working tree — defer the reviews/*.md write.
-    if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
-    comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
+    //
+    // An already-done step is re-synced for its APPROVALS ONLY. Everything else here is per-round
+    // bookkeeping for a review still in flight, and re-running it on a closed one is pure churn: both
+    // wired sweeps drive `gate ci --branch … --merged` (event mode) over a 7-day window, so a merged
+    // review that still carries one unresolved thread would append a fresh comment round — and a fresh
+    // `chore(gate): advance … [skip ci]` commit on the default branch — every 15 minutes for a week.
+    // That is the same churn the resource_group fix exists to stop, so it must not be reintroduced here.
+    if (!alreadyDone) {
+      if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
+      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
+    }
 
     // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
     // posts a friendly public @-mention inviting the reviewer to run the companion. Idempotent via
-    // pr.nudged; only on the writer path (a platform comment, not a ledger write).
-    if (!readOnly) {
+    // pr.nudged; only on the writer path (a platform comment, not a ledger write) — and never on a
+    // closed step, where it would @-mention reviewers on an already-merged PR.
+    if (!readOnly && !alreadyDone) {
       const nudged = new Set(pr.nudged || []);
       for (const rv of pull.reviews) {
         if (rv.state !== 'APPROVED' || parseEngagement(rv.body) === 'verified' || !rv.login || nudged.has(rv.login)) continue;
-        if (postComment(platform, pr.number, nudgeMessage(rv.login), { cwd: root }).ok) nudged.add(rv.login);
+        if (poster(platform, pr.number, nudgeMessage(rv.login), { cwd: root }).ok) nudged.add(rv.login);
       }
       pr.nudged = [...nudged];
     }
@@ -266,7 +388,15 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
     });
 
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule})`)}`);
-    if (pred.passed) {
+    if (alreadyDone) {
+      // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
+      // next step, and moving it back to in_review would un-ship work already built on it. What this
+      // pass DOES do is record the approvals that arrived, so `gate status` tells the truth about how
+      // many of them are live against the current artifact.
+      const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
+      info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${verdict}`);
+      for (const m of pred.missing) hand(`recorded gap: ${m}`);
+    } else if (pred.passed) {
       state = advanceState(state, step);
       advanced++;
       ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);
@@ -274,7 +404,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
       state = markInReview(state, step);
       for (const m of pred.missing) hand(`still needed: ${m}`);
     }
-    pr.lastSyncedAt = today;
+    // Stamp when this run actually learned something: an open step every time, and a closed one only
+    // when the approval record genuinely changed (a re-opened review that was re-approved). Otherwise
+    // an identical re-sync would rewrite the date daily and churn the ledger, while a real re-review
+    // would leave no trace of when it was reconciled.
+    if (!alreadyDone) { pr.lastSyncedAt = today; open.push(pr); }
+    else if (JSON.stringify(approvals) !== approvalsBefore) pr.lastSyncedAt = today;
     synced++;
   }
 
@@ -286,7 +421,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, l
   writeJSON(ledger.files.comments, comments);
   writeJSON(ledger.files.hubPrs, hubPrs);
   writeJSON(ledger.files.state, state);
-  refreshRoster(epicDir, targets, approvals, today);
+  refreshRoster(epicDir, open, approvals, today);
   return { synced, advanced };
 }
 
@@ -370,6 +505,16 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // build the entry from the event itself so the advance commit carries it onto the default branch.
     const existing = (ledger.hubPrs || []).find((x) => x.artifact === job.artifact);
     const number = Number(job.pr) || existing?.number || null;
+    // Same migration as gateSync, at the one point CI knows the OLD pointer: stamp the approvals it
+    // recorded before replacing it, or a re-review on the replacement PR can never be told from a
+    // re-read of the old one and stays permanently stale.
+    if (existing?.number != null && number !== existing.number) {
+      const stamped = stampLegacyPr(ledger.approvals, step.id, existing.number);
+      if (stamped) {
+        writeJSON(ledger.files.approvals, ledger.approvals);
+        info(`${job.epic}: recorded PR #${existing.number} on ${stamped} approval(s) that predate PR provenance`);
+      }
+    }
     if (!existing || existing.number !== number || existing.branch !== job.branch) {
       ledger.hubPrs = upsertHubPr(ledger.hubPrs, {
         step: step.id, artifact: job.artifact, platform: hub.platform, number,
@@ -555,7 +700,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 // the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
-export async function gateOpen(root, { epic, artifact, head, creator = createPr } = {}) {
+export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists } = {}) {
   const { hub, repos } = loadHub(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -570,6 +715,27 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr 
   warnIncompleteDiscovery(epicDir, artifact);
 
   const bridge = isBridge(hub);
+  // The review branch must exist ON ORIGIN: this command opens a PR against it, it never creates or
+  // pushes it, and `gh pr create --head` explicitly does NOT push either — so a branch that is only
+  // local still fails inside the platform CLI, which is the opaque error this guard exists to replace.
+  // `open-pr` pushes the checked-out branch first and passes it as `head`, so that path is unaffected;
+  // only the branch this command COMPUTED is checked. A null answer means git could not be asked (no
+  // checkout, unreachable origin) — not evidence of absence, so it warns rather than blocks.
+  //
+  // Checked BEFORE any state is written: marking the step in_review and then refusing would leave the
+  // ledger claiming a review is open that was never opened.
+  if (!head && hub?.platform) {
+    const present = hasBranch(root, branch);
+    if (present === false) {
+      fail(`review branch '${branch}' is not on origin`);
+      hand(`git push -u origin ${branch}`);
+      hand('or run `yad open-pr` from the branch — it pushes, then opens the review PR');
+      process.exitCode = 1;
+      return;
+    }
+    if (present === null) warn(`could not verify that '${branch}' is on origin — opening the PR against it anyway`);
+  }
+
   // Outside bridge mode (file-only, OR a platform with no gate-sync CI) there is no CI to write the
   // ledger, so the local command marks the step in_review. In bridge mode CI is the sole writer.
   if (!bridge) {

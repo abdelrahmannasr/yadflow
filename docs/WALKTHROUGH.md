@@ -187,7 +187,8 @@ accumulate, and the step moves forward only when the rule is met. **File-only** 
 `advance` (moves **only if** the rule is satisfied, else it names the missing approval).
 
 **PR-driven** — when the hub is on a platform, the **`yad gate`** CLI runs the same gate over a PR/MR:
-- `yad gate open <epic> <artifact>` — raise the review PR/MR; mark the step `in_review`.
+- `yad gate open <epic> <artifact>` — raise the review PR/MR; mark the step `in_review`. The
+  `review/<epic>/<artifact>` branch must already be pushed (or use `yad open-pr` from it, which pushes first).
 - `yad gate sync <epic> [artifact]` — pull approvals + comment threads into the **same** ledger (your
   own `gh`/`glab`, no stored tokens) and **auto-advance on merge** once the rule is met and every thread
   is resolved. Approvals are **revoked when the reviewed artifact changes** (re-hash), so reviewers get
@@ -232,7 +233,7 @@ ls  epics/EP-istifta-inquiries/reviews/
 ls  epics/EP-istifta-inquiries/stories/
 # re-verify the contract surface still matches its lock:
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-istifta-inquiries/contract.md | shasum -a 256
+  epics/EP-istifta-inquiries/contract.md | tr -d '\r' | shasum -a 256
 ```
 
 ## Run the full build half by hand (Phase 3)

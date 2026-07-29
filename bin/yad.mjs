@@ -74,8 +74,13 @@ ${c.bold('Where am I / what next')}
                                        --undo reverses it until the stories review opens
 
 ${c.bold('Review gate (front half)')}
-  yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review
-  yad gate sync <epic> [artifact]      Pull PR state -> ledger; advance on approved+resolved+merged
+  yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
+                                       branch must already be on origin (it is never created here)
+  yad gate sync <epic> [artifact] [--pr <n>]
+                                       Pull PR state -> ledger; advance on approved+resolved+merged.
+                                       With no recorded PR, resolves it from the review branch; --pr
+                                       names one (and overrides a stale recorded pointer). Advisory
+                                       in bridge mode — there, recover with 'yad gate ci' below
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
   yad gate repair <epic> [--push]      Close an author step stranded behind a passed review gate
@@ -272,7 +277,7 @@ async function main() {
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
       // CI's job at merge — never wired into the local gate. File-only mode keeps local writes.
       if (action === 'open') await gateOpen(o.dir, { epic, artifact });
-      else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, local: true });
+      else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });
       else if (action === 'status') await gateStatus(o.dir, { epic });
       else if (action === 'repair') await gateRepair(o.dir, { epic, push: o.push, allowBranch: o.allowBranch, dryRun: o.dryRun });

@@ -86,7 +86,41 @@ test('spec-link gate: maintenance commit (ci/chore/build/test) is exempt', () =>
   commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
   const r = runGate(SPEC_LINK, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'chore\(deps\): bump x' — maintenance commit \(exempt\)/);
+  assert.match(r.out, /PASS \[spec-link\]: [0-9a-f]+ 'chore\(deps\): bump x' — maintenance commit, no Task trailer \(exempt\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: an exempt commit that CLAIMS a story still resolves it (issue #157)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore(spec): tidy the spec\n\nTask: EP-demo-S01-T01', {
+    'specs/EP-demo-S01/link.md': 'story: EP-demo-S01\n',
+  });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /EP-demo-S01-T01 -> specs\/EP-demo-S01\/link\.md \(maintenance commit, trailer resolved anyway\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: an exempt commit whose Task trailer resolves to nothing FAILS (issue #157)', () => {
+  const T = scaffoldRepo();
+  // The exemption waives the REQUIREMENT for a link, never the VALIDITY of one that is claimed —
+  // otherwise a `chore:` subject makes the trailer decorative and an unlinked commit of the same
+  // shape is indistinguishable from a linked one.
+  commit(T, 'chore(ci): rewire\n\nTask: EP-ghost-S01-T01', { '.github/x.yml': 'x' });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 1, 'a dangling story claim must fail even on an exempt commit');
+  assert.match(r.out, /specs\/EP-ghost-S01\/ but link\.md is missing/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: an exempt commit with a MALFORMED Task trailer FAILS (issue #157)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'test(spec): add a case\n\nTask: EP-demo-S01', {
+    'specs/EP-demo-S01/link.md': 'story: EP-demo-S01\n',
+  });
+  const r = runGate(SPEC_LINK, T);
+  assert.equal(r.code, 1, 'a malformed trailer must fail even on an exempt commit');
+  assert.match(r.out, /malformed Task trailer 'EP-demo-S01'/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -179,18 +213,29 @@ test('contract-check gate: surface change with Contract-Change: yes passes (no u
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A link.md as `yad-spec` writes it: real frontmatter, `product-repo` written relative to THIS file's
+// own directory (specs/<story>/) — `../../product` therefore points at <repo-root>/product.
+const linkMd = (fields) =>
+  ['---', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '---', ''].join('\n');
+
+// A product hub at <repo>/product carrying one epic's contract lock.
+function seedProductLock(T, epic, hash, at = 'product') {
+  fs.mkdirSync(path.join(T, at, 'epics', epic, '.sdlc'), { recursive: true });
+  fs.writeFileSync(
+    path.join(T, at, 'epics', epic, '.sdlc/contract-lock.json'),
+    JSON.stringify({ hash: `sha256:${hash}` }),
+  );
+}
+
 test('contract-check gate: Contract-Change claimed but link.md pins a stale hash fails', () => {
   const T = scaffoldRepo();
   // Product repo lives next to the code repo; lock hash differs from the pinned one.
-  fs.mkdirSync(path.join(T, 'product/epics/EP-demo/.sdlc'), { recursive: true });
-  fs.writeFileSync(
-    path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'),
-    JSON.stringify({ hash: 'sha256:' + 'b'.repeat(64) }),
-  );
+  seedProductLock(T, 'EP-demo', 'b'.repeat(64));
   commit(T, 'feat: widen API\n\nContract-Change: yes', {
     'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
-    'specs/EP-demo-S01/link.md':
-      `story: EP-demo-S01\nproduct-repo: product\ncontract-lock: sha256:${'a'.repeat(64)}\n`,
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': `sha256:${'a'.repeat(64)}`,
+    }),
   });
   const r = runGate(CONTRACT, T);
   assert.equal(r.code, 1, 'stale pinned hash must fail');
@@ -202,15 +247,12 @@ test('contract-check gate: Contract-Change claimed but link.md pins a stale hash
 test('contract-check gate: Contract-Change with link.md matching the product lock passes', () => {
   const T = scaffoldRepo();
   const hash = 'c'.repeat(64);
-  fs.mkdirSync(path.join(T, 'product/epics/EP-demo/.sdlc'), { recursive: true });
-  fs.writeFileSync(
-    path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'),
-    JSON.stringify({ hash: `sha256:${hash}` }),
-  );
+  seedProductLock(T, 'EP-demo', hash);
   commit(T, 'feat: widen API\n\nContract-Change: yes', {
     'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
-    'specs/EP-demo-S01/link.md':
-      `story: EP-demo-S01\nproduct-repo: product\ncontract-lock: sha256:${hash}\n`,
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': `sha256:${hash}`,
+    }),
   });
   const r = runGate(CONTRACT, T);
   assert.equal(r.code, 0, r.out);
@@ -218,11 +260,241 @@ test('contract-check gate: Contract-Change with link.md matching the product loc
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// (contract-check's product-repo forms are covered by the four-gate matrix below — an absolute path
+// was already the one form it handled, so a bespoke case here pinned nothing.)
+
 test('contract-check gate: unresolvable base fails closed', () => {
   const T = scaffoldRepo();
   const r = runGate(CONTRACT, T, ['origin/nope']);
   assert.equal(r.code, 1, 'undiffable range must never green-light');
   assert.match(r.out, /base ref 'origin\/nope' not found/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------- phase-6 thread gates: product-repo resolution (issue #149) ----------
+// All three read the owning epic through link.md's `product-repo`. Both the ABSOLUTE and the RELATIVE
+// form must reach the hub — an unresolvable path degrades each gate to a PASS-with-note, i.e. it stops
+// gating without saying so.
+const LINEAGE = path.join(CHECKS, 'lineage-check.sh');
+const EPIC_OPEN = path.join(CHECKS, 'epic-open.sh');
+const DEBT = path.join(CHECKS, 'reconcile-debt-check.sh');
+
+// A hub with one epic. `fm` goes into epic.md frontmatter; `stories` maps story id -> status.
+function seedHubEpic(hub, epic, { fm = {}, stories = {}, debt = null } = {}) {
+  const dir = path.join(hub, 'epics', epic);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'epic.md'), linkMd({ epic, ...fm }) + `\n# ${epic}\n`);
+  for (const [id, status] of Object.entries(stories)) {
+    fs.mkdirSync(path.join(dir, 'stories'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'stories', `${id}.md`), linkMd({ story: id, status }) + `\n# ${id}\n`);
+  }
+  if (debt) {
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/reconcile-debt.json'), JSON.stringify(debt));
+  }
+  return dir;
+}
+
+// A code-repo commit whose Task trailer links a story pointing at `productRepo`.
+const linkedCommit = (T, productRepo, epic = 'EP-demo') => commit(
+  T, 'feat: add thing\n\nTask: EP-demo-S01-T01',
+  {
+    'src/thing.js': 'x',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic, 'product-repo': productRepo }),
+  },
+);
+
+// The invariant is that all four hub-reading gates resolve `product-repo` IDENTICALLY — a value one
+// gate can reach must be reachable from every gate, or the unreachable ones degrade to a
+// PASS-with-note and silently stop gating (issue #149). So this is a matrix, not four bespoke cases:
+// every gate × every path form a link.md in the wild can carry, each fixture rigged so the gate FAILs
+// iff it actually read the hub.
+//
+// `link-relative` is the canonical form yad-spec writes; `root-relative` is what contract-check
+// historically resolved, so link.md files authored against it must keep working; `unfenced` is a
+// pre-frontmatter link.md, which the whole-file `sed` used to read and the frontmatter reader alone
+// would silently see as empty.
+const GATES = [
+  {
+    name: 'lineage-check',
+    script: LINEAGE,
+    seed: (hub) => seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change' } }), // kind:change, no parent
+    expect: /is kind:change but declares no 'parent:'/,
+  },
+  {
+    name: 'epic-open',
+    script: EPIC_OPEN,
+    seed: (hub) => seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } }), // sealed
+    expect: /targets SEALED epic EP-demo/,
+  },
+  {
+    name: 'reconcile-debt',
+    script: DEBT,
+    seed: (hub) => {
+      seedHubEpic(hub, 'EP-root');
+      seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
+      seedHubEpic(hub, 'EP-fix', { fm: { kind: 'hotfix', parent: 'EP-root' }, debt: [{ status: 'open' }] });
+    },
+    expect: /carries OPEN hotfix debt/,
+  },
+  {
+    name: 'contract-check',
+    script: CONTRACT,
+    seed: (hub) => seedProductLock(hub, 'EP-demo', 'b'.repeat(64), '.'),
+    // contract-check needs a surface change + the claim trailer; its link.md also pins a hash.
+    files: {
+      'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    },
+    subject: 'feat: widen API\n\nContract-Change: yes',
+    extraLink: { 'contract-lock': `sha256:${'a'.repeat(64)}` },
+    expect: /still pins/,
+  },
+];
+
+// Where the hub lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
+const FORMS = [
+  { name: 'absolute', hub: (T, out) => out, value: (T, out) => out },
+  { name: 'link-relative', hub: (T) => path.join(T, 'product'), value: () => '../../product' },
+  { name: 'root-relative', hub: (T) => path.join(T, 'product'), value: () => 'product' },
+  { name: 'unfenced link.md', hub: (T) => path.join(T, 'product'), value: () => '../../product', unfenced: true },
+];
+
+for (const g of GATES) {
+  for (const form of FORMS) {
+    test(`${g.name} gate: reaches the hub with a ${form.name} product-repo (issue #149)`, () => {
+      const T = scaffoldRepo();
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+      const hub = form.hub(T, outside);
+      g.seed(hub);
+      const fields = { story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': form.value(T, outside), ...(g.extraLink || {}) };
+      commit(T, g.subject || 'feat: add thing\n\nTask: EP-demo-S01-T01', {
+        'src/thing.js': 'x',
+        ...(g.files || {}),
+        // An unfenced link.md is the pre-frontmatter shape still committed in code repos.
+        'specs/EP-demo-S01/link.md': form.unfenced
+          ? Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n') + '\n'
+          : linkMd(fields),
+      });
+      const r = runGate(g.script, T);
+      assert.equal(r.code, 1, `a ${form.name} product-repo must be READ, not deferred to a vacuous PASS:\n${r.out}`);
+      assert.match(r.out, g.expect);
+      fs.rmSync(outside, { recursive: true, force: true });
+      fs.rmSync(T, { recursive: true, force: true });
+    });
+  }
+}
+
+test('contract-check gate: a link.md with no product-repo defers by name, not by a /-rooted path', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01' }), // no product-repo at all
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  // An empty resolution used to interpolate to "/epics/<epic>/…" — a path at the filesystem root,
+  // which both reads as a real location in the note and could match a foreign file on some hosts.
+  assert.match(r.out, /not reachable at <no product-repo in link\.md>/);
+  assert.doesNotMatch(r.out, /at \/epics\//);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: says so when the product lock is not reachable', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', 'product-repo': '../../nowhere' }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  // A skipped fidelity check used to be indistinguishable from a passed one — which is how a
+  // mis-resolved product-repo turned a stale-pin FAIL into a silent PASS.
+  assert.match(r.out, /product lock not reachable at .*nowhere.* — fidelity check deferred/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The exemption rule has to hold in every gate that has one, or `chore(x): …` + a Task trailer walks
+// past the sealed-epic / orphan-thread / frozen-thread checks while spec-link happily resolves it.
+for (const g of GATES.filter((x) => x.name !== 'contract-check')) {
+  test(`${g.name} gate: an exempt commit that CLAIMS a story is still gated (issue #157)`, () => {
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product'));
+    commit(T, 'chore(deps): bump x\n\nTask: EP-demo-S01-T01', {
+      'package.json': '{}',
+      'specs/EP-demo-S01/link.md': linkMd({ story: 'EP-demo-S01', epic: 'EP-demo', 'product-repo': '../../product' }),
+    });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 1, `a maintenance subject must not buy a pass past this gate:\n${r.out}`);
+    assert.match(r.out, g.expect);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  test(`${g.name} gate: a maintenance commit with no Task trailer stays exempt`, () => {
+    const T = scaffoldRepo();
+    g.seed(path.join(T, 'product'));
+    commit(T, 'chore(deps): bump x', { 'package.json': '{}' });
+    const r = runGate(g.script, T);
+    assert.equal(r.code, 0, r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('all four hub-reading gates carry the SAME resolution block, byte for byte', () => {
+  // The gates are standalone by design, so the block is duplicated rather than sourced — and issue
+  // #149 was caused by exactly that duplication drifting. Pin it.
+  const region = (file) => {
+    const src = fs.readFileSync(path.join(CHECKS, file), 'utf8');
+    const start = src.indexOf('# --- shared link.md resolution');
+    const end = src.indexOf('\nresolve_product() {');
+    assert.ok(start >= 0 && end > start, `${file}: shared block not found`);
+    return src.slice(start, src.indexOf('\n}\n', end) + 3);
+  };
+  const canonical = region('contract-check.sh');
+  for (const f of ['lineage-check.sh', 'epic-open.sh', 'reconcile-debt-check.sh']) {
+    assert.equal(region(f), canonical, `${f} drifted from the canonical resolution block`);
+  }
+});
+
+test('epic-open gate: an ABSOLUTE product-repo reaches the hub and refuses a SEALED epic', () => {
+  const T = scaffoldRepo();
+  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } });
+  linkedCommit(T, hub);
+  const r = runGate(EPIC_OPEN, T);
+  assert.equal(r.code, 1, 'a sealed epic must fail, not defer');
+  assert.match(r.out, /targets SEALED epic EP-demo/);
+  fs.rmSync(hub, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('epic-open gate: an open epic (an unshipped story) passes', () => {
+  const T = scaffoldRepo();
+  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped', 'EP-demo-S02': 'in-progress' } });
+  linkedCommit(T, hub);
+  const r = runGate(EPIC_OPEN, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /epic is open — has unshipped stories/);
+  fs.rmSync(hub, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes the thread', () => {
+  const T = scaffoldRepo();
+  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  // EP-demo threads off EP-root; the sibling hotfix EP-fix (same thread) carries OPEN debt.
+  seedHubEpic(hub, 'EP-root');
+  seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change', parent: 'EP-root' } });
+  seedHubEpic(hub, 'EP-fix', {
+    fm: { kind: 'hotfix', parent: 'EP-root' },
+    debt: [{ status: 'open', reason: 'ship-first hotfix' }],
+  });
+  linkedCommit(T, hub);
+  const r = runGate(DEBT, T);
+  assert.equal(r.code, 1, 'open thread debt must freeze the thread, not defer');
+  assert.match(r.out, /thread EP-root carries OPEN hotfix debt/);
+  assert.match(r.out, /EP-fix/);
+  fs.rmSync(hub, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
 

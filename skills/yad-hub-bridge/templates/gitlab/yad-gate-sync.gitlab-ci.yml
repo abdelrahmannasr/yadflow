@@ -19,7 +19,8 @@
 #   - MERGE push (default branch, commit names a review branch): resolve the merged MR's IID from its
 #     source branch, then advance + flip status on the default branch — near-immediate.
 #   - SCHEDULED sweep (catch-up): enumerate recently-merged review MRs via the API and advance any
-#     not yet advanced (idempotent — a step already `done` is skipped). Covers bare approvals and
+#     not yet advanced (idempotent — an already-`done` step is never re-advanced, and re-syncing it
+#     writes nothing unless its approvals changed). Covers bare approvals and
 #     squash merges whose commit message dropped the branch name. Create a pipeline schedule
 #     (one-time, cannot be committed as code): cron `*/15 * * * *` with variable SDLC_GATE_SYNC=true.
 #     UI: CI/CD > Schedules, or:
@@ -39,6 +40,15 @@ variables:
 
 yad-gate-sync:
   needs: []
+  # Serialize every advance: the merge-push pipeline and the scheduled sweep both commit the ledger
+  # and push the DEFAULT branch, and the sweep's 7-day window covers MRs the merge path is still
+  # processing — so without this they race on the same MR. Both produce the advance, one pushes, the
+  # loser rebases onto it and pushes the same commit message under a different SHA. That is where the
+  # duplicate `chore(gate): advance …` commits with shifting SHAs come from, and every one of them
+  # carries [skip ci] and lands directly on the default branch, so nothing validates the churn.
+  # `resource_group` is GitLab's equivalent of the `concurrency` group the GitHub workflow sets on both
+  # of its jobs: at most one instance runs at a time, the rest queue.
+  resource_group: yad-gate-mergesync
   # Runner selection: set the YAD_RUNNER_TAGS CI/CD variable (e.g. `dind_runner`) to route this
   # docker job on instances whose runners are tag-locked (run_untagged: false) — it lives in
   # project Settings → CI/CD → Variables, so it survives every `yad` sync. When unset, current
@@ -69,7 +79,8 @@ yad-gate-sync:
       rc=0
       if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
         # SCHEDULED SWEEP — discover merged review MRs from the platform (Path B keeps no per-branch
-        # ledger), then advance each. `gate ci` is idempotent: a step already `done` is skipped.
+        # ledger), then advance each. `gate ci` is idempotent: an already-`done` step is never
+        # re-advanced, and re-syncing it writes nothing unless its approvals changed.
         # A stuck review MR (a squash merge whose commit dropped the branch name, or a failed merge
         # push) is always RECENT, so sweep a generous recent window and PAGINATE it fully (--paginate)
         # — this bounds cost without the old hard 50-row cap that could permanently strand older MRs.

@@ -42,7 +42,9 @@ content. This prevents "approve, then quietly change it" (build plan §5 spirit)
 For the architecture+contract review there is a second, content-based staleness check: recompute the
 SHA-256 of the contract-surface block and compare it to `.sdlc/contract-lock.json`. A mismatch means
 the locked surface changed even if the file's mtime looks fine — approvals are stale, re-lock and
-re-approve. (Hash recipe: `yad-architecture/references/contract-format.md`.)
+re-approve. (Hash recipe: `yad-architecture/references/contract-format.md`.) `yad` computes the
+identical digest, so `yad doctor` performs this comparison for every epic and FAILs on a surface that
+drifted from its lock — run it rather than recomputing by hand.
 
 ## Worked example — epic gate
 
@@ -91,8 +93,10 @@ approvals regardless of how they were recorded.
 - On PR/MR open the assignee is the committer and reviewers are the scope's `reviewer` + `domain-owner`
   members (minus the committer); the owner/author is recorded, not requested. See
   `../yad-hub-bridge/references/login-roster.md`.
-- `sync` is idempotent (upsert by `(step, approver, role, domain)`; supersede revoked; key comments on
-  comment id) and never touches **manual** approvals.
+- `sync` is idempotent (upsert by `(step, approver, role, domain)`; key comments on comment id) and
+  never touches **manual** approvals. A revoked approval is superseded **while the step is open**; once
+  the step is `done` its approvals are kept as the record of why it passed, and a re-sync only re-binds
+  new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").
 - The architecture+contract staleness rule applies to bridge approvals too: a re-lock discards bridge
   approvals dated before the new lock.
 - No platform / no CLI → the gate runs file-only with no error. Detail: `../yad-hub-bridge/references/bridge.md`.

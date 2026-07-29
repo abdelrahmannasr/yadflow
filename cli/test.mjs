@@ -838,6 +838,7 @@ test('templateBody: without a task/summary the Spec + Summary placeholders degra
 // gateOpen head override (P1) + runOpenPr hub-front delegation failure signalling (P2)
 // ---------------------------------------------------------------------------------------------
 const { gateOpen } = await import('./gate.mjs');
+const { branchExists } = await import('./platform.mjs');
 const { runOpenPr } = await import('./openpr.mjs');
 
 // A hub with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
@@ -2080,6 +2081,370 @@ test('gate sync advisory (bridge, local): unresolved comments do not dirty revie
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// The re-open loop (issue #156): an already-approved architecture step is re-opened, the contract
+// surface is edited + re-locked, a FRESH review PR is opened, the same reviewers approve it, and it is
+// merged. In bridge mode nothing ever moves the step back to `in_review` (CI is the sole ledger
+// writer), so the merge-time sync used to hit a blanket "already done — skipping" and write only the
+// PR pointer: the step read `done` with every approval bound to the pre-edit hash.
+async function reopenAndReapprove(reviews) {
+  const { T, ep } = scaffoldEpic();
+  const first = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', reviews, threads: [] };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => first });
+  const state0 = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state0.steps.find((s) => s.id === 'architecture-review').status, 'done', 'first review advanced');
+
+  // Widen the surface + re-lock: every prior approval is now bound to a stale hash.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+  const stale = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  const { artifactHash } = await import('./epic-state.mjs');
+  const newHash = artifactHash(ep, 'architecture.md');
+  assert.ok(stale.every((a) => a.artifactHash !== newHash), 'the re-lock revoked the prior approvals');
+
+  // A NEW review MR/PR for the re-opened step, approved by the same reviewers, merged.
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 11, url: 'http://x/11', branch: 'review/EP-test/architecture', lastSyncedAt: null },
+  ]));
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => first });
+  return { T, ep, newHash };
+}
+
+test('gate sync: a re-opened, re-approved review re-binds its approvals (issue #156)', async () => {
+  const { T, ep, newHash } = await reopenAndReapprove(fullApproval.reviews);
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  const live = after.filter((a) => a.status === 'approved' && a.artifactHash === newHash);
+  assert.ok(live.length >= 3, `the new approvals must bind to the re-locked surface, got ${JSON.stringify(after)}`);
+  // The chain is NOT re-advanced: the step stays done and the next step keeps its own progress.
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  assert.equal(state.currentStep, 'ui-design');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a re-approval on a new PR re-binds even without review timestamps (GitLab)', async () => {
+  // GitLab approvals carry no submittedAt at all, so "is this a newer review?" cannot be answered by
+  // time. A different PR/MR number is the proof: a re-opened review is always a new MR.
+  const noTimestamps = fullApproval.reviews.map(({ login, state }) => ({ login, state }));
+  const { T, ep, newHash } = await reopenAndReapprove(noTimestamps);
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  const live = after.filter((a) => a.status === 'approved' && a.artifactHash === newHash);
+  assert.ok(live.length >= 3, `a timestampless re-approval on MR #11 must re-bind, got ${JSON.stringify(after)}`);
+  assert.ok(after.every((a) => a.pr === 11), 'each approval records the PR/MR it arrived on');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a done step never loses the approvals that passed it', async () => {
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  const before = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.ok(before.length >= 3, 'the gate passed on real approvals');
+
+  // A later read that returns cleanly but maps NO approvers — an ordinary roster edit (a login
+  // changed or a member left), a GitLab approval reset, or a degraded-but-ok read. On an OPEN step
+  // this correctly drops them; on a step that already advanced it would erase the record of WHY it
+  // advanced, leaving `done` with zero approvals.
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => ({ ...fullApproval, reviews: [] }) });
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.deepEqual(after, before, 'a closed gate keeps its approval record when the platform reports none');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an OPEN step still drops an approval the platform no longer reports', async () => {
+  const { T, ep } = scaffoldEpic();
+  // Not merged → the step stays in_review, so the platform remains the live source of truth.
+  const held = { ...fullApproval, merged: false };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => held });
+  assert.ok(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'))).length >= 3);
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => ({ ...held, reviews: [] }) });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'))), [], 'a dismissal on an open step still vanishes');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: re-syncing a done step is a byte-identical no-op, threads and all', async () => {
+  const { T, ep } = scaffoldEpic();
+  // A merged review that still carries ONE unresolved thread — the ordinary case, and the one that
+  // churns: `recordComments` allocates a fresh round per call, so an unguarded re-sync appends a
+  // record set (and therefore a default-branch gate commit) on every pass of the 15-minute sweep.
+  const merged1thread = {
+    ...fullApproval,
+    threads: [{ id: 't', resolved: false, login: 'x', body: 'a nit nobody resolved' }],
+  };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  const snapshot = () => ({
+    approvals: fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'),
+    comments: fs.readFileSync(path.join(ep, '.sdlc/comments.json'), 'utf8'),
+    hubPrs: fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'),
+    reviews: fs.readdirSync(path.join(ep, 'reviews')).sort(),
+  });
+  // Baseline BEFORE any re-sync, so a write by the first re-sync cannot be baked into it.
+  const before = snapshot();
+  for (const day of ['2026-06-20', '2026-06-21', '2026-06-22']) {
+    await gateSync(T, { epic: 'EP-test', today: day, reader: () => merged1thread });
+  }
+  assert.deepEqual(snapshot(), before, 'a re-sync of an already-done step must write nothing new');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a done step never posts engagement nudges on its merged PR', async () => {
+  const { T } = scaffoldEpic();
+  const posted = [];
+  const poster = (_p, n, body) => { posted.push([n, body]); return { ok: true }; };
+  // The nudge is a PLATFORM write. Re-running it on a closed review would @-mention reviewers on an
+  // already-merged PR every time the sweep comes round. Bare approvals (no engagement marker) are
+  // exactly what triggers it. The step is NOT merged on the first pass, so the nudges land while the
+  // review is genuinely open.
+  const bare = { ...fullApproval, merged: false, reviews: fullApproval.reviews.map(({ login, state }) => ({ login, state })) };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => bare, poster });
+  assert.ok(posted.length > 0, 'an open review does nudge bare approvals');
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => ({ ...bare, merged: true }), poster });
+  const afterMerge = posted.length;
+  // Now the step is done; every later sweep pass must stay silent on the platform.
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-20', reader: () => ({ ...bare, merged: true }), poster });
+  assert.equal(posted.length, afterMerge, 'no further platform writes once the step is done');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+
+// Under the bridge the ledger records the PR pointer only at merge, so a review a human must push
+// through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.
+test('gate sync: resolves an unrecorded review PR from the review branch (issue #158)', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the bridge case
+  const seen = [];
+  const finder = (platform, branch) => { seen.push([platform, branch]); return { ok: true, number: 42, url: 'http://x/42' }; };
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => fullApproval, finder });
+  assert.deepEqual(seen, [['github', 'review/EP-test/architecture']], 'looked the PR up by its review branch');
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done', 'the merged review advances');
+  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  assert.equal(hubPrs[0].number, 42, 'the resolved pointer is adopted on the writer path');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr names the review PR directly, without a branch lookup', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const finder = () => { throw new Error('must not be called when --pr is given'); };
+  const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: '42', reader: () => fullApproval, finder, branchOf });
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr overrides the recorded pointer (a re-opened review is a new PR)', async () => {
+  const { T, ep } = scaffoldEpic(); // ledger records #7
+  const seen = [];
+  const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
+  await gateSync(T, {
+    epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 11, branchOf,
+    reader: (_p, n) => { seen.push(n); return fullApproval; },
+  });
+  assert.deepEqual(seen, [11], 'the named PR is what gets read, not the stale recorded one');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')))[0].number, 11);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr naming the recorded PR keeps its url and nudge history', async () => {
+  const { T, ep } = scaffoldEpic(); // ledger records #7
+  const posted = [];
+  const poster = (_p, n, body) => { posted.push([n, body]); return { ok: true }; };
+  const branchOf = () => ({ ok: true, branch: 'review/EP-test/architecture' });
+  const bare = { ...fullApproval, merged: false, reviews: fullApproval.reviews.map(({ login, state }) => ({ login, state })) };
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => bare, poster });
+  const first = posted.length;
+  assert.ok(first > 0, 'bare approvals are nudged once');
+  const recorded = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')))[0];
+  assert.ok(recorded.nudged?.length, 'the nudge idempotency set was recorded');
+
+  // Naming the SAME PR must not rebuild the entry from scratch: `nudged` is what stops the bot
+  // @-mentioning every bare approver again, and it is a platform write, not just a ledger one.
+  await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-10', number: 7, reader: () => bare, poster, branchOf });
+  assert.equal(posted.length, first, 'no reviewer is nudged twice for the same approval');
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')))[0];
+  assert.deepEqual(after.nudged?.sort(), recorded.nudged.sort(), 'nudge history survives --pr');
+  assert.equal(after.url, recorded.url, 'the recorded url is not churned to null');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: --pr naming a PR on another branch is refused, not bound to this artifact', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    // A typo lands on some unrelated merged-and-approved PR. Binding its reviewers to this artifact's
+    // hash would satisfy this gate with approvals nobody gave it.
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 999,
+      reader: () => fullApproval, branchOf: () => ({ ok: true, branch: 'feature/unrelated' }),
+    });
+  } finally { console.log = restore; }
+  assert.match(out.join('\n'), /#999 is on 'feature\/unrelated', not this artifact's review branch/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')))
+    .steps.find((s) => s.id === 'architecture-review').status, 'in_review', 'the gate did not advance');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: a non-numeric --pr is rejected before it reaches the platform', async () => {
+  const { T } = scaffoldEpic();
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 'abc',
+      reader: () => { throw new Error('must not read the platform with a bad --pr'); },
+      branchOf: () => { throw new Error('must not query the platform with a bad --pr'); },
+    });
+  } finally { console.log = restore; }
+  assert.match(out.join('\n'), /--pr must be a positive integer, got 'abc'/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an unconfirmable --pr warns but is taken at the human\'s word', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    // Offline / unauthenticated / no CLI: "cannot ask" is not evidence the number is wrong.
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', number: 42,
+      reader: () => fullApproval, branchOf: () => ({ ok: false, reason: 'gh not authenticated' }),
+    });
+  } finally { console.log = restore; }
+  assert.match(out.join('\n'), /could not confirm #42 belongs to review\/EP-test\/architecture/);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')))
+    .steps.find((s) => s.id === 'architecture-review').status, 'done', 'recovery still works offline');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an unresolvable review PR reports the recovery, not a bare refusal', async () => {
+  const { T, ep } = scaffoldEpic();
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]');
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  try {
+    await gateSync(T, {
+      epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09',
+      reader: () => fullApproval, finder: () => ({ ok: false, reason: 'no pull request found for head branch review/EP-test/architecture' }),
+    });
+  } finally { console.log = restore; }
+  const text = out.join('\n');
+  assert.match(text, /no pull request found for head branch/);
+  assert.match(text, /--pr <n>/, 'names the flag that recovers it by hand');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// `gate open` opens a PR against review/<epic>/<artifact>; it never creates or pushes that branch, so
+// a missing one used to surface as an opaque platform error (issue #158).
+test('gate open: refuses a review branch that is not on origin, and leaves the ledger alone', async () => {
+  const { T, ep } = scaffoldEpic();
+  const out = [];
+  const restore = console.log;
+  console.log = (s = '') => out.push(String(s));
+  let created = false;
+  const before = process.exitCode;
+  const stateBefore = fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8');
+  try {
+    await gateOpen(T, {
+      epic: 'EP-test', artifact: 'architecture.md',
+      creator: () => { created = true; return { ok: true, url: 'http://x/1' }; },
+      hasBranch: () => false,
+    });
+  } finally { console.log = restore; process.exitCode = before; }
+  assert.equal(created, false, 'no PR is opened against a branch that is not there');
+  const text = out.join('\n');
+  assert.match(text, /review branch 'review\/EP-test\/architecture' is not on origin/);
+  assert.match(text, /yad open-pr/);
+  // The guard runs BEFORE the ledger write — otherwise state.json would claim a review is open that
+  // was never opened.
+  assert.equal(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'), stateBefore, 'no in_review written');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate open: a branch that exists only LOCALLY is still refused', () => {
+  // gh pr create --head does not push, so a local-only branch fails inside the platform CLI — exactly
+  // the opaque error the guard replaces. Pin that branchExists asks origin, not refs/heads.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-branch-'));
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.email', 'a@b.c');
+  git(T, 'config', 'user.name', 'a');
+  fs.writeFileSync(path.join(T, 'f.txt'), 'x');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'seed');
+  git(T, 'checkout', '-q', '-b', 'review/EP-test/architecture');
+  // A real, reachable origin that simply does not carry the branch.
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+  git(origin, 'init', '-q', '--bare');
+  git(T, 'remote', 'add', 'origin', origin);
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), false, 'local-only is not "on origin"');
+  git(T, 'push', '-q', 'origin', 'review/EP-test/architecture');
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), true, 'pushed → present');
+  assert.equal(branchExists(T, 'review/EP-test/nope'), false, 'a reachable origin gives a definite no');
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(origin, { recursive: true, force: true });
+});
+
+test('gate open: an unreachable origin is "unknown", never a block', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-branch-'));
+  git(T, 'init', '-q');
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), null, 'no origin configured → cannot ask');
+  // An origin that exists in config but cannot be reached: distinct from ls-remote's exit 2, so it
+  // must read as "could not ask", not as a definite absence that would block `gate open`.
+  git(T, 'remote', 'add', 'origin', path.join(T, 'no-such-remote.git'));
+  const started = process.hrtime.bigint();
+  assert.equal(branchExists(T, 'review/EP-test/architecture'), null, 'broken origin → cannot ask');
+  // And it must come back promptly — this sits on the synchronous `gate open` path, so a probe that
+  // blocks (a credential prompt, an ssh host-key question) is a hung command, not a null.
+  const ms = Number((process.hrtime.bigint() - started) / 1_000_000n);
+  assert.ok(ms < 15_000, `the probe must be bounded, took ${ms}ms`);
+  fs.rmSync(T, { recursive: true, force: true });
+  assert.equal(branchExists(fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-')), 'x'), null, 'not a checkout → cannot ask');
+});
+
+test('gate open: an existing branch opens normally; an explicit head is never re-checked', async () => {
+  const { T } = scaffoldEpic();
+  let checks = 0;
+  const hasBranch = () => { checks++; return true; };
+  const creator = () => ({ ok: true, url: 'http://x/5' });
+  assert.equal((await gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', creator, hasBranch }))?.url, 'http://x/5');
+  assert.equal(checks, 1);
+  // open-pr pushes the branch itself and passes it as `head` — that path must not be second-guessed.
+  await gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', head: 'review/EP-test/architecture-v2', creator, hasBranch });
+  assert.equal(checks, 1, 'an explicit head is taken as given');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: an approval predating PR provenance is stamped, then re-binds (issue #156)', async () => {
+  const { T, ep } = scaffoldEpic();
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  // Rewrite the ledger into the pre-upgrade shape: no `pr`, and (like GitLab) no `approvedAt` either,
+  // so NEITHER proof of a newer review is available. This is what is on disk in the hubs issue #156
+  // was filed from. The pointer still names the PR they were recorded against (#7).
+  const legacy = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')))
+    .map((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== 'pr' && k !== 'approvedAt')));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(legacy));
+  assert.ok(legacy.every((a) => a.pr === undefined), 'fixture really is legacy-shaped');
+
+  // Re-lock the surface, then a fresh MR approved by the same people, merged.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+  const { artifactHash } = await import('./epic-state.mjs');
+  const newHash = artifactHash(ep, 'architecture.md');
+  const noTimestamps = fullApproval.reviews.map(({ login, state }) => ({ login, state }));
+  await gateSync(T, {
+    epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-20', number: 11,
+    reader: () => ({ ...fullApproval, reviews: noTimestamps }),
+  });
+
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
+  assert.ok(after.some((a) => a.artifactHash === newHash), `a legacy ledger must re-bind on a replacement MR, got ${JSON.stringify(after)}`);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: a re-sync after advance does not clobber the next step', async () => {
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
@@ -2181,6 +2546,35 @@ test('contractSurfaceHash: CRLF and LF files with the same surface hash identica
   const h = surfHash(lf);
   assert.ok(h?.startsWith('sha256:'));
   assert.equal(surfHash(crlf), h, 'a CRLF re-save must not change the hash (no false revocations)');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contractSurfaceHash: equals the documented awk | shasum recipe byte for byte (issue #156)', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-recipe-'));
+  const contract = path.join(T, 'contract.md');
+  fs.writeFileSync(contract, [
+    '# Contract', '',
+    '<!-- CONTRACT-SURFACE:BEGIN -->',
+    'POST /inquiries { subject, body }',
+    'GET  /inquiries?status=<open|closed>',
+    '',
+    'status: open -> assigned -> answered',
+    '<!-- CONTRACT-SURFACE:END -->',
+    '', '## Notes outside the surface', '',
+  ].join('\n'));
+  // The recipe the architect runs to write contract-lock.json (yad-architecture Step 5 /
+  // references/contract-format.md). If the CLI disagrees, the lock can never equal the hash approvals
+  // bind to and the lock file is decorative.
+  // `shasum -a 256` (BSD/macOS) and `sha256sum` (GNU) are the two forms the docs name; use whichever
+  // this host has so the cross-check runs on both CI images.
+  // An explicit if/else, not `cmd && a || b`: with the short-circuit form a present-but-failing shasum
+  // would silently fall through to sha256sum and quietly change what is being compared.
+  const recipe = execFileSync('bash', ['-c',
+    `awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' "$1" | tr -d '\\r' \
+       | if command -v shasum >/dev/null; then shasum -a 256; else sha256sum; fi | cut -d' ' -f1`,
+    'bash', contract], { encoding: 'utf8' }).trim();
+  assert.equal(surfHash(T), `sha256:${recipe}`, 'the CLI digest IS the documented recipe');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4061,6 +4455,137 @@ test('doctor: warns on an open review PR recorded on the default branch (pre-3.0
   writeState('done');
   const r2 = await doctorOn(T);
   assert.ok(!r2.checks.some((x) => x.id === 'epic:EP-mig:migration'), 'a done review does not warn');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a contract surface that drifted from its lock FAILS (issue #156)', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-lock');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-lock', currentStep: 'architecture-review',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review' }],
+  }));
+  const surface = (body) => `<!-- CONTRACT-SURFACE:BEGIN -->\n${body}\n<!-- CONTRACT-SURFACE:END -->\n`;
+  fs.writeFileSync(path.join(ep, 'contract.md'), surface('POST /x'));
+  // Locked against the surface as it stands → clean.
+  fs.writeFileSync(path.join(ep, '.sdlc/contract-lock.json'),
+    JSON.stringify({ artifact: 'contract.md', hash: surfHash(ep), lockedAt: '2026-06-09' }));
+  const clean = await doctorOn(T);
+  assert.ok(clean.checks.some((x) => x.id === 'epic:EP-lock:contract-lock' && x.status === 'ok'), 'a matching lock is ok');
+
+  // Widen the surface without re-locking → the lock no longer describes it.
+  fs.writeFileSync(path.join(ep, 'contract.md'), surface('POST /x\nPOST /y'));
+  const drifted = await doctorOn(T);
+  const hit = drifted.checks.find((x) => x.id === 'epic:EP-lock:contract-lock');
+  assert.equal(hit?.status, 'fail', 'a surface edited without a re-lock must not read as locked');
+  assert.match(hit.message, /drifted from its lock/);
+
+  // A BEGIN with no END: nothing to verify the lock against — also a failure, never a silent pass.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n');
+  const broken = await doctorOn(T);
+  assert.match(broken.checks.find((x) => x.id === 'epic:EP-lock:contract-lock').message, /no readable CONTRACT-SURFACE block/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a pointer-lock is verified against the parent lock it copies, not a contract.md', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const seed = (id) => {
+    fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', id, '.sdlc/state.json'), JSON.stringify({
+      epicId: id, currentStep: 'ready-for-build',
+      steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+    }));
+    return path.join(T, 'epics', id);
+  };
+  const genesis = seed('EP-gen');
+  fs.writeFileSync(path.join(genesis, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  const hash = surfHash(genesis);
+  fs.writeFileSync(path.join(genesis, '.sdlc/contract-lock.json'), JSON.stringify({ artifact: 'contract.md', hash }));
+  // The change-epic inherits architecture: no contract.md of its own, just the parent's hash verbatim.
+  const child = seed('EP-chg');
+  const pointer = (h) => JSON.stringify({
+    artifact: 'contract.md', hash: h, inheritedFrom: 'EP-gen', ref: '../../EP-gen/.sdlc/contract-lock.json',
+  });
+  fs.writeFileSync(path.join(child, '.sdlc/contract-lock.json'), pointer(hash));
+  const clean = await doctorOn(T);
+  assert.equal(clean.checks.find((x) => x.id === 'epic:EP-chg:contract-lock')?.status, 'ok', 'a missing contract.md is normal for a pointer-lock');
+
+  // The parent re-locked; the copy is now stale.
+  fs.writeFileSync(path.join(child, '.sdlc/contract-lock.json'), pointer('sha256:' + 'a'.repeat(64)));
+  const stale = await doctorOn(T);
+  const hit = stale.checks.find((x) => x.id === 'epic:EP-chg:contract-lock');
+  assert.equal(hit?.status, 'fail');
+  assert.match(hit.message, /pointer-lock pins .* but EP-gen now locks/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a contract-lock.json with no usable hash FAILs, it does not read as "not locked yet"', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-bad');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-bad', currentStep: 'architecture-review',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review' }],
+  }));
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  for (const bad of ['{}', 'null', '{"hash": ""}', '{"hash": "nonsense"}', '{"hash": 42}']) {
+    fs.writeFileSync(path.join(ep, '.sdlc/contract-lock.json'), bad);
+    const r = await doctorOn(T);
+    const hit = r.checks.find((x) => x.id === 'epic:EP-bad:contract-lock');
+    assert.equal(hit?.status, 'fail', `a lock of ${bad} must not pass as unlocked`);
+    assert.match(hit.message, /no usable sha256 hash/);
+  }
+  // An epic that genuinely has not locked yet has NO file, and stays silent.
+  fs.rmSync(path.join(ep, '.sdlc/contract-lock.json'));
+  const clean = await doctorOn(T);
+  assert.ok(!clean.checks.some((x) => x.id === 'epic:EP-bad:contract-lock'), 'pre-lock epics are not nagged');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a pointer-lock ref that escapes epics/ is refused', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-esc');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-esc', currentStep: 'ready-for-build',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+  }));
+  fs.writeFileSync(path.join(ep, '.sdlc/contract-lock.json'), JSON.stringify({
+    hash: `sha256:${'a'.repeat(64)}`, inheritedFrom: 'EP-gen', ref: '../../../../../../etc/somewhere.json',
+  }));
+  const r = await doctorOn(T);
+  const hit = r.checks.find((x) => x.id === 'epic:EP-esc:contract-lock');
+  assert.equal(hit?.status, 'fail');
+  assert.match(hit.message, /resolves outside epics\//);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a done review whose approvals all went stale is reported', async () => {
+  const { contractSurfaceHash: surfHash } = await import('./epic-state.mjs');
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-stale');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-stale', currentStep: 'ready-for-build',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+  }));
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n');
+  const approved = surfHash(ep);
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
+    { step: 'architecture-review', approver: 'alice', role: 'owner', status: 'approved', artifactHash: approved },
+    { step: 'architecture-review', approver: 'bob', role: 'reviewer', status: 'approved', artifactHash: approved },
+  ]));
+  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'epic:EP-stale:architecture-review:stale'), 'bound approvals are fine');
+
+  // The surface moved after it was approved. The gate is one-way by design, so nothing pulls the step
+  // back — which is exactly why it has to be reported somewhere.
+  fs.writeFileSync(path.join(ep, 'contract.md'), '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\nPOST /y\n<!-- CONTRACT-SURFACE:END -->\n');
+  const hit = (await doctorOn(T)).checks.find((x) => x.id === 'epic:EP-stale:architecture-review:stale');
+  assert.equal(hit?.status, 'warn');
+  assert.match(hit.message, /done, but all 2 approval\(s\) are bound to an older architecture\.md/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

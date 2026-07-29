@@ -131,8 +131,9 @@ via the local user's `gh`/`glab`. For each:
 - an `APPROVED` review / MR approval → append an `approved` record to `approvals.json` tagged
   `"source": "bridge"`; a `COMMENTED`/`CHANGES_REQUESTED`/note → write to
   `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` + `comments.json` (never an approval).
-**Idempotent:** upsert bridge approvals by `(step, approver, role, domain)`, supersede revoked ones, and
-key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
+**Idempotent:** upsert bridge approvals by `(step, approver, role, domain)`, supersede revoked ones
+**while the step is open** (a step already `done` keeps its approvals — they are the record of why it
+passed), and key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
 before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
 roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. Under the PR-driven CLI (`yad
@@ -170,7 +171,9 @@ If the predicate **passes**:
 
 ### PR-driven automation (the `yad gate` CLI)
 When the hub has a platform, **CI is the sole writer of the ledger**. `yad gate open` opens the review
-PR only; CI (`yad gate ci`) writes the `.sdlc/` + `reviews/` records this skill describes. The skill's
+PR only — against the `review/<epic>/<artifact>` branch, which must already exist (create it and run
+`yad open-pr` from it, which pushes it first). CI (`yad gate ci`) writes the `.sdlc/` + `reviews/`
+records this skill describes. The skill's
 job is the human half: presenting the artifact, helping the owner address comments, and narrating the
 gate. Local `yad gate sync` is advisory in bridge mode (reads the platform, prints status, writes
 nothing); a human must never commit gate-state files (the `ledger-guard` check rejects it).
@@ -178,6 +181,13 @@ nothing); a human must never commit gate-state files (the `ledger-guard` check r
 Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rule is satisfied, whose
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and
 unblocks the next step. (Until those three hold, the step stays `in_review`.)
+
+**Re-reviewing a step that already advanced.** A step is advanced **once** — the chain is never pulled
+backward. But a step that is `done` is still *synced*: when the artifact is edited (for architecture, a
+re-locked contract surface) its prior approvals go stale, and the approvals arriving on the new review
+PR/MR are recorded and bound to the new content. `yad gate status` then shows the truth — how many
+approvals are live against what is in the file today, and how many were revoked — instead of a `done`
+step whose approvals all belong to the version before the edit.
 
 The flow is **merge-driven** (wired by `yad-hub-bridge` `wire`): during review CI writes nothing — the
 platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review

@@ -49,7 +49,10 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 ```
 
 - `awk` emits every line strictly between the two markers (the `next` after BEGIN skips the BEGIN
-  line; setting `f=0` on END stops before printing END).
+  line; setting `f=0` on END stops before printing END), each **terminated by a newline** — so the
+  hashed bytes are the surface lines joined by LF **plus a trailing LF**. That trailing byte is part
+  of the digest; `yad` computes the identical value (`contractSurfaceHash`, `cli/epic-state.mjs`), so
+  the lock file and what the gate binds approvals to are the same number.
 - `tr -d '\r'` normalizes CRLF line endings to LF before hashing — the same surface must hash
   identically no matter which platform last saved the file (the CLI normalizes the same way).
 - `shasum -a 256` (BSD/macOS) or `sha256sum` (GNU/Linux) produce the same hex digest for identical

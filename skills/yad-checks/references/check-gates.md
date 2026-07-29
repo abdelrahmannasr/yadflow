@@ -26,6 +26,10 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 - Maintenance commits are **exempt**: a Conventional-Commits subject of type `ci`, `chore`, `build`,
   or `test` (optional `(scope)` / breaking `!`) **PASSes** without a link — CI wiring, dependency
   bumps, and test-infra changes legitimately link no story.
+- The exemption waives the **requirement** for a link, never the **validity** of one that is claimed.
+  A maintenance commit that *does* carry a `Task:` trailer is resolved like any other: a malformed id
+  or a missing `specs/<story>/link.md` **FAILS**. Otherwise the trailer is decorative on exempt
+  commits and an unlinked `chore:` is indistinguishable from one naming a story that never existed.
 - For every other commit, requires a `Task: <story>-<task>` trailer. **FAIL** if absent.
 - The trailer must be a well-formed `<story>-T<NN>` id. **FAIL** on a malformed trailer (e.g.
   `EP-demo-S01` with no `-T<NN>`) rather than letting it slip through the suffix-strip.
@@ -168,9 +172,22 @@ After the contract locks and code ships, a change must not mutate a locked artif
 epic threaded to its parent (`config.yaml` `change:`). These three gates keep that discipline. All three
 resolve the owning epic the same way: `Task:` trailer → `specs/<story>/link.md` (`epic` + `product-repo`)
 → the hub epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
-commits are exempt. When the **product hub is not reachable** from CI (the usual case for a code-repo
+commits **with no `Task:` trailer** are exempt — like spec-link, the exemption waives the requirement
+for an owning epic, never the validity of one that is claimed, so a maintenance subject cannot buy a
+pass past the sealed-epic / orphan-thread / frozen-thread checks. When the **product hub is not reachable** from CI (the usual case for a code-repo
 PR), each degrades to a **PASS-with-note** — the hub-side check (`yad doctor` / `yad reconcile`) covers
 that path, and spec-link still proves the story link.
+
+**Resolving `product-repo` (shared by all four hub-reading gates, contract-check included).** An
+**absolute** value is used as-is; a **relative** value is joined to the `link.md`'s own directory,
+`specs/<story>/`, falling back to a repo-root reading when only that resolves (what contract-check
+historically did, so `link.md` files written for it keep working). The `link.md` itself is read from
+its frontmatter block, falling back to a whole-file scan for a pre-frontmatter one. Every gate applies
+the identical rule — when they disagree, a value one gate can resolve becomes an unreachable path for
+another, and "unreachable" is a PASS-with-note, so the gate silently stops gating (issue #149). Each
+gate now **prints that note**, so a deferred check is never mistaken for a passed one. The block is
+duplicated verbatim across the four scripts (they are standalone by design) and a test asserts the
+four copies stay byte-identical.
 
 - **lineage-check** — reads the hub epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
   passes. A `change`/`defect`/`hotfix` epic **FAILS** unless it declares a `parent:` that resolves to a

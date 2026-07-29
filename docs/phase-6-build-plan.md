@@ -34,8 +34,10 @@ reference) and **re-authors** only the ones it does. So:
 
 **Why it's cheap.** The CI gates already derive an epic from a story by stripping the `-S0N` suffix and
 read *that epic's own* `contract-lock.json`. A change-epic is a new `EP-<slug2>` with its own stories, so
-every existing derivation, the review gate, the bridge, and `yad next` keep working. `contract-check.sh`
-and `spec-link.sh` stay byte-for-byte unchanged.
+every existing derivation, the review gate, the bridge, and `yad next` keep working — the change needed no
+reshaping of `contract-check.sh` or `spec-link.sh`. (Both have since been corrected in place: they share
+the four gates' `product-repo` resolution, and their type exemption no longer waives a Task trailer that
+is actually present.)
 
 ## What gets built
 
@@ -55,8 +57,9 @@ and `spec-link.sh` stay byte-for-byte unchanged.
   change-epic. This is the staleness preventer.
 - **reconcile-debt** — a thread with open hotfix debt is frozen for new changes until paid.
 
-All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check)
-and degrade to a PASS-with-note when the hub is not reachable from CI.
+All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check
+— absolute as-is, relative to the `link.md`'s own dir) and degrade to a PASS-with-note when the hub is
+not reachable from CI.
 
 ### 3. Five skills
 - **yad-change** — intake + triage; seeds the threaded change-epic (lineage, inherited state, pointer-lock,
@@ -98,5 +101,6 @@ and degrade to a PASS-with-note when the hub is not reachable from CI.
 ## Explicitly NOT in Phase 6
 - No mutation of any locked artifact — ever. A change is a new epic.
 - No auto-advance of any front state (a change-epic's re-authored steps are `human_approve`, like genesis).
-- No new derivation in the existing gates — `spec-link`/`contract-check` are unchanged; the thread is
-  derived from `parent:` frontmatter, not a registry.
+- No new derivation in the existing gates — the thread is derived from `parent:` frontmatter, not a
+  registry. (`spec-link`/`contract-check` were unchanged *by this phase*; both were later corrected for
+  issues #149/#157, which altered neither what they derive nor where the thread comes from.)

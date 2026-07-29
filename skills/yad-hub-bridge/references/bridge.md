@@ -10,7 +10,7 @@ predicate (`../yad-review-gate/references/gating.md`) runs unchanged. The bridge
 |---|---|
 | GitHub review `APPROVED` / GitLab MR approval (`approved_by`) | an `approved` record in `approvals.json`, role resolved from the roster (owner/reviewer) or derived domain-owner, tagged `"source": "bridge"` |
 | GitHub `COMMENTED` / `CHANGES_REQUESTED`; GitLab discussions/notes | a line under `## <name> (<role>)` in `reviews/<artifact>--<date>--comments.md` + a `comments.json` record; **never** an approval. `CHANGES_REQUESTED` is also flagged as blocking in the comments file |
-| GitHub review dismissed / GitLab approval revoked | the prior bridge `approved` record for that approver is removed on re-sync (see idempotency) |
+| GitHub review dismissed / GitLab approval revoked | the prior bridge `approved` record for that approver is removed on re-sync **while the step is open**; once the step is `done` the record is kept as the audit trail of why it passed (see idempotency) |
 
 `approvals.json` records from the bridge carry `"source": "bridge"`; **manual** approvals have no such
 tag and are **never** touched by `sync` — the two coexist.
@@ -82,10 +82,21 @@ login and requested too — otherwise an escalated step is structurally unsatisf
 ## Idempotent re-sync
 
 - Key bridge approvals on `(step, approver, role, domain)`. On re-sync, **upsert** — do not append a
-  duplicate. Remove any bridge approval whose platform review was dismissed/revoked.
-- Key synced comments on the platform comment id so the same comment is not appended twice.
-- Update the step's `hub-prs.json` `lastSyncedAt` after a successful sync.
-- Running `sync` twice with no platform change is a no-op on the ledger.
+  duplicate.
+- **On an OPEN step**, remove any bridge approval whose platform review was dismissed/revoked: the
+  platform is the live source of truth while the review is in flight.
+- **On a step already `done`**, the record is only added to or refreshed in place — an approval the
+  platform no longer reports is **kept**. Those approvals are the audit record of *why* the gate
+  passed; a roster edit, an approval reset, or a degraded-but-successful read would otherwise erase
+  them and leave the step `done` with zero approvals.
+- Key synced comments on the platform comment id so the same comment is not appended twice. Comment
+  rounds are recorded for an **open** step only, so re-visiting a merged review does not append a new
+  round per pass.
+- Update the step's `hub-prs.json` `lastSyncedAt` when the sync **learned something** — every sync on
+  an open step, and on a closed one only when the approval record actually changed (a re-opened review
+  that was re-approved). An identical re-sync leaves it alone, so the ledger does not churn.
+- Running `sync` twice with no platform change is a no-op on the ledger — byte-identical, including
+  `comments.json` and the dated `reviews/*.md` side files.
 
 ## Contract re-lock invalidates prior platform approvals too
 
@@ -200,6 +211,40 @@ reviews not yet `done`). To force it immediately, a maintainer runs the same com
 the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (this writes + pushes,
 unlike advisory `yad gate sync`). File-only mode (no platform) keeps `yad gate sync` as the local writer.
 The file ledger is still the source of truth.
+
+Because CI records the `hub-prs.json` pointer only at merge, a review the ledger has never seen still
+has to be nameable — otherwise `sync` refuses a PR that is sitting merged on the platform. With no
+recorded pointer, `yad gate sync <epic> <artifact>` resolves the PR/MR from the review branch
+(`review/<epic>/<artifact>`) itself, and `--pr <n>` names it outright:
+
+```bash
+yad gate sync EP-x architecture.md --pr 42   # advisory in bridge mode; the writer without the bridge
+```
+
+An explicit `--pr` also **overrides** a recorded pointer, since a re-opened review is a new PR the
+ledger has not seen. Before its reviewers are bound to the artifact's hash, the number is confirmed to
+be the PR for that artifact's review branch — a mismatch is refused, and a platform that cannot answer
+warns and proceeds. The bridge rule is unchanged: the resolved pointer is adopted into the ledger only
+on the writer path, so a human never leaves a gate-state file in their working tree for `ledger-guard`
+to reject.
+
+**In bridge mode `gate sync` stays advisory even with `--pr`** — it prints the predicate and writes
+nothing, because CI owns the ledger. The recovery that actually writes is the command CI itself runs,
+on the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged`.
+
+**Serialization.** Both wired jobs push the ledger to the default branch, and on GitLab the scheduled
+sweep's recent-MR window overlaps whatever the merge-push pipeline is handling — so they are pinned to
+one at a time (`concurrency: yad-gate-mergesync` on GitHub, `resource_group: yad-gate-mergesync` on
+GitLab). Without it both runs produce the same advance, one pushes, and the other rebases onto it and
+lands a duplicate `chore(gate): advance …` commit under a different SHA — unreviewed churn, since
+those commits carry `[skip ci]` and go straight to the default branch. An already-wired GitLab hub
+picks the `resource_group` up on the next `yad update` / `yad check --fix`.
+
+**`yad gate open` does not create or push the review branch.** It opens a PR/MR *against*
+`review/<epic>/<artifact>`, so that branch must already be **on origin** — a local-only branch is no
+use, because `gh pr create --head` does not push either. `yad open-pr`, run from the branch, pushes it
+and then delegates here. Opening with the branch absent is refused up front, before any ledger write,
+rather than failing inside `gh`/`glab`; an origin that cannot be reached at all only warns.
 
 ### Manual end-to-end verification (GitHub)
 

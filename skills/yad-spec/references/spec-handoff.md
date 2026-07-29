@@ -68,7 +68,7 @@ story: EP-<slug>-S0N
 epic: EP-<slug>
 repo: <repo>
 feature-id: EP-<slug>-S0N
-product-repo: <absolute or relative path to the product repo>
+product-repo: <path to the product repo — absolute, or relative to THIS file's dir (specs/<story>/)>
 contract-lock: sha256:<hex copied from epics/EP-<slug>/.sdlc/contract-lock.json>
 speckit: installed | not-installed
 generated: <YYYY-MM-DD>
@@ -86,6 +86,16 @@ The contract surface above is **referenced, not re-defined**. Any change to the 
 back to the architecture gate in the product repo — it is never widened from this code repo.
 ```
 
+`product-repo` is the one field CI resolves on disk (contract-check, lineage-check, epic-open,
+reconcile-debt all read it). Every gate resolves it the SAME way: an **absolute** path is used as-is; a
+**relative** path is joined to this `link.md`'s own directory, `specs/<story>/` — `../../` climbs out
+of the story dir and out of `specs/` to the code-repo root, so a hub checked out beside the code repo
+is `../../../<hub-dir>`. A relative value that only resolves from the **repo root** still works too
+(what contract-check historically did), so older `link.md` files keep gating. Write it as an
+**unquoted scalar** — `"..."` or `'...'` is taken literally, and a leading `~`/`$VAR` is never
+expanded. An unreachable path degrades the hub-reading gates to a PASS-with-note rather than failing
+them, and each one now says so in its output.
+
 ## Do not re-invent the contract
 
 The spec **quotes** the locked surface; it never extends it. To confirm the surface the spec relies on
@@ -93,7 +103,7 @@ matches the lock, run from the **product** repo:
 
 ```bash
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-<slug>/contract.md | shasum -a 256
+  epics/EP-<slug>/contract.md | tr -d '\r' | shasum -a 256
 # compare against epics/EP-<slug>/.sdlc/contract-lock.json
 ```
 

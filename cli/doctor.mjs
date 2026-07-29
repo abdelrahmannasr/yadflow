@@ -6,7 +6,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -280,6 +280,116 @@ export function ciTagsChecks(checks, root, hub, registry) {
   }
 }
 
+// Is `.sdlc/contract-lock.json` still the hash of the surface it claims to lock? The lock is what the
+// spec pins and what contract-check compares a code repo's slice against, but nothing ever verified it
+// against the live contract.md — so a surface edited without a re-lock (or locked with a different
+// recipe) read as "locked" while binding nothing. FAIL on a mismatch: a decorative lock is worse than
+// none, because everyone downstream treats it as proof.
+//
+// Two shapes (yad-change references/triage.md): a SURFACE lock, verified against this epic's own
+// contract.md, and a POINTER lock — a change-epic that inherited architecture, which carries no
+// contract.md at all and instead copies the parent's hash verbatim. Its integrity property is that the
+// copy still equals what the referenced lock holds, so verify it there.
+function contractLockCheck(checks, root, epic, ledger) {
+  const id = `epic:${epic}:contract-lock`;
+  const lock = ledger.contractLock;
+  const epicDir = epicRoot(root, epic);
+  // An epic that has not reached the lock yet simply has no lock file — that is the normal pre-lock
+  // state and stays silent. A lock file that EXISTS but carries no usable hash is the opposite: it is
+  // the decorative lock this check was added to catch, so it must never read as "not locked yet".
+  // `readJSONStrict` yields null both for an absent file and for one holding literal `null`, so ask the
+  // filesystem — the second is a malformed lock, not a missing one.
+  if (lock === null && !exists(ledger.files.contractLock)) return;
+  const stored = typeof lock?.hash === 'string' && /^sha256:[0-9a-f]{64}$/.test(lock.hash) ? lock.hash : null;
+  if (!stored) {
+    check(checks, id, 'epics', 'fail',
+      `${epic}: contract-lock.json exists but carries no usable sha256 hash`,
+      're-lock the surface (yad-architecture Step 5) or delete the file — a lock nobody can verify is worse than none');
+    return;
+  }
+  const short = (h) => `${h.slice(0, 19)}…`;
+
+  if (lock.inheritedFrom || lock.ref) {
+    // The ref is repo-controlled text, so keep it inside this hub's epics/ — a lock file must not be
+    // able to point the check at arbitrary JSON elsewhere on disk.
+    const epicsDir = path.join(root, 'epics');
+    const refPath = path.resolve(path.join(epicDir, '.sdlc'), lock.ref || `../../${lock.inheritedFrom}/.sdlc/contract-lock.json`);
+    if (refPath !== epicsDir && !refPath.startsWith(epicsDir + path.sep)) {
+      check(checks, id, 'epics', 'fail',
+        `${epic}: pointer-lock ref '${lock.ref}' resolves outside epics/`,
+        'a pointer-lock must reference another epic in this hub — fix `ref` (yad-change writes ../../EP-<parent>/.sdlc/contract-lock.json)');
+      return;
+    }
+    const parent = readJSON(refPath, null);
+    if (!parent || typeof parent.hash !== 'string') {
+      check(checks, id, 'epics', 'fail',
+        `${epic}: pointer-lock references ${lock.inheritedFrom || lock.ref}, whose contract-lock.json is missing or has no hash`,
+        're-thread the change-epic (yad-change) so it points at a real parent lock');
+      return;
+    }
+    if (parent.hash !== stored) {
+      check(checks, id, 'epics', 'fail',
+        `${epic}: pointer-lock pins ${short(stored)} but ${lock.inheritedFrom || 'its parent'} now locks ${short(parent.hash)}`,
+        'the inherited surface was re-locked upstream — re-copy the parent hash, or re-author architecture in this epic');
+      return;
+    }
+    // A pointer-lock epic has no contract.md by construction (the surface physically cannot drift).
+    // One that DOES have a contract.md is a change-epic that re-authored architecture but left the
+    // inherited fields behind, so verify the live surface as well rather than trusting the pointer.
+    if (!exists(path.join(epicDir, 'contract.md'))) {
+      check(checks, id, 'epics', 'ok', `${epic}: pointer-lock matches ${lock.inheritedFrom || 'its parent'} (${short(stored)})`);
+      return;
+    }
+    check(checks, `${id}:inherited`, 'epics', 'warn',
+      `${epic}: lock is marked inherited from ${lock.inheritedFrom || lock.ref} but this epic has its own contract.md`,
+      're-authored architecture? drop `inheritedFrom`/`ref` and re-lock against this epic\'s surface');
+    // and fall through to verify the live surface too
+  }
+
+  if (!exists(path.join(epicDir, 'contract.md'))) {
+    check(checks, id, 'epics', 'fail',
+      `${epic}: contract-lock.json pins ${short(stored)} but there is no contract.md to lock`,
+      'restore contract.md, or record the lock as inherited (`inheritedFrom` + `ref`) if this epic threads off a parent');
+    return;
+  }
+  const current = contractSurfaceHash(epicDir);
+  if (current === null) {
+    check(checks, id, 'epics', 'fail',
+      `${epic}: contract-lock.json pins ${short(stored)} but contract.md has no readable CONTRACT-SURFACE block`,
+      'restore the BEGIN/END markers around the surface, then re-lock (see yad-architecture Step 5)');
+    return;
+  }
+  if (current !== stored) {
+    check(checks, id, 'epics', 'fail',
+      `${epic}: contract surface drifted from its lock — contract.md hashes ${short(current)}, contract-lock.json pins ${short(stored)}`,
+      'the surface changed without a re-lock: re-run the yad-architecture Step 5 recipe and re-open the architecture gate');
+    return;
+  }
+  check(checks, id, 'epics', 'ok', `${epic}: contract surface matches its lock (${short(stored)})`);
+}
+
+// A review step that is `done` but whose approvals no longer bind to the artifact as it stands today.
+// The gate is deliberately one-way — nothing pulls a chain backward once work is built on it — so the
+// only way this surfaces is if something reports it. `gate sync` records the gap on the step it is
+// syncing; this reports it for the whole epic, so a re-locked surface that was never re-approved is
+// visible in the one command people run when something looks wrong. WARN, not FAIL: the state is a
+// fact about history, and the fix (re-open the review) is a human decision.
+function staleGateCheck(checks, root, epic, ledger) {
+  const epicDir = epicRoot(root, epic);
+  for (const s of ledger.state.steps) {
+    if (s.type !== 'review+approve' || s.status !== 'done' || s.inherited || s.skipped) continue;
+    const cur = artifactHash(epicDir, s.artifact);
+    if (!cur) continue; // nothing to bind to (no locked surface / incomplete set) — not a staleness claim
+    const forStep = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved');
+    if (!forStep.length) continue; // solo mode waives approvals entirely; absence is not staleness
+    const live = forStep.filter((a) => !a.artifactHash || a.artifactHash === cur);
+    if (live.length) continue;
+    check(checks, `epic:${epic}:${s.id}:stale`, 'epics', 'warn',
+      `${epic}: ${s.id} is done, but all ${forStep.length} approval(s) are bound to an older ${s.artifact}`,
+      'the artifact changed after it was approved — re-open the review (a fresh PR/MR) so the record matches what shipped');
+  }
+}
+
 export function epicChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
@@ -308,6 +418,8 @@ export function epicChecks(checks, root) {
         if (openPr) check(checks, `epic:${e}:migration`, 'epics', 'warn',
           `${e}: an open review PR (${openPr.artifact}${openPr.number ? ` #${openPr.number}` : ''}) is recorded on the default branch`,
           'opened under a pre-3.0 yadflow? merge/close it before continuing — CI now records the gate ledger on the default branch only at merge');
+        contractLockCheck(checks, root, e, ledger);
+        staleGateCheck(checks, root, e, ledger);
       }
     } catch (err) {
       check(checks, `epic:${e}`, 'epics', 'fail', `${e}: ${err.message} [${err.code || 'YAD-STATE-001'}]`, err.hint || 'fix the file or restore it from git');
