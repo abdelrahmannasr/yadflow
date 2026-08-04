@@ -4796,6 +4796,26 @@ test('doctor: absent design.json is silent (markdown-only is the normal default)
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('manifest tool lists mirror skills/sdlc/config.yaml (the comments claim they do)', async () => {
+  const { DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } = await import('./manifest.mjs');
+  const cfg = fs.readFileSync(path.join(ROOT, 'skills/sdlc/config.yaml'), 'utf8');
+  // `tools: [a, b, c]` under each section — read the FIRST match after the section key so a
+  // `tools:` elsewhere in the file cannot satisfy the assertion.
+  const listAfter = (section) => {
+    const at = cfg.indexOf(`\n${section}:`);
+    assert.ok(at >= 0, `config.yaml has no \`${section}:\` section`);
+    const m = /\n\s*tools:\s*\[([^\]]*)\]/.exec(cfg.slice(at));
+    assert.ok(m, `config.yaml \`${section}\` has no \`tools:\` list`);
+    return m[1].split(',').map((s) => s.trim()).filter(Boolean);
+  };
+  // Drift here is silent and expensive: doctor validates against the manifest while humans read
+  // config.yaml, so a tool added to one and not the other is accepted by one and rejected by the
+  // other with no error pointing at the mismatch.
+  assert.deepEqual(listAfter('design'), DESIGN_TOOLS, 'design.tools drifted from DESIGN_TOOLS');
+  assert.deepEqual(listAfter('testing'), TESTING_TOOLS, 'testing.tools drifted from TESTING_TOOLS');
+  assert.deepEqual(listAfter('learning'), LEARNING_TOOLS, 'learning.tools drifted from LEARNING_TOOLS');
+});
+
 test('doctor: testing.json with a known tool + confirmed MCP is ok; unknown tool fails YAD-CFG-003', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
@@ -4803,6 +4823,10 @@ test('doctor: testing.json with a known tool + confirmed MCP is ok; unknown tool
   fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'playwright', source: 'playwright-mcp' }));
   let r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'ok' && /playwright/.test(x.message)));
+  // maestro is a first-class adapter (mobile E2E, where playwright has no reach)
+  fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'maestro', source: 'maestro-mcp' }));
+  r = await doctorOn(T);
+  assert.ok(r.checks.some((x) => x.id === 'testing' && x.status === 'ok' && /maestro/.test(x.message)));
   // none => artifacts-only, still ok
   fs.writeFileSync(path.join(T, '.sdlc/testing.json'), JSON.stringify({ tool: 'none', source: 'unavailable' }));
   r = await doctorOn(T);

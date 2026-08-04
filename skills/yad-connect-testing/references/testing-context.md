@@ -15,6 +15,7 @@ Detection is best-effort against the user's own authenticated MCP session:
 | `playwright` | a Playwright MCP | **generate** — author + run E2E/API specs against the app |
 | `cypress` | the Cypress MCP | **generate** — author + run Cypress specs |
 | `pytest` | a pytest MCP | **generate** — author + run service-layer tests |
+| `maestro` | the Maestro MCP (`maestro mcp`, bundled in the CLI, STDIO) | **generate** — author + run Maestro flows on iOS/Android/Chromium |
 | any | a read-only runner MCP | **link** — reference an existing suite and read results back |
 | other | the adapter's named MCP | per that adapter |
 

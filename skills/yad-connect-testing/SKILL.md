@@ -21,7 +21,7 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
 - `{project-root}` resolves from the project working directory (the **product hub**).
 - The integration is **Playwright-first but pluggable** (`config.yaml` `testing.tools`): a testing-tool
   *adapter*, like the GitHub/GitLab platform adapter or the design-tool adapter. Playwright is the
-  primary provider; `cypress` and `pytest` are second providers; `none` → artifacts-only.
+  primary provider; `cypress`, `pytest` and `maestro` are second providers; `none` → artifacts-only.
 - **The testing tool is reached through its MCP** (a harness MCP server), NOT a subprocess CLI — the
   same shape as the design tool's MCP, not Repomix's `npx`. The skill detects the MCP and degrades when
   it is absent; it never installs an MCP server.
@@ -34,7 +34,7 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
 ## Inputs
 
 - `action` — `connect` (default) | `refresh` | `list` | `disconnect`.
-- `tool` — `playwright` | `cypress` | `pytest` | another adapter id (`config.yaml` `testing.tools`).
+- `tool` — `playwright` | `cypress` | `pytest` | `maestro` | another adapter id (`config.yaml` `testing.tools`).
   `none` records a deliberate artifacts-only project.
 - `project_url` — the testing tool's project/config reference (e.g. a `playwright.config.ts` path or a
   test-runner project URL). Optional — a connection with no suite yet is valid; `yad-test-cases` can
@@ -51,9 +51,13 @@ way `registerRepo` falls back on an unknown platform). Then **detect the tool's 
 - **playwright** → a Playwright MCP server (drives a browser, generates/runs E2E + API specs).
 - **cypress** → the Cypress MCP (generate/run Cypress specs).
 - **pytest** → a pytest MCP (generate/run service-layer tests).
+- **maestro** → the Maestro MCP, bundled in the Maestro CLI and started as `maestro mcp` over STDIO
+  (drives iOS simulators, Android emulators and Chromium; generates/runs Maestro flows). Mobile E2E,
+  where Playwright has no reach.
 - another adapter → its named MCP.
 
-Record `provider` (the concrete MCP, e.g. `playwright-mcp` | `cypress-mcp` | `pytest-mcp`) and whether
+Record `provider` (the concrete MCP, e.g. `playwright-mcp` | `cypress-mcp` | `pytest-mcp` |
+`maestro-mcp`) and whether
 it is available. **Auth is the local user's own** — the user's authenticated MCP session. The skill
 **stores no tokens**; `project_url`/`suites` are plain references, never credentials.
 
