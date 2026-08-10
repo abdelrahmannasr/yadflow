@@ -4799,12 +4799,16 @@ test('doctor: absent design.json is silent (markdown-only is the normal default)
 test('manifest tool lists mirror skills/sdlc/config.yaml (the comments claim they do)', async () => {
   const { DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } = await import('./manifest.mjs');
   const cfg = fs.readFileSync(path.join(ROOT, 'skills/sdlc/config.yaml'), 'utf8');
-  // `tools: [a, b, c]` under each section — read the FIRST match after the section key so a
-  // `tools:` elsewhere in the file cannot satisfy the assertion.
+  // `tools: [a, b, c]` under one section — read it from the section's OWN body, bounded at the next
+  // top-level key, so a section that lost its list cannot borrow a later section's and report a
+  // false match. The whitespace classes are horizontal-only for the same reason: `\s*` spans
+  // newlines, which would let `tools:` on a later line still count as this line's list.
   const listAfter = (section) => {
     const at = cfg.indexOf(`\n${section}:`);
     assert.ok(at >= 0, `config.yaml has no \`${section}:\` section`);
-    const m = /\n\s*tools:\s*\[([^\]]*)\]/.exec(cfg.slice(at));
+    const body = cfg.slice(at + 1);
+    const end = body.search(/\n[a-z_]+:/);            // the next top-level key ends this section
+    const m = /\n[^\S\n]*tools:[^\S\n]*\[([^\]]*)\]/.exec(end === -1 ? body : body.slice(0, end));
     assert.ok(m, `config.yaml \`${section}\` has no \`tools:\` list`);
     return m[1].split(',').map((s) => s.trim()).filter(Boolean);
   };
