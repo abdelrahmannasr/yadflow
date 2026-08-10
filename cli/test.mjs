@@ -1484,6 +1484,36 @@ test('runNext --json: a bad id / missing epic still yields ONE parseable object,
   process.exitCode = 0;
 });
 
+// The ONE input where "no state.json" is not an error: `--check <entry step>`. `preconditionsMet`
+// answers a null ledger with the entry-step rule — `epic`/`analysis`/`discovery` are runnable when
+// nothing is seeded yet — because that is exactly when the guard is called ("may I author this?").
+// The actions route above still errors on a missing ledger; only the guard is exempt, and `--json`
+// has to say what the prose says, or a caller that switched to the object would read a different
+// answer for the same command.
+test('runNext --json: --check on an unseeded epic matches prose — the entry step is runnable', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson6-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  process.exitCode = 0;
+  const entry = await nextJSON(T, { epic: 'EP-unseeded', check: 'epic' });
+  assert.equal(process.exitCode, 0, 'the entry step is runnable, so the guard must exit 0');
+  assert.equal(entry.ok, true);
+  assert.equal(entry.check.ok, true);
+  assert.equal(entry.check.epic, 'EP-unseeded');
+  // …and the prose guard, on the same unseeded epic, agrees.
+  process.exitCode = 0;
+  const prose = await grab(() => runNext(T, { epic: 'EP-unseeded', check: 'epic' }));
+  assert.equal(process.exitCode, 0);
+  assert.match(prose, /ready to run/);
+  // A later step is still blocked in both renderings — the exemption is the entry step, not the file.
+  process.exitCode = 0;
+  const later = await nextJSON(T, { epic: 'EP-unseeded', check: 'architecture' });
+  assert.equal(process.exitCode, 1);
+  assert.equal(later.ok, false);
+  assert.ok(later.check.reason, 'a blocked step must say why');
+  process.exitCode = 0;
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — the profile interview (resolveProfile is pure of side effects)
 // ---------------------------------------------------------------------------------------------
