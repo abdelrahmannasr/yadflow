@@ -1,3 +1,10 @@
+# [3.14.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.13.2...v3.14.0) (2026-08-10)
+
+
+### Features
+
+* **next:** emit the action object with --json ([40d34dd](https://github.com/abdelrahmannasr/yadflow/commit/40d34ddba2492821700c7a877de28938faa74f3e))
+
 ## [3.13.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.13.1...v3.13.2) (2026-08-10)
 
 
