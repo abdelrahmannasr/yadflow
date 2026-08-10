@@ -1,3 +1,10 @@
+# [3.15.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.14.0...v3.15.0) (2026-08-10)
+
+
+### Features
+
+* **testing:** add maestro as a testing-tool adapter ([7718b50](https://github.com/abdelrahmannasr/yadflow/commit/7718b502814ee8e0eb46f5e6f20342fc2471dbd7))
+
 # [3.14.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.13.2...v3.14.0) (2026-08-10)
 
 
