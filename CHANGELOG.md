@@ -1,3 +1,10 @@
+## [3.13.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.13.1...v3.13.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **doctor:** fail a done review gate that holds no approval ([b1b23df](https://github.com/abdelrahmannasr/yadflow/commit/b1b23df5426e8523cdb1d95221cb2291200c6249))
+
 ## [3.13.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.13.0...v3.13.1) (2026-07-29)
 
 
