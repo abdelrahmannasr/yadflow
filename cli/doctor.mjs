@@ -368,20 +368,40 @@ function contractLockCheck(checks, root, epic, ledger) {
   check(checks, id, 'epics', 'ok', `${epic}: contract surface matches its lock (${short(stored)})`);
 }
 
-// A review step that is `done` but whose approvals no longer bind to the artifact as it stands today.
-// The gate is deliberately one-way — nothing pulls a chain backward once work is built on it — so the
-// only way this surfaces is if something reports it. `gate sync` records the gap on the step it is
-// syncing; this reports it for the whole epic, so a re-locked surface that was never re-approved is
-// visible in the one command people run when something looks wrong. WARN, not FAIL: the state is a
-// fact about history, and the fix (re-open the review) is a human decision.
-function staleGateCheck(checks, root, epic, ledger) {
+// Two findings on a review step that is already `done`, both about the approval record behind it.
+//
+//   FAIL — it holds NO qualifying approval at all (outside solo mode). This is the state the gate
+//   exists to prevent: the step advanced without the record that justifies it. `gatePredicate` counts
+//   exactly the same thing (`status === 'approved'`, with `inherited`/`skipped` steps short-circuited
+//   before it), so a step doctor reports here is one the gate itself would refuse today.
+//
+//   WARN — it holds approvals, but none still bind to the artifact as it stands. The gate is
+//   deliberately one-way — nothing pulls a chain backward once work is built on it — so the only way
+//   this surfaces is if something reports it. `gate sync` records the gap on the step it is syncing;
+//   this reports it for the whole epic, so a re-locked surface that was never re-approved is visible
+//   in the one command people run when something looks wrong. A warning, because the state is a fact
+//   about history and the fix (re-open the review) is a human decision.
+function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
   const epicDir = epicRoot(root, epic);
   for (const s of ledger.state.steps) {
     if (s.type !== 'review+approve' || s.status !== 'done' || s.inherited || s.skipped) continue;
+    const forStep = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved');
+    // Checked BEFORE the artifact hash below: "done holding no approval" is a claim about the ledger,
+    // not about content, so it must not depend on there being something to hash. Gating it behind the
+    // hash would keep hiding it on every epic with no locked surface.
+    if (!forStep.length) {
+      // Solo mode waives the approval requirement outright (you cannot approve your own PR) — the
+      // merge + resolved threads are what advance the step, so an empty record is the documented
+      // shape there, not a finding. Everywhere else it is the gate being silently defeated.
+      if (solo) continue;
+      const records = ledger.approvals.filter((a) => a.step === s.id).length;
+      check(checks, `epic:${epic}:${s.id}:unapproved`, 'epics', 'fail',
+        `${epic}: ${s.id} is done but holds no approval${records ? ` (${records} record(s), none of them live)` : ''}`,
+        'the step advanced without the record the gate exists to keep — re-open the review (a fresh PR/MR) and re-approve, or run `yad gate sync` if the approvals are on the PR but never reached the ledger');
+      continue;
+    }
     const cur = artifactHash(epicDir, s.artifact);
     if (!cur) continue; // nothing to bind to (no locked surface / incomplete set) — not a staleness claim
-    const forStep = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved');
-    if (!forStep.length) continue; // solo mode waives approvals entirely; absence is not staleness
     const live = forStep.filter((a) => !a.artifactHash || a.artifactHash === cur);
     if (live.length) continue;
     check(checks, `epic:${epic}:${s.id}:stale`, 'epics', 'warn',
@@ -393,6 +413,8 @@ function staleGateCheck(checks, root, epic, ledger) {
 export function epicChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
+  // Read once for the whole sweep: whether approval is waived is a project fact, not a per-epic one.
+  const solo = isSolo(readJSON(path.join(root, PROJECT_FILES.hubConfig), null));
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
     try {
@@ -419,7 +441,7 @@ export function epicChecks(checks, root) {
           `${e}: an open review PR (${openPr.artifact}${openPr.number ? ` #${openPr.number}` : ''}) is recorded on the default branch`,
           'opened under a pre-3.0 yadflow? merge/close it before continuing — CI now records the gate ledger on the default branch only at merge');
         contractLockCheck(checks, root, e, ledger);
-        staleGateCheck(checks, root, e, ledger);
+        staleGateCheck(checks, root, e, ledger, { solo });
       }
     } catch (err) {
       check(checks, `epic:${e}`, 'epics', 'fail', `${e}: ${err.message} [${err.code || 'YAD-STATE-001'}]`, err.hint || 'fix the file or restore it from git');

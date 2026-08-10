@@ -4589,6 +4589,75 @@ test('doctor: a done review whose approvals all went stale is reported', async (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A `done` review step holding no approval at all — the state the gate exists to prevent. Before this,
+// zero approvals was treated as a solo waiver without checking whether the project is actually solo,
+// so doctor called such a project healthy.
+function seedDoneReview(T, epic, approvals, { hub } = {}) {
+  const ep = path.join(T, 'epics', epic);
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: epic, currentStep: 'ready-for-build',
+    steps: [{ id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done' }],
+  }));
+  if (approvals) fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(approvals));
+  if (hub) fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+  return ep;
+}
+const unapprovedHit = (r, epic) => r.checks.find((x) => x.id === `epic:${epic}:architecture-review:unapproved`);
+
+test('doctor: a done review holding only revoked approvals FAILS on a team project', async () => {
+  const { T } = scaffold();
+  seedDoneReview(T, 'EP-unapproved', [
+    { step: 'architecture-review', approver: 'alice', role: 'owner', status: 'revoked' },
+    { step: 'architecture-review', approver: 'bob', role: 'reviewer', status: 'revoked' },
+  ]);
+  const r = await doctorOn(T);
+  const hit = unapprovedHit(r, 'EP-unapproved');
+  assert.equal(hit?.status, 'fail');
+  assert.match(hit.message, /is done but holds no approval \(2 record\(s\), none of them live\)/);
+  assert.ok(r.failed >= 1, 'the project must not read as healthy');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: a done review with NO approvals.json fails even with no artifact to hash', async () => {
+  // The finding is about the ledger, not the content — so it must not depend on artifactHash() having
+  // something to bind to. This epic has no architecture.md at all.
+  const { T } = scaffold();
+  seedDoneReview(T, 'EP-noledger', null);
+  const hit = unapprovedHit(await doctorOn(T), 'EP-noledger');
+  assert.equal(hit?.status, 'fail');
+  assert.match(hit.message, /is done but holds no approval$/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: solo mode still waives approvals — the same ledger is not a finding', async () => {
+  const { T } = scaffold();
+  seedDoneReview(T, 'EP-solo', [
+    { step: 'architecture-review', approver: 'alice', role: 'owner', status: 'revoked' },
+  ], { hub: { platform: 'github', solo: true } });
+  const r = await doctorOn(T);
+  assert.equal(unapprovedHit(r, 'EP-solo'), undefined);
+  assert.equal(r.failed, 0, JSON.stringify(r.checks.filter((x) => x.status === 'fail')));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: an inherited or skipped done review is exempt, as it is at the gate', async () => {
+  const { T } = scaffold();
+  const ep = path.join(T, 'epics/EP-inherited');
+  fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-inherited', currentStep: 'ready-for-build',
+    steps: [
+      // Phase 6: approval lives upstream in the thread. gatePredicate short-circuits both of these.
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done', inherited: true },
+      { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'done', skipped: true },
+    ],
+  }));
+  const r = await doctorOn(T);
+  assert.equal(r.checks.filter((x) => x.id.endsWith(':unapproved')).length, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: untagged GitLab fragment warns with YAD-CI-001; tagged is silent', async () => {
   const { T } = scaffold();
   const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
