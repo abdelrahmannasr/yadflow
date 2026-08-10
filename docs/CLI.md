@@ -99,7 +99,7 @@ does / why / what to enter / what skipping means), and the step count adapts.
    (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
 3. **Hub platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
-4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest), learning (DeepTutor).
+4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).
    Configure now, or **defer with one prompt** → all recorded as `none` (connect later with the
    `yad-connect-*` skills; the MCPs/CLIs are confirmed there).
 5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo and
@@ -185,7 +185,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
 | `YAD-CFG-002` | `design.json` names an unknown design tool | expected one of `config.yaml` `design.tools` (e.g. `figma`, `pencil`), or `none` — fix it or re-run `yad setup` |
-| `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`), or `none` — fix it or re-run `yad setup` |
+| `YAD-CFG-003` | `testing.json` names an unknown testing tool | expected one of `config.yaml` `testing.tools` (e.g. `playwright`, `cypress`, `pytest`, `maestro`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-004` | `learning.json` names an unknown learning tool | expected one of `config.yaml` `learning.tools` (e.g. `deeptutor`), or `none` — fix it or re-run `yad setup` |
 | `YAD-CFG-005` | `hub.json` sets a platform but is missing `git_url` (needed to scope auth + open PRs) | add `git_url` to `.sdlc/hub.json`, or re-run `yad setup` — it backfills it from the origin remote |
 
