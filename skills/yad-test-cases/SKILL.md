@@ -94,7 +94,8 @@ Read `{project-root}/.sdlc/testing.json` (`config.yaml` `testing.registry`). Dec
   the Markdown artifact only and record `testing: none` in the frontmatter with a one-line note
   (mirrors the `design: none` degrade). Skip to Step 4.
 - **A tool is connected and its MCP is available:** adopt the `test architect` lens and, using the
-  provider recorded in `testing.json` (Playwright via a Playwright MCP, Cypress/pytest via theirs) drive
+  provider recorded in `testing.json` (Playwright via a Playwright MCP, Cypress/pytest/Maestro via
+  theirs — Maestro authors mobile flows where Playwright has no reach) drive
   `bmad-testarch-automate`:
   - **Generate** — when the provider is write-capable, author one automation test per high-priority
     (P0/P1) case into the connected code repo(s) for the repos in `epic.repos`, reusing the code-maps
@@ -120,7 +121,7 @@ status: draft
 owner: <inherit from epic.md owner>   # the epic owner carries through; not retyped
 repos: [<inherit from epic>]
 code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # code-maps that informed the tests (Step 2b)
-testing: <none | { tool: <playwright|cypress|pytest|…>, direction: <generated|linked>, suite: <url/path>, tests: <N> }>   # the connected testing tool (Step 3b)
+testing: <none | { tool: <playwright|cypress|pytest|maestro|…>, direction: <generated|linked>, suite: <url/path>, tests: <N> }>   # the connected testing tool (Step 3b)
 ---
 
 ## Test strategy & risk
