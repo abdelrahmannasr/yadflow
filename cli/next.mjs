@@ -9,10 +9,11 @@
 //   yad next <epic>           the single next action for one epic
 //   yad next <epic> --check <step>   exit 0 if <step> is runnable now, else 1 (the precondition guard)
 //   yad next --all            every active epic's next action at once
+//   yad next [<epic>] --json  the same answer as an action object, for an agent or CI
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { PROJECT_FILES, VERSION } from './manifest.mjs';
 import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, kindNoun, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
@@ -36,6 +37,14 @@ function listEpics(root) {
     .filter((id) => exists(path.join(dir, id, '.sdlc', 'state.json')))
     .sort();
 }
+
+// The action object for ONE epic, with its lineage kind attached. The single shape both surfaces
+// consume — `printAction` renders it, `--json` emits it verbatim — so the prose and the machine
+// answer can never drift apart.
+const actionFor = (root, id) => ({
+  ...nextAction(loadLedger(epicRoot(root, id)), { epic: id }),
+  lineageKind: epicLineage(root, id).kind,
+});
 
 // EP-istifta-inquiries-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
 const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
@@ -128,9 +137,7 @@ function generalNext(root, { all } = {}) {
   const allEpics = listEpics(root);
   const hasDiscovery = allEpics.includes(DISCOVERY_EPIC);
   const featureEpics = allEpics.filter((id) => id !== DISCOVERY_EPIC);
-  const discoveryAction = hasDiscovery
-    ? nextAction(loadLedger(epicRoot(root, DISCOVERY_EPIC)), { epic: DISCOVERY_EPIC })
-    : null;
+  const discoveryAction = hasDiscovery ? actionFor(root, DISCOVERY_EPIC) : null;
   const discoveryOpen = !!discoveryAction && discoveryAction.kind !== 'discovery-done';
 
   if (!featureEpics.length) {
@@ -142,10 +149,7 @@ function generalNext(root, { all } = {}) {
     return;
   }
 
-  const actions = featureEpics.map((id) => ({
-    ...nextAction(loadLedger(epicRoot(root, id)), { epic: id }),
-    lineageKind: epicLineage(root, id).kind,
-  }));
+  const actions = featureEpics.map((id) => actionFor(root, id));
   if (discoveryOpen) printAction(discoveryAction, { solo });   // an unfinished discovery comes first
 
   if (featureEpics.length === 1 || all) {
@@ -171,14 +175,59 @@ function checkPrecondition(root, epic, stepId) {
   process.exitCode = 1;
 }
 
+// ---- machine-readable output (`--json`) --------------------------------------------------------
+// `nextAction` already computes exactly what a caller needs; until now the ANSI prose renderer was
+// its only consumer, so anything driving yadflow had to regex coloured English. This emits the SAME
+// objects, unrendered. One envelope for every route, so a caller never has to branch on the shape:
+//
+//   { version, ok: true,  actions: [ <action>, … ] }        next / next <epic>
+//   { version, ok,        check: { epic, step, ok, reason } } next <epic> --check <step>
+//   { version, ok: true,  setUp: false, actions: [] }        the project has no `yad setup` yet
+//   { version, ok: false, error }                            bad epic id / no state.json
+//
+// Exit codes are unchanged from the prose path — only the rendering differs.
+const emitJSON = (payload) => log(JSON.stringify({ version: VERSION, ...payload }, null, 2));
+
+// A JSON error still leaves stdout parseable: a caller that pipes us into a parser gets an object
+// explaining the failure, never half a document or a bare ANSI line.
+function jsonError(message) {
+  emitJSON({ ok: false, error: message });
+  process.exitCode = 1;
+}
+
+// `--json` counterpart of runNext's three routes. Kept in one function so the routing reads next to
+// the prose routing it mirrors.
+function jsonNext(root, { epic, check }) {
+  if (epic && check) {
+    const res = preconditionsMet(loadLedger(epicRoot(root, epic)).state, check);
+    emitJSON({ ok: !!res.ok, check: { epic, step: check, ok: !!res.ok, ...(res.reason ? { reason: res.reason } : {}) } });
+    if (!res.ok) process.exitCode = 1;
+    return;
+  }
+  if (epic) {
+    if (!exists(path.join(epicRoot(root, epic), '.sdlc', 'state.json'))) {
+      return jsonError(`no epic state at epics/${epic}/.sdlc/state.json`);
+    }
+    return emitJSON({ ok: true, actions: [actionFor(root, epic)] });
+  }
+  if (!isSetUp(root)) return emitJSON({ ok: true, setUp: false, actions: [] });
+  // Every epic that HAS a ledger, discovery included — its `kind` already says whether it is open
+  // (`discovery-*`) or finished, so filtering it out would hide a fact rather than clarify one.
+  // `--all` is implied: an array always carries everything, so there is nothing left to expand.
+  return emitJSON({ ok: true, actions: listEpics(root).map((id) => actionFor(root, id)) });
+}
+
 // Entry point for the `next` command: route to the precondition check, a single epic's action, or the
 // project-wide general view. Validates the epic id first.
-export async function runNext(root, { epic, check, all } = {}) {
+export async function runNext(root, { epic, check, all, json } = {}) {
   if (epic && !isValidEpicId(epic)) {
-    fail(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`);
+    const message = `invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`;
+    if (json) return jsonError(message);
+    fail(message);
     process.exitCode = 1;
     return;
   }
+  if (json) return jsonNext(root, { epic, check });
   if (epic && check) return checkPrecondition(root, epic, check);
   if (!epic) return generalNext(root, { all });
 
@@ -189,8 +238,5 @@ export async function runNext(root, { epic, check, all } = {}) {
     process.exitCode = 1;
     return;
   }
-  printAction(
-    { ...nextAction(loadLedger(epicDir), { epic }), lineageKind: epicLineage(root, epic).kind },
-    { solo: isSolo(root) },
-  );
+  printAction(actionFor(root, epic), { solo: isSolo(root) });
 }

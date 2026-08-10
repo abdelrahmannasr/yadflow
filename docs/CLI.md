@@ -18,7 +18,7 @@ no clone needed.
 | Command | What it does |
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
-| `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so the build half is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. |
+| `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so the build half is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. |
@@ -53,6 +53,32 @@ fails locally if it is malformed), `--ai
 <claude\|copilot\|cursor\|coderabbit\|none>`, `--contract-change`, `--dry-run`. `open-pr` flags:
 `--repo`, `--risk <low\|medium\|high>`, `--contract-change`. `ship` takes the union of the `commit`
 and `open-pr` flags (it runs `open-pr` only if the commit lands).
+
+### `yad next --json` (the driver, machine-readable)
+
+`yad next` renders coloured English, which is the wrong shape for the agents and CI jobs that drive
+this workflow. `--json` emits the action object the router already computed. One envelope covers
+every route, so a caller never branches on the output shape:
+
+```jsonc
+// yad next --json  /  yad next <epic> --json
+{ "version": "3.13.1", "ok": true, "actions": [ /* one per epic, EP-discovery included */ ] }
+
+// yad next <epic> --check <step> --json      (exit 1 when the step is blocked, as in prose)
+{ "version": "3.13.1", "ok": false, "check": { "epic": "EP-x", "step": "architecture-review", "ok": false, "reason": "…" } }
+
+// the project has no `yad setup` yet
+{ "version": "3.13.1", "ok": true, "setUp": false, "actions": [] }
+
+// bad epic id, or an epic with no state.json
+{ "version": "3.13.1", "ok": false, "error": "invalid epic id: …" }
+```
+
+Each action carries `epicId`, `kind`
+(`new|author|review-open|review-sync|build|discovery-done|backfill-pending|backfill-done`), `step`,
+`status`, `artifact`, `skill`, `command`, `pr`, `parallel`, `builds` (the per-story/per-repo lanes)
+`why`, and `lineageKind`. `--all` is implied — the array always carries every epic. Exit codes are
+identical to the prose path, and the prose path itself is unchanged.
 
 ## The PR-driven review gate
 

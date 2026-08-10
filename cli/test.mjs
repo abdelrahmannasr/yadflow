@@ -1396,6 +1396,124 @@ test('runNext: no-epics non-brownfield omits the backfill hint; bad id / missing
   process.exitCode = 0;
 });
 
+// --- `yad next --json`: the same answers, unrendered -------------------------------------------
+// Every route must emit ONE parseable document with no ANSI, and keep the prose path's exit code.
+const nextJSON = async (T, opts = {}) => JSON.parse(await grab(() => runNext(T, { ...opts, json: true })));
+const { VERSION: NEXT_JSON_VERSION } = await import('./manifest.mjs');
+
+test('runNext --json: one epic emits the action object, with no ANSI to parse around', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson1-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  const raw = await grab(() => runNext(T, { epic: 'EP-x', json: true }));
+  assert.ok(!raw.includes('\u001b'), 'JSON must never carry the ANSI the prose renderer adds');
+  const j = JSON.parse(raw);
+  assert.equal(j.ok, true);
+  assert.equal(j.actions.length, 1);
+  assert.equal(j.actions[0].epicId, 'EP-x');
+  assert.equal(j.actions[0].kind, 'author');
+  assert.equal(j.actions[0].skill, 'yad-architecture');
+  assert.equal(j.actions[0].lineageKind, 'feature');
+  assert.equal(j.version, NEXT_JSON_VERSION);
+});
+
+test('runNext --json: the project view carries every epic distinctly, so --all is implied', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-a', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  seedEpic(T, 'EP-b', chain({ currentStep: 'epic-review', epicReview: 'in_review', architecture: 'blocked' }));
+  seedEpic(T, 'EP-discovery', { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review', steps: [
+    S('discovery', 'author', 'done', 'discovery/'),
+    S('discovery-review', 'review+approve', 'in_review', 'discovery/'),
+  ] });
+  const j = await nextJSON(T);
+  // The prose roll-up renders one line per epic; the object keeps every field, so two epics sitting
+  // on the SAME kind (EP-b and EP-discovery are both `review-open`) stay distinguishable by step.
+  assert.deepEqual(j.actions.map((a) => a.epicId).sort(), ['EP-a', 'EP-b', 'EP-discovery']);
+  assert.equal(new Set(j.actions.map((a) => `${a.kind}|${a.step}`)).size, 3);
+  assert.equal(j.actions.find((a) => a.epicId === 'EP-a').kind, 'author');
+  // Discovery is an entry like any other — its own kind/step already say it is open.
+  const disc = j.actions.find((a) => a.epicId === 'EP-discovery');
+  assert.equal(disc.kind, 'review-open');
+  assert.equal(disc.step, 'discovery-review');
+});
+
+test('runNext --json: an un-set-up project says so instead of printing setup prose', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson3-'));
+  const j = await nextJSON(T);
+  assert.equal(j.ok, true);
+  assert.equal(j.setUp, false);
+  assert.deepEqual(j.actions, []);
+});
+
+test('runNext --json: --check reports the precondition and keeps the exit code', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson4-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  process.exitCode = 0;
+  const blocked = await nextJSON(T, { epic: 'EP-x', check: 'architecture-review' });
+  assert.equal(process.exitCode, 1);
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.check.step, 'architecture-review');
+  assert.ok(blocked.check.reason, 'a blocked step must say why');
+  process.exitCode = 0;
+  const ready = await nextJSON(T, { epic: 'EP-x', check: 'architecture' });
+  assert.equal(process.exitCode, 0);
+  assert.equal(ready.ok, true);
+  assert.equal(ready.check.ok, true);
+  process.exitCode = 0;
+});
+
+test('runNext --json: a bad id / missing epic still yields ONE parseable object, exit 1', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson5-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  process.exitCode = 0;
+  const bad = await nextJSON(T, { epic: 'not-an-id' });
+  assert.equal(process.exitCode, 1);
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /invalid epic id/);
+  process.exitCode = 0;
+  const missing = await nextJSON(T, { epic: 'EP-missing' });
+  assert.equal(process.exitCode, 1);
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /EP-missing/);
+  process.exitCode = 0;
+});
+
+// The ONE input where "no state.json" is not an error: `--check <entry step>`. `preconditionsMet`
+// answers a null ledger with the entry-step rule — `epic`/`analysis`/`discovery` are runnable when
+// nothing is seeded yet — because that is exactly when the guard is called ("may I author this?").
+// The actions route above still errors on a missing ledger; only the guard is exempt, and `--json`
+// has to say what the prose says, or a caller that switched to the object would read a different
+// answer for the same command.
+test('runNext --json: --check on an unseeded epic matches prose — the entry step is runnable', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson6-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  process.exitCode = 0;
+  const entry = await nextJSON(T, { epic: 'EP-unseeded', check: 'epic' });
+  assert.equal(process.exitCode, 0, 'the entry step is runnable, so the guard must exit 0');
+  assert.equal(entry.ok, true);
+  assert.equal(entry.check.ok, true);
+  assert.equal(entry.check.epic, 'EP-unseeded');
+  // …and the prose guard, on the same unseeded epic, agrees.
+  process.exitCode = 0;
+  const prose = await grab(() => runNext(T, { epic: 'EP-unseeded', check: 'epic' }));
+  assert.equal(process.exitCode, 0);
+  assert.match(prose, /ready to run/);
+  // A later step is still blocked in both renderings — the exemption is the entry step, not the file.
+  process.exitCode = 0;
+  const later = await nextJSON(T, { epic: 'EP-unseeded', check: 'architecture' });
+  assert.equal(process.exitCode, 1);
+  assert.equal(later.ok, false);
+  assert.ok(later.check.reason, 'a blocked step must say why');
+  process.exitCode = 0;
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — the profile interview (resolveProfile is pure of side effects)
 // ---------------------------------------------------------------------------------------------
