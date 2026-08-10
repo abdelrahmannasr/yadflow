@@ -590,9 +590,12 @@ export async function runSetup(root, opts = {}) {
     }
 
     // Connect a testing tool (Playwright-first, pluggable; the test-cases step implements automation here)
-    S('Connect a testing tool (playwright / cypress / pytest / none)');
+    // Banner + guide read TESTING_TOOLS rather than spelling the adapters out: this is the list that
+    // actually grows (maestro joined it), and a hardcoded copy here would quietly offer the user fewer
+    // tools than the prompt below accepts.
+    S(`Connect a testing tool (${TESTING_TOOLS.join(' / ')} / none)`);
     guide([
-      'Where yad-test-cases generates automation. playwright/cypress/pytest, or none for artifacts-only.',
+      `Where yad-test-cases generates automation. ${TESTING_TOOLS.join('/')}, or none for artifacts-only.`,
       'Skipping is safe — test-cases authors test-cases.md only.',
     ]);
     if (exists(testingPath) && !(await askYesNo('testing.json exists — reconfigure?', false))) {

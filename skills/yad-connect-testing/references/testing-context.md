@@ -15,6 +15,7 @@ Detection is best-effort against the user's own authenticated MCP session:
 | `playwright` | a Playwright MCP | **generate** — author + run E2E/API specs against the app |
 | `cypress` | the Cypress MCP | **generate** — author + run Cypress specs |
 | `pytest` | a pytest MCP | **generate** — author + run service-layer tests |
+| `maestro` | the Maestro MCP (`maestro mcp`, bundled in the CLI, STDIO) | **generate** — author + run Maestro flows on iOS/Android/Chromium |
 | any | a read-only runner MCP | **link** — reference an existing suite and read results back |
 | other | the adapter's named MCP | per that adapter |
 
@@ -34,6 +35,11 @@ the cases `test-cases.md` enumerates and the acceptance criteria the stories def
   the code-maps from `yad-test-cases` Step 2b), one spec per high-priority (P0/P1) case, and runs them
   via the MCP to confirm they execute.
 - **Cypress / pytest** — the lens authors the equivalent specs in that framework's layout.
+- **Maestro** — the lens authors `.yaml` flows under the repo's Maestro directory (one flow per
+  high-priority case), targeting the app id / screen elements the code-maps name rather than invented
+  ones, and runs them via the MCP against a simulator/emulator to confirm they execute. Mobile E2E is
+  the top of that pyramid: keep the flow count small and push detail down to the unit/integration
+  levels the repo already has.
 
 Reuse what already exists: load the connected code repos' code-maps (`yad-test-cases` Step 2b) so
 generated tests target real endpoints/components, not invented ones, and prefer the lowest useful test

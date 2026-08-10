@@ -14,8 +14,8 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
 
 ```json
 {
-  "tool": "playwright",                              // playwright | cypress | pytest | <adapter id> | none (artifacts-only)
-  "provider": "playwright-mcp",                      // the concrete MCP: playwright-mcp | cypress-mcp | pytest-mcp | null
+  "tool": "playwright",                              // playwright | cypress | pytest | maestro | <adapter id> | none
+  "provider": "playwright-mcp",                      // the concrete MCP: playwright-mcp | cypress-mcp | pytest-mcp | maestro-mcp | null
   "project_url": "tests/playwright.config.ts",       // project/config reference; null if none yet
   "auth": "user",                                    // ALWAYS the user's own MCP session — never a token
   "suites": { "backend": null, "mobile": null },     // optional default suite refs per repo

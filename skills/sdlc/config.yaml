@@ -198,7 +198,7 @@ design:
 # (test-links.json) is written by yad-test-cases per epic.
 testing:
   registry: "{project-root}/.sdlc/testing.json"      # project-wide testing connection (NOT per-epic)
-  tools: [playwright, cypress, pytest]                # supported adapters; an unknown tool falls back to `primary`
+  tools: [playwright, cypress, pytest, maestro]       # supported adapters; an unknown tool falls back to `primary`
   primary: playwright                                 # the default/named provider
   degrade: artifacts-only                             # no tool / no MCP => yad-test-cases authors test-cases.md only
   links: "{project-root}/epics/EP-<slug>/.sdlc/test-links.json"   # per-epic case->test map (yad-test-cases)

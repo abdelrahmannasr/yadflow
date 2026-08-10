@@ -135,7 +135,7 @@ export const DESIGN_PRIMARY = 'figma';
 // is the fallback `registerTesting`/setup use when an unknown tool is named, and `none` is the explicit
 // artifacts-only choice. (doctor does NOT fall back — an unknown tool there is a hard YAD-CFG-003 fail,
 // mirroring the design-tool YAD-CFG-002.)
-export const TESTING_TOOLS = ['playwright', 'cypress', 'pytest'];
+export const TESTING_TOOLS = ['playwright', 'cypress', 'pytest', 'maestro'];
 export const TESTING_PRIMARY = 'playwright';
 
 // Supported learning-tool adapters (mirrors skills/sdlc/config.yaml `learning.tools`); `LEARNING_PRIMARY`
