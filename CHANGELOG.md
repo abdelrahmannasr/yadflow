@@ -1,3 +1,12 @@
+## [3.15.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.2...v3.15.3) (2026-08-11)
+
+
+### Bug Fixes
+
+* **bridge:** pass the PR head ref through env, not into the run script ([306f49f](https://github.com/abdelrahmannasr/yadflow/commit/306f49f569c5398bbfb36ce9aa3fb38d8341336c))
+* **gate:** make the reconcile sweep converge instead of committing forever ([6bcb8fd](https://github.com/abdelrahmannasr/yadflow/commit/6bcb8fd8cd296b669bcf11226013fcd2e107f650)), closes [#163](https://github.com/abdelrahmannasr/yadflow/issues/163)
+* **gate:** stage the merge commit from an allowlist, not the whole epic dir ([8142ddc](https://github.com/abdelrahmannasr/yadflow/commit/8142ddcce0f889505a29558c6664e42548d9d671))
+
 ## [3.15.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.1...v3.15.2) (2026-08-11)
 
 
