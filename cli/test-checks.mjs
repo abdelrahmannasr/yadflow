@@ -14,11 +14,15 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CHECKS = path.join(ROOT, 'skills/yad-checks/templates/checks');
 const RISK_ROUTE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/risk-route.sh');
 
-// Strip ambient git identity env (see cli/test.mjs for why) — and SDLC_BASE, which the gates read as
-// the base branch. The repo's own docs tell developers to `export SDLC_BASE=…`, so leaking it into a
-// gate run would silence the no-base tests below on exactly the machines that followed the docs.
+// Strip ambient git identity env (see cli/test.mjs for why) — and the two vars the gates resolve their
+// base from: SDLC_BASE (the base branch) and SDLC_HUB_CONFIG (which hub.json to read default_branch
+// out of). The repo's own docs tell developers to `export SDLC_BASE=…`, so leaking either would
+// silence the no-base tests below on exactly the machines that followed the docs. Per-test overrides
+// still work — runGate merges its `env` argument on top of this.
 const GIT_ENV = Object.fromEntries(
-  Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && k !== 'SDLC_BASE'),
+  Object.entries(process.env).filter(
+    ([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && k !== 'SDLC_BASE' && k !== 'SDLC_HUB_CONFIG',
+  ),
 );
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
 
@@ -434,6 +438,36 @@ test('contract-check gate: a configured default_branch outranks the remote defau
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /no base given — diffing against 'origin\/main'/); // not origin/develop
   fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: default_branch is read even when the JSON puts it across lines', () => {
+  // A key and its value on separate lines is legal JSON. A per-line match silently misses it, and
+  // "silently misses the configured branch" means diffing whatever origin/HEAD happens to name.
+  const { T, src } = scaffoldClonedRepo('develop');
+  git(T, 'update-ref', 'refs/remotes/origin/main', 'origin/develop');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{\n  "default_branch":\n    "main"\n}\n');
+  commit(T, 'feat: consume the contract', { 'src/api.js': 'x' });
+  const r = runGate(CONTRACT, T, []);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /no base given — diffing against 'origin\/main'/);
+  fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a product lock split across lines still parses (it must not FAIL as broken)', () => {
+  const T = scaffoldRepo();
+  const hash = 'c'.repeat(64);
+  fs.mkdirSync(path.join(T, 'product/epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(
+    path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'),
+    `{\n  "hash":\n    "sha256:${hash}"\n}\n`,
+  );
+  commit(T, 'feat: widen API\n\nContract-Change: yes', storySlice('EP-demo-S01', hash));
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, `a formatting choice must not read as a broken lock:\n${r.out}`);
+  assert.match(r.out, /hash matches the product lock/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

@@ -22,7 +22,8 @@ set -euo pipefail
 # so this governs local runs only. The `|| _x=""` guards are load-bearing: under `set -e` a failing
 # command substitution in an assignment aborts the script.
 resolve_base() {
-  _cfg="$(sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | head -1)" || _cfg=""
+  # tr first: a key and its value may legally sit on separate lines, which a per-line match misses.
+  _cfg="$(tr -d '\n' < "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
   _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
   for _c in "origin/${_cfg}" "${_head}" origin/main; do
     case "$_c" in ''|origin/) continue ;; esac

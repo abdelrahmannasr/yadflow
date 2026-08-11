@@ -356,12 +356,13 @@ line). Code repos run the same three with `--profile code` inside the main `yad-
 
 ## Running by hand (Phase 3 is manual)
 
-From inside the code repo, against the PR/MR base (e.g. `master`). The base argument is optional —
-omit it and each gate diffs the remote's default branch (`origin/HEAD`, else `origin/main`), printing
-the base it chose; pass it (or `export SDLC_BASE=…`) whenever the PR targets something else:
+From inside the code repo, against the PR/MR base (e.g. `master`). For the gates that take one, the
+base argument is optional — omit it and the gate resolves the trunk in the order above (configured
+`default_branch`, else `origin/HEAD`, else `origin/main`), printing the base it chose; pass it (or
+`export SDLC_BASE=…`) whenever the PR targets something else. `build-test-lint` takes no base at all.
 
 ```bash
-bash checks/spec-link.sh                 # -> diffs origin/<the remote's default branch>
+bash checks/spec-link.sh                 # -> diffs the resolved trunk, and says which one
 bash checks/spec-link.sh master
 bash checks/contract-check.sh master
 bash checks/build-test-lint.sh

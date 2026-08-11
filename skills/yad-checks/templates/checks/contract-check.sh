@@ -20,7 +20,8 @@ set -euo pipefail
 # so this governs local runs only. The `|| _x=""` guards are load-bearing: under `set -e` a failing
 # command substitution in an assignment aborts the script.
 resolve_base() {
-  _cfg="$(sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | head -1)" || _cfg=""
+  # tr first: a key and its value may legally sit on separate lines, which a per-line match misses.
+  _cfg="$(tr -d '\n' < "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
   _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
   for _c in "origin/${_cfg}" "${_head}" origin/main; do
     case "$_c" in ''|origin/) continue ;; esac
@@ -123,7 +124,11 @@ while IFS= read -r story; do
   lock=""
   [ -n "$prod" ] && lock="${prod}/epics/${epic}/.sdlc/contract-lock.json"
   if [ -n "$product_rel" ] && [ -f "$lock" ]; then
-    current="$(sed -nE 's/.*"hash":[[:space:]]*"sha256:([0-9a-f]+)".*/\1/p' "$lock" | head -1)"
+    # Newline-tolerant, first-match: `"hash":` and its value may legally sit on separate lines, and an
+    # unparseable lock is a FAIL below — so a formatting choice must not become a gate failure.
+    # `|| current=""` is load-bearing: under `pipefail` a no-match grep fails the whole pipeline, which
+    # under `set -e` would abort the gate instead of reaching the unparseable-lock FAIL below.
+    current="$(tr '\n' ' ' < "$lock" | grep -oE '"hash"[[:space:]]*:[[:space:]]*"sha256:[0-9a-f]+"' | head -1 | sed -E 's/.*sha256:([0-9a-f]+)"$/\1/')" || current=""
     # A lock we can READ but cannot PARSE proves nothing, and an empty `current` used to short-circuit
     # the comparison below straight into the "hash matches" note — the gate affirmatively reporting a
     # match it never made. Fail closed instead: a truncated, half-written or schema-changed lock is a
