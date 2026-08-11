@@ -271,6 +271,122 @@ test('contract-check gate: unresolvable base fails closed', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// ---------- multi-story surface diffs (issue #161) ----------
+// `git diff --name-only` is path-sorted, so reading ONE story off `head -1` validated whichever story
+// sorted first and left every other quoted slice in the diff unpinned. Each case below is rigged so
+// the story that would be read first is the one that does NOT fail.
+
+// A story that quotes the surface: its slice + a link.md pinning `lock` against the shared product hub.
+const storySlice = (story, lock) => ({
+  [`specs/${story}/contracts/api.md`]: 'new endpoint\n',
+  [`specs/${story}/link.md`]: linkMd({
+    story, 'product-repo': '../../product', 'contract-lock': `sha256:${lock}`,
+  }),
+});
+
+test('contract-check gate: a LATER story pinning a stale lock is not masked by a clean first one (issue #161)', () => {
+  const T = scaffoldRepo();
+  const hash = 'c'.repeat(64);
+  seedProductLock(T, 'EP-demo', hash);
+  commit(T, 'feat: widen API across both stories\n\nContract-Change: yes', {
+    ...storySlice('EP-demo-S01', hash),                 // sorts first, pins the CURRENT lock
+    ...storySlice('EP-demo-S02', 'a'.repeat(64)),       // sorts second, pins a STALE lock
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, `every changed slice must be pinned, not just the first:\n${r.out}`);
+  assert.match(r.out, /specs\/EP-demo-S02\/link\.md still pins/);
+  // ...and the clean story still reports, so the output names which slice is at fault.
+  assert.match(r.out, /specs\/EP-demo-S01\/link\.md hash matches the product lock/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a first story with no link.md does not defer the whole check (issue #161)', () => {
+  const T = scaffoldRepo();
+  seedProductLock(T, 'EP-demo', 'c'.repeat(64));
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n', // sorts first, no link.md at all
+    ...storySlice('EP-demo-S02', 'a'.repeat(64)),           // sorts second, pins a STALE lock
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, `a deferred story must not stand in for the ones behind it:\n${r.out}`);
+  assert.match(r.out, /no specs\/EP-demo-S01\/link\.md — fidelity check deferred/);
+  assert.match(r.out, /specs\/EP-demo-S02\/link\.md still pins/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: every story pinning the current lock passes, reporting each', () => {
+  const T = scaffoldRepo();
+  const hash = 'c'.repeat(64);
+  seedProductLock(T, 'EP-demo', hash);
+  commit(T, 'feat: widen API across both stories\n\nContract-Change: yes', {
+    ...storySlice('EP-demo-S01', hash),
+    ...storySlice('EP-demo-S02', hash),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /specs\/EP-demo-S01\/link\.md hash matches the product lock/);
+  assert.match(r.out, /specs\/EP-demo-S02\/link\.md hash matches the product lock/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------- base resolution with no explicit base (issue #161) ----------
+// CI always passes the base; a local run does not. Defaulting to a hardcoded `origin/main` diffs the
+// wrong range (or nothing at all) on a repo whose trunk is `develop`/`master`.
+
+// A code repo CLONED from an origin whose default branch is `trunk`, so origin/HEAD points at it —
+// the shape scaffoldRepo() cannot produce (it has no remote).
+function scaffoldClonedRepo(trunk) {
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-origin-'));
+  git(src, 'init', '-q');
+  git(src, 'config', 'user.name', 'alice');
+  git(src, 'config', 'user.email', 'alice@corp.io');
+  fs.writeFileSync(path.join(src, 'a.txt'), '1');
+  git(src, 'add', '-A');
+  git(src, 'commit', '-q', '-m', 'seed');
+  git(src, 'branch', '-q', '-M', trunk);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-checks-'));
+  fs.rmSync(T, { recursive: true, force: true });
+  git(os.tmpdir(), 'clone', '-q', src, T);
+  git(T, 'config', 'user.name', 'alice');
+  git(T, 'config', 'user.email', 'alice@corp.io');
+  git(T, 'checkout', '-q', '-b', 'feature');
+  return { T, src };
+}
+
+test('contract-check gate: with no base argument it diffs the remote default branch, not origin/main', () => {
+  const { T, src } = scaffoldClonedRepo('develop');
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+  });
+  const r = runGate(CONTRACT, T, []); // no base: must resolve origin/HEAD -> origin/develop
+  assert.equal(r.code, 0, `a develop-trunk repo must be diffable without naming the base:\n${r.out}`);
+  assert.match(r.out, /no base given — diffing against 'origin\/develop'/);
+  assert.doesNotMatch(r.out, /origin\/main/);
+  assert.match(r.out, /diff touches the contract surface/);
+  fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('spec-link gate: SDLC_BASE still wins over the auto-detected default branch', () => {
+  const { T, src } = scaffoldClonedRepo('develop');
+  commit(T, 'feat: unlinked change', { 'src/thing.js': 'x' });
+  const r = runGate(SPEC_LINK, T, [], { SDLC_BASE: 'origin/nope' });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /base ref 'origin\/nope' not found/);
+  assert.doesNotMatch(r.out, /no base given/);
+  fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: with no remote at all the base falls back to origin/main and fails closed', () => {
+  const T = scaffoldRepo(); // no remote, so origin/HEAD does not resolve
+  const r = runGate(CONTRACT, T, []);
+  assert.equal(r.code, 1, 'an unresolvable auto-detected base must never green-light');
+  assert.match(r.out, /no base given — diffing against 'origin\/main'/);
+  assert.match(r.out, /base ref 'origin\/main' not found/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------- phase-6 thread gates: product-repo resolution (issue #149) ----------
 // All three read the owning epic through link.md's `product-repo`. Both the ABSOLUTE and the RELATIVE
 // form must reach the hub — an unresolvable path degrades each gate to a PASS-with-note, i.e. it stops
@@ -452,6 +568,26 @@ test('all four hub-reading gates carry the SAME resolution block, byte for byte'
   const canonical = region('contract-check.sh');
   for (const f of ['lineage-check.sh', 'epic-open.sh', 'reconcile-debt-check.sh']) {
     assert.equal(region(f), canonical, `${f} drifted from the canonical resolution block`);
+  }
+});
+
+test('every base-taking gate carries the SAME base-resolution block, byte for byte', () => {
+  // Same reason as the link.md block above: duplicated by design, so it has to be pinned. A gate that
+  // drifts back to a hardcoded `origin/main` diffs a different range than its siblings on the same
+  // repo (issue #161), which is exactly the class of divergence #149 came from.
+  const region = (file) => {
+    const src = fs.readFileSync(path.join(CHECKS, file), 'utf8');
+    const start = src.indexOf('# --- shared base resolution');
+    const end = src.indexOf('\nresolve_base() {');
+    assert.ok(start >= 0 && end > start, `${file}: base-resolution block not found`);
+    return src.slice(start, src.indexOf('\n}\n', end) + 3);
+  };
+  const canonical = region('contract-check.sh');
+  for (const f of [
+    'spec-link.sh', 'lineage-check.sh', 'epic-open.sh', 'reconcile-debt-check.sh',
+    'commit-message.sh', 'ledger-guard.sh', 'verified-commits.sh',
+  ]) {
+    assert.equal(region(f), canonical, `${f} drifted from the canonical base-resolution block`);
   }
 });
 

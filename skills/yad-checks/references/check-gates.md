@@ -19,6 +19,21 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
 | pr-template | the PR/MR body (from the CI event payload) | `yad-pr-template` (the committed PR/MR template) |
 
+## Resolving `<base>` (every gate that takes one)
+
+The `<base>` argument is **optional**. The order is: the **argument**, else `SDLC_BASE`, else the
+remote's **published default branch** (`git symbolic-ref refs/remotes/origin/HEAD`), else
+`origin/main`. CI always passes it explicitly (`origin/<PR base>` /
+`origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), so this governs local runs — and it mirrors the CLI's
+own rule (`cli/repo.mjs`, `cli/hubcommit.mjs`).
+
+Hardcoding `origin/main` diffed the wrong range on a repo whose trunk is `develop`/`master` — either
+failing closed for the wrong reason, or, where a stale `main` still existed, silently diffing a range
+that both mis-reports the surface and drags unrelated stories into contract-check's per-story fidelity
+pass (issue #161). An auto-resolved base is **printed as a note**, so the range a local run gated is
+never implicit. Like the `product-repo` block below, this one is duplicated verbatim across the
+scripts (they are standalone by design) and pinned byte-identical by a test.
+
 ## 1. spec-link (`templates/checks/spec-link.sh`)
 
 - Checks every non-merge commit in `<base>..HEAD` **per commit** (not aggregated across the range),
@@ -38,11 +53,13 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 - An empty range (no non-merge commits) **PASSes**.
 - Portable across bash 3.2 (macOS) and 4+ (no `mapfile`).
 - **Fails closed** when `<base>` can't be resolved (so a shallow clone / wrong base never PASSes blind).
+  `<base>` is optional — see [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 
 ## 2. contract-check (`templates/checks/contract-check.sh`)
 
 - **Fails closed** if `<base>` can't be resolved — an undiffable range must never report "no surface
-  change" and silently green-light a bypass.
+  change" and silently green-light a bypass. `<base>` is optional — see
+  [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 - Computes the changed files in `<base>..HEAD`.
 - If **nothing** under `specs/*/contracts/**` changed → **PASS** (normal implementation only *consumes*
   the contract).
@@ -52,6 +69,13 @@ repo uses. Each reads conventions established by earlier steps — it invents no
     require `link.md`'s pinned `contract-lock` hash to match the product repo's current
     `contract-lock.json`. A claimed change that still pins the **old** lock **FAILS** — re-run
     `yad-spec` so the slice matches the re-locked contract.
+  - The fidelity check runs for **every story whose slice the diff touches**, and **aggregates**: each
+    story reports (matched / stale / deferred), and any stale pin fails the gate. `git diff
+    --name-only` is path-sorted, so reading one story off the first changed path validated whichever
+    story sorted first and left the rest unpinned — a later story pinning a stale hash passed, and a
+    first story with no `link.md` deferred the whole check before the stale one was ever read
+    (issue #161). One clean-or-deferred story never masks another's stale pin, the same rule spec-link
+    applies per commit.
 - This enforces the Phase 2 rule: the shared surface is owned upstream and is never widened from inside
   a code repo. The hash recipe is in `../yad-architecture/references/contract-format.md`.
 
@@ -129,6 +153,7 @@ non-merge commit in `<base>..HEAD`:
 - **Profiles** (`--profile code|hub`): the subject rule is identical on both; the gate never requires
   the `Task:` trailer (spec-link owns that on code repos; hub commits are not task-scoped).
 - **Fails closed** when `<base>` can't be resolved.
+  `<base>` is optional — see [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 
 ## 6. pr-title (`templates/checks/pr-title.sh`)
 
@@ -319,9 +344,12 @@ line). Code repos run the same three with `--profile code` inside the main `yad-
 
 ## Running by hand (Phase 3 is manual)
 
-From inside the code repo, against the PR/MR base (e.g. `master`):
+From inside the code repo, against the PR/MR base (e.g. `master`). The base argument is optional —
+omit it and each gate diffs the remote's default branch (`origin/HEAD`, else `origin/main`), printing
+the base it chose; pass it (or `export SDLC_BASE=…`) whenever the PR targets something else:
 
 ```bash
+bash checks/spec-link.sh                 # -> diffs origin/<the remote's default branch>
 bash checks/spec-link.sh master
 bash checks/contract-check.sh master
 bash checks/build-test-lint.sh

@@ -25,7 +25,21 @@ while [ $# -gt 0 ]; do
 done
 case "$PROFILE" in code|hub) ;; *) echo "FAIL [commit-message]: unknown --profile '$PROFILE' (code|hub)."; exit 1 ;; esac
 
-BASE="${ARGS[0]:-${SDLC_BASE:-origin/main}}"
+# --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
+# --- is duplicated, not sourced) ---
+# With no explicit base, diff against the remote's PUBLISHED default branch rather than a hardcoded
+# `origin/main` — on a repo whose trunk is `develop`/`master` that guess either fails closed or, when
+# a stale `main` still exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own rule
+# (cli/repo.mjs, cli/hubcommit.mjs): origin/HEAD, else origin/main. CI always passes the base
+# explicitly, so this governs local runs only. The `|| _b=""` is load-bearing: under `set -e` a failing
+# command substitution in an assignment aborts the script.
+resolve_base() {
+  _b="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _b=""
+  printf '%s' "${_b:-origin/main}"
+}
+
+BASE="${ARGS[0]:-${SDLC_BASE:-$(resolve_base)}}"
+[ "${#ARGS[@]}" -gt 0 ] || [ -n "${SDLC_BASE:-}" ] || echo "note [commit-message]: no base given — diffing against '${BASE}'."
 
 # Fail closed if the base ref can't be resolved (shallow clone / wrong base branch / unfetched ref).
 if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
