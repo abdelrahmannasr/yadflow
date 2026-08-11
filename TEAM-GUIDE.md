@@ -223,7 +223,7 @@ yad-connect-repos action: detect-hub                              # records the 
 yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
 yad-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
 yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
-yad-hub-bridge      action: wire                                  # event-driven gate sync (CI runs `yad gate ci` on approve/request-changes/merge)
+yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
 The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
@@ -339,9 +339,12 @@ flowchart LR
   the hub PR and you run `action: sync` to pull that platform state into the ledger.
 - `action: advance` — moves forward **only if** the rule is met; otherwise it tells you who's still missing.
   (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
-- With the hub's gate-sync CI wired (step 3d2), `sync` runs **automatically** on every platform
-  approval / change request / merge and commits the ledger to the hub's default branch — the same
-  predicate, just triggered by the event instead of a human command.
+- With the hub's gate-sync CI wired (step 3d2), `sync` runs **automatically when the review PR/MR is
+  merged** and commits the ledger to the hub's default branch — the same predicate, just triggered by
+  the merge instead of a human command. Nothing runs pre-merge: while the review is open the platform
+  holds the state (native approvals + threads), and CI never touches the review branch, so an
+  in-flight approval is never dismissed by a CI commit. A scheduled job re-checks recently-merged
+  reviews as a safety net.
 
 ---
 

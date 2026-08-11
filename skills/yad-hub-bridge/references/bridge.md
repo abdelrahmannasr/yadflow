@@ -189,7 +189,8 @@ and fall back to `3`:
 
 The default `3` floats on the major, so a published fix reaches a scheduled job on its next pass with
 nobody in the loop — which is how you want a correctness or gate-churn fix to arrive (this page's own
-#163 is the example). To adopt releases deliberately instead, set `YAD_VERSION` to an exact version.
+issue #163 is the example). To adopt releases deliberately instead, set `YAD_VERSION` to an exact
+version.
 The pin lives in **platform config, not in the wired file**: `yad` owns that file and `yad check --fix`
 rewrites it byte-for-byte from the template, so a version edited into it would be silently reverted on
 the next sync. A hub that pins then owns its own upgrade decision — including for fixes.
