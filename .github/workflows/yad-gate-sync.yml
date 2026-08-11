@@ -78,12 +78,19 @@ jobs:
         with:
           node-version: "20"
       - name: Advance the gate on merge
+        # The head ref reaches the shell through `env:`, never through `${{ }}` inside `run:`. A
+        # branch name may legally contain `$`, backticks and parentheses, so a PR opened from
+        # `review/EP-x$(curl …)` would otherwise execute on a runner holding `contents: write` — and
+        # the `if:` guard above does not stop it, since that name still starts with `review/EP-`.
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           git config user.name  "yad-gate-sync[bot]"
           git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
           npx -y -p "yadflow@${YAD_VERSION}" yad gate ci \
-            --branch "${{ github.event.pull_request.head.ref }}" \
-            --pr "${{ github.event.pull_request.number }}" \
+            --branch "$HEAD_REF" \
+            --pr "$PR_NUMBER" \
             --merged
 
   reconcile:
