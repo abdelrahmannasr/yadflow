@@ -134,6 +134,12 @@ Seed `.sdlc/approvals.json` with one **provenance** record per inherited gate (N
 `{ "artifact": "<art>", "step": "<…-review>", "status": "inherited", "from": "<epic>", "boundHash": "<hash>", "date": "<today>" }`.
 Seed `.sdlc/comments.json` = `[]` and create `reviews/`.
 
+Commit the seed on the `change/EP-<slug>` branch. It reaches the hub's default branch through this
+change-epic's **first** review PR/MR — cut the `review/EP-<slug>/<artifact>` branch from `change/…` so
+it carries the seed. In bridge mode `ledger-guard` exempts a new epic's ledger (creation, not mutation,
+#162), so no direct push to a protected default branch is needed; every later change to that ledger is
+CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
+
 When `architecture` is **inherited**, materialize the **pointer-lock** `.sdlc/contract-lock.json`:
 `{ "artifact": "contract.md", "hash": "<parent surface hash, verbatim>", "lockedAt": "<today>", "inheritedFrom": "<epic>", "ref": "../../<epic>/.sdlc/contract-lock.json" }`.
 There is no `contract.md` in the change-epic, so the surface cannot drift, and `contract-check` passes

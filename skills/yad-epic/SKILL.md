@@ -152,6 +152,10 @@ Notes:
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
   when `stories-review` passes — at which point the epic is already `ready-for-build`, so the build half
   runs alongside the tester. They never gate `ready-for-build` (see `references/state-schema.md`).
+- Commit the seed on this step's authoring branch. It reaches the hub's default branch through the
+  epic's **first** review PR/MR — cut `review/EP-<slug>/epic` from the authoring branch so it carries
+  the seed. In bridge mode `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162);
+  every later change to it is CI's. See `references/state-schema.md`, "Authoring branches".
 - Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
   `[]`, and the `reviews/` directory. (`comments.json` is the machine-readable counterpart to the

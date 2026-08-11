@@ -112,6 +112,10 @@ Notes:
   never escalates to domain owners (no contract surface is touched yet).
 - Also create an empty approvals ledger `.sdlc/approvals.json` and comments ledger
   `.sdlc/comments.json`, each containing `[]`, and the `reviews/` directory.
+- Commit the seed on the `discovery/EP-discovery` branch, and cut `review/EP-discovery/discovery` from
+  it so the **first** review PR/MR carries the ledger to the default branch. In bridge mode
+  `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162); every later change to it
+  is CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the path to the discovery set, and that the next action is **review** via `yad-review-gate`

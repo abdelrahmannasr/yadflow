@@ -155,7 +155,9 @@ During review CI writes nothing: the platform PR/MR is the source of truth (nati
 threads). The CLI is self-sufficient at merge: it derives the epic + artifact from the
 `review/EP-<slug>/<artifact-base>` head branch, takes the PR/MR number from the event (GitHub) or
 resolves it from the platform (GitLab), upserts the `hub-prs.json` entry itself, and **re-reads
-approvals fresh from the platform** — so no ledger needs to be pre-seeded on the branch.
+approvals fresh from the platform** — so no ledger needs to be pre-seeded on the branch. (It only
+*advances* a chain, though: it cannot **create** one. A brand-new epic's seed therefore travels the
+other way — up through its first review PR/MR; see "the seed of a new epic" below.)
 
 | Platform event | Phase | CI action |
 |---|---|---|
@@ -174,13 +176,26 @@ commit — the advance plus the `draft → approved` status flip — lands on th
 check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
 .json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
-edit — which it rejects. (The `verified-commits` gate still vets every commit's signature + author;
+edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
+gate still vets every commit's signature + author;
 its gate-bot exemption is now vestigial in-PR because CI no longer commits there.) `yad gate open`
 opens the PR only; local `yad gate sync` is advisory in bridge mode (writes nothing). After a merge,
 everyone `git checkout <default> && git pull`. (Without the bridge, humans own the ledger locally and
 these guards are no-ops.)
 
-**The one sanctioned human ledger write: `yad gate repair`.** It heals a `YAD-STATE-005` chain (an
+**The one sanctioned human ledger write *in a review PR*: the seed of a new epic.** `gate ci` only
+**advances** an existing chain — it bails on a missing `state.json`, and the engine reads that absence
+as "not seeded yet" — so no CI path can ever create a ledger. The seed the authoring skills write
+(`yad-epic`, `yad-change`, `yad-analysis`, `yad-discovery`, `yad-stub`) can reach the default branch
+only through the epic's **first** review PR/MR, which is exactly where `ledger-guard` runs. So the gate
+exempts **creation**: an epic whose `.sdlc/state.json` is absent from the PR's base ref may have its
+ledger written by a human there (#162). It stays a narrow carve-out — the probe is against the base
+ref, not the parent commit, so deleting an on-trunk `state.json` to "re-seed" it is itself a rejected
+mutation, and the moment the ledger is on the default branch every further change is CI's alone. Cut
+that first review branch from the authoring branch (`epic/…`, `change/…`) so it carries the seed; no
+direct push to a protected default branch is needed.
+
+**The one sanctioned human ledger write *on the default branch*: `yad gate repair`.** It heals a `YAD-STATE-005` chain (an
 authoring step stranded behind a review gate that already advanced) by writing `state.json` alone. This
 is not a `ledger-guard` gap: the repair commits to the **default branch**, where `ledger-guard` — which
 only inspects review PRs — never runs, and where the `yad-update-guard` (platform-Verified signature +
