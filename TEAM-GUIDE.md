@@ -231,11 +231,16 @@ derived from each repo's `domain_owner` in `repos.json` (not retyped). With the 
 front-half gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
 comments back. No platform (or `bridge_enabled: false`)? The gate just runs file-only — skip d2.
 
-With the gate-sync CI wired, you usually don't run `sync` at all: every approval, change request, and
-merge on a review PR triggers it in the hub's CI, and the ledger update is committed straight to the
-hub's default branch (`git pull` to see it). CI never approves or merges — the merge click stays human.
+With the gate-sync CI wired, you usually don't run `sync` at all: the **merge** of a review PR triggers
+it in the hub's CI, and the ledger update is committed straight to the hub's default branch (`git pull`
+to see it). Nothing fires pre-merge — approvals and change requests live on the platform, which is the
+source of truth while the review is open, and CI never touches the review branch (so an in-flight
+approval is never dismissed by a CI commit). CI never approves or merges — the merge click stays human.
 GitLab caveat: a bare approval is only picked up by the ~15-min scheduled sweep (one-time schedule +
-`SDLC_GATE_TOKEN`; recipe in the skill).
+`SDLC_GATE_TOKEN`; recipe in the skill). That sweep re-visits each merged review for a week; on a yadflow
+carrying the #163 fix that costs a read, not a commit — the ledgers are written in a canonical order,
+so an unchanged approval record re-serializes to an identical file. On older versions it committed the
+reorder every 15 minutes; the workaround there is to disable the schedule.
 
 **e. Connect your code repos to the hub (so the brain knows what's already built).** From inside the
 hub, run once per code repo — and again any time you add a new one:

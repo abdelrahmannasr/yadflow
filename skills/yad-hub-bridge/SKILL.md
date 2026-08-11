@@ -103,6 +103,10 @@ default branch. (File-only mode keeps `yad gate sync` as the local writer.)
    - GitLab → `.gitlab/ci/yad-gate-sync.yml` (from `templates/gitlab/yad-gate-sync.gitlab-ci.yml`)
    - plus the hub-side **verified-commits** gate (`checks/verified-commits.sh` + its workflow/fragment,
      owned by `yad-checks`) so review PRs accept only signed commits from roster-known authors
+   - the wired job runs `yadflow@${YAD_VERSION}`, defaulting to the floating major `3` so a published
+     fix reaches the schedule on its own. To pin an exact version, set a `YAD_VERSION` CI/CD (GitLab) or
+     Actions (GitHub) **variable** — never edit it into the wired file, which `yad check --fix` rewrites
+     from the template. See `references/bridge.md`.
 2. **GitLab only — two one-time steps** (see the fragment's header for the exact recipes):
    - add `include: - local: '.gitlab/ci/yad-gate-sync.yml'` to the root `.gitlab-ci.yml`, or write
      `templates/gitlab/gitlab-ci.include-root.yml` as the root when none exists;
