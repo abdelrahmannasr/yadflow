@@ -2302,6 +2302,111 @@ test('gate sync: re-syncing a done step is a byte-identical no-op, threads and a
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// `advanceState` opens the step FOLLOWING the one it closes, so a sync that passes two gates in the
+// wrong order rewinds the epic: close architecture-review first (next: ui-design), then epic-review
+// (next: architecture), and the already-done `architecture` author step reopens while currentStep
+// points backward — the YAD-STATE-005 inconsistency `yad gate repair` exists to undo. gateSync used to
+// rely on hub-prs.json happening to be in insertion order; once the file is written sorted by artifact
+// that accident is gone, so the sync orders its targets by the chain explicitly.
+test('gate sync: advances multiple passing gates in CHAIN order, never in ledger order', async () => {
+  const { T, ep } = scaffoldEpic();
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  state.currentStep = 'epic-review';
+  state.steps.unshift(
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+  );
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
+  // Ledger order is alphabetical (what canonicalHubPrs writes) — the REVERSE of the chain here.
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+    { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: null, branch: 'review/EP-test/architecture', lastSyncedAt: null },
+    { step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: null, branch: 'review/EP-test/epic', lastSyncedAt: null },
+  ]));
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
+  const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  const status = (id) => after.steps.find((s) => s.id === id).status;
+  assert.equal(status('epic-review'), 'done');
+  assert.equal(status('architecture-review'), 'done');
+  assert.equal(status('architecture'), 'done', 'the later gate must not reopen an author step the earlier one already closed');
+  assert.equal(after.currentStep, 'ui-design', 'currentStep lands on the furthest step, not the earlier gate\'s successor');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// issue #163. The test above passes on the BUGGY code because its ledger holds one step's approvals,
+// which the drop-and-re-append upsert puts back exactly where they were. With TWO steps in the epic —
+// the ordinary case — syncing step A moves A's records to the tail, syncing B moves B's past them, and
+// the wired sweep (one `gate ci --branch <ref> --merged` per merged PR/MR) walks that rotation on every
+// pass: each hop is a non-empty diff, so each hop commits and pushes, forever, with zero semantic
+// change. This is the fixture that catches it.
+test('gate sync: a two-step ledger is order-stable under a rotating re-sync (issue #163)', async () => {
+  const { T, ep } = scaffoldEpic();
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  state.currentStep = 'epic-review';
+  state.steps.unshift(
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+  );
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
+  const hubPrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json')));
+  hubPrs.push({ step: 'epic-review', artifact: 'epic.md', platform: 'github', number: 8, url: 'http://x/8', branch: 'review/EP-test/epic', lastSyncedAt: null });
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(hubPrs));
+
+  const sync = (artifact, today) => gateSync(T, { epic: 'EP-test', artifact, today, reader: () => fullApproval });
+  // Advance both gates, then let one full sweep settle the ledger.
+  await sync('epic.md', '2026-06-09');
+  await sync('architecture.md', '2026-06-09');
+  const snapshot = () => ['approvals', 'comments', 'hub-prs'].map(
+    (f) => fs.readFileSync(path.join(ep, '.sdlc', `${f}.json`), 'utf8'),
+  );
+  const before = snapshot();
+  const approvals = JSON.parse(before[0]);
+  assert.ok(
+    new Set(approvals.map((a) => a.step)).size === 2,
+    'the fixture really does hold two steps of approvals — otherwise this test proves nothing',
+  );
+  // Now walk the rotation the sweep walks, twice round. Every one of these used to be a commit.
+  for (const day of ['2026-06-20', '2026-06-21']) {
+    await sync('epic.md', day);
+    assert.deepEqual(snapshot(), before, 'syncing epic.md must not reorder architecture-review\'s records');
+    await sync('architecture.md', day);
+    assert.deepEqual(snapshot(), before, 'syncing architecture.md must not reorder epic-review\'s records');
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The other half of #163's commit loop, reachable from the state the `alreadyDone` guard cannot cover.
+// A review merged while one thread is still unresolved never passes the predicate, so its step stays
+// `in_review` forever — `alreadyDone` is false on every pass, and `recordComments` used to allocate
+// round = max+1 each time, appending a fresh record set (and a default-branch commit) every 15 minutes
+// for the whole 7-day sweep window. A round is a change in thread state, not a sync.
+test('gate sync: a merged-but-held review does not open a new comment round per sweep (issue #163)', async () => {
+  const { T, ep } = scaffoldEpic();
+  const stuck = {
+    ...fullApproval,
+    threads: [{ id: 't', resolved: false, login: 'bo', body: 'a nit nobody resolved' }],
+  };
+  const commentsFile = path.join(ep, '.sdlc/comments.json');
+  const rounds = () => JSON.parse(fs.readFileSync(commentsFile, 'utf8')).filter((cm) => cm.step === 'architecture-review');
+
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => stuck });
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+  assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'in_review', 'the unresolved thread holds the gate — the step never goes done');
+  assert.deepEqual([...new Set(rounds().map((cm) => cm.round))], [1], 'the first sync opens round 1');
+  const before = fs.readFileSync(commentsFile, 'utf8');
+
+  // The sweep keeps re-reading the same unchanged MR for a week.
+  for (const day of ['2026-06-20', '2026-06-21', '2026-06-22']) {
+    await gateSync(T, { epic: 'EP-test', today: day, reader: () => stuck });
+  }
+  assert.equal(fs.readFileSync(commentsFile, 'utf8'), before, 'an unchanged thread state re-records the same round, byte for byte');
+
+  // A genuinely new comment IS a new round — the idempotency must not swallow real activity.
+  const escalated = { ...stuck, threads: [...stuck.threads, { id: 't2', resolved: false, login: 'ca', body: 'a second reviewer weighs in' }] };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-23', reader: () => escalated });
+  assert.deepEqual([...new Set(rounds().map((cm) => cm.round))].sort(), [1, 2], 'a changed thread state opens round 2');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate sync: a done step never posts engagement nudges on its merged PR', async () => {
   const { T } = scaffoldEpic();
   const posted = [];
@@ -3672,8 +3777,44 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, SKIPPABLE_STEPS, isSkippableStep, authorStepFor, repairState } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, SKIPPABLE_STEPS, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
+
+// issue #163. Sorting is only a fix if the order is TOTAL: `Array#sort` is stable, so records that tie
+// on the sort key keep their input order — which is exactly the rotating order being eliminated. A
+// manual (skill-written) approval can tie with a bridge one on (step, approver, role, domain), so the
+// key carries `source` and the comparator falls back to per-record content.
+test('canonicalApprovals/canonicalComments impose a TOTAL order (no ties keep input order)', () => {
+  const a = { step: 'epic-review', artifact: 'epic.md', approver: 'alice', role: 'owner', status: 'approved', date: '2026-06-09' };
+  const b = { ...a, source: 'bridge', artifactHash: 'sha256:ff', approvedAt: '2026-06-09' };
+  const c = { ...a, step: 'architecture-review', artifact: 'architecture.md' };
+  const key = (l) => l.map((x) => JSON.stringify(x)).join('~');
+  assert.equal(key(canonicalApprovals([a, b, c])), key(canonicalApprovals([c, b, a])), 'order is a function of the record set, not of insertion order');
+  assert.equal(canonicalApprovals([a, b, c])[0].step, 'architecture-review', 'sorted by step first');
+  // Records identical but for content the key does not name still sort deterministically.
+  const d = { ...b, engagement: 'verified' };
+  const e = { ...b, engagement: 'none' };
+  assert.equal(key(canonicalApprovals([d, e])), key(canonicalApprovals([e, d])));
+  // Rounds sort numerically, not lexically — round 10 must not land between 1 and 2.
+  const cm = (round) => ({ step: 's', artifact: 'a.md', commenter: 'bob', role: 'reviewer', round, count: 1, date: '2026-06-09' });
+  assert.deepEqual(canonicalComments([cm(10), cm(2), cm(1)]).map((x) => x.round), [1, 2, 10]);
+  // Compared by code unit, not by locale: CI and every teammate's machine rewrite the same file, and
+  // localeCompare would order 'Zoe' AFTER 'alice' under most locales while a code-unit sort puts it
+  // first. Two machines disagreeing on that is the same churn, reintroduced.
+  const by = (name) => ({ ...a, approver: name });
+  assert.deepEqual(canonicalApprovals([by('alice'), by('Zoe')]).map((x) => x.approver), ['Zoe', 'alice']);
+  // canonicalHubPrs has the narrowest key of the three, so it leans hardest on the tiebreak.
+  const pr = (artifact, number) => ({ step: `${artifact.split('.')[0]}-review`, artifact, platform: 'github', number });
+  const prs = [pr('epic.md', 8), pr('architecture.md', 7), pr('ui-design.md', 9)];
+  assert.deepEqual(canonicalHubPrs(prs).map((x) => x.artifact), ['architecture.md', 'epic.md', 'ui-design.md']);
+  assert.equal(key(canonicalHubPrs(prs)), key(canonicalHubPrs([...prs].reverse())));
+  // Same artifact+step, different payload: the key ties, so only the tiebreak keeps this deterministic.
+  const dup = [{ ...prs[0], number: 2 }, { ...prs[0], number: 1 }];
+  assert.equal(key(canonicalHubPrs(dup)), key(canonicalHubPrs([...dup].reverse())));
+  // Empty / absent input is the ledger's normal starting state.
+  assert.deepEqual(canonicalApprovals(), []);
+  assert.deepEqual(canonicalHubPrs(), []);
+});
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
   assert.deepEqual(parseReviewBranch('review/EP-x/architecture'), { epic: 'EP-x', base: 'architecture' });
@@ -4177,6 +4318,64 @@ test('gate ci pre-merge: read-only — never pushes the review branch or the def
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// The stampLegacyPr backfill used to run before gateCi knew the phase, so a pre-merge event naming a
+// PR the ledger had not seen left approvals.json modified in the checkout — the run returned without
+// committing it and without restoring it, breaking the documented "pre-merge writes nothing" guarantee
+// and leaving a file `ledger-guard` rejects. It is now gated on `merged`: the file is not written at
+// all pre-merge, so nothing has to be undone (a restore wide enough to cover approvals.json would also
+// revert records the run never wrote — a human's uncommitted manual approval, or a freshly seeded
+// ledger that `git clean` would delete outright).
+test('gate ci pre-merge: never writes approvals.json for the legacy-PR backfill', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  // A review branch that DOES carry the ledger (an older hub, or the new-epic seed carve-out), holding
+  // one approval from before approvals recorded which PR they arrived on.
+  git(author, 'checkout', '-q', 'review/EP-test/architecture');
+  const sdlc = path.join(author, 'epics/EP-test/.sdlc');
+  fs.writeFileSync(path.join(sdlc, 'hub-prs.json'), JSON.stringify([
+    { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: null, branch: 'review/EP-test/architecture', lastSyncedAt: null },
+  ]));
+  fs.writeFileSync(path.join(sdlc, 'approvals.json'), JSON.stringify([
+    { artifact: 'architecture.md', step: 'architecture-review', approver: 'alice', role: 'owner', status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-06-01' },
+  ], null, 2) + '\n');
+  git(author, 'add', '-A');
+  git(author, 'commit', '-q', '-m', 'review: architecture (EP-test) — carry the ledger');
+  git(author, 'push', '-q', '-f', 'origin', 'review/EP-test/architecture');
+  git(author, 'checkout', '-q', 'trunk');
+
+  git(ci, 'fetch', '-q', 'origin', 'review/EP-test/architecture');
+  git(ci, 'checkout', '-q', '-B', 'review/EP-test/architecture', 'origin/review/EP-test/architecture');
+  // An UNCOMMITTED manual approval, the kind the yad-review-gate skill appends by hand. gateCi never
+  // wrote it, so gateCi must not revert or delete it — the reason the fix is "don't write pre-merge"
+  // rather than "git checkout the file afterwards".
+  const approvalsFile = path.join(ci, 'epics/EP-test/.sdlc/approvals.json');
+  const manual = JSON.parse(fs.readFileSync(approvalsFile, 'utf8'));
+  manual.push({ artifact: 'architecture.md', step: 'architecture-review', approver: 'bob', role: 'reviewer', status: 'approved', date: '2026-06-08' });
+  fs.writeFileSync(approvalsFile, JSON.stringify(manual, null, 2) + '\n');
+  const onDisk = fs.readFileSync(approvalsFile, 'utf8');
+
+  // A REPLACEMENT PR (#9, not the recorded #7) is what makes the backfill fire; not merged, so Path B
+  // says this run persists nothing.
+  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 9, merged: false, today: '2026-06-09', reader: () => ({ ...fullApproval, state: 'OPEN', merged: false }) });
+  assert.equal(fs.readFileSync(approvalsFile, 'utf8'), onDisk, 'pre-merge neither stamps nor reverts approvals.json');
+  assert.equal(git(ci, 'status', '--porcelain').toString().trim(), 'M epics/EP-test/.sdlc/approvals.json', 'the only dirt is the human edit gateCi found');
+
+  // The stamp is not lost, only deferred: the old pointer is still on disk, so the merge event records
+  // it. (Run on the default branch, as the wired workflow does.)
+  git(ci, 'checkout', '-q', '--', 'epics/EP-test/.sdlc/approvals.json');
+  git(ci, 'checkout', '-q', '-B', 'trunk', 'origin/trunk');
+  git(ci, 'checkout', '-q', 'origin/review/EP-test/architecture', '--', 'epics/EP-test/.sdlc');
+  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 9, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval });
+  // What the stamp buys is the `newerPr` proof: with `pr: 7` recorded, the approval arriving on #9 is
+  // provably a NEW review, so it re-binds to the merged content instead of keeping the pre-edit hash and
+  // reading `done` with zero live approvals (issue #156). Without the stamp, gateSync's own backfill
+  // would write `pr: 9` first, the proof would never fire, and 'sha256:old' would survive.
+  const stamped = JSON.parse(git(ci, 'show', 'HEAD:epics/EP-test/.sdlc/approvals.json').toString());
+  const alice = stamped.find((a) => a.approver === 'alice');
+  assert.ok(alice, 'the legacy approval survived the merge-phase sync');
+  assert.notEqual(alice.artifactHash, 'sha256:old', 'the deferred stamp still re-binds the legacy approval at merge');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate ci --merged: advances the step + flips artifact status on the default branch (rebase-retries past the merge)', async () => {
   const { T, author, ci } = scaffoldCiHub();
   // The human merge brings the review branch (the owner's artifact edit) onto the default
@@ -4196,6 +4395,93 @@ test('gate ci --merged: advances the step + flips artifact status on the default
   assert.match(show(author, 'origin/trunk:epics/EP-test/architecture.md'), /status: approved/);
   // the advance commit carries the loop guard.
   assert.match(git(author, 'log', '-1', '--format=%B', 'origin/trunk').toString(), /\[skip ci\]/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// issue #163, end to end: the wired sweep calls `gate ci --branch <ref> --pr <n> --merged` once per
+// merged review PR/MR inside its 7-day window, every 15 minutes. On the buggy code each of those calls
+// re-appended its own step's approvals at the tail of a shared approvals.json, so every call produced a
+// reorder-only diff, committed it, and pushed it to the default branch — ~1,800 bot commits/day on the
+// reporting hub. This walks that exact rotation and asserts the commit count stops growing.
+test('gate ci --merged: a repeat sweep over two merged reviews commits nothing (issue #163)', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  // Give the epic a SECOND review gate, so approvals.json holds more than one step's records.
+  const statePath = path.join(author, 'epics/EP-test/.sdlc/state.json');
+  const state = JSON.parse(fs.readFileSync(statePath));
+  state.currentStep = 'epic-review';
+  state.steps.unshift(
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+  );
+  fs.writeFileSync(statePath, JSON.stringify(state));
+  git(author, 'add', '-A');
+  git(author, 'commit', '-q', '-m', 'seed: second review gate');
+  git(author, 'push', '-q', 'origin', 'trunk');
+  // The human merges both reviews; CI then sweeps them on the default branch.
+  git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge review/EP-test/architecture');
+  git(author, 'push', '-q', 'origin', 'trunk');
+  git(ci, 'fetch', '-q', 'origin');
+  git(ci, 'checkout', '-q', '-B', 'trunk', 'origin/trunk');
+
+  const sweep = async (day) => {
+    for (const [base, pr] of [['epic', 8], ['architecture', 7]]) {
+      await gateCi(ci, { branch: `review/EP-test/${base}`, pr, merged: true, today: day, reader: () => fullApproval });
+    }
+  };
+  await sweep('2026-06-09'); // the advance itself — this one legitimately commits
+  git(author, 'fetch', '-q', 'origin');
+  const advanced = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/state.json'));
+  assert.equal(advanced.steps.find((s) => s.id === 'epic-review').status, 'done');
+  assert.equal(advanced.steps.find((s) => s.id === 'architecture-review').status, 'done');
+  const approvals = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json'));
+  assert.equal(new Set(approvals.map((a) => a.step)).size, 2, 'both steps really are in one approvals.json');
+
+  const count = () => git(ci, 'rev-list', '--count', 'HEAD').toString().trim();
+  const settled = count();
+  const ledger = show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json');
+  // Two more sweeps — the schedule firing again. Both steps are `done`, the platform state is
+  // unchanged, so nothing may be written, committed or pushed.
+  await sweep('2026-06-20');
+  await sweep('2026-06-21');
+  assert.equal(count(), settled, 'a repeat sweep of already-advanced reviews must not commit');
+  assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '', 'and must leave no working-tree churn');
+  git(author, 'fetch', '-q', 'origin');
+  assert.equal(show(author, 'origin/trunk:epics/EP-test/.sdlc/approvals.json'), ledger, 'approvals.json is byte-identical');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// `yad gate ci … --merged` on the default branch is the DOCUMENTED manual recovery for a stuck gate,
+// and a human's checkout is rarely pristine. Staging `git add -A -- epics/<e>` would sweep whatever
+// else sits in that directory into a `chore(gate) … [skip ci]` commit pushed straight to the default
+// branch — unreviewed, and contradicting the "CI commits only the ledger" contract.
+test('gate ci --merged: commits the ledger allowlist only, never a dirty worktree', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  git(author, 'checkout', '-q', 'trunk');
+  git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge review/EP-test/architecture');
+  git(author, 'push', '-q', 'origin', 'trunk');
+
+  // The operator's checkout carries unrelated work inside the SAME epic directory: a half-finished
+  // edit to a tracked artifact, and a stray untracked file.
+  const ep = path.join(ci, 'epics/EP-test');
+  fs.writeFileSync(path.join(ep, 'epic.md'), '---\nid: EP-test\nowner: alice\nrepos: [backend]\n---\nhalf-written thought\n');
+  fs.writeFileSync(path.join(ep, 'scratch-notes.md'), 'do not ship me\n');
+
+  // push: false — this is about what gets STAGED, and it keeps HEAD as the commit under inspection.
+  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval });
+
+  const committed = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n').filter(Boolean).sort();
+  assert.deepEqual(committed, [
+    'epics/EP-test/.sdlc/approvals.json',
+    'epics/EP-test/.sdlc/comments.json',
+    'epics/EP-test/.sdlc/hub-prs.json',
+    'epics/EP-test/.sdlc/state.json',
+    'epics/EP-test/architecture.md',
+    'epics/EP-test/reviews/architecture--2026-06-09--approved.md',
+  ], 'only the ledger, the generated review summary, and the status-flipped artifact');
+  // The operator's work is untouched, still theirs to finish.
+  const dirty = git(ci, 'status', '--porcelain').toString();
+  assert.match(dirty, /epics\/EP-test\/epic\.md/, 'the unrelated artifact edit stays uncommitted');
+  assert.match(dirty, /epics\/EP-test\/scratch-notes\.md/, 'the stray untracked file is neither committed nor cleaned');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

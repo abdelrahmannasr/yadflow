@@ -35,6 +35,13 @@
 # SDLC_GATE_TOKEN. Without it the job fails visibly; recover by setting the token, then re-run the
 # pipeline or run `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default
 # branch (advisory `yad gate sync` is read-only in bridge mode and cannot recover a stuck gate).
+#
+# Which yadflow this job runs: `npx -y -p "yadflow@${YAD_VERSION:-3}"`. The default `3` floats on the
+# major, so a published fix reaches this job on its next run with nobody in the loop — which is how you
+# want a correctness or gate-churn fix to arrive. To adopt releases deliberately instead, pin an exact
+# version by setting a CI/CD variable YAD_VERSION (e.g. `3.15.2`) in project Settings → CI/CD →
+# Variables — the same place SDLC_GATE_TOKEN lives, and deliberately NOT in this file, which `yad`
+# owns and rewrites on every sync. A pinned hub then owns its own upgrade decision.
 variables:
   GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch
 
@@ -79,8 +86,12 @@ yad-gate-sync:
       rc=0
       if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
         # SCHEDULED SWEEP — discover merged review MRs from the platform (Path B keeps no per-branch
-        # ledger), then advance each. `gate ci` is idempotent: an already-`done` step is never
-        # re-advanced, and re-syncing it writes nothing unless its approvals changed.
+        # ledger), then advance each. `gate ci` is idempotent DOWN TO THE BYTES: an already-`done` step
+        # is never re-advanced, and re-syncing it rewrites the ledger in a canonical order, so an
+        # unchanged approval record produces an unchanged file and nothing is committed. That last part
+        # is load-bearing — before the #163 fix the re-sync re-appended each step's approvals at the
+        # tail, so this loop rotated approvals.json and committed the reorder on every pass, forever
+        # (issue #163). If you are on an older yadflow, disable this schedule.
         # A stuck review MR (a squash merge whose commit dropped the branch name, or a failed merge
         # push) is always RECENT, so sweep a generous recent window and PAGINATE it fully (--paginate)
         # — this bounds cost without the old hard 50-row cap that could permanently strand older MRs.
@@ -94,7 +105,7 @@ yad-gate-sync:
         while read -r IID REF; do
           [ -n "$IID" ] || continue
           git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
-          npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$IID" --merged || rc=1
+          npx -y -p "yadflow@${YAD_VERSION:-3}" yad gate ci --branch "$REF" --pr "$IID" --merged || rc=1
         done < /tmp/yad-merged-mrs
       else
         # MERGE push to the default branch whose commit names a review branch: resolve the merged MR's
@@ -106,7 +117,7 @@ yad-gate-sync:
           IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" 2>/dev/null | jq -r '.[0].iid // empty' || true)"
           if [ -n "$IID" ]; then
             # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
-            npx -y -p yadflow@3 yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
+            npx -y -p "yadflow@${YAD_VERSION:-3}" yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
           else
             # Without the IID, gate ci cannot re-read approvals — fail visibly (the scheduled sweep
             # retries) rather than running a green no-op that silently leaves the gate unadvanced.

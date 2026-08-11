@@ -95,8 +95,22 @@ login and requested too — otherwise an escalated step is structurally unsatisf
 - Update the step's `hub-prs.json` `lastSyncedAt` when the sync **learned something** — every sync on
   an open step, and on a closed one only when the approval record actually changed (a re-opened review
   that was re-approved). An identical re-sync leaves it alone, so the ledger does not churn.
+- **Write the ledgers in a canonical order.** `approvals.json`, `comments.json` and `hub-prs.json` are
+  sorted on write, so the bytes are a function of the record *set* and never of which step was synced
+  last. Without this the upsert above — which drops the records it refreshes and re-appends them at the
+  tail — makes the file depend on sync order, and the wired sweep (one `gate ci --branch <ref>
+  --merged` per merged PR/MR, every 15 minutes) walks a rotation:
+  `[A,B,C] → sync A → [B,C,A] → sync B → [C,A,B] → sync C → [A,B,C]`. Every hop is a non-empty diff, so
+  every hop commits and pushes, and the pass ends where it began — an unbounded commit loop with zero
+  semantic change. That is issue #163: ~1,800 bot commits/day on the hub that reported it. Sorting is
+  what makes the "nothing staged → nothing to commit" guard in `gate ci` actually hold.
 - Running `sync` twice with no platform change is a no-op on the ledger — byte-identical, including
   `comments.json` and the dated `reviews/*.md` side files.
+
+**Upgrading past #163.** The first sweep on a yadflow carrying the fix writes one canonicalizing
+reorder commit per epic (the records are the same; only their order changes), then converges
+permanently. On an older yadflow the workaround is to disable the pipeline schedule — merges still
+advance gates via the push path; only the catch-up for squash merges and bare approvals is lost.
 
 ## Contract re-lock invalidates prior platform approvals too
 
@@ -164,6 +178,22 @@ other way — up through its first review PR/MR; see "the seed of a new epic" be
 | PR/MR opened / reopened / pushed / reviewed | pre-merge | **none** — review state lives on the platform; CI never touches the branch |
 | PR/MR closed **and merged** (the human act) | merge | `gate ci --branch <head> --pr <n> --merged` → re-read approvals, advance the step + flip the artifact `status:` **on the default branch** |
 | Schedule (`*/15`) | reconcile | Safety net: enumerate recently-**merged** `review/EP-*` PRs/MRs via the API and advance any not yet `done` (idempotent). Recovers a merge whose merge-time run failed transiently, and on GitLab also picks up a squash merge whose commit dropped the branch name (and a bare approval — GitLab fires no pipeline on one). **GitHub:** a scheduled workflow, automatic once committed. **GitLab:** a pipeline schedule with `SDLC_GATE_SYNC=true` (one-time setup) |
+
+**Which yadflow the wired job runs.** Both fragments resolve the version from a `YAD_VERSION` variable
+and fall back to `3`:
+
+| Platform | Where the job reads it | Where you set the pin |
+|---|---|---|
+| GitHub | workflow `env: YAD_VERSION: ${{ vars.YAD_VERSION \|\| '3' }}` | Settings → Secrets and variables → Actions → **Variables** |
+| GitLab | `npx -y -p "yadflow@${YAD_VERSION:-3}"` | Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
+
+The default `3` floats on the major, so a published fix reaches a scheduled job on its next pass with
+nobody in the loop — which is how you want a correctness or gate-churn fix to arrive (this page's own
+issue #163 is the example). To adopt releases deliberately instead, set `YAD_VERSION` to an exact
+version.
+The pin lives in **platform config, not in the wired file**: `yad` owns that file and `yad check --fix`
+rewrites it byte-for-byte from the template, so a version edited into it would be silently reverted on
+the next sync. A hub that pins then owns its own upgrade decision — including for fixes.
 
 **Why no pre-merge write fixes the gate.** Keeping CI off the PR head means an in-flight approval is
 never dismissed by a CI commit, and the PR's required checks never strand on a `[skip ci]` CI commit.

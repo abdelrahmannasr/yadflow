@@ -12,6 +12,7 @@ import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
+  canonicalApprovals, canonicalComments, canonicalHubPrs,
 } from './epic-state.mjs';
 import { hubGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -179,7 +180,11 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       ...(r.unverified ? { unverified: true } : {}),
     });
   }
-  return kept;
+  // Canonical order, not insertion order: this function re-appends at the tail, so without it the
+  // bytes depend on which step was synced last and the sweep rotates the file forever (issue #163 —
+  // see canonicalApprovals). Sorting here also makes the in-memory before/after comparison below
+  // (`approvalsBefore`) mean what it says, so an unchanged re-sync no longer re-stamps lastSyncedAt.
+  return canonicalApprovals(kept);
 }
 
 // Mutates in place, returns how many it stamped. Backfill `pr` on this step's bridge approvals that
@@ -216,14 +221,28 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
   if (!blocking.length) return comments;
   const byName = (login) => (roster.find((r) => r.login === login)?.name) || login || 'reviewer';
   const roleOf = (login) => (roster.find((r) => r.login === login)?.role) || 'reviewer';
-  const round = (comments.filter((cm) => cm.step === stepId).reduce((m, cm) => Math.max(m, cm.round || 0), 0)) + 1;
   const counts = new Map();
   for (const t of blocking) counts.set(t.login, (counts.get(t.login) || 0) + 1);
+  // A round is a CHANGE in the thread state, not a sync. Allocating max+1 on every call made an
+  // unchanged re-read append a whole new record set each pass — and the sweep re-reads a merged review
+  // every 15 minutes for a week. A step whose gate never passes (one unresolved thread, or a missing
+  // approval) is never `alreadyDone`, so it kept reaching here: ~96 ledger commits a day per stuck
+  // review, the same unbounded loop as #163 from the other side. So when the latest recorded round
+  // already describes exactly these commenters and counts, REWRITE it in place instead.
+  const rounds = comments.filter((cm) => cm.step === stepId);
+  const latest = rounds.reduce((m, cm) => Math.max(m, cm.round || 0), 0);
+  const prior = rounds.filter((cm) => cm.round === latest);
+  const now = new Map([...counts].map(([login, count]) => [byName(login), count]));
+  const same = latest > 0 && prior.length === now.size && prior.every((cm) => now.get(cm.commenter) === cm.count);
+  const round = same ? latest : latest + 1;
   const kept = comments.filter((cm) => !(cm.step === stepId && cm.round === round));
   for (const [login, count] of counts) {
-    kept.push({ artifact, step: stepId, commenter: byName(login), role: roleOf(login), round, count, date: today });
+    // An unchanged round keeps its original date, so re-syncing it is byte-identical rather than a
+    // daily one-line churn (the same rule upsertBridge applies to an unchanged approval).
+    const was = prior.find((cm) => cm.commenter === byName(login));
+    kept.push({ artifact, step: stepId, commenter: byName(login), role: roleOf(login), round, count, date: (same && was?.date) || today });
   }
-  return kept;
+  return canonicalComments(kept); // same drop-and-re-append churn as approvals — see canonicalApprovals
 }
 
 // ---- actions ------------------------------------------------------------------------------------
@@ -306,7 +325,19 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     if (s) stampLegacyPr(approvals, s.id, p.number);
   }
   const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
-  const targets = resolved.targets;
+  // Advance in CHAIN order, never in ledger order. `advanceState` opens the step that FOLLOWS the one
+  // it closes, so syncing two passing gates out of chain order rewinds the epic: closing
+  // architecture-review first (next: ui-design) and epic-review second (next: architecture) reopens the
+  // already-done `architecture` author step and points currentStep backward — the YAD-STATE-005 chain
+  // inconsistency `yad gate repair` exists to undo. This used to hold only by accident, because
+  // hub-prs.json happened to be in insertion order; now that the file is written sorted by artifact
+  // (see canonicalHubPrs) the accident is gone, so make the ordering explicit. `gate ci` is unaffected
+  // either way — it always names a single artifact.
+  const stepIndex = (p) => {
+    const s = findReviewStep(state, p.artifact);
+    return s ? state.steps.indexOf(s) : Number.MAX_SAFE_INTEGER;
+  };
+  const targets = [...resolved.targets].sort((a, b) => stepIndex(a) - stepIndex(b));
   if (!targets.length) {
     warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);
     hand(`run \`yad gate open ${epic} ${artifact || '<artifact>'}\`, or name the PR: \`yad gate sync ${epic} ${artifact || '<artifact>'} --pr <n>\``);
@@ -417,11 +448,17 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     info('bridge mode: advisory view — CI owns the ledger, nothing written locally');
     return { synced, advanced };
   }
+  // Belt-and-braces: the upserts above already return canonical order, but a ledger this run only
+  // READ (no matching target, or a pre-canonical file written by an older release) still gets sorted
+  // here, so the first sweep after the upgrade converges the file once and never churns it again.
+  approvals = canonicalApprovals(approvals);
+  comments = canonicalComments(comments);
+  hubPrs = canonicalHubPrs(hubPrs);
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
   writeJSON(ledger.files.hubPrs, hubPrs);
   writeJSON(ledger.files.state, state);
-  refreshRoster(epicDir, open, approvals, today);
+  refreshRoster(epicDir, open, approvals, today); // the dated side file lists them in the same order
   return { synced, advanced };
 }
 
@@ -482,6 +519,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   let synced = 0;
   const touched = new Set();
   const advancedEpics = new Set(); // epics whose step actually passed this run (merge OR a swept merge)
+  const statusFiles = new Map();   // epic -> the artifact files syncStatuses rewrote (staging allowlist)
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
     // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.
@@ -508,10 +546,18 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // Same migration as gateSync, at the one point CI knows the OLD pointer: stamp the approvals it
     // recorded before replacing it, or a re-review on the replacement PR can never be told from a
     // re-read of the old one and stays permanently stale.
-    if (existing?.number != null && number !== existing.number) {
+    //
+    // MERGE PHASE ONLY. This is the one approvals.json write gateCi itself performs, and pre-merge the
+    // run persists nothing and commits nothing — so a stamp there would be a working-tree edit with no
+    // purpose, left behind for `ledger-guard` to reject (and a `git checkout` broad enough to undo it
+    // would also revert approvals this run never wrote, e.g. a human's uncommitted manual record). The
+    // stamp loses nothing by waiting: pre-merge writes nothing, so the OLD pointer is still on disk when
+    // the merge event arrives and re-runs this. In sweep mode `job.pr` comes from the ledger itself, so
+    // `number === existing.number` and the condition is false regardless.
+    if (merged && existing?.number != null && number !== existing.number) {
       const stamped = stampLegacyPr(ledger.approvals, step.id, existing.number);
       if (stamped) {
-        writeJSON(ledger.files.approvals, ledger.approvals);
+        writeJSON(ledger.files.approvals, canonicalApprovals(ledger.approvals));
         info(`${job.epic}: recorded PR #${existing.number} on ${stamped} approval(s) that predate PR provenance`);
       }
     }
@@ -535,7 +581,13 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       // reflect it in the artifact frontmatter (draft → approved). Keyed off the advance, not the
       // --merged flag, so the GitLab scheduled sweep also flips status on a merge it catches. Never
       // on a held step: CI must not touch the artifact while the owner is editing it pre-merge.
-      if (r.advanced > 0) { advancedEpics.add(job.epic); await syncStatuses(root, { epic: job.epic }); }
+      if (r.advanced > 0) {
+        advancedEpics.add(job.epic);
+        const st = await syncStatuses(root, { epic: job.epic });
+        // Remember exactly which artifacts were rewritten — that, and nothing else, is what the
+        // commit below may stage outside the ledger (see the staging allowlist).
+        statusFiles.set(job.epic, [...(statusFiles.get(job.epic) || []), ...(st.files || [])]);
+      }
     } catch (err) {
       if (branch) throw err; // event mode: one epic — surface the failure
       warn(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
@@ -554,10 +606,18 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // unaffected: the merge phase re-reads approvals fresh from the platform (readPr).
   const advancedAny = advancedEpics.size > 0;
   if (!merged && !advancedAny) {
-    // Pre-merge is read-only (Path B): the gate was evaluated with a dry sync that persists nothing.
-    // The one working-tree write is the hub-prs.json seed above (so the dry sync could find the PR);
-    // restore exactly that file per epic so the checkout stays clean — never touching anything else,
-    // so a local `yad gate ci --branch` cannot disturb unrelated files.
+    // EVENT mode (--branch) pre-merge is read-only (Path B): the gate was evaluated with a dry sync
+    // that persists nothing, so the one working-tree write is the hub-prs.json seed above (which let
+    // the dry sync find the PR). Restore exactly that file per epic so the checkout stays clean —
+    // never touching anything else, so a local `yad gate ci --branch` cannot disturb unrelated files.
+    // The stampLegacyPr backfill is gated on `merged` above precisely so there is no second file to
+    // undo: a restore wide enough to cover approvals.json would also revert records this run never
+    // wrote — a human's uncommitted manual approval, or an untracked ledger seed `git clean` deletes.
+    //
+    // SWEEP mode (no --branch) reaches here too, and its sync was NOT dry, so state.json/comments.json
+    // and reviews/*.md may be modified and are deliberately left alone: reverting a sync that genuinely
+    // ran would discard platform state the run just recorded. A bare `yad gate ci` that advances
+    // nothing therefore leaves those files dirty for the operator to inspect and commit (or discard).
     for (const e of touched) {
       const hp = path.join('epics', e, '.sdlc', 'hub-prs.json');
       git('checkout', '-q', '--', hp); // restore it if it was tracked
@@ -568,13 +628,22 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   }
   const target = defaultBranch; // CI only ever commits the ledger to the default branch
 
-  // Stage what this merge-phase run owns, per epic (everything lands on the default branch):
-  //  - advanced → the whole epic (ledger advance + the status flip syncStatuses wrote into the .md).
-  //  - merged but not advanced (merged before the rule passed) → the ledger (.sdlc) + the generated
-  //    reviews/ summaries only; the artifact is the owner's, left untouched.
+  // Stage what this merge-phase run owns, per epic, by an EXPLICIT ALLOWLIST — never `git add -A`
+  // over the whole epic directory:
+  //  - always → the ledger (.sdlc) + the generated reviews/ summaries.
+  //  - advanced → plus exactly the artifact files syncStatuses rewrote (the draft → approved flip).
+  //    The owner's artifact is otherwise theirs, and is left untouched.
+  //
+  // `git add -A -- epics/<e>` would also sweep up anything else sitting in that directory. In CI the
+  // checkout is fresh, so it is invisible there — but `yad gate ci … --merged` on the default branch
+  // is the DOCUMENTED manual recovery for a stuck gate, and a human's checkout is rarely pristine.
+  // Half-finished edits to another artifact, or a stray untracked file, would be committed and pushed
+  // straight to the default branch under a `chore(gate)` subject with [skip ci] — unreviewed, and
+  // contradicting the "CI commits only the ledger" contract every doc in this repo states.
   for (const e of touched) {
-    if (advancedEpics.has(e)) git('add', '-A', '--', path.join('epics', e));
-    else { git('add', '-A', '--', path.join('epics', e, '.sdlc')); git('add', '-A', '--', path.join('epics', e, 'reviews')); }
+    git('add', '-A', '--', path.join('epics', e, '.sdlc'));
+    git('add', '-A', '--', path.join('epics', e, 'reviews'));
+    for (const f of statusFiles.get(e) || []) git('add', '--', f);
   }
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard

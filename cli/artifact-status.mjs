@@ -59,9 +59,15 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
   const epics = epic
     ? [epic]
     : (fs.existsSync(epicsDir) ? fs.readdirSync(epicsDir).filter((e) => fs.statSync(path.join(epicsDir, e)).isDirectory()).sort() : []);
-  if (!epics.length) { info('no epics found — nothing to sync'); return { changed: 0 }; }
+  if (!epics.length) { info('no epics found — nothing to sync'); return { changed: 0, files: [] }; }
 
   let changed = 0;
+  // The root-relative paths actually rewritten. `gate ci` stages its merge commit from an explicit
+  // allowlist — the ledger, the generated reviews, and exactly these artifacts — so a run on a dirty
+  // checkout (the documented manual recovery) can never sweep an unrelated file onto the default
+  // branch. Reporting the paths is what lets the caller be that specific. Named `written`, not
+  // `files`: the per-epic loop below already binds a local `files` (its candidate list).
+  const written = [];
   for (const e of epics) {
     const dir = epicRoot(root, e);
     const state = readJSONStrict(epicFiles(dir).state, null);
@@ -98,10 +104,10 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
         continue;
       }
       const prev = setFrontmatterStatus(file, want);
-      if (prev) { ok(`${path.relative(root, file)}: ${prev} → ${want}`); changed++; }
+      if (prev) { ok(`${path.relative(root, file)}: ${prev} → ${want}`); changed++; written.push(path.relative(root, file)); }
     }
   }
   if (!changed) info(dryRun ? 'no status changes needed' : 'all artifact statuses already in sync');
   else if (!dryRun) ok(`updated ${changed} artifact status(es)`);
-  return { changed };
+  return { changed, files: written };
 }

@@ -17,10 +17,14 @@
 #   RECONCILE (schedule, every 15 min): the safety net. The merge job's `closed` event fires once and
 #   never repeats, so a transient API/GraphQL/push failure (or a fail-closed degraded approval read)
 #   would otherwise strand a merged review until someone reran it by hand. This periodic job discovers
-#   recently-merged review PRs from the API and advances any not yet done. Idempotent: a step that is
-#   already `done` is never re-advanced (the chain is one-way), and re-syncing it writes nothing unless
-#   its approvals genuinely changed — so re-visiting a merged review for a week costs one no-op read per
-#   pass, not a commit. On GitHub a scheduled workflow runs automatically once committed (no setup).
+#   recently-merged review PRs from the API and advances any not yet done. Idempotent DOWN TO THE
+#   BYTES: a step that is already `done` is never re-advanced (the chain is one-way), and re-syncing it
+#   rewrites the ledger in a canonical order, so an unchanged approval record produces an unchanged file
+#   and nothing is committed — re-visiting a merged review for a week costs one no-op read per pass. That
+#   last part is load-bearing: before the #163 fix the re-sync re-appended each step's approvals at the
+#   tail, so this job rotated approvals.json and committed the reorder every 15 minutes, forever (issue
+#   #163). If you pin YAD_VERSION (below) to something older, disable the schedule.
+#   On GitHub a scheduled workflow runs automatically once committed (no setup).
 #
 # CI never approves and never merges — the merge click is the human approval act.
 #
@@ -40,6 +44,15 @@ permissions:
   contents: write # push the merge-advance ledger commit to the default branch
   pull-requests: read # gh pr view + reviewThreads GraphQL
 
+env:
+  # Which yadflow these jobs run. The default `3` floats on the major, so a published fix reaches the
+  # schedule on its next pass with nobody in the loop — which is how you want a correctness or
+  # gate-churn fix to arrive. To adopt releases deliberately instead, pin an exact version by setting a
+  # repository (or organization) Actions **variable** named YAD_VERSION to e.g. `3.15.2`:
+  # Settings → Secrets and variables → Actions → Variables. It lives there, deliberately NOT in this
+  # file, which `yad` owns and rewrites on every sync. A pinned hub then owns its own upgrade decision.
+  YAD_VERSION: ${{ vars.YAD_VERSION || '3' }}
+
 jobs:
   mergesync:
     # The human merge of a review branch: advance the step + flip the artifact status on the default
@@ -57,20 +70,27 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       # Check out the default branch — the merge already landed the artifact here.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Advance the gate on merge
+        # The head ref reaches the shell through `env:`, never through `${{ }}` inside `run:`. A
+        # branch name may legally contain `$`, backticks and parentheses, so a PR opened from
+        # `review/EP-x$(curl …)` would otherwise execute on a runner holding `contents: write` — and
+        # the `if:` guard above does not stop it, since that name still starts with `review/EP-`.
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           git config user.name  "yad-gate-sync[bot]"
           git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
-          npx -y -p yadflow@3 yad gate ci \
-            --branch "${{ github.event.pull_request.head.ref }}" \
-            --pr "${{ github.event.pull_request.number }}" \
+          npx -y -p "yadflow@${YAD_VERSION}" yad gate ci \
+            --branch "$HEAD_REF" \
+            --pr "$PR_NUMBER" \
             --merged
 
   reconcile:
@@ -85,11 +105,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Reconcile recently-merged review PRs
@@ -110,7 +130,7 @@ jobs:
             [ -n "$N" ] || continue
             REF="$(gh pr view "$N" --json headRefName --jq '.headRefName' 2>/dev/null)" || rc=1
             case "$REF" in
-              review/EP-*) npx -y -p yadflow@3 yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
+              review/EP-*) npx -y -p "yadflow@${YAD_VERSION}" yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
             esac
           done < /tmp/yad-merged-prs
           exit $rc
