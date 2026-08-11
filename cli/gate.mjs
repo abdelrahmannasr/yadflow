@@ -519,6 +519,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   let synced = 0;
   const touched = new Set();
   const advancedEpics = new Set(); // epics whose step actually passed this run (merge OR a swept merge)
+  const statusFiles = new Map();   // epic -> the artifact files syncStatuses rewrote (staging allowlist)
   for (const job of jobs) {
     const epicDir = epicRoot(root, job.epic);
     // Event mode (--branch) targets a single epic: fail loudly. Sweep mode skips the bad epic.
@@ -580,7 +581,13 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       // reflect it in the artifact frontmatter (draft → approved). Keyed off the advance, not the
       // --merged flag, so the GitLab scheduled sweep also flips status on a merge it catches. Never
       // on a held step: CI must not touch the artifact while the owner is editing it pre-merge.
-      if (r.advanced > 0) { advancedEpics.add(job.epic); await syncStatuses(root, { epic: job.epic }); }
+      if (r.advanced > 0) {
+        advancedEpics.add(job.epic);
+        const st = await syncStatuses(root, { epic: job.epic });
+        // Remember exactly which artifacts were rewritten — that, and nothing else, is what the
+        // commit below may stage outside the ledger (see the staging allowlist).
+        statusFiles.set(job.epic, [...(statusFiles.get(job.epic) || []), ...(st.files || [])]);
+      }
     } catch (err) {
       if (branch) throw err; // event mode: one epic — surface the failure
       warn(`${job.epic}: sync failed — ${err.message} — skipping this epic`);
@@ -621,13 +628,22 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   }
   const target = defaultBranch; // CI only ever commits the ledger to the default branch
 
-  // Stage what this merge-phase run owns, per epic (everything lands on the default branch):
-  //  - advanced → the whole epic (ledger advance + the status flip syncStatuses wrote into the .md).
-  //  - merged but not advanced (merged before the rule passed) → the ledger (.sdlc) + the generated
-  //    reviews/ summaries only; the artifact is the owner's, left untouched.
+  // Stage what this merge-phase run owns, per epic, by an EXPLICIT ALLOWLIST — never `git add -A`
+  // over the whole epic directory:
+  //  - always → the ledger (.sdlc) + the generated reviews/ summaries.
+  //  - advanced → plus exactly the artifact files syncStatuses rewrote (the draft → approved flip).
+  //    The owner's artifact is otherwise theirs, and is left untouched.
+  //
+  // `git add -A -- epics/<e>` would also sweep up anything else sitting in that directory. In CI the
+  // checkout is fresh, so it is invisible there — but `yad gate ci … --merged` on the default branch
+  // is the DOCUMENTED manual recovery for a stuck gate, and a human's checkout is rarely pristine.
+  // Half-finished edits to another artifact, or a stray untracked file, would be committed and pushed
+  // straight to the default branch under a `chore(gate)` subject with [skip ci] — unreviewed, and
+  // contradicting the "CI commits only the ledger" contract every doc in this repo states.
   for (const e of touched) {
-    if (advancedEpics.has(e)) git('add', '-A', '--', path.join('epics', e));
-    else { git('add', '-A', '--', path.join('epics', e, '.sdlc')); git('add', '-A', '--', path.join('epics', e, 'reviews')); }
+    git('add', '-A', '--', path.join('epics', e, '.sdlc'));
+    git('add', '-A', '--', path.join('epics', e, 'reviews'));
+    for (const f of statusFiles.get(e) || []) git('add', '--', f);
   }
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard

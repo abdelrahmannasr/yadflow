@@ -4450,6 +4450,41 @@ test('gate ci --merged: a repeat sweep over two merged reviews commits nothing (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// `yad gate ci … --merged` on the default branch is the DOCUMENTED manual recovery for a stuck gate,
+// and a human's checkout is rarely pristine. Staging `git add -A -- epics/<e>` would sweep whatever
+// else sits in that directory into a `chore(gate) … [skip ci]` commit pushed straight to the default
+// branch — unreviewed, and contradicting the "CI commits only the ledger" contract.
+test('gate ci --merged: commits the ledger allowlist only, never a dirty worktree', async () => {
+  const { T, author, ci } = scaffoldCiHub();
+  git(author, 'checkout', '-q', 'trunk');
+  git(author, 'merge', '-q', '--no-ff', 'review/EP-test/architecture', '-m', 'merge review/EP-test/architecture');
+  git(author, 'push', '-q', 'origin', 'trunk');
+
+  // The operator's checkout carries unrelated work inside the SAME epic directory: a half-finished
+  // edit to a tracked artifact, and a stray untracked file.
+  const ep = path.join(ci, 'epics/EP-test');
+  fs.writeFileSync(path.join(ep, 'epic.md'), '---\nid: EP-test\nowner: alice\nrepos: [backend]\n---\nhalf-written thought\n');
+  fs.writeFileSync(path.join(ep, 'scratch-notes.md'), 'do not ship me\n');
+
+  // push: false — this is about what gets STAGED, and it keeps HEAD as the commit under inspection.
+  await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval });
+
+  const committed = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString().trim().split('\n').filter(Boolean).sort();
+  assert.deepEqual(committed, [
+    'epics/EP-test/.sdlc/approvals.json',
+    'epics/EP-test/.sdlc/comments.json',
+    'epics/EP-test/.sdlc/hub-prs.json',
+    'epics/EP-test/.sdlc/state.json',
+    'epics/EP-test/architecture.md',
+    'epics/EP-test/reviews/architecture--2026-06-09--approved.md',
+  ], 'only the ledger, the generated review summary, and the status-flipped artifact');
+  // The operator's work is untouched, still theirs to finish.
+  const dirty = git(ci, 'status', '--porcelain').toString();
+  assert.match(dirty, /epics\/EP-test\/epic\.md/, 'the unrelated artifact edit stays uncommitted');
+  assert.match(dirty, /epics\/EP-test\/scratch-notes\.md/, 'the stray untracked file is neither committed nor cleaned');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('gate ci: a non-review branch is a graceful no-op', async () => {
   const { T, ci } = scaffoldCiHub();
   const r = await gateCi(ci, { branch: 'feature/foo', pr: 1, today: '2026-06-09', reader: () => fullApproval });
