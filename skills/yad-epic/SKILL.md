@@ -169,14 +169,25 @@ Notes:
 
 ### Step 5b — Advance the authoring step — analysis-ran only
 *(Only when analysis ran — `state.json` already exists from `yad-analysis`.)*
-In `state.json`: set `epic.status: "done"`, set `epic-review.status: "in_review"`, and set
-`currentStep: "epic-review"`. Write `state.json`. Do **not** re-seed and do **not** touch
-`approvals.json` — only real reviewers approve, through the gate.
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+
+**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`, `yad gate open`
+deliberately skips this write for the same reason, and `yad gate ci --merged` performs the whole
+transition when the review PR merges. Making the edit here fails the gate if it rides the review PR,
+and desynchronises the ledger CI is about to rewrite if it is pushed around the gate. Commit the
+**artifact only**, then hand off to `yad-review-gate`.
+
+**File-only mode — write it.** In `state.json`: set `epic.status: "done"`, set
+`epic-review.status: "in_review"`, and set `currentStep: "epic-review"`. Write `state.json`. Do
+**not** re-seed and do **not** touch `approvals.json` — only real reviewers approve, through the
+gate.
 
 > Since 3.11 the CLI closes the authoring step itself whenever its review gate opens or advances
-> (`yad gate open` / `sync`), so this edit is a no-op when the gate has already run. Keep making it —
-> it keeps `state.json` truthful before the gate opens — but it is no longer load-bearing: an epic
-> whose author step is left `in_progress` used to strand forever (`YAD-STATE-005`).
+> (`yad gate open` / `sync`), so this edit is a no-op when the gate has already run. It keeps
+> `state.json` truthful before the gate opens, but it is no longer load-bearing: an epic whose author
+> step is left `in_progress` used to strand forever (`YAD-STATE-005`).
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via
