@@ -99,6 +99,12 @@ thread off it, `promote` is what makes that anchor real — run it once the feat
   "wake" the state chain — set `currentStep: "epic"`, `epic` step `status: "in_progress"` — then run
   `yad-epic` → `yad-architecture` → … the normal way. This re-locks a contract that subsequent thread
   changes will inherit.
+- **Bridge mode — promote is not wired.** The `state.json` edits above mutate an epic whose ledger is
+  already on the base ref, so the `#162` seed exemption does not apply and `ledger-guard` rejects the
+  commit; unlike the authoring steps there is no `yad backfill` CLI and no `gate ci` path that performs
+  the promotion instead. On a bridge hub, STOP and report this — the promotion needs the gate bot (or a
+  maintainer landing it out of band). Only the `epic.md` half is safe to commit. Tracked as a gap; do
+  **not** push the ledger edit around the guard.
 - Never auto-advances; a human confirms the promotion.
 
 ### Step 7 — Stop (no auto-advance)
