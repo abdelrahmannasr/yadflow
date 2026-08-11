@@ -52,9 +52,45 @@ export function artifactPaths(base) {
   return [`${base}.md`];
 }
 
+// ---- canonical ledger order ---------------------------------------------------------------------
+// Every epic-ledger upsert in this codebase is drop-and-re-append: the records being refreshed are
+// filtered out of the array and pushed back at the TAIL. That makes the file's bytes depend on WHICH
+// step was synced last, not on what the ledger holds — and the wired sweep drives one `gate ci` per
+// merged PR/MR, so a pass over N merged reviews ROTATES the array:
+//
+//   [A,B,C,D,E] -sync A-> [B,C,D,E,A] -sync B-> [C,D,E,A,B] -> … -sync E-> [A,B,C,D,E]
+//
+// Every hop is a non-empty diff, so every hop commits and pushes, and the pass lands back where it
+// started — an unbounded commit loop with zero semantic change (issue #163). Sorting the array on
+// write makes the bytes a pure function of the record SET, so an unchanged re-sync is byte-identical
+// and `gate ci`'s existing "nothing staged -> nothing to commit" guard finally holds.
+//
+// The per-record JSON.stringify tiebreak is what makes the order TOTAL. `Array#sort` is stable, so
+// records tying on the tuple key would keep their (rotating) insertion order — and a manual,
+// skill-written approval can tie with a bridge one on (step, approver, role, domain). The tiebreak is
+// position-independent, so ties resolve by content instead.
+//
+// Compared by CODE UNIT (`<`), not localeCompare: the ledger is written by CI and read/re-written by
+// every teammate's machine, and localeCompare's order depends on the host locale and ICU build. Two
+// machines disagreeing on where one record sorts would reintroduce exactly the churn this prevents.
+const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const canonical = (list, keyOf) => [...list].sort(
+  (x, y) => cmp(keyOf(x), keyOf(y)) || cmp(JSON.stringify(x), JSON.stringify(y)),
+);
+const field = (v) => (v == null ? '' : String(v));
+
+export const canonicalApprovals = (approvals = []) => canonical(approvals, (a) =>
+  [a.step, a.artifact, a.role, a.domain, a.approver, a.source, a.approvedAt, a.date].map(field).join('|'));
+
+export const canonicalComments = (comments = []) => canonical(comments, (cm) =>
+  [cm.step, String(cm.round ?? '').padStart(6, '0'), cm.commenter, cm.role, cm.date].map(field).join('|'));
+
+export const canonicalHubPrs = (hubPrs = []) => canonical(hubPrs, (p) =>
+  [p.artifact, p.step].map(field).join('|'));
+
 // Replace-not-append upsert into hub-prs.json, keyed by artifact (one live review PR per artifact).
 export function upsertHubPr(hubPrs = [], rec) {
-  return [...hubPrs.filter((p) => p.artifact !== rec.artifact), rec];
+  return canonicalHubPrs([...hubPrs.filter((p) => p.artifact !== rec.artifact), rec]);
 }
 
 // SHA-256 of the contract surface block (architecture only). Byte-for-byte identical to the recipe

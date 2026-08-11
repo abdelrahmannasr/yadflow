@@ -123,6 +123,13 @@ export function readJSONStrict(p, def = null) {
 // file, and a failed rename never leaves a stray .tmp for `git add -A` to pick up.
 export function writeJSON(p, obj) {
   const data = JSON.stringify(obj, null, 2) + '\n';
+  // Byte-identical content is not a write. The ledger writers are unconditional — they re-serialize
+  // whether or not anything changed — so this keeps an unchanged sync from touching the file at all
+  // (no mtime churn, nothing for a watcher or a `git add -A` to notice). A backstop, not the fix: the
+  // load-bearing guarantee is that the serialized bytes are canonically ordered (see #163).
+  try {
+    if (fs.readFileSync(p, 'utf8') === data) return;
+  } catch { /* missing or unreadable — fall through and write it */ }
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const tmp = `${p}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, data);
