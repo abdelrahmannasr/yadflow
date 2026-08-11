@@ -182,17 +182,18 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 **bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
 
 **Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`, `yad gate open`
-deliberately skips this write for the same reason, and `yad gate ci --merged` performs the whole
-transition when the review PR merges. Making the edit here fails the gate if it rides the review PR,
-and desynchronises the ledger CI is about to rewrite if it is pushed around the gate. Commit the
-**artifact only** — `contract-lock.json` is artifact-side and rides with it — then hand off to
-`yad-review-gate`.
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+`epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
+`yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
+fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
+is pushed around the gate. Commit the **artifact only** — `contract-lock.json` is artifact-side and
+rides with it — then hand off to `yad-review-gate`.
 
-**File-only mode — write it.** In `state.json`: set `architecture.status: "done"`, set
-`architecture-review.status: "in_review"`, and set `currentStep: "architecture-review"`. Write
-`state.json`. Do **not** touch `approvals.json` — only real reviewers approve, through the gate.
-`yad gate open` makes the same edit, so this is a no-op once the gate has run.
+**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+`architecture.status: "done"`, set `architecture-review.status: "in_review"`, and set
+`currentStep: "architecture-review"`. Write `state.json`. Do **not** touch `approvals.json` — only
+real reviewers approve, through the gate. On this branch `yad gate open` makes the same edit, so it
+is a no-op once the gate has run.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
