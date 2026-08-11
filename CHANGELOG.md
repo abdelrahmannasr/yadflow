@@ -1,3 +1,12 @@
+## [3.15.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.0...v3.15.1) (2026-08-11)
+
+
+### Bug Fixes
+
+* **checks:** close the silent-PASS holes the [#161](https://github.com/abdelrahmannasr/yadflow/issues/161) fix left open ([0f180ab](https://github.com/abdelrahmannasr/yadflow/commit/0f180abc72618fcd793ef6717fe1e128aa5ccfa5))
+* **checks:** pin every changed contract slice, not just the first ([a79a946](https://github.com/abdelrahmannasr/yadflow/commit/a79a946aa37c08615741082bc638d006f7e80b76)), closes [#161](https://github.com/abdelrahmannasr/yadflow/issues/161)
+* **checks:** read hub.json and the contract lock across line breaks ([43a618d](https://github.com/abdelrahmannasr/yadflow/commit/43a618d0822ed8576b9a164889bc53a52bbdf713)), closes [#161](https://github.com/abdelrahmannasr/yadflow/issues/161)
+
 # [3.15.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.14.0...v3.15.0) (2026-08-10)
 
 
