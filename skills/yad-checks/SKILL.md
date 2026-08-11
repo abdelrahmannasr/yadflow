@@ -55,7 +55,11 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     when humans legitimately own the ledger). On review PRs it FAILs any commit that touches the
     CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`, `reviews/*.md`) unless it
     is a **verified gate-bot commit** — bot-authored AND platform-Verified, since author text alone is
-    spoofable. `.sdlc/contract-lock.json` is artifact-side and exempt. Runs in `yad-hub-checks`
+    spoofable. `.sdlc/contract-lock.json` is artifact-side and exempt. So is a **new epic's seed**:
+    no CI path can create a ledger (`gate ci` only *advances* an existing chain, at merge, on the
+    default branch), so an epic whose `.sdlc/state.json` is absent from the base ref may be created by
+    a human on its first review PR/MR — **creation, not mutation** (#162). Once the ledger is on the
+    default branch the guard is absolute again. Runs in `yad-hub-checks`
     alongside `verified-commits` (which waives the allowlist for the bot but still requires its
     signature). See `yad-hub-bridge`.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`

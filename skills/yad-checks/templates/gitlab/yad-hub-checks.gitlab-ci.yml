@@ -44,7 +44,9 @@ yad-hub-pr-template:
     - body="$(mktemp)"; printf '%s' "$CI_MERGE_REQUEST_DESCRIPTION" > "$body"
     - bash checks/pr-template.sh --profile hub --head "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --changed "$changed" "$body"
 
-# The gate ledger is CI-owned: reject non-bot commits to .sdlc/*.json or reviews/*.md.
+# The gate ledger is CI-owned: reject non-bot commits to .sdlc/{state,approvals,comments,hub-prs}.json
+# or reviews/*.md (.sdlc/contract-lock.json is artifact-side and allowed). The one other exception is a
+# brand-new epic's seed, which no CI path can write, so it rides this first review MR (#162).
 yad-hub-ledger-guard:
   extends: .yad_hub_mr_only
   needs: []

@@ -115,6 +115,11 @@ into normal authoring with zero re-seeding.
 Also create the empty ledgers `{.sdlc/approvals.json}` and `{.sdlc/comments.json}` (each `[]`) and the
 `reviews/` directory. **Do NOT** write a `contract-lock.json` — a stub has no locked surface yet.
 
+Commit the seed on this step's authoring branch; it reaches the hub's default branch through the
+epic's **first** review PR/MR (or, for a stub, the PR that carries the stub itself). In bridge mode
+`ledger-guard` exempts a new epic's ledger — creation, not mutation (#162) — while every later change
+to it stays CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
+
 ### Step 6 — Stop; hand off (NO auto-advance)
 Report the new `EP-<slug>`, that it is a **stub (backfill pending)**, and the two next moves:
 - **File bugs now:** `yad-change` (`--parent EP-<slug>`, `kind: defect|change`) — the defect threads off

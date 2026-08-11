@@ -1090,15 +1090,151 @@ const enableBridge = (T) => {
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","bridge_enabled":true}\n');
 };
 
-test('ledger-guard: with the bridge ON, a non-bot commit touching gate-state files FAILS', () => {
-  const T = scaffoldRepo();
+// Put an epic's ledger on `main` (the base ref) so the branch that follows MUTATES a CI-owned ledger
+// rather than seeding a new one. scaffoldRepo cuts `feature` off the first commit, so the ledger has
+// to land on main and the working branch be re-cut from it.
+const seedLedgerOnBase = (T, epic = 'EP-x', files = {}) => {
+  git(T, 'checkout', '-q', 'main');
   enableBridge(T);
-  commit(T, 'enable bridge', {}); // commit the hub.json (artifact-side; not a gate file)
+  commit(T, 'seed epic ledger', {
+    [`epics/${epic}/epic.md`]: '# e\n',
+    [`epics/${epic}/.sdlc/state.json`]: '{"epicId":"' + epic + '"}\n',
+    [`epics/${epic}/.sdlc/approvals.json`]: '[]\n',
+    ...files,
+  });
+  git(T, 'checkout', '-q', '-B', 'feature');
+};
+
+test('ledger-guard: with the bridge ON, a non-bot commit MUTATING an existing ledger FAILS', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
   commit(T, 'review: epic', { 'epics/EP-x/epic.md': 'x\n' }); // artifact ok
-  commit(T, 'sneaky', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' }); // human ledger edit
+  commit(T, 'sneaky', { 'epics/EP-x/.sdlc/approvals.json': '[{"status":"approved"}]\n' }); // human ledger edit
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /epics\/EP-x\/\.sdlc\/approvals\.json/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// #162: no CI path can seed a new epic's ledger (gate-sync only ADVANCES an existing chain, at merge,
+// on the default branch), so the seed can only reach the trunk through the first review PR/MR — the
+// one place this gate runs. Creation is exempt; mutation stays guarded by the test above.
+test('ledger-guard: a human seeding a NEW epic PASSES — creation is not mutation', () => {
+  const T = scaffoldRepo();
+  enableBridge(T);
+  commit(T, 'enable bridge', {});
+  commit(T, 'review: epic', {
+    'epics/EP-new/epic.md': '# e\n',
+    'epics/EP-new/.sdlc/state.json': '{"currentStep":"epic"}\n',
+    'epics/EP-new/.sdlc/approvals.json': '[]\n',
+    'epics/EP-new/.sdlc/comments.json': '[]\n',
+  });
+  // the authoring skill's follow-up edit (epic → done, epic-review → in_review) is a MODIFY, still pre-seed
+  commit(T, 'chore: close the authoring step', { 'epics/EP-new/.sdlc/state.json': '{"currentStep":"epic-review"}\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /epics\/EP-new has no ledger on main — new epic/);
+  assert.match(r.out, /PASS .*gate-bot commit or a new epic's seed/); // the PASS line names the rule that passed it
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: the carve-out is anchored on state.json — hub-prs.json on an existing epic still FAILS', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T); // state.json + approvals.json on main; hub-prs.json has never existed
+  commit(T, 'sneaky pointer', { 'epics/EP-x/.sdlc/hub-prs.json': '[{"number":1}]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /hub-prs\.json/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: deleting an on-base state.json FAILS — delete-then-re-seed cannot reset the carve-out', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  fs.rmSync(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+  commit(T, 'drop the ledger');
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-x\/\.sdlc\/state\.json/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: a mixed range fails for the existing epic only, not the newly seeded one', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T, 'EP-old');
+  commit(T, 'seed + mutate', {
+    'epics/EP-new/.sdlc/state.json': '{"currentStep":"epic"}\n',   // new epic — exempt
+    'epics/EP-old/.sdlc/approvals.json': '[{"status":"approved"}]\n', // existing ledger — guarded
+  });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-old\/\.sdlc\/approvals\.json/);
+  assert.doesNotMatch(r.out, /→ epics\/EP-new/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: reviews/*.md for a not-yet-seeded epic rides the same carve-out', () => {
+  const T = scaffoldRepo();
+  enableBridge(T);
+  commit(T, 'enable bridge', {});
+  commit(T, 'review: epic', {
+    'epics/EP-new/.sdlc/state.json': '{"currentStep":"epic"}\n',
+    'epics/EP-new/reviews/epic--review.md': '# review\n',
+  });
+  assert.equal(runGate(LEDGER_GUARD, T).code, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: reviews/*.md on an epic that IS on base stays guarded', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T);
+  commit(T, 'hand-written review record', { 'epics/EP-x/reviews/epic--review.md': '# review\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-x\/reviews\/epic--review\.md/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Git permits a newline inside a path. Read line-wise, `epics/EP-<newline>x/.sdlc/state.json` splits
+// into two records that match no arm — the on-base ledger vanishes from the seeded list AND the
+// mutation vanishes from the scan, so the gate fails OPEN. Both reads are NUL-delimited instead.
+test('ledger-guard: a newline inside the epic path cannot slip a mutation past the scan', () => {
+  const T = scaffoldRepo();
+  const slug = 'EP-x\nold';
+  const write = (p, content) => {
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'],
+      { cwd: T, env: GIT_ENV, input: content }).toString().trim();
+    // --cacheinfo cannot carry a newline in its comma form; index-info takes NUL-terminated records.
+    execFileSync('git', ['update-index', '-z', '--add', '--index-info'],
+      { cwd: T, env: GIT_ENV, input: `100644 ${blob}\t${p}\0` });
+  };
+  git(T, 'checkout', '-q', 'main');
+  enableBridge(T);
+  git(T, 'add', '.sdlc/hub.json');      // never `add -A` after write(): the path is index-only, so a
+  write(`epics/${slug}/.sdlc/state.json`, '{}\n'); // worktree rescan would stage its deletion
+  git(T, 'commit', '-q', '-m', 'seed epic ledger');
+  git(T, 'checkout', '-q', '-B', 'feature');
+  write(`epics/${slug}/.sdlc/approvals.json`, '[{"status":"approved"}]\n');
+  git(T, 'commit', '-q', '-m', 'sneaky newline path');
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// macOS/Windows fold case, so `ep-x` beside an on-base `EP-x` would be the SAME directory locally —
+// the carve-out must read that as a mutation of EP-x's ledger, not the creation of a new epic.
+test('ledger-guard: a case-folded slug cannot launder a mutation as a creation', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T, 'EP-x');
+  // Straight through the index: this host's filesystem folds case, so writing the file would land in
+  // the real EP-x directory and never produce the `ep-x` path a case-sensitive CI runner would see.
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'],
+    { cwd: T, env: GIT_ENV, input: '[{"status":"approved"}]\n' }).toString().trim();
+  git(T, 'update-index', '--add', '--cacheinfo', `100644,${blob},epics/ep-x/.sdlc/approvals.json`);
+  git(T, 'commit', '-q', '-m', 'sneaky case fold');
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/ep-x\/\.sdlc\/approvals\.json/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1117,14 +1253,14 @@ test('ledger-guard: artifact + contract-lock edits by a human PASS', () => {
 
 test('ledger-guard: a bot-authored ledger commit is allowed (signature waived without a remote)', () => {
   const T = scaffoldRepo();
-  enableBridge(T);
-  commit(T, 'enable bridge', {});
-  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
+  seedLedgerOnBase(T); // an EXISTING ledger, so this exercises the bot path and not the seeding carve-out
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{"currentStep":"epic-review"}\n');
   git(T, 'add', '-A');
   git(T, '-c', 'user.name=yad-gate-sync[bot]', '-c', 'user.email=yad-gate-sync[bot]@users.noreply.github.com',
     'commit', '-q', '-m', 'chore(gate): sync [skip ci]');
-  assert.equal(runGate(LEDGER_GUARD, T).code, 0);
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /is a verified gate-bot commit\.$/m); // passed on the BOT rule, not the carve-out
   fs.rmSync(T, { recursive: true, force: true });
 });
 

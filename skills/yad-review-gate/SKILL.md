@@ -176,7 +176,9 @@ PR only — against the `review/<epic>/<artifact>` branch, which must already ex
 records this skill describes. The skill's
 job is the human half: presenting the artifact, helping the owner address comments, and narrating the
 gate. Local `yad gate sync` is advisory in bridge mode (reads the platform, prints status, writes
-nothing); a human must never commit gate-state files (the `ledger-guard` check rejects it).
+nothing); a human must never commit gate-state files (the `ledger-guard` check rejects it). The single
+exception is an epic's **seed** — no CI path can create a ledger, so a brand-new epic's `.sdlc/` rides
+its **first** review PR/MR, cut from the authoring branch (creation, not mutation, #162).
 
 Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rule is satisfied, whose
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and

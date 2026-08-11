@@ -52,7 +52,10 @@ each required domain-owner to a platform `login` via the roster (a roster `name`
 ### Step 2 — `open` (create the review PR/MR)
 1. From the hub default branch, create `review/EP-<slug>/<artifact-base>` and ensure the artifact file
    (and, for architecture, `contract.md` + `.sdlc/contract-lock.json`) is committed on it. Push as the
-   local user.
+   local user. **First gate of a new epic:** cut the review branch from the **authoring** branch
+   (`epic/…`, `change/…`, `analysis/…`, `discovery/…`) instead, so it carries the `.sdlc/` **seed** —
+   that PR/MR is the only way a new epic's ledger reaches the default branch, and `ledger-guard`
+   exempts it (see step 4).
 2. Open the PR/MR with `gh`/`glab` using the hub body template (`yad-pr-template` `templates/hub/…`),
    filled with the epic, artifact, gate step, owner, `epic.repos`, and the step's risk tags.
 3. **Request the required reviewers** (their logins) and add a `domain:<repo>` label per touched repo so
@@ -68,7 +71,9 @@ each required domain-owner to a platform `login` via the roster (a roster `name`
    A human commit touching the gate-state files (`.sdlc/{state,approvals,comments,hub-prs}.json` or
    `reviews/*.md`; `.sdlc/contract-lock.json` is artifact-side and allowed) on a review PR is rejected
    by the `ledger-guard` check. (The `yad gate open` CLI behaves the same: in bridge mode it opens the
-   PR only and writes no ledger.)
+   PR only and writes no ledger.) The **one** exception is a brand-new epic's **seed** — no CI path can
+   create a ledger, so an epic whose `.sdlc/state.json` is absent from the base ref may be created by a
+   human on this first PR/MR (#162). Every later change to it is CI's alone.
 5. Report the PR/MR URL and the required reviewers. **Do not** record approvals or advance — reviewers
    act on the platform; CI (`yad gate ci`) reconciles it onto the default branch at merge.
 
@@ -143,7 +148,8 @@ default branch. (File-only mode keeps `yad gate sync` as the local writer.)
 - **Protect the hub default branch.** Require that `epics/**` artifacts change only through a review
   PR/MR (branch protection). This keeps revoke-on-change sound: it removes the only window where a
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
-  "Known limitation").
+  "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
+  nobody needs a direct push to the default branch to start an epic (#162).
 - **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs file-only with no error.
 
 ## Reference

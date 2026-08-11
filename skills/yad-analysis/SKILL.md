@@ -138,6 +138,10 @@ Notes:
 - Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
   `[]`, and the `reviews/` directory.
+- Commit the seed on the `analysis/EP-<slug>` branch, and cut `review/EP-<slug>/analysis` from it so the
+  epic's **first** review PR/MR carries the ledger to the default branch. In bridge mode `ledger-guard`
+  exempts a new epic's ledger (creation, not mutation, #162); every later change to it is CI's. See
+  `../yad-epic/references/state-schema.md`, "Authoring branches".
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `analysis.md`, and that the next action is **review** via

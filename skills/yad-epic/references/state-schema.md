@@ -94,6 +94,16 @@ The shared procedure (run once the `EP-<slug>` is known):
    hub's default branch (`git checkout -b <step>/EP-<slug>`).
 3. Author and commit the step's artifact(s) on that branch. The bridge's `review/…` branch is created
    separately at review time and is untouched by this step.
+
+**How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once, by hand, on the
+**entry** step's authoring branch (`analysis/…`, `epic/…`, `change/…`, `discovery/…`) — no CLI or CI
+path creates one (`yad gate ci` only *advances* an existing chain, at merge, on the default branch).
+So for the **first** gate of an epic, cut `review/EP-<slug>/<artifact-base>` from that authoring
+branch: the review PR/MR then carries the seed alongside the artifact, and the ledger lands on the
+default branch when it merges. In bridge mode `ledger-guard` exempts exactly this case — **creation,
+not mutation** (#162) — so no direct push to a protected default branch is needed. For every **later**
+gate the ledger is already on the default branch: cut the review branch from there, commit the
+artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `reviews/*.md` to CI.
 | `type` | `author` \| `review+approve` | Authoring step or a team review gate. |
 | `artifact` | filename or folder | The file/folder this step produces or gates. |
 | `assistance` | `none` \| `review` \| `heavy` | Dial 1 — how much AI helps (build plan §2). |
