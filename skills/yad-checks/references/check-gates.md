@@ -22,17 +22,23 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 ## Resolving `<base>` (every gate that takes one)
 
 The `<base>` argument is **optional**. The order is: the **argument**, else `SDLC_BASE`, else the
-remote's **published default branch** (`git symbolic-ref refs/remotes/origin/HEAD`), else
-`origin/main`. CI always passes it explicitly (`origin/<PR base>` /
-`origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), so this governs local runs — and it mirrors the CLI's
-own rule (`cli/repo.mjs`, `cli/hubcommit.mjs`).
+**configured** `default_branch` (`.sdlc/hub.json`, or `SDLC_HUB_CONFIG`), else the remote's
+**published default branch** (`git symbolic-ref refs/remotes/origin/HEAD`), else `origin/main` —
+the same order the CLI resolves (`cli/hubcommit.mjs`, `cli/repo.mjs`), so a gate never diffs a
+different range than the `yad` commands run beside it. Each candidate must actually **resolve**
+before it is used, so a *dangling* `origin/HEAD` (trunk renamed, the old remote-tracking ref pruned)
+falls through instead of failing the gate on a fully-fetched repo. CI always passes the base
+explicitly (`origin/<PR base>` / `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), so this governs
+local runs.
 
 Hardcoding `origin/main` diffed the wrong range on a repo whose trunk is `develop`/`master` — either
 failing closed for the wrong reason, or, where a stale `main` still existed, silently diffing a range
 that both mis-reports the surface and drags unrelated stories into contract-check's per-story fidelity
 pass (issue #161). An auto-resolved base is **printed as a note**, so the range a local run gated is
 never implicit. Like the `product-repo` block below, this one is duplicated verbatim across the
-scripts (they are standalone by design) and pinned byte-identical by a test.
+scripts (they are standalone by design) and pinned byte-identical by a test — which covers every
+base-taking gate, including `yad-backfill`'s `backfill-check.sh` and the installed copies this repo's
+own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 
 ## 1. spec-link (`templates/checks/spec-link.sh`)
 
@@ -76,6 +82,12 @@ scripts (they are standalone by design) and pinned byte-identical by a test.
     first story with no `link.md` deferred the whole check before the stale one was ever read
     (issue #161). One clean-or-deferred story never masks another's stale pin, the same rule spec-link
     applies per commit.
+  - A lock the gate can **read but not parse** (truncated, half-written, or a changed schema — no
+    `"hash": "sha256:…"`) **FAILS**. It used to short-circuit the comparison into the "hash matches"
+    note, i.e. the gate affirmatively reported a match it never made.
+- The changed-file list is read with `core.quotePath=false`. With git's default, a path holding a
+  non-ASCII byte comes back quoted and octal-escaped, so a slice like `specs/EP-démo-S01/contracts/…`
+  never matched the surface pattern and an undeclared widening passed untouched.
 - This enforces the Phase 2 rule: the shared surface is owned upstream and is never widened from inside
   a code repo. The hash recipe is in `../yad-architecture/references/contract-format.md`.
 

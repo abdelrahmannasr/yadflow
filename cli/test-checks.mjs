@@ -14,9 +14,11 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CHECKS = path.join(ROOT, 'skills/yad-checks/templates/checks');
 const RISK_ROUTE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/risk-route.sh');
 
-// Strip ambient git identity env (see cli/test.mjs for why).
+// Strip ambient git identity env (see cli/test.mjs for why) — and SDLC_BASE, which the gates read as
+// the base branch. The repo's own docs tell developers to `export SDLC_BASE=…`, so leaking it into a
+// gate run would silence the no-base tests below on exactly the machines that followed the docs.
 const GIT_ENV = Object.fromEntries(
-  Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k)),
+  Object.entries(process.env).filter(([k]) => !/^GIT_(AUTHOR|COMMITTER)_/.test(k) && k !== 'SDLC_BASE'),
 );
 const git = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe', env: GIT_ENV });
 
@@ -48,7 +50,7 @@ function commit(T, msg, files = {}) {
 const runGate = (script, cwd, args = ['main'], env = {}) => {
   try {
     const out = execFileSync('bash', [script, ...args], {
-      cwd, env: { ...process.env, ...env }, stdio: 'pipe',
+      cwd, env: { ...GIT_ENV, ...env }, stdio: 'pipe',
     });
     return { code: 0, out: out.toString() };
   } catch (e) {
@@ -329,6 +331,32 @@ test('contract-check gate: every story pinning the current lock passes, reportin
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('contract-check gate: a product lock with no readable hash FAILs, never "hash matches"', () => {
+  const T = scaffoldRepo();
+  // A truncated / half-written / schema-changed lock: readable file, no parseable hash.
+  fs.mkdirSync(path.join(T, 'product/epics/EP-demo/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'product/epics/EP-demo/.sdlc/contract-lock.json'), '{}\n');
+  commit(T, 'feat: widen API\n\nContract-Change: yes', storySlice('EP-demo-S01', 'a'.repeat(64)));
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, `an unparseable lock proves nothing and must not pass:\n${r.out}`);
+  assert.match(r.out, /has no readable "hash": "sha256:…" value/);
+  assert.doesNotMatch(r.out, /hash matches the product lock/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a non-ASCII slice path still counts as the contract surface', () => {
+  const T = scaffoldRepo();
+  // git quote-wraps such paths in --name-only output unless core.quotePath is off, which used to hide
+  // the slice from the surface pattern entirely — the gate PASSed an undeclared surface widening.
+  commit(T, 'feat: widen the API quietly', {
+    'specs/EP-démo-S01/contracts/api.md': 'new endpoint\n',
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, `one accented character must not buy a pass past the gate:\n${r.out}`);
+  assert.match(r.out, /without a 'Contract-Change: yes' trailer/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------- base resolution with no explicit base (issue #161) ----------
 // CI always passes the base; a local run does not. Defaulting to a hardcoded `origin/main` diffs the
 // wrong range (or nothing at all) on a repo whose trunk is `develop`/`master`.
@@ -375,6 +403,44 @@ test('spec-link gate: SDLC_BASE still wins over the auto-detected default branch
   assert.match(r.out, /base ref 'origin\/nope' not found/);
   assert.doesNotMatch(r.out, /no base given/);
   fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a DANGLING origin/HEAD falls through to the next candidate', () => {
+  // Trunk renamed master -> main: an old clone keeps origin/HEAD -> origin/master, and a prune removes
+  // the ref it names. symbolic-ref still SUCCEEDS, so a fallback that only fires on failure would fail
+  // the gate closed on a fully-fetched repo — for a base the developer never named.
+  const { T, src } = scaffoldClonedRepo('master');
+  git(T, 'update-ref', 'refs/remotes/origin/main', 'origin/master');
+  git(T, 'update-ref', '-d', 'refs/remotes/origin/master');
+  commit(T, 'feat: consume the contract', { 'src/api.js': 'x' });
+  const r = runGate(CONTRACT, T, []);
+  assert.equal(r.code, 0, `a dangling origin/HEAD must not fail a diffable repo:\n${r.out}`);
+  assert.match(r.out, /no base given — diffing against 'origin\/main'/);
+  fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: a configured default_branch outranks the remote default (the CLI order)', () => {
+  // `.sdlc/hub.json`'s default_branch is what the CLI resolves first (cli/hubcommit.mjs) — it is how a
+  // team overrides a stale origin/HEAD, so a gate that ignored it would diff a different range than
+  // every `yad` command on the same repo.
+  const { T, src } = scaffoldClonedRepo('develop');
+  git(T, 'update-ref', 'refs/remotes/origin/main', 'origin/develop');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ default_branch: 'main' }, null, 2));
+  commit(T, 'feat: consume the contract', { 'src/api.js': 'x' });
+  const r = runGate(CONTRACT, T, []);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /no base given — diffing against 'origin\/main'/); // not origin/develop
+  fs.rmSync(src, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('commit-message gate: an EMPTY base argument counts as no base, like every other gate', () => {
+  const T = scaffoldRepo();
+  const r = runGate(path.join(CHECKS, 'commit-message.sh'), T, ['--profile', 'code', '']);
+  assert.match(r.out, /no base given — diffing against 'origin\/main'/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -571,23 +637,53 @@ test('all four hub-reading gates carry the SAME resolution block, byte for byte'
   }
 });
 
+// Every gate that takes a `<base>`, by the path a test can read it from. The set is deliberately
+// wider than CHECKS: `checks/verified-commits.sh` is the copy this repo's own CI runs (kept in sync by
+// hand), and backfill-check.sh lives in a different skill — both were left behind by an earlier
+// base-default change, which is precisely the drift this pins.
+const BASE_TAKING_GATES = [
+  'skills/yad-checks/templates/checks/contract-check.sh',
+  'skills/yad-checks/templates/checks/spec-link.sh',
+  'skills/yad-checks/templates/checks/lineage-check.sh',
+  'skills/yad-checks/templates/checks/epic-open.sh',
+  'skills/yad-checks/templates/checks/reconcile-debt-check.sh',
+  'skills/yad-checks/templates/checks/commit-message.sh',
+  'skills/yad-checks/templates/checks/ledger-guard.sh',
+  'skills/yad-checks/templates/checks/verified-commits.sh',
+  'skills/yad-backfill/templates/checks/backfill-check.sh',
+  'checks/verified-commits.sh', // yadflow's own installed copy — its CI executes this one
+];
+
 test('every base-taking gate carries the SAME base-resolution block, byte for byte', () => {
   // Same reason as the link.md block above: duplicated by design, so it has to be pinned. A gate that
   // drifts back to a hardcoded `origin/main` diffs a different range than its siblings on the same
   // repo (issue #161), which is exactly the class of divergence #149 came from.
   const region = (file) => {
-    const src = fs.readFileSync(path.join(CHECKS, file), 'utf8');
+    const src = fs.readFileSync(path.join(ROOT, file), 'utf8');
     const start = src.indexOf('# --- shared base resolution');
     const end = src.indexOf('\nresolve_base() {');
     assert.ok(start >= 0 && end > start, `${file}: base-resolution block not found`);
     return src.slice(start, src.indexOf('\n}\n', end) + 3);
   };
-  const canonical = region('contract-check.sh');
-  for (const f of [
-    'spec-link.sh', 'lineage-check.sh', 'epic-open.sh', 'reconcile-debt-check.sh',
-    'commit-message.sh', 'ledger-guard.sh', 'verified-commits.sh',
-  ]) {
+  const [first, ...rest] = BASE_TAKING_GATES;
+  const canonical = region(first);
+  for (const f of rest) {
     assert.equal(region(f), canonical, `${f} drifted from the canonical base-resolution block`);
+  }
+});
+
+test('every base-taking gate actually CONSUMES resolve_base (no hardcoded origin/main default)', () => {
+  // Pinning the helper alone leaves the two lines that use it unpinned — a gate could carry the block
+  // verbatim and still assign `BASE="${1:-${SDLC_BASE:-origin/main}}"`, i.e. exactly the drift the pin
+  // above exists to catch, with the test passing.
+  for (const f of BASE_TAKING_GATES) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    assert.doesNotMatch(src, /SDLC_BASE:-origin\/main/, `${f} still hardcodes the origin/main default`);
+    assert.match(src, /^BASE="\$\{(1|ARGS\[0\]):-\$\{SDLC_BASE:-\$\(resolve_base\)\}\}"$/m,
+      `${f} does not assign BASE from resolve_base`);
+    // ...and says which base it picked when nothing named one.
+    assert.match(src, /\|\| echo "note \[[a-z-]+\]: no base given — diffing against '\$\{BASE\}'\."$/m,
+      `${f} does not report an auto-resolved base`);
   }
 });
 

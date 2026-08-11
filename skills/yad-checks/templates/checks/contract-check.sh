@@ -10,15 +10,23 @@ set -euo pipefail
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
-# With no explicit base, diff against the remote's PUBLISHED default branch rather than a hardcoded
-# `origin/main` — on a repo whose trunk is `develop`/`master` that guess either fails closed or, when
-# a stale `main` still exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own rule
-# (cli/repo.mjs, cli/hubcommit.mjs): origin/HEAD, else origin/main. CI always passes the base
-# explicitly, so this governs local runs only. The `|| _b=""` is load-bearing: under `set -e` a failing
+# With no explicit base, RESOLVE the trunk instead of assuming a hardcoded `origin/main` — on a repo
+# whose trunk is `develop`/`master` that guess either fails closed or, where a stale `main` still
+# exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own order (cli/hubcommit.mjs,
+# cli/repo.mjs): the CONFIGURED default_branch first, then the remote's published default
+# (origin/HEAD), then origin/main. Each candidate must actually resolve before it is used, so a
+# DANGLING origin/HEAD (trunk renamed, the old remote-tracking ref pruned) falls through to the next
+# candidate instead of failing the gate on a fully-fetched repo. CI always passes the base explicitly,
+# so this governs local runs only. The `|| _x=""` guards are load-bearing: under `set -e` a failing
 # command substitution in an assignment aborts the script.
 resolve_base() {
-  _b="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _b=""
-  printf '%s' "${_b:-origin/main}"
+  _cfg="$(sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | head -1)" || _cfg=""
+  _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
+  for _c in "origin/${_cfg}" "${_head}" origin/main; do
+    case "$_c" in ''|origin/) continue ;; esac
+    if git rev-parse --verify --quiet "${_c}^{commit}" >/dev/null 2>&1; then printf '%s' "$_c"; return; fi
+  done
+  printf '%s' origin/main
 }
 
 BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
@@ -32,7 +40,10 @@ if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
 fi
 RANGE="${BASE}..HEAD"
 
-changed="$(git diff --name-only "$RANGE")"
+# core.quotePath=false: with the default ON, git wraps any path holding a non-ASCII byte in quotes
+# and octal-escapes it, so a slice like specs/EP-démo-S01/contracts/api.md never matches the pattern
+# below — the surface change would be invisible to the gate it exists to stop.
+changed="$(git -c core.quotePath=false diff --name-only "$RANGE")"
 surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)"
 
 if [ -z "$surface" ]; then
@@ -113,7 +124,17 @@ while IFS= read -r story; do
   [ -n "$prod" ] && lock="${prod}/epics/${epic}/.sdlc/contract-lock.json"
   if [ -n "$product_rel" ] && [ -f "$lock" ]; then
     current="$(sed -nE 's/.*"hash":[[:space:]]*"sha256:([0-9a-f]+)".*/\1/p' "$lock" | head -1)"
-    if [ -n "$current" ] && [ "$current" != "$pinned" ]; then
+    # A lock we can READ but cannot PARSE proves nothing, and an empty `current` used to short-circuit
+    # the comparison below straight into the "hash matches" note — the gate affirmatively reporting a
+    # match it never made. Fail closed instead: a truncated, half-written or schema-changed lock is a
+    # broken lock, and a Contract-Change is being claimed against it.
+    if [ -z "$current" ]; then
+      echo "FAIL [contract-check]: ${lock} has no readable \"hash\": \"sha256:…\" value —"
+      echo "  the lock cannot prove ${link}'s pin. Re-lock the contract upstream (yad-architecture Step 5)."
+      rc=1
+      continue
+    fi
+    if [ "$current" != "$pinned" ]; then
       echo "FAIL [contract-check]: Contract-Change claimed, but ${link} still pins ${pinned:0:12}…"
       echo "  while the product lock is ${current:0:12}… — re-run yad-spec so the slice matches the re-locked contract."
       rc=1

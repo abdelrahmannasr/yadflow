@@ -142,9 +142,9 @@ bash checks/spec-link.sh "<base>"
 bash checks/contract-check.sh "<base>"
 bash checks/build-test-lint.sh
 ```
-`<base>` is optional — omitted, each gate diffs the remote's default branch (`origin/HEAD`, else
-`origin/main`) and prints the base it chose; pass it (or `SDLC_BASE`) when the PR/MR targets another
-branch.
+`<base>` is optional — omitted, each gate resolves the trunk (configured `default_branch`, else
+`origin/HEAD`, else `origin/main`) and prints the base it chose; pass it (or `SDLC_BASE`) when the
+PR/MR targets another branch.
 
 A non-zero exit is a FAIL. Summarize which gates passed and, for any failure, the exact remediation
 (spec-link: add the `Task:` trailer / spec; contract-check: route back to the architecture gate and

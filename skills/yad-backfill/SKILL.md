@@ -72,8 +72,9 @@ the approver(s) + date. Only a `verified: true` backfill spec counts as real.
 
 ### Step 5 — `gate` (block changes per touched feature)
 `bash checks/backfill-check.sh <base>` blocks a change that touches a feature being backfilled until
-that feature's spec is `verified: true`. It is **per touched feature** — a change touching feature A is
-not blocked by an unverified feature B. Forward-spec'd features (those with their own `specs/<story>/`)
+that feature's spec is `verified: true`. `<base>` is optional and resolves like every other gate's —
+see "Resolving `<base>`" in `../yad-checks/references/check-gates.md`. It is **per touched feature** —
+a change touching feature A is not blocked by an unverified feature B. Forward-spec'd features (those with their own `specs/<story>/`)
 are not this gate's concern.
 
 ### Step 6 — `promote` (flip a stub epic → real, once its spec is approved)

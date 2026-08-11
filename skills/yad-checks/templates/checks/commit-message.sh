@@ -27,19 +27,27 @@ case "$PROFILE" in code|hub) ;; *) echo "FAIL [commit-message]: unknown --profil
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
-# With no explicit base, diff against the remote's PUBLISHED default branch rather than a hardcoded
-# `origin/main` — on a repo whose trunk is `develop`/`master` that guess either fails closed or, when
-# a stale `main` still exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own rule
-# (cli/repo.mjs, cli/hubcommit.mjs): origin/HEAD, else origin/main. CI always passes the base
-# explicitly, so this governs local runs only. The `|| _b=""` is load-bearing: under `set -e` a failing
+# With no explicit base, RESOLVE the trunk instead of assuming a hardcoded `origin/main` — on a repo
+# whose trunk is `develop`/`master` that guess either fails closed or, where a stale `main` still
+# exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own order (cli/hubcommit.mjs,
+# cli/repo.mjs): the CONFIGURED default_branch first, then the remote's published default
+# (origin/HEAD), then origin/main. Each candidate must actually resolve before it is used, so a
+# DANGLING origin/HEAD (trunk renamed, the old remote-tracking ref pruned) falls through to the next
+# candidate instead of failing the gate on a fully-fetched repo. CI always passes the base explicitly,
+# so this governs local runs only. The `|| _x=""` guards are load-bearing: under `set -e` a failing
 # command substitution in an assignment aborts the script.
 resolve_base() {
-  _b="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _b=""
-  printf '%s' "${_b:-origin/main}"
+  _cfg="$(sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | head -1)" || _cfg=""
+  _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
+  for _c in "origin/${_cfg}" "${_head}" origin/main; do
+    case "$_c" in ''|origin/) continue ;; esac
+    if git rev-parse --verify --quiet "${_c}^{commit}" >/dev/null 2>&1; then printf '%s' "$_c"; return; fi
+  done
+  printf '%s' origin/main
 }
 
 BASE="${ARGS[0]:-${SDLC_BASE:-$(resolve_base)}}"
-[ "${#ARGS[@]}" -gt 0 ] || [ -n "${SDLC_BASE:-}" ] || echo "note [commit-message]: no base given — diffing against '${BASE}'."
+[ -n "${ARGS[0]:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [commit-message]: no base given — diffing against '${BASE}'."
 
 # Fail closed if the base ref can't be resolved (shallow clone / wrong base branch / unfetched ref).
 if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
