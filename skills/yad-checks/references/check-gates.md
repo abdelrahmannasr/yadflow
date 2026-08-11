@@ -19,6 +19,27 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
 | pr-template | the PR/MR body (from the CI event payload) | `yad-pr-template` (the committed PR/MR template) |
 
+## Resolving `<base>` (every gate that takes one)
+
+The `<base>` argument is **optional**. The order is: the **argument**, else `SDLC_BASE`, else the
+**configured** `default_branch` (`.sdlc/hub.json`, or `SDLC_HUB_CONFIG`), else the remote's
+**published default branch** (`git symbolic-ref refs/remotes/origin/HEAD`), else `origin/main` —
+the same order the CLI resolves (`cli/hubcommit.mjs`, `cli/repo.mjs`), so a gate never diffs a
+different range than the `yad` commands run beside it. Each candidate must actually **resolve**
+before it is used, so a *dangling* `origin/HEAD` (trunk renamed, the old remote-tracking ref pruned)
+falls through instead of failing the gate on a fully-fetched repo. CI always passes the base
+explicitly (`origin/<PR base>` / `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), so this governs
+local runs.
+
+Hardcoding `origin/main` diffed the wrong range on a repo whose trunk is `develop`/`master` — either
+failing closed for the wrong reason, or, where a stale `main` still existed, silently diffing a range
+that both mis-reports the surface and drags unrelated stories into contract-check's per-story fidelity
+pass (issue #161). An auto-resolved base is **printed as a note**, so the range a local run gated is
+never implicit. Like the `product-repo` block below, this one is duplicated verbatim across the
+scripts (they are standalone by design) and pinned byte-identical by a test — which covers every
+base-taking gate, including `yad-backfill`'s `backfill-check.sh` and the installed copies this repo's
+own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
+
 ## 1. spec-link (`templates/checks/spec-link.sh`)
 
 - Checks every non-merge commit in `<base>..HEAD` **per commit** (not aggregated across the range),
@@ -38,11 +59,13 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 - An empty range (no non-merge commits) **PASSes**.
 - Portable across bash 3.2 (macOS) and 4+ (no `mapfile`).
 - **Fails closed** when `<base>` can't be resolved (so a shallow clone / wrong base never PASSes blind).
+  `<base>` is optional — see [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 
 ## 2. contract-check (`templates/checks/contract-check.sh`)
 
 - **Fails closed** if `<base>` can't be resolved — an undiffable range must never report "no surface
-  change" and silently green-light a bypass.
+  change" and silently green-light a bypass. `<base>` is optional — see
+  [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 - Computes the changed files in `<base>..HEAD`.
 - If **nothing** under `specs/*/contracts/**` changed → **PASS** (normal implementation only *consumes*
   the contract).
@@ -52,6 +75,19 @@ repo uses. Each reads conventions established by earlier steps — it invents no
     require `link.md`'s pinned `contract-lock` hash to match the product repo's current
     `contract-lock.json`. A claimed change that still pins the **old** lock **FAILS** — re-run
     `yad-spec` so the slice matches the re-locked contract.
+  - The fidelity check runs for **every story whose slice the diff touches**, and **aggregates**: each
+    story reports (matched / stale / deferred), and any stale pin fails the gate. `git diff
+    --name-only` is path-sorted, so reading one story off the first changed path validated whichever
+    story sorted first and left the rest unpinned — a later story pinning a stale hash passed, and a
+    first story with no `link.md` deferred the whole check before the stale one was ever read
+    (issue #161). One clean-or-deferred story never masks another's stale pin, the same rule spec-link
+    applies per commit.
+  - A lock the gate can **read but not parse** (truncated, half-written, or a changed schema — no
+    `"hash": "sha256:…"`) **FAILS**. It used to short-circuit the comparison into the "hash matches"
+    note, i.e. the gate affirmatively reported a match it never made.
+- The changed-file list is read with `core.quotePath=false`. With git's default, a path holding a
+  non-ASCII byte comes back quoted and octal-escaped, so a slice like `specs/EP-démo-S01/contracts/…`
+  never matched the surface pattern and an undeclared widening passed untouched.
 - This enforces the Phase 2 rule: the shared surface is owned upstream and is never widened from inside
   a code repo. The hash recipe is in `../yad-architecture/references/contract-format.md`.
 
@@ -129,6 +165,7 @@ non-merge commit in `<base>..HEAD`:
 - **Profiles** (`--profile code|hub`): the subject rule is identical on both; the gate never requires
   the `Task:` trailer (spec-link owns that on code repos; hub commits are not task-scoped).
 - **Fails closed** when `<base>` can't be resolved.
+  `<base>` is optional — see [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 
 ## 6. pr-title (`templates/checks/pr-title.sh`)
 
@@ -319,9 +356,13 @@ line). Code repos run the same three with `--profile code` inside the main `yad-
 
 ## Running by hand (Phase 3 is manual)
 
-From inside the code repo, against the PR/MR base (e.g. `master`):
+From inside the code repo, against the PR/MR base (e.g. `master`). For the gates that take one, the
+base argument is optional — omit it and the gate resolves the trunk in the order above (configured
+`default_branch`, else `origin/HEAD`, else `origin/main`), printing the base it chose; pass it (or
+`export SDLC_BASE=…`) whenever the PR targets something else. `build-test-lint` takes no base at all.
 
 ```bash
+bash checks/spec-link.sh                 # -> diffs the resolved trunk, and says which one
 bash checks/spec-link.sh master
 bash checks/contract-check.sh master
 bash checks/build-test-lint.sh

@@ -20,9 +20,10 @@ run. Only this README is version-controlled; the repos themselves are regenerabl
   independently, each pinning the **same** locked contract hash. Both carry the same gate scripts and
   PR template, so the contract-check blocks a surface bypass in either repo.
 
-> Running the gates locally: these throwaway repos have **no remote**, so pass the base branch
-> explicitly — e.g. `bash checks/contract-check.sh master` (the scripts default to `origin/main` and
-> fail closed when it can't be resolved). Set `SDLC_BASE=master` to avoid repeating it.
+> Running the gates locally: the scripts resolve the trunk on their own — the configured
+> `default_branch`, else the remote's published default (`origin/HEAD`), else `origin/main` — and fail
+> closed when none of them resolves. These throwaway repos have **no remote**, so pass the base branch
+> explicitly — e.g. `bash checks/contract-check.sh master`. Set `SDLC_BASE=master` to avoid repeating it.
 
 ## Regenerate `backend/`
 

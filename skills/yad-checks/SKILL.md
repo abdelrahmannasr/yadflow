@@ -15,6 +15,7 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    `specs/<story>/contracts/`) without a `Contract-Change: yes` trailer **and** an updated, re-locked
    contract upstream, it **FAILS and routes back to the architecture gate**. The shared surface is
    never widened from inside a code repo (Phase 2 contract representation: delimited block + SHA-256 lock).
+   Every story whose slice the diff touches is checked, not just the first — see `references/check-gates.md`.
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
@@ -141,6 +142,10 @@ bash checks/spec-link.sh "<base>"
 bash checks/contract-check.sh "<base>"
 bash checks/build-test-lint.sh
 ```
+`<base>` is optional for the gates that take one (`build-test-lint` takes none) — omitted, the gate
+resolves the trunk (configured `default_branch`, else `origin/HEAD`, else `origin/main`) and prints
+the base it chose; pass it (or `SDLC_BASE`) when the PR/MR targets another branch.
+
 A non-zero exit is a FAIL. Summarize which gates passed and, for any failure, the exact remediation
 (spec-link: add the `Task:` trailer / spec; contract-check: route back to the architecture gate and
 re-lock the contract; build/test/lint: fix the failing lint/test).

@@ -10,7 +10,30 @@
 # ci/chore/build/test exempt. Fails CLOSED on an unresolvable base.
 set -euo pipefail
 
-BASE="${1:-${SDLC_BASE:-origin/main}}"
+# --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
+# --- is duplicated, not sourced) ---
+# With no explicit base, RESOLVE the trunk instead of assuming a hardcoded `origin/main` — on a repo
+# whose trunk is `develop`/`master` that guess either fails closed or, where a stale `main` still
+# exists, silently diffs the WRONG range (issue #161). Mirrors the CLI's own order (cli/hubcommit.mjs,
+# cli/repo.mjs): the CONFIGURED default_branch first, then the remote's published default
+# (origin/HEAD), then origin/main. Each candidate must actually resolve before it is used, so a
+# DANGLING origin/HEAD (trunk renamed, the old remote-tracking ref pruned) falls through to the next
+# candidate instead of failing the gate on a fully-fetched repo. CI always passes the base explicitly,
+# so this governs local runs only. The `|| _x=""` guards are load-bearing: under `set -e` a failing
+# command substitution in an assignment aborts the script.
+resolve_base() {
+  # tr first: a key and its value may legally sit on separate lines, which a per-line match misses.
+  _cfg="$(tr -d '\n' < "${SDLC_HUB_CONFIG:-.sdlc/hub.json}" 2>/dev/null | sed -nE 's/.*"default_branch"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p')" || _cfg=""
+  _head="$(git symbolic-ref --short --quiet refs/remotes/origin/HEAD 2>/dev/null)" || _head=""
+  for _c in "origin/${_cfg}" "${_head}" origin/main; do
+    case "$_c" in ''|origin/) continue ;; esac
+    if git rev-parse --verify --quiet "${_c}^{commit}" >/dev/null 2>&1; then printf '%s' "$_c"; return; fi
+  done
+  printf '%s' origin/main
+}
+
+BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
+[ -n "${1:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [reconcile-debt]: no base given — diffing against '${BASE}'."
 
 if ! git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
   echo "FAIL [reconcile-debt]: base ref '${BASE}' not found — fetch full history / check the base branch."
