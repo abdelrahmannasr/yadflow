@@ -1,3 +1,10 @@
+## [3.15.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.1...v3.15.2) (2026-08-11)
+
+
+### Bug Fixes
+
+* **checks:** exempt a new epic's ledger seed from ledger-guard ([ba923c2](https://github.com/abdelrahmannasr/yadflow/commit/ba923c2a3823e8bf17b2fc59b41f0160a3a11a19)), closes [#162](https://github.com/abdelrahmannasr/yadflow/issues/162)
+
 ## [3.15.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.0...v3.15.1) (2026-08-11)
 
 
