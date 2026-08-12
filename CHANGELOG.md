@@ -1,3 +1,12 @@
+## [3.15.5](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.4...v3.15.5) (2026-08-12)
+
+
+### Bug Fixes
+
+* **bridge:** resolve the wired gate-sync pin from the repo, not a floating major ([8489bf5](https://github.com/abdelrahmannasr/yadflow/commit/8489bf5298f529868dc65085068882b59e89bbb5)), closes [#163](https://github.com/abdelrahmannasr/yadflow/issues/163) [#163](https://github.com/abdelrahmannasr/yadflow/issues/163)
+* **checks:** require a platform for the ledger-guard bridge gate ([297d13a](https://github.com/abdelrahmannasr/yadflow/commit/297d13a0ebf26bec995ce64e0aacfa022b228e18)), closes [#185](https://github.com/abdelrahmannasr/yadflow/issues/185) [#186](https://github.com/abdelrahmannasr/yadflow/issues/186)
+* **checks:** scope the ledger-guard bridge read to root-level keys ([4fb83a9](https://github.com/abdelrahmannasr/yadflow/commit/4fb83a968d4537e89a9367d72418aede9cf305f0)), closes [#186](https://github.com/abdelrahmannasr/yadflow/issues/186) [#186](https://github.com/abdelrahmannasr/yadflow/issues/186)
+
 ## [3.15.4](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.3...v3.15.4) (2026-08-12)
 
 ## [3.15.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.2...v3.15.3) (2026-08-11)
