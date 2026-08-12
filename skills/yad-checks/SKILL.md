@@ -174,8 +174,10 @@ file-editing tool call and refuses the write up front, naming the command that o
 - **It fails OPEN** — no `yad`, no hub, an unreadable config, an unparseable payload all ALLOW, with
   a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
   skips one command.
-- **Known gap:** a `Bash` tool call (`sed -i epics/…`) is not intercepted — matching it would mean
-  parsing shell. The CI gate catches it.
+- **Known gaps** (both caught by the CI gate instead): a `Bash` tool call (`sed -i epics/…`) is not
+  intercepted — matching it would mean parsing shell; and the hook arms sessions **rooted at the
+  hub**, since a harness reads hooks from its own project root — a session opened at the workspace
+  above the hub never loads the hub's `.claude/settings.json`.
 
 `yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a bridge hub.
 See `references/check-gates.md` §"The agent guardrail".

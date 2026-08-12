@@ -404,8 +404,16 @@ with a note on stderr. A local guardrail that failed closed would brick an agent
 anything the moment an install went sideways. The CI gate fails **closed** and is what actually
 protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` skips one command.
 
-**Known gap:** a `Bash` tool call (`sed -i epics/…`) is not intercepted — matching it would mean
-parsing shell for write intent. The CI gate catches the resulting commit.
+**Known gaps** — both fall through to the CI gate, which is why it stays the authority:
+
+- A `Bash` tool call (`sed -i epics/…`) is not intercepted; matching it would mean parsing shell for
+  write intent.
+- The hook arms sessions **rooted at the hub**. A harness loads hooks from its own project root, so a
+  session opened at the *workspace* (`project/`, with the hub at `project/product/`) never reads the
+  hub's `.claude/settings.json` and the guard does not fire there — even though the decision itself
+  resolves the hub correctly from any path. In that layout, open the session at the hub, or copy the
+  entry into the workspace's own settings (the command's `$CLAUDE_PROJECT_DIR` would then need the
+  hub-relative path).
 
 **Wiring** (installed by `yad setup` / `yad check --fix`, bridge hubs only):
 
