@@ -8,7 +8,8 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha,
 } from './lib.mjs';
 import {
-  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES, isBridgeHub,
+  HOOK_WIRING, HOOK_SETTINGS, HOOK_TOOL_MATCHER, HOOK_COMMAND,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
 } from './manifest.mjs';
 
@@ -441,7 +442,7 @@ export function legacyRepoActions(root, repo) {
 
 export function legacyHubActions(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
-  if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
+  if (!isBridgeHub(hub)) return [];
   const wiring = [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])];
   return legacyFileActions('hub', root, LEGACY_HUB_FILES[hub.platform], wiring);
 }
@@ -460,12 +461,111 @@ export function repoActions(root, repo) {
 export function hubActions(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
   // `bridge_enabled` is the canonical flag (the documented hub-config schema); older setup versions
-  // wrote `bridge` — accept an explicit true in either spelling, wire nothing otherwise.
-  if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
+  // wrote `bridge` — `isBridgeHub` accepts an explicit true in either spelling, and is the one
+  // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
+  if (!isBridgeHub(hub)) return [];
   const ledger = readManagedLedger(root);
   return [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])].map((w) =>
     wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
+}
+
+// ---- harness hooks (#171) --------------------------------------------------------------------
+// The desired hook entry, in the shape a harness reads it.
+export const hookEntry = () => ({
+  matcher: HOOK_TOOL_MATCHER,
+  hooks: [{ type: 'command', command: HOOK_COMMAND }],
+});
+
+// Ours is the hook command carrying the script path — never "the entry at index N", never "the entry
+// with our matcher". That marker is what makes this idempotent against a settings file the team also
+// edits: everything else in it, including other PreToolUse entries, is copied through untouched.
+const OURS = (h) => typeof h?.command === 'string' && h.command.includes('hooks/ledger-guard.sh');
+
+// Additive merge of our PreToolUse entry into a parsed settings object. Returns
+// `{ settings, changed }`; `settings` is a new object, so a caller can compare without mutating.
+// A matcher the team NARROWED is left alone (only the command is normalised) — the same respect for
+// a local edit that `modified` gives a managed file. Widening it back would silently undo their choice.
+export function mergeHookSettings(input) {
+  const settings = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : {}) };
+  const hooks = { ...(settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks) ? settings.hooks : {}) };
+  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.map((e) => ({ ...e })) : [];
+  let changed = false;
+  let found = false;
+  for (const entry of pre) {
+    if (!Array.isArray(entry.hooks)) continue;
+    entry.hooks = entry.hooks.map((h) => {
+      if (!OURS(h)) return h;
+      found = true;
+      if (h.command === HOOK_COMMAND && h.type === 'command') return h;
+      changed = true;
+      return { ...h, type: 'command', command: HOOK_COMMAND };
+    });
+  }
+  if (!found) { pre.push(hookEntry()); changed = true; }
+  hooks.PreToolUse = pre;
+  settings.hooks = hooks;
+  return { settings, changed };
+}
+
+// One harness's settings file as an action. Not a `wiredFileAction`: there is no template to compare
+// bytes against — the file belongs to the team and we own exactly one entry inside it. So it is also
+// deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
+// byte-matches its src); the marker above is its provenance instead.
+function hookSettingsAction(root, ide, relDest) {
+  const dest = path.join(root, relDest);
+  const raw = exists(dest) ? fs.readFileSync(dest, 'utf8') : null;
+  let parsed = null;
+  let unreadable = false;
+  if (raw !== null) {
+    try { parsed = JSON.parse(raw); } catch { unreadable = true; }
+    if (!unreadable && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) unreadable = true;
+  }
+  // Scope is the IDE target, item the file under it, so the report reads `.claude/settings.json`
+  // once — the same scope the skills for that target are grouped under.
+  const base = { scope: ide, item: path.basename(relDest), root, paths: [rel(root, dest)] };
+  // A settings file we cannot read is never silently replaced — same stance as a `modified` managed
+  // file. `--overwrite-local` is the only path that writes, and it saves the original first.
+  if (unreadable) {
+    const backup = backupPathFor(dest);
+    return {
+      ...base,
+      status: 'modified',
+      backup,
+      apply: () => {
+        fs.copyFileSync(dest, backup);
+        writeJSON(dest, mergeHookSettings({}).settings);
+      },
+    };
+  }
+  const { changed } = mergeHookSettings(parsed);
+  return {
+    ...base,
+    status: raw === null ? 'missing' : changed ? 'outdated' : 'ok',
+    // Re-read at apply() time rather than closing over the merge computed above: setup and reconcile
+    // build every action before applying any, so the file may have been written since.
+    apply: () => {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      writeJSON(dest, mergeHookSettings(readJSON(dest, {})).settings);
+    },
+  };
+}
+
+// Harness-hook wiring on the hub: the guard script plus, per IDE target that defines a hook protocol,
+// the entry that invokes it. Bridge-gated exactly like `hubActions` — with no bridge the ledger is
+// locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
+export function hookActions(root, ideTargets = ideTargetsFor(root)) {
+  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  if (!isBridgeHub(hub)) return [];
+  const ledger = readManagedLedger(root);
+  const actions = HOOK_WIRING.map((w) =>
+    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  );
+  for (const ide of safeIdeTargetsFor(root, ideTargets)) {
+    const relDest = HOOK_SETTINGS[ide];
+    if (relDest) actions.push(hookSettingsAction(root, ide, relDest));
+  }
+  return actions;
 }
 
 // Every email the verified-commits gate should accept as a known author: the hub roster's `email`

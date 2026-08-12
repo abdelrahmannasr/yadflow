@@ -5,7 +5,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, isBridgeHub } from './manifest.mjs';
+import { mergeHookSettings } from './plan.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -147,6 +148,27 @@ export function projectChecks(checks, root) {
           }
         }
       }
+    }
+  }
+
+  // The harness ledger guard (#171). Only meaningful in bridge mode: there the ledger is CI-owned and
+  // an agent's hand-edit is always rejected later by `ledger-guard`, so the local hook that refuses it
+  // up front should be installed. Without the bridge the ledger is locally owned and the hand-edit the
+  // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
+  const hubForHooks = readJSON(hubPath, null);
+  if (isBridgeHub(hubForHooks)) {
+    const unwired = [];
+    if (!exists(path.join(root, 'hooks', 'ledger-guard.sh'))) unwired.push('hooks/ledger-guard.sh');
+    for (const [ide, relDest] of Object.entries(HOOK_SETTINGS)) {
+      // Only harnesses this project actually installs into — an absent `.claude/` is not a gap.
+      if (!exists(path.join(root, ide))) continue;
+      if (mergeHookSettings(readJSON(path.join(root, relDest), null)).changed) unwired.push(relDest);
+    }
+    if (unwired.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}`,
+        'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
+    } else {
+      check(checks, 'hooks', 'project', 'ok', 'agent ledger guard wired (hooks/ledger-guard.sh)');
     }
   }
 
