@@ -174,12 +174,15 @@ export function projectChecks(checks, root) {
       // "absent" and "broken", and null merges as "not wired" — which would send the human to
       // `yad check --fix`, a command that (correctly) refuses to rewrite a settings file it cannot
       // parse. The warning would then repeat forever with advice that can never apply.
+      // Read ONCE and reuse: parsing the same file twice lets `unreadable` and the merge check
+      // describe different content if it changes in between.
+      let settings = null;
       if (exists(settingsPath)) {
         let parsed;
         try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* reported below */ }
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
+        settings = parsed;
       }
-      const settings = readJSON(settingsPath, null);
       if (mergeHookSettings(settings).changed) { unwired.push(relDest); continue; }
       // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
       // deliberately leaves it alone), but one that no longer selects any file-editing tool means

@@ -1558,9 +1558,11 @@ test('ledger-guard wrapper: only an explicit deny blocks', () => {
       assert.equal(r.code, 0, `exit ${code} allows`);
       assert.match(r.err, new RegExp(`exited ${code}`));
     }
-    // The subcommand is what actually gets invoked.
-    runHookWrapper(T, { YAD_BIN: fakeYad(bin, 'yad-argv', 0) });
-    assert.equal(fs.readFileSync(path.join(bin, 'argv.txt'), 'utf8').trim(), 'hook ledger-guard');
+    // The subcommand is what actually gets invoked. Its own directory, so the assertion cannot pass
+    // on an argv.txt an earlier fake in this test already wrote.
+    const argvBin = path.join(T, 'argvbin');
+    runHookWrapper(T, { YAD_BIN: fakeYad(argvBin, 'yad-argv', 0) });
+    assert.equal(fs.readFileSync(path.join(argvBin, 'argv.txt'), 'utf8').trim(), 'hook ledger-guard');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

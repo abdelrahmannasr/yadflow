@@ -8614,6 +8614,8 @@ test('payloadPaths reads every tool shape a harness sends, and shrugs at the res
 // Everything above tests the decision; this tests the thing a harness actually invokes.
 test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-hookcli-'));
+  // Declared out here so the cleanup runs even when an assertion below fails.
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-hookremote-'));
   const yad = path.join(ROOT, 'bin/yad.mjs');
   const runHook = (payload, extra = []) => {
     const r = spawnSync(process.execPath, [yad, 'hook', 'ledger-guard', ...extra], {
@@ -8635,7 +8637,6 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     git(T, 'commit', '-q', '-m', 'seed');
     git(T, 'branch', '-q', '-M', 'main');
     // A real origin, so the base resolves the way it does on a clone.
-    const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-hookremote-'));
     git(remote, 'init', '-q', '--bare');
     git(T, 'remote', 'add', 'origin', remote);
     git(T, 'push', '-q', 'origin', 'main');
@@ -8656,12 +8657,21 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     // --path is the stdin-free alternative, and must not wait on stdin to use it.
     assert.equal(runHook('', ['--path', 'epics/EP-a/.sdlc/state.json']).code, 2, '--path alone denies');
     assert.equal(runHook('', ['--path', 'epics/EP-a/epic.md']).code, 0, '--path alone allows');
-    assert.equal(runHook('{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', [], ).code, 2);
+    // A leading flag must not hide the command from the update-notice guard, or the banner lands on
+    // the same stderr the block reason travels on.
+    const viaFlag = spawnSync(process.execPath, [yad, '--dir', T, 'hook', 'ledger-guard'], {
+      input: '{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', encoding: 'utf8', cwd: T,
+      env: { ...GIT_ENV, CLAUDE_PROJECT_DIR: T, YAD_CACHE_DIR: path.join(T, 'cache2') },
+    });
+    assert.equal(viaFlag.status, 2, '`yad --dir <p> hook …` still denies');
+    assert.doesNotMatch(viaFlag.stderr || '', /update available/, 'and still suppresses the banner');
     // An unknown hook name is a usage error (1), never a block (2).
     const bad = spawnSync(process.execPath, [yad, 'hook', 'nope'], { input: '', encoding: 'utf8', cwd: T, env: { ...GIT_ENV, YAD_NO_UPDATE_NOTIFIER: '1' } });
     assert.equal(bad.status, 1);
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
-  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
 });
 
 test('mergeHookSettings adds our entry once and never touches anything else', () => {

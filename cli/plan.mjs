@@ -559,12 +559,14 @@ function hookSettingsAction(root, ide, relDest) {
   // other hooks — is the team's. Synthesizing a replacement from an empty object would discard all of
   // it, and `--overwrite-local` is a generic recovery command someone runs for an unrelated drifted
   // gate script. So this reports `modified` forever and writes nothing; the human fixes the JSON.
+  //
+  // Warned at PLAN time, not from apply(): reconcile only reaches a `modified` action's apply() with
+  // `--overwrite-local`, so a plain `yad check --fix` would print nothing but the generic drift
+  // hand — "replace them with `yad update --overwrite-local`" — advice that can never clear this,
+  // since this action deliberately writes nothing. The specific reason has to surface either way.
   if (unreadable) {
-    return {
-      ...base,
-      status: 'modified',
-      apply: () => warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\` to wire the ledger guard`),
-    };
+    warn(`${relDest} does not parse — the ledger guard cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
+    return { ...base, status: 'modified', apply: () => {} };
   }
   const { changed } = mergeHookSettings(parsed);
   return {

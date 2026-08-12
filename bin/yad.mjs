@@ -434,8 +434,10 @@ main()
   .finally(async () => {
     try {
       // Never on `yad hook`: it runs on every agent tool call, and its stderr is the channel the
-      // block reason travels on — an update banner there is noise in front of a model.
-      if (process.argv[2] !== 'hook') await maybeNotifyUpdate();
+      // block reason travels on — an update banner there would land in front of a model.
+      // Resolved the way main() resolves it, NOT from argv[2]: that is the first raw argument, so
+      // `yad --dir <path> hook ledger-guard` puts `--dir` there and the banner slips through.
+      if (parseArgs(process.argv.slice(2))._[0] !== 'hook') await maybeNotifyUpdate();
     } catch { /* the notice is never worth failing or hanging a command over */ } finally {
       closePrompts();
     }
