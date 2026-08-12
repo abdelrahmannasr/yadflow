@@ -176,6 +176,6 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#1e8449",
     position: { x: 58, y: 92 },
     description:
-      "The per-epic ship ledger — every merged story recorded at merge time. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
+      "The per-epic ship ledger — every merged story recorded at merge time. Shard-then-fold: each ship is written as its own file under `.sdlc/build-log/` (so concurrent shippers never conflict) and readers union those shards with the folded `build-log.json`, which `yad tidy up` compacts into later — reading the folded file alone misses every unfolded ship. A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
   },
 ];

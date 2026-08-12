@@ -366,7 +366,10 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
    to print the required reviewers.
 5. **Engineer review + merge** — `yad-engineer-review` → AI review (advisory) → **engineer approval (a
-   human)** → merge. The ship is recorded in `build-log.json` and the story moves to `in-build` → `shipped`.
+   human)** → merge. The ship is recorded in the build ledger and the story moves to `in-build` → `shipped`.
+   That ledger is **shard-then-fold**: the ship lands as its own file under `.sdlc/build-log/` so two people
+   shipping different tasks never collide, readers union those shards with the folded `build-log.json`, and
+   `yad tidy up` folds them in later. An empty `build-log.json` is normal — it is only half the ledger.
    The machine-written ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed for you
    by **`yad checkpoint`** — a `chore(hub)` audit-trail commit the back half runs so you never hand-commit
    this state; you don't review these machine writes, but CI and `yad status` on other machines must see them.

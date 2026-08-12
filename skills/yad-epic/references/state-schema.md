@@ -333,8 +333,9 @@ storage layout is noted here (it mirrors `trust-log.json`):
   only a story whose frontmatter is `shipped` — every ship on a story still at `in-build`, indefinitely.
   A reader that skips the union silently under-reports what shipped (#167).
 - `yad checkpoint` commits the shard dir; `yad tidy up` folds a shipped story's finished shards into the
-  folded file (loose objects + `git gc`). The fold is the **only** writer of the folded file — no ship
-  path ever appends to it directly, which is what keeps concurrent shippers conflict-free.
+  folded file (loose objects + `git gc`). No **ship** path ever appends to the folded file — that is what
+  keeps concurrent shippers conflict-free. (`yad review reconcile` does write it, but only to stamp a ship
+  already folded there; see `updateShip`.)
 
 ---
 

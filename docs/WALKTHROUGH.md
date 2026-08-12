@@ -268,8 +268,9 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    owners (`risk-route.sh`), the same escalation as the gate.
 5. **AI review → engineer review → merge** — `yad-engineer-review`: CodeRabbit is an advisory first pass
    (never the authority); a human engineer approves (owner + 1 reviewer, escalating to domain owners); on
-   merge the ship is recorded in `.sdlc/build-log.json` and the story state becomes `in-build` →
-   `shipped`. The epic → story → task → PR → mergeCommit chain is traceable both ways.
+   merge the ship is recorded in the build ledger — as a shard under `.sdlc/build-log/`, which readers
+   union with the folded `.sdlc/build-log.json` and `yad tidy up` later folds in — and the story state
+   becomes `in-build` → `shipped`. The epic → story → task → PR → mergeCommit chain is traceable both ways.
 
 **Multi-repo:** a story tagged `repos: [backend, mobile]` runs the above in each repo independently from
 the **one** locked contract; the contract-check blocks a surface bypass in either repo.
