@@ -51,8 +51,11 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
   - `templates/checks/{spec-link,contract-check,build-test-lint,verified-commits}.sh`
-  - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in bridge mode** (a no-op
-    when humans legitimately own the ledger). On review PRs it FAILs any commit that touches the
+  - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in bridge mode** — hub.json
+    carries BOTH a `platform` and `bridge_enabled` (or the legacy `bridge`) true, the same predicate
+    `isBridge` (`cli/gate.mjs`) applies, so the gate and the CLI can never disagree about who owns the
+    ledger (#186). A no-op otherwise, when humans legitimately own it. On review PRs it FAILs any
+    commit that touches the
     CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`, `reviews/*.md`) unless it
     is a **verified gate-bot commit** — bot-authored AND platform-Verified, since author text alone is
     spoofable. `.sdlc/contract-lock.json` is artifact-side and exempt. So is a **new epic's seed**:

@@ -1085,17 +1085,20 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
 // tests exercise the bridge gate + author half hermetically (the signature half mirrors
 // verified-commits, whose signature path is likewise not unit-mocked).
 const LEDGER_GUARD = path.join(CHECKS, 'ledger-guard.sh');
-const enableBridge = (T) => {
+// The default hub is the canonical bridge shape: a platform AND the flag. `hub` overrides it so a
+// test can exercise a divergent config (no platform, legacy key, key/value split across lines).
+const BRIDGE_HUB = '{"platform":"github","bridge_enabled":true}\n';
+const enableBridge = (T, hub = BRIDGE_HUB) => {
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","bridge_enabled":true}\n');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), hub);
 };
 
 // Put an epic's ledger on `main` (the base ref) so the branch that follows MUTATES a CI-owned ledger
 // rather than seeding a new one. scaffoldRepo cuts `feature` off the first commit, so the ledger has
 // to land on main and the working branch be re-cut from it.
-const seedLedgerOnBase = (T, epic = 'EP-x', files = {}) => {
+const seedLedgerOnBase = (T, epic = 'EP-x', files = {}, hub = BRIDGE_HUB) => {
   git(T, 'checkout', '-q', 'main');
-  enableBridge(T);
+  enableBridge(T, hub);
   commit(T, 'seed epic ledger', {
     [`epics/${epic}/epic.md`]: '# e\n',
     [`epics/${epic}/.sdlc/state.json`]: '{"epicId":"' + epic + '"}\n',
@@ -1270,6 +1273,54 @@ test('ledger-guard: with the bridge OFF it is a no-op (humans own the ledger loc
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /bridge not enabled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// #186: the gate used to enable itself on the flag ALONE, while `isBridge` (cli/gate.mjs) and
+// `hubActions` (cli/plan.mjs) both also require a `platform`. A hub holding one without the other
+// deadlocked — the shell rejected the human's ledger commit while the CLI, reading the same file,
+// called it file-only and kept the local write path, so nothing could write the ledger at all.
+test('ledger-guard: the bridge flag WITHOUT a platform is not bridge mode — no-op (issue #186)', () => {
+  const T = scaffoldRepo();
+  enableBridge(T, '{"bridge_enabled":true}\n'); // no platform → the CLI calls this file-only
+  commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /bridge not enabled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: a platform WITHOUT the bridge flag is not bridge mode — no-op (issue #186)', () => {
+  const T = scaffoldRepo();
+  enableBridge(T, '{"platform":"github"}\n');
+  commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /bridge not enabled/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The #161 bug class, in its FAIL-OPEN direction: the old per-line grep missed a key whose value sat
+// on the next line, so a fully bridge-enabled hub silently no-opped a security gate. Every other
+// hub.json read in these gates already flattens with `tr -d '\n'` first.
+test('ledger-guard: a hub.json with the flag split across lines still enforces (issue #186)', () => {
+  const T = scaffoldRepo();
+  const multiline = '{\n  "platform":\n    "github",\n  "bridge_enabled":\n    true\n}\n';
+  seedLedgerOnBase(T, 'EP-x', {}, multiline);
+  commit(T, 'sneaky', { 'epics/EP-x/.sdlc/approvals.json': '[{"status":"approved"}]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-x\/\.sdlc\/approvals\.json/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: the legacy `bridge` key still enforces when a platform is set', () => {
+  const T = scaffoldRepo();
+  seedLedgerOnBase(T, 'EP-x', {}, '{"platform":"gitlab","bridge":true}\n');
+  commit(T, 'sneaky', { 'epics/EP-x/.sdlc/approvals.json': '[{"status":"approved"}]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-x\/\.sdlc\/approvals\.json/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

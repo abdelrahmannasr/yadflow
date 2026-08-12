@@ -204,7 +204,10 @@ commit — the advance plus the `draft → approved` status flip — lands on th
 
 **The ledger is CI-owned (bridge mode only).** Humans never commit gate-state files: the `ledger-guard`
 check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
-.json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). Under Path B **no
+.json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). "Bridge mode" there
+means the same thing it means everywhere else — a `platform` **and** the bridge flag, `isBridge`'s
+predicate. The gate used to enable itself on the flag alone, which let a platform-less hub reject the
+human's ledger write while the CLI still expected one (#186). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
 edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
 gate still vets every commit's signature + author;

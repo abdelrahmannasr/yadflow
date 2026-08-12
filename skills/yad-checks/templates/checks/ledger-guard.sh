@@ -20,16 +20,41 @@
 # distinguishes CI-generated commits. A spoofed-author commit that is not Verified is treated as a
 # human edit and rejected.
 #
-# Scope: enforced ONLY when the bridge is enabled (a platform + gate-sync CI). Without the bridge
-# (file-only / non-bridge) humans legitimately write the ledger locally, so the gate is a no-op.
+# Scope: enforced ONLY when the bridge is enabled — hub.json carries BOTH a `platform` and
+# `bridge_enabled` (or the legacy `bridge`) true, the same predicate `isBridge` (cli/gate.mjs) and
+# `hubActions` (cli/plan.mjs) apply. Without the bridge (file-only / non-bridge, or a platform-less
+# hub) humans legitimately write the ledger locally, so the gate is a no-op.
 #
 # Degradation: a base ref that cannot be resolved FAILs closed; no platform (cannot read the Verified
 # badge) WARNs and waives the signature half — the same stance verified-commits takes.
 set -euo pipefail
 
 # ---- bridge gate: only CI-owned ledgers are guarded -------------------------------------------
+# The predicate is BOTH a platform and the bridge flag, exactly as `isBridge` (cli/gate.mjs) and
+# `hubActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
+# other bridge detector (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
+# have its human ledger commits rejected here while the CLI, reading the same file, called it
+# file-only and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate
+# could advance. Reachable through a stale install (platform set, script wired, platform later
+# nulled), not through `yad setup`, which derives both from one value.
+#
+# `tr -d '\n'` first, like every other hub.json read in these gates: a key and its value may legally
+# sit on separate lines, and a per-line match would MISS the flag and silently no-op a security gate
+# (the fail-open direction of issue #161). Still depth-blind after flattening — a nested `"bridge":
+# true` matches — which is the same limitation the shared `default_branch` read carries below, and not
+# worth a JSON parser in bash.
+#
+# Flattened ONCE into a variable and matched with here-strings, never `tr … | grep -q`: under the
+# `pipefail` set above, `grep -q` exits at the first match and can SIGPIPE `tr`, which would make a
+# MATCHING pipeline report failure. Reading from a here-string has no upstream process to kill.
 HUB="${SDLC_HUB_CONFIG:-.sdlc/hub.json}"
-if [ ! -f "$HUB" ] || ! grep -Eq '"(bridge_enabled|bridge)"[[:space:]]*:[[:space:]]*true' "$HUB"; then
+HUB_FLAT="$(tr -d '\n' < "$HUB" 2>/dev/null || true)"
+# One line in, so `sed` emits at most one line out — no `head` needed (which would re-introduce the
+# SIGPIPE-under-pipefail problem this avoids).
+hub_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$HUB_FLAT"; }
+hub_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$HUB_FLAT"; }
+
+if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || { ! hub_true bridge_enabled && ! hub_true bridge; }; then
   echo "PASS [ledger-guard]: bridge not enabled — the ledger is locally owned, nothing to guard."
   exit 0
 fi

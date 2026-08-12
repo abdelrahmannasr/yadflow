@@ -148,7 +148,11 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
 - **`detect-hub`** — detect the hub's own platform and upsert `.sdlc/hub.json`. Run
   `git remote get-url origin` **on the hub** and read the host with the SAME logic Step 1 uses for code
   repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
-  `git_url`, `default_branch`, `detectedAt`, and `bridge_enabled: true` (preserve an existing roster).
+  `git_url`, `default_branch`, `detectedAt`, and `bridge_enabled` — **`true` only when a platform was
+  detected, `false` alongside `platform: null`** (preserve an existing roster). The two travel
+  together: bridge mode is a platform AND the flag (`isBridge`, `cli/gate.mjs`), and `yad setup`
+  derives both from one value, so writing the flag onto a platform-less hub creates a state no CLI
+  path can produce and the gates read differently (#186).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
 - **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `email` + a per-scope
   `roles` map (`roles: { hub: ["owner","reviewer"], <repo>: ["domain-owner", …] }`). Upsert by `login`;
