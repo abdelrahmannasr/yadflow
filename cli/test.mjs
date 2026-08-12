@@ -1325,6 +1325,14 @@ async function grab(fn) {
   try { await fn(); } finally { console.log = orig; }
   return out.join('\n');
 }
+// The same capture for a SYNCHRONOUS call — returns what was printed.
+function grabSync(fn) {
+  const orig = console.log;
+  const out = [];
+  console.log = (...a) => out.push(a.map(String).join(' '));
+  try { fn(); } finally { console.log = orig; }
+  return out.join('\n');
+}
 // Write a minimal per-epic state ledger under T/epics/<id>/.sdlc/state.json for driver tests.
 function seedEpic(T, id, state) {
   fs.mkdirSync(path.join(T, 'epics', id, '.sdlc'), { recursive: true });
@@ -5974,6 +5982,23 @@ test('usage: a ship with no engineer review is flagged as a hygiene gap', () => 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('usage: a retroactive backfill ship is NOT a hygiene gap, however many repos it spans (#166)', () => {
+  const T = usageFixture();
+  // Three per-repo `--retro-ship` shards for one pre-tracking story: reconciliation records, not
+  // un-reviewed merges — they never had a tracked PR to review.
+  const dir = path.join(T, 'epics/EP-x/.sdlc/build-log');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const repo of ['web', 'api', 'jobs']) {
+    fs.writeFileSync(path.join(dir, `EP-x-S03-retro-${repo}.json`),
+      JSON.stringify({ story: 'EP-x-S03', task: 'retro', repo, retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-01-14' }));
+  }
+  const model = buildModel(T, {});
+  assert.equal(model.hygiene.length, 1, 'still exactly the one real empty-review ship');
+  assert.equal(model.hygiene[0].story, 'EP-x-S02');
+  assert.ok(!model.hygiene.some((h) => h.story === 'EP-x-S03'), 'no reconciliation noise, and none per repo');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('usage: rendered output never leaks emails or comment bodies', () => {
   const T = usageFixture();
   const model = buildModel(T, {});
@@ -6069,7 +6094,7 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
 // yad checkpoint — commit the machine-written back-half hub state (trust-log/build-log/build-state)
 // ---------------------------------------------------------------------------------------------
 const {
-  runCheckpoint, backHalfPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip,
+  runCheckpoint, backHalfPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip, retroShipRepos,
 } = await import('./checkpoint.mjs');
 const { hubGit } = await import('./hubcommit.mjs');
 
@@ -6436,6 +6461,94 @@ test('recordRetroShip: guards on missing epic/story/repo and a nonexistent targe
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// --- #166 review: the per-repo guard must not become a licence to invent ledger evidence ---
+
+test('recordRetroShip REFUSES a repo the story does not declare — a typo must not fabricate a ship (#166)', () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'shipped', { ship: false }); // declares repos: [web]
+  const out = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'wbe', today: '2026-07-14' }));
+  assert.match(out, /wbe is not a repo EP-a-S01 declares/, 'the typo is named and refused');
+  assert.match(out, /known: web/, 'the declared repos are listed');
+  assert.ok(!fs.existsSync(path.join(T, 'epics/EP-a/.sdlc/build-log')), 'no shard written for an undeclared repo');
+  // Case matters — `Web` is not `web`.
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'Web', today: '2026-07-14' }).ok, false);
+  // The declared one is accepted.
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }).ok, true);
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('recordRetroShip REFUSES a repo whose shard name collides with a recorded one — never overwrite evidence (#166)', () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  // `api.v2` and `api_v2` both sanitize to `api_v2` in the shard filename.
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'api.v2', today: '2026-07-14' }).ok, true);
+  const shard = path.join(T, 'epics/EP-a/.sdlc/build-log/EP-a-S01-retro-api_v2.json');
+  const before = fs.readFileSync(shard, 'utf8');
+  const out = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'api_v2', today: '2026-07-14' }));
+  assert.match(out, /shares a build-log shard name with the already-recorded api\.v2/, 'the collision is explained');
+  assert.equal(fs.readFileSync(shard, 'utf8'), before, 'the first repo\'s ship record is untouched');
+  assert.deepEqual(fs.readdirSync(path.dirname(shard)), ['EP-a-S01-retro-api_v2.json'], 'no second shard');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --retro-ship --dry-run never deletes an already-committed shard (#166)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: approved\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
+  await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'api.v2', today: '2026-07-14' } }));
+  const shard = 'epics/EP-a/.sdlc/build-log/EP-a-S01-retro-api_v2.json';
+  assert.ok(git(T, 'ls-files', shard).toString().trim(), 'the first repo\'s shard is committed');
+  // The colliding repo as a PREVIEW: it must refuse, and must not touch the committed shard.
+  const out = await grab(() => runCheckpoint(T, { dryRun: true, retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'api_v2', today: '2026-07-14' } }));
+  assert.match(out, /shares a build-log shard name/);
+  assert.ok(fs.existsSync(path.join(T, shard)), 'the committed shard still exists on disk');
+  assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'a dry run left no deletion staged or unstaged');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('recordRetroShip reports the still-unrecorded declared repos, and drops the hint when none are left (#166)', () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web, api]\n---\n\n# EP-a-S01\n`);
+  const first = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }));
+  assert.match(first, /still unrecorded: api/, 'a half-done backfill says what is left');
+  const second = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'api', today: '2026-07-14' }));
+  assert.ok(!/still unrecorded/.test(second), 'the last repo reports no remainder');
+  // A refused re-run of a fully-recorded story must NOT invite a `--repo <other>` that would fabricate one.
+  const again = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }));
+  assert.match(again, /already has a build-log ship in web/);
+  assert.ok(!/re-run with/.test(again), 'no hint steering the operator into an invented repo');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('retroShipRepos: story frontmatter wins, the registry is the fallback, neither blocks a bare legacy story (#166)', () => {
+  const T = hubForCheckpoint();
+  const storyFile = path.join(T, 'epics/EP-a/stories/EP-a-S01.md');
+  fs.mkdirSync(path.dirname(storyFile), { recursive: true });
+  fs.writeFileSync(storyFile, `---\nstatus: shipped\nrepos: [web, api]\n---\n\n# EP-a-S01\n`);
+  assert.deepEqual(retroShipRepos(T, storyFile), { names: ['web', 'api'], source: 'story' });
+  // No `repos:` on the story ⇒ the hub's connected repos.
+  fs.writeFileSync(storyFile, `---\nstatus: shipped\n---\n\n# EP-a-S01\n`);
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'web' }, { name: 'api' }] }));
+  assert.deepEqual(retroShipRepos(T, storyFile), { names: ['web', 'api'], source: 'registry' });
+  // Neither declares anything ⇒ nothing to validate against; the backfill is NOT blocked.
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  assert.deepEqual(retroShipRepos(T, storyFile), { names: [], source: 'none' });
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'anything', today: '2026-07-14' }).ok, true);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('stagedStoryIsStatusOnly: true for a lone status flip, false for a prose edit or a new file', () => {
   const T = hubForCheckpoint();
   const rel = 'epics/EP-a/stories/EP-a-S01.md';
@@ -6702,6 +6815,24 @@ test('writeRetroShip: the guard is per (story, repo) — a multi-repo story is r
   // A REAL ship in one repo does not block the backfill of a DIFFERENT repo either.
   writeBuildShard(epicDir, { story: 'EP-x-S02', task: 'T01', repo: 'be', engineer_review: [] });
   assert.equal(writeRetroShip(epicDir, { story: 'EP-x-S02', repo: 'web' }).written, true);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeRetroShip: refuses a repo whose SHARD NAME collides with a recorded one — never clobbers evidence (#166)', () => {
+  const { T, epicDir } = ledgerEpic();
+  // `safe()` maps every character outside [A-Za-z0-9_-] to `_`, so these two names share one filename.
+  const first = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'api.v2', shippedAt: '2026-07-14' });
+  assert.equal(first.written, true);
+  const before = fs.readFileSync(first.file, 'utf8');
+  assert.deepEqual(writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'api_v2' }), { written: false, reason: 'collision', repo: 'api.v2' });
+  assert.equal(fs.readFileSync(first.file, 'utf8'), before, 'the recorded ship is byte-for-byte intact');
+  // The same protection when readShips cannot SEE the shard (corrupt JSON is skipped by readShardDir):
+  // the target file itself is never overwritten.
+  fs.writeFileSync(first.file, '{ not json');
+  const res = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'api.v2' });
+  assert.equal(res.written, false);
+  assert.equal(res.reason, 'collision');
+  assert.equal(fs.readFileSync(first.file, 'utf8'), '{ not json', 'a corrupt shard is left for a human, not silently replaced');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

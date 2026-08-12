@@ -93,19 +93,28 @@ export function readShips(epicDir) {
 // story could never be fully recorded. Each repo is recorded by its own run — the shards are distinct
 // by construction (`buildShardName` keys on story+task+repo). Not keyed on `task` too: that would let
 // repeated `--task T0x` pile several retro shards into one repo, the very muddying this guard prevents.
-// Returns { written: false, reason } when refused, else { written: true, file, ship }.
+//
+// Two names can differ yet share ONE shard file: `buildShardName` sanitizes each component through
+// `safe()`, so `api.v2` and `api_v2` both become `api_v2` while the (story, repo) key sees them as
+// distinct. Writing the second would silently overwrite the first repo's ship — destroying evidence in
+// an append-only ledger, and (via the --dry-run cleanup) deleting an already-committed shard. So a
+// name that COLLIDES with an existing ship's shard name is refused as `reason: 'collision'`, and the
+// target file is never overwritten even when `readShips` cannot see it (a corrupt shard is skipped by
+// `readShardDir`). Returns { written: false, reason } when refused, else { written: true, file, ship }.
 export function writeRetroShip(epicDir, { story, repo, task = 'retro', mergeCommit, shippedAt }) {
   if (!story) throw new Error('writeRetroShip: story is required');
   if (!repo) throw new Error('writeRetroShip: repo is required');
-  if (readShips(epicDir).some((s) => s.story === story && s.repo === repo)) {
-    return { written: false, reason: 'exists' };
-  }
+  const ships = readShips(epicDir).filter((s) => s.story === story);
+  if (ships.some((s) => s.repo === repo)) return { written: false, reason: 'exists' };
+  const clash = ships.find((s) => safe(s.repo) === safe(repo));
+  if (clash) return { written: false, reason: 'collision', repo: clash.repo };
   const t = task || 'retro';
   const ship = { story, task: t, repo, retroactive: true, note: 'pre-tracking backfill' };
   if (mergeCommit) ship.mergeCommit = mergeCommit;
   if (shippedAt) ship.shippedAt = shippedAt;
   const f = epicFiles(epicDir);
   const file = path.join(f.buildLogDir, buildShardName({ story, task: t, repo }));
+  if (fs.existsSync(file)) return { written: false, reason: 'collision', file };
   writeJSON(file, ship);
   return { written: true, file, ship };
 }

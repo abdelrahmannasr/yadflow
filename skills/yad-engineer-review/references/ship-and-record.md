@@ -96,7 +96,17 @@ yad checkpoint --retro-ship EP-foo/EP-foo-S01 --repo api --push
 ```
 
 The `status:` flip rides the **first** commit (it only needs one ship to be carried); each later run
-lands only its own ship shard, so the story ends up with complete per-repo evidence.
+lands only its own ship shard, so the story ends up with complete per-repo evidence. After each run the
+command names the declared repos that still have none, so a half-finished backfill is visible instead of
+looking complete.
+
+A ship is permanent audit evidence, so `--repo` is checked before anything is written: it must be a repo
+the story's `repos:` frontmatter declares (or, for a legacy story that declares none, one connected in
+`.sdlc/repos.json`). A typo'd, mis-cased or invented name is **refused** — the per-repo guard means it
+would otherwise collide with nothing and quietly record a ship for a repo that never existed. A name
+that would share a shard **filename** with an already-recorded repo (shard names sanitize everything
+outside `[A-Za-z0-9_-]` to `_`, so `api.v2` and `api_v2` are one file) is refused for the same reason:
+recording it would overwrite the other repo's ship record in an append-only ledger.
 
 **Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
 — `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)
