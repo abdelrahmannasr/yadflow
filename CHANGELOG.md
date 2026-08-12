@@ -1,3 +1,12 @@
+## [3.16.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.0...v3.16.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **checkpoint:** guard --retro-ship per repo so a multi-repo story can be fully recorded ([d6d2fae](https://github.com/abdelrahmannasr/yadflow/commit/d6d2faeea91c0d59a00a532c0605f76c5b77eace)), closes [#166](https://github.com/abdelrahmannasr/yadflow/issues/166)
+* **checkpoint:** validate the retro-ship repo instead of relying on the duplicate guard ([f1e085e](https://github.com/abdelrahmannasr/yadflow/commit/f1e085e89e4eb10fbf853647ab10c1912237daf8)), closes [#166](https://github.com/abdelrahmannasr/yadflow/issues/166) [#166](https://github.com/abdelrahmannasr/yadflow/issues/166) [#166](https://github.com/abdelrahmannasr/yadflow/issues/166)
+* **ledger:** hold an exclusive lock across a ledger read-modify-write ([45b849a](https://github.com/abdelrahmannasr/yadflow/commit/45b849a7755a5bc58bc646e627218170a54b31bc)), closes [#166](https://github.com/abdelrahmannasr/yadflow/issues/166)
+
 # [3.16.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.5...v3.16.0) (2026-08-12)
 
 
