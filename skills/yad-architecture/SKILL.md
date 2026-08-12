@@ -186,8 +186,8 @@ any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.js
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
-is pushed around the gate. Commit the **artifact only** — `contract-lock.json` is artifact-side and
-rides with it — then hand off to `yad-review-gate`.
+is pushed around the gate. Commit the artifact set — **`architecture.md`, `contract.md`, and
+`.sdlc/contract-lock.json`** (artifact-side, not ledger) — then hand off to `yad-review-gate`.
 
 **Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
 `architecture.status: "done"`, set `architecture-review.status: "in_review"`, and set
