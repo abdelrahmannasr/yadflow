@@ -34,13 +34,21 @@ Run `yad reconcile check` (optionally `--thread EP-<genesis>`). For each thread 
 `yad check` drift style, any of:
 - **Broken lineage** — a change-epic whose `parent` is missing, a cycle, or a `thread` cache that
   disagrees with the computed root (the same signal `yad doctor` reports).
-- **Orphan / drift** — code shipped (`build-log.json`) or a touched repo's HEAD advanced past its
+- **Orphan / drift** — code shipped (the build ledger) or a touched repo's HEAD advanced past its
   `repos.json` `syncedHead` with **no owning change-epic** in any thread — i.e. behaviour reached
   production that no epic in the thread describes. Name the repo (`<repo>: <old>→<new>`).
 - **Open hotfix debt** — a `reconcile-debt.json` entry still `open`; the next normal change on that
   thread is blocked until it is paid.
 
 Writes nothing. This is the read-only sweep a human (or CI) runs to see the picture.
+
+> **Read the build ledger as a union — a missed ship reads as "no drift".** It is **shard-then-fold**:
+> union the folded `.sdlc/build-log.json` `ships` with every loose `.sdlc/build-log/` shard, deduped by
+> `(story, task, repo)` (a shard WINS over a folded ship of the same key). Reading `build-log.json` alone
+> drops every ship not yet folded by `yad tidy up` — including every `yad checkpoint --retro-ship` backfill,
+> and every ship on a story still at `in-build`, which `tidy up` never folds. Those are exactly the ships
+> most likely to be orphaned, so missing them turns this check into a false all-clear. See
+> `../yad-engineer-review/references/ship-and-record.md`.
 
 ### Step 2 — `refresh` (advisory, never silent)
 For each flagged thread, **point the human at the fix** — open a reconcile change-epic with `yad-change`

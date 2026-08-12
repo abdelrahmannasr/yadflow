@@ -110,6 +110,11 @@ and the change-thread ledgers `change.json`, `reconcile-debt.json`, `build-log.j
 the **connected code repos**; the **design / testing / learning tools**; and the **platform**
 (GitHub/GitLab + Pages). A skill's `sideEffects` link its step to the component it writes.
 
+`trust-log.json` and `build-log.json` are the *folded* halves of two **shard-then-fold** ledgers — each
+also has a shard dir (`.sdlc/trust-log/`, `.sdlc/build-log/`) holding the entries `yad tidy up` has not
+folded yet. They render as one component each, but anything READING them must union the folded file with
+its shards (`../../yad-engineer-review/references/ship-and-record.md`).
+
 ## Roles = the lenses
 
 The eight yadflow lenses, each to its relevant phase sections + paths:
