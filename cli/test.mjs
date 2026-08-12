@@ -2185,6 +2185,30 @@ test('review context: prints the grounding bundle (diff cmd + code-map) for the 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('review context: grounds the diff on the resolved default branch, not a hardcoded main (#168)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctxbase-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  // A registry entry with NO default_branch — the old `meta?.default_branch || 'main'` grounded the
+  // companion on `main...HEAD` here, which on a staging-trunk repo is the wrong range or no range.
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github' }] }));
+  const runner = fakeRunner({ 'gh repo view': 'staging' });
+  const b = await reviewContext(T, { repo: 'backend', pr: 9, runner });
+  assert.equal(b.base, 'staging');
+  assert.ok(b.diffCmd.includes('staging...HEAD'), 'the companion diffs the real trunk');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review context: a configured default_branch answers WITHOUT any platform round-trip (Codex P2)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctxprobe-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'develop' }] }));
+  const runner = fakeRunner({ 'gh repo view': 'staging' });
+  const b = await reviewContext(T, { repo: 'backend', pr: 9, runner });
+  assert.equal(b.base, 'develop');
+  assert.deepEqual(runner.calls, [], 'no gh/glab call — a slow or unreachable host cannot stall this');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('review walkthrough: prints the bundle PLUS ordered, risk-tagged stops (highest-risk first)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rwalk-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -4008,6 +4032,27 @@ test('resolveBaseBranch does not probe git when an earlier rung already answered
   const r = fakeRunner({ 'gh repo view': 'staging', 'git symbolic-ref': 'origin/trunk' });
   assert.equal(resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: r }).base, 'develop');
   assert.ok(!r.calls.some((c2) => c2.startsWith('git ')), 'the local git read is lazy');
+});
+
+test('resolveBaseBranch probe:false never touches the platform once a rung answers (Codex P2)', () => {
+  // A caller that only wants a base must not pay a live gh/glab round-trip — worst case the full 10s
+  // timeout on an unreachable host — for a `platformDefault` it then discards.
+  const configured = fakeRunner({ 'gh repo view': 'staging' });
+  const res = resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: configured, probe: false });
+  assert.equal(res.base, 'develop');
+  assert.equal(res.platformDefault, null, 'never asked, so nothing to report');
+  assert.deepEqual(configured.calls, [], 'no platform probe at all');
+
+  // ...but with nothing configured it still reaches the platform — laziness, not blindness.
+  const unconfigured = fakeRunner({ 'gh repo view': 'staging' });
+  const res2 = resolveBaseBranch('github', { runner: unconfigured, probe: false });
+  assert.equal(res2.base, 'staging');
+  assert.equal(res2.source, 'platform');
+  assert.equal(unconfigured.calls.filter((c2) => c2.startsWith('gh ')).length, 1, 'asked at most once');
+
+  // The default stays eager: open-pr needs platformDefault for the mismatch warning even when it lost.
+  const eager = fakeRunner({ 'gh repo view': 'staging' });
+  assert.equal(resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: eager }).platformDefault, 'staging');
 });
 
 // ---------------------------------------------------------------------------------------------

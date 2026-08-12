@@ -425,14 +425,29 @@ export function platformDefaultBranch(platform, { cwd, runner = run } = {}) {
 //                   this path is a hang hazard.
 //   6 fallback    — 'main'
 //
-// `platformDefault` always rides along (when the platform could answer) even if an earlier rung won,
-// so the caller can warn about a base that is not the remote's trunk without a second round-trip.
-// Returns { base, source, platformDefault }.
+// `probe` decides WHEN the platform is asked, and exists because the two callers want different things:
+//   true  (default) — ask up front, so `platformDefault` rides along even when an earlier rung won.
+//                     `yad open-pr` needs that to warn about a base that is not the remote's trunk,
+//                     and it is about to shell out to gh/glab anyway.
+//   false           — ask only if the config rungs all miss. A caller that just wants a base (the
+//                     review companion) would otherwise pay a live round-trip — up to the full 10s
+//                     timeout on a slow/unreachable host — for a `platformDefault` it discards.
+// Either way the probe runs AT MOST once. Returns { base, source, platformDefault }; with `probe:false`
+// and an early rung winning, `platformDefault` is null because it was never asked, not because the
+// platform had no answer.
 export function resolveBaseBranch(platform, {
-  cwd, explicit = null, meta = null, hub = null, runner = run,
+  cwd, explicit = null, meta = null, hub = null, runner = run, probe = true,
 } = {}) {
-  const remote = platformDefaultBranch(platform, { cwd, runner });
-  const platformDefault = remote.ok ? remote.branch : null;
+  let platformDefault = null;
+  let asked = false;
+  const askPlatform = () => {
+    if (asked) return platformDefault;
+    asked = true;
+    const remote = platformDefaultBranch(platform, { cwd, runner });
+    platformDefault = remote.ok ? remote.branch : null;
+    return platformDefault;
+  };
+  if (probe) askPlatform();
   const originHead = () => {
     const r = runner('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd });
     return r.ok && r.stdout ? r.stdout.replace(/^origin\//, '') : null;
@@ -441,7 +456,7 @@ export function resolveBaseBranch(platform, {
     ['flag', explicit],
     ['registry', meta?.default_branch],
     ['hub', hub?.default_branch],
-    ['platform', platformDefault],
+    ['platform', askPlatform],
     ['origin-head', originHead],
   ];
   for (const [source, value] of chain) {

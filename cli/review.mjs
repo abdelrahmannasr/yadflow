@@ -41,14 +41,16 @@ function platformOf(root, repoRoot, meta) {
 // Build (but don't print) the back-half grounding bundle. Shared by `context` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
 // Returns { error } on a bad --repo, else { bundle, repoRoot, base }.
-function contextBundle(root, { repo, dir, pr } = {}) {
+function contextBundle(root, { repo, dir, pr, runner = run } = {}) {
   const rr = resolveRepo(root, { repo, dir });
   if (rr.error) return { error: rr.error };
   const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   // Same resolution as `yad open-pr` (#168): without it a repo whose trunk is not `main` grounded the
-  // companion on the wrong diff range — or on a branch that does not exist at all.
-  const { base } = resolveBaseBranch(platform, { cwd: repoRoot, meta });
+  // companion on the wrong diff range — or on a branch that does not exist at all. `probe: false`
+  // because this caller only wants the base: a configured `default_branch` must answer locally and
+  // instantly, never behind a live gh/glab round-trip that could stall for the full timeout.
+  const { base } = resolveBaseBranch(platform, { cwd: repoRoot, meta, runner, probe: false });
   const bundle = {
     repo: meta?.name || null,
     repoRoot,
@@ -69,8 +71,8 @@ function contextBundle(root, { repo, dir, pr } = {}) {
 
 // `yad review context --repo <r> --pr <n>` — print the grounding bundle the companion uses to generate
 // the trailer / cards and run the chat over the CODE diff (grounded in the repo code-map + the PR).
-export async function reviewContext(root, { repo, dir, pr } = {}) {
-  const r = contextBundle(root, { repo, dir, pr });
+export async function reviewContext(root, { repo, dir, pr, runner = run } = {}) {
+  const r = contextBundle(root, { repo, dir, pr, runner });
   if (r.error) { fail(r.error); process.exitCode = 1; return; }
   log(JSON.stringify(r.bundle, null, 2));
   return r.bundle;
@@ -81,7 +83,7 @@ export async function reviewContext(root, { repo, dir, pr } = {}) {
 // first). The CLI sequences deterministically; the skill (yad-pair-review) walks the stops, generates
 // the per-stop briefing + Socratic question, and runs the two-way session. No LLM here, no ledger write.
 export async function reviewWalkthrough(root, { repo, dir, pr, runner = run } = {}) {
-  const r = contextBundle(root, { repo, dir, pr });
+  const r = contextBundle(root, { repo, dir, pr, runner });
   if (r.error) { fail(r.error); process.exitCode = 1; return; }
   const { bundle, repoRoot, base } = r;
   const diff = runner('git', ['-C', repoRoot, 'diff', `${base}...HEAD`]);
