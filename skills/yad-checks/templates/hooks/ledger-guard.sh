@@ -31,9 +31,13 @@ HUB_ROOT="$(dirname -- "$HOOK_DIR")"
 # in this hub, then whatever is on PATH, then a network-free npx. `--no-install` matters — a hook
 # runs on every tool call and must never pause an agent to download a package.
 CMD=()
-if [ -n "${YAD_BIN:-}" ]; then
+_yad_bin="${YAD_BIN:-}"
+if [ -n "${_yad_bin//[[:space:]]/}" ]; then
   # Split deliberately: YAD_BIN is commonly an interpreter + script ("node /path/to/yad.mjs").
-  read -r -a CMD <<< "$YAD_BIN"
+  # The whitespace-stripped test above matters: a YAD_BIN of only spaces would leave CMD empty, and
+  # macOS's bash 3.2 treats "${CMD[@]}" on an empty array as an unbound variable under `set -u` —
+  # aborting the script with a confusing 127 instead of taking one of the branches below.
+  read -r -a CMD <<< "$_yad_bin"
 elif [ -f "$HUB_ROOT/node_modules/yadflow/bin/yad.mjs" ] && command -v node >/dev/null 2>&1; then
   CMD=(node "$HUB_ROOT/node_modules/yadflow/bin/yad.mjs")
 elif command -v yad >/dev/null 2>&1; then
@@ -42,6 +46,13 @@ elif command -v npx >/dev/null 2>&1; then
   CMD=(npx --no-install yadflow)
 else
   echo "  • yad hook: no \`yad\` on PATH and none installed in $HUB_ROOT — allowing (install yadflow to re-arm the ledger guard)" >&2
+  exit 0
+fi
+
+# Belt and braces for bash 3.2's empty-array-is-unbound rule: every branch above sets CMD, but an
+# unexpanded array under `set -u` would abort the script rather than allow, so check before using it.
+if [ "${#CMD[@]}" -eq 0 ]; then
+  echo "  • yad hook: could not resolve a \`yad\` to run — allowing" >&2
   exit 0
 fi
 
