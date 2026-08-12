@@ -158,6 +158,18 @@ export const PROJECT_FILES = {
   version: '.sdlc/cli-version.json',
 };
 
+// Bridge mode: a platform AND the gate-sync CI explicitly enabled (the canonical `bridge_enabled`,
+// or the older `bridge`). ONLY then is CI the sole ledger writer — so `gate open`/`sync` stay
+// hands-off, `hubActions` wires the hub CI, and the ledger guards (the `ledger-guard` check gate and
+// the `yad hook ledger-guard` harness hook) are live. A platform without the bridge keeps the local
+// write path, or reviews could never advance.
+//
+// ONE definition, imported by every JS caller. Copies that drift are how #186 happened — a hub that
+// one reader called bridge and another called file-only had no permitted ledger writer at all.
+// `templates/checks/ledger-guard.sh` re-implements it in bash because the check gates are standalone
+// by design; that copy is the only one, and its header says so.
+export const isBridgeHub = (hub) => !!(hub?.platform && (hub.bridge_enabled === true || hub.bridge === true));
+
 // ---- `yad commit` conventions (mirror skills/sdlc/config.yaml `build`) ----
 // Conventional-commit types (config.yaml commit_subject_style).
 export const COMMIT_TYPES = ['feat', 'fix', 'docs', 'refactor', 'test', 'perf', 'build', 'ci', 'chore', 'revert'];
@@ -275,3 +287,21 @@ export const HUB_WIRING = {
     { src: 'skills/yad-checks/templates/gitlab/yad-update-guard.gitlab-ci.yml', dest: '.gitlab/ci/yad-update-guard.yml' },
   ],
 };
+
+// Harness hooks: the LOCAL half of the ledger rule, installed on the hub beside the CI gates and
+// active under the same bridge predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
+// CI gate — it is advisory, fails open, and its adapter (below) is per-harness, not per-platform.
+export const HOOK_WIRING = [
+  { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },
+];
+
+// Per-harness adapter config: which IDE target gets a hook entry written, and where.
+// `.claude` alone — it is the only supported target with a defined hook protocol (`.agents`,
+// `.zencoder` and `.opencode` carry skills only). The others simply get the script and no wiring;
+// the contract in the script header is what they would wire by hand.
+export const HOOK_SETTINGS = { '.claude': '.claude/settings.json' };
+// The tools that can write a file. A `Bash` call (`sed -i epics/…`) is deliberately NOT matched:
+// matching it would mean parsing shell, and CI's ledger-guard already fails closed on the result.
+export const HOOK_TOOL_MATCHER = 'Edit|Write|MultiEdit|NotebookEdit';
+// `$CLAUDE_PROJECT_DIR` so the entry works whatever the harness's working directory is.
+export const HOOK_COMMAND = '$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh';

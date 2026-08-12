@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run, pushWithRebase,
 } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { PROJECT_FILES, isBridgeHub } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
@@ -113,11 +113,10 @@ export function loadHub(root) {
 // merge advances the step). Recorded per-project in hub.json by `yad setup`.
 const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 
-// Bridge mode: a platform AND the gate-sync CI explicitly enabled (the canonical `bridge_enabled`,
-// or the older `bridge`). ONLY then is CI the sole ledger writer — so `gate open`/`sync` stay
-// hands-off. A platform without the bridge (no gate-sync CI installed) keeps the local write path,
-// or reviews could never advance. Mirrors plan.mjs hubActions.
-const isBridge = (hub) => !!(hub?.platform && (hub.bridge_enabled === true || hub.bridge === true));
+// Bridge mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
+// defined once in manifest.mjs (`isBridgeHub`) and shared with plan.mjs's wiring and the ledger
+// hook, so no two readers can disagree about who owns the ledger (#186).
+const isBridge = isBridgeHub;
 
 // requireEngagement (config `hub.review.requireEngagement`): when on, the predicate counts only
 // approvals carrying a verified engagement signal. Soft-off by default — a bare approve still counts
