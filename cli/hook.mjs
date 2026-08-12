@@ -30,12 +30,19 @@ const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', '
 
 // `epics/<epic>/.sdlc/<ledger>.json` or `epics/<epic>/reviews/<name>.md` → { epic, rel }; else null.
 // Takes a hub-relative POSIX path.
+//
+// Depth is matched the way the CI gate matches it, not more strictly. Its arms are bash `case`
+// globs — `epics/*/.sdlc/state.json` — and a bash glob's `*` spans `/`, so the gate ALSO rejects
+// `epics/EP-a/nested/.sdlc/state.json`. Requiring exactly four segments here would have let a path
+// through locally that CI blocks, in a guard whose whole claim is that its scope is the gate's.
+// The slug is the second segment either way (the gate's `${f#epics/}` / `${_slug%%/*}`).
 export function protectedLedgerPath(rel) {
-  const parts = rel.split('/');
-  if (parts.length !== 4 || parts[0] !== 'epics') return null;
-  const [, epic, dir, file] = parts;
-  if (dir === '.sdlc' && LEDGER_FILES.has(file)) return { epic, rel, kind: 'state' };
-  if (dir === 'reviews' && file.endsWith('.md')) return { epic, rel, kind: 'review' };
+  if (!rel.startsWith('epics/')) return null;
+  const epic = rel.slice('epics/'.length).split('/')[0];
+  if (!epic || epic === '.' || epic === '..') return null;
+  const ledgers = [...LEDGER_FILES].map((f) => f.replace('.', '\\.')).join('|');
+  if (new RegExp(`/\\.sdlc/(?:${ledgers})$`).test(rel)) return { epic, rel, kind: 'state' };
+  if (/\/reviews\/.*\.md$/.test(rel)) return { epic, rel, kind: 'review' };
   return null;
 }
 
@@ -80,28 +87,60 @@ export function baseDirFor(env = process.env, runner = run) {
   return top.ok && top.stdout ? top.stdout : process.cwd();
 }
 
-// Is this epic's ledger already on the base ref? The #162 carve-out, mirrored: no CI path can CREATE
-// a ledger (`gate ci` only advances an existing chain, at merge, on the default branch), so a brand-new
-// epic's seed is legitimately a human's write and rides the first review PR/MR. Mutation of a ledger
-// that is already on the base ref is what nothing but the bot may do.
+// Case-folded, exactly as the CI gate folds (`tr '[:upper:]' '[:lower:]'`).
+const fold = (s) => s.toLowerCase();
+
+// The base ref, resolved in the CI gate's own order: `origin/<default_branch>`, then the remote's
+// published default, then `origin/main`. Returns null when none resolves.
 //
-// Degradation matches the fail-open stance: if git cannot answer (no repo, no such ref, git absent),
-// fall back to the working tree — a `state.json` that does not exist yet is a creation.
-export function ledgerIsSeeded(hubRoot, epic, hub, runner = run) {
-  const statePath = `epics/${epic}/.sdlc/state.json`;
-  const base = hub?.default_branch
-    || (() => {
-      const head = runner('git', ['-C', hubRoot, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
-      return head.ok && head.stdout ? head.stdout.replace(/^origin\//, '') : '';
-    })()
-    || 'main';
-  const probe = runner('git', ['-C', hubRoot, 'cat-file', '-e', `${base}:${statePath}`]);
-  if (probe.ok) return true;
-  // `cat-file -e` exits non-zero both for "not in that tree" and for "no such ref". Only the second
-  // is ambiguous, so confirm the ref resolves before trusting the answer.
-  if (runner('git', ['-C', hubRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) return false;
-  return fs.existsSync(path.join(hubRoot, ...statePath.split('/')));
+// ORIGIN refs only — never a bare local branch. A local trunk is whatever the developer last pulled,
+// and `git fetch` never fast-forwards it, so probing `main` would report an epic whose review PR has
+// already merged as absent from the base and wave a real mutation straight through. That is the
+// stale-clone case, and it is the common one, not an edge.
+export function resolveHookBase(hubRoot, hub, runner = run) {
+  const cfg = hub?.default_branch || '';
+  const head = runner('git', ['-C', hubRoot, 'symbolic-ref', '--short', '--quiet', 'refs/remotes/origin/HEAD']);
+  for (const base of [cfg ? `origin/${cfg}` : '', head.ok ? head.stdout : '', 'origin/main']) {
+    if (!base || base === 'origin/') continue;
+    if (runner('git', ['-C', hubRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) return base;
+  }
+  return null;
 }
+
+// Every epic whose ledger is already on the base ref, case-folded. The #162 carve-out, mirrored from
+// the gate's `is_seeding`: no CI path can CREATE a ledger (`gate ci` only advances an existing chain,
+// at merge, on the default branch), so a brand-new epic's seed is legitimately a human's write and
+// rides the first review PR/MR. Mutating a ledger that is already on the base is what only the bot
+// may do.
+//
+// Read with `ls-tree` from the hub, never with a `<rev>:<path>` probe: a rev:path spec is always
+// resolved from the repository TOP LEVEL and `-C` does not re-anchor it, so a hub sitting in a
+// subdirectory of its repo (a monorepo, or a workspace that is itself a repo) would miss on every
+// probe and the guard would allow everything, silently. `ls-tree` run with `-C hubRoot` takes a
+// cwd-relative pathspec and prints cwd-relative paths, so both halves stay hub-relative.
+//
+// Slugs are FOLDED because the gate folds them: on a case-insensitive filesystem `epics/ep-x/…` and
+// `epics/EP-X/…` are the same file, so a byte-exact compare lets a mutation be laundered as a
+// creation — the vector the gate's own header names.
+//
+// null means the base could not be read at all — "unknown", which ALLOWS. The working tree cannot
+// stand in for the base ref: a seed writes `state.json` first, so using that as proof would deny
+// every remaining file of the same seed.
+export function seededSlugs(hubRoot, hub, runner = run) {
+  const base = resolveHookBase(hubRoot, hub, runner);
+  if (!base) return null;
+  const tree = runner('git', [
+    '-C', hubRoot, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', base, '--', 'epics',
+  ]);
+  if (!tree.ok) return null;
+  const slugs = new Set();
+  for (const p of tree.stdout.split('\0')) {
+    const m = /^epics\/([^/]+)\/\.sdlc\/state\.json$/.exec(p);
+    if (m) slugs.add(fold(m[1]));
+  }
+  return slugs;
+}
+
 
 // What the agent is told when the edit is refused. Names the command that owns each transition —
 // the whole point of #171 was that the ledger write had no command behind it.
@@ -131,6 +170,9 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
   if (env.YAD_HOOK_DISABLE) return { allow: true, skipped: 'YAD_HOOK_DISABLE' };
   if (!paths.length) return { allow: true };
   const base = baseDirFor(env, runner);
+  // One `ls-tree` per hub, not one per candidate path: a MultiEdit carries many paths and this runs
+  // inside the agent's tool loop.
+  const seededByHub = new Map();
   for (const candidate of paths) {
     const abs = path.resolve(base, candidate);
     const hubRoot = hubRootFor(abs);
@@ -142,7 +184,10 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
     const rel = path.relative(hubRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;
-    if (!ledgerIsSeeded(hubRoot, hit.epic, hub, runner)) continue; // creation, not mutation (#162)
+    if (!seededByHub.has(hubRoot)) seededByHub.set(hubRoot, seededSlugs(hubRoot, hub, runner));
+    const seeded = seededByHub.get(hubRoot);
+    if (seeded === null) continue;                      // base unreadable — unknown allows
+    if (!seeded.has(fold(hit.epic))) continue;          // creation, not mutation (#162)
     return { allow: false, epic: hit.epic, rel, message: denyMessage({ epic: hit.epic, rel, hubRoot }) };
   }
   return { allow: true };
@@ -165,7 +210,11 @@ function readPayload() {
 // The `yad hook ledger-guard` entry point. `paths` (from `--path`) is additive to the payload, so
 // a harness with no JSON contract can call the guard directly.
 export function runLedgerGuardHook({ paths = [] } = {}) {
-  const payload = readPayload();
+  // Only read stdin when there is nothing else to go on. `readFileSync(0)` blocks until EOF, and a
+  // caller that passes `--path` (the documented stdin-free alternative) may well have inherited an
+  // open pipe from a long-lived parent — `isTTY` is false there, so the TTY guard does not trip and
+  // the hook would hang forever. A hang is strictly worse for an agent than a block.
+  const payload = paths.length ? null : readPayload();
   const all = [...new Set([...payloadPaths(payload), ...paths])];
   const verdict = ledgerGuardDecision(all);
   if (verdict.allow) return 0;
