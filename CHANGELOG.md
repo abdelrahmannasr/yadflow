@@ -1,3 +1,15 @@
+## [3.16.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.2...v3.16.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* **open-pr:** base the task PR on the repo default branch, not main ([63da011](https://github.com/abdelrahmannasr/yadflow/commit/63da011fd2c4b6e81940c646879cc692b634a877)), closes [#168](https://github.com/abdelrahmannasr/yadflow/issues/168)
+
+
+### Performance Improvements
+
+* **review:** stop probing the platform for an already-configured base ([0fc3de3](https://github.com/abdelrahmannasr/yadflow/commit/0fc3de34c7a522ec3463953778787f247ab28071)), closes [#191](https://github.com/abdelrahmannasr/yadflow/issues/191)
+
 ## [3.16.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.1...v3.16.2) (2026-08-12)
 
 
