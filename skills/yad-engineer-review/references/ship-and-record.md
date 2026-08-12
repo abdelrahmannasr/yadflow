@@ -108,6 +108,12 @@ that would share a shard **filename** with an already-recorded repo (shard names
 outside `[A-Za-z0-9_-]` to `_`, so `api.v2` and `api_v2` are one file) is refused for the same reason:
 recording it would overwrite the other repo's ship record in an append-only ledger.
 
+Those checks decide from the ledger and then write it, so each one runs under an exclusive **lock** on
+the epic's `build-log` — as does `yad review reconcile`'s stamp and `yad tidy up`'s fold. Two commands
+writing the same ledger at once would otherwise both read "no ship yet" and both write. The lock is an
+empty directory (`build-log.json.lock`), so git never sees it; one held by a process that died is
+reclaimed after 30s, and a live one reports `YAD-STATE-006` rather than writing over the other's work.
+
 **Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
 — `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)
 (`yad review trailer/context/nudge`, a real trailer/cards/chat session over the diff), `none` for a bare

@@ -1,11 +1,12 @@
 // Dependency-free tests for the yad CLI. Run: node --test cli/test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
@@ -6712,7 +6713,7 @@ test('buildCheckpointMessage subject matches the hub commit-message gate regex a
 // ---------------------------------------------------------------------------------------------
 // cli/ledger.mjs — shard-then-fold union reader + fold (the conflict-free ledger storage)
 // ---------------------------------------------------------------------------------------------
-const { readTrustRuns, readShips, updateShip, foldTrust, trustShardName, buildShardName, writeRetroShip } = await import('./ledger.mjs');
+const { readTrustRuns, readShips, updateShip, foldTrust, foldBuild, trustShardName, buildShardName, writeRetroShip, withLedgerLock } = await import('./ledger.mjs');
 
 // Build an epic dir with a .sdlc/. Returns the epicDir (what the ledger fns take).
 function ledgerEpic() {
@@ -6864,6 +6865,95 @@ test('foldTrust/foldBuild: fold picked shards into the folded file + delete them
   assert.equal(JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/trust-log.json'))).runs.length, 1, 'S01 folded in');
   // idempotent: S01 already gone, nothing more to fold
   assert.equal(foldTrust(epicDir, onlyS01).folded, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// --- ledger locking: a read-modify-write must not interleave with another writer (CodeRabbit) ---
+
+test('withLedgerLock: holds exclusively, always releases, and leaves nothing git could see', () => {
+  const { T, epicDir } = ledgerEpic();
+  const lock = path.join(epicDir, '.sdlc/build-log.json.lock');
+  assert.equal(withLedgerLock(lock, () => { assert.ok(fs.existsSync(lock), 'held for the whole span'); return 42; }), 42);
+  assert.ok(!fs.existsSync(lock), 'released on the happy path');
+  assert.throws(() => withLedgerLock(lock, () => { throw new Error('boom'); }), /boom/);
+  assert.ok(!fs.existsSync(lock), 'released even when the body throws');
+  // A lock is an EMPTY DIRECTORY — git never tracks one, so it can never ride into a commit.
+  withLedgerLock(lock, () => assert.deepEqual(fs.readdirSync(lock), [], 'the lock holds no files'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('withLedgerLock: a held lock blocks a second writer (YAD-STATE-006), a stale one is reclaimed', () => {
+  const { T, epicDir } = ledgerEpic();
+  const lock = path.join(epicDir, '.sdlc/build-log.json.lock');
+  fs.mkdirSync(lock, { recursive: true });                       // a live holder
+  let ran = false;
+  assert.throws(
+    () => withLedgerLock(lock, () => { ran = true; }, { retries: 1, waitMs: 1 }),
+    (e) => e.code === 'YAD-STATE-006' && /another process is writing build-log/.test(e.message),
+    'a live lock is reported, never stolen',
+  );
+  assert.equal(ran, false, 'the body never ran while another writer held the ledger');
+  // The holder died: its lock ages out and the next writer reclaims it rather than blocking forever.
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(lock, old, old);
+  assert.equal(withLedgerLock(lock, () => 'ok', { retries: 1, waitMs: 1 }), 'ok');
+  assert.ok(!fs.existsSync(lock), 'the reclaimed lock is released again');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('the ship-evidence writers take the ledger lock — no shard is written past another writer', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeBuildShard(epicDir, { story: 'EP-x-S01', task: 'T01', repo: 'be', pr: 7, engineer_review: [] });
+  const w = { retries: 1, waitMs: 1 };                           // don't sit out the real 5s budget
+  for (const l of ['build-log.json.lock', 'trust-log.json.lock']) fs.mkdirSync(path.join(epicDir, '.sdlc', l), { recursive: true });
+  const held = (fn) => assert.throws(fn, (e) => e.code === 'YAD-STATE-006');
+  // This is the CodeRabbit race made deterministic: a second `--retro-ship` (any --task) cannot slip
+  // between the first one's duplicate check and its write.
+  held(() => writeRetroShip(epicDir, { story: 'EP-x-S02', repo: 'be', task: 'T09' }, w));
+  held(() => updateShip(epicDir, (s) => s.pr === 7, (s) => { s.engineer_review = [{ approver: 'x' }]; }, w));
+  held(() => foldBuild(epicDir, () => true, w));
+  held(() => foldTrust(epicDir, () => true, w));                 // its own ledger, its own lock
+  assert.equal(fs.readdirSync(path.join(epicDir, '.sdlc/build-log')).length, 1, 'nothing was written past the lock');
+  assert.deepEqual(readShips(epicDir)[0].engineer_review, [], 'the recorded ship is unchanged');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeRetroShip is exclusive ACROSS PROCESSES — four concurrent backfills leave exactly one ship', async () => {
+  const { T, epicDir } = ledgerEpic();
+  // The reported race, run for real: four `--retro-ship` writers for the SAME (story, repo), each with
+  // a different --task, started together. Unlocked, they all read "no ship yet" and each writes its own
+  // <story>-<task>-<repo>.json — four shards where the duplicate guard promises one. The lock is a
+  // cross-PROCESS claim (an atomic mkdir), so exactly one wins and the rest are refused as `exists`.
+  // A barrier makes them genuinely simultaneous: each child announces itself and then spins until the
+  // parent releases all four at once. Without it, node's ~50ms startup staggers them so far apart that
+  // each finishes before the next begins and the race never happens.
+  const src = `import fs from 'node:fs';
+    import { writeRetroShip } from ${JSON.stringify(path.join(ROOT, 'cli/ledger.mjs'))};
+    fs.writeFileSync(process.env.READY, '');
+    const deadline = Date.now() + 10000;
+    while (!fs.existsSync(process.env.GO) && Date.now() < deadline) { /* spin to the barrier */ }
+    const r = writeRetroShip(process.env.EPIC_DIR, { story: 'EP-x-S01', repo: 'be', task: process.env.TASK });
+    console.log(r.written ? 'written' : r.reason);`;
+  const go = path.join(T, 'go');
+  const run = (task) => new Promise((resolve) => {
+    const p = spawn('node', ['--input-type=module', '-e', src], {
+      env: { ...process.env, EPIC_DIR: epicDir, TASK: task, READY: path.join(T, `ready-${task}`), GO: go },
+    });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('close', () => resolve(out.trim()));
+  });
+  const tasks = ['T01', 'T02', 'T03', 'T04'];
+  const runs = tasks.map(run);
+  const armed = Date.now() + 15000;
+  while (tasks.some((t) => !fs.existsSync(path.join(T, `ready-${t}`))) && Date.now() < armed) await delay(10);
+  fs.writeFileSync(go, '');                                      // release all four into the guard together
+  const results = await Promise.all(runs);
+  assert.equal(results.filter((r) => r === 'written').length, 1, `exactly one writer won: ${results.join(',')}`);
+  assert.equal(results.filter((r) => r === 'exists').length, 3, `the rest saw the ship: ${results.join(',')}`);
+  assert.equal(fs.readdirSync(path.join(epicDir, '.sdlc/build-log')).length, 1, 'one shard on disk, not one per task');
+  assert.equal(readShips(epicDir).length, 1);
+  assert.ok(!fs.existsSync(path.join(epicDir, '.sdlc/build-log.json.lock')), 'every process released its lock');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
