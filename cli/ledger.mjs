@@ -86,13 +86,18 @@ export function readShips(epicDir) {
 // ship: `task` defaults to the sentinel `retro`, `mergeCommit` is written only when the caller supplies
 // it (never invented), and `shippedAt` is the backfill date (the `retroactive` flag marks it as such).
 //
-// Guard: refuse when the story ALREADY has ANY build-log ship — then it isn't pre-tracking and the
-// normal ship/checkpoint flow applies; a retro record would only muddy the ledger. Returns
-// { written: false, reason } in that case, else { written: true, file, ship }.
+// Guard: refuse when the story already has a build-log ship IN THIS REPO — then it isn't pre-tracking
+// there and the normal ship/checkpoint flow applies; a retro record would only muddy the ledger. The
+// key is (story, repo), NOT story alone (#166): a story tagged with several repos ships once per repo,
+// so a story-only guard let the FIRST backfill lock out every other repo and a multi-repo pre-tracking
+// story could never be fully recorded. Each repo is recorded by its own run — the shards are distinct
+// by construction (`buildShardName` keys on story+task+repo). Not keyed on `task` too: that would let
+// repeated `--task T0x` pile several retro shards into one repo, the very muddying this guard prevents.
+// Returns { written: false, reason } when refused, else { written: true, file, ship }.
 export function writeRetroShip(epicDir, { story, repo, task = 'retro', mergeCommit, shippedAt }) {
   if (!story) throw new Error('writeRetroShip: story is required');
   if (!repo) throw new Error('writeRetroShip: repo is required');
-  if (readShips(epicDir).some((s) => s.story === story)) {
+  if (readShips(epicDir).some((s) => s.story === story && s.repo === repo)) {
     return { written: false, reason: 'exists' };
   }
   const t = task || 'retro';

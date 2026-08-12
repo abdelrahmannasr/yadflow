@@ -81,10 +81,22 @@ yad checkpoint --retro-ship <epic>/<story> --repo <r> [--task <t>] [--merge-comm
 It writes ONE minimal ship shard marked `retroactive: true` (`task` defaults to the sentinel `retro`;
 `mergeCommit` is written only if you pass `--merge-commit`; `shippedAt` is the backfill date), then runs
 the normal checkpoint so the story's already-made `status:` flip rides along in the **same** commit. It
-refuses when the story already has a real ship (then it isn't pre-tracking — use the normal flow). It
-does **not** author the story frontmatter — and to keep evidence and the flip atomic (the no-drift
+refuses when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the
+normal flow). It does **not** author the story frontmatter — and to keep evidence and the flip atomic (the no-drift
 invariant), it **refuses** unless you have already set `status: shipped` in `stories/<story>.md`, so a
 ship shard is never committed while the artifact still says `approved`.
+
+**One repo per run (#166).** A ship is recorded per `(story, task, repo)`, so a story that shipped in
+several repos needs one retroactive shard **per repo** — the guard is keyed on `(story, repo)`, not on
+the story alone, so recording the first repo never locks out the rest. Re-run once per repo:
+
+```
+yad checkpoint --retro-ship EP-foo/EP-foo-S01 --repo web --push
+yad checkpoint --retro-ship EP-foo/EP-foo-S01 --repo api --push
+```
+
+The `status:` flip rides the **first** commit (it only needs one ship to be carried); each later run
+lands only its own ship shard, so the story ends up with complete per-repo evidence.
 
 **Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
 — `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)

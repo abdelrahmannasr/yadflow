@@ -171,6 +171,9 @@ export function stagedStoryIsStatusOnly(git, file) {
 // (with a printed reason) aborts the commit; `file` is the shard just written, so a dry run can delete it
 // and leave no side effect. Does NOT author the story frontmatter — it only supplies the missing
 // evidence, and the human must have ALREADY flipped `status:` to a back-half value in the working tree.
+//
+// ONE repo per run (#166). A story that shipped in several repos is backfilled by re-running with each
+// `--repo`; the second run finds the flip already committed, so it lands only the new ship shard.
 export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, today }) {
   if (!epic || !story) { fail('--retro-ship needs <epic>/<story> (e.g. --retro-ship EP-foo/EP-foo-S01)'); return { ok: false }; }
   if (!repo) { fail('--retro-ship needs --repo <name> (the repo the story shipped in)'); return { ok: false }; }
@@ -193,7 +196,10 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   try { res = writeRetroShip(epicDir, { story, repo, task, mergeCommit, shippedAt: today }); }
   catch (e) { fail(`could not record retroactive ship — ${e.message}`); return { ok: false }; }
   if (!res.written) {
-    fail(`${story} already has a build-log ship — it is not pre-tracking; use the normal ship/checkpoint flow`);
+    // Per REPO, not per story (#166) — so the message names the repo, and a multi-repo story whose
+    // other repos are still unrecorded is pointed at its next run rather than left looking finished.
+    fail(`${story} already has a build-log ship in ${repo} — it is not pre-tracking there; use the normal ship/checkpoint flow`);
+    hand(`a story that shipped in several repos is recorded one repo at a time — re-run with \`--repo <other>\` for each remaining repo`);
     return { ok: false };
   }
   ok(`recorded retroactive ship for ${story} (${repo})${mergeCommit ? ` @ ${mergeCommit}` : ''}`);
