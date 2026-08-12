@@ -303,5 +303,15 @@ export const HOOK_SETTINGS = { '.claude': '.claude/settings.json' };
 // The tools that can write a file. A `Bash` call (`sed -i epics/…`) is deliberately NOT matched:
 // matching it would mean parsing shell, and CI's ledger-guard already fails closed on the result.
 export const HOOK_TOOL_MATCHER = 'Edit|Write|MultiEdit|NotebookEdit';
-// `$CLAUDE_PROJECT_DIR` so the entry works whatever the harness's working directory is.
-export const HOOK_COMMAND = '$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh';
+// `$CLAUDE_PROJECT_DIR` so the entry works whatever the harness's working directory is — QUOTED,
+// because the harness runs this through a shell: unquoted, a project path containing a space
+// word-splits, the command is not found, and the guard is silently off while `check` and `doctor`
+// both still report it wired.
+export const HOOK_COMMAND = '"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"';
+// Spellings a previous yadflow wrote for the SAME hook. An installed entry matching one of these is
+// ours to normalise; anything else is the team's, even if it names a similar path. Never widen this
+// to a substring test — a team keeping its own wrapper at `.claude/hooks/ledger-guard.sh` would have
+// their hook silently rewritten to ours.
+export const HOOK_COMMAND_LEGACY = Object.freeze([
+  '$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh', // 3.16.x, pre-quoting
+]);
