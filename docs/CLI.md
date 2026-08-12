@@ -19,9 +19,9 @@ no clone needed.
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so the build half is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
-| `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
-| `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct. |
-| `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. |
+| `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
+| `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct, and never overwrites a managed file reported as `modified`. |
+| `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. A managed file you edited is reported and **left alone**; `--overwrite-local` replaces it after saving a `<file>.yad-orig` backup. |
 | `npx yadflow update --push` | Everything `update` does, **then commits each repo's applied changes and pushes them straight to the default branch** of the hub and every connected repo — one `chore(yad-update): sync SDLC install to yadflow vX.Y.Z` commit per repo, so a version upgrade "just lands" instead of leaving dirty trees to hand-commit across N repos. Stages an **explicit per-repo allowlist** (never `git add -A`); commits **only on each repo's default branch** (a repo on a feature branch is **skipped with a warning**, never disrupted; `--allow-branch` overrides). No PR/MR — so the `pull_request`/`merge_request` gate suite never fires; the push-on-default-branch **`yad-update-guard`** workflow/fragment runs **only** `verified-commits` + `commit-message` over it (deliberately **no** `[skip ci]`). Prints an announce banner first — **announce the team & pause merges until it completes**. Also spelled `check --fix --push`. |
 | `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads, **each epic's `contract-lock.json` still matches its surface**, and **no completed review gate is left holding no approval (fail) or only stale ones (warn)** — solo mode waives the first, since approval is waived there by design. Exit 1 on any failure; `--json` for CI and bug reports. |
 | `yad report [-m <text>]` | **Self issue reporter.** File a bug in the yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool present+authenticated booleans, the hub platform enum, the error code/hint, a path-scrubbed message, and the failing command + flag *names*. Never posts paths, hostnames, git URLs, repo names, logins, epic IDs, branch names, or flag values. Searches open issues first (dedupe), shows the exact payload, and asks before posting; files via an authenticated `gh`/`glab` or a prefilled `issues/new` URL. Also **offered automatically** after an unexpected failure (interactive only). `YAD_NO_REPORT=1` (or `SDLC_NONINTERACTIVE`) disables it. |
@@ -47,7 +47,8 @@ no clone needed.
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
-bypasses the commit atomic guard). Commit flags: `--type`, `-m/--message`, `--task` (a
+bypasses the commit atomic guard) — it never reaches a `modified` managed file; `--overwrite-local`
+replaces those (see below). Commit flags: `--type`, `-m/--message`, `--task` (a
 `<story>-T<NN>` id — an explicit value is validated against the spec-link gate and `yad commit`
 fails locally if it is malformed), `--ai
 <claude\|copilot\|cursor\|coderabbit\|none>`, `--contract-change`, `--dry-run`. `open-pr` flags:
@@ -130,7 +131,9 @@ does / why / what to enter / what skipping means), and the step count adapts.
    `yad-connect-*` skills; the MCPs/CLIs are confirmed there).
 5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo and
    skips domain-owner prompts; **greenfield** skips the Repomix pack (run `yad repo refresh` once it has code).
-6. **Wire each repo** — CI gates and PR/MR template.
+6. **Wire each repo** — CI gates and PR/MR template, recording each written file's sha in that repo's
+   `.sdlc/managed.json` so a later `update` can tell a stale copy from one you edited
+   ([managed files](#managed-files-what-yad-owns-and-what-you-edited)).
 7. **AI review** — optionally write `.coderabbit.yaml`.
 8. **Done** — stamp `.sdlc/cli-version.json` and print a **profile-tailored next step** (brownfield →
    `yad-backfill` first; everyone → `yad next` and your first epic via `yad-epic`).
@@ -149,6 +152,40 @@ input you already gave; re-running `setup` carries your profile forward.
 > [Conventional Commits](../CONTRIBUTING.md), publishes to npm with build provenance (tokenless OIDC),
 > ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No manual `npm publish`. See
 > [`RELEASING.md`](../RELEASING.md).
+
+## Managed files: what `yad` owns, and what you edited
+
+`setup` / `check --fix` / `update` write a fixed set of **managed files** into the hub and every
+connected repo — the `checks/*.sh` gate scripts, the CI workflow/fragment, and the PR/MR template.
+They are yad's to rewrite, which is how a version upgrade lands new gate logic everywhere at once.
+
+The catch (#164): "the file differs from the shipped template" cannot, on its own, tell a **stale**
+copy (rewrite it) from one your team deliberately **customized** (ask first). So every write records
+the sha256 of what it wrote in that repo's `.sdlc/managed.json`, and the next run compares:
+
+| On disk | Reported | What `--fix` / `update` does |
+|---------|----------|------------------------------|
+| = the shipped template | `ok` | nothing |
+| ≠ template, = the sha we recorded | `outdated` | rewrites it silently — it is provably our stale copy |
+| ≠ template, ≠ the sha we recorded | **`modified`** | **nothing.** Names the file and moves on |
+| ≠ template, no record at all | `outdated` | rewrites it, but saves `<file>.yad-orig` first |
+
+A `modified` file is reported on **every** check until you resolve it — that visible drift is the
+point, and it is the honest cost of keeping a local edit to a managed file. To resolve it:
+
+- **keep the edit** — leave it; the update never touches it. Better: move the knowledge into a file
+  yad does not manage (an ADR under `docs/`) so an upgrade cannot strand it;
+- **take the shipped version** — `yad update --overwrite-local`, which replaces every `modified` file
+  after writing your version next to it as `<file>.yad-orig` (review it, then delete it).
+
+`.sdlc/managed.json` is committed, so the record travels with the repo instead of living in one
+clone. The last row is the migration path for an install made before this record existed: nothing is
+proven there, so the routine upgrade still lands but never discards content it cannot account for.
+A record that exists but cannot be read as one (corrupt JSON, a bad merge resolution) is an **error**,
+never a silent reset — restore it from git, or delete it to start over from that last row.
+
+> **Not yet supported:** marking a customization as *accepted* so it stops being reported (an
+> opt-out list of managed paths you own). Until then, `modified` is a permanent, deliberate nag.
 
 ## Staying up to date
 

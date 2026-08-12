@@ -3,12 +3,13 @@
 // setup (apply all), update (apply changed), and check (report; fix non-ok) share it.
 import fs from 'node:fs';
 import path from 'node:path';
+import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha,
 } from './lib.mjs';
 import {
-  SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
-  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
+  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
 } from './manifest.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
@@ -35,6 +36,83 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
   paths: root ? [rel(root, dest)] : [],
   apply: () => copyDir(src, dest),
 });
+
+// ---- managed-file provenance (#164) --------------------------------------------------------
+// Read one repo root's ledger of "files yad wrote, and the sha it wrote". Strict, like every other
+// ledger read: only an ABSENT ledger means "no record" ({}). One that exists but does not parse — or
+// parses into something that is not a `files` map — must throw. Defaulting either to {} would
+// silently downgrade every locally-modified file to an unrecorded one and re-open, one backup short,
+// the silent clobber this record exists to prevent.
+const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+export function readManagedLedger(root) {
+  const file = path.join(root, MANAGED_LEDGER);
+  const rec = readJSONStrict(file, null);
+  if (rec === null && !exists(file)) return {};
+  if (!isMap(rec) || !isMap(rec.files)) {
+    // Parses, but is not a record — YAD-STATE-002 (wrong shape), not -001 (does not parse).
+    throw err('YAD-STATE-002', `unreadable provenance record in ${file}: expected an object with a "files" map`,
+      'restore it from git — or delete it to start over, which costs the record (the next update then backs up every managed file it replaces)');
+  }
+  return rec.files;
+}
+
+// Where the pre-overwrite copy of `dest` goes.
+export const backupPathFor = (dest) => `${dest}${BACKUP_SUFFIX}`;
+
+// A wired file (gate script, CI fragment, PR/MR template) — a fileAction plus provenance:
+//   'ok'        bytes are the shipped template
+//   'missing'   not installed
+//   'outdated'  differs, and the recorded sha proves WE wrote what is there (a stale copy) — or the
+//               file predates the ledger (no record at all), in which case nothing is proven and
+//               apply() saves a .yad-orig copy before replacing it
+//   'modified'  differs, and the recorded sha says someone edited our copy — never overwritten by a
+//               plain update; `--overwrite-local` replaces it (after a .yad-orig backup)
+// apply() backs up whenever provenance is not proven, so no unproven content is ever discarded.
+const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = {} } = {}) => {
+  const base = fileAction(scope, item, src, dest, { root, exec });
+  const managed = { src, dest, root };
+  if (base.status !== 'outdated') return { ...base, managed };
+  const recorded = ledger[rel(root, dest)];
+  const ours = !!recorded && recorded === fileSha(dest);
+  const backup = ours ? null : backupPathFor(dest);
+  return {
+    ...base,
+    // No record at all is a pre-ledger install, not evidence of an edit: keep the routine upgrade
+    // working (still 'outdated'), but never discard content we cannot prove we wrote — hence backup.
+    status: ours || !recorded ? 'outdated' : 'modified',
+    managed,
+    backup,
+    apply: () => {
+      if (backup) fs.copyFileSync(dest, backup);
+      copyFile(src, dest, { exec });
+    },
+  };
+};
+
+// Persist the provenance of every managed file whose on-disk bytes ARE the shipped template — the
+// ones just applied AND the ones already correct. Seeding the already-correct ones is what migrates
+// an install made before this ledger existed: from then on, an edit to any of them is detectable.
+// A file we skipped as `modified` is deliberately NOT recorded — it is the team's copy, not ours.
+// Keys are sorted so two repos' updates produce mergeable, byte-stable ledgers.
+// Returns the roots written, so the caller can stage them alongside what they describe.
+export function recordManagedWrites(actions = []) {
+  const byRoot = new Map();
+  for (const a of actions) {
+    const m = a?.managed;
+    if (!m || !m.root) continue;
+    if (!sameContent(m.src, m.dest)) continue;
+    if (!byRoot.has(m.root)) byRoot.set(m.root, {});
+    byRoot.get(m.root)[rel(m.root, m.dest)] = fileSha(m.dest);
+  }
+  const roots = [];
+  for (const [root, written] of byRoot) {
+    const files = { ...readManagedLedger(root), ...written };
+    const sorted = Object.fromEntries(Object.keys(files).sort().map((k) => [k, files[k]]));
+    writeJSON(path.join(root, MANAGED_LEDGER), { version: VERSION, files: sorted });
+    roots.push(root);
+  }
+  return roots;
+}
 
 // Persisted state gets one deliberately narrow compatibility repair. Explicit setup/planner input
 // does not: a caller typo is an error, while the known v3.11.1 `.cluade` stamp is safely migrated.
@@ -371,8 +449,9 @@ export function legacyHubActions(root) {
 // Per-repo wiring (gate scripts, CI, PR template).
 export function repoActions(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
+  const ledger = readManagedLedger(repoRoot);
   return wiringFor(repo.platform).map((w) =>
-    fileAction(repo.name, w.dest, asset(w.src), path.join(repoRoot, w.dest), { root: repoRoot, exec: !!w.exec }),
+    wiredFileAction(repo.name, w.dest, asset(w.src), path.join(repoRoot, w.dest), { root: repoRoot, exec: !!w.exec, ledger }),
   );
 }
 
@@ -383,8 +462,9 @@ export function hubActions(root) {
   // `bridge_enabled` is the canonical flag (the documented hub-config schema); older setup versions
   // wrote `bridge` — accept an explicit true in either spelling, wire nothing otherwise.
   if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
+  const ledger = readManagedLedger(root);
   return [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])].map((w) =>
-    fileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec }),
+    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
 }
 

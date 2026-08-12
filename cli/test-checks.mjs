@@ -1080,6 +1080,63 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #164 — GitLab truncates $CI_MERGE_REQUEST_DESCRIPTION at 2700 characters, so a valid description
+// can lose a required section before the gate reads it. The gate cannot un-truncate the body; what it
+// CAN do is stop reporting "does not use the template" as if the author had ignored it.
+const GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md');
+const HUB_GITLAB_TPL = path.join(ROOT, 'skills/yad-pr-template/templates/hub/gitlab/merge_request_templates/Default.md');
+
+test('pr-template gate: names the 2700-character GitLab truncation when a section falls past the cutoff', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  // What GitLab actually hands CI: the first 2700 characters of a longer description whose
+  // `## Checklist` sits below the cutoff.
+  const long = '## Summary\nx\n\n## Impact & Risk\n- **Risk level:** low\n\n'
+    + 'narrative '.repeat(400) + '\n\n## Checklist\n- [ ] done\n';
+  const truncated = body(T, long.slice(0, 2700));
+  const r = runGate(PR_TEMPLATE, T, ['--profile', 'code', truncated]);
+  assert.equal(r.code, 1, 'the section really is absent from what CI passed in');
+  assert.match(r.out, /TRUNCATED at 2700/);
+  assert.match(r.out, /move the required sections above the cutoff/);
+
+  // GitLab counts CHARACTERS. A body of multibyte punctuation reaches 2700 BYTES at a third of that
+  // length, and blaming truncation there would send the author reordering a description that fits.
+  const multibyte = body(T, `## Summary\nx\n${'é'.repeat(1350)}\n`);
+  assert.ok(fs.statSync(multibyte).size >= 2700, 'the fixture really is >= 2700 bytes');
+  assert.doesNotMatch(runGate(PR_TEMPLATE, T, ['--profile', 'code', multibyte]).out, /TRUNCATED/);
+  // …but a multibyte body that IS at the character limit must still be recognised (5400 bytes here),
+  // so the count is code points, not a byte count with a different name.
+  const atLimit = body(T, `## Summary\nx\n${'é'.repeat(2700)}\n`);
+  assert.match(runGate(PR_TEMPLATE, T, ['--profile', 'code', atLimit]).out, /TRUNCATED at 2700/);
+
+  // A short body that fails for an ordinary reason must not be blamed on truncation.
+  const short = runGate(PR_TEMPLATE, T, ['--profile', 'code', body(T, '## Summary\nno template here\n')]);
+  assert.equal(short.code, 1);
+  assert.doesNotMatch(short.out, /TRUNCATED/);
+  // Neither must a passing body of any length.
+  assert.doesNotMatch(runGate(PR_TEMPLATE, T, ['--profile', 'code', GITLAB_TPL]).out, /TRUNCATED/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('pr-template gate: both GitLab templates keep their required sections inside the truncation window', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prtpl-'));
+  // The templates carry the warning as a comment, which costs characters — so assert what actually
+  // matters: a template that is itself truncated at 2700 still passes its own gate, with room to
+  // spare for the author's prose.
+  for (const [profile, tpl] of [['code', GITLAB_TPL], ['hub', HUB_GITLAB_TPL]]) {
+    const text = fs.readFileSync(tpl, 'utf8');
+    assert.match(text, /GITLAB 2700-CHARACTER LIMIT/, `${profile} template documents the limit`);
+    assert.equal(runGate(PR_TEMPLATE, T, ['--profile', profile, body(T, text.slice(0, 2700))]).code, 0);
+    assert.ok(text.indexOf('## Checklist') < 2000, `${profile} template's last required section starts well inside the window`);
+  }
+  // The warning must not itself trip the label greps: `value_of` reads the FIRST matching line, so a
+  // comment mentioning a label above the real field would be read as its (unfilled) value.
+  const routed = runGate(RISK_ROUTE, T, [body(T, fs.readFileSync(GITLAB_TPL, 'utf8').replace('<backend | mobile | …>', 'backend'))]);
+  assert.match(routed.out, /Risk level: low/);
+  assert.match(routed.out, /Contract surface touched: no/);
+  assert.match(routed.out, /Domains touched: backend/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------- ledger-guard.sh ----------
 // No origin remote in these scratch repos, so the platform signature check is waived (WARN) — the
 // tests exercise the bridge gate + author half hermetically (the signature half mirrors

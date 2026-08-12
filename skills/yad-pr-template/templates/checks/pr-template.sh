@@ -45,6 +45,18 @@ if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
   exit 1
 fi
 
+# GitLab TRUNCATES $CI_MERGE_REQUEST_DESCRIPTION at 2700 characters, so a long-but-valid description
+# can lose a required section before this gate ever reads it — the author then sees "does not use the
+# template" while looking at an MR that visibly contains it (#164). Measure the RAW body now (the
+# trailer strip below shortens it) so a failure at that boundary can say so. GitHub bodies are not
+# truncated, so the note is advisory and only ever printed alongside a real failure.
+GITLAB_DESC_LIMIT=2700
+# CHARACTERS, not bytes — GitLab counts characters, and a description full of multibyte punctuation
+# (an em-dash costs 3 bytes) would hit 2700 bytes long before it could ever be truncated. `wc -m`
+# would need a UTF-8 locale we cannot assume across CI images, so count UTF-8 code points the
+# locale-independent way: every byte that is NOT a continuation byte (0x80-0xBF) starts one.
+RAW_CHARS="$(LC_ALL=C tr -d '\200-\277' < "$BODY" | wc -c | tr -d '[:space:]')"
+
 # The Review Companion injects a `<!-- yad:trailer --> … <!-- /yad:trailer -->` briefing block (and
 # `<!-- yad:noblock -->` notes) into the description. Strip those before the template check so the
 # AI-generated prose can never hide a required section heading or be mistaken for the `Risk level:`
@@ -108,6 +120,11 @@ if [ "$PROFILE" = hub ]; then
   esac
 else
   check_code_body
+fi
+
+if [ "$rc" != 0 ] && [ "$RAW_CHARS" -ge "$GITLAB_DESC_LIMIT" ]; then
+  echo "NOTE [pr-template]: the description this gate read is ${RAW_CHARS} characters. On GitLab the gate reads \$CI_MERGE_REQUEST_DESCRIPTION, which is TRUNCATED at ${GITLAB_DESC_LIMIT} — a section below that cutoff is invisible here even though the MR shows it."
+  echo "NOTE [pr-template]: if the missing section IS in your description, move the required sections above the cutoff (reorder, never delete) and push the long narrative to the end."
 fi
 
 [ "$rc" = 0 ] && echo "PASS [pr-template]: body uses the ${KIND} template (required sections present)."
