@@ -36,12 +36,16 @@
 # pipeline or run `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default
 # branch (advisory `yad gate sync` is read-only in bridge mode and cannot recover a stuck gate).
 #
-# Which yadflow this job runs: `npx -y -p "yadflow@${YAD_VERSION:-3}"`. The default `3` floats on the
-# major, so a published fix reaches this job on its next run with nobody in the loop — which is how you
-# want a correctness or gate-churn fix to arrive. To adopt releases deliberately instead, pin an exact
-# version by setting a CI/CD variable YAD_VERSION (e.g. `3.15.2`) in project Settings → CI/CD →
-# Variables — the same place SDLC_GATE_TOKEN lives, and deliberately NOT in this file, which `yad`
-# owns and rewrites on every sync. A pinned hub then owns its own upgrade decision.
+# Which yadflow this job runs: an EXACT version resolved from the repo at run time — see the `yad-pin`
+# block in the script below for the precedence. It no longer floats on the major, because floating let a
+# release change what a scheduled job does with nobody deciding to upgrade (issue #163, where 3.13.1
+# took one hub from 20 to 96 churn commits an hour). The trade-off is deliberate and cuts both ways: a
+# hub is no longer carried onto a fix automatically, so if the resolved pin is older than 3.15.3, run
+# `yad update` or disable this schedule.
+#
+# To override it, set a CI/CD variable YAD_VERSION (e.g. `3.15.2`) in project Settings → CI/CD →
+# Variables — the same place SDLC_GATE_TOKEN lives, and deliberately NOT in this file, which `yad` owns
+# and rewrites byte-for-byte from its template on every sync.
 variables:
   GIT_DEPTH: "0" # full history: gate ci pushes the advance to the default branch
 
@@ -83,6 +87,37 @@ yad-gate-sync:
     - git fetch origin "$CI_DEFAULT_BRANCH"
     - git checkout -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
     - |
+      # >>> yad-pin
+      # Which yadflow this job runs, most explicit source first:
+      #   1. $YAD_VERSION            — the CI/CD variable, a human's deliberate override, verbatim
+      #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this hub
+      #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
+      #   4. 3                       — floating major, only when nothing above resolves
+      # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
+      # they are VALIDATED: an exact release token of the major this fragment was written for. That
+      # also keeps the value safe to interpolate into `npx -p "yadflow@$V"` — a repo-controlled
+      # string reaching a shell on a runner holding a push token. Anything unparseable is skipped
+      # loudly rather than failing the run. Resolved once here; GitLab runs every `script` line in
+      # the same shell, so YAD_PKG carries into the block below.
+      # Pipes, not bash here-strings: a GitLab runner falls back to `sh` when the image has no bash,
+      # and `<<<` is a bashism. `sed` drains its input (no early exit, so nothing SIGPIPEs `tr`).
+      yad_pin_read() { # <file> <key>
+        [ -f "$1" ] || return 0
+        tr -d '\n' < "$1" 2>/dev/null | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p"
+      }
+      yad_pin_valid() { printf '%s' "${1:-}" | grep -Eq '^3\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; }
+      YAD_PKG="${YAD_VERSION:-}"
+      if [ -z "$YAD_PKG" ]; then
+        for _cand in "$(yad_pin_read .sdlc/hub.json gate_sync_version)" "$(yad_pin_read .sdlc/cli-version.json version)"; do
+          [ -n "$_cand" ] || continue
+          if yad_pin_valid "$_cand"; then YAD_PKG="$_cand"; break; fi
+          echo "yad-gate-sync: ignoring pin '${_cand}' — not an exact 3.x release." >&2
+        done
+      fi
+      YAD_PKG="${YAD_PKG:-3}"
+      echo "yad-gate-sync: running yadflow@${YAD_PKG}"
+      # <<< yad-pin
+    - |
       rc=0
       if [ "$CI_PIPELINE_SOURCE" = "schedule" ]; then
         # SCHEDULED SWEEP — discover merged review MRs from the platform (Path B keeps no per-branch
@@ -91,7 +126,8 @@ yad-gate-sync:
         # unchanged approval record produces an unchanged file and nothing is committed. That last part
         # is load-bearing — before the #163 fix the re-sync re-appended each step's approvals at the
         # tail, so this loop rotated approvals.json and committed the reorder on every pass, forever
-        # (issue #163). If you are on an older yadflow, disable this schedule.
+        # (issue #163). This job runs an exact pin resolved from the repo, so a hub still sitting on a
+        # pre-3.15.3 yadflow keeps that behaviour — upgrade it or disable this schedule.
         # A stuck review MR (a squash merge whose commit dropped the branch name, or a failed merge
         # push) is always RECENT, so sweep a generous recent window and PAGINATE it fully (--paginate)
         # — this bounds cost without the old hard 50-row cap that could permanently strand older MRs.
@@ -105,7 +141,7 @@ yad-gate-sync:
         while read -r IID REF; do
           [ -n "$IID" ] || continue
           git checkout -q -B "$CI_DEFAULT_BRANCH" "origin/$CI_DEFAULT_BRANCH"
-          npx -y -p "yadflow@${YAD_VERSION:-3}" yad gate ci --branch "$REF" --pr "$IID" --merged || rc=1
+          npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REF" --pr "$IID" --merged || rc=1
         done < /tmp/yad-merged-mrs
       else
         # MERGE push to the default branch whose commit names a review branch: resolve the merged MR's
@@ -117,7 +153,7 @@ yad-gate-sync:
           IID="$(glab api "projects/:id/merge_requests?source_branch=${REVIEW_BRANCH}&state=merged" 2>/dev/null | jq -r '.[0].iid // empty' || true)"
           if [ -n "$IID" ]; then
             # Pass --pr + IID as two distinct args (avoid a fragile, shell-dependent ${IID:+...} split).
-            npx -y -p "yadflow@${YAD_VERSION:-3}" yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
+            npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REVIEW_BRANCH" --pr "$IID" --merged || rc=1
           else
             # Without the IID, gate ci cannot re-read approvals — fail visibly (the scheduled sweep
             # retries) rather than running a green no-op that silently leaves the gate unadvanced.

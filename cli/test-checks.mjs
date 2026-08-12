@@ -1331,3 +1331,88 @@ test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
   assert.equal(runGate(LEDGER_GUARD, T, ['origin/nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---------- the gate-sync version pin (issue #163 suggestion 4) ----------
+// The wired fragments used to run `yadflow@3`, floating on the major — so a release could change what
+// a scheduled job does with nobody deciding to upgrade, which is how #163's churn bug reached hubs
+// that never opted into it. They now resolve an EXACT version at run time. The resolver cannot be
+// stamped into the wired file: `fileAction` (cli/plan.mjs) compares the installed file against the
+// shipped template by sha256, so an edited-in version would report `outdated` forever and be reverted
+// by the next `yad check --fix`. It therefore reads committed files instead, and these tests EXECUTE
+// the real block lifted out of each template rather than asserting on its text.
+const GATE_SYNC_GITHUB = path.join(ROOT, 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml');
+const GATE_SYNC_GITLAB = path.join(ROOT, 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml');
+
+// Pull every `# >>> yad-pin` … `# <<< yad-pin` block out of a YAML fragment and undo the block
+// scalar's indentation, so what runs here is what the runner runs.
+const pinBlocks = (file) => {
+  const blocks = [];
+  let cur = null;
+  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+    if (line.includes('>>> yad-pin')) { cur = []; continue; }
+    if (line.includes('<<< yad-pin')) { blocks.push(cur); cur = null; continue; }
+    if (cur) cur.push(line);
+  }
+  return blocks.map((b) => {
+    const indent = Math.min(...b.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length));
+    return b.map((l) => l.slice(indent)).join('\n');
+  });
+};
+
+// `sh`, not `bash`: a GitLab runner falls back to it when the image ships no bash, so the block has to
+// stay POSIX. Returns the resolved package version.
+const resolvePin = (block, files = {}, env = {}) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-pin-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  for (const [rel, body] of Object.entries(files)) fs.writeFileSync(path.join(T, rel), body);
+  fs.writeFileSync(path.join(T, 'pin.sh'), `${block}\nprintf 'RESOLVED=%s' "$YAD_PKG"\n`);
+  const out = execFileSync('sh', ['pin.sh'], { cwd: T, env: { ...GIT_ENV, ...env }, stdio: 'pipe' }).toString();
+  fs.rmSync(T, { recursive: true, force: true });
+  return out.match(/RESOLVED=(.*)$/)?.[1];
+};
+
+test('gate-sync pin: every wired fragment carries the same resolver, and none floats on the major', () => {
+  const gh = pinBlocks(GATE_SYNC_GITHUB);
+  const gl = pinBlocks(GATE_SYNC_GITLAB);
+  assert.equal(gh.length, 2, 'both GitHub jobs resolve a pin'); // mergesync + reconcile
+  assert.equal(gl.length, 1, 'the GitLab job resolves one, reused across its script');
+  assert.equal(gh[0], gh[1], 'the two GitHub copies must not drift apart');
+  // Comments differ (each names its own platform's variable); the code must not.
+  const code = (s) => s.replace(/^\s*#.*$/gm, '').replace(/\n+/g, '\n').trim();
+  assert.equal(code(gh[0]), code(gl[0]), 'GitHub and GitLab must resolve the pin identically');
+
+  for (const f of [GATE_SYNC_GITHUB, GATE_SYNC_GITLAB]) {
+    const text = fs.readFileSync(f, 'utf8');
+    // The floating invocation is what #163 asked to remove; `yadflow@${YAD_PKG}` is the only form left.
+    assert.ok(!/npx[^\n]*yadflow@(3|\$\{YAD_VERSION:-3\})["\s]/.test(text), `${f} still floats on the major`);
+    assert.ok(/npx -y -p "yadflow@\$\{YAD_PKG\}"/.test(text), `${f} does not run the resolved pin`);
+  }
+});
+
+test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot trust', () => {
+  const [block] = pinBlocks(GATE_SYNC_GITLAB);
+  const hub = (v) => ({ '.sdlc/hub.json': `{"gate_sync_version":"${v}"}` });
+  const stamp = (v) => ({ '.sdlc/cli-version.json': `{"version":"${v}"}` });
+
+  // 4. nothing committed to read → the floating major, exactly today's behaviour
+  assert.equal(resolvePin(block), '3');
+  // 3. the version that wired the hub
+  assert.equal(resolvePin(block, stamp('3.15.3')), '3.15.3');
+  // 2. the explicit hub pin outranks it
+  assert.equal(resolvePin(block, { ...stamp('3.15.3'), ...hub('3.14.0') }), '3.14.0');
+  // 1. the platform variable outranks both, verbatim — the operator's escape hatch, including
+  //    downgrading across majors, which the file sources are not allowed to do.
+  assert.equal(resolvePin(block, hub('3.14.0'), { YAD_VERSION: '2.1.0' }), '2.1.0');
+
+  // A stamp from a different major is the realistic failure: `.sdlc/cli-version.json` is written by
+  // whichever CLI last ran `yad check --fix`, and a long-untouched project can still say 1.0.2 — a
+  // version with no `yad gate ci` at all. Skip it, do not run it.
+  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp('3.15.3') }), '3.15.3');
+  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp('1.0.2') }), '3');
+  // Not a version at all → never reaches `npx -p "yadflow@$V"` on a runner holding a push token.
+  assert.equal(resolvePin(block, hub('3.1.0;curl evil')), '3');
+  assert.equal(resolvePin(block, hub('latest')), '3');
+  // Prereleases are legitimate exact versions; a key split across lines still reads (the #161 idiom).
+  assert.equal(resolvePin(block, hub('3.16.0-rc.1')), '3.16.0-rc.1');
+  assert.equal(resolvePin(block, { '.sdlc/hub.json': '{\n "gate_sync_version":\n  "3.15.9"\n}' }), '3.15.9');
+});
