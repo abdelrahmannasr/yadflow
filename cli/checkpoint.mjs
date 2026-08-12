@@ -191,7 +191,7 @@ export function retroShipRepos(root, storyFile) {
   return { names, source: names.length ? 'registry' : 'none' };
 }
 
-export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, today }) {
+export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, today, dryRun = false }) {
   if (!epic || !story) { fail('--retro-ship needs <epic>/<story> (e.g. --retro-ship EP-foo/EP-foo-S01)'); return { ok: false }; }
   if (!repo) { fail('--retro-ship needs --repo <name> (the repo the story shipped in)'); return { ok: false }; }
   const epicDir = path.join(root, 'epics', epic);
@@ -250,6 +250,14 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
     return { ok: false };
   }
   ok(`recorded retroactive ship for ${story} (${repo})${mergeCommit ? ` @ ${mergeCommit}` : ''}`);
+  // Name WHERE the record landed. The ledger is shard-then-fold, so this ship is one loose shard and the
+  // folded `build-log.json` is untouched until `yad tidy up` runs — an operator who opens build-log.json,
+  // finds nothing, and concludes the write was lost is reading half the ledger (#167). Every reader unions
+  // the two; say so here, while they are looking. `tidy up` only folds a story whose frontmatter is
+  // `shipped`, so an `in-build` story's shard stays loose (and still readable) by design.
+  const rel = path.relative(root, res.file).split(path.sep).join('/');
+  info(`${dryRun ? 'would land at' : 'landed at'} ${rel}`);
+  info(`readers union build-log/ shards with the folded build-log.json; \`yad tidy up\` folds it in once ${story} is \`shipped\``);
   // A multi-repo story is only half-reconciled until every declared repo has evidence, and nothing
   // downstream reports the gap (the story already reads `shipped`) — so say it here, while the
   // operator is running the backfill.
@@ -288,7 +296,7 @@ export async function runCheckpoint(root, opts = {}) {
   // already wrote is then carried by the normal storyStatusPathspecs path below — no raw git needed.
   let retroFile;
   if (opts.retroShip) {
-    const r = recordRetroShip(root, opts.retroShip);
+    const r = recordRetroShip(root, { ...opts.retroShip, dryRun: opts.dryRun });
     if (!r.ok) { process.exitCode = 1; return; }
     retroFile = r.file;
   }
