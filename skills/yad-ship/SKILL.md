@@ -34,7 +34,11 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
   footer**; the `Co-Authored-By` trailer appears only when this flag names a tool).
 - `task`           — Task trailer (optional; derived from the branch when omitted).
 - `contractChange` — flag; marks the contract surface touched (commit trailer + PR escalation).
-- `repo` / `risk` / `base` / `platform` / `title` — PR/MR options (see `yad-open-pr`).
+- `repo` / `risk` / `platform` / `title` — PR/MR options (see `yad-open-pr`).
+- `base`           — override the PR/MR base. The default is the repo's own default branch, resolved
+  by the full chain in **Base branch** (`yad-open-pr`) — the canonical description, including the
+  hub rung — never a hardcoded `main`. A non-default base loses the AI first pass; `ship` warns and
+  still opens.
 
 ## On Activation
 
@@ -59,6 +63,7 @@ the engineer review and merge are Step E (`yad-engineer-review`).
 ## Hard rules
 
 - **One staged atomic task = one commit = one PR/MR.** Never bundle; never open from the default branch.
+- **The PR targets the repo's default branch** unless `--base` says otherwise; never assume `main`.
 - **No AI footer by default.** The wrapped commit writes a `Co-Authored-By` trailer ONLY when `--ai <id>`
   is explicitly passed; never add it on the AI's own initiative.
 - **No PR without a landed commit.** A failed/`--dry-run` commit stops the step before pushing.

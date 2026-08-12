@@ -1022,6 +1022,108 @@ test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit co
   }
 });
 
+// A standalone code repo on a task branch, pushable to a bare remote — so runOpenPr reaches the
+// create step and the base it hands the platform can actually be asserted.
+function codeRepoWithRemote() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-base-'));
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-basebare-'));
+  git(bare, 'init', '-q', '--bare');
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'feat: seed');
+  git(T, 'branch', '-q', '-M', 'staging'); git(T, 'remote', 'add', 'origin', bare);
+  git(T, 'checkout', '-q', '-b', 'feat/EP-demo-S01-T01-x');
+  return { T, bare };
+}
+
+test('runOpenPr bases the PR on the platform default, not a hardcoded main (#168)', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = codeRepoWithRemote();
+  try {
+    process.exitCode = 0;
+    let seen;
+    const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://x/pull/1' }; };
+    // no repos registry here — this is the "run it from inside the code repo" path, where `meta` is
+    // null and the old code fell straight through to 'main'.
+    const runner = fakeRunner({ 'gh repo view': 'staging' });
+    const out = await grab(() => runOpenPr(T, { platform: 'github', creator, runner }));
+    assert.equal(seen.base, 'staging', 'the PR targets the repo default, not main');
+    assert.match(out, /base staging/);
+    assert.doesNotMatch(out, /not the repo default/, 'no warning when the base IS the default');
+    assert.ok(!process.exitCode);
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test('runOpenPr never lets the HUB default_branch become a code repo\'s base (#168)', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = codeRepoWithRemote();
+  // A hub that owns this repo via the registry. The hub's own trunk is `trunk` — a DIFFERENT repo's
+  // branch, which must never leak into a code-repo PR — and the registry entry deliberately declares
+  // no default_branch, so the resolution has to fall past the hub rung to the platform.
+  const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-basehub-'));
+  try {
+    process.exitCode = 0;
+    fs.mkdirSync(path.join(H, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(H, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'trunk', roster: [] }));
+    fs.writeFileSync(path.join(H, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: T, platform: 'github' }] }));
+    let seen;
+    const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://x/pull/1' }; };
+    const runner = fakeRunner({ 'gh repo view': 'staging' });
+    await grab(() => runOpenPr(H, { repo: 'backend', creator, runner }));
+    assert.equal(seen.base, 'staging', 'the code repo\'s own default wins');
+    assert.notEqual(seen.base, 'trunk', 'the hub trunk never leaks into a connected repo\'s PR');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+    fs.rmSync(H, { recursive: true, force: true });
+  }
+});
+
+test('runOpenPr refuses to open when HEAD is the resolved base, not just when it is main (#168)', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = codeRepoWithRemote();
+  try {
+    process.exitCode = 0;
+    git(T, 'checkout', '-q', 'staging');   // the repo's real trunk — never `main` here
+    let called = false;
+    const creator = () => { called = true; return { ok: true, url: 'https://x/pull/1' }; };
+    const runner = fakeRunner({ 'gh repo view': 'staging' });
+    const out = await grab(() => runOpenPr(T, { platform: 'github', creator, runner }));
+    assert.match(out, /on staging — switch to your task branch first/);
+    assert.ok(!called, 'no PR is opened from the base branch');
+    assert.ok(process.exitCode, 'the guard sets a non-zero exit code');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test('runOpenPr warns (but still opens) when the base is not the platform default (#168)', async () => {
+  const prev = process.exitCode;
+  const { T, bare } = codeRepoWithRemote();
+  try {
+    process.exitCode = 0;
+    let seen;
+    const creator = (_p, o) => { seen = o; return { ok: true, url: 'https://x/pull/1' }; };
+    const runner = fakeRunner({ 'gh repo view': 'staging' });
+    const out = await grab(() => runOpenPr(T, { platform: 'github', base: 'release/1.0', creator, runner }));
+    assert.equal(seen.base, 'release/1.0', '--base is still honoured — the warning never blocks');
+    assert.match(out, /not the repo default 'staging'/);
+    assert.match(out, /CodeRabbit/);
+    assert.match(out, /opened https:\/\/x\/pull\/1/);
+    assert.ok(!process.exitCode);
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------------------------
 // Gate predicate — pure, the heart of the gate
 // ---------------------------------------------------------------------------------------------
@@ -2080,6 +2182,30 @@ test('review context: prints the grounding bundle (diff cmd + code-map) for the 
   assert.equal(b.pr, 9);
   assert.ok(b.diffCmd.includes('main...HEAD'));
   assert.ok(b.codeMap.endsWith('.sdlc/code-context/backend/code-map.md'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review context: grounds the diff on the resolved default branch, not a hardcoded main (#168)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctxbase-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  // A registry entry with NO default_branch — the old `meta?.default_branch || 'main'` grounded the
+  // companion on `main...HEAD` here, which on a staging-trunk repo is the wrong range or no range.
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github' }] }));
+  const runner = fakeRunner({ 'gh repo view': 'staging' });
+  const b = await reviewContext(T, { repo: 'backend', pr: 9, runner });
+  assert.equal(b.base, 'staging');
+  assert.ok(b.diffCmd.includes('staging...HEAD'), 'the companion diffs the real trunk');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('review context: a configured default_branch answers WITHOUT any platform round-trip (Codex P2)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-rctxprobe-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'demo/backend', platform: 'github', default_branch: 'develop' }] }));
+  const runner = fakeRunner({ 'gh repo view': 'staging' });
+  const b = await reviewContext(T, { repo: 'backend', pr: 9, runner });
+  assert.equal(b.base, 'develop');
+  assert.deepEqual(runner.calls, [], 'no gh/glab call — a slow or unreachable host cannot stall this');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3823,6 +3949,110 @@ test('buildPrArgs wires reviewers + assignees for gh and glab', () => {
   assert.ok(gl.includes('--assignee') && gl[gl.indexOf('--assignee') + 1] === 'al');
   // glab omits --assignee entirely when none given (no @me concept)
   assert.ok(!buildPrArgs('gitlab', { title: 't', body: 'b', base: 'main', head: 'f' }).includes('--assignee'));
+});
+
+// ---------------------------------------------------------------------------------------------
+// platformDefaultBranch / resolveBaseBranch — the PR base is RESOLVED, never hardcoded (#168)
+// ---------------------------------------------------------------------------------------------
+const { platformDefaultBranch, resolveBaseBranch } = await import('./platform.mjs');
+
+// A runner that answers a scripted map of `cmd arg0 arg1` prefixes; anything else fails like a CLI
+// that could not answer. Records what it was asked so argv can be asserted.
+function fakeRunner(answers = {}) {
+  const calls = [];
+  const runner = (cmd, args = []) => {
+    calls.push([cmd, ...args].join(' '));
+    for (const [prefix, out] of Object.entries(answers)) {
+      if ([cmd, ...args].join(' ').startsWith(prefix)) {
+        return typeof out === 'string' ? { ok: true, code: 0, stdout: out, stderr: '' } : out;
+      }
+    }
+    return { ok: false, code: 1, stdout: '', stderr: 'not scripted' };
+  };
+  runner.calls = calls;
+  return runner;
+}
+
+test('platformDefaultBranch asks gh/glab and degrades to ok:false instead of throwing', () => {
+  const gh = fakeRunner({ 'gh repo view': 'staging' });
+  assert.deepEqual(platformDefaultBranch('github', { runner: gh }), { ok: true, branch: 'staging' });
+  assert.match(gh.calls[0], /--json defaultBranchRef/);
+
+  const gl = fakeRunner({ 'glab api projects/:id': JSON.stringify({ default_branch: 'develop' }) });
+  assert.deepEqual(platformDefaultBranch('gitlab', { runner: gl }), { ok: true, branch: 'develop' });
+  assert.match(gl.calls[0], /projects\/:id/);
+
+  // a failed CLI, an empty answer, and unreadable JSON are all "could not tell" — never a throw
+  assert.equal(platformDefaultBranch('github', { runner: fakeRunner() }).ok, false);
+  assert.equal(platformDefaultBranch('github', { runner: fakeRunner({ 'gh repo view': '' }) }).ok, false);
+  assert.equal(platformDefaultBranch('gitlab', { runner: fakeRunner({ 'glab api': 'not json' }) }).ok, false);
+  assert.equal(platformDefaultBranch('gitlab', { runner: fakeRunner({ 'glab api': '{}' }) }).ok, false);
+  // no platform to ask => no spawn at all
+  const none = fakeRunner();
+  assert.equal(platformDefaultBranch(null, { runner: none }).ok, false);
+  assert.equal(none.calls.length, 0);
+});
+
+test('resolveBaseBranch: flag > registry > hub > platform > origin/HEAD > main (#168)', () => {
+  const gh = () => fakeRunner({ 'gh repo view': 'staging', 'git symbolic-ref': 'origin/trunk' });
+
+  // 1. an explicit --base wins over everything
+  assert.deepEqual(
+    resolveBaseBranch('github', { explicit: 'rc/1.2', meta: { default_branch: 'develop' }, runner: gh() }),
+    { base: 'rc/1.2', source: 'flag', platformDefault: 'staging' },
+  );
+  // 2. the registry outranks the remote — the documented yad order (cf. repo.mjs / contract-check)
+  assert.deepEqual(
+    resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: gh() }),
+    { base: 'develop', source: 'registry', platformDefault: 'staging' },
+  );
+  // 3. hub.json's default_branch, for a PR against the product hub itself
+  assert.equal(resolveBaseBranch('github', { hub: { default_branch: 'trunk' }, runner: gh() }).source, 'hub');
+  // 4. THE #168 REGRESSION: no registry entry (the run-from-inside-the-code-repo path) must reach the
+  //    platform, not fall through to a hardcoded 'main'
+  assert.deepEqual(
+    resolveBaseBranch('github', { meta: null, runner: gh() }),
+    { base: 'staging', source: 'platform', platformDefault: 'staging' },
+  );
+  // 5. platform unreachable => the LOCAL origin/HEAD read (never ls-remote: it can hang on auth)
+  const offline = fakeRunner({ 'git symbolic-ref': 'origin/trunk' });
+  assert.deepEqual(
+    resolveBaseBranch('github', { runner: offline }),
+    { base: 'trunk', source: 'origin-head', platformDefault: null },
+  );
+  assert.ok(!offline.calls.some((c2) => c2.includes('ls-remote')));
+  // 6. nothing resolvable => 'main'
+  assert.deepEqual(
+    resolveBaseBranch('github', { runner: fakeRunner() }),
+    { base: 'main', source: 'fallback', platformDefault: null },
+  );
+});
+
+test('resolveBaseBranch does not probe git when an earlier rung already answered', () => {
+  const r = fakeRunner({ 'gh repo view': 'staging', 'git symbolic-ref': 'origin/trunk' });
+  assert.equal(resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: r }).base, 'develop');
+  assert.ok(!r.calls.some((c2) => c2.startsWith('git ')), 'the local git read is lazy');
+});
+
+test('resolveBaseBranch probe:false never touches the platform once a rung answers (Codex P2)', () => {
+  // A caller that only wants a base must not pay a live gh/glab round-trip — worst case the full 10s
+  // timeout on an unreachable host — for a `platformDefault` it then discards.
+  const configured = fakeRunner({ 'gh repo view': 'staging' });
+  const res = resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: configured, probe: false });
+  assert.equal(res.base, 'develop');
+  assert.equal(res.platformDefault, null, 'never asked, so nothing to report');
+  assert.deepEqual(configured.calls, [], 'no platform probe at all');
+
+  // ...but with nothing configured it still reaches the platform — laziness, not blindness.
+  const unconfigured = fakeRunner({ 'gh repo view': 'staging' });
+  const res2 = resolveBaseBranch('github', { runner: unconfigured, probe: false });
+  assert.equal(res2.base, 'staging');
+  assert.equal(res2.source, 'platform');
+  assert.equal(unconfigured.calls.filter((c2) => c2.startsWith('gh ')).length, 1, 'asked at most once');
+
+  // The default stays eager: open-pr needs platformDefault for the mismatch warning even when it lost.
+  const eager = fakeRunner({ 'gh repo view': 'staging' });
+  assert.equal(resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: eager }).platformDefault, 'staging');
 });
 
 // ---------------------------------------------------------------------------------------------

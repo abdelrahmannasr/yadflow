@@ -4,9 +4,11 @@
 // on the product hub.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, hand, fail, run, exists, readJSON } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { detectPlatform, createPr, reviewersForScopes, resolveCommitterLogin } from './platform.mjs';
+import {
+  detectPlatform, createPr, reviewersForScopes, resolveCommitterLogin, resolveBaseBranch,
+} from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase } from './epic-state.mjs';
 import { gateOpen } from './gate.mjs';
@@ -104,9 +106,6 @@ export async function runOpenPr(root, opts = {}) {
   if (!platform) { fail('could not detect platform (github/gitlab) — pass --platform'); process.exitCode = 1; return; }
 
   const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot }).stdout;
-  const baseBranch = opts.base || meta?.default_branch || 'main';
-  if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
-
   const stage = detectStage(root, repoRoot, branch, meta);
 
   // hub-front: this is a front-half artifact-review PR (review/EP-*/<artifact> head on the hub). The
@@ -127,6 +126,34 @@ export async function runOpenPr(root, opts = {}) {
     const res = await gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), head: branch });
     if (!res?.url) process.exitCode = 1;
     return res;
+  }
+
+  // The hub roster + its default_branch. The latter only applies when the PR targets the hub ITSELF
+  // (a hub-tooling branch) — for a connected code repo the hub's trunk belongs to a different repo and
+  // must never leak in. Resolved AFTER the hub-front hand-off above, which delegates its own base to
+  // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
+  // delegated path then ignores.
+  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });
+
+  // Resolve the base rather than assume it (#168). Hardcoding 'main' mis-based every PR on a repo
+  // whose trunk is something else — and CodeRabbit decides auto-review eligibility from the base at
+  // PR-OPEN time, so those PRs silently got no AI first pass at all.
+  const { base: baseBranch, source: baseSource, platformDefault } = resolveBaseBranch(platform, {
+    cwd: repoRoot, explicit: opts.base, meta, hub: stage === 'code-repo' ? null : hub, runner: opts.runner,
+  });
+  if (branch === baseBranch) { fail(`on ${baseBranch} — switch to your task branch first`); process.exitCode = 1; return; }
+  info(`base ${baseBranch} ${c.dim(`(from ${baseSource})`)}`);
+  // A base that is not the remote's default is legitimate (stacked PRs, release branches) but it costs
+  // the AI first pass, invisibly and irreversibly — so it is never silent. The REMEDY depends on where
+  // the base came from: telling someone to override a `default_branch` they deliberately configured
+  // would mean contradicting their own committed config on every PR, forever.
+  if (platformDefault && platformDefault !== baseBranch) {
+    warn(`base '${baseBranch}' is not the repo default '${platformDefault}' — CodeRabbit skips auto-review on a non-default base unless .coderabbit.yaml lists it under reviews.base_branches, and retargeting later does NOT undo the skip`);
+    if (baseSource === 'registry' || baseSource === 'hub') {
+      hand(`the configured default_branch (${baseSource === 'hub' ? '.sdlc/hub.json' : '.sdlc/repos.json'}) disagrees with the platform — reconcile them, or allow '${baseBranch}' in .coderabbit.yaml`);
+    } else {
+      hand(`open against '${platformDefault}' (or pass --base ${platformDefault}) unless you meant to stack this PR`);
+    }
   }
 
   // Push the branch (sets upstream) using the user's own auth. Abort on failure — creating a PR for a
@@ -155,7 +182,6 @@ export async function runOpenPr(root, opts = {}) {
   // Auto-assign from the hub roster, scoped to this repo: assignee = the committer (resolved from
   // local git identity), reviewers = the repo's reviewers + domain-owners, minus the committer.
   // Degrades cleanly when there is no roster / the committer is unmapped (gh self-assigns via @me).
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });
   const roster = hub.roster || [];
   const committer = resolveCommitterLogin(repoRoot, roster);
   const scope = meta?.name ? [meta.name] : [];
@@ -164,7 +190,10 @@ export async function runOpenPr(root, opts = {}) {
   const reviewers = reviewersForScopes(roster, scope, { excludeLogin: committer, repos: meta ? [meta] : [] });
   const assignees = committer ? [committer] : [];
 
-  const r = createPr(platform, { title, body, base: baseBranch, head: branch, reviewers, assignees, cwd: repoRoot });
+  // `creator` is injectable (mirrors gateOpen's) so a test can assert the base that reaches the
+  // platform CLI without shelling out to gh/glab.
+  const creator = opts.creator || createPr;
+  const r = creator(platform, { title, body, base: baseBranch, head: branch, reviewers, assignees, cwd: repoRoot });
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
   if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);

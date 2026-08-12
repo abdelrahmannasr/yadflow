@@ -151,6 +151,7 @@
   .lbl-what { background: #2471a3; }
   .lbl-how  { background: #1e8449; }
   .lbl-when { background: #ca6f1e; }
+  .lbl-base { background: #6c3483; }
   .skillcard pre { margin: 8px 0 4px; }
   .callout.blue { border-left-color: var(--earns-bd); background: var(--earns-bg); }
   footer { color: var(--muted); font-size: .85rem; margin-top: 60px; border-top: 1px solid var(--line); padding-top: 16px; }
@@ -960,6 +961,7 @@ yad commit --type fix -m "handle null user" --dry-run   # preview only</code></p
   <div class="skillcard" id="sk-openpr">
     <h4><code>yad-open-pr</code> — Build helper</h4>
     <div class="row"><span class="lbl lbl-what">What</span> Opens a code-repo <strong>task PR/MR</strong> from the committed platform template: detects GitHub/GitLab, pushes the task branch, and creates the PR/MR with the body prefilled and the title defaulting to the commit subject. Auto-assigns from the hub roster — assignee = the committer, reviewers = the repo’s reviewers + domain-owners. It never merges.</div>
+    <div class="row"><span class="lbl lbl-base">Base</span> Targets the repo’s <strong>resolved default branch</strong> — registry <code>default_branch</code>, else the platform’s own default, else <code>origin/HEAD</code>, else <code>main</code> — never a hardcoded <code>main</code>. It warns when the base is not the platform default, because CodeRabbit skips auto-review on a non-default base and retargeting afterwards does not undo it.</div>
     <div class="row"><span class="lbl lbl-how">How</span> On the task branch:</div>
 <pre><code>yad open-pr --repo backend --risk low</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After committing a task, to raise its PR/MR for the check gates + engineer review.</div>
@@ -1141,10 +1143,12 @@ yad commit --type feat -m "…" --dry-run                             # preview 
   <div class="skillcard">
     <h4><code>yad open-pr [--repo &lt;name&gt;] [--risk &lt;level&gt;]</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Pushes the task branch and opens the code-repo PR/MR <em>pre-filled from the wired template</em> — story/task links and the Impact &amp; Risk block included. Aborts cleanly if the branch push fails.</div>
+    <div class="row"><span class="lbl lbl-base">Base</span> The PR targets the repo’s <strong>own default branch</strong>, resolved rather than assumed: the registry’s <code>default_branch</code> when set, otherwise the platform’s own default (<code>gh repo view --json defaultBranchRef</code> / <code>glab api projects/:id</code>), then <code>origin/HEAD</code>, then <code>main</code> — so <code>default_branch</code> is not mandatory. <code>--base</code> overrides it. A base that is <em>not</em> the platform default warns and still opens: CodeRabbit decides auto-review eligibility from the base at PR-<em>open</em> time, so a mis-based PR gets no AI first pass and retargeting later does not undo it.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad open-pr --repo backend
 yad open-pr --repo backend --risk high            # routes review to the domain owners
-yad open-pr --repo backend --contract-change      # declares a locked-surface change</code></pre>
+yad open-pr --repo backend --contract-change      # declares a locked-surface change
+yad open-pr --repo backend --base release/1.4     # deliberate non-default base (warns)</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After the task is committed and <code>yad-checks action: run</code> is green — one PR per atomic task.</div>
   </div>
 

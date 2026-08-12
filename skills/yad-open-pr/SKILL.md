@@ -30,6 +30,17 @@ the product hub.
     (`## Summary` / `Risk level:` / `## Checklist`) instead of the hub's artifact-review
     `pull_request_template.md`, so the hub `pr-template` gate passes.
   In a code repo nothing changes — it reads the repo's own committed code-task template.
+- **Base branch** — **resolved, never assumed.** In order: `--base` → the repo's `default_branch` in
+  `.sdlc/repos.json` → (for a PR against the hub itself) `hub.json`'s `default_branch` → what the
+  platform reports (`gh repo view --json defaultBranchRef` / `glab api projects/:id`) → local
+  `origin/HEAD` → `main`. The same **configuration-outranks-the-remote** order `yad repo sync` and the
+  contract-check gate already use (they stop at `origin/HEAD`; only this chain also asks the platform).
+  The CLI prints which rung answered.
+  **If the resolved base is not the platform's default branch it warns and still opens** — that is a
+  legitimate stacked-PR / release-branch move, but it costs the AI first pass: CodeRabbit decides
+  auto-review eligibility from the base at PR-**open** time, and retargeting afterwards does not undo
+  the skip. Hardcoding `main` here is the same bug the check gates already refuse to make (see
+  `../yad-checks/references/check-gates.md`).
 - **Auto-assign** — from the hub roster scoped to this repo: assignee = the committer (resolved from
   the local git identity), reviewers = the repo's `reviewer`/`domain-owner` logins minus the committer.
   Degrades cleanly when there is no roster.
@@ -42,7 +53,9 @@ the product hub.
 - `repo`           — target a registered repo by name (optional; else the current dir).
 - `risk`           — `low|medium|high` (default `low`); prefilled into the body.
 - `contractChange` — flag; marks the contract surface touched and triggers escalation.
-- `base` / `platform` / `title` — optional overrides.
+- `base`           — override the PR/MR base (optional; defaults to the repo's own default branch —
+  see **Base branch** above). Only pass it deliberately: a non-default base loses the AI first pass.
+- `platform` / `title` — optional overrides.
 
 ## On Activation
 
@@ -56,7 +69,14 @@ Run from the repo root:
 yad open-pr [--repo <name>] [--risk <level>] [--contract-change] [--title "<subject>"]
 ```
 The CLI pushes the branch (sets upstream, the user's own auth), fills the template, and creates the
-PR/MR with the auto-assigned assignee + reviewers.
+PR/MR with the auto-assigned assignee + reviewers. It prints the base it resolved and where that came
+from.
+
+The non-default-base warning is **advisory — it does not block, and the PR/MR is already open by the
+time you read it.** If the base was intended (a stacked PR, a release branch), carry on. If it was
+not, do **not** just retarget the open PR — that leaves the AI first pass skipped. Close it, fix the
+cause (the repo's `default_branch`, or drop the wrong `--base`), and re-run `yad open-pr` so the PR
+is *created* against the right base.
 
 ### Step 3 — Route the review (if escalated)
 On `high` risk or a contract touch, run `bash checks/risk-route.sh <pr-body>` to print the required
@@ -79,6 +99,8 @@ engineer review and merge happen in `yad-engineer-review` (Step E).
 ## Hard rules
 
 - **One task = one branch = one PR/MR.** Never open a PR from the default branch.
+- **The base is the repo's default branch** unless you deliberately chose otherwise with `--base`.
+  Never hardcode `main`, and never ignore the non-default-base warning silently.
 - **Title follows the commit subject** — Conventional-Commits style, so the `pr-title` gate passes.
 - **High risk routes to domain owners** — the same escalation as the gate; never a separate rule.
 - **Opening a PR never merges.** The human owns the merge in Step E.

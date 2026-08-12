@@ -162,7 +162,10 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file
   atomic guard). Drives `yad commit`.
 - **`yad-open-pr`** — build helper. Open a code-repo task PR/MR from the committed template: push the
-  branch, prefill the body, auto-assign the repo-scoped roster. Drives `yad open-pr`.
+  branch, prefill the body, auto-assign the repo-scoped roster. Bases the PR on the repo's **resolved
+  default branch** (`repos.json` → the platform → `origin/HEAD` → `main`; `--base` overrides), and
+  warns when the base is not the platform default — a mis-based PR silently gets no AI first pass.
+  Drives `yad open-pr`.
 - **`yad-ship`** — build helper. Commit **and** open the task PR/MR in one step (`yad commit` then
   `yad open-pr`; the PR step runs only if the commit lands). Drives `yad ship`.
 - **`yad-engineer-review`** — Step E. AI review (CodeRabbit, advisory) → engineer review (the human gate,

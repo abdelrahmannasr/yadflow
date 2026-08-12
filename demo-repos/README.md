@@ -24,6 +24,10 @@ run. Only this README is version-controlled; the repos themselves are regenerabl
 > `default_branch`, else the remote's published default (`origin/HEAD`), else `origin/main` — and fail
 > closed when none of them resolves. These throwaway repos have **no remote**, so pass the base branch
 > explicitly — e.g. `bash checks/contract-check.sh master`. Set `SDLC_BASE=master` to avoid repeating it.
+>
+> `yad open-pr` resolves its PR base the same way (`.sdlc/repos.json` `default_branch` → the platform's
+> own default → `origin/HEAD` → `main`), and both demo repos are registered with
+> `"default_branch": "master"` — so it picks up `master` here without a `--base`.
 
 ## Regenerate `backend/`
 
