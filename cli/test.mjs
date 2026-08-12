@@ -6800,6 +6800,35 @@ test('writeRetroShip: writes a retroactive shard for a pre-tracking story; refus
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// #167 was filed as "the aggregate build-log.json is never appended to by --retro-ship, so the ship stays
+// invisible to downstream reports". Half right: the aggregate is untouched BY DESIGN (shard-then-fold —
+// appending there is what causes the merge conflicts shards exist to prevent), but the ship is NOT
+// invisible, because every reader unions. This pins that contract from both ends so neither half can
+// regress: the shard is readable while unfolded, and `yad tidy up` does eventually put it in the aggregate.
+test('a retro shard is READABLE while the folded build-log.json does not exist at all (#167)', () => {
+  const { T, epicDir } = ledgerEpic();
+  const r = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' });
+  assert.equal(r.written, true);
+  assert.ok(!fs.existsSync(path.join(epicDir, '.sdlc/build-log.json')), 'nothing appended to the aggregate — shard-then-fold, not append');
+  const ships = readShips(epicDir);
+  assert.equal(ships.length, 1, 'the union reader still sees the ship — it was never lost');
+  assert.equal(ships[0].retroactive, true);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('foldBuild puts a retro shard INTO the aggregate build-log.json and deletes the shard (#167)', () => {
+  const { T, epicDir } = ledgerEpic();
+  const r = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' });
+  const res = foldBuild(epicDir, (e) => e.story === 'EP-x-S01');
+  assert.equal(res.folded, 1);
+  const folded = JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/build-log.json'), 'utf8'));
+  assert.deepEqual(folded.ships.map((s) => [s.story, s.repo, s.retroactive]), [['EP-x-S01', 'be', true]],
+    'the retroactive ship reaches the aggregate — via the fold, which is the only writer of that file');
+  assert.ok(!fs.existsSync(r.file), 'the shard is removed once folded — never counted twice');
+  assert.equal(readShips(epicDir).length, 1, 'and the union read is unchanged across the fold');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('writeRetroShip: the guard is per (story, repo) — a multi-repo story is recorded one repo at a time (#166)', () => {
   const { T, epicDir } = ledgerEpic();
   assert.equal(writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' }).written, true);
@@ -7039,6 +7068,53 @@ test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, co
   const out = await grab(() => runTidy(T, {}));
   assert.match(out, /nothing to tidy/);
   assert.ok(!process.exitCode);
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The reporter's exact path in #167, end to end: back-fill a pre-tracking story, look at build-log.json
+// (empty — the "never appended to" observation), then tidy up and watch the ship arrive in the aggregate.
+test('--retro-ship → tidy up: the backfilled ship is readable throughout and lands in build-log.json (#167)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed pre-tracking story');
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
+  const ep = path.join(T, 'epics/EP-a');
+
+  const out = await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  assert.match(out, /landed at epics\/EP-a\/\.sdlc\/build-log\/EP-a-S01-retro-web\.json/, 'the output names where the record actually is');
+  assert.match(out, /readers union/, 'and says the folded file is only half the ledger');
+  // The observation behind #167 — and why it is not a lost write.
+  assert.ok(!fs.existsSync(path.join(ep, '.sdlc/build-log.json')), 'the aggregate is untouched at this point');
+  assert.equal(readShips(ep).length, 1, 'yet the ship is fully readable — every reader unions the shard dir');
+
+  await grab(() => runTidy(T, {}));
+  const folded = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/build-log.json'), 'utf8'));
+  assert.deepEqual(folded.ships.map((s) => [s.story, s.repo, s.retroactive]), [['EP-a-S01', 'web', true]],
+    'tidy up is what appends to the aggregate — for a retro ship exactly as for a real one');
+  assert.equal(readShips(ep).length, 1, 'still one ship — folded, not duplicated');
+  assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'the fold is committed, not left dirty');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('a retro shard on an in-build story is NEVER folded, and is still read (#167)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed pre-tracking story');
+  // `in-build` is a valid --retro-ship target (checkpoint.mjs BACK_HALF_STATUSES), but `tidy up` folds
+  // only `shipped` stories — so this shard stays loose indefinitely. That is exactly why a reader that
+  // opens build-log.json alone can be permanently blind, and why the union rule is not optional.
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: in-build\nrepos: [web]\n---\n\n# EP-a-S01\n`);
+  const ep = path.join(T, 'epics/EP-a');
+  await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  const out = await grab(() => runTidy(T, {}));
+  assert.match(out, /nothing to tidy/, 'an in-build story is never folded');
+  assert.ok(!fs.existsSync(path.join(ep, '.sdlc/build-log.json')), 'so the aggregate stays empty forever');
+  assert.deepEqual(fs.readdirSync(path.join(ep, '.sdlc/build-log')), ['EP-a-S01-retro-web.json'], 'the shard is still there');
+  assert.equal(readShips(ep).length, 1, 'and the union reader still sees the ship — only a raw read would miss it');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
 });
