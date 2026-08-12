@@ -8376,3 +8376,232 @@ test('yad still succeeds on a runtime with no global fetch (--no-experimental-fe
     fs.rmSync(pkg, { recursive: true, force: true });
   }
 });
+
+// ---- the harness ledger guard (`yad hook ledger-guard`, #171) --------------------------------
+const {
+  ledgerGuardDecision, protectedLedgerPath, payloadPaths, hubRootFor,
+} = await import('./hook.mjs');
+const { hookActions, mergeHookSettings } = await import('./plan.mjs');
+
+// A hub with one epic whose ledger is already on the base ref, and one that only exists locally.
+function hookHub({ hub = { platform: 'gitlab', bridge_enabled: true, default_branch: 'main' } } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-hook-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  if (hub) fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+  for (const epic of ['EP-seeded', 'EP-fresh']) {
+    fs.mkdirSync(path.join(T, 'epics', epic, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'epics', epic, 'reviews'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', epic, '.sdlc/state.json'), '{}');
+  }
+  return T;
+}
+
+// git, faked: `seeded` are the epics whose state.json is on the base ref. Everything else answers
+// the way a healthy repo would, so only the carve-out under test varies.
+const fakeGit = (seeded = ['EP-seeded'], { baseResolves = true } = {}) => (cmd, args = []) => {
+  const line = args.join(' ');
+  if (cmd !== 'git') return { ok: false, stdout: '', stderr: '', code: 1 };
+  if (line.includes('symbolic-ref')) return { ok: true, stdout: 'origin/main', code: 0 };
+  if (line.includes('rev-parse --show-toplevel')) return { ok: false, stdout: '', code: 1 };
+  if (line.includes('cat-file -e')) {
+    const ref = args[args.length - 1];
+    return { ok: baseResolves && seeded.some((e) => ref.endsWith(`epics/${e}/.sdlc/state.json`)), stdout: '', code: 0 };
+  }
+  if (line.includes('rev-parse --verify')) return { ok: baseResolves, stdout: '', code: 0 };
+  return { ok: false, stdout: '', code: 1 };
+};
+
+const decide = (T, rel, opts = {}) => ledgerGuardDecision([path.join(T, rel)], {
+  env: { CLAUDE_PROJECT_DIR: T, ...(opts.env || {}) },
+  runner: opts.runner || fakeGit(opts.seeded),
+});
+
+test('ledger hook denies a mutation of a ledger already on the base ref, and names the command', () => {
+  const T = hookHub();
+  try {
+    const v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
+    assert.equal(v.allow, false);
+    assert.equal(v.epic, 'EP-seeded');
+    assert.match(v.message, /yad gate open EP-seeded/);
+    assert.match(v.message, /gate ci --merged/);
+    assert.match(v.message, /YAD_HOOK_DISABLE=1/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger hook guards every CI-owned file, and nothing else in the epic', () => {
+  const T = hookHub();
+  try {
+    for (const rel of [
+      'epics/EP-seeded/.sdlc/state.json', 'epics/EP-seeded/.sdlc/approvals.json',
+      'epics/EP-seeded/.sdlc/comments.json', 'epics/EP-seeded/.sdlc/hub-prs.json',
+      'epics/EP-seeded/reviews/epic--2026-08-12--approved.md',
+    ]) assert.equal(decide(T, rel).allow, false, `${rel} must be guarded`);
+    // contract-lock.json is artifact-side and change.json is the human's — both exempt in the CI
+    // gate too, so the hook must not diverge from it.
+    for (const rel of [
+      'epics/EP-seeded/.sdlc/contract-lock.json', 'epics/EP-seeded/.sdlc/change.json',
+      'epics/EP-seeded/epic.md', 'epics/EP-seeded/stories/EP-seeded-S01.md',
+      'epics/EP-seeded/reviews/notes.txt', 'docs/CLI.md',
+    ]) assert.equal(decide(T, rel).allow, true, `${rel} must be allowed`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger hook allows a NEW epic seed — creation is not mutation (#162)', () => {
+  const T = hookHub();
+  try {
+    assert.equal(decide(T, 'epics/EP-fresh/.sdlc/state.json').allow, true);
+    // ...and once that ledger is on the base ref, the guard is absolute again.
+    assert.equal(decide(T, 'epics/EP-fresh/.sdlc/state.json', { seeded: ['EP-fresh'] }).allow, false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger hook falls back to the working tree when the base ref cannot be resolved', () => {
+  const T = hookHub();
+  try {
+    // No usable base: a state.json that exists locally is treated as already seeded (guard it),
+    // one that does not is a creation. Never a hard failure — the hook must not block on git.
+    const runner = fakeGit([], { baseResolves: false });
+    assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json', { runner }).allow, false);
+    fs.rmSync(path.join(T, 'epics/EP-fresh/.sdlc/state.json'));
+    assert.equal(decide(T, 'epics/EP-fresh/.sdlc/state.json', { runner }).allow, true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger hook is a no-op without the bridge — there the hand-edit is correct', () => {
+  for (const hub of [
+    { platform: 'gitlab', bridge_enabled: false },
+    { platform: null, bridge_enabled: true },
+    { platform: 'gitlab' },
+    null,
+  ]) {
+    const T = hookHub({ hub });
+    try {
+      assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json').allow, true, JSON.stringify(hub));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  // ...and the legacy `bridge` spelling still arms it, exactly as isBridgeHub reads it.
+  const legacy = hookHub({ hub: { platform: 'github', bridge: true } });
+  try {
+    assert.equal(decide(legacy, 'epics/EP-seeded/.sdlc/state.json').allow, false);
+  } finally { fs.rmSync(legacy, { recursive: true, force: true }); }
+});
+
+test('ledger hook resolves the hub from the edited PATH, not the session root', () => {
+  // The documented layout puts code repos BESIDE the hub, so a session opened at the workspace has
+  // no hub.json under its root. A session-rooted lookup would find nothing and allow the mutation.
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-ws-'));
+  const T = path.join(workspace, 'product');
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true }));
+    fs.mkdirSync(path.join(T, 'epics/EP-seeded/.sdlc'), { recursive: true });
+    const v = ledgerGuardDecision(['product/epics/EP-seeded/.sdlc/state.json'], {
+      env: { CLAUDE_PROJECT_DIR: workspace }, runner: fakeGit(),
+    });
+    assert.equal(v.allow, false, 'a relative path under the workspace still resolves to its hub');
+    assert.equal(hubRootFor(path.join(T, 'epics/EP-seeded/.sdlc/state.json')), T);
+    // A path in no hub at all is simply not ours to judge.
+    assert.equal(hubRootFor(path.join(workspace, 'backend/src/index.ts')), null);
+  } finally { fs.rmSync(workspace, { recursive: true, force: true }); }
+});
+
+test('ledger hook fails OPEN — an unusable payload or an explicit override never blocks', () => {
+  const T = hookHub();
+  try {
+    assert.equal(ledgerGuardDecision([], { env: {}, runner: fakeGit() }).allow, true);
+    const v = decide(T, 'epics/EP-seeded/.sdlc/state.json', { env: { YAD_HOOK_DISABLE: '1' } });
+    assert.equal(v.allow, true);
+    assert.equal(v.skipped, 'YAD_HOOK_DISABLE');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('protectedLedgerPath matches only the CI-owned files, at their exact depth', () => {
+  assert.deepEqual(protectedLedgerPath('epics/EP-a/.sdlc/state.json'), { epic: 'EP-a', rel: 'epics/EP-a/.sdlc/state.json', kind: 'state' });
+  assert.equal(protectedLedgerPath('epics/EP-a/reviews/x.md').kind, 'review');
+  for (const rel of [
+    'epics/EP-a/.sdlc/contract-lock.json', 'epics/EP-a/.sdlc/nested/state.json',
+    'epics/EP-a/state.json', 'other/EP-a/.sdlc/state.json', 'epics/EP-a/reviews/x.json', 'epics',
+  ]) assert.equal(protectedLedgerPath(rel), null, rel);
+});
+
+test('payloadPaths reads every tool shape a harness sends, and shrugs at the rest', () => {
+  assert.deepEqual(payloadPaths({ tool_input: { file_path: 'a.md' } }), ['a.md']);
+  assert.deepEqual(payloadPaths({ tool_input: { notebook_path: 'n.ipynb' } }), ['n.ipynb']);
+  assert.deepEqual(payloadPaths({ tool_input: { edits: [{ file_path: 'a' }, { file_path: 'b' }, {}] } }), ['a', 'b']);
+  assert.deepEqual(payloadPaths({ tool_input: { file_path: 'a', edits: [{ file_path: 'a' }] } }), ['a'], 'deduped');
+  for (const bad of [null, {}, { tool_input: null }, { tool_input: 'x' }, { tool_input: { file_path: 3 } }]) {
+    assert.deepEqual(payloadPaths(bad), [], JSON.stringify(bad));
+  }
+});
+
+test('mergeHookSettings adds our entry once and never touches anything else', () => {
+  const foreign = {
+    permissions: { allow: ['Bash(ls:*)'] },
+    hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo hi' }] }] },
+  };
+  const first = mergeHookSettings(foreign);
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.settings.permissions, foreign.permissions, 'foreign keys survive');
+  assert.equal(first.settings.hooks.PreToolUse.length, 2);
+  assert.equal(first.settings.hooks.PreToolUse[0].hooks[0].command, 'echo hi', 'foreign hook survives');
+  // Idempotent: a second pass is a no-op, so `check` reports ok rather than rewriting forever.
+  const second = mergeHookSettings(first.settings);
+  assert.equal(second.changed, false);
+  assert.equal(second.settings.hooks.PreToolUse.length, 2);
+  // A stale command (an older install path) is normalised in place, not duplicated.
+  const stale = JSON.parse(JSON.stringify(first.settings));
+  stale.hooks.PreToolUse[1].hooks[0].command = 'bash ./hooks/ledger-guard.sh';
+  const fixed = mergeHookSettings(stale);
+  assert.equal(fixed.changed, true);
+  assert.equal(fixed.settings.hooks.PreToolUse.length, 2);
+  assert.match(fixed.settings.hooks.PreToolUse[1].hooks[0].command, /^\$CLAUDE_PROJECT_DIR/);
+  // A matcher the team narrowed is theirs to keep — only the command is ours.
+  const narrowed = JSON.parse(JSON.stringify(first.settings));
+  narrowed.hooks.PreToolUse[1].matcher = 'Write';
+  assert.equal(mergeHookSettings(narrowed).changed, false);
+  // Junk in either position is replaced by a valid shape rather than throwing.
+  for (const junk of [null, 'x', [], { hooks: 'x' }, { hooks: { PreToolUse: 'x' } }]) {
+    assert.equal(mergeHookSettings(junk).settings.hooks.PreToolUse.length, 1, JSON.stringify(junk));
+  }
+});
+
+test('hookActions wires the guard on a bridge hub, and nothing without the bridge', () => {
+  const T = hookHub();
+  try {
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    const first = hookActions(T, ['.claude']);
+    assert.deepEqual(first.map((a) => [a.item, a.status]), [['hooks/ledger-guard.sh', 'missing'], ['settings.json', 'missing']]);
+    for (const a of first) a.apply();
+    const applied = hookActions(T, ['.claude']);
+    assert.deepEqual(applied.map((a) => a.status), ['ok', 'ok'], 'idempotent');
+    assert.ok(fs.statSync(path.join(T, 'hooks/ledger-guard.sh')).mode & 0o111, 'the script is executable');
+    const settings = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
+    assert.equal(settings.hooks.PreToolUse.length, 1);
+    // An existing settings file that predates the hook is 'outdated' — so an upgrade wires it.
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), '{"permissions":{}}');
+    assert.equal(hookActions(T, ['.claude']).find((a) => a.item === 'settings.json').status, 'outdated');
+    // A target with no hook protocol gets the script only.
+    fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
+    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  const fileOnly = hookHub({ hub: { platform: 'gitlab', bridge_enabled: false } });
+  try {
+    assert.deepEqual(hookActions(fileOnly, ['.claude']), []);
+  } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }
+});
+
+test('hookActions never silently replaces a settings file it cannot read', () => {
+  const T = hookHub();
+  try {
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), '{ not json');
+    const action = hookActions(T, ['.claude']).find((a) => a.item === 'settings.json');
+    // 'modified' is never applied by setup or a plain update — only --overwrite-local reaches it,
+    // and even then the unreadable original is saved beside the file first.
+    assert.equal(action.status, 'modified');
+    assert.ok(action.backup);
+    action.apply();
+    assert.equal(fs.readFileSync(action.backup, 'utf8'), '{ not json');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8')).hooks.PreToolUse.length, 1);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
