@@ -1,3 +1,12 @@
+## [3.16.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.1...v3.16.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **checkpoint:** make a --retro-ship dry run honest and side-effect free ([b03704f](https://github.com/abdelrahmannasr/yadflow/commit/b03704fb0564b1510dca121a24853758431f9374)), closes [112/#142](https://github.com/abdelrahmannasr/yadflow/issues/142) [#167](https://github.com/abdelrahmannasr/yadflow/issues/167)
+* **checkpoint:** name the shard path and the fold step after --retro-ship ([64c33b3](https://github.com/abdelrahmannasr/yadflow/commit/64c33b37171ee1cebf540b7a66c35ee56cdc61a7)), closes [#167](https://github.com/abdelrahmannasr/yadflow/issues/167) [#167](https://github.com/abdelrahmannasr/yadflow/issues/167)
+* **skills:** read build-log as the folded + shard union ([4302de2](https://github.com/abdelrahmannasr/yadflow/commit/4302de2e5f569989e8fc51c0a165aaae5abe1625)), closes [#167](https://github.com/abdelrahmannasr/yadflow/issues/167)
+
 ## [3.16.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.0...v3.16.1) (2026-08-12)
 
 
