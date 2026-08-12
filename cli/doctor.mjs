@@ -165,10 +165,21 @@ export function projectChecks(checks, root) {
     // stray `.claude/` would be told to run `yad check --fix` forever, while that command builds no
     // action for `.claude` and correctly reports "already up to date". Never name a remedy that
     // cannot reach the thing being reported.
+    const unreadable = [];
     for (const ide of ideTargetsFor(root)) {
       const relDest = HOOK_SETTINGS[ide];
       if (!relDest) continue;
-      const settings = readJSON(path.join(root, relDest), null);
+      const settingsPath = path.join(root, relDest);
+      // A file that exists but does not parse is its OWN report. `readJSON` returns null for both
+      // "absent" and "broken", and null merges as "not wired" — which would send the human to
+      // `yad check --fix`, a command that (correctly) refuses to rewrite a settings file it cannot
+      // parse. The warning would then repeat forever with advice that can never apply.
+      if (exists(settingsPath)) {
+        let parsed;
+        try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* reported below */ }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
+      }
+      const settings = readJSON(settingsPath, null);
       if (mergeHookSettings(settings).changed) { unwired.push(relDest); continue; }
       // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
       // deliberately leaves it alone), but one that no longer selects any file-editing tool means
@@ -176,7 +187,10 @@ export function projectChecks(checks, root) {
       // healthy until a ledger edit fails in CI.
       if (!hookMatcherFires(settings)) broken.push(relDest);
     }
-    if (unwired.length) {
+    if (unreadable.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]`,
+        'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
+    } else if (unwired.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}`,
         'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
     } else if (broken.length) {

@@ -459,8 +459,18 @@ The settings file is the team's, so the rules around that one entry are delibera
   entry without the script it points at would fire a missing command on every file edit.
 
 `.claude` is the only IDE target wired: it is the only one with a defined hook protocol. Other
-targets get the script, and the contract above is what they would wire by hand. `yad doctor` reports
-`agent ledger guard wired` / `not wired` on a bridge hub.
+targets get the script, and the contract above is what they would wire by hand.
+
+`yad doctor` reports the guard on a bridge hub, and distinguishes the three states that matter — it
+reads the same persisted `ideTargets` the wiring reads, so every gap it names is one the command it
+names can actually close:
+
+| State | Report | Remedy |
+|---|---|---|
+| script + entry present, matcher live | `agent ledger guard wired` | — |
+| either half absent | `not wired: <what>` | `yad check --fix` |
+| present but the matcher no longer selects a file-editing tool | `installed but its matcher no longer selects file edits` | restore the matcher — it is wired and never fires |
+| the settings file does not parse | `cannot be wired — … does not parse` | fix the JSON by hand; yad never rewrites one it cannot parse, so nothing else clears it |
 
 ## Running by hand (Phase 3 is manual)
 
