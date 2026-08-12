@@ -5,8 +5,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, isBridgeHub } from './manifest.mjs';
-import { mergeHookSettings } from './plan.mjs';
+import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isBridgeHub } from './manifest.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -158,15 +158,30 @@ export function projectChecks(checks, root) {
   const hubForHooks = readJSON(hubPath, null);
   if (isBridgeHub(hubForHooks)) {
     const unwired = [];
+    const broken = [];
     if (!exists(path.join(root, 'hooks', 'ledger-guard.sh'))) unwired.push('hooks/ledger-guard.sh');
-    for (const [ide, relDest] of Object.entries(HOOK_SETTINGS)) {
-      // Only harnesses this project actually installs into — an absent `.claude/` is not a gap.
-      if (!exists(path.join(root, ide))) continue;
-      if (mergeHookSettings(readJSON(path.join(root, relDest), null)).changed) unwired.push(relDest);
+    // The SAME target list `hookActions` wires — the persisted `ideTargets`, not "does the directory
+    // exist". Keyed on the directory, a project whose targets are `['.agents']` but which also has a
+    // stray `.claude/` would be told to run `yad check --fix` forever, while that command builds no
+    // action for `.claude` and correctly reports "already up to date". Never name a remedy that
+    // cannot reach the thing being reported.
+    for (const ide of ideTargetsFor(root)) {
+      const relDest = HOOK_SETTINGS[ide];
+      if (!relDest) continue;
+      const settings = readJSON(path.join(root, relDest), null);
+      if (mergeHookSettings(settings).changed) { unwired.push(relDest); continue; }
+      // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
+      // deliberately leaves it alone), but one that no longer selects any file-editing tool means
+      // nothing is intercepted — and reporting that as `ok` is how a disarmed guard passes for
+      // healthy until a ledger edit fails in CI.
+      if (!hookMatcherFires(settings)) broken.push(relDest);
     }
     if (unwired.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}`,
         'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
+    } else if (broken.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}`,
+        `restore the matcher to \`${HOOK_TOOL_MATCHER}\` — as it stands the hook is wired but never fires`);
     } else {
       check(checks, 'hooks', 'project', 'ok', 'agent ledger guard wired (hooks/ledger-guard.sh)');
     }
