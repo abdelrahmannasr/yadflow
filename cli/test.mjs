@@ -8782,3 +8782,43 @@ test('hookActions never rewrites a settings file it cannot read — not even wit
     assert.equal(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'), theirs, 'still untouched');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('doctor reports the ledger guard against what actually arms it', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = hookHub();
+  const hooksCheck = () => collectDoctor(T).checks.find((c) => c.id === 'hooks');
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.claude'] }));
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    assert.equal(hooksCheck().status, 'warn', 'nothing installed yet');
+    assert.match(hooksCheck().message, /not wired/);
+
+    for (const a of hookActions(T, ['.claude'])) a.apply();
+    assert.equal(hooksCheck().status, 'ok');
+
+    // Installed but narrowed until it selects nothing: the worst state to call healthy.
+    const settingsPath = path.join(T, '.claude/settings.json');
+    const narrow = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    narrow.hooks.PreToolUse[0].matcher = 'Bash';
+    fs.writeFileSync(settingsPath, JSON.stringify(narrow));
+    assert.equal(hooksCheck().status, 'warn');
+    assert.match(hooksCheck().message, /matcher no longer selects file edits/);
+
+    // A settings file that does not parse gets its OWN advice: `yad check --fix` refuses to rewrite
+    // one, so pointing at it would nag forever with a remedy that cannot apply.
+    fs.writeFileSync(settingsPath, '{ nope');
+    assert.match(hooksCheck().message, /does not parse/);
+    assert.match(hooksCheck().hint, /fix the JSON by hand/);
+
+    // A target with no hook protocol is not a gap — and neither is a stray .claude/ on a project
+    // whose persisted targets do not include it.
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.agents'] }));
+    fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
+    assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  // Without the bridge there is nothing to guard, so the check is silent rather than ok.
+  const fileOnly = hookHub({ hub: { platform: 'gitlab', bridge_enabled: false } });
+  try {
+    assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);
+  } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }
+});
