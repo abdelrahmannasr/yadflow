@@ -8577,6 +8577,12 @@ test('hookActions wires the guard on a bridge hub, and nothing without the bridg
     assert.ok(fs.statSync(path.join(T, 'hooks/ledger-guard.sh')).mode & 0o111, 'the script is executable');
     const settings = JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'));
     assert.equal(settings.hooks.PreToolUse.length, 1);
+    // `yad setup` re-applies with force:true, which reaches an `ok` action. Applying one must not
+    // rewrite the file — it is the team's, hand-formatting and all, and we own one entry in it.
+    const hand = JSON.stringify(settings, null, 4) + '\n';
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), hand);
+    for (const a of hookActions(T, ['.claude'])) a.apply();
+    assert.equal(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'), hand, 'an ok settings file is left byte-identical');
     // An existing settings file that predates the hook is 'outdated' — so an upgrade wires it.
     fs.writeFileSync(path.join(T, '.claude/settings.json'), '{"permissions":{}}');
     assert.equal(hookActions(T, ['.claude']).find((a) => a.item === 'settings.json').status, 'outdated');

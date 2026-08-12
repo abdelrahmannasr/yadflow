@@ -544,7 +544,13 @@ function hookSettingsAction(root, ide, relDest) {
     status: raw === null ? 'missing' : changed ? 'outdated' : 'ok',
     // Re-read at apply() time rather than closing over the merge computed above: setup and reconcile
     // build every action before applying any, so the file may have been written since.
+    //
+    // A no-op when the entry is already there. `yad setup` re-applies with force:true, which reaches
+    // an `ok` action — and an unconditional write would reformat a team's hand-formatted (but valid)
+    // settings.json to writeJSON's style on every re-run. Nothing is lost, but the diff noise lands
+    // in a committed file we only own one entry of.
     apply: () => {
+      if (!changed && raw !== null) return;
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       writeJSON(dest, mergeHookSettings(readJSON(dest, {})).settings);
     },
