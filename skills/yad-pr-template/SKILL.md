@@ -33,9 +33,11 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (front-half)`
   / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
   Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
-- **Installed templates are yad-managed.** `yad update` rewrites them on upgrade — but never one you
-  edited: a local change is reported as `modified` and left alone (see `docs/CLI.md` → *Managed
-  files*). Put knowledge that must survive upgrades in an ADR under `docs/`, not in the template.
+- **Installed templates are yad-managed.** `yad update` rewrites them on upgrade. An edit yad can
+  prove — the file's sha differs from the one it recorded when it wrote the template — is reported as
+  `modified` and left alone; a copy it has no record of is replaced after a `.yad-orig` backup (see
+  `docs/CLI.md` → *Managed files*). Either way, put knowledge that must survive an upgrade in an ADR
+  under `docs/`, not in the template.
 - The Impact & Risk block reuses the conventions of earlier steps: the `Task: <story>-<task>` trailer
   (`yad-implement`), the contract surface (`yad-architecture` / contract-check), and the
   domain-owner escalation (`yad-review-gate`).

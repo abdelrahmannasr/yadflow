@@ -181,6 +181,8 @@ point, and it is the honest cost of keeping a local edit to a managed file. To r
 `.sdlc/managed.json` is committed, so the record travels with the repo instead of living in one
 clone. The last row is the migration path for an install made before this record existed: nothing is
 proven there, so the routine upgrade still lands but never discards content it cannot account for.
+A record that exists but cannot be read as one (corrupt JSON, a bad merge resolution) is an **error**,
+never a silent reset — restore it from git, or delete it to start over from that last row.
 
 > **Not yet supported:** marking a customization as *accepted* so it stops being reported (an
 > opt-out list of managed paths you own). Until then, `modified` is a permanent, deliberate nag.

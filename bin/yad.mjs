@@ -35,8 +35,10 @@ ${c.bold('Setup & maintenance')}
   yad update           Apply drift only (alias for: check --fix --scope=changed);
                        installs newly-added skills, updates changed skills + gate scripts,
                        and migrates pre-2.0 sdlc-* installs to the yad-* names.
-                       A managed file YOU edited is reported 'modified' and left alone;
-                       --overwrite-local replaces it (saving a <file>.yad-orig backup)
+                       A managed file whose edit yad can prove (its recorded sha) is
+                       reported 'modified' and left alone; --overwrite-local replaces
+                       it. Anything else it cannot account for is replaced only after
+                       a <file>.yad-orig backup
   yad update --push    Also commit each repo's applied changes and push them straight to the
                        default branch of the hub + every connected repo (a chore(yad-update)
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits

@@ -273,11 +273,21 @@ test('issue #164: a managed file with no record is still updated, but backed up 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('issue #164: a corrupt provenance ledger fails loudly instead of forgetting the record', async () => {
+test('issue #164: an unusable provenance ledger fails loudly instead of forgetting the record', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
-  fs.writeFileSync(path.join(backend, MANAGED), '{ not json');
+  const ledger = path.join(backend, MANAGED);
+  fs.writeFileSync(ledger, '{ not json');
   await assert.rejects(reconcile(T, { fix: true, scope: 'changed' }), /corrupt JSON/);
+  // Parseable but not a record: silently reading these as {} would demote every edited file to an
+  // unrecorded one and overwrite it — the failure this whole mechanism exists to prevent.
+  for (const shape of ['{}', '{"version":"9.9.9"}', '{"files":[]}', '[]', 'null']) {
+    fs.writeFileSync(ledger, shape);
+    await assert.rejects(reconcile(T, { fix: true, scope: 'changed' }), /unreadable provenance record/, shape);
+  }
+  fs.rmSync(ledger);
+  const recovered = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.equal(recovered.counts.modified, 0, 'deleting the ledger is a supported reset (no record, not an error)');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

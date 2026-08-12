@@ -51,7 +51,11 @@ fi
 # trailer strip below shortens it) so a failure at that boundary can say so. GitHub bodies are not
 # truncated, so the note is advisory and only ever printed alongside a real failure.
 GITLAB_DESC_LIMIT=2700
-RAW_CHARS="$(wc -c < "$BODY" | tr -d '[:space:]')"
+# CHARACTERS, not bytes — GitLab counts characters, and a description full of multibyte punctuation
+# (an em-dash costs 3 bytes) would hit 2700 bytes long before it could ever be truncated. `wc -m`
+# would need a UTF-8 locale we cannot assume across CI images, so count UTF-8 code points the
+# locale-independent way: every byte that is NOT a continuation byte (0x80-0xBF) starts one.
+RAW_CHARS="$(LC_ALL=C tr -d '\200-\277' < "$BODY" | wc -c | tr -d '[:space:]')"
 
 # The Review Companion injects a `<!-- yad:trailer --> … <!-- /yad:trailer -->` briefing block (and
 # `<!-- yad:noblock -->` notes) into the description. Strip those before the template check so the

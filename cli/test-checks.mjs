@@ -1098,6 +1098,16 @@ test('pr-template gate: names the 2700-character GitLab truncation when a sectio
   assert.match(r.out, /TRUNCATED at 2700/);
   assert.match(r.out, /move the required sections above the cutoff/);
 
+  // GitLab counts CHARACTERS. A body of multibyte punctuation reaches 2700 BYTES at a third of that
+  // length, and blaming truncation there would send the author reordering a description that fits.
+  const multibyte = body(T, `## Summary\nx\n${'é'.repeat(1350)}\n`);
+  assert.ok(fs.statSync(multibyte).size >= 2700, 'the fixture really is >= 2700 bytes');
+  assert.doesNotMatch(runGate(PR_TEMPLATE, T, ['--profile', 'code', multibyte]).out, /TRUNCATED/);
+  // …but a multibyte body that IS at the character limit must still be recognised (5400 bytes here),
+  // so the count is code points, not a byte count with a different name.
+  const atLimit = body(T, `## Summary\nx\n${'é'.repeat(2700)}\n`);
+  assert.match(runGate(PR_TEMPLATE, T, ['--profile', 'code', atLimit]).out, /TRUNCATED at 2700/);
+
   // A short body that fails for an ordinary reason must not be blamed on truncation.
   const short = runGate(PR_TEMPLATE, T, ['--profile', 'code', body(T, '## Summary\nno template here\n')]);
   assert.equal(short.code, 1);

@@ -3,6 +3,7 @@
 // setup (apply all), update (apply changed), and check (report; fix non-ok) share it.
 import fs from 'node:fs';
 import path from 'node:path';
+import { err } from './errors.mjs';
 import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha,
 } from './lib.mjs';
@@ -38,13 +39,21 @@ const dirAction = (scope, item, src, dest, { root } = {}) => ({
 
 // ---- managed-file provenance (#164) --------------------------------------------------------
 // Read one repo root's ledger of "files yad wrote, and the sha it wrote". Strict, like every other
-// ledger read: a ledger that exists but does not parse must throw rather than default to {} —
-// silently forgetting the record would downgrade every locally-modified file back to "just drift"
-// and re-open the silent clobber this record exists to prevent.
+// ledger read: only an ABSENT ledger means "no record" ({}). One that exists but does not parse — or
+// parses into something that is not a `files` map — must throw. Defaulting either to {} would
+// silently downgrade every locally-modified file to an unrecorded one and re-open, one backup short,
+// the silent clobber this record exists to prevent.
+const isMap = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 export function readManagedLedger(root) {
-  const rec = readJSONStrict(path.join(root, MANAGED_LEDGER), null);
-  const files = rec && typeof rec === 'object' && !Array.isArray(rec) ? rec.files : null;
-  return files && typeof files === 'object' && !Array.isArray(files) ? files : {};
+  const file = path.join(root, MANAGED_LEDGER);
+  const rec = readJSONStrict(file, null);
+  if (rec === null && !exists(file)) return {};
+  if (!isMap(rec) || !isMap(rec.files)) {
+    // Parses, but is not a record — YAD-STATE-002 (wrong shape), not -001 (does not parse).
+    throw err('YAD-STATE-002', `unreadable provenance record in ${file}: expected an object with a "files" map`,
+      'restore it from git — or delete it to start over, which costs the record (the next update then backs up every managed file it replaces)');
+  }
+  return rec.files;
 }
 
 // Where the pre-overwrite copy of `dest` goes.
