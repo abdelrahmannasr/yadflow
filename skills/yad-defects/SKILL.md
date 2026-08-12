@@ -1,6 +1,6 @@
 ---
 name: yad-defects
-description: 'Phase 6 output enrichment (never a gate) — the quality-gap report. Generates a per-epic AND per-thread defect/bug report (the vendored React/Vite/Tailwind shell HTML + a DEFECTS.md) that aggregates every kind:defect change-epic + each change.json defect block + shipped regressions in build-log.json BY escape_stage (the SDLC gate that should have caught the defect) and root_cause, and visualizes WHERE quality gaps systematically come from — e.g. "% of this feature''s defects that escaped at the test-cases gate" — so the team hardens the originating stage instead of just fixing symptoms. Degrades to markdown-only when no docs target is connected. Use when the user says "show the defect report", "where are our quality gaps", "generate the bug report for this epic", or "which gate is leaking defects".'
+description: 'Phase 6 output enrichment (never a gate) — the quality-gap report. Generates a per-epic AND per-thread defect/bug report (the vendored React/Vite/Tailwind shell HTML + a DEFECTS.md) that aggregates every kind:defect change-epic + each change.json defect block + shipped regressions in the build ledger (the folded build-log.json unioned with every build-log/ shard) BY escape_stage (the SDLC gate that should have caught the defect) and root_cause, and visualizes WHERE quality gaps systematically come from — e.g. "% of this feature''s defects that escaped at the test-cases gate" — so the team hardens the originating stage instead of just fixing symptoms. Degrades to markdown-only when no docs target is connected. Use when the user says "show the defect report", "where are our quality gaps", "generate the bug report for this epic", or "which gate is leaking defects".'
 ---
 
 # SDLC — Quality-Gap Report (Phase 6, output enrichment)
@@ -32,9 +32,15 @@ risk), not just the symptom. It is an **output enrichment**, exactly like `yad-d
 Resolve the scope (`yad thread <id> --json` for a thread). Collect, across the scoped epic(s):
 - every `kind: defect` (and `kind: hotfix`) change-epic + its `.sdlc/change.json` `defect` block
   (`origin`, `severity`, `escape_stage`, `root_cause`);
-- the shipped regression fixes from each `.sdlc/build-log.json` (the fix that closed the defect, linking
+- the shipped regression fixes from each epic's build ledger (the fix that closed the defect, linking
   the change-epic → its regression story/test);
 - open reconcile debt (a hotfix whose front truth is not yet restored).
+
+The build ledger is **shard-then-fold**: read it as the **union** of the folded `.sdlc/build-log.json`
+`ships` PLUS every loose `.sdlc/build-log/` shard, deduped by `(story, task, repo)` — a shard WINS over a
+folded ship of the same key. Reading `build-log.json` alone drops every ship not yet folded by
+`yad tidy up` (including every `yad checkpoint --retro-ship` backfill, and every ship on a story still at
+`in-build`, which `tidy up` never folds), which would under-count the very fixes this report attributes.
 
 ### Step 2 — Attribute each defect to the gate that should have caught it
 A defect is attributed to its **earliest** responsible SDLC stage. Use `change.json.escape_stage`
@@ -73,7 +79,9 @@ Also write a plain `epics/<scope>/DEFECTS.md` mirror. On `action: deploy`, `yad 
 - **Degrade gracefully.** No docs target → `DEFECTS.md` only; never fail because a tool is absent.
 
 ## Reference
-- The defect data: `.sdlc/change.json` `defect` blocks + `build-log.json` (`../yad-epic/references/state-schema.md`, Phase 6).
+- The defect data: `.sdlc/change.json` `defect` blocks + the build ledger, read as the folded
+  `build-log.json` unioned with every `.sdlc/build-log/` shard
+  (`../yad-epic/references/state-schema.md`, Phase 6; `../yad-engineer-review/references/ship-and-record.md`).
 - The shell + deterministic generation it reuses: `../yad-docs/SKILL.md`, `../yad-docs/references/data-mapping.md`.
 - The companion evolution view: `../yad-timeline/SKILL.md`.
 - The intake that records `escape_stage` + `root_cause`: `../yad-change/SKILL.md`.

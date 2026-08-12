@@ -69,7 +69,7 @@ Per-story, per-repo: `spec → tasks → implement → checks → engineer-revie
 | `yad-checks` | `checks/*.sh`, CI workflows — the gate set: `spec-link · contract-check · build-test-lint · verified-commits · commit-message · pr-title · pr-template · lineage-check · epic-open · reconcile-debt`, plus `yad-update-guard` (push-on-default: re-checks any direct-to-default commit with `verified-commits · commit-message`) |
 | `yad-pr-template` | PR/MR template + routing helpers |
 | `yad-commit` / `yad-open-pr` / `yad-ship` | one commit / one PR/MR |
-| `yad-engineer-review` | engineer review + ship recorded in `build-log.json` |
+| `yad-engineer-review` | engineer review + ship recorded as a `build-log/` shard |
 | `yad-backfill` | DRAFT specs for legacy features |
 
 ### Path: Automation (the second dial + observation)
@@ -109,6 +109,11 @@ runs the sweep. The three thread gates ride in the build-half `yad-checks` set a
 and the change-thread ledgers `change.json`, `reconcile-debt.json`, `build-log.json`);
 the **connected code repos**; the **design / testing / learning tools**; and the **platform**
 (GitHub/GitLab + Pages). A skill's `sideEffects` link its step to the component it writes.
+
+`trust-log.json` and `build-log.json` are the *folded* halves of two **shard-then-fold** ledgers — each
+also has a shard dir (`.sdlc/trust-log/`, `.sdlc/build-log/`) holding the entries `yad tidy up` has not
+folded yet. They render as one component each, but anything READING them must union the folded file with
+its shards (`../../yad-engineer-review/references/ship-and-record.md`).
 
 ## Roles = the lenses
 

@@ -38,8 +38,14 @@ current-truth map, and any open reconcile debt. **STOP** and report if the linea
 
 ### Step 2 — Read each node's evolution facts
 For each epic in the chain read `epic.md` (lineage + the change brief), `.sdlc/change.json` (depth,
-defect block), `.sdlc/build-log.json` (ship events), and the contract-lock (a real lock = a re-lock
+defect block), the build ledger (ship events), and the contract-lock (a real lock = a re-lock
 event; a pointer-lock = inherited). Greenfield-safe: an absent input degrades its part of the view.
+
+The build ledger is **shard-then-fold**, so read it as the **union** of the folded `.sdlc/build-log.json`
+`ships` PLUS every loose `.sdlc/build-log/` shard, deduped by `(story, task, repo)` — a shard WINS over a
+folded ship of the same key. Reading `build-log.json` alone silently drops every ship not yet folded by
+`yad tidy up` (including every `yad checkpoint --retro-ship` backfill, and every ship on a story still at
+`in-build`, which `tidy up` never folds). See `../yad-engineer-review/references/ship-and-record.md`.
 
 ### Step 3 — Render the evolution view (yad-docs shell)
 Generate the site into `epics/<thread>/timeline-site/` (copy the shell verbatim; generate `src/data/*.ts`

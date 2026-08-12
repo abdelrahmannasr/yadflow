@@ -139,7 +139,12 @@ build:
   risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (yad-review-gate escalation)
   # Step E (yad-engineer-review) — AI review (advisory) + engineer review (the human gate) + merge.
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
-  build_log: "epics/EP-<slug>/.sdlc/build-log.json"   # append-only ship ledger (back-half analogue of approvals.json)
+  # Append-only ship ledger (back-half analogue of approvals.json), stored shard-then-fold: writers add one
+  # shard per ship under build_log_dir; `yad tidy up` folds a SHIPPED story's shards into build_log.
+  # READERS MUST UNION the two (dedupe by (story, task, repo); a shard wins) — build_log alone omits every
+  # unfolded ship, e.g. a `yad checkpoint --retro-ship` backfill or any ship on an `in-build` story.
+  build_log: "epics/EP-<slug>/.sdlc/build-log.json"   # folded ships
+  build_log_dir: "epics/EP-<slug>/.sdlc/build-log/"   # one <story>-<task>-<repo>.json shard per ship
   story_build_states: [in-build, shipped]   # in-build = some tasks shipped; shipped = all tasks in tasks.md shipped
   # Backfill (yad-backfill) — specs for already-built features in an existing repo.
   backfill:

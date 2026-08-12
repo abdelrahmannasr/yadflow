@@ -325,11 +325,17 @@ storage layout is noted here (it mirrors `trust-log.json`):
   ship object. `(story, task, repo)` is already a natural unique key, so no `uid` is needed.
 - **Folded file:** `epics/<epic>/.sdlc/build-log.json` = `{ "epic": "<id>", "ships": [ <ship>, … ] }`
   (also the legacy single-file layout, and the output of `yad tidy up`).
-- **Union-read rule:** union the folded `ships` with every `build-log/` shard, **deduping by
-  `(story, task, repo)`** — a shard WINS over a stale folded ship (so a `yad review reconcile` edit to a
-  ship's shard is authoritative until it is folded).
+- **Union-read rule (binding on every reader — never read the folded file alone):** union the folded
+  `ships` with every `build-log/` shard, **deduping by `(story, task, repo)`** — a shard WINS over a stale
+  folded ship (so a `yad review reconcile` edit to a ship's shard is authoritative until it is folded).
+  `build-log.json` on its own is only the *folded* half of the ledger: it omits every ship `yad tidy up`
+  has not folded, including every `yad checkpoint --retro-ship` backfill, and — because `tidy up` folds
+  only a story whose frontmatter is `shipped` — every ship on a story still at `in-build`, indefinitely.
+  A reader that skips the union silently under-reports what shipped (#167).
 - `yad checkpoint` commits the shard dir; `yad tidy up` folds a shipped story's finished shards into the
-  folded file (loose objects + `git gc`).
+  folded file (loose objects + `git gc`). No **ship** path ever appends to the folded file — that is what
+  keeps concurrent shippers conflict-free. (`yad review reconcile` does write it, but only to stamp a ship
+  already folded there; see `updateShip`.)
 
 ---
 

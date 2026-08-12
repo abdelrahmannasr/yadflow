@@ -83,8 +83,15 @@ It writes ONE minimal ship shard marked `retroactive: true` (`task` defaults to 
 the normal checkpoint so the story's already-made `status:` flip rides along in the **same** commit. It
 refuses when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the
 normal flow). It does **not** author the story frontmatter — and to keep evidence and the flip atomic (the no-drift
-invariant), it **refuses** unless you have already set `status: shipped` in `stories/<story>.md`, so a
-ship shard is never committed while the artifact still says `approved`.
+invariant), it **refuses** unless you have already set a back-half `status:` (`in-build` or `shipped`) in
+`stories/<story>.md`, so a ship shard is never committed while the artifact still says `approved`.
+
+**Where the record lands — it is a shard, not an append to `build-log.json`.** Like every other ship, a
+retroactive one is written to `.sdlc/build-log/` and the folded `build-log.json` is left untouched until
+`yad tidy up` folds it. Opening `build-log.json` and finding nothing does **not** mean the write was lost:
+read the ledger by the union rule above and the ship is there (#167). Note `tidy up` only folds a story
+whose frontmatter is `shipped`, so a backfill recorded against an `in-build` story stays a loose shard
+indefinitely — which is precisely why reading the folded file alone is never sufficient.
 
 **One repo per run (#166).** A ship is recorded per `(story, task, repo)`, so a story that shipped in
 several repos needs one retroactive shard **per repo** — the guard is keyed on `(story, repo)`, not on
@@ -138,11 +145,12 @@ The story frontmatter `status` reflects build progress:
 You write this flip into `stories/<story>.md`, but **do not hand-commit it** — the next
 `yad checkpoint --push` carries it in the same `chore(hub)` commit as the ledgers (the story now has a
 build-log ship, so checkpoint stages it; #112). This is what keeps the story artifact from drifting
-from `build-log.json`, so there is never a reason to fall back to a raw `git push origin main`.
+from the build ledger, so there is never a reason to fall back to a raw `git push origin main`.
 
 So the chain is traceable both ways: from the epic down (`epic.md` → `stories/<story>.md` →
-`tasks.md` → `build-log.json` ship → `mergeCommit`) and from a merge commit back up (its `Task:`
-trailer → story → epic).
+`tasks.md` → the build-ledger ship → `mergeCommit`) and from a merge commit back up (its `Task:`
+trailer → story → epic). Resolve that ship by the union rule, not from `build-log.json` alone — until
+`yad tidy up` folds it, the ship lives only in its `build-log/` shard and the chain looks broken.
 
 ## Preconditions for ship (all required)
 
