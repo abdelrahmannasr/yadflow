@@ -54,16 +54,28 @@ touched `repos` — never a forked or copied gate.
 
 ### Step 2 — Dispatch on `action`
 
+> **Check the mode first — in bridge mode you write nothing to the ledger.** Read `.sdlc/hub.json`:
+> **bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`. Under the bridge
+> the ledger is CI-owned — `ledger-guard` rejects any non-bot commit touching
+> `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`, local `yad gate
+> sync` is advisory, and `yad gate ci --merged` writes the whole transition when the review PR merges.
+> So every "set / append / write" instruction below is the **file-only, or a platform with no
+> gate-sync CI** path. In bridge mode do the human-facing half — present the artifact, route the
+> required reviewers, help the owner address comments — and let the platform PR/MR carry the review
+> state; the approvals, comments, review records and the advance all land through CI at merge.
+
 **`open`** — Present the artifact for review. Summarise what changed, list the required reviewers per
 the rule above, and tell reviewers how to comment/approve. Set the step `status` to `in_review` and
 `currentStep` to this step in `state.json` if not already. Do not advance.
 
-If `.sdlc/hub.json` has a non-null `platform`, `bridge_enabled: true`, `config.yaml` `hub.bridge: true`,
-and `gh`/`glab` is authenticated, **also open a review PR/MR on the hub** by invoking
-`yad-hub-bridge action: open` (epic + artifact). Record the PR in `epics/<epic>/.sdlc/hub-prs.json`
-(`{step, artifact, platform, number, url, branch, lastSyncedAt}`) and report the URL + required
-reviewers. Otherwise (no platform / disabled / no CLI) proceed **file-only** exactly as before — no
-error. Opening the PR records no approvals and never advances.
+If `.sdlc/hub.json` has a non-null `platform` and `bridge_enabled: true` (or legacy `bridge: true` —
+`.sdlc/hub.json` is the only source the CLI reads, see `isBridge` in `cli/gate.mjs`), and `gh`/`glab`
+is authenticated, **also open a review PR/MR on the hub** by invoking `yad-hub-bridge action: open`
+(epic + artifact), and report the URL + required reviewers. **CI records the PR** in
+`epics/<epic>/.sdlc/hub-prs.json` (`{step, artifact, platform, number, url, branch, lastSyncedAt}`) —
+write that file yourself only on the file-only path. Otherwise (no platform / disabled / no CLI)
+proceed **file-only** exactly as before — no error. Opening the PR records no approvals and never
+advances.
 
 **`comment`** — Capture reviewer feedback. Append/create a review file
 `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` with a heading per reviewer:
