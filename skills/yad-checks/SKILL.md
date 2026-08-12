@@ -65,6 +65,11 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     default branch the guard is absolute again. Runs in `yad-hub-checks`
     alongside `verified-commits` (which waives the allowlist for the bot but still requires its
     signature). See `yad-hub-bridge`.
+  - `templates/hooks/ledger-guard.sh` → **hub-only** agent guardrail, active **only in bridge mode**
+    (the same `isBridgeHub` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
+    edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the
+    local half of `checks/ledger-guard.sh` (#171). Installed to `<hub>/hooks/ledger-guard.sh` with the
+    `PreToolUse` entry in `.claude/settings.json`. Fails OPEN; see "Step 2b" below.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
     → the standalone hub-side verified-commits CI (installed by `yad check --fix` with the hub wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`)
@@ -141,6 +146,39 @@ Commit the wiring on the repo's default branch (it is shared infrastructure, not
 
 **The hub is wired the same way.** `repo: hub` wires the hub repo itself (platform from `.sdlc/hub.json`)
 with a hub-flavored gate set — see "Wiring the hub" in `references/check-gates.md`.
+
+**The hub also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.sh` →
+`<hub>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
+and `yad check --fix` install both; there is nothing to do by hand.
+
+### Step 2b — the agent guardrail (harness hooks, bridge mode only)
+The CI gates speak at CI time. That is too late for one failure the field kept hitting (#171): in
+bridge mode the gate ledger is **CI-owned**, so an agent that hand-edits
+`epics/*/.sdlc/state.json` only finds out twenty minutes later, from a `ledger-guard` FAIL with
+nothing connecting cause to effect — and by then the write has to be reverted before the review
+PR/MR can go green.
+
+`hooks/ledger-guard.sh` is the local half of that same rule. It runs as a **harness hook** before a
+file-editing tool call and refuses the write up front, naming the command that owns the transition
+(`yad gate open`), so the agent corrects itself instead of failing a pipeline.
+
+- **Harness-agnostic by contract.** The script only locates `yad` and hands the tool payload to
+  `yad hook ledger-guard`: **stdin** is a JSON tool-call payload, **exit 0** allows, **exit 2**
+  denies with the reason on stderr. Claude Code's `PreToolUse` protocol is exactly that, so no
+  adapter logic is needed; another harness needs only those two exit codes.
+- **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`
+  and `epics/*/reviews/*.md`; exempt are `contract-lock.json`, `change.json`, and every artifact.
+  A **new** epic's ledger is exempt too — creation, not mutation (#162).
+- **A no-op without the bridge.** There the ledger is locally owned and the hand-edit the authoring
+  skills describe is *correct*, so nothing is wired and nothing is blocked.
+- **It fails OPEN** — no `yad`, no hub, an unreadable config, an unparseable payload all ALLOW, with
+  a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
+  skips one command.
+- **Known gap:** a `Bash` tool call (`sed -i epics/…`) is not intercepted — matching it would mean
+  parsing shell. The CI gate catches it.
+
+`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a bridge hub.
+See `references/check-gates.md` §"The agent guardrail".
 
 ### Step 3 — `run` (run the gates now)
 From inside the repo, run each gate against `base` and report PASS/FAIL per gate:

@@ -44,6 +44,7 @@ no clone needed.
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
 | `yad thread [<epic>]` | **Feature threads (Phase 6).** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling. Read-only. |
 | `yad reconcile [check\|refresh\|wire]` | Sweep threads for **drift / orphans / open hotfix debt** and report which thread drifted and why (mirrors `yad docs sync`; advisory — the CI gates block at merge). |
+| `yad hook ledger-guard` | **Harness-invoked, never typed.** The local half of the `ledger-guard` rule: in bridge mode the gate ledger is CI-owned, so an agent that hand-edits `epics/*/.sdlc/state.json` is refused **at the moment of the edit** and told the command that owns the transition (`yad gate open`) — instead of discovering it twenty minutes later in a failed pipeline (#171). Reads a tool-call payload as JSON on **stdin** (or `--path <p>`); **exit 0 allows, exit 2 denies** with the reason on stderr, which is Claude Code's `PreToolUse` contract and any other harness's too. Same scope as the CI gate, including the new-epic seed exemption (#162); a **no-op** without the bridge. **Fails open** — no `yad`, no hub, an unreadable config all allow, because the CI gate is the one that fails closed. `YAD_HOOK_DISABLE=1` skips it. Wired by `setup` / `check --fix`; `yad doctor` reports whether it is armed. |
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
@@ -158,8 +159,15 @@ input you already gave; re-running `setup` carries your profile forward.
 ## Managed files: what `yad` owns, and what you edited
 
 `setup` / `check --fix` / `update` write a fixed set of **managed files** into the hub and every
-connected repo — the `checks/*.sh` gate scripts, the CI workflow/fragment, and the PR/MR template.
-They are yad's to rewrite, which is how a version upgrade lands new gate logic everywhere at once.
+connected repo — the `checks/*.sh` gate scripts, the CI workflow/fragment, the PR/MR template, and (on
+a bridge hub) `hooks/ledger-guard.sh`, the agent guardrail. They are yad's to rewrite, which is how a
+version upgrade lands new gate logic everywhere at once.
+
+One wired file is deliberately **not** managed in that sense: `.claude/settings.json` belongs to your
+team, and yad owns exactly **one entry** inside it — the `PreToolUse` hook that invokes
+`hooks/ledger-guard.sh`. It is merged additively and identified by that command string, so re-running
+never duplicates it and nothing else in the file is touched. A `settings.json` that does not parse is
+reported `modified` and never silently replaced.
 
 The catch (#164): "the file differs from the shipped template" cannot, on its own, tell a **stale**
 copy (rewrite it) from one your team deliberately **customized** (ask first). So every write records

@@ -366,6 +366,58 @@ title + the code task template), so a PR that changes the hub's own workflows/ch
 `templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
 line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
 
+## The agent guardrail (`templates/hooks/ledger-guard.sh` + `yad hook ledger-guard`)
+
+Not a CI gate — a **harness hook**, and the only piece of yadflow that runs *inside* an agent's tool
+loop. It exists because of the gap #171 reported: `checks/ledger-guard.sh` is correct and blocking,
+but it speaks at CI time. An agent that hand-edits `epics/*/.sdlc/state.json` in bridge mode learns
+twenty minutes later, from a FAIL with nothing connecting cause to effect, and by then the write must
+be reverted before the review PR/MR can go green.
+
+**Contract** — deliberately not Claude-Code-shaped:
+
+| | |
+|---|---|
+| stdin | a harness tool-call payload as JSON (optional; `--path <p>` works instead) |
+| exit 0 | allow |
+| exit 2 | deny — the reason is on stderr, for the agent to read |
+
+Claude Code's `PreToolUse` protocol is exactly that (exit 2 blocks the call and feeds stderr back to
+the model), so `.claude/settings.json` wires it with no adapter logic. Any harness that can run a
+command and read those two exit codes can use the same script.
+
+**Layering.** `hooks/ledger-guard.sh` is only the adapter: it locates `yad` (`$YAD_BIN` → the hub's
+`node_modules/yadflow` → `PATH` → `npx --no-install`) and passes the payload to `yad hook
+ledger-guard`, which holds the decision. So the wiring never hard-codes an install path, and the
+logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
+
+**Scope — identical to the CI gate, on purpose.** Guarded: `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`
+and `epics/*/reviews/*.md`. Exempt: `contract-lock.json` (artifact-side), `change.json`, every
+artifact, and a **new** epic's ledger — creation, not mutation (#162), probed as "is this epic's
+`state.json` on the base ref?". Bridge-gated by the same `isBridgeHub` predicate the CLI and the
+wiring read (#186): without the bridge the ledger is locally owned, the hand-edit the authoring
+skills describe is correct, and nothing is wired or blocked.
+
+**It fails OPEN, and that asymmetry is the design.** No `yad` on PATH, no hub above the edited path,
+an unreadable `hub.json`, an unparseable payload, a `yad` that errors — every one of them ALLOWS,
+with a note on stderr. A local guardrail that failed closed would brick an agent's ability to edit
+anything the moment an install went sideways. The CI gate fails **closed** and is what actually
+protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` skips one command.
+
+**Known gap:** a `Bash` tool call (`sed -i epics/…`) is not intercepted — matching it would mean
+parsing shell for write intent. The CI gate catches the resulting commit.
+
+**Wiring** (installed by `yad setup` / `yad check --fix`, bridge hubs only):
+
+| Path | Owner |
+|---|---|
+| `<hub>/hooks/ledger-guard.sh` | fully managed — drift-checked and recorded in `.sdlc/managed.json` like any gate script |
+| `<hub>/.claude/settings.json` | **one entry**, merged additively into `hooks.PreToolUse`; identified by the `hooks/ledger-guard.sh` command string, so re-running never duplicates it and every other key survives untouched. A file that does not parse is reported `modified` and never silently replaced. A `matcher` the team narrowed is left as they set it. |
+
+`.claude` is the only IDE target wired: it is the only one with a defined hook protocol. Other
+targets get the script, and the contract above is what they would wire by hand. `yad doctor` reports
+`agent ledger guard wired` / `not wired` on a bridge hub.
+
 ## Running by hand (Phase 3 is manual)
 
 From inside the code repo, against the PR/MR base (e.g. `master`). For the gates that take one, the
