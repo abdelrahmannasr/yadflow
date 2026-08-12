@@ -10,7 +10,7 @@ import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TEST
 import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
-  safeIdeTargetsFor, detectedIdeTargetStateFor,
+  safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { validateLogin, rolesForScope } from './platform.mjs';
 
@@ -348,10 +348,16 @@ export function registerLearning(root, { tool, kb = null, today = null } = {}) {
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
+    // A managed file the team edited is left alone here too — setup re-runs with force:true, so
+    // without this the wizard would be a second silent-clobber path for the same edits (#164).
+    if (a.status === 'modified') {
+      warn(`kept locally modified ${a.scope}/${a.item} — replace it with \`yad update --overwrite-local\``);
+      continue;
+    }
     if (a.status === 'ok' && !force) continue;
     a.apply();
     changed++;
-    info(`${a.status === 'missing' ? 'installed' : 'updated'} ${a.scope}/${a.item}`);
+    info(`${a.status === 'missing' ? 'installed' : 'updated'} ${a.scope}/${a.item}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
   }
   if (!changed) info('already up to date');
   return changed;
@@ -708,9 +714,14 @@ export async function runSetup(root, opts = {}) {
   S('Wire connected repos + the hub (CI gates, PR template, gate-sync)');
   guide(['Installs the CI safety gates, PR/MR template, and gate-sync — automatic, no input needed.']);
   if (registry.repos.length === 0) info('no repos to wire');
+  // Every managed file this step writes is recorded (sha per repo root) so a LATER `yad update` can
+  // tell a stale copy from one the team edited, instead of silently rewriting both (#164).
+  const wired = [];
   for (const repo of registry.repos) {
     log(`  ${c.bold(repo.name)} ${c.dim(`(${repo.platform})`)}`);
-    applyActions(repoActions(root, repo), { force: true });
+    const repoWiring = repoActions(root, repo);
+    applyActions(repoWiring, { force: true });
+    wired.push(...repoWiring);
     // Migrate pre-2.0 wired CI (marker-owned sdlc-*.yml -> yad-*.yml); a user-authored
     // same-named file is never touched.
     applyActions(legacyRepoActions(root, repo), { force: true });
@@ -720,8 +731,12 @@ export async function runSetup(root, opts = {}) {
   if (hubWiring.length) {
     log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
     applyActions(hubWiring, { force: true });
+    wired.push(...hubWiring);
   }
   applyActions(legacyHubActions(root), { force: true });
+  // After every write to a managed path has landed (including the legacy renames), so the recorded
+  // sha is the file's final state.
+  recordManagedWrites(wired);
   // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
   applyActions(authorsActions(root, registry.repos), { force: true });
 

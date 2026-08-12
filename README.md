@@ -65,6 +65,9 @@ Every step stops at a gate until a human approves. New here? **Walk it lesson-by
 
 Running `yad` tells you when a new release is out — upgrade with `npm install yadflow -g`, then
 `yad update` to re-sync this project's skills. See [staying up to date](docs/CLI.md#staying-up-to-date).
+An update rewrites the files yad manages (gate scripts, CI, PR/MR templates) — but never one **you**
+edited: that is reported as `modified` and left alone
+([managed files](docs/CLI.md#managed-files-what-yad-owns-and-what-you-edited)).
 
 ## What `npx yadflow setup` installs
 

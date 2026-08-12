@@ -230,6 +230,17 @@ export const REPO_WIRING = {
   ],
 };
 
+// Provenance of the wired files above, per repo root. Wiring files are OURS to rewrite, but "the
+// on-disk copy differs from the shipped template" cannot tell a STALE copy (overwrite it) from one a
+// team deliberately CUSTOMIZED (ask first) — so every write records the sha256 of what it wrote here.
+// On the next update, on-disk == recorded proves the copy is untouched since we wrote it; anything
+// else is a local edit, reported as `modified` and left alone (#164). Committed, so the record
+// travels with the repo instead of living in one person's clone.
+export const MANAGED_LEDGER = '.sdlc/managed.json';
+// Suffix for the copy written beside a managed file before its content is replaced without that
+// proof — the local edit is always recoverable from the working tree, not only from git history.
+export const BACKUP_SUFFIX = '.yad-orig';
+
 export const wiringFor = (platform) => [
   ...REPO_WIRING.common,
   ...(REPO_WIRING[platform] || []),

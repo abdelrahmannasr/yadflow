@@ -30,11 +30,13 @@ ${c.bold('Setup & maintenance')}
   yad setup            Guided first-run setup (profile interview, install, connect & wire repos)
                        profile flags: --solo | --team <n>, --greenfield | --brownfield,
                        --monorepo | --separate, --tools (configure design/testing/learning now)
-  yad check            Report what is missing / drifted / stale / legacy (read-only)
+  yad check            Report what is missing / drifted / modified / stale / legacy (read-only)
   yad check --fix      Reconcile: fill what is missing, update what changed
   yad update           Apply drift only (alias for: check --fix --scope=changed);
                        installs newly-added skills, updates changed skills + gate scripts,
-                       and migrates pre-2.0 sdlc-* installs to the yad-* names
+                       and migrates pre-2.0 sdlc-* installs to the yad-* names.
+                       A managed file YOU edited is reported 'modified' and left alone;
+                       --overwrite-local replaces it (saving a <file>.yad-orig backup)
   yad update --push    Also commit each repo's applied changes and push them straight to the
                        default branch of the hub + every connected repo (a chore(yad-update)
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits
@@ -159,6 +161,8 @@ ${c.bold('Options')}
   --no-push             gate ci: commit the ledger but do not push
   --push                check --fix / update: commit + push applied changes to the default branch
   --allow-branch        check --fix --push / update --push / repo refresh --push: allow committing on a non-default branch
+  --overwrite-local     check --fix / update: replace managed files reported as 'modified'
+                        (a <file>.yad-orig backup is written first)
   -h, --help            Show this help
   -v, --version         Print version
 
@@ -178,6 +182,7 @@ function parseArgs(argv) {
     else if (a === '--no-push') o.noPush = true;
     else if (a === '--push') o.push = true;
     else if (a === '--allow-branch') o.allowBranch = true;
+    else if (a === '--overwrite-local') o.overwriteLocal = true;
     else if (a === '--merged') o.merged = true;
     else if (a === '--overview') o.overview = true;
     // `--check` is a bare boolean for `docs sync --check`, but takes a value for
@@ -232,10 +237,10 @@ async function main() {
       });
       break;
     case 'check':
-      await reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, today });
+      await reconcile(o.dir, { fix: o.fix, scope: o.scope, force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;
     case 'update':
-      await reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, today });
+      await reconcile(o.dir, { fix: true, scope: 'changed', force: o.force, push: o.push, allowBranch: o.allowBranch, overwriteLocal: o.overwriteLocal, today });
       break;
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });

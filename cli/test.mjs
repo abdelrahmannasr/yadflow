@@ -194,6 +194,93 @@ test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs 
   }
 });
 
+// #164 — `yad update` used to rewrite every managed file that merely DIFFERED from the shipped
+// template, so a team's local edit (a documented CI constraint, in the report) vanished with no
+// warning and no backup. The provenance ledger separates "stale copy we wrote" from "copy they
+// edited"; only the first is reconciled silently.
+const MANAGED = '.sdlc/managed.json';
+const localEdit = (p, line = '<!-- our CI constraint -->\n') => fs.writeFileSync(p, line + fs.readFileSync(p, 'utf8'));
+
+test('issue #164: a locally modified managed file is reported, never silently overwritten', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  const tpl = path.join(backend, '.github/pull_request_template.md');
+  assert.ok(JSON.parse(fs.readFileSync(path.join(backend, MANAGED), 'utf8'))
+    .files['.github/pull_request_template.md'], 'the install records what it wrote');
+
+  localEdit(tpl);
+  const edited = fs.readFileSync(tpl, 'utf8');
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false }));
+  assert.equal(checked.value.counts.modified, 1, 'read-only check reports it as modified, not outdated');
+  assert.equal(checked.value.counts.outdated, 0);
+  assert.match(checked.out, /pull_request_template\.md is locally modified/);
+  assert.match(checked.out, /--overwrite-local/, 'the report names the way to replace it');
+
+  const updated = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+  assert.equal(fs.readFileSync(tpl, 'utf8'), edited, 'the local edit survives the update');
+  assert.equal(updated.value.modified, 1);
+  assert.match(updated.out, /left untouched — this update did not reach them/);
+  assert.ok(!fs.existsSync(`${tpl}.yad-orig`), 'nothing was replaced, so nothing was backed up');
+
+  // --force re-copies what is already correct; it must NOT reach a modified file.
+  await captureConsole(() => reconcile(T, { fix: true, force: true }));
+  assert.equal(fs.readFileSync(tpl, 'utf8'), edited, '--force is not an escape hatch for local edits');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('issue #164: --overwrite-local replaces the edit and saves it beside the file', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  const tpl = path.join(backend, '.github/pull_request_template.md');
+  localEdit(tpl);
+  const edited = fs.readFileSync(tpl, 'utf8');
+
+  const out = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed', overwriteLocal: true }));
+  assert.match(out.out, /previous content saved to pull_request_template\.md\.yad-orig/);
+  assert.equal(fs.readFileSync(`${tpl}.yad-orig`, 'utf8'), edited, 'the discarded edit is recoverable from the tree');
+  assert.equal(
+    fs.readFileSync(tpl, 'utf8'),
+    fs.readFileSync(path.join(ROOT, 'skills/yad-pr-template/templates/github/pull_request_template.md'), 'utf8'),
+    'the shipped template is back',
+  );
+  const after = await reconcile(T, { fix: false });
+  assert.equal(after.counts.modified, 0, 'the replaced file is recorded as ours again');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('issue #164: a managed file with no record is still updated, but backed up first', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  // An install made before the ledger existed: drift is real drift there, so the routine upgrade
+  // must still land — we just cannot prove we wrote what is on disk, so it is never discarded.
+  fs.rmSync(path.join(backend, MANAGED));
+  const gate = path.join(backend, 'checks/spec-link.sh');
+  fs.writeFileSync(gate, '# an older release of this gate\n');
+
+  const out = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+  assert.equal(out.value.counts.modified, 0, 'no record is not evidence of an edit');
+  assert.equal(out.value.counts.outdated, 1);
+  assert.equal(fs.readFileSync(`${gate}.yad-orig`, 'utf8'), '# an older release of this gate\n');
+  assert.match(out.out, /previous content saved to spec-link\.sh\.yad-orig/);
+  assert.ok(fs.readFileSync(gate, 'utf8').includes('spec-link'), 'the shipped gate script landed');
+
+  // …and the ledger is re-seeded from every file that now matches the template, so the NEXT edit is
+  // detected exactly (this is the one-time cost of migrating an install).
+  localEdit(gate, '# local tweak\n');
+  const next = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.equal(next.counts.modified, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('issue #164: a corrupt provenance ledger fails loudly instead of forgetting the record', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(backend, MANAGED), '{ not json');
+  await assert.rejects(reconcile(T, { fix: true, scope: 'changed' }), /corrupt JSON/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('check detects exactly one missing, one outdated, one stale', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
@@ -1606,6 +1693,24 @@ test('runSetup: invalid programmatic IDE target aborts before skills or stamp ar
   assert.ok(!fs.existsSync(path.join(T, '.claude')), 'no skills copied');
   assert.ok(!fs.existsSync(path.join(T, '.sdlc/cli-version.json')), 'no version stamp written');
   assert.ok(!fs.existsSync(outside), 'no traversal destination created');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('issue #164: `yad setup` re-run keeps a locally modified managed file too', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  const tpl = path.join(backend, '.github/pull_request_template.md');
+  localEdit(tpl);
+  const edited = fs.readFileSync(tpl, 'utf8');
+
+  process.env.SDLC_NONINTERACTIVE = '1';
+  let out;
+  try {
+    out = await captureConsole(() => runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }));
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  // The wizard wires with force:true — without the guard it would be a second silent-clobber path.
+  assert.equal(fs.readFileSync(tpl, 'utf8'), edited, 'setup does not clobber the edit either');
+  assert.match(out.out, /kept locally modified/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

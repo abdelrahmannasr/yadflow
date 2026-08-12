@@ -10,18 +10,18 @@ import {
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
 import { preflightGuardReadiness } from './hubcommit.mjs';
-import { VERSION, PROJECT_FILES } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
-  ideTargetStateFor,
+  ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
-import { groupByRoot, commitUpdates } from './update-commit.mjs';
+import { groupByRoot, commitUpdates, repoLabel } from './update-commit.mjs';
 
-const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
+const MARK = { missing: c.red('missing'), new: c.cyan('new'), outdated: c.yellow('outdated'), modified: c.cyan('modified'), stale: c.yellow('stale'), legacy: c.yellow('legacy'), removed: c.yellow('removed'), ok: c.green('ok') };
 
-export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false } = {}) {
+export async function reconcile(root, { fix = false, scope = 'all', force = false, push = false, allowBranch = false, overwriteLocal = false } = {}) {
   log(c.bold(`\nSDLC reconcile  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}\n`));
 
@@ -91,7 +91,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (!byScope.has(a.scope)) byScope.set(a.scope, []);
     byScope.get(a.scope).push(a);
   }
-  const counts = { missing: 0, new: 0, outdated: 0, stale: 0, legacy: 0, removed: 0, ok: 0 };
+  const counts = { missing: 0, new: 0, outdated: 0, modified: 0, stale: 0, legacy: 0, removed: 0, ok: 0 };
   for (const [scopeName, items] of byScope) {
     const notOk = items.filter((i) => i.status !== 'ok');
     items.forEach((i) => counts[i.status]++);
@@ -125,16 +125,29 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     warn('existing .cluade path was left untouched; review its contents and remove it manually');
   }
 
+  // A managed file the team edited is NEVER rewritten by a plain update — that silent clobber is what
+  // #164 reported. It is reported on every run (honest drift) until either the edit is dropped or
+  // `--overwrite-local` replaces it, which still saves the previous content beside it.
+  const modified = actions.filter((a) => a.status === 'modified');
+  for (const m of modified) {
+    warn(`${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
+  }
+  if (modified.length && !overwriteLocal) {
+    hand(`keep the edits (reported as \`modified\` on every check), or replace them with \`yad update --overwrite-local\` — each previous version is saved beside the file as <file>${BACKUP_SUFFIX}`);
+  }
+
   const fixable = actions.filter((a) =>
-    a.status !== 'ok' && (scope === 'all' ? true : a.status !== 'missing'),
+    a.status !== 'ok'
+    && (a.status !== 'modified' || overwriteLocal)
+    && (scope === 'all' ? true : a.status !== 'missing'),
   );
   log('');
-  log(c.dim(`summary: ${counts.missing} missing, ${counts.new} new, ${counts.outdated} outdated, ${counts.stale} stale, ${counts.legacy} legacy, ${counts.removed} removed, ${counts.ok} ok`));
+  log(c.dim(`summary: ${counts.missing} missing, ${counts.new} new, ${counts.outdated} outdated, ${counts.modified} modified, ${counts.stale} stale, ${counts.legacy} legacy, ${counts.removed} removed, ${counts.ok} ok`));
 
   if (!fix) {
     if (push) warn('--push has no effect without --fix (there is nothing applied to commit).');
     if (fixable.length || gaps.length) hand('run `yad check --fix` to reconcile (or `yad setup` for missing one-time setup).');
-    return { counts, gaps, applied: 0 };
+    return { counts, gaps, applied: 0, modified: modified.length };
   }
 
   // --- apply --- (collect the applied actions so --push can stage each repo's exact allowlist) ---
@@ -145,16 +158,32 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     a.apply();
     applied++;
     appliedActions.push(a);
-    info(`${a.status} → fixed: ${a.scope}/${a.item}`);
+    // A backup means the replaced content was not provably ours (a pre-ledger install, or an edit
+    // --overwrite-local was told to discard). Never report that as an ordinary template adoption.
+    info(`${a.status} → fixed: ${a.scope}/${a.item}${a.backup ? ` ${c.yellow(`(previous content saved to ${path.basename(a.backup)})`)}` : ''}`);
   }
   if (force) {
+    // --force re-copies what is already correct; it deliberately does NOT reach a `modified` file —
+    // only --overwrite-local discards a local edit, and only after backing it up.
     for (const a of actions.filter((a) => a.status === 'ok')) { a.apply(); appliedActions.push(a); }
   }
   // Refresh the version stamp and persist only the canonical targets used to build actions. This also
   // completes legacy/corrupt target migration even when no skill content itself needed an update.
   writeCanonicalStamp();
   appliedActions.push({ scope: 'hub', item: PROJECT_FILES.version, status: 'stamp', root, paths: [PROJECT_FILES.version] });
+  // Record what we wrote (and what was already correct) so the NEXT update can tell a stale managed
+  // file from an edited one. Seeding the already-correct files is what migrates a pre-ledger install.
+  // A file left as `modified` records nothing — it differs from the template by definition.
+  for (const ledgerRoot of recordManagedWrites(actions)) {
+    appliedActions.push({
+      scope: repoLabel(root, ledgerRoot), item: MANAGED_LEDGER, status: 'stamp',
+      root: ledgerRoot, paths: [MANAGED_LEDGER],
+    });
+  }
   applied ? ok(`reconciled ${applied} item(s)`) : info('nothing to fix');
+  if (modified.length && !overwriteLocal) {
+    warn(`${modified.length} locally modified file(s) left untouched — this update did not reach them`);
+  }
   if (gaps.length) hand('one-time setup still missing — run `yad setup`.');
 
   // --- publish: commit each repo's applied changes and push directly to its default branch ---
@@ -182,5 +211,5 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
       },
     });
   }
-  return { counts, gaps, applied };
+  return { counts, gaps, applied, modified: modified.length };
 }
