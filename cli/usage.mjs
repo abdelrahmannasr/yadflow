@@ -243,11 +243,17 @@ function memberFlags(m) {
 
 // Team-level hygiene, keyed by epic/story — a ship with no recorded engineer review is a process gap,
 // not attributable to one person, so it lives here rather than in a member's flag list.
+//
+// A `retroactive: true` ship is EXCLUDED: it is a `yad checkpoint --retro-ship` reconciliation of a
+// story that shipped before the ledger existed, so it never had a tracked PR to review — counting it
+// as a missing review reports a gap the team could not have filled. It also scales with repo count
+// (one backfill shard per repo since #166), which would swamp the real gaps with reconciliation noise.
 export function shipHygiene(root, { since, until } = {}) {
   const items = [];
   for (const epic of listEpics(root)) {
     for (const s of readShips(path.join(root, 'epics', epic))) {
       if (!inWindow(s.shippedAt, since, until)) continue;
+      if (s.retroactive) continue;
       if (!Array.isArray(s.engineer_review) || s.engineer_review.length === 0) {
         items.push({ epic, story: s.story || null, task: s.task || null, repo: s.repo || null, shippedAt: s.shippedAt || null });
       }

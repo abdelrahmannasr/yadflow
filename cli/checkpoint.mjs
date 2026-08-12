@@ -22,7 +22,7 @@
 //      marker would strand the PR's required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
+import { c, log, ok, info, fail, hand, exists, readJSON, pushWithRebase } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { loadHub } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
@@ -171,6 +171,26 @@ export function stagedStoryIsStatusOnly(git, file) {
 // (with a printed reason) aborts the commit; `file` is the shard just written, so a dry run can delete it
 // and leave no side effect. Does NOT author the story frontmatter — it only supplies the missing
 // evidence, and the human must have ALREADY flipped `status:` to a back-half value in the working tree.
+//
+// ONE repo per run (#166). A story that shipped in several repos is backfilled by re-running with each
+// `--repo`; the second run finds the flip already committed, so it lands only the new ship shard.
+//
+// The repo names a retro ship MAY carry — the story's own `repos:` frontmatter (its statement of where
+// it was implemented), else the hub's connected-repo registry as the project-wide fallback. Used to
+// reject a typo'd/mis-cased/invented `--repo` (#166 review): once the duplicate guard is per repo, a
+// wrong name no longer collides with anything, so nothing else would stop it from committing a
+// `retroactive: true` ship for a repo that never existed. Returns `{ names: [], source: 'none' }` when
+// neither declares anything — a legacy story with no metadata is still backfillable, never blocked on
+// a missing list.
+export function retroShipRepos(root, storyFile) {
+  const declared = readFrontmatter(storyFile).repos;
+  const story = (Array.isArray(declared) ? declared : declared ? [declared] : []).map(String).filter(Boolean);
+  if (story.length) return { names: story, source: 'story' };
+  const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const names = (Array.isArray(reg?.repos) ? reg.repos : []).map((r) => r?.name).filter(Boolean);
+  return { names, source: names.length ? 'registry' : 'none' };
+}
+
 export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, today }) {
   if (!epic || !story) { fail('--retro-ship needs <epic>/<story> (e.g. --retro-ship EP-foo/EP-foo-S01)'); return { ok: false }; }
   if (!repo) { fail('--retro-ship needs --repo <name> (the repo the story shipped in)'); return { ok: false }; }
@@ -189,14 +209,51 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
     return { ok: false };
   }
 
+  // A ship is permanent audit evidence, so the repo it names must be one the story could have shipped
+  // in — an unrecognized `--repo` is a typo, not a discovery. Skipped only when nothing declares any
+  // repo (`source: 'none'`), so a legacy story with no metadata is never blocked.
+  const { names, source } = retroShipRepos(root, storyFile);
+  if (names.length && !names.includes(repo)) {
+    fail(`${repo} is not a repo ${source === 'story' ? `${story} declares` : 'connected to this hub'} — a retroactive ship must name a real repo, never invent one`);
+    hand(`known: ${names.join(', ')} (names are case-sensitive)`);
+    return { ok: false };
+  }
+  // Which of the story's OWN declared repos still lack evidence — read BEFORE the write so both the
+  // refusal and the success path can report honestly how much of a multi-repo backfill is left. Only
+  // the story's own list is used: the hub registry lists every connected repo, which says nothing
+  // about where THIS story shipped.
+  const remaining = () => {
+    if (source !== 'story') return [];
+    let recorded;
+    try { recorded = new Set(readShips(epicDir).filter((s) => s.story === story).map((s) => s.repo)); }
+    catch { return []; } // corrupt build-log — the write below reports it; don't guess at progress
+    return names.filter((n) => !recorded.has(n) && n !== repo);
+  };
+  const left = remaining();
+
   let res;
   try { res = writeRetroShip(epicDir, { story, repo, task, mergeCommit, shippedAt: today }); }
   catch (e) { fail(`could not record retroactive ship — ${e.message}`); return { ok: false }; }
   if (!res.written) {
-    fail(`${story} already has a build-log ship — it is not pre-tracking; use the normal ship/checkpoint flow`);
+    if (res.reason === 'collision') {
+      // Distinct names, ONE shard file (`buildShardName` sanitizes each component) — recording this one
+      // would overwrite the other repo's ship record, so it is refused rather than silently clobbered.
+      fail(`${repo} cannot be recorded: it shares a build-log shard name with ${res.repo ? `the already-recorded ${res.repo}` : `an existing shard (${path.basename(res.file)})`}`);
+      hand('recording it would overwrite that ship record — rename one of the repos in the registry, or record this ship through the normal ship/checkpoint flow');
+      return { ok: false };
+    }
+    // Per REPO, not per story (#166) — so the message names the repo. The follow-up hint names the
+    // story's OWN still-unrecorded repos; with none left there is nothing to re-run, and inventing a
+    // `--repo <other>` at that point would fabricate a ship for a repo the story never shipped in.
+    fail(`${story} already has a build-log ship in ${repo} — it is not pre-tracking there; use the normal ship/checkpoint flow`);
+    if (left.length) hand(`still unrecorded for ${story}: ${left.join(', ')} — re-run with \`--repo <name>\` for each`);
     return { ok: false };
   }
   ok(`recorded retroactive ship for ${story} (${repo})${mergeCommit ? ` @ ${mergeCommit}` : ''}`);
+  // A multi-repo story is only half-reconciled until every declared repo has evidence, and nothing
+  // downstream reports the gap (the story already reads `shipped`) — so say it here, while the
+  // operator is running the backfill.
+  if (left.length) hand(`${story} declares ${names.length} repos — still unrecorded: ${left.join(', ')}; re-run with \`--repo <name>\` for each`);
   return { ok: true, file: res.file };
 }
 

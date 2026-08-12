@@ -115,7 +115,8 @@ ${c.bold('Build helpers')}
   yad checkpoint --retro-ship <epic>/<story> --repo <r>
                                        Record a retroactive build-log ship for a PRE-TRACKING story
                                        (merged before ledger tracking), then carry its status: shipped
-                                       flip in the same commit (--merge-commit <sha>, --task <t> opt.)
+                                       flip in the same commit (--merge-commit <sha>, --task <t> opt.);
+                                       one repo per run — re-run per --repo for a multi-repo story
   yad tidy up [<epic>] [--push]        Fold FINISHED back-half shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
                                        ledger, as one chore(hub) commit — the manual "pack it up"

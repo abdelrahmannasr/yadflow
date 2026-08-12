@@ -1,11 +1,12 @@
 // Dependency-free tests for the yad CLI. Run: node --test cli/test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
@@ -1323,6 +1324,14 @@ async function grab(fn) {
   const out = [];
   console.log = (...a) => out.push(a.map(String).join(' '));
   try { await fn(); } finally { console.log = orig; }
+  return out.join('\n');
+}
+// The same capture for a SYNCHRONOUS call — returns what was printed.
+function grabSync(fn) {
+  const orig = console.log;
+  const out = [];
+  console.log = (...a) => out.push(a.map(String).join(' '));
+  try { fn(); } finally { console.log = orig; }
   return out.join('\n');
 }
 // Write a minimal per-epic state ledger under T/epics/<id>/.sdlc/state.json for driver tests.
@@ -5974,6 +5983,23 @@ test('usage: a ship with no engineer review is flagged as a hygiene gap', () => 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('usage: a retroactive backfill ship is NOT a hygiene gap, however many repos it spans (#166)', () => {
+  const T = usageFixture();
+  // Three per-repo `--retro-ship` shards for one pre-tracking story: reconciliation records, not
+  // un-reviewed merges — they never had a tracked PR to review.
+  const dir = path.join(T, 'epics/EP-x/.sdlc/build-log');
+  fs.mkdirSync(dir, { recursive: true });
+  for (const repo of ['web', 'api', 'jobs']) {
+    fs.writeFileSync(path.join(dir, `EP-x-S03-retro-${repo}.json`),
+      JSON.stringify({ story: 'EP-x-S03', task: 'retro', repo, retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-01-14' }));
+  }
+  const model = buildModel(T, {});
+  assert.equal(model.hygiene.length, 1, 'still exactly the one real empty-review ship');
+  assert.equal(model.hygiene[0].story, 'EP-x-S02');
+  assert.ok(!model.hygiene.some((h) => h.story === 'EP-x-S03'), 'no reconciliation noise, and none per repo');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('usage: rendered output never leaks emails or comment bodies', () => {
   const T = usageFixture();
   const model = buildModel(T, {});
@@ -6069,7 +6095,7 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
 // yad checkpoint — commit the machine-written back-half hub state (trust-log/build-log/build-state)
 // ---------------------------------------------------------------------------------------------
 const {
-  runCheckpoint, backHalfPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip,
+  runCheckpoint, backHalfPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip, retroShipRepos,
 } = await import('./checkpoint.mjs');
 const { hubGit } = await import('./hubcommit.mjs');
 
@@ -6335,10 +6361,41 @@ test('runCheckpoint --retro-ship records the missing ship AND carries the flip i
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runCheckpoint --retro-ship refuses a story that already has a real build-log ship (#142)', async () => {
+test('runCheckpoint --retro-ship records a MULTI-REPO pre-tracking story one repo at a time (#166)', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
-  writeStory(T, 'EP-a', 'EP-a-S01', 'shipped'); // ship:true ⇒ a real ship already exists
+  // A pre-tracking story that shipped in TWO repos: no ship evidence in either.
+  const storyFile = path.join(T, 'epics/EP-a/stories/EP-a-S01.md');
+  fs.mkdirSync(path.dirname(storyFile), { recursive: true });
+  const story = (status) => `---\nstatus: ${status}\nrepos: [web, api]\n---\n\n# EP-a-S01\n`;
+  fs.writeFileSync(storyFile, story('approved'));
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed pre-tracking multi-repo story');
+  fs.writeFileSync(storyFile, story('shipped')); // the human's flip — the status: line alone
+
+  await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  const first = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.ok(first.includes('epics/EP-a/.sdlc/build-log/EP-a-S01-retro-web.json'), 'the first repo shard is committed');
+  assert.ok(first.includes('epics/EP-a/stories/EP-a-S01.md'), 'the status flip rides the first commit');
+
+  // The SECOND repo — a story-only guard (#166) refused here, stranding the story half-recorded.
+  const out = await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'api', today: '2026-07-14' } }));
+  assert.ok(!/already has a build-log ship/.test(out), 'the second repo is still pre-tracking — not refused');
+  const second = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
+  assert.deepEqual(second, ['epics/EP-a/.sdlc/build-log/EP-a-S01-retro-api.json'], 'only the new shard lands — the flip was already committed');
+  assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'nothing left uncommitted — no raw git-to-main needed');
+
+  // …and a repo that IS recorded is still guarded.
+  const again = await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  assert.match(again, /already has a build-log ship in web/, 'the refusal names the repo');
+  assert.ok(process.exitCode, 'refusal sets a non-zero exit code');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --retro-ship refuses a story that already has a real build-log ship in that repo (#142, #166)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'shipped'); // ship:true ⇒ a real ship already exists, in repo `web`
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed shipped story');
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
@@ -6402,6 +6459,94 @@ test('recordRetroShip: guards on missing epic/story/repo and a nonexistent targe
   assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web' }).ok, false, 'a nonexistent story is rejected');
   assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01' }).ok, false, 'missing --repo is rejected');
   process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// --- #166 review: the per-repo guard must not become a licence to invent ledger evidence ---
+
+test('recordRetroShip REFUSES a repo the story does not declare — a typo must not fabricate a ship (#166)', () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'shipped', { ship: false }); // declares repos: [web]
+  const out = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'wbe', today: '2026-07-14' }));
+  assert.match(out, /wbe is not a repo EP-a-S01 declares/, 'the typo is named and refused');
+  assert.match(out, /known: web/, 'the declared repos are listed');
+  assert.ok(!fs.existsSync(path.join(T, 'epics/EP-a/.sdlc/build-log')), 'no shard written for an undeclared repo');
+  // Case matters — `Web` is not `web`.
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'Web', today: '2026-07-14' }).ok, false);
+  // The declared one is accepted.
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }).ok, true);
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('recordRetroShip REFUSES a repo whose shard name collides with a recorded one — never overwrite evidence (#166)', () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  // `api.v2` and `api_v2` both sanitize to `api_v2` in the shard filename.
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'api.v2', today: '2026-07-14' }).ok, true);
+  const shard = path.join(T, 'epics/EP-a/.sdlc/build-log/EP-a-S01-retro-api_v2.json');
+  const before = fs.readFileSync(shard, 'utf8');
+  const out = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'api_v2', today: '2026-07-14' }));
+  assert.match(out, /shares a build-log shard name with the already-recorded api\.v2/, 'the collision is explained');
+  assert.equal(fs.readFileSync(shard, 'utf8'), before, 'the first repo\'s ship record is untouched');
+  assert.deepEqual(fs.readdirSync(path.dirname(shard)), ['EP-a-S01-retro-api_v2.json'], 'no second shard');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --retro-ship --dry-run never deletes an already-committed shard (#166)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: approved\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
+  await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'api.v2', today: '2026-07-14' } }));
+  const shard = 'epics/EP-a/.sdlc/build-log/EP-a-S01-retro-api_v2.json';
+  assert.ok(git(T, 'ls-files', shard).toString().trim(), 'the first repo\'s shard is committed');
+  // The colliding repo as a PREVIEW: it must refuse, and must not touch the committed shard.
+  const out = await grab(() => runCheckpoint(T, { dryRun: true, retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'api_v2', today: '2026-07-14' } }));
+  assert.match(out, /shares a build-log shard name/);
+  assert.ok(fs.existsSync(path.join(T, shard)), 'the committed shard still exists on disk');
+  assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'a dry run left no deletion staged or unstaged');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('recordRetroShip reports the still-unrecorded declared repos, and drops the hint when none are left (#166)', () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web, api]\n---\n\n# EP-a-S01\n`);
+  const first = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }));
+  assert.match(first, /still unrecorded: api/, 'a half-done backfill says what is left');
+  const second = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'api', today: '2026-07-14' }));
+  assert.ok(!/still unrecorded/.test(second), 'the last repo reports no remainder');
+  // A refused re-run of a fully-recorded story must NOT invite a `--repo <other>` that would fabricate one.
+  const again = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }));
+  assert.match(again, /already has a build-log ship in web/);
+  assert.ok(!/re-run with/.test(again), 'no hint steering the operator into an invented repo');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('retroShipRepos: story frontmatter wins, the registry is the fallback, neither blocks a bare legacy story (#166)', () => {
+  const T = hubForCheckpoint();
+  const storyFile = path.join(T, 'epics/EP-a/stories/EP-a-S01.md');
+  fs.mkdirSync(path.dirname(storyFile), { recursive: true });
+  fs.writeFileSync(storyFile, `---\nstatus: shipped\nrepos: [web, api]\n---\n\n# EP-a-S01\n`);
+  assert.deepEqual(retroShipRepos(T, storyFile), { names: ['web', 'api'], source: 'story' });
+  // No `repos:` on the story ⇒ the hub's connected repos.
+  fs.writeFileSync(storyFile, `---\nstatus: shipped\n---\n\n# EP-a-S01\n`);
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'web' }, { name: 'api' }] }));
+  assert.deepEqual(retroShipRepos(T, storyFile), { names: ['web', 'api'], source: 'registry' });
+  // Neither declares anything ⇒ nothing to validate against; the backfill is NOT blocked.
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+  assert.deepEqual(retroShipRepos(T, storyFile), { names: [], source: 'none' });
+  assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'anything', today: '2026-07-14' }).ok, true);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -6568,7 +6713,7 @@ test('buildCheckpointMessage subject matches the hub commit-message gate regex a
 // ---------------------------------------------------------------------------------------------
 // cli/ledger.mjs — shard-then-fold union reader + fold (the conflict-free ledger storage)
 // ---------------------------------------------------------------------------------------------
-const { readTrustRuns, readShips, updateShip, foldTrust, trustShardName, buildShardName, writeRetroShip } = await import('./ledger.mjs');
+const { readTrustRuns, readShips, updateShip, foldTrust, foldBuild, trustShardName, buildShardName, writeRetroShip, withLedgerLock } = await import('./ledger.mjs');
 
 // Build an epic dir with a .sdlc/. Returns the epicDir (what the ledger fns take).
 function ledgerEpic() {
@@ -6650,8 +6795,45 @@ test('writeRetroShip: writes a retroactive shard for a pre-tracking story; refus
   assert.deepEqual(ship, { story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
   assert.ok(!('mergeCommit' in ship), 'no mergeCommit is invented when the caller omits it');
   assert.ok(readShips(epicDir).some((s) => s.story === 'EP-x-S01'), 'readShips now proves the story shipped');
-  // A second call refuses — the story now has a ship, so it is not pre-tracking.
+  // A second call for the SAME repo refuses — it is no longer pre-tracking there.
   assert.deepEqual(writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be' }), { written: false, reason: 'exists' });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeRetroShip: the guard is per (story, repo) — a multi-repo story is recorded one repo at a time (#166)', () => {
+  const { T, epicDir } = ledgerEpic();
+  assert.equal(writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' }).written, true);
+  // The SECOND repo of the same story is still pre-tracking there — it must be recordable.
+  const web = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'web', shippedAt: '2026-07-14' });
+  assert.equal(web.written, true, 'a story-only guard would have locked out every repo after the first');
+  assert.match(web.file, /EP-x-S01-retro-web\.json$/, 'its own shard — no collision with the be shard');
+  assert.deepEqual(
+    readShips(epicDir).filter((s) => s.story === 'EP-x-S01').map((s) => s.repo).sort(),
+    ['be', 'web'], 'both repos now carry ship evidence',
+  );
+  // …and each repo is still guarded once recorded.
+  assert.equal(writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'web' }).written, false);
+  // A REAL ship in one repo does not block the backfill of a DIFFERENT repo either.
+  writeBuildShard(epicDir, { story: 'EP-x-S02', task: 'T01', repo: 'be', engineer_review: [] });
+  assert.equal(writeRetroShip(epicDir, { story: 'EP-x-S02', repo: 'web' }).written, true);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeRetroShip: refuses a repo whose SHARD NAME collides with a recorded one — never clobbers evidence (#166)', () => {
+  const { T, epicDir } = ledgerEpic();
+  // `safe()` maps every character outside [A-Za-z0-9_-] to `_`, so these two names share one filename.
+  const first = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'api.v2', shippedAt: '2026-07-14' });
+  assert.equal(first.written, true);
+  const before = fs.readFileSync(first.file, 'utf8');
+  assert.deepEqual(writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'api_v2' }), { written: false, reason: 'collision', repo: 'api.v2' });
+  assert.equal(fs.readFileSync(first.file, 'utf8'), before, 'the recorded ship is byte-for-byte intact');
+  // The same protection when readShips cannot SEE the shard (corrupt JSON is skipped by readShardDir):
+  // the target file itself is never overwritten.
+  fs.writeFileSync(first.file, '{ not json');
+  const res = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'api.v2' });
+  assert.equal(res.written, false);
+  assert.equal(res.reason, 'collision');
+  assert.equal(fs.readFileSync(first.file, 'utf8'), '{ not json', 'a corrupt shard is left for a human, not silently replaced');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -6660,7 +6842,7 @@ test('writeRetroShip: records mergeCommit + a custom task when supplied; refuses
   const r = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', task: 'T07', mergeCommit: 'deadbeef', shippedAt: '2026-07-14' });
   assert.match(r.file, /EP-x-S01-T07-be\.json$/);
   assert.equal(JSON.parse(fs.readFileSync(r.file, 'utf8')).mergeCommit, 'deadbeef');
-  // A story that already has a normal ship must be refused (it is not pre-tracking).
+  // A story that already has a normal ship IN THAT REPO must be refused (it is not pre-tracking there).
   writeBuildShard(epicDir, { story: 'EP-x-S02', task: 'T01', repo: 'be', engineer_review: [] });
   assert.equal(writeRetroShip(epicDir, { story: 'EP-x-S02', repo: 'be' }).written, false);
   fs.rmSync(T, { recursive: true, force: true });
@@ -6683,6 +6865,95 @@ test('foldTrust/foldBuild: fold picked shards into the folded file + delete them
   assert.equal(JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/trust-log.json'))).runs.length, 1, 'S01 folded in');
   // idempotent: S01 already gone, nothing more to fold
   assert.equal(foldTrust(epicDir, onlyS01).folded, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// --- ledger locking: a read-modify-write must not interleave with another writer (CodeRabbit) ---
+
+test('withLedgerLock: holds exclusively, always releases, and leaves nothing git could see', () => {
+  const { T, epicDir } = ledgerEpic();
+  const lock = path.join(epicDir, '.sdlc/build-log.json.lock');
+  assert.equal(withLedgerLock(lock, () => { assert.ok(fs.existsSync(lock), 'held for the whole span'); return 42; }), 42);
+  assert.ok(!fs.existsSync(lock), 'released on the happy path');
+  assert.throws(() => withLedgerLock(lock, () => { throw new Error('boom'); }), /boom/);
+  assert.ok(!fs.existsSync(lock), 'released even when the body throws');
+  // A lock is an EMPTY DIRECTORY — git never tracks one, so it can never ride into a commit.
+  withLedgerLock(lock, () => assert.deepEqual(fs.readdirSync(lock), [], 'the lock holds no files'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('withLedgerLock: a held lock blocks a second writer (YAD-STATE-006), a stale one is reclaimed', () => {
+  const { T, epicDir } = ledgerEpic();
+  const lock = path.join(epicDir, '.sdlc/build-log.json.lock');
+  fs.mkdirSync(lock, { recursive: true });                       // a live holder
+  let ran = false;
+  assert.throws(
+    () => withLedgerLock(lock, () => { ran = true; }, { retries: 1, waitMs: 1 }),
+    (e) => e.code === 'YAD-STATE-006' && /another process is writing build-log/.test(e.message),
+    'a live lock is reported, never stolen',
+  );
+  assert.equal(ran, false, 'the body never ran while another writer held the ledger');
+  // The holder died: its lock ages out and the next writer reclaims it rather than blocking forever.
+  const old = new Date(Date.now() - 120_000);
+  fs.utimesSync(lock, old, old);
+  assert.equal(withLedgerLock(lock, () => 'ok', { retries: 1, waitMs: 1 }), 'ok');
+  assert.ok(!fs.existsSync(lock), 'the reclaimed lock is released again');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('the ship-evidence writers take the ledger lock — no shard is written past another writer', () => {
+  const { T, epicDir } = ledgerEpic();
+  writeBuildShard(epicDir, { story: 'EP-x-S01', task: 'T01', repo: 'be', pr: 7, engineer_review: [] });
+  const w = { retries: 1, waitMs: 1 };                           // don't sit out the real 5s budget
+  for (const l of ['build-log.json.lock', 'trust-log.json.lock']) fs.mkdirSync(path.join(epicDir, '.sdlc', l), { recursive: true });
+  const held = (fn) => assert.throws(fn, (e) => e.code === 'YAD-STATE-006');
+  // This is the CodeRabbit race made deterministic: a second `--retro-ship` (any --task) cannot slip
+  // between the first one's duplicate check and its write.
+  held(() => writeRetroShip(epicDir, { story: 'EP-x-S02', repo: 'be', task: 'T09' }, w));
+  held(() => updateShip(epicDir, (s) => s.pr === 7, (s) => { s.engineer_review = [{ approver: 'x' }]; }, w));
+  held(() => foldBuild(epicDir, () => true, w));
+  held(() => foldTrust(epicDir, () => true, w));                 // its own ledger, its own lock
+  assert.equal(fs.readdirSync(path.join(epicDir, '.sdlc/build-log')).length, 1, 'nothing was written past the lock');
+  assert.deepEqual(readShips(epicDir)[0].engineer_review, [], 'the recorded ship is unchanged');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('writeRetroShip is exclusive ACROSS PROCESSES — four concurrent backfills leave exactly one ship', async () => {
+  const { T, epicDir } = ledgerEpic();
+  // The reported race, run for real: four `--retro-ship` writers for the SAME (story, repo), each with
+  // a different --task, started together. Unlocked, they all read "no ship yet" and each writes its own
+  // <story>-<task>-<repo>.json — four shards where the duplicate guard promises one. The lock is a
+  // cross-PROCESS claim (an atomic mkdir), so exactly one wins and the rest are refused as `exists`.
+  // A barrier makes them genuinely simultaneous: each child announces itself and then spins until the
+  // parent releases all four at once. Without it, node's ~50ms startup staggers them so far apart that
+  // each finishes before the next begins and the race never happens.
+  const src = `import fs from 'node:fs';
+    import { writeRetroShip } from ${JSON.stringify(path.join(ROOT, 'cli/ledger.mjs'))};
+    fs.writeFileSync(process.env.READY, '');
+    const deadline = Date.now() + 10000;
+    while (!fs.existsSync(process.env.GO) && Date.now() < deadline) { /* spin to the barrier */ }
+    const r = writeRetroShip(process.env.EPIC_DIR, { story: 'EP-x-S01', repo: 'be', task: process.env.TASK });
+    console.log(r.written ? 'written' : r.reason);`;
+  const go = path.join(T, 'go');
+  const run = (task) => new Promise((resolve) => {
+    const p = spawn('node', ['--input-type=module', '-e', src], {
+      env: { ...process.env, EPIC_DIR: epicDir, TASK: task, READY: path.join(T, `ready-${task}`), GO: go },
+    });
+    let out = '';
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('close', () => resolve(out.trim()));
+  });
+  const tasks = ['T01', 'T02', 'T03', 'T04'];
+  const runs = tasks.map(run);
+  const armed = Date.now() + 15000;
+  while (tasks.some((t) => !fs.existsSync(path.join(T, `ready-${t}`))) && Date.now() < armed) await delay(10);
+  fs.writeFileSync(go, '');                                      // release all four into the guard together
+  const results = await Promise.all(runs);
+  assert.equal(results.filter((r) => r === 'written').length, 1, `exactly one writer won: ${results.join(',')}`);
+  assert.equal(results.filter((r) => r === 'exists').length, 3, `the rest saw the ship: ${results.join(',')}`);
+  assert.equal(fs.readdirSync(path.join(epicDir, '.sdlc/build-log')).length, 1, 'one shard on disk, not one per task');
+  assert.equal(readShips(epicDir).length, 1);
+  assert.ok(!fs.existsSync(path.join(epicDir, '.sdlc/build-log.json.lock')), 'every process released its lock');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
