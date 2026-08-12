@@ -6444,9 +6444,50 @@ test('runCheckpoint --retro-ship --dry-run leaves NO shard on disk and commits n
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
-  await grab(() => runCheckpoint(T, { dryRun: true, retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  const out = await grab(() => runCheckpoint(T, { dryRun: true, retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
   assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), before, 'dry run commits nothing');
   assert.ok(!fs.existsSync(path.join(T, 'epics/EP-a/.sdlc/build-log/EP-a-S01-retro-web.json')), 'the previewed shard is cleaned up — dry run leaves no side effect');
+  // …and it must SAY so. A past-tense "recorded"/"landed at" over a shard the dry run deletes would tell
+  // the operator the backfill is done, so they never re-run for real and the story keeps `shipped` with
+  // no ship behind it — the #112/#142 drift this command removes.
+  assert.match(out, /would record retroactive ship/, 'the headline speaks in the conditional');
+  assert.match(out, /would land at/, 'so does the shard-path line');
+  assert.doesNotMatch(out, /landed at epics/, 'nothing claims the shard is on disk');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --retro-ship --dry-run rolls the shard back even when it exits EARLY (#167 review)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
+  const shard = path.join(T, 'epics/EP-a/.sdlc/build-log/EP-a-S01-retro-web.json');
+  // Make `git add` fail: an index.lock nobody will release. The dry run has already written its preview
+  // shard by then, so this is the early-return path that used to leak it — leaving an untracked retro
+  // record that refuses the operator's next REAL backfill and rides into the next plain checkpoint.
+  fs.writeFileSync(path.join(T, '.git/index.lock'), '');
+  await grab(() => runCheckpoint(T, { dryRun: true, retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  fs.rmSync(path.join(T, '.git/index.lock'), { force: true });
+  assert.ok(!fs.existsSync(shard), 'the previewed shard is rolled back on the failure path too');
+  // Proof it matters: the real backfill still works, which a leaked shard would have refused.
+  await grab(() => runCheckpoint(T, { retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  assert.ok(fs.existsSync(shard), 'the follow-up real run records the ship');
+  process.exitCode = prev;
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runCheckpoint --retro-ship --dry-run counts the previewed repo as still unrecorded (#167 review)', async () => {
+  const prev = process.exitCode;
+  const T = hubForCheckpoint();
+  fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web, api, mobile]\n---\n\n# EP-a-S01\n`);
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
+  const out = await grab(() => runCheckpoint(T, { dryRun: true, retroShip: { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' } }));
+  // The rolled-back repo belongs in the remaining list: after this dry run NOTHING is recorded, so a hint
+  // naming only api + mobile would send the operator away without the repo they were just previewing.
+  assert.match(out, /still unrecorded: web, api, mobile/, 'the previewed repo is listed again — the dry run recorded nothing');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
 });

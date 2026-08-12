@@ -203,7 +203,8 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   // Evidence and the flip must land TOGETHER — the #112 no-drift invariant. Refuse unless the human has
   // already flipped the story frontmatter to a back-half status in the working tree; otherwise the ship
   // shard would commit while the artifact still says e.g. `approved` — the very drift #112 prevents.
-  if (!BACK_HALF_STATUSES.has(readFrontmatter(storyFile).status)) {
+  const storyStatus = readFrontmatter(storyFile).status;
+  if (!BACK_HALF_STATUSES.has(storyStatus)) {
     fail(`${story} frontmatter is not at in-build|shipped`);
     hand(`set \`status: shipped\` in ${storyRel} first, then re-run — the ship and the flip land in one commit`);
     return { ok: false };
@@ -238,7 +239,12 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
     if (res.reason === 'collision') {
       // Distinct names, ONE shard file (`buildShardName` sanitizes each component) — recording this one
       // would overwrite the other repo's ship record, so it is refused rather than silently clobbered.
-      fail(`${repo} cannot be recorded: it shares a build-log shard name with ${res.repo ? `the already-recorded ${res.repo}` : `an existing shard (${path.basename(res.file)})`}`);
+      // `writeRetroShip` reports a clash EITHER as `repo` (a ship readShips can see) OR as `file` (a shard
+      // on disk it cannot parse) — and a malformed shard can carry a blank `repo`, satisfying neither. Name
+      // whichever it gave us; never index into the one it did not, or the refusal becomes a stack trace.
+      const clashedWith = res.repo ? `the already-recorded ${res.repo}`
+        : res.file ? `an existing shard (${path.basename(res.file)})` : 'an existing ship record';
+      fail(`${repo} cannot be recorded: it shares a build-log shard name with ${clashedWith}`);
       hand('recording it would overwrite that ship record — rename one of the repos in the registry, or record this ship through the normal ship/checkpoint flow');
       return { ok: false };
     }
@@ -249,19 +255,26 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
     if (left.length) hand(`still unrecorded for ${story}: ${left.join(', ')} — re-run with \`--repo <name>\` for each`);
     return { ok: false };
   }
-  ok(`recorded retroactive ship for ${story} (${repo})${mergeCommit ? ` @ ${mergeCommit}` : ''}`);
+  // A dry run WROTE this shard only so the flip could be previewed; it is rolled back before the command
+  // returns. Every line below must therefore speak in the conditional — a past-tense "recorded" would tell
+  // the operator the backfill landed, they would never re-run for real, and the story would keep
+  // `status: shipped` with no ship behind it: exactly the #112/#142 drift this command exists to remove.
+  ok(`${dryRun ? 'would record' : 'recorded'} retroactive ship for ${story} (${repo})${mergeCommit ? ` @ ${mergeCommit}` : ''}`);
   // Name WHERE the record landed. The ledger is shard-then-fold, so this ship is one loose shard and the
   // folded `build-log.json` is untouched until `yad tidy up` runs — an operator who opens build-log.json,
   // finds nothing, and concludes the write was lost is reading half the ledger (#167). Every reader unions
   // the two; say so here, while they are looking. `tidy up` only folds a story whose frontmatter is
-  // `shipped`, so an `in-build` story's shard stays loose (and still readable) by design.
+  // `shipped`, so an `in-build` story's shard stays loose (and still readable) by design — mention the
+  // `shipped` precondition only when it is actually still outstanding.
   const rel = path.relative(root, res.file).split(path.sep).join('/');
   info(`${dryRun ? 'would land at' : 'landed at'} ${rel}`);
-  info(`readers union build-log/ shards with the folded build-log.json; \`yad tidy up\` folds it in once ${story} is \`shipped\``);
+  info(`readers union build-log/ shards with the folded build-log.json; \`yad tidy up\` folds it in${storyStatus === 'shipped' ? '' : ` once ${story} is \`shipped\``}`);
   // A multi-repo story is only half-reconciled until every declared repo has evidence, and nothing
   // downstream reports the gap (the story already reads `shipped`) — so say it here, while the
-  // operator is running the backfill.
-  if (left.length) hand(`${story} declares ${names.length} repos — still unrecorded: ${left.join(', ')}; re-run with \`--repo <name>\` for each`);
+  // operator is running the backfill. `left` excludes the repo just recorded; in a dry run that record is
+  // rolled back, so it is still unrecorded and belongs back in the list.
+  const stillLeft = dryRun && left.length ? [repo, ...left] : left;
+  if (stillLeft.length) hand(`${story} declares ${names.length} repos — still unrecorded: ${stillLeft.join(', ')}; re-run with \`--repo <name>\` for each`);
   return { ok: true, file: res.file };
 }
 
@@ -301,17 +314,25 @@ export async function runCheckpoint(root, opts = {}) {
     retroFile = r.file;
   }
 
+  // A --retro-ship DRY RUN wrote a real shard so the flip could be previewed, and it must be undone on
+  // EVERY exit path below, not just the happy one. An early return that skipped the rollback (git add
+  // failed, nothing staged) would leave an untracked retro shard behind — which then refuses the
+  // operator's next REAL backfill ("already has a build-log ship in <repo>") and rides into the next
+  // plain `yad checkpoint` as permanent `retroactive: true` audit evidence nobody chose to record.
+  // A real run deliberately keeps its shard on a failure (see the commit-failed path below).
+  const rollbackRetro = () => { if (opts.dryRun && retroFile) cleanupRetroShard(retroFile); };
+
   // The machine ledgers PLUS any build-log-backed story `status:` flip (#112) — one commit records
   // both, so the story artifact never drifts from build-log and no raw git-to-main push is needed.
   const pathspecs = [...backHalfPathspecs(root), ...storyStatusPathspecs(root)];
-  if (!pathspecs.length) { info('no back-half ledgers found — nothing to checkpoint'); return; }
+  if (!pathspecs.length) { rollbackRetro(); info('no back-half ledgers found — nothing to checkpoint'); return; }
 
   // Stage the allowlist. `git add -- <spec>` picks up new + modified files, and deletions of tracked
   // files WITHIN a still-present spec (e.g. a removed build-state/<story>.json). A wholesale-deleted
   // top-level ledger is intentionally NOT staged (its spec drops out on the existence check) — an
   // append-only audit ledger vanishing is an anomaly a human should see, not something to auto-commit.
   const add = git('add', '--', ...pathspecs);
-  if (!add.ok) { fail(`git add failed — ${add.stderr.split('\n')[0] || add.code}`); process.exitCode = 1; return; }
+  if (!add.ok) { rollbackRetro(); fail(`git add failed — ${add.stderr.split('\n')[0] || add.code}`); process.exitCode = 1; return; }
 
   // #112 review-bypass guard: a story is only carried when its staged change is the `status:` line
   // ALONE. Unstage any candidate whose working tree also touched prose/other frontmatter — those
@@ -326,6 +347,7 @@ export async function runCheckpoint(root, opts = {}) {
   }
 
   if (git('diff', '--cached', '--quiet', '--', ...pathspecs).ok) {
+    rollbackRetro();
     info('back-half state unchanged — nothing to commit');
     return;
   }
@@ -344,7 +366,7 @@ export async function runCheckpoint(root, opts = {}) {
     git('reset', '-q', '--', ...pathspecs); // restore the index — a dry run must not leave things staged
     // A --retro-ship dry run wrote a shard so the flip could be PREVIEWED above; undo it now so the dry
     // run leaves no side effect on disk (git reset only unstaged it, back to untracked).
-    if (retroFile) cleanupRetroShard(retroFile);
+    rollbackRetro();
     info('dry run — not committed');
     return { message };
   }
