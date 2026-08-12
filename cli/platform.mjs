@@ -378,6 +378,79 @@ export function branchExists(cwd, branch) {
   return remote.code === 2 ? false : null;
 }
 
+// ---- default branch -----------------------------------------------------------------------------
+// The REMOTE's own default branch, asked of the platform. This is the branch the platform (and the
+// tooling that keys off it — CodeRabbit's auto-review eligibility, branch protection, "compare"
+// defaults) considers the trunk, so it is the only authoritative answer to "what should a PR target?".
+// `runner` is injectable so the read is unit-testable without shelling out (mirrors searchIssues).
+// Returns { ok, branch, reason }; never throws — an absent/unauthenticated CLI is just `ok:false`.
+// It is a READ of the remote's own config, so it costs one API round-trip; callers that only need a
+// base branch get it folded into resolveBaseBranch below rather than calling this twice.
+export function platformDefaultBranch(platform, { cwd, runner = run } = {}) {
+  // No `platformReady` probe: an absent CLI already surfaces as a failed spawn, and skipping the probe
+  // keeps the read a pure function of `runner` (so a test never depends on gh/glab being installed).
+  if (!cliFor(platform)) return { ok: false, reason: 'no platform (github/gitlab) to ask' };
+  // This is a live network round-trip on a SYNCHRONOUS command path, so it carries the same ceiling
+  // branchExists documents for its own remote probe: "cannot ask" has to be fast, or a black-holed
+  // host / wedged credential helper turns `yad open-pr` into a hang. A timeout surfaces as ok:false,
+  // which the caller already treats as "the platform could not tell me".
+  const opts = { cwd, timeout: 10_000 };
+  if (platform === 'gitlab') {
+    // `:id` is glab's own placeholder for the project the cwd resolves to (same form as readPrGitLab).
+    const r = runner('glab', ['api', 'projects/:id'], opts);
+    if (!r.ok) return { ok: false, reason: r.stderr || 'glab api projects/:id failed' };
+    try {
+      const branch = JSON.parse(r.stdout)?.default_branch;
+      return branch ? { ok: true, branch } : { ok: false, reason: 'project has no default_branch' };
+    } catch { return { ok: false, reason: 'unreadable glab api response' }; }
+  }
+  const r = runner('gh', ['repo', 'view', '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name'], opts);
+  if (!r.ok) return { ok: false, reason: r.stderr || 'gh repo view failed' };
+  return r.stdout ? { ok: true, branch: r.stdout } : { ok: false, reason: 'gh returned no defaultBranchRef' };
+}
+
+// The branch a PR/MR should target, resolved rather than assumed (issue #168: open-pr hardcoded
+// 'main', so every task PR on a `staging`-trunk repo was mis-based — and CodeRabbit, which decides
+// auto-review eligibility at PR-OPEN time from the base, silently skipped every one of them).
+//
+// Order — most explicit first, and configuration outranks the remote: the same
+// configuration-outranks-the-remote order `yad repo sync` (repo.mjs) and the contract-check gate use,
+// though only this chain has a platform rung — they stop at the local `origin/HEAD`:
+//   1 flag        — an explicit --base; the human said so
+//   2 registry    — the repo's `default_branch` in .sdlc/repos.json
+//   3 hub         — hub.json's `default_branch`, for a PR against the product hub itself
+//   4 platform    — what the remote says (see platformDefaultBranch)
+//   5 origin-head — local `refs/remotes/origin/HEAD`, the same read repo.mjs/hubcommit.mjs use.
+//                   Deliberately NOT `ls-remote`: see branchExists above for why a network probe on
+//                   this path is a hang hazard.
+//   6 fallback    — 'main'
+//
+// `platformDefault` always rides along (when the platform could answer) even if an earlier rung won,
+// so the caller can warn about a base that is not the remote's trunk without a second round-trip.
+// Returns { base, source, platformDefault }.
+export function resolveBaseBranch(platform, {
+  cwd, explicit = null, meta = null, hub = null, runner = run,
+} = {}) {
+  const remote = platformDefaultBranch(platform, { cwd, runner });
+  const platformDefault = remote.ok ? remote.branch : null;
+  const originHead = () => {
+    const r = runner('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { cwd });
+    return r.ok && r.stdout ? r.stdout.replace(/^origin\//, '') : null;
+  };
+  const chain = [
+    ['flag', explicit],
+    ['registry', meta?.default_branch],
+    ['hub', hub?.default_branch],
+    ['platform', platformDefault],
+    ['origin-head', originHead],
+  ];
+  for (const [source, value] of chain) {
+    const branch = typeof value === 'function' ? value() : value;
+    if (branch) return { base: branch, source, platformDefault };
+  }
+  return { base: 'main', source: 'fallback', platformDefault };
+}
+
 // ---- create a PR/MR -----------------------------------------------------------------------------
 // `assignees` = the committer/PR-opener (always set, so the PR is owned by whoever pushed it);
 // `reviewers` = the scope's reviewers + domain-owners (computed by reviewersForScopes). On GitHub an

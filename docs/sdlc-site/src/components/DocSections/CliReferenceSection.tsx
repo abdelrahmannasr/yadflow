@@ -29,7 +29,7 @@ const GROUPS = [
     color: '#1e8449',
     items: [
       'yad commit --type <t> -m <subject> — Conventional subject + trailers + atomic guard',
-      'yad open-pr [--repo <name>] — open a task PR/MR from the repo template',
+      'yad open-pr [--repo <name>] [--base <branch>] — open a task PR/MR from the repo template, based on the repo\'s resolved default branch (warns on a non-default base: no AI first pass)',
       'yad ship --type <t> -m <subject> — commit AND open the PR/MR in one step',
       'yad repo list / yad repo refresh [name] — fresh/stale code-context',
       'yad repo refresh [name] --push — publish refreshed code-maps + the registry to the hub default branch (chore(hub): sync code-context [skip ci])',

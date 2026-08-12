@@ -364,7 +364,10 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    pattern gates commit-message / pr-title / pr-template.
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
-   to print the required reviewers.
+   to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
+   registry `default_branch` → the platform → `origin/HEAD` → `main`), not a hardcoded `main`. If it
+   warns that your base is not the platform default, fix it **before** the PR opens — the AI first pass
+   is decided at open time and retargeting afterwards does not bring it back.
 5. **Engineer review + merge** — `yad-engineer-review` → AI review (advisory) → **engineer approval (a
    human)** → merge. The ship is recorded in the build ledger and the story moves to `in-build` → `shipped`.
    That ledger is **shard-then-fold**: the ship lands as its own file under `.sdlc/build-log/` so two people
@@ -518,7 +521,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |
 | `yad-pr-template` | Install the platform PR/MR template + risk routing + the pr-title/pr-template gate scripts. |
 | `yad-commit` | Commit one staged atomic change by the conventions (`--ai` co-author footer, atomic guard). |
-| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, roster auto-assign). |
+| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, roster auto-assign), based on the repo's **resolved default branch** — `--base` overrides, and a non-default base warns (it costs the AI first pass). |
 | `yad-ship` | Commit **and** open the task PR/MR in one step. |
 | `yad-engineer-review` | AI review → engineer review → merge + record. |
 | `yad-backfill` | Spec already-built / legacy code so new work doesn't break it. |

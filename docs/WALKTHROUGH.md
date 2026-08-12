@@ -99,7 +99,11 @@ build half by hand"** below.
     `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
     step 13.)
 13. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or do
-    12+13 in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR's CI now also
+    12+13 in one step with **`yad ship --type <t> -m <subject> --repo <repo>`**). The PR is based on the
+    repo's **own default branch**, resolved the same way the gates resolve their trunk (the registry's
+    `default_branch`, else the platform's own default, else `origin/HEAD`, else `main`) — `--base`
+    overrides it, and a base that is not the platform default warns, because CodeRabbit skips
+    auto-review on one and retargeting afterwards does not bring it back. The PR's CI now also
     runs the `pr-title` and `pr-template` gates; `yad-pr-template repo:<repo> action: route` prints the
     required reviewers from the Impact & Risk block.
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,

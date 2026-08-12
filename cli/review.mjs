@@ -12,6 +12,7 @@ import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
 import {
   detectPlatform, readPr, mapApprovers, getPrBody, editPrBody, postComment, prNumberFromUrl,
+  resolveBaseBranch,
 } from './platform.mjs';
 import { upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
 import { sequenceDiff } from './walkthrough.mjs';
@@ -45,7 +46,9 @@ function contextBundle(root, { repo, dir, pr } = {}) {
   if (rr.error) return { error: rr.error };
   const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
-  const base = meta?.default_branch || 'main';
+  // Same resolution as `yad open-pr` (#168): without it a repo whose trunk is not `main` grounded the
+  // companion on the wrong diff range — or on a branch that does not exist at all.
+  const { base } = resolveBaseBranch(platform, { cwd: repoRoot, meta });
   const bundle = {
     repo: meta?.name || null,
     repoRoot,

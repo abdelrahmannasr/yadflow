@@ -103,9 +103,11 @@ ${c.bold('Review gate (front half)')}
 
 ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
-  yad open-pr [--repo <name>]          Open a task PR/MR — stage-aware on the hub: a review/EP-*
-                                       branch opens the front-half artifact-review PR (delegates to
-                                       gate open), any other hub branch uses the code-task template
+  yad open-pr [--repo <name>]          Open a task PR/MR against the repo's DEFAULT branch (never a
+                                       hardcoded main; --base overrides) — stage-aware on the hub: a
+                                       review/EP-* branch opens the front-half artifact-review PR
+                                       (delegates to gate open), any other hub branch uses the
+                                       code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
   yad checkpoint [--push]              Commit the machine-written back-half hub state
                                        (trust-log/build-log/build-state) — plus any story
@@ -153,6 +155,9 @@ ${c.bold('Options')}
   --contract-change     commit/open-pr: mark the contract surface touched
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
+  --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
+                        branch (repos.json default_branch, else the platform, else origin/HEAD,
+                        else main); a non-default base loses the AI first pass
   --epic <id>           docs: target one epic's site (EP-<slug>)
   --overview            docs: target the project SDLC-overview site
   --check/--refresh/--wire   docs sync: report stale / rebuild / install Pages CI
