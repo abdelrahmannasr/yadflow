@@ -162,9 +162,24 @@ Keep the `## Automation (<tool>)` section of `test-cases.md` in step with this f
 degraded (`testing: none`), do **not** write `test-links.json`.
 
 ### Step 5 — Advance the authoring step (NOT the gate)
-In `state.json`: set `test-cases.status: "done"` and set `test-cases-review.status: "in_review"`. **Leave
-`currentStep` at `ready-for-build`** — this is the parallel track; moving `currentStep` would pull it
-back from the build half. Write `state.json`. Do **not** touch `approvals.json`.
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+
+**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+`epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
+`yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
+fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
+is pushed around the gate. Commit the artifact set — **`test-cases.md` and, when a testing
+tool was used, `.sdlc/test-links.json`** (artifact-side, not ledger; generated tests live in their
+own code repo, not here) — then hand off to `yad-review-gate`.
+
+**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+`test-cases.status: "done"` and set `test-cases-review.status: "in_review"`. **Leave `currentStep` at
+`ready-for-build`** — this is the parallel track; moving `currentStep` would pull it back from the
+build half. Write `state.json`. Do **not** touch `approvals.json`. On this branch `yad gate open`
+makes the same edit — `markInReview` leaves `currentStep` alone once it is `ready-for-build`
+(`cli/epic-state.mjs`) — so it is a no-op once the gate has run.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the path to `test-cases.md`, the connected testing tool and what it produced (e.g. "Playwright —

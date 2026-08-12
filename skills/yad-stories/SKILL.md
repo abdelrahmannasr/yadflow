@@ -101,12 +101,26 @@ As a <role>, I want <capability>, so that <outcome>.
 `repos` is the field the later build phase reads to know where to scaffold specs — set it precisely.
 
 ### Step 6 — Advance the authoring step (NOT the gate)
-In `state.json`: set `stories.status: "done"`, set `stories-review.status: "in_review"`, and set
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+
+**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+`epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
+`yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
+fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
+is pushed around the gate. Commit **the story files under `stories/` only** — nothing else
+under `.sdlc/` — then hand off to `yad-review-gate`.
+
+**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+`stories.status: "done"`, set `stories-review.status: "in_review"`, and set
 `currentStep: "stories-review"`. Write `state.json`. Do **not** touch `approvals.json`.
 
-> Since 3.11 the CLI also closes the authoring step when its review gate opens or advances, so this
-> edit is a no-op once `yad gate open` has run. A `stories` step left `in_progress` behind a passed
-> `stories-review` used to block the parallel `test-cases` track (`YAD-STATE-005`).
+> **File-only branch only.** Since 3.11 the CLI also closes the authoring step when its review gate
+> opens or advances, so this edit is a no-op once `yad gate open` has run. A `stories` step left
+> `in_progress` behind a passed `stories-review` used to block the parallel `test-cases` track
+> (`YAD-STATE-005`). In bridge mode `gate open` writes nothing and local `gate sync` is advisory —
+> `gate ci` closes the step at merge.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the story IDs created, the repos each touches, and that the next action is **review** via

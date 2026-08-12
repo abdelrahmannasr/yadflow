@@ -171,8 +171,22 @@ Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. 
 (`design: none`), do **not** write `design-links.json`.
 
 ### Step 5 — Advance the authoring step (NOT the gate)
-In `state.json`: set `ui-design.status: "done"`, set `ui-design-review.status: "in_review"`, and set
-`currentStep: "ui-design-review"`. Write `state.json`. Do **not** touch `approvals.json`.
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+
+**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+`epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
+`yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
+fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
+is pushed around the gate. Commit the artifact set — **`ui-design.md`, `DESIGN.md`, and, when a
+design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — then hand off to
+`yad-review-gate`.
+
+**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+`ui-design.status: "done"`, set `ui-design-review.status: "in_review"`, and set
+`currentStep: "ui-design-review"`. Write `state.json`. Do **not** touch `approvals.json`. On this
+branch `yad gate open` makes the same edit, so it is a no-op once the gate has run.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, the connected design
