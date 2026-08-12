@@ -111,6 +111,9 @@ login and requested too — otherwise an escalated step is structurally unsatisf
 reorder commit per epic (the records are the same; only their order changes), then converges
 permanently. On an older yadflow the workaround is to disable the pipeline schedule — merges still
 advance gates via the push path; only the catch-up for squash merges and bare approvals is lost.
+Since the wired job now runs an exact pin rather than floating on the major, that upgrade is a
+deliberate act: `yad update` (which re-stamps `.sdlc/cli-version.json`), or a `gate_sync_version` in
+`hub.json` — see the version table below.
 
 ## Contract re-lock invalidates prior platform approvals too
 
@@ -182,18 +185,32 @@ other way — up through its first review PR/MR; see "the seed of a new epic" be
 **Which yadflow the wired job runs.** Both fragments resolve the version from a `YAD_VERSION` variable
 and fall back to `3`:
 
-| Platform | Where the job reads it | Where you set the pin |
+| # | Source | Set it in |
 |---|---|---|
-| GitHub | workflow `env: YAD_VERSION: ${{ vars.YAD_VERSION \|\| '3' }}` | Settings → Secrets and variables → Actions → **Variables** |
-| GitLab | `npx -y -p "yadflow@${YAD_VERSION:-3}"` | Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
+| 1 | `YAD_VERSION` — used **verbatim**, the operator's override | GitHub: Settings → Secrets and variables → Actions → **Variables**. GitLab: Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
+| 2 | `.sdlc/hub.json` → `gate_sync_version` — this hub's committed pin | edit `hub.json`, commit it |
+| 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the hub | `yad update` re-stamps it |
+| 4 | `3` — floating major, only when nothing above resolves | — |
 
-The default `3` floats on the major, so a published fix reaches a scheduled job on its next pass with
-nobody in the loop — which is how you want a correctness or gate-churn fix to arrive (this page's own
-issue #163 is the example). To adopt releases deliberately instead, set `YAD_VERSION` to an exact
-version.
-The pin lives in **platform config, not in the wired file**: `yad` owns that file and `yad check --fix`
-rewrites it byte-for-byte from the template, so a version edited into it would be silently reverted on
-the next sync. A hub that pins then owns its own upgrade decision — including for fixes.
+Sources 2 and 3 are **validated** before use: an exact `3.x.y` release token, prereleases included
+(`3.16.0-rc.1` is a legitimate pin; `latest` and a bare `3` are not). A `.sdlc/cli-version.json`
+written by a long-untouched project can still say something like `1.0.2`, a version with no `yad gate ci`
+in it at all, and the value is interpolated into `npx -p "yadflow@$V"` on a runner holding a push token —
+so anything that is not an exact release of this major is skipped, loudly, in favour of the next source.
+`YAD_VERSION` is exempt: it is a human's deliberate act, and it is the only way to cross a major.
+
+**Why this is no longer a floating major.** It used to be, on the argument that a published fix should
+reach a scheduled job with nobody in the loop — this page's own issue #163 as the example. The same
+mechanism is how #163's churn *arrived*: the CI fragment ran `yadflow@3`, so 3.13.1 rolled onto every
+wired hub automatically and took the reporting one from 20 to 96 churn commits an hour, with nobody
+deciding to upgrade. Issue #163's fourth suggested fix was to stop that. The trade-off is real and cuts
+both ways — a hub is no longer carried onto a fix for free, so **if the resolved pin is older than
+3.15.3, run `yad update` or disable the schedule** (`yad doctor` flags a stale stamp).
+
+The pin is **never stamped into the wired file**: `yad` owns that file and `yad check --fix` rewrites it
+byte-for-byte from the template, so a version edited into it would report `outdated` on every check and
+be reverted on the next sync. That is exactly why the job resolves it from committed files at run time
+instead — the fragment itself stays byte-identical to what ships.
 
 **Why no pre-merge write fixes the gate.** Keeping CI off the PR head means an in-flight approval is
 never dismissed by a CI commit, and the PR's required checks never strand on a `[skip ci]` CI commit.
@@ -204,7 +221,10 @@ commit — the advance plus the `draft → approved` status flip — lands on th
 
 **The ledger is CI-owned (bridge mode only).** Humans never commit gate-state files: the `ledger-guard`
 check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
-.json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). Under Path B **no
+.json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). "Bridge mode" there
+means the same thing it means everywhere else — a `platform` **and** the bridge flag, `isBridge`'s
+predicate. The gate used to enable itself on the flag alone, which let a platform-less hub reject the
+human's ledger write while the CLI still expected one (#186). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
 edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
 gate still vets every commit's signature + author;

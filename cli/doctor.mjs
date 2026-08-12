@@ -62,7 +62,11 @@ export function projectChecks(checks, root) {
   // version stamp
   const ver = readJSON(verPath, null);
   if (!ver) check(checks, 'cli-version', 'project', 'warn', `${PROJECT_FILES.version} missing or unreadable`, 'run `yad check --fix`');
-  else if (ver.version !== VERSION) check(checks, 'cli-version', 'project', 'warn', `project stamped v${ver.version}, CLI is v${VERSION}`, 'run `yad update` to reconcile');
+  // The stamp is not only cosmetic: in bridge mode the wired gate-sync job resolves the yadflow it
+  // RUNS from it — unless hub.json pins `gate_sync_version`, a YAD_VERSION variable overrides, or the
+  // stamp is not an exact release of the current major (then the job skips it and floats). So a stale
+  // stamp can mean CI is running an old gate; say so, or the warning reads as bookkeeping.
+  else if (ver.version !== VERSION) check(checks, 'cli-version', 'project', 'warn', `project stamped v${ver.version}, CLI is v${VERSION} — this also drives the wired gate-sync pin`, 'run `yad update` to reconcile');
   else check(checks, 'cli-version', 'project', 'ok', `version stamp matches (v${VERSION})`);
 
   // hub.json: parse + shape

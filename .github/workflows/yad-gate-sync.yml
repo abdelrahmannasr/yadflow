@@ -23,7 +23,9 @@
 #   and nothing is committed — re-visiting a merged review for a week costs one no-op read per pass. That
 #   last part is load-bearing: before the #163 fix the re-sync re-appended each step's approvals at the
 #   tail, so this job rotated approvals.json and committed the reorder every 15 minutes, forever (issue
-#   #163). If you pin YAD_VERSION (below) to something older, disable the schedule.
+#   #163). These jobs run an EXACT version resolved from the repo (see the resolver in each job), so a
+#   hub sitting on a pre-#163 yadflow keeps that behaviour until someone upgrades it — if the resolved
+#   pin is older than 3.15.3, run `yad update` or disable the schedule.
 #   On GitHub a scheduled workflow runs automatically once committed (no setup).
 #
 # CI never approves and never merges — the merge click is the human approval act.
@@ -45,13 +47,16 @@ permissions:
   pull-requests: read # gh pr view + reviewThreads GraphQL
 
 env:
-  # Which yadflow these jobs run. The default `3` floats on the major, so a published fix reaches the
-  # schedule on its next pass with nobody in the loop — which is how you want a correctness or
-  # gate-churn fix to arrive. To adopt releases deliberately instead, pin an exact version by setting a
-  # repository (or organization) Actions **variable** named YAD_VERSION to e.g. `3.15.2`:
-  # Settings → Secrets and variables → Actions → Variables. It lives there, deliberately NOT in this
-  # file, which `yad` owns and rewrites on every sync. A pinned hub then owns its own upgrade decision.
-  YAD_VERSION: ${{ vars.YAD_VERSION || '3' }}
+  # The manual override for which yadflow these jobs run: set a repository (or organization) Actions
+  # **variable** named YAD_VERSION to e.g. `3.15.2`, under Settings → Secrets and variables → Actions →
+  # Variables. It lives there and not in this file, which `yad` owns and rewrites byte-for-byte from
+  # its template on every sync — a version edited in here would be silently reverted.
+  #
+  # Left EMPTY the jobs resolve an exact pin from the repo itself instead of floating on the major (see
+  # the resolver step in each job). Floating meant a release could change what a scheduled job does with
+  # nobody deciding to upgrade — the amplification path in issue #163, where 3.13.1 took one hub from 20
+  # to 96 churn commits an hour.
+  YAD_VERSION: ${{ vars.YAD_VERSION || '' }}
 
 jobs:
   mergesync:
@@ -77,6 +82,39 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
+      - name: Resolve the yadflow pin
+        run: |
+          # >>> yad-pin
+          # Which yadflow this job runs, most explicit source first:
+          #   1. $YAD_VERSION            — the platform variable, a human's deliberate override, verbatim
+          #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this hub
+          #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
+          #   4. 3                       — floating major, only when nothing above resolves
+          # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
+          # they are VALIDATED: an exact release token of the major this fragment was written for. That
+          # also keeps the value safe to interpolate into `npx -p "yadflow@$V"` — a repo-controlled
+          # string reaching a shell on a runner holding `contents: write` is the same class of hole the
+          # HEAD_REF fix closed. Anything unparseable is skipped loudly rather than failing the run.
+          # Pipes, not bash here-strings, so the block stays byte-identical to the GitLab fragment's
+          # (which must run under `sh` when an image has no bash). `sed` drains its input, so nothing
+          # SIGPIPEs `tr`.
+          yad_pin_read() { # <file> <key>
+            [ -f "$1" ] || return 0
+            tr -d '\n' < "$1" 2>/dev/null | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p"
+          }
+          yad_pin_valid() { printf '%s' "${1:-}" | grep -Eq '^3\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; }
+          YAD_PKG="${YAD_VERSION:-}"
+          if [ -z "$YAD_PKG" ]; then
+            for _cand in "$(yad_pin_read .sdlc/hub.json gate_sync_version)" "$(yad_pin_read .sdlc/cli-version.json version)"; do
+              [ -n "$_cand" ] || continue
+              if yad_pin_valid "$_cand"; then YAD_PKG="$_cand"; break; fi
+              echo "yad-gate-sync: ignoring pin '${_cand}' — not an exact 3.x release." >&2
+            done
+          fi
+          YAD_PKG="${YAD_PKG:-3}"
+          echo "yad-gate-sync: running yadflow@${YAD_PKG}"
+          # <<< yad-pin
+          echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
       - name: Advance the gate on merge
         # The head ref reaches the shell through `env:`, never through `${{ }}` inside `run:`. A
         # branch name may legally contain `$`, backticks and parentheses, so a PR opened from
@@ -88,7 +126,7 @@ jobs:
         run: |
           git config user.name  "yad-gate-sync[bot]"
           git config user.email "yad-gate-sync[bot]@users.noreply.github.com"
-          npx -y -p "yadflow@${YAD_VERSION}" yad gate ci \
+          npx -y -p "yadflow@${YAD_PKG}" yad gate ci \
             --branch "$HEAD_REF" \
             --pr "$PR_NUMBER" \
             --merged
@@ -112,6 +150,39 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "20"
+      - name: Resolve the yadflow pin
+        run: |
+          # >>> yad-pin
+          # Which yadflow this job runs, most explicit source first:
+          #   1. $YAD_VERSION            — the platform variable, a human's deliberate override, verbatim
+          #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this hub
+          #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
+          #   4. 3                       — floating major, only when nothing above resolves
+          # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
+          # they are VALIDATED: an exact release token of the major this fragment was written for. That
+          # also keeps the value safe to interpolate into `npx -p "yadflow@$V"` — a repo-controlled
+          # string reaching a shell on a runner holding `contents: write` is the same class of hole the
+          # HEAD_REF fix closed. Anything unparseable is skipped loudly rather than failing the run.
+          # Pipes, not bash here-strings, so the block stays byte-identical to the GitLab fragment's
+          # (which must run under `sh` when an image has no bash). `sed` drains its input, so nothing
+          # SIGPIPEs `tr`.
+          yad_pin_read() { # <file> <key>
+            [ -f "$1" ] || return 0
+            tr -d '\n' < "$1" 2>/dev/null | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p"
+          }
+          yad_pin_valid() { printf '%s' "${1:-}" | grep -Eq '^3\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; }
+          YAD_PKG="${YAD_VERSION:-}"
+          if [ -z "$YAD_PKG" ]; then
+            for _cand in "$(yad_pin_read .sdlc/hub.json gate_sync_version)" "$(yad_pin_read .sdlc/cli-version.json version)"; do
+              [ -n "$_cand" ] || continue
+              if yad_pin_valid "$_cand"; then YAD_PKG="$_cand"; break; fi
+              echo "yad-gate-sync: ignoring pin '${_cand}' — not an exact 3.x release." >&2
+            done
+          fi
+          YAD_PKG="${YAD_PKG:-3}"
+          echo "yad-gate-sync: running yadflow@${YAD_PKG}"
+          # <<< yad-pin
+          echo "YAD_PKG=${YAD_PKG}" >> "$GITHUB_ENV"
       - name: Reconcile recently-merged review PRs
         run: |
           git config user.name  "yad-gate-sync[bot]"
@@ -130,7 +201,7 @@ jobs:
             [ -n "$N" ] || continue
             REF="$(gh pr view "$N" --json headRefName --jq '.headRefName' 2>/dev/null)" || rc=1
             case "$REF" in
-              review/EP-*) npx -y -p "yadflow@${YAD_VERSION}" yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
+              review/EP-*) npx -y -p "yadflow@${YAD_PKG}" yad gate ci --branch "$REF" --pr "$N" --merged || rc=1 ;;
             esac
           done < /tmp/yad-merged-prs
           exit $rc

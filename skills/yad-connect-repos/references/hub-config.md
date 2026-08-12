@@ -18,7 +18,8 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
   "platform": "github",                                       // github | gitlab (from the hub's own remote host); null when local-only
   "git_url": "https://github.com/abdelrahmannasr/yadflow.git", // REQUIRED when platform is non-null (scopes auth + opens PRs); yad doctor warns YAD-CFG-005 if absent
   "default_branch": "main",
-  "bridge_enabled": true,                                     // open review PRs/MRs on the hub for front-half reviews
+  "bridge_enabled": true,                                     // open review PRs/MRs on the hub for front-half reviews; travels WITH platform — bridge mode is both (isBridge), so never true beside platform: null (#186)
+  "gate_sync_version": "3.15.3",                              // OPTIONAL exact pin for the wired gate-sync job; an exact 3.x.y, prereleases included (3.16.0-rc.1) — anything else is skipped. Omitted => the .sdlc/cli-version.json stamp if that qualifies, else floating 3
   "review": { "requireEngagement": false },                   // Review Companion: false (soft) counts bare approves but nudges; true counts only verified-engagement approvals
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
   "roster": [
