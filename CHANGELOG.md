@@ -1,3 +1,16 @@
+# [3.16.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.5...v3.16.0) (2026-08-12)
+
+
+### Bug Fixes
+
+* **pr-template:** name GitLab's 2700-character description truncation ([475e2b7](https://github.com/abdelrahmannasr/yadflow/commit/475e2b7db8f0d24909ce5c874122f18dc6508985)), closes [#164](https://github.com/abdelrahmannasr/yadflow/issues/164)
+* **update:** reject an unusable provenance record instead of ignoring it ([5107381](https://github.com/abdelrahmannasr/yadflow/commit/5107381ae2c08b261fddda76433cfc2a3fe3ea46)), closes [#188](https://github.com/abdelrahmannasr/yadflow/issues/188) [#164](https://github.com/abdelrahmannasr/yadflow/issues/164)
+
+
+### Features
+
+* **update:** never silently overwrite a locally modified managed file ([28d6ee4](https://github.com/abdelrahmannasr/yadflow/commit/28d6ee4c1af250415c3ad50d999a263ebe91cd83)), closes [#164](https://github.com/abdelrahmannasr/yadflow/issues/164)
+
 ## [3.15.5](https://github.com/abdelrahmannasr/yadflow/compare/v3.15.4...v3.15.5) (2026-08-12)
 
 
