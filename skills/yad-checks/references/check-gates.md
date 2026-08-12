@@ -366,6 +366,112 @@ title + the code task template), so a PR that changes the hub's own workflows/ch
 `templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
 line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
 
+## The agent guardrail (`templates/hooks/ledger-guard.sh` + `yad hook ledger-guard`)
+
+Not a CI gate — a **harness hook**, and the only piece of yadflow that runs *inside* an agent's tool
+loop. It exists because of the gap #171 reported: `checks/ledger-guard.sh` is correct and blocking,
+but it speaks at CI time. An agent that hand-edits `epics/*/.sdlc/state.json` in bridge mode learns
+twenty minutes later, from a FAIL with nothing connecting cause to effect, and by then the write must
+be reverted before the review PR/MR can go green.
+
+**Contract** — deliberately not Claude-Code-shaped:
+
+| | |
+|---|---|
+| stdin | a harness tool-call payload as JSON (optional; `--path <p>` works instead) |
+| exit 0 | allow |
+| exit 2 | deny — the reason is on stderr, for the agent to read |
+
+Claude Code's `PreToolUse` protocol is exactly that (exit 2 blocks the call and feeds stderr back to
+the model), so `.claude/settings.json` wires it with no adapter logic. Any harness that can run a
+command and read those two exit codes can use the same script.
+
+**Layering.** `hooks/ledger-guard.sh` is only the adapter: it locates `yad` (`$YAD_BIN` → the hub's
+`node_modules/yadflow` → `PATH` → `npx --no-install`) and passes the payload to `yad hook
+ledger-guard`, which holds the decision. So the wiring never hard-codes an install path, and the
+logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
+
+**Scope — identical to the CI gate, on purpose**, down to the details that decide the hard cases:
+
+- Guarded: `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` and `epics/*/reviews/*.md`.
+  Exempt: `contract-lock.json` (artifact-side), `change.json`, every artifact.
+- **Depth matches the gate's globs.** Its arms are bash `case` patterns, and a bash `*` spans `/`, so
+  `epics/EP-a/nested/.sdlc/state.json` is guarded there — and here. Being stricter locally would let
+  a path through that CI blocks.
+- **The seed carve-out reads the base ref, not the working tree** (#162): the epics whose
+  `state.json` the base carries are listed once with `ls-tree`, and an epic absent from that list is
+  a creation. Never a `<rev>:<path>` probe — that spec resolves from the repository top level and
+  `-C` does not re-anchor it, so a hub in a subdirectory of its repo would miss every time and the
+  guard would allow everything, silently.
+- **The base is an `origin/` ref** — `origin/<default_branch>`, then the remote's published default,
+  then `origin/main`, the gate's own order. Never a bare local branch: `git fetch` does not
+  fast-forward one, so a stale trunk would report a merged epic's ledger as absent and wave a real
+  mutation through. If none resolves, the answer is *unknown* and unknown allows.
+- **Slugs are case-folded**, as the gate folds them. On a case-insensitive filesystem `epics/ep-x/…`
+  and `epics/EP-X/…` are the same file, so a byte-exact compare would let a mutation be laundered as
+  a creation.
+- Bridge-gated by the same `isBridgeHub` predicate the CLI and the wiring read (#186): without the
+  bridge the ledger is locally owned, the hand-edit the authoring skills describe is correct, and
+  nothing is wired or blocked.
+
+**It fails OPEN, and that asymmetry is the design.** No `yad` on PATH, no hub above the edited path,
+an unreadable `hub.json`, an unparseable payload, a `yad` that errors — every one of them ALLOWS,
+with a note on stderr. A local guardrail that failed closed would brick an agent's ability to edit
+anything the moment an install went sideways. The CI gate fails **closed** and is what actually
+protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` skips one command.
+
+**Known gaps** — both fall through to the CI gate, which is why it stays the authority:
+
+- A `Bash` tool call (`sed -i epics/…`) is not intercepted; matching it would mean parsing shell for
+  write intent.
+- The hook arms sessions **rooted at the hub**. A harness loads hooks from its own project root, so a
+  session opened at the *workspace* (`project/`, with the hub at `project/product/`) never reads the
+  hub's `.claude/settings.json` and the guard does not fire there — even though the decision itself
+  resolves the hub correctly from any path. In that layout, open the session at the hub, or copy the
+  entry into the workspace's own settings (the command's `$CLAUDE_PROJECT_DIR` would then need the
+  hub-relative path).
+
+**Wiring** (installed by `yad setup` / `yad check --fix`, bridge hubs only):
+
+| Path | Owner |
+|---|---|
+| `<hub>/hooks/ledger-guard.sh` | fully managed — drift-checked and recorded in `.sdlc/managed.json` like any gate script |
+| `<hub>/.claude/settings.json` | **one entry**, merged additively into `hooks.PreToolUse`. See below. |
+
+The settings file is the team's, so the rules around that one entry are deliberately conservative:
+
+- **Ownership is an exact command match** — the current spelling or a documented past one — never a
+  substring. A team keeping its own wrapper at `.claude/hooks/ledger-guard.sh` would otherwise have
+  their hook silently rewritten to ours, on the `outdated` path that takes no backup. Matching
+  exactly means the worst case is a second entry (the guard runs twice, harmlessly).
+- **The command is quoted** (`"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"`) because the harness runs
+  it through a shell: unquoted, a project path containing a space word-splits and the guard is
+  silently off while `check` and `doctor` still call it wired.
+- **A file that does not parse is never rewritten** — not even by `--overwrite-local`. For a managed
+  file that flag restores a shipped template; here there is none, and everything in the file is the
+  team's. It reports `modified` until a human fixes the JSON.
+- **A `matcher` the team narrowed is left as they set it** — but `yad doctor` warns when it no longer
+  selects any file-editing tool, so an installed-but-dead guard cannot pass for healthy.
+- **It is never staged by `yad update --push`.** Every other path in that allowlist is a file yad
+  wrote in full; this one would sweep the team's unrelated edits into a `chore` commit pushed
+  straight to the default branch.
+- **Both halves land together.** The script and the entry ride `yad update` as one: applying the
+  entry without the script it points at would fire a missing command on every file edit.
+
+`.claude` is the only IDE target wired: it is the only one with a defined hook protocol. Other
+targets get the script, and the contract above is what they would wire by hand.
+
+`yad doctor` reports the guard on a bridge hub, and distinguishes the three states that matter — it
+reads the same persisted `ideTargets` the wiring reads, so every gap it names is one the command it
+names can actually close:
+
+| State | Report | Remedy |
+|---|---|---|
+| script + entry present, matcher live | `agent ledger guard wired` | — |
+| either half absent | `not wired: <what>` | `yad check --fix` |
+| present but the matcher no longer selects a file-editing tool | `installed but its matcher no longer selects file edits` | restore the matcher — it is wired and never fires |
+| the settings file does not parse | `cannot be wired — … does not parse` | fix the JSON by hand; yad never rewrites one it cannot parse, so nothing else clears it |
+
 ## Running by hand (Phase 3 is manual)
 
 From inside the code repo, against the PR/MR base (e.g. `master`). For the gates that take one, the

@@ -22,6 +22,7 @@ import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
 import { runUsage } from '../cli/usage.mjs';
+import { runLedgerGuardHook } from '../cli/hook.mjs';
 import { maybeNotifyUpdate } from '../cli/update-notice.mjs';
 
 const HELP = `${c.bold('yad')} — setup, review-gate & build helpers for the SDLC Workflow module  ${c.dim('v' + VERSION)}
@@ -51,6 +52,11 @@ ${c.bold('Setup & maintenance')}
   yad report [-m <text>]   File a bug in the yadflow repo with auto-scrubbed diagnostics
                        (no paths/hosts/repo names/logins/flag values). Also offered
                        automatically after an unexpected failure. YAD_NO_REPORT=1 disables.
+  yad hook ledger-guard    ${c.dim('harness-invoked, not typed')} — refuse an agent's edit to the
+                       CI-owned gate ledger in bridge mode and name the command that owns
+                       the transition. Reads a tool-call payload on stdin (or --path <p>);
+                       exit 0 allows, exit 2 denies with the reason on stderr. Wired into
+                       .claude/settings.json by setup / check --fix. YAD_HOOK_DISABLE=1 skips.
 
 ${c.bold('Reviewer roster')}
   yad roster list                      Show every member + their roles per scope (hub + each repo)
@@ -179,7 +185,7 @@ ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--retro-ship', '--merge-commit']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--retro-ship', '--merge-commit', '--path']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -254,6 +260,18 @@ async function main() {
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
       break;
+    // Harness-invoked, not typed by a human: a tool-call payload arrives on stdin and the exit code
+    // is the verdict (0 allow, 2 deny). See cli/hook.mjs for the contract.
+    case 'hook': {
+      const [, action] = o._;
+      if (action !== 'ledger-guard') {
+        log(c.red(`unknown hook: ${action ?? '(none)'} (ledger-guard)`));
+        process.exitCode = 1;
+        break;
+      }
+      runLedgerGuardHook({ paths: o.path ? [o.path] : [] });
+      break;
+    }
     case 'report':
       await runReport(o.dir, { message: o.message });
       break;
@@ -415,7 +433,11 @@ main()
   // the readline handle open so the process never exits.
   .finally(async () => {
     try {
-      await maybeNotifyUpdate();
+      // Never on `yad hook`: it runs on every agent tool call, and its stderr is the channel the
+      // block reason travels on — an update banner there would land in front of a model.
+      // Resolved the way main() resolves it, NOT from argv[2]: that is the first raw argument, so
+      // `yad --dir <path> hook ledger-guard` puts `--dir` there and the banner slips through.
+      if (parseArgs(process.argv.slice(2))._[0] !== 'hook') await maybeNotifyUpdate();
     } catch { /* the notice is never worth failing or hanging a command over */ } finally {
       closePrompts();
     }

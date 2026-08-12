@@ -4,7 +4,7 @@
 // production safety gates: spec-link, contract-check, build-test-lint, risk-route.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1509,4 +1509,91 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
   // Prereleases are legitimate exact versions; a key split across lines still reads (the #161 idiom).
   assert.equal(resolvePin(block, hub('3.16.0-rc.1')), '3.16.0-rc.1');
   assert.equal(resolvePin(block, { '.sdlc/hub.json': '{\n "gate_sync_version":\n  "3.15.9"\n}' }), '3.15.9');
+});
+
+// ---------- hooks/ledger-guard.sh (the harness adapter) ----------
+// The wrapper's ONE load-bearing rule is the exit mapping: only an explicit deny (2) may block, so
+// a `yad` that is present but cannot run — an `npx --no-install` with nothing to find, a crash, a
+// version too old to know the subcommand — must never read as a refusal. Nothing exercised that.
+const HOOK = path.join(ROOT, 'skills/yad-checks/templates/hooks/ledger-guard.sh');
+
+// A hub laid out the way the wrapper expects, with `hooks/` beside a fake install.
+function scaffoldHookHub() {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-wrapper-'));
+  fs.mkdirSync(path.join(T, 'hooks'), { recursive: true });
+  fs.copyFileSync(HOOK, path.join(T, 'hooks/ledger-guard.sh'));
+  fs.chmodSync(path.join(T, 'hooks/ledger-guard.sh'), 0o755);
+  return T;
+}
+// A stand-in `yad` that exits with whatever code the test wants, and records that it ran.
+function fakeYad(dir, name, code) {
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, `#!/usr/bin/env bash\ncat > /dev/null\necho "$@" > "${path.join(dir, 'argv.txt')}"\nexit ${code}\n`);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+const runHookWrapper = (T, env = {}) => {
+  const r = spawnSync('bash', [path.join(T, 'hooks/ledger-guard.sh')], {
+    input: '{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}',
+    encoding: 'utf8', cwd: T,
+    // No PATH by default: the wrapper must not find a real `yad`/`npx` and must still allow.
+    env: { ...GIT_ENV, PATH: '/usr/bin:/bin', CLAUDE_PROJECT_DIR: T, ...env },
+  });
+  return { code: r.status, err: r.stderr || '' };
+};
+
+test('ledger-guard wrapper: only an explicit deny blocks', () => {
+  const T = scaffoldHookHub();
+  try {
+    const bin = path.join(T, 'bin');
+    // 2 propagates — that is the whole point of the hook.
+    assert.equal(runHookWrapper(T, { YAD_BIN: fakeYad(bin, 'yad-deny', 2) }).code, 2);
+    // 0 allows.
+    assert.equal(runHookWrapper(T, { YAD_BIN: fakeYad(bin, 'yad-allow', 0) }).code, 0);
+    // Anything else allows, with a note — a crash or an old `yad` that does not know the subcommand
+    // must not read as a refusal.
+    for (const code of [1, 127]) {
+      const r = runHookWrapper(T, { YAD_BIN: fakeYad(bin, `yad-${code}`, code) });
+      assert.equal(r.code, 0, `exit ${code} allows`);
+      assert.match(r.err, new RegExp(`exited ${code}`));
+    }
+    // The subcommand is what actually gets invoked. Its own directory, so the assertion cannot pass
+    // on an argv.txt an earlier fake in this test already wrote.
+    const argvBin = path.join(T, 'argvbin');
+    runHookWrapper(T, { YAD_BIN: fakeYad(argvBin, 'yad-argv', 0) });
+    assert.equal(fs.readFileSync(path.join(argvBin, 'argv.txt'), 'utf8').trim(), 'hook ledger-guard');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('ledger-guard wrapper: resolution order, and fail-open when nothing resolves', () => {
+  const T = scaffoldHookHub();
+  try {
+    // Nothing to find at all → allow, and say so rather than dying.
+    const none = runHookWrapper(T);
+    assert.equal(none.code, 0);
+    assert.match(none.err, /no `yad` on PATH and none installed/);
+
+    // A whitespace-only YAD_BIN must not leave an empty command array: macOS's bash 3.2 treats
+    // "${CMD[@]}" on an empty array as unbound under `set -u` and aborts with 127.
+    const blank = runHookWrapper(T, { YAD_BIN: '   ' });
+    assert.equal(blank.code, 0);
+    assert.doesNotMatch(blank.err, /unbound variable/);
+
+    // The hub's own install is preferred over PATH, and is found from the SCRIPT's location — not
+    // the caller's cwd, which a harness sets to anything.
+    const nm = path.join(T, 'node_modules/yadflow/bin');
+    fs.mkdirSync(nm, { recursive: true });
+    fs.writeFileSync(path.join(nm, 'yad.mjs'), 'process.stdin.resume();process.stdin.on("end",()=>process.exit(2));');
+    const onPath = path.join(T, 'pathbin');
+    fakeYad(onPath, 'yad', 0);
+    const r = spawnSync('bash', [path.join(T, 'hooks/ledger-guard.sh')], {
+      input: '{}', encoding: 'utf8', cwd: os.tmpdir(),
+      // node's own directory is on PATH so the hub-install branch is reachable at all; the point of
+      // the assertion is that it wins over the `yad` sitting earlier on that same PATH.
+      env: { ...GIT_ENV, PATH: `${onPath}:${path.dirname(process.execPath)}:/usr/bin:/bin`, CLAUDE_PROJECT_DIR: T },
+    });
+    assert.equal(r.status, 2, 'the hub install answered, not the `yad` on PATH');
+    assert.ok(!fs.existsSync(path.join(onPath, 'argv.txt')), 'the PATH copy was never invoked');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

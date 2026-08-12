@@ -196,6 +196,22 @@ export const CHECK_GATES: CheckGate[] = [
     triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
     visibleTo: ALL,
   },
+  {
+    name: 'ledger-guard',
+    queue: 'yad-hub-checks',
+    timing: 'on every hub review PR/MR',
+    description: 'Hub-only, bridge mode only: the gate ledger (.sdlc/{state,approvals,comments,hub-prs}.json, reviews/*.md) is CI-owned, so any commit changing it that is not a verified gate-bot commit FAILS. A brand-new epic\'s ledger is exempt — creation, not mutation (#162); contract-lock.json is artifact-side and exempt too. Fails closed: this is what actually protects the ledger.',
+    triggeredBy: 'GitHub Actions / GitLab CI (yad-hub-checks.yml)',
+    visibleTo: ALL,
+  },
+  {
+    name: 'ledger-guard (agent hook)',
+    queue: 'harness hook',
+    timing: 'before an agent\'s file edit',
+    description: 'The local half of the rule above (#171): a PreToolUse hook that refuses an agent the CI-owned ledger write at the moment it is attempted and names the command that owns the transition (yad gate open), instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic by contract — stdin takes the tool payload, exit 0 allows, exit 2 denies with the reason on stderr. Fails OPEN (no yad, no hub, bad config all allow); the CI gate is the authority. Installed by yad setup / check --fix on bridge hubs.',
+    triggeredBy: 'the agent harness (.claude/settings.json → hooks/ledger-guard.sh)',
+    visibleTo: ALL,
+  },
 ];
 
 // ─── Connectors (the registries the setup phase writes) — "feature flags" matrix ───
@@ -276,6 +292,7 @@ export const CLI_COMMANDS: CliCommand[] = [
   { constant: 'NEXT', value: 'yad next', target: 'setup', category: 'setup', description: 'Where am I / what next: the one concrete next action — project-wide or per epic (yad next <epic>). In the build half it reads each story\'s build-state and prints the next build sub-step per repo (spec → tasks → implement → checks → engineer-review) plus the remaining chain; --check <step> guards step order.', visibleTo: ALL },
   { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed. A managed file you edited (gate script, CI fragment, PR/MR template) is reported as modified and never silently overwritten — .sdlc/managed.json records the sha of every file yad wrote; --overwrite-local replaces them, saving a <file>.yad-orig backup (#164).', visibleTo: ALL },
   { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI).', visibleTo: ALL },
+  { constant: 'HOOK', value: 'yad hook ledger-guard', target: 'setup', category: 'setup', description: 'Harness-invoked, never typed: refuses an agent\'s edit to the CI-owned gate ledger in bridge mode and names the command that owns the transition (yad gate open) — the local half of the ledger-guard CI gate (#171). Reads a tool-call payload on stdin (or --path); exit 0 allows, exit 2 denies with the reason on stderr. A no-op without the bridge, and fails open. Wired into .claude/settings.json by setup / check --fix; YAD_HOOK_DISABLE=1 skips it.', visibleTo: ALL },
   { constant: 'SYNC_STATUS', value: 'yad sync-status', target: 'setup', category: 'setup', description: 'Reconcile each artifact’s frontmatter status (draft → in-review → approved) with .sdlc/state.json — all epics, or one (yad sync-status <epic>); --dry-run to preview. Advance-only; locked/in-build/shipped are left alone. Runs automatically after a local gate open/sync.', visibleTo: ALL },
   { constant: 'ROSTER', value: 'yad roster', target: 'setup', category: 'setup', description: 'Manage the reviewer roster + per-repo roles any time: list / add (repo-driven walk) / grant / revoke / remove. Domain-owner grants sync repos.json.', visibleTo: ALL },
   { constant: 'GATE', value: 'yad gate open|sync', target: 'setup', category: 'front', description: 'Drive the front-half review PR/MR; sync approvals into the ledger and auto-advance on merge.', visibleTo: ALL },

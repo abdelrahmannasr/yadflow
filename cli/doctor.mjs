@@ -5,7 +5,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isBridgeHub } from './manifest.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -147,6 +148,59 @@ export function projectChecks(checks, root) {
           }
         }
       }
+    }
+  }
+
+  // The harness ledger guard (#171). Only meaningful in bridge mode: there the ledger is CI-owned and
+  // an agent's hand-edit is always rejected later by `ledger-guard`, so the local hook that refuses it
+  // up front should be installed. Without the bridge the ledger is locally owned and the hand-edit the
+  // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
+  const hubForHooks = readJSON(hubPath, null);
+  if (isBridgeHub(hubForHooks)) {
+    const unwired = [];
+    const broken = [];
+    if (!exists(path.join(root, 'hooks', 'ledger-guard.sh'))) unwired.push('hooks/ledger-guard.sh');
+    // The SAME target list `hookActions` wires — the persisted `ideTargets`, not "does the directory
+    // exist". Keyed on the directory, a project whose targets are `['.agents']` but which also has a
+    // stray `.claude/` would be told to run `yad check --fix` forever, while that command builds no
+    // action for `.claude` and correctly reports "already up to date". Never name a remedy that
+    // cannot reach the thing being reported.
+    const unreadable = [];
+    for (const ide of ideTargetsFor(root)) {
+      const relDest = HOOK_SETTINGS[ide];
+      if (!relDest) continue;
+      const settingsPath = path.join(root, relDest);
+      // A file that exists but does not parse is its OWN report. `readJSON` returns null for both
+      // "absent" and "broken", and null merges as "not wired" — which would send the human to
+      // `yad check --fix`, a command that (correctly) refuses to rewrite a settings file it cannot
+      // parse. The warning would then repeat forever with advice that can never apply.
+      // Read ONCE and reuse: parsing the same file twice lets `unreadable` and the merge check
+      // describe different content if it changes in between.
+      let settings = null;
+      if (exists(settingsPath)) {
+        let parsed;
+        try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* reported below */ }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
+        settings = parsed;
+      }
+      if (mergeHookSettings(settings).changed) { unwired.push(relDest); continue; }
+      // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
+      // deliberately leaves it alone), but one that no longer selects any file-editing tool means
+      // nothing is intercepted — and reporting that as `ok` is how a disarmed guard passes for
+      // healthy until a ledger edit fails in CI.
+      if (!hookMatcherFires(settings)) broken.push(relDest);
+    }
+    if (unreadable.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]`,
+        'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
+    } else if (unwired.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}`,
+        'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
+    } else if (broken.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}`,
+        `restore the matcher to \`${HOOK_TOOL_MATCHER}\` — as it stands the hook is wired but never fires`);
+    } else {
+      check(checks, 'hooks', 'project', 'ok', 'agent ledger guard wired (hooks/ledger-guard.sh)');
     }
   }
 

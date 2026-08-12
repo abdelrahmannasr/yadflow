@@ -12,7 +12,7 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX } from './manifest.mjs';
 import {
-  moduleActions, repoActions, hubActions, authorsActions,
+  moduleActions, repoActions, hubActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -48,7 +48,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   //     and purge of skills removed in a later release ('removed': delete the lingering install) ---
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
-    ...hubActions(root), ...legacyHubActions(root),
+    ...hubActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
     ...authorsActions(root, registry.repos),
   ];
   if (ideState.needsRepair) {

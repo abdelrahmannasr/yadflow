@@ -8,7 +8,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
 import {
-  moduleActions, repoActions, hubActions, authorsActions,
+  moduleActions, repoActions, hubActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -734,6 +734,15 @@ export async function runSetup(root, opts = {}) {
     wired.push(...hubWiring);
   }
   applyActions(legacyHubActions(root), { force: true });
+  // the hub, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
+  // the moment it tries it rather than by a failed pipeline later (#171). Bridge-gated like the CI
+  // above — with no bridge the ledger is locally owned and the guard would be wrong.
+  const hookWiring = hookActions(root, ideTargets);
+  if (hookWiring.length) {
+    log(`  ${c.bold('hub')} ${c.dim('(agent ledger guard)')}`);
+    applyActions(hookWiring, { force: true });
+    wired.push(...hookWiring);
+  }
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.
   recordManagedWrites(wired);

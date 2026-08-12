@@ -5,10 +5,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn,
 } from './lib.mjs';
 import {
-  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES, isBridgeHub,
+  HOOK_WIRING, HOOK_SETTINGS, HOOK_TOOL_MATCHER, HOOK_COMMAND, HOOK_COMMAND_LEGACY,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
 } from './manifest.mjs';
 
@@ -441,7 +442,7 @@ export function legacyRepoActions(root, repo) {
 
 export function legacyHubActions(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
-  if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
+  if (!isBridgeHub(hub)) return [];
   const wiring = [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])];
   return legacyFileActions('hub', root, LEGACY_HUB_FILES[hub.platform], wiring);
 }
@@ -460,12 +461,166 @@ export function repoActions(root, repo) {
 export function hubActions(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
   // `bridge_enabled` is the canonical flag (the documented hub-config schema); older setup versions
-  // wrote `bridge` — accept an explicit true in either spelling, wire nothing otherwise.
-  if (!hub?.platform || !(hub.bridge_enabled === true || hub.bridge === true)) return [];
+  // wrote `bridge` — `isBridgeHub` accepts an explicit true in either spelling, and is the one
+  // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
+  if (!isBridgeHub(hub)) return [];
   const ledger = readManagedLedger(root);
   return [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])].map((w) =>
     wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
+}
+
+// ---- harness hooks (#171) --------------------------------------------------------------------
+// The desired hook entry, in the shape a harness reads it.
+export const hookEntry = () => ({
+  matcher: HOOK_TOOL_MATCHER,
+  hooks: [{ type: 'command', command: HOOK_COMMAND }],
+});
+
+// Ours is a hook command EXACTLY equal to one we have written — the current spelling or a
+// documented past one. Never "the entry at index N", never "the entry with our matcher", and
+// deliberately never a substring test: `includes('hooks/ledger-guard.sh')` would also claim a team's
+// own wrapper at `.claude/hooks/ledger-guard.sh` and silently rewrite it to ours, on the `outdated`
+// path that takes no backup. Matching exactly means the worst case is a second entry (the guard runs
+// twice — harmless) instead of someone else's hook disappearing.
+const OWNED_COMMANDS = new Set([HOOK_COMMAND, ...HOOK_COMMAND_LEGACY]);
+const OURS = (h) => typeof h?.command === 'string' && OWNED_COMMANDS.has(h.command);
+
+// Additive merge of our PreToolUse entry into a parsed settings object. Returns
+// `{ settings, changed }`; `settings` is a new object, so a caller can compare without mutating.
+// A matcher the team NARROWED is left alone (only the command is normalised) — the same respect for
+// a local edit that `modified` gives a managed file. Widening it back would silently undo their choice.
+export function mergeHookSettings(input) {
+  const settings = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : {}) };
+  const hooks = { ...(settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks) ? settings.hooks : {}) };
+  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.map((e) => ({ ...e })) : [];
+  let changed = false;
+  let found = false;
+  for (const entry of pre) {
+    if (!Array.isArray(entry.hooks)) continue;
+    entry.hooks = entry.hooks.map((h) => {
+      if (!OURS(h)) return h;
+      found = true;
+      if (h.command === HOOK_COMMAND && h.type === 'command') return h;
+      changed = true;
+      return { ...h, type: 'command', command: HOOK_COMMAND };
+    });
+  }
+  if (!found) { pre.push(hookEntry()); changed = true; }
+  hooks.PreToolUse = pre;
+  settings.hooks = hooks;
+  return { settings, changed };
+}
+
+// Does the installed entry still select at least one file-editing tool? The merge deliberately
+// leaves a narrowed `matcher` alone — it is the team's — but a matcher narrowed to nothing (blanked,
+// or pointed at `Bash`) means the guard is installed and never fires, which must not read as healthy.
+// The matcher is a regex the harness tests tool names against, so test it as one; an invalid regex
+// cannot fire either.
+export function hookMatcherFires(settings) {
+  const pre = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(pre)) return false;
+  const tools = HOOK_TOOL_MATCHER.split('|');
+  for (const entry of pre) {
+    if (!Array.isArray(entry?.hooks) || !entry.hooks.some(OURS)) continue;
+    let re;
+    try { re = new RegExp(entry.matcher ?? ''); } catch { continue; }
+    // An empty matcher matches every tool name in Claude Code, so it is armed, not blank.
+    if (!entry.matcher || tools.some((t) => re.test(t))) return true;
+  }
+  return false;
+}
+
+// One harness's settings file as an action. Not a `wiredFileAction`: there is no template to compare
+// bytes against — the file belongs to the team and we own exactly one entry inside it. So it is also
+// deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
+// byte-matches its src); the marker above is its provenance instead.
+function hookSettingsAction(root, ide, relDest) {
+  const dest = path.join(root, relDest);
+  const raw = exists(dest) ? fs.readFileSync(dest, 'utf8') : null;
+  let parsed = null;
+  let unreadable = false;
+  if (raw !== null) {
+    try { parsed = JSON.parse(raw); } catch { unreadable = true; }
+    if (!unreadable && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) unreadable = true;
+  }
+  // Scope is the IDE target, item the file under it, so the report reads `.claude/settings.json`
+  // once — the same scope the skills for that target are grouped under.
+  //
+  // `paths` is EMPTY, unlike every other action's: it is the pathspec `yad update --push` stages, and
+  // every other entry in that allowlist is a file yad wrote in full. This one the team co-owns, so
+  // staging it wholesale would sweep their unrelated working-tree edits into a `chore(yad-update)`
+  // commit pushed straight to the default branch, bypassing review. The entry is theirs to commit.
+  const base = { scope: ide, item: path.basename(relDest), root, paths: [] };
+  // A settings file we cannot READ is never rewritten — not even by `--overwrite-local`.
+  //
+  // For a managed file, `--overwrite-local` restores the shipped template, which is coherent. Here
+  // there is no template: only the parse failed, and everything the file holds — permissions, env,
+  // other hooks — is the team's. Synthesizing a replacement from an empty object would discard all of
+  // it, and `--overwrite-local` is a generic recovery command someone runs for an unrelated drifted
+  // gate script. So this reports `modified` forever and writes nothing; the human fixes the JSON.
+  //
+  // Warned at PLAN time, not from apply(): reconcile only reaches a `modified` action's apply() with
+  // `--overwrite-local`, so a plain `yad check --fix` would print nothing but the generic drift
+  // hand — "replace them with `yad update --overwrite-local`" — advice that can never clear this,
+  // since this action deliberately writes nothing. The specific reason has to surface either way.
+  if (unreadable) {
+    warn(`${relDest} does not parse — the ledger guard cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
+    return { ...base, status: 'modified', apply: () => {} };
+  }
+  const { changed } = mergeHookSettings(parsed);
+  return {
+    ...base,
+    status: raw === null ? 'missing' : changed ? 'outdated' : 'ok',
+    // Re-read at apply() time rather than closing over the merge computed above: setup and reconcile
+    // build every action before applying any, so the file may have been written since.
+    //
+    // A no-op when the entry is already there. `yad setup` re-applies with force:true, which reaches
+    // an `ok` action — and an unconditional write would reformat a team's hand-formatted (but valid)
+    // settings.json to writeJSON's style on every re-run. Nothing is lost, but the diff noise lands
+    // in a committed file we only own one entry of.
+    //
+    // The re-read is STRICT. `readJSON`'s swallow-and-default would turn a file that became
+    // unparseable between plan and apply into `{}` and write the team's whole config away — with no
+    // backup, since that is the branch above. Re-check instead, and refuse the same way.
+    apply: () => {
+      if (!changed && raw !== null) return;
+      if (exists(dest)) {
+        let current;
+        try { current = JSON.parse(fs.readFileSync(dest, 'utf8')); } catch { /* unreadable — refused below */ }
+        if (!current || typeof current !== 'object' || Array.isArray(current)) {
+          warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
+          return;
+        }
+        writeJSON(dest, mergeHookSettings(current).settings);
+        return;
+      }
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      writeJSON(dest, mergeHookSettings({}).settings);
+    },
+  };
+}
+
+// Harness-hook wiring on the hub: the guard script plus, per IDE target that defines a hook protocol,
+// the entry that invokes it. Bridge-gated exactly like `hubActions` — with no bridge the ledger is
+// locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
+export function hookActions(root, ideTargets = ideTargetsFor(root)) {
+  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  if (!isBridgeHub(hub)) return [];
+  const ledger = readManagedLedger(root);
+  const actions = HOOK_WIRING.map((w) =>
+    wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
+  );
+  for (const ide of safeIdeTargetsFor(root, ideTargets)) {
+    const relDest = HOOK_SETTINGS[ide];
+    if (relDest) actions.push(hookSettingsAction(root, ide, relDest));
+  }
+  // The two halves must land TOGETHER, so `missing` is relabelled `new` — the same relabel a new
+  // first-party skill gets, and for the same reason: `yad update` (--scope=changed) excludes only
+  // the literal 'missing'. Without it, an upgrade on a hub that already has a settings.json applies
+  // the entry (`outdated`) while skipping the script (`missing`), leaving every file edit firing a
+  // PreToolUse command that does not exist — a hook error per edit, and no guarding at all.
+  return actions.map(asNewSkill);
 }
 
 // Every email the verified-commits gate should accept as a known author: the hub roster's `email`
