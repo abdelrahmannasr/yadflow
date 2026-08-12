@@ -145,11 +145,12 @@ The story frontmatter `status` reflects build progress:
 You write this flip into `stories/<story>.md`, but **do not hand-commit it** — the next
 `yad checkpoint --push` carries it in the same `chore(hub)` commit as the ledgers (the story now has a
 build-log ship, so checkpoint stages it; #112). This is what keeps the story artifact from drifting
-from `build-log.json`, so there is never a reason to fall back to a raw `git push origin main`.
+from the build ledger, so there is never a reason to fall back to a raw `git push origin main`.
 
 So the chain is traceable both ways: from the epic down (`epic.md` → `stories/<story>.md` →
-`tasks.md` → `build-log.json` ship → `mergeCommit`) and from a merge commit back up (its `Task:`
-trailer → story → epic).
+`tasks.md` → the build-ledger ship → `mergeCommit`) and from a merge commit back up (its `Task:`
+trailer → story → epic). Resolve that ship by the union rule, not from `build-log.json` alone — until
+`yad tidy up` folds it, the ship lives only in its `build-log/` shard and the chain looks broken.
 
 ## Preconditions for ship (all required)
 

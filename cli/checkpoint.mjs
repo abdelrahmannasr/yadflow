@@ -206,7 +206,7 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   const storyStatus = readFrontmatter(storyFile).status;
   if (!BACK_HALF_STATUSES.has(storyStatus)) {
     fail(`${story} frontmatter is not at in-build|shipped`);
-    hand(`set \`status: shipped\` in ${storyRel} first, then re-run — the ship and the flip land in one commit`);
+    hand(`set \`status: in-build\` or \`status: shipped\` in ${storyRel} first, then re-run — the ship and the flip land in one commit`);
     return { ok: false };
   }
 
