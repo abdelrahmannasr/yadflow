@@ -83,8 +83,15 @@ It writes ONE minimal ship shard marked `retroactive: true` (`task` defaults to 
 the normal checkpoint so the story's already-made `status:` flip rides along in the **same** commit. It
 refuses when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the
 normal flow). It does **not** author the story frontmatter — and to keep evidence and the flip atomic (the no-drift
-invariant), it **refuses** unless you have already set `status: shipped` in `stories/<story>.md`, so a
-ship shard is never committed while the artifact still says `approved`.
+invariant), it **refuses** unless you have already set a back-half `status:` (`in-build` or `shipped`) in
+`stories/<story>.md`, so a ship shard is never committed while the artifact still says `approved`.
+
+**Where the record lands — it is a shard, not an append to `build-log.json`.** Like every other ship, a
+retroactive one is written to `.sdlc/build-log/` and the folded `build-log.json` is left untouched until
+`yad tidy up` folds it. Opening `build-log.json` and finding nothing does **not** mean the write was lost:
+read the ledger by the union rule above and the ship is there (#167). Note `tidy up` only folds a story
+whose frontmatter is `shipped`, so a backfill recorded against an `in-build` story stays a loose shard
+indefinitely — which is precisely why reading the folded file alone is never sufficient.
 
 **One repo per run (#166).** A ship is recorded per `(story, task, repo)`, so a story that shipped in
 several repos needs one retroactive shard **per repo** — the guard is keyed on `(story, repo)`, not on
