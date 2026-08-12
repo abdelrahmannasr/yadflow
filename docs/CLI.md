@@ -165,9 +165,12 @@ version upgrade lands new gate logic everywhere at once.
 
 One wired file is deliberately **not** managed in that sense: `.claude/settings.json` belongs to your
 team, and yad owns exactly **one entry** inside it — the `PreToolUse` hook that invokes
-`hooks/ledger-guard.sh`. It is merged additively and identified by that command string, so re-running
-never duplicates it and nothing else in the file is touched. A `settings.json` that does not parse is
-reported `modified` and never silently replaced.
+`hooks/ledger-guard.sh`. It is merged additively and claimed only by an **exact** command match (the
+current spelling or a documented past one), so re-running never duplicates it, nothing else in the
+file is touched, and a hook of your own that merely names a similar path is never hijacked. A
+`settings.json` that does not parse is reported `modified` and **never** rewritten — not even by
+`--overwrite-local`, which has no shipped template to restore here; fix the JSON and re-run. It is
+also never staged by `--push`: every other path in that allowlist is a file yad wrote in full.
 
 The catch (#164): "the file differs from the shipped template" cannot, on its own, tell a **stale**
 copy (rewrite it) from one your team deliberately **customized** (ask first). So every write records

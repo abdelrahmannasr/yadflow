@@ -167,8 +167,10 @@ file-editing tool call and refuses the write up front, naming the command that o
   denies with the reason on stderr. Claude Code's `PreToolUse` protocol is exactly that, so no
   adapter logic is needed; another harness needs only those two exit codes.
 - **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`
-  and `epics/*/reviews/*.md`; exempt are `contract-lock.json`, `change.json`, and every artifact.
-  A **new** epic's ledger is exempt too — creation, not mutation (#162).
+  and `epics/*/reviews/*.md` (at the gate's own glob depth, which spans `/`); exempt are
+  `contract-lock.json`, `change.json`, and every artifact. A **new** epic's ledger is exempt too —
+  creation, not mutation (#162), decided by listing the epics the **base ref** carries (an
+  `origin/` ref, case-folded slugs), never by looking at the working tree.
 - **A no-op without the bridge.** There the ledger is locally owned and the hand-edit the authoring
   skills describe is *correct*, so nothing is wired and nothing is blocked.
 - **It fails OPEN** — no `yad`, no hub, an unreadable config, an unparseable payload all ALLOW, with
