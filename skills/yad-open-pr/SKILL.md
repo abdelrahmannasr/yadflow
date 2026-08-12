@@ -70,8 +70,13 @@ yad open-pr [--repo <name>] [--risk <level>] [--contract-change] [--title "<subj
 ```
 The CLI pushes the branch (sets upstream, the user's own auth), fills the template, and creates the
 PR/MR with the auto-assigned assignee + reviewers. It prints the base it resolved and where that came
-from — if it warns that the base is not the repo default, stop and fix it **before** the PR opens
-(retargeting later does not bring the AI review back).
+from.
+
+The non-default-base warning is **advisory — it does not block, and the PR/MR is already open by the
+time you read it.** If the base was intended (a stacked PR, a release branch), carry on. If it was
+not, do **not** just retarget the open PR — that leaves the AI first pass skipped. Close it, fix the
+cause (the repo's `default_branch`, or drop the wrong `--base`), and re-run `yad open-pr` so the PR
+is *created* against the right base.
 
 ### Step 3 — Route the review (if escalated)
 On `high` risk or a contract touch, run `bash checks/risk-route.sh <pr-body>` to print the required

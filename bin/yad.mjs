@@ -156,8 +156,9 @@ ${c.bold('Options')}
   --risk <level>        open-pr: low|medium|high (default low)
   --repo <name>         open-pr: target a registered repo by name
   --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
-                        branch (repos.json default_branch, else the platform, else origin/HEAD,
-                        else main); a non-default base loses the AI first pass
+                        branch (repos.json default_branch, else hub.json default_branch for a PR
+                        on the hub itself, else the platform, else origin/HEAD, else main); a
+                        non-default base loses the AI first pass (warns, never blocks)
   --epic <id>           docs: target one epic's site (EP-<slug>)
   --overview            docs: target the project SDLC-overview site
   --check/--refresh/--wire   docs sync: report stale / rebuild / install Pages CI

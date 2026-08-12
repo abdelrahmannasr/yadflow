@@ -36,8 +36,9 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
 - `contractChange` — flag; marks the contract surface touched (commit trailer + PR escalation).
 - `repo` / `risk` / `platform` / `title` — PR/MR options (see `yad-open-pr`).
 - `base`           — override the PR/MR base. The default is the repo's own default branch, resolved
-  (`repos.json` `default_branch` → the platform → `origin/HEAD` → `main`), never a hardcoded `main` —
-  see **Base branch** in `yad-open-pr`. A non-default base loses the AI first pass, and `ship` warns.
+  by the full chain in **Base branch** (`yad-open-pr`) — the canonical description, including the
+  hub rung — never a hardcoded `main`. A non-default base loses the AI first pass; `ship` warns and
+  still opens.
 
 ## On Activation
 

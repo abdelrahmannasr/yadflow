@@ -365,9 +365,11 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
    to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
-   registry `default_branch` → the platform → `origin/HEAD` → `main`), not a hardcoded `main`. If it
-   warns that your base is not the platform default, fix it **before** the PR opens — the AI first pass
-   is decided at open time and retargeting afterwards does not bring it back.
+   registry `default_branch` → the hub's `default_branch` for a hub PR → the platform → `origin/HEAD` →
+   `main`), not a hardcoded `main`. If it warns that your base is not the platform default, that is
+   **advisory — nothing is blocked and the PR is already open.** Intended (stacked PR, release branch)?
+   Carry on. Not intended? Close it, pick the right base, and re-run — retargeting the open PR does not
+   bring the AI first pass back, because eligibility is decided when the PR is created.
 5. **Engineer review + merge** — `yad-engineer-review` → AI review (advisory) → **engineer approval (a
    human)** → merge. The ship is recorded in the build ledger and the story moves to `in-build` → `shipped`.
    That ledger is **shard-then-fold**: the ship lands as its own file under `.sdlc/build-log/` so two people
