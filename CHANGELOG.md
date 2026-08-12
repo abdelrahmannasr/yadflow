@@ -1,3 +1,22 @@
+# [3.17.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.3...v3.17.0) (2026-08-12)
+
+
+### Bug Fixes
+
+* **check:** leave an already-wired settings.json byte-identical ([1d50ed4](https://github.com/abdelrahmannasr/yadflow/commit/1d50ed4b173f7de2350344fc5facb1de19bd9c61))
+* **check:** stop the hook wiring from damaging a file the team owns ([a348c99](https://github.com/abdelrahmannasr/yadflow/commit/a348c997ba3b87406addef4e5868bdd14406fa49))
+* **doctor:** give an unparseable settings file its own advice ([0862875](https://github.com/abdelrahmannasr/yadflow/commit/08628750a3c8e8642075db0fc0712d217dacdeb4))
+* **doctor:** report the ledger guard against what actually arms it ([a1ec4ba](https://github.com/abdelrahmannasr/yadflow/commit/a1ec4bafec8441b6bf8c0515bf4f1bd68cb00ef7))
+* **hook:** read the seeded set the way the CI gate reads it ([38cd206](https://github.com/abdelrahmannasr/yadflow/commit/38cd206fc94256782a074a309fe6dbc2ae3ce135)), closes [#171](https://github.com/abdelrahmannasr/yadflow/issues/171)
+* **hook:** resolve the command before suppressing the update notice ([44d8768](https://github.com/abdelrahmannasr/yadflow/commit/44d87683abbc8acff02b011b6ce47d140e8075d3))
+* **hook:** survive an empty command array on bash 3.2 ([7fd6984](https://github.com/abdelrahmannasr/yadflow/commit/7fd698412d8229f312f62c2a21f299dad445700b))
+
+
+### Features
+
+* **check:** install and report the agent ledger guardrail ([8251d9f](https://github.com/abdelrahmannasr/yadflow/commit/8251d9f92740690ca7b3e27a0280f999593793f3))
+* **hook:** refuse an agent the CI-owned ledger write, at the edit ([15291ce](https://github.com/abdelrahmannasr/yadflow/commit/15291ce2d73167cebeb5aba52920bdb078d6d0aa))
+
 ## [3.16.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.16.2...v3.16.3) (2026-08-12)
 
 
