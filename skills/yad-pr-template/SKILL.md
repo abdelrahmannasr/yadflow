@@ -26,6 +26,16 @@ touched domain). This step **never auto-advances**; it sets up the template and 
     `templates/hub/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The hub body carries no `Task:` trailer
     (hub PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s `hub-route.sh`.
+- **GitLab reads a truncated description.** The `pr-template` gate is fed
+  `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
+  that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use
+  the template" (#164). Both GitLab templates say so in a comment and keep `## Summary` /
+  `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (front-half)`
+  / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
+  Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
+- **Installed templates are yad-managed.** `yad update` rewrites them on upgrade — but never one you
+  edited: a local change is reported as `modified` and left alone (see `docs/CLI.md` → *Managed
+  files*). Put knowledge that must survive upgrades in an ADR under `docs/`, not in the template.
 - The Impact & Risk block reuses the conventions of earlier steps: the `Task: <story>-<task>` trailer
   (`yad-implement`), the contract surface (`yad-architecture` / contract-check), and the
   domain-owner escalation (`yad-review-gate`).

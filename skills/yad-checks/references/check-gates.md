@@ -203,6 +203,18 @@ catches a free-form description that bypassed it:
     (`epics/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
     must go through a `review/EP-*` PR.
 
+**GitLab truncates the description this gate reads.** `$CI_MERGE_REQUEST_DESCRIPTION` stops at **2700
+characters**, so a long but perfectly valid MR can lose a required section *before the gate sees it* —
+the author then reads "does not use the template" while looking at a description that visibly contains
+it (#164). GitHub is unaffected (`github.event.pull_request.body` is not truncated). Two mitigations,
+both shipped:
+
+- the GitLab MR templates (`yad-pr-template` `templates/gitlab/…` and `templates/hub/gitlab/…`) carry
+  the constraint as a comment and keep every required section early, so a truncated body still passes;
+- when a required section is missing **and** the body it read is ≥ 2700 characters, the gate prints a
+  `NOTE` naming the truncation and the fix — reorder the required sections above the cutoff and push
+  the long narrative to the end. Never delete a section: reordering is always allowed.
+
 ## 8. Phase 6 — feature-thread gates (`lineage-check.sh`, `epic-open.sh`, `reconcile-debt-check.sh`)
 
 After the contract locks and code ships, a change must not mutate a locked artifact — it becomes a new
