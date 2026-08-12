@@ -192,7 +192,8 @@ and fall back to `3`:
 | 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the hub | `yad update` re-stamps it |
 | 4 | `3` — floating major, only when nothing above resolves | — |
 
-Sources 2 and 3 are **validated** before use: an exact `3.x.y` release token. A `.sdlc/cli-version.json`
+Sources 2 and 3 are **validated** before use: an exact `3.x.y` release token, prereleases included
+(`3.16.0-rc.1` is a legitimate pin; `latest` and a bare `3` are not). A `.sdlc/cli-version.json`
 written by a long-untouched project can still say something like `1.0.2`, a version with no `yad gate ci`
 in it at all, and the value is interpolated into `npx -p "yadflow@$V"` on a runner holding a push token —
 so anything that is not an exact release of this major is skipped, loudly, in favour of the next source.

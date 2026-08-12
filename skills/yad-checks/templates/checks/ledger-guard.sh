@@ -40,19 +40,33 @@ set -euo pipefail
 #
 # `tr -d '\n'` first, like every other hub.json read in these gates: a key and its value may legally
 # sit on separate lines, and a per-line match would MISS the flag and silently no-op a security gate
-# (the fail-open direction of issue #161). Still depth-blind after flattening — a nested `"bridge":
-# true` matches — which is the same limitation the shared `default_branch` read carries below, and not
-# worth a JSON parser in bash.
+# (the fail-open direction of issue #161).
+#
+# Matched at the ROOT LEVEL only. The shared `default_branch` read below is depth-blind, and that is
+# survivable there — a false match yields a bogus branch name and the gate fails loudly. Here it is
+# not: a nested `"bridge": true` (say under `review`) would silently ENABLE this gate on a hub whose
+# `isBridge` is false, recreating the exact no-writer deadlock #186 is about, from the other side. So
+# the nesting is stripped rather than ignored: peel the outermost braces, then delete innermost
+# objects/arrays until none remain, leaving only root-level pairs to match against. Not a JSON parser
+# — a value containing a literal brace would confuse it — but hub.json is machine-written and the
+# failure it prevents is the one that matters.
 #
 # Flattened ONCE into a variable and matched with here-strings, never `tr … | grep -q`: under the
 # `pipefail` set above, `grep -q` exits at the first match and can SIGPIPE `tr`, which would make a
 # MATCHING pipeline report failure. Reading from a here-string has no upstream process to kill.
 HUB="${SDLC_HUB_CONFIG:-.sdlc/hub.json}"
 HUB_FLAT="$(tr -d '\n' < "$HUB" 2>/dev/null || true)"
+HUB_ROOT="${HUB_FLAT#*\{}"
+HUB_ROOT="${HUB_ROOT%\}*}"
+while :; do
+  _stripped="$(sed -E 's/\{[^{}]*\}//g; s/\[[^][]*\]//g' <<< "$HUB_ROOT")"
+  [ "$_stripped" = "$HUB_ROOT" ] && break
+  HUB_ROOT="$_stripped"
+done
 # One line in, so `sed` emits at most one line out — no `head` needed (which would re-introduce the
 # SIGPIPE-under-pipefail problem this avoids).
-hub_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$HUB_FLAT"; }
-hub_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$HUB_FLAT"; }
+hub_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$HUB_ROOT"; }
+hub_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$HUB_ROOT"; }
 
 if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || { ! hub_true bridge_enabled && ! hub_true bridge; }; then
   echo "PASS [ledger-guard]: bridge not enabled — the ledger is locally owned, nothing to guard."

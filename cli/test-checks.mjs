@@ -1300,6 +1300,43 @@ test('ledger-guard: a platform WITHOUT the bridge flag is not bridge mode — no
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// Flattening the JSON to read it must not make the read depth-blind. A `bridge` key NESTED in some
+// other object is not the bridge flag, and treating it as one would enable this gate on a hub whose
+// `isBridge` is false — the same no-writer deadlock #186 is about, reached from the other side.
+test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #186)', () => {
+  const T = scaffoldRepo();
+  // Root-level platform, but the only `bridge: true` is nested — `isBridge` would say false.
+  enableBridge(T, '{"platform":"github","review":{"bridge":true},"roster":[{"bridge_enabled":true}]}\n');
+  commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
+  let r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /bridge not enabled/);
+
+  // Mirror image: the flag is root-level but `platform` only appears nested.
+  const T2 = scaffoldRepo();
+  enableBridge(T2, '{"bridge_enabled":true,"profile":{"platform":"github"}}\n');
+  commit(T2, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
+  r = runGate(LEDGER_GUARD, T2);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /bridge not enabled/);
+
+  for (const d of [T, T2]) fs.rmSync(d, { recursive: true, force: true });
+});
+
+// A real hub carries nested objects (`review`, `roster`) AROUND the root-level flags — stripping the
+// nesting must not throw the root pair out with it.
+test('ledger-guard: root-level flags still enforce when the hub carries nested objects', () => {
+  const T = scaffoldRepo();
+  const nested = '{"platform":"github","review":{"requireEngagement":false},'
+    + '"roster":[{"login":"a","roles":{"hub":["owner"]}}],"bridge_enabled":true}\n';
+  seedLedgerOnBase(T, 'EP-x', {}, nested);
+  commit(T, 'sneaky', { 'epics/EP-x/.sdlc/approvals.json': '[{"status":"approved"}]\n' });
+  const r = runGate(LEDGER_GUARD, T);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /epics\/EP-x\/\.sdlc\/approvals\.json/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // The #161 bug class, in its FAIL-OPEN direction: the old per-line grep missed a key whose value sat
 // on the next line, so a fully bridge-enabled hub silently no-opped a security gate. Every other
 // hub.json read in these gates already flattens with `tr -d '\n'` first.
