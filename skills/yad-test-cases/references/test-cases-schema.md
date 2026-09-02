@@ -45,7 +45,7 @@ Written by `yad-test-cases` Step 4b. Absent when the step ran artifacts-only (`t
   "direction": "generated | linked",
   "tests": [
     { "case": "TC-01", "story": "EP-<slug>-S01", "repo": "backend", "level": "e2e",
-      "path": "tests/inquiry.spec.ts", "url": "<repo url to the test>" }
+      "path": "tests/order.spec.ts", "url": "<repo url to the test>" }
   ],
   "source": "playwright-mcp"
 }

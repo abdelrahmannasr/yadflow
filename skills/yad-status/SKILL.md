@@ -38,7 +38,7 @@ Print, in this order:
 1. **Header:** render the kind noun from `epic.md` frontmatter `kind` — **Change request** (`change`),
    **Defect** (`defect`), **Hotfix** (`hotfix`), or **Epic** (`feature`, and the default when `kind` is
    absent) — followed by `epicId`, then `status` from `epic.md` frontmatter, `currentStep`, and `repos`
-   (the touched domains). Example: `Defect EP-istifta-queue-filter — draft @ stories`. A bug is a defect
+   (the touched domains). Example: `Defect EP-checkout-queue-filter — draft @ stories`. A bug is a defect
    (`kind: defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
 2. **Steps table** — for every front step in `steps[]` order (10, or 12 when the optional analysis step
    was run): `id`, `type`, `status`, `assistance`, `automation`, `locked`, and `risk_tags`. Mark the

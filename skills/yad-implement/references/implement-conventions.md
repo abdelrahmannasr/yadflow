@@ -10,11 +10,11 @@ diff back to its task, story, and contract.
 feat/<story-id>-<task-id>-<short-slug>
 ```
 
-- `<story-id>` — the permanent story ID, e.g. `EP-istifta-inquiries-S01`.
+- `<story-id>` — the permanent story ID, e.g. `EP-checkout-S01`.
 - `<task-id>` — the atomic task ID from `tasks.md`, e.g. `T01`.
-- `<short-slug>` — 2–4 hyphenated words naming the change, e.g. `create-inquiry`.
+- `<short-slug>` — 2–4 hyphenated words naming the change, e.g. `create-order`.
 
-Example: `feat/EP-istifta-inquiries-S01-T01-create-inquiry`. Branched off the code repo's default
+Example: `feat/EP-checkout-S01-T01-create-order`. Branched off the code repo's default
 branch. One task = one branch; never reuse a branch for a different task, never fork a second branch
 for the same task.
 
@@ -33,9 +33,9 @@ Task: <story-id>-<task-id>
 - The **`<type>` is lowercase** (`feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`,
   `chore`, `revert`) and the **`<subject>` starts lowercase**, is **imperative**, and has **no trailing
   period** — Conventional Commits (see `CONTRIBUTING.md` and `config.yaml` `build.commit_subject_style`).
-  Proper nouns/acronyms keep their case (`fix: refresh OAuth token`). e.g. `feat: add POST /inquiries
-  create path`, not `feat: Add POST /inquiries create path.`
-- The **`Task:` trailer is required** (`Task: EP-istifta-inquiries-S01-T01`) — the anchor the spec-link
+  Proper nouns/acronyms keep their case (`fix: refresh OAuth token`). e.g. `feat: add POST /orders
+  create path`, not `feat: Add POST /orders create path.`
+- The **`Task:` trailer is required** (`Task: EP-checkout-S01-T01`) — the anchor the spec-link
   check (§C) and the PR (§D) read to connect the diff to its spec and story. It need not be the *last*
   line: the spec-link gate finds it with git's native trailer parser
   (`%(trailers:key=Task)`), which is order-independent. All trailers must sit in **one contiguous block**
@@ -85,7 +85,7 @@ The **locked contract surface** is the cross-repo agreement in `epics/<epic>/con
 `CONTRACT-SURFACE` block, hash-locked at `.sdlc/contract-lock.json`). Distinguish:
 
 - **Consuming the contract** (normal) — implementing an endpoint/event/entity to the shape the contract
-  already agreed (e.g. building `POST /inquiries` to its agreed request/response). **Not** a contract
+  already agreed (e.g. building `POST /orders` to its agreed request/response). **Not** a contract
   change; no trailer.
 - **Changing the contract** (exceptional) — altering the agreed shape itself (new field crossing repos,
   changed status enum, new shared endpoint). This is **not** an implementation decision. Stop, go back

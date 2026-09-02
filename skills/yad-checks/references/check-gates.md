@@ -489,15 +489,15 @@ bash checks/commit-message.sh --profile code master
 # pr-title / pr-template validate the actual PR/MR metadata (in CI they come from the event payload).
 # By hand, pass the title, and a FILE holding the PR/MR description (the rendered/filled body, not the
 # template source):
-bash checks/pr-title.sh --profile code "feat: add the inquiry endpoint"
+bash checks/pr-title.sh --profile code "feat: add the order endpoint"
 # save the PR/MR description to a file first (e.g. `gh pr view <n> --json body -q .body > /tmp/pr-body.md`)
 bash checks/pr-template.sh --profile code /tmp/pr-body.md
 ```
 
-## Proven behavior (demo: `demo-repos/backend`, story EP-istifta-inquiries-S01)
+## Proven behavior (demo: `demo-repos/backend`, story EP-checkout-S01)
 
 - **Good PR** (task branch with a `Task:` trailer, no surface change, passing tests) → all three **PASS**.
 - **Bad PR A** (a code change committed with **no** `Task:` trailer) → spec-link **FAILS**.
-- **Bad PR B** (edits `specs/.../contracts/inquiries.md` to widen the surface, with a `Task:` trailer
+- **Bad PR B** (edits `specs/.../contracts/orders.md` to widen the surface, with a `Task:` trailer
   but **no** `Contract-Change`) → spec-link passes, contract-check **FAILS** and routes back to the
   architecture gate.

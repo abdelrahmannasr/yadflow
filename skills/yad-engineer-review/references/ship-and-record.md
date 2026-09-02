@@ -36,13 +36,13 @@ without the `{ epic, ships }` wrapper):
 
 ```json
 {
-  "epic": "EP-istifta-inquiries",
+  "epic": "EP-checkout",
   "ships": [
     {
-      "story": "EP-istifta-inquiries-S01",
+      "story": "EP-checkout-S01",
       "task": "T01",
       "repo": "backend",
-      "branch": "feat/EP-istifta-inquiries-S01-T01-create-inquiry",
+      "branch": "feat/EP-checkout-S01-T01-create-order",
       "pr": "<url|#|local>",
       "mergeCommit": "<sha>",
       "gates": ["spec-link", "contract-check", "build-test-lint"],

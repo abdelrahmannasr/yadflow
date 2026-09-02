@@ -83,7 +83,7 @@ unchanged — do not consume an unapproved roadmap. After seeding the epic, the 
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand) — analysis-skipped only
 *(Skip when analysis ran — the ID was already assigned by `yad-analysis`.)*
 Derive `EP-<slug>` where `slug` is **2–4 lowercase words joined by hyphens**, drawn from the idea
-(e.g. `EP-istifta-inquiries`). Lowercase except the fixed `EP` prefix. `EP-discovery` is **reserved**
+(e.g. `EP-checkout`). Lowercase except the fixed `EP` prefix. `EP-discovery` is **reserved**
 for the project front-zero — never use it for a feature. **The ID is assigned once and
 never renamed** — renaming breaks every downstream link (build plan §6b).
 Check `{project-root}/epics/` for collisions; if the slug exists, append a distinguishing word.

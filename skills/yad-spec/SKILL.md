@@ -25,7 +25,7 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
 - **Code repos are separate git repos**, one `.git` each, under `{project-root}/demo-repos/<repo>/`
   (`config.yaml` `build.code_repos_root`). All Spec Kit outputs land **inside the code repo**, never
   in the product repo.
-- `{feature-id}` is the **story ID** (e.g. `EP-istifta-inquiries-S01`) — **pinned**, never Spec Kit's
+- `{feature-id}` is the **story ID** (e.g. `EP-checkout-S01`) — **pinned**, never Spec Kit's
   numbered auto-slug (which is unstable and severs the permanent story link). The spec folder is
   `specs/<story-id>/`.
 - Spec Kit output layout (RESEARCH-NOTES §2): `specs/<feature-id>/spec.md` (+ `research.md`,

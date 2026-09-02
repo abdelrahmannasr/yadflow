@@ -18,24 +18,24 @@ source: repomix
 - The mobile repo is a **thin client** over the backend's contract — it consumes endpoints, exposes none.
 
 ## Entry points
-- `src/screens/ScholarQueue.js` — Scholar Queue screen logic (`loadQueue(http)`).
-- `src/api/inquiries.js` — the inquiries HTTP client.
+- `src/screens/MerchantQueue.js` — Merchant Queue screen logic (`loadQueue(http)`).
+- `src/api/orders.js` — the orders HTTP client.
 
 ## Public endpoints / APIs
-- None exposed (client only). **Consumes** these backend endpoints via `src/api/inquiries.js`:
-  - `GET /inquiries/queue` → `getQueue(http)` returns `items` (`{ items: Inquiry[] }`).
-  - `POST /inquiries/{id}/assign` → `assign(http, id)`.
-  - `POST /inquiries/{id}/answer` → `answer(http, id, body)`.
-<!-- unverified: assign/answer are called here but have no handler in the backend repo's route table yet. -->
+- None exposed (client only). **Consumes** these backend endpoints via `src/api/orders.js`:
+  - `GET /orders/queue` → `getQueue(http)` returns `items` (`{ items: Order[] }`).
+  - `POST /orders/{id}/assign` → `assign(http, id)`.
+  - `POST /orders/{id}/fulfil` → `fulfil(http, id, body)`.
+<!-- unverified: assign/fulfil are called here but have no handler in the backend repo's route table yet. -->
 
 ## Events
 - None.
 
 ## Data models / entities
-- Consumes `Inquiry`; the Scholar Queue maps each to `{ id, text, status }` for display (status shown only,
+- Consumes `Order`; the Merchant Queue maps each to `{ id, itemCount, status }` for display (status shown only,
   not mutated client-side).
 
 ## Module layout
-- `src/api/inquiries.js` — `getQueue`, `assign`, `answer` against the inquiries surface.
-- `src/screens/ScholarQueue.js` — `loadQueue` (reads the queue, projects display fields).
-- `specs/EP-istifta-inquiries-S03/` — forward spec (+ `contracts/queue.md`) for the queue slice.
+- `src/api/orders.js` — `getQueue`, `assign`, `fulfil` against the orders surface.
+- `src/screens/MerchantQueue.js` — `loadQueue` (reads the queue, projects display fields).
+- `specs/EP-checkout-S03/` — forward spec (+ `contracts/queue.md`) for the queue slice.

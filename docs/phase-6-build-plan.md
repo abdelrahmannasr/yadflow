@@ -96,7 +96,7 @@ not reachable from CI.
   change until paid.
 - `yad-timeline` + `yad-defects` render the thread (the defect attributes to its `escape_stage`).
 - Engine unit-tested (`cli/test-threads.mjs`); the full suite + lint green; the worked demo
-  (`EP-istifta-inquiries` → `EP-istifta-queue-filter`) proves the loop end-to-end.
+  (`EP-checkout` → `EP-checkout-queue-filter`) proves the loop end-to-end.
 
 ## Explicitly NOT in Phase 6
 - No mutation of any locked artifact — ever. A change is a new epic.

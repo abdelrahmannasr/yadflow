@@ -17,7 +17,7 @@ root, not under any `epics/EP-<slug>/.sdlc/`.
   "tool": "deeptutor",                               // deeptutor | <adapter id> | none (harness-native)
   "provider": "deeptutor-cli",                       // the concrete CLI: deeptutor-cli | null
   "version": "1.4.5",                                // CLI version reported at detect time; null if absent
-  "kb": "yadflow-istifta",                           // grounded knowledge-base name; null if not built
+  "kb": "yadflow-checkout",                           // grounded knowledge-base name; null if not built
   "kb_sources": ["epic.md", "architecture.md", "contract.md", "ui-design.md", "stories/", "code-context/*/code-map.md"],
   "auth": "user",                                    // ALWAYS the user's own DeepTutor config / LLM keys — never a token
   "connectedAt": "2026-06-14",                       // first connect (YYYY-MM-DD)

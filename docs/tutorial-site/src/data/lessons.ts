@@ -749,9 +749,9 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'IDs are immutable once assigned — renaming them breaks every downstream link.' },
           { kind: 'list', items: [
-            '**Epic** — `EP-<slug>` — e.g. `EP-istifta-inquiries`',
-            '**Story** — `EP-<slug>-S0N` — e.g. `EP-istifta-inquiries-S01`',
-            '**Task** — `EP-<slug>-S0N-T0N` — e.g. `EP-istifta-inquiries-S01-T03`',
+            '**Epic** — `EP-<slug>` — e.g. `EP-checkout`',
+            '**Story** — `EP-<slug>-S0N` — e.g. `EP-checkout-S01`',
+            '**Task** — `EP-<slug>-S0N-T0N` — e.g. `EP-checkout-S01-T03`',
             '**Branch** — `feat/<story-id>-<task-id>-<short-slug>`',
             '**Commit trailer** — `Task: <story-id>-<task-id>` (add `Contract-Change: yes` only if the locked surface is touched)',
           ] },
