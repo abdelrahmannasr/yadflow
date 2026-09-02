@@ -83,7 +83,7 @@ By the end of Phase 2, a feature should walk: epic → review → architecture+c
 - All three reviews run through the **same** `yad-review-gate` (with options for escalation and reviewer routing) — no forked gate code.
 - `yad-status` shows the full front-state chain.
 - `RESEARCH-NOTES.md` updated with: the contract representation chosen, the Impeccable slash-command names, and the Repomix interface (CLI vs slash-command).
-- Worked demo extended: `EP-istifta-inquiries` walks the full front half — epic → review → architecture+contract → review → UI → review → stories (tagged by repo) → review → `ready-for-build`. Show at least one escalation (contract review needing a domain owner) and one per-repo story review in the demo.
+- Worked demo extended: `EP-checkout` walks the full front half — epic → review → architecture+contract → review → UI → review → stories (tagged by repo) → review → `ready-for-build`. Show at least one escalation (contract review needing a domain owner) and one per-repo story review in the demo.
 - `README.md` updated so the team can run the whole front half by hand.
 
 ---

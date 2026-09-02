@@ -416,7 +416,7 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
 ```json
 { "id": "architecture", "type": "author", "artifact": "architecture.md",
   "assistance": "review", "automation": "human_approve", "locked": true,
-  "status": "done", "inherited": true, "inheritedFrom": "EP-istifta-inquiries",
+  "status": "done", "inherited": true, "inheritedFrom": "EP-checkout",
   "boundHash": "sha256:…", "risk_tags": [] }
 ```
 
@@ -432,7 +432,7 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
 
 ```json
 { "artifact": "architecture.md", "step": "architecture-review", "status": "inherited",
-  "from": "EP-istifta-inquiries", "boundHash": "sha256:…", "date": "<YYYY-MM-DD>" }
+  "from": "EP-checkout", "boundHash": "sha256:…", "date": "<YYYY-MM-DD>" }
 ```
 
 ## The pointer-lock — `contract-lock.json` in a change-epic
@@ -443,7 +443,7 @@ no `contract.md` in the child to edit, so the surface physically cannot drift.
 
 ```json
 { "artifact": "contract.md", "hash": "sha256:<parent hash, verbatim>", "lockedAt": "<date>",
-  "inheritedFrom": "EP-istifta-inquiries", "ref": "../../EP-istifta-inquiries/.sdlc/contract-lock.json" }
+  "inheritedFrom": "EP-checkout", "ref": "../../EP-checkout/.sdlc/contract-lock.json" }
 ```
 
 Omitting `architecture` from `inherits` (depth `contract-surface`) is what triggers a **real re-lock**:
@@ -455,9 +455,9 @@ architecture gate" with "open a contract-surface change-epic" — one mechanism,
 Intake + triage record, one per change/defect/hotfix epic (sibling of `approvals.json`).
 
 ```json
-{ "epicId": "EP-istifta-queue-filter", "thread": "EP-istifta-inquiries", "parent": "EP-istifta-inquiries",
+{ "epicId": "EP-checkout-queue-filter", "thread": "EP-checkout", "parent": "EP-checkout",
   "kind": "defect", "depth": "defect-fix", "intakeBy": "alice", "intakeDate": "<YYYY-MM-DD>",
-  "title": "Pending queue returns answered inquiries", "description": "…",
+  "title": "Pending queue returns fulfilled orders", "description": "…",
   "affectedArtifacts": ["stories", "test-cases"],
   "reauthors": ["stories", "test-cases"], "inherits": ["epic", "architecture", "contract", "ui-design"],
   "defect": { "origin": "production", "severity": "sev2", "escape_stage": "test-cases",
@@ -476,7 +476,7 @@ sharing `thread` and read each `change.json`; there is no duplicated thread regi
 Append-only ledger of hotfix ship-first debt (a hotfix shipped code before its front gates approved).
 
 ```json
-[ { "thread": "EP-istifta-inquiries", "epicId": "EP-istifta-hotfix-x", "openedDate": "<date>",
+[ { "thread": "EP-checkout", "epicId": "EP-checkout-hotfix-x", "openedDate": "<date>",
     "reason": "prod outage", "requires": ["artifacts-updated", "regression-test"],
     "status": "open", "paidDate": null, "paidBy": null,
     "evidence": { "artifacts": [], "regressionTest": "" } } ]

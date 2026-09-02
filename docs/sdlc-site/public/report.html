@@ -487,7 +487,7 @@ each code repo/
   <div class="term"><strong>Assistance dial</strong><span class="badge b-core">core</span><br>A per-step setting for how much AI helps with the work: <code>none</code>, <code>review</code> (AI checks human work), or <code>heavy</code> (AI does the drafting, human directs).</div>
   <div class="term"><strong>Automation dial</strong><span class="badge b-core">core</span><br>A per-step setting for who advances the step: <code>human_approve</code> (default — a person clicks/records the approval) or <code>machine_advance</code> (the orchestrator moves on by itself). Front steps and the engineer review can never be set to <code>machine_advance</code>.</div>
   <div class="term"><strong>End-first automation</strong><span class="badge b-core">core</span><br>The rule for <em>which</em> steps get automated first: start from the safe end (checks, implement — a mistake there is one revert, caught by gates) and move toward the valuable end (design decisions), which is never automated at all.</div>
-  <div class="term"><strong>Epic</strong><span class="badge b-core">core</span><br>One feature, described well: the problem, the goal, the scope. The unit the front half works on. Gets a stable ID like <code>EP-istifta-inquiries</code>.</div>
+  <div class="term"><strong>Epic</strong><span class="badge b-core">core</span><br>One feature, described well: the problem, the goal, the scope. The unit the front half works on. Gets a stable ID like <code>EP-checkout</code>.</div>
   <div class="term"><strong>Story (user story)</strong><span class="badge b-core">core</span><br>A slice of an epic small enough to build and review on its own. Each story is <em>repo-tagged</em> — it lists which code repos must implement it (e.g. <code>repos: [backend, mobile]</code>). ID: <code>EP-&lt;slug&gt;-S01</code>.</div>
   <div class="term"><strong>Atomic task</strong><span class="badge b-core">core</span><br>The smallest unit of building: one task = one branch = one commit = one PR, with a small diff (≤3 files) that stays inside the files the task declared. ID: <code>EP-&lt;slug&gt;-S01-T03</code>.</div>
   <div class="term"><strong>Handoff rule</strong><span class="badge b-core">core</span><br>Where files live: everything up to and including the locked contract lives in the product hub; everything from the spec onward lives in each code repo. The handover point is exactly where Spec Kit begins.</div>
@@ -544,7 +544,7 @@ each code repo/
   <div class="term"><strong>Commit-message gate</strong><span class="badge b-build">build</span><br>CI gate #5: every commit subject must follow Conventional Commits (<code>&lt;type&gt;: …</code>, no trailing period) and its trailers must be ordered <code>Task → Contract-Change → Co-Authored-By</code>. Profile-aware (code|hub).</div>
   <div class="term"><strong>PR-title gate</strong><span class="badge b-build">build</span><br>CI gate #6: the PR/MR title must follow the convention — a Conventional-Commits subject on code repos. On the hub it splits by head branch: a <code>review/EP-*</code> branch is a front-half review PR and needs a <code>review: &lt;artifact&gt; (EP-&lt;slug&gt;)</code> title, while any other branch is a hub tooling/code change and uses the Conventional-Commits subject. <em>Anti-bypass:</em> a non-review branch that changes a front-half artifact (<code>epics/**</code>) is rejected — artifact edits must go through a review PR.</div>
   <div class="term"><strong>PR-template gate</strong><span class="badge b-build">build</span><br>CI gate #7: the PR/MR body must actually use the committed template (its required sections present + the risk field filled), so the review and routing have their inputs. Profile-aware (code|hub); the hub splits by head branch the same way as the PR-title gate, with the same <code>epics/**</code>-on-a-non-review-branch anti-bypass guard.</div>
-  <div class="term"><strong><code>Task:</code> trailer</strong><span class="badge b-build">build</span><br>A line at the end of every commit message naming the story + task it implements (e.g. <code>Task: EP-istifta-inquiries-S01-T03</code>). What the spec-link check verifies.</div>
+  <div class="term"><strong><code>Task:</code> trailer</strong><span class="badge b-build">build</span><br>A line at the end of every commit message naming the story + task it implements (e.g. <code>Task: EP-checkout-S01-T03</code>). What the spec-link check verifies.</div>
   <div class="term"><strong><code>Contract-Change: yes</code> trailer</strong><span class="badge b-build">build</span><br>A commit trailer added <em>only</em> when the diff deliberately touches the locked contract surface — paired with an updated, re-locked contract, or the contract-check fails.</div>
   <div class="term"><strong>Conventional Commits</strong><span class="badge b-build">build</span><br>The commit/PR title convention used everywhere: <code>feat: …</code>, <code>fix: …</code> (lowercase after the type). Merged <code>feat:</code>/<code>fix:</code> commits also drive automated releases of the CLI itself.</div>
   <div class="term"><strong><code>Co-Authored-By</code> AI trailer</strong><span class="badge b-build">build</span><br>An optional per-commit trailer crediting the AI tool that helped (claude / copilot / cursor / coderabbit). The human author always owns the commit.</div>
@@ -590,10 +590,10 @@ each code repo/
   <h3>IDs &amp; naming (immutable once assigned)</h3>
   <table>
     <tr><th>Thing</th><th>Format</th><th>Example</th></tr>
-    <tr><td>Epic ID</td><td><code>EP-&lt;slug&gt;</code></td><td><code>EP-istifta-inquiries</code></td></tr>
-    <tr><td>Story ID</td><td><code>EP-&lt;slug&gt;-S0N</code></td><td><code>EP-istifta-inquiries-S01</code></td></tr>
-    <tr><td>Task ID</td><td><code>EP-&lt;slug&gt;-S0N-T0N</code></td><td><code>EP-istifta-inquiries-S01-T03</code></td></tr>
-    <tr><td>Branch</td><td><code>feat/&lt;story-id&gt;-&lt;task-id&gt;-&lt;slug&gt;</code></td><td><code>feat/EP-istifta-inquiries-S01-T01-create-inquiry</code></td></tr>
+    <tr><td>Epic ID</td><td><code>EP-&lt;slug&gt;</code></td><td><code>EP-checkout</code></td></tr>
+    <tr><td>Story ID</td><td><code>EP-&lt;slug&gt;-S0N</code></td><td><code>EP-checkout-S01</code></td></tr>
+    <tr><td>Task ID</td><td><code>EP-&lt;slug&gt;-S0N-T0N</code></td><td><code>EP-checkout-S01-T03</code></td></tr>
+    <tr><td>Branch</td><td><code>feat/&lt;story-id&gt;-&lt;task-id&gt;-&lt;slug&gt;</code></td><td><code>feat/EP-checkout-S01-T01-create-order</code></td></tr>
     <tr><td>Commit trailer</td><td><code>Task: &lt;story-id&gt;-&lt;task-id&gt;</code></td><td>+ <code>Contract-Change: yes</code> only when the locked surface is touched</td></tr>
   </table>
   <div class="callout">Renaming an ID breaks every downstream link — IDs are <strong>immutable once assigned</strong>.</div>
@@ -822,7 +822,7 @@ yad-connect-learning action: disconnect</code></pre>
     <h4><code>yad-learn</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> The <strong>learning layer</strong>. At <em>any</em> SDLC stage a team member can ask to learn a concept and be tutored <em>in the context of what the team is building</em> — e.g. "teach me why the architecture hash-locks the contract surface." It routes to the connected learning tool (DeepTutor, grounded in the project knowledge base) or degrades to <strong>harness-native</strong> tutoring, renders a tutorial artifact, and appends to a per-member <strong>learning ledger</strong> kept <strong>local-only</strong> (gitignored — never committed or pushed, to the hub or any code repo) so it stays a private, personal skills log (<code>yad-status</code> rolls up the local records). <strong>Purely opt-in — it never blocks a gate</strong> and never touches epic state, approvals, or the contract lock.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Any time, from any stage:</div>
-<pre><code>run yad-learn — concept: "contract versioning" epic: EP-istifta-inquiries stage: architecture-review
+<pre><code>run yad-learn — concept: "contract versioning" epic: EP-checkout stage: architecture-review
 yad-learn action: list                           # your local skills-log records for this epic
 yad-learn action: complete concept: "contract versioning"   # mark it learned</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Whenever a member wants to understand what is being built — to review a gate with confidence, onboard onto a domain, or grow a skill. It is additive and reversible: learning never gates the work.</div>
@@ -834,7 +834,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-discovery</code> <em>(optional · front-zero)</em></h4>
     <div class="row"><span class="lbl lbl-what">What</span> A once-per-project discovery phase that runs <em>before</em> any epic: with the analyst, it pressure-tests the product itself — market, competitors, current state, feasibility, requirements — and writes <code>roadmap.md</code>, the feature menu each <code>yad-epic</code> reads. Greenfield and brownfield; modelled as the reserved epic-zero <code>EP-discovery</code>, it terminates at <code>discovery-done</code> (there is no build half).</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, describe the product:</div>
-<pre><code>run yad-discovery — idea: "a platform for submitting and tracking religious inquiries"</code></pre>
+<pre><code>run yad-discovery — idea: "an online shop where customers place and track orders"</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> At project kick-off, to frame the whole product before the first epic. <strong>Skip it freely</strong> — <code>roadmap.md</code> is reference-only and never auto-seeds epics.</div>
   </div>
 
@@ -842,7 +842,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-analysis</code> <em>(optional)</em></h4>
     <div class="row"><span class="lbl lbl-what">What</span> A dedicated discovery pass: the analyst AI pressure-tests your raw idea — is it worth building, for whom, what could kill it — and writes the brief into <code>analysis.md</code>. It assigns the epic’s <code>EP-&lt;slug&gt;</code> ID and seeds the state files.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, just describe the idea:</div>
-<pre><code>run yad-analysis — idea: "let users submit religious inquiries and track answers"</code></pre>
+<pre><code>run yad-analysis — idea: "let customers check out a cart and track their orders"</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Before the epic, when the idea is still fuzzy and deserves its own gated discovery round. <strong>Skip it freely</strong> — the epic step does the same shaping inline.</div>
   </div>
 
@@ -850,7 +850,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-epic</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Writes the feature down properly: problem, goal, scope, the repos it will touch → <code>epic.md</code>. The analyst shapes the idea, the pm writes the epic. If analysis didn’t run, this is the entry point: it assigns the <code>EP-&lt;slug&gt;</code> ID and seeds <code>.sdlc/</code> state. If repos are connected, it reads their code-maps so the epic references what already exists.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub:</div>
-<pre><code>run yad-epic — feature: "inquiry submission and tracking"</code></pre>
+<pre><code>run yad-epic — feature: "cart checkout and order tracking"</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> The start of every new feature (or right after the analysis gate passes). It ends by stopping at the <strong>epic review gate</strong>.</div>
   </div>
 
@@ -858,7 +858,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-architecture</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> With the architect AI, decides <em>how</em> the feature is built (<code>architecture.md</code>) and writes the <strong>locked contract</strong> (<code>contract.md</code>) — the one shared surface (APIs, events, data model) every repo must obey. It hash-locks the contract surface into <code>contract-lock.json</code>. Code-aware: it cross-checks the surface against existing endpoints before locking.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the epic gate passes:</div>
-<pre><code>run yad-architecture — epic: EP-istifta-inquiries</code></pre>
+<pre><code>run yad-architecture — epic: EP-checkout</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Right after the epic review is approved. Stops at the <strong>architecture review gate</strong>, which is always <em>escalated</em> (domain owners of every repo must approve).</div>
   </div>
 
@@ -866,7 +866,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-ui</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> With the ux-designer AI, authors the UI design for the epic: <code>ui-design.md</code> (this feature’s screens and flows) + <code>DESIGN.md</code> (the reusable design language). Drives Impeccable’s <code>document / extract / craft</code> commands when installed; writes the files directly when not (and records that). When a design tool is connected (<code>yad-connect-design</code>), it also <strong>materializes the screens in that tool</strong> — generating them from the spec or linking an existing design — and records the screen→frame map in <code>design-links.json</code>; otherwise it stays markdown-only.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the architecture gate passes:</div>
-<pre><code>run yad-ui — epic: EP-istifta-inquiries</code></pre>
+<pre><code>run yad-ui — epic: EP-checkout</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After architecture, before stories. Skip-able only if the epic genuinely has no UI. Stops at the <strong>UI review gate</strong> (base rule).</div>
   </div>
 
@@ -874,7 +874,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-stories</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> With the pm AI, slices the approved epic into user stories small enough to build — one file each under <code>stories/</code>, with stable IDs (<code>EP-&lt;slug&gt;-S01</code>…) and a <code>repos:</code> tag naming which code repos must implement each one. Reads epic + architecture + contract + UI as input.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the UI gate passes:</div>
-<pre><code>run yad-stories — epic: EP-istifta-inquiries</code></pre>
+<pre><code>run yad-stories — epic: EP-checkout</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After the UI gate passes. Stops at the <strong>stories review gate</strong> (per-repo rule). When it passes the epic is <code>ready-for-build</code> — the build half can start, and <code>yad-test-cases</code> opens in parallel.</div>
   </div>
 
@@ -882,7 +882,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-test-cases</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> With the <strong>test architect</strong> AI (Murat), authors the risk-based test cases that cover the approved stories → <code>test-cases.md</code> (cases prioritised P0–P3, with story→case traceability). When a testing tool is connected (<code>yad-connect-testing</code>), it also <strong>implements the automation tests in that tool</strong> — generating them into the connected code repo(s) or linking an existing suite — and records the case→test map in <code>test-links.json</code>; otherwise it stays artifacts-only. Reads epic + architecture + contract + UI + stories as input.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, after the stories gate passes:</div>
-<pre><code>run yad-test-cases — epic: EP-istifta-inquiries</code></pre>
+<pre><code>run yad-test-cases — epic: EP-checkout</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> A <strong>parallel, non-blocking</strong> track: it opens the moment the stories gate passes — the epic is already <code>ready-for-build</code>, so this runs <strong>alongside the build half</strong>, not before it. Stops at its own <strong>test-cases review gate</strong> (base rule); that review never blocks building.</div>
   </div>
 
@@ -892,7 +892,7 @@ yad-learn action: complete concept: "contract versioning"   # mark it learned</c
     <h4><code>yad-review-gate</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> The one reusable team review loop used by <em>every</em> front-half review. It shows the artifact, records comments and approvals as files, enforces the approval rule (owner + 1 reviewer, escalating on contract/auth/payments), and moves the step forward <strong>only</strong> when the rule is met.</div>
     <div class="row"><span class="lbl lbl-how">How</span> In the product hub, one action at a time:</div>
-<pre><code>yad-review-gate epic: EP-istifta-inquiries artifact: epic.md action: open      # present it for review
+<pre><code>yad-review-gate epic: EP-checkout artifact: epic.md action: open      # present it for review
 yad-review-gate … action: comment    # record a reviewer's notes (never advances)
 yad-review-gate … action: approve    # record an approval (name + role)
 yad-review-gate … action: sync       # pull approvals/comments from the hub review PR
@@ -914,7 +914,7 @@ yad-review-gate … action: advance    # move on — only if the rule is met, el
     <h4><code>yad-spec</code> — Build Step A</h4>
     <div class="row"><span class="lbl lbl-what">What</span> Runs the heavy Spec Kit ceremony <strong>once</strong> for one story in one repo — <code>specify → clarify → plan → analyze → checklist → tasks</code> — writing <code>specs/&lt;story-id&gt;/</code> inside the code repo plus a <code>link.md</code> back to the story. It <em>quotes</em> the locked contract; it never widens it. Drives <code>/speckit.*</code> when installed, authors the same files by hand when not.</div>
     <div class="row"><span class="lbl lbl-how">How</span> From the code repo (or naming it):</div>
-<pre><code>yad-spec story: EP-istifta-inquiries-S01 repo: backend</code></pre>
+<pre><code>yad-spec story: EP-checkout-S01 repo: backend</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> The first build step for every <code>ready-for-build</code> story — once per repo the story is tagged with. The tasks it produces feed <code>yad-implement</code>.</div>
   </div>
 
@@ -922,9 +922,9 @@ yad-review-gate … action: advance    # move on — only if the rule is met, el
     <h4><code>yad-implement</code> — Build Step B</h4>
     <div class="row"><span class="lbl lbl-what">What</span> With the dev AI, implements <strong>one atomic task</strong> from the story’s <code>tasks.md</code> as a small diff (≤3 files) on its own branch: <em>one task = one branch = one commit = one PR</em>. The diff must stay inside the files the task declared — if it would grow, the skill flags it and STOPS. The commit follows the convention (Conventional subject, <code>Task:</code> trailer, optional AI co-author, <code>Contract-Change: yes</code> only if the locked surface is touched).</div>
     <div class="row"><span class="lbl lbl-how">How</span> Once per task, repeating until the story’s tasks are done:</div>
-<pre><code>yad-implement story: EP-istifta-inquiries-S01 repo: backend task: T01
+<pre><code>yad-implement story: EP-checkout-S01 repo: backend task: T01
 # then commit + open the PR with the CLI:
-yad commit --type feat -m "create inquiry endpoint" --ai claude
+yad commit --type feat -m "create order endpoint" --ai claude
 yad open-pr --repo backend</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After the story is spec’d. Run it once per task ID (<code>T01</code>, <code>T02</code>, …). It hands off to the check gates — never merges anything itself.</div>
   </div>
@@ -953,7 +953,7 @@ yad-pr-template repo: hub action: wire        # the hub's front-half review temp
     <h4><code>yad-commit</code> — Build helper</h4>
     <div class="row"><span class="lbl lbl-what">What</span> Commits <strong>one staged atomic change</strong> by the conventions: a Conventional-Commits subject, the fixed trailer block (<code>Task → Contract-Change → Co-Authored-By</code>), and a ≤3-file atomic guard. The human git author owns the commit; an assisting AI is recorded only as a <code>Co-Authored-By</code> footer chosen per-commit with <code>--ai</code> (default <code>none</code>, human-only).</div>
     <div class="row"><span class="lbl lbl-how">How</span> From the repo holding the staged change:</div>
-<pre><code>yad commit --type feat -m "add the inquiry endpoint" --ai claude
+<pre><code>yad commit --type feat -m "add the order endpoint" --ai claude
 yad commit --type fix -m "handle null user" --dry-run   # preview only</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Any time you have a staged atomic change to commit by the rules — on a code repo or the hub.</div>
   </div>
@@ -971,7 +971,7 @@ yad commit --type fix -m "handle null user" --dry-run   # preview only</code></p
     <h4><code>yad-ship</code> — Build helper</h4>
     <div class="row"><span class="lbl lbl-what">What</span> Does the two routine build-half hand-actions for one task in <strong>one step</strong>: commit by convention, then open the task PR/MR. A thin wrapper over <code>yad-commit</code> then <code>yad-open-pr</code> — the PR step runs <em>only</em> if the commit lands (a failed commit, tripped guard, or <code>--dry-run</code> stops before pushing). It never merges.</div>
     <div class="row"><span class="lbl lbl-how">How</span> On the task branch, with the change staged:</div>
-<pre><code>yad ship --type feat -m "add the inquiry endpoint" --ai claude --repo backend --risk low</code></pre>
+<pre><code>yad ship --type feat -m "add the order endpoint" --ai claude --repo backend --risk low</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> The common case — turn an implemented, staged task into a reviewable PR/MR in one command.</div>
   </div>
 
@@ -979,7 +979,7 @@ yad commit --type fix -m "handle null user" --dry-run   # preview only</code></p
     <h4><code>yad-engineer-review</code> — Build Step E</h4>
     <div class="row"><span class="lbl lbl-what">What</span> The last mile of a task’s PR: <code>ai-review</code> triggers the advisory AI pass (CodeRabbit — a second set of eyes, never the authority); <code>approve</code> records the <strong>human engineer approval</strong> (owner + 1 reviewer, same escalation); <code>ship</code> merges and records the ship in <code>build-log.json</code>, moving the story to <code>in-build</code> → <code>shipped</code> so the epic → story → task → PR chain stays traceable.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Against the task’s PR, in order:</div>
-<pre><code>yad-engineer-review story: EP-istifta-inquiries-S01 task: T01 repo: backend action: ai-review
+<pre><code>yad-engineer-review story: EP-checkout-S01 task: T01 repo: backend action: ai-review
 yad-engineer-review … action: approve     # the human engineer's approval
 yad-engineer-review … action: ship        # merge + record in build-log.json</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Once a task’s PR is open and the check gates are green. The engineer approval here is <strong>permanently human</strong> — no dial can ever automate it.</div>
@@ -999,7 +999,7 @@ yad-engineer-review … action: ship        # merge + record in build-log.json</
     <h4><code>yad-run</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> The orchestrator that makes automation real. It walks a story’s back half (spec → tasks → implement → checks) reading each step’s automation dial: <code>machine_advance</code> → it proceeds alone; <code>human_approve</code> → it stops for you. Any failure, scope overrun, or contract-surface touch <strong>halts and pulls in a human</strong>, and it always stops at the engineer review. Every run lands in the trust log. It also flips dials (refusing without enough evidence) and owns the kill switch.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>yad-run story: EP-istifta-inquiries-S02 repo: backend        # drive the back half on the dials
+<pre><code>yad-run story: EP-checkout-S02 repo: backend        # drive the back half on the dials
 yad-run action: set-dial step: checks to: machine_advance    # earn automation (needs trust evidence)
 yad-run action: set-dial step: checks to: human_approve      # revert — always allowed
 yad-run action: kill      # everything back to human, system-wide, instantly
@@ -1012,7 +1012,7 @@ yad-run action: unkill    # restore earned automation</code></pre>
     <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> dashboard in text: the epic’s full step chain, every step’s two dials and status, the contract lock, which approvals the active gate is still waiting on, each back step’s trust record, the kill-switch state — and across epics, the fleet roll-up. It changes nothing.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-status                          # everything, across epics (fleet view)
-yad-status EP-istifta-inquiries     # one epic in detail</code></pre>
+yad-status EP-checkout     # one epic in detail</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Any time, freely — it’s the “where are we and what’s blocking?” command. The best first move whenever you’re unsure what to do next.</div>
   </div>
 
@@ -1094,7 +1094,7 @@ npx yadflow update       # apply updates only</code></pre>
     <h4><code>yad gate open &lt;epic&gt; &lt;artifact&gt;</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Opens the review PR/MR on the hub for one authored artifact (epic, architecture, UI, stories…), sets the required reviewers and labels from the routing rule, and marks the step <code>in_review</code>.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>yad gate open EP-istifta-inquiries epic.md</code></pre>
+<pre><code>yad gate open EP-checkout epic.md</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Right after an author step finishes, when the hub is on a platform. (No platform? Use the <code>yad-review-gate</code> skill file-only instead.)</div>
   </div>
 
@@ -1102,22 +1102,22 @@ npx yadflow update       # apply updates only</code></pre>
     <h4><code>yad gate sync &lt;epic&gt; [artifact]</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Pulls the review PR’s approvals and comment threads into the file ledger (<code>approvals.json</code>, <code>comments.json</code>, <code>reviews/*.md</code>) using your own <code>gh</code>/<code>glab</code> login — and <strong>auto-advances the step</strong> once three things hold: the approval rule is satisfied, every comment thread is resolved, and the PR is merged. Approvals are revoked automatically if the artifact changed since they were given.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
-<pre><code>yad gate sync EP-istifta-inquiries            # all open reviews of the epic
-yad gate sync EP-istifta-inquiries epic.md    # just this one</code></pre>
+<pre><code>yad gate sync EP-checkout            # all open reviews of the epic
+yad gate sync EP-checkout epic.md    # just this one</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> After reviewers acted on the platform. <strong>Usually you don’t run it at all</strong> — with the gate-sync CI wired, every approval / change request / merge triggers it automatically; this stays valid as the manual fallback.</div>
   </div>
 
   <div class="skillcard">
     <h4><code>yad gate comments &lt;epic&gt; [artifact]</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Fetches the <em>unresolved</em> review comment threads so the artifact owner can address them. (You reply on the PR; the reviewer resolves their own thread.)</div>
-    <div class="row"><span class="lbl lbl-how">How</span> <code>yad gate comments EP-istifta-inquiries</code></div>
+    <div class="row"><span class="lbl lbl-how">How</span> <code>yad gate comments EP-checkout</code></div>
     <div class="row"><span class="lbl lbl-when">When</span> A gate is stuck <code>in_review</code> and you want the to-do list of open feedback.</div>
   </div>
 
   <div class="skillcard">
     <h4><code>yad gate status &lt;epic&gt;</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Shows each review step and its recorded approvals — counting only the non-stale ones.</div>
-    <div class="row"><span class="lbl lbl-how">How</span> <code>yad gate status EP-istifta-inquiries</code></div>
+    <div class="row"><span class="lbl lbl-how">How</span> <code>yad gate status EP-checkout</code></div>
     <div class="row"><span class="lbl lbl-when">When</span> Quick check of “who has approved what, and who is still missing” on the front half.</div>
   </div>
 
@@ -1134,8 +1134,8 @@ yad gate sync EP-istifta-inquiries epic.md    # just this one</code></pre>
     <h4><code>yad commit --type &lt;t&gt; -m &lt;subject&gt;</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Commits by the SDLC convention so you never hand-build a trailer: it forms the Conventional subject (<code>feat: …</code>), derives the <code>Task:</code> trailer from your branch name, optionally appends an AI <code>Co-Authored-By:</code>, adds <code>Contract-Change: yes</code> only when you say so, and <strong>refuses a non-atomic stage</strong> (changes outside the task’s declared files).</div>
     <div class="row"><span class="lbl lbl-how">How</span> From the task branch in a code repo:</div>
-<pre><code>yad commit --type feat -m "create inquiry endpoint" --ai claude
-yad commit --type fix  -m "handle empty answer" --contract-change   # only if the locked surface moved
+<pre><code>yad commit --type feat -m "create order endpoint" --ai claude
+yad commit --type fix  -m "handle empty shipping note" --contract-change   # only if the locked surface moved
 yad commit --type feat -m "…" --dry-run                             # preview without committing</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Every commit during <code>yad-implement</code>. Flags: <code>--type</code>, <code>-m/--message</code>, <code>--task</code>, <code>--ai claude|copilot|cursor|coderabbit|none</code>, <code>--contract-change</code>, <code>--dry-run</code>, <code>--force</code> (bypass the atomic guard — use sparingly).</div>
   </div>
@@ -1416,7 +1416,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
   <footer>
     Generated 2026-06-12 from the project’s own docs: <code>README.md</code>, <code>TEAM-GUIDE.md</code>,
     and <code>docs/sdlc-workflow-plan.md</code> (incl. §8 “The three project types”).
-    A worked end-to-end example lives in <code>epics/EP-istifta-inquiries/</code>.
+    A worked end-to-end example lives in <code>epics/EP-checkout/</code>.
     Renamed <strong>Yadflow</strong> at v2.0.0 — npm package previously <code>@abdelrahmannasr/sdlc-workflow</code>
     (now deprecated), GitHub repo previously <code>sdlc-workflow</code> (old URLs redirect); both are now
     <code>yadflow</code>.

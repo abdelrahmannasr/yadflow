@@ -186,7 +186,7 @@
 ## Phase 3 decisions (build-half Step A)
 
 > Recorded 2026-06-06 while building Step A (`yad-spec`) — the Spec Kit handoff — on one repo
-> (`backend`), one story (`EP-istifta-inquiries-S01`). Per `docs/phase-3-build-plan.md` Step A is the
+> (`backend`), one story (`EP-checkout-S01`). Per `docs/phase-3-build-plan.md` Step A is the
 > riskiest integration and is built/verified **alone** before Step B (`yad-implement`).
 
 - **Spec Kit command names confirmed for Step A** (DoD: "Command names recorded in
@@ -212,20 +212,20 @@
 - **Code repos are separate git repos.** Code repos live as their own `.git` repos under
   `demo-repos/<repo>/` (gitignored from the product repo, regenerable via `demo-repos/README.md`),
   faithful to "per-repo specs in each code repo, contract singular in the product repo." Step A never
-  re-locks or widens the contract; it **quotes** the locked surface (`POST /inquiries`, `Inquiry`,
-  `InquiryStatus` for S01) and routes any gap back to the architecture gate.
+  re-locks or widens the contract; it **quotes** the locked surface (`POST /orders`, `Order`,
+  `OrderStatus` for S01) and routes any gap back to the architecture gate.
 
 ## Phase 3 decisions (build-half Step B)
 
 > Recorded 2026-06-06 while building Step B (`yad-implement`) — the `dev` step — and proving it on
-> one atomic task (`T01`) of `EP-istifta-inquiries-S01` in the separate `demo-repos/backend` repo.
+> one atomic task (`T01`) of `EP-checkout-S01` in the separate `demo-repos/backend` repo.
 > Per `docs/phase-3-build-plan.md` §B: one atomic task = one branch = one PR/MR.
 
 - **Implementing lens = `dev`** (`bmad-agent-dev`, Amelia). The dev implements ONE atomic task from the
   story's `tasks.md` as a small diff (≤3 files), inside the files the task declared.
 - **Branch convention** (`config.yaml` `build.branch_convention`):
   `feat/<story-id>-<task-id>-<short-slug>`, e.g.
-  `feat/EP-istifta-inquiries-S01-T01-create-inquiry`, branched off the code repo's default branch.
+  `feat/EP-checkout-S01-T01-create-order`, branched off the code repo's default branch.
 - **Commit convention** — conventional subject + body + a **final trailer that is the task ID**
   (`Task: <story-id>-<task-id>`). This trailer is the anchor the Step C spec-link check will read to
   tie a diff to its spec/story. `Contract-Change: yes` is added **only** when the diff alters the
@@ -234,16 +234,16 @@
 - **File-boundary rule (hard stop).** Each `tasks.md` task declares a `Files:` list; the diff must stay
   inside it. A needed file outside the list is treated as a **spec bug** (re-scope the task), never a
   silent diff widening — this is the main guard against unreviewed scope slipping past the gates.
-- **Verified on T01.** Implemented `POST /inquiries` create path across exactly the three declared
-  files (`src/inquiry/index.js`, `src/inquiry/store.js`, `src/routes.js`); an ephemeral `node` smoke
-  confirmed AC #1 (`{ id, status: "submitted" }`) and that an injected `status` is ignored
+- **Verified on T01.** Implemented `POST /orders` create path across exactly the three declared
+  files (`src/order/index.js`, `src/order/store.js`, `src/routes.js`); an ephemeral `node` smoke
+  confirmed AC #1 (`{ id, status: "placed" }`) and that an injected `status` is ignored
   (server-owned). Committed on the task branch with the `Task:` trailer and no `Contract-Change`.
   The skill **stops at the committed branch** — no PR/merge/state change (gates are Step C, not built).
 
 ## Phase 3 decisions (build-half Step C)
 
 > Recorded 2026-06-06 while building Step C (`yad-checks`) — the production-safety check gates — and
-> proving them on `demo-repos/backend` (story `EP-istifta-inquiries-S01`). Per
+> proving them on `demo-repos/backend` (story `EP-checkout-S01`). Per
 > `docs/phase-3-build-plan.md` §C the gates are separate, simple CI checks that must pass before merge.
 
 - **Three gates, CI-agnostic bash** (canonical source: `skills/yad-checks/templates/checks/`):
@@ -266,9 +266,9 @@
   bash-4 `mapfile` builtin so they run on macOS bash 3.2 as well as CI's bash 4+.
 - **Demonstrated (DoD).** Good PR (task branch, `Task:` trailer, no surface change, passing tests) →
   all three PASS. Bad PR A (code change, **no** `Task:` trailer) → spec-link FAILS. Bad PR B (edits
-  `specs/.../contracts/inquiries.md` to widen the surface, with a `Task:` trailer but **no**
+  `specs/.../contracts/orders.md` to widen the surface, with a `Task:` trailer but **no**
   `Contract-Change`) → spec-link passes, contract-check FAILS. The build/test/lint test was provided by
-  running the `yad-implement` loop for task **T03** (server-owned status: `test/inquiry.create.test.js`
+  running the `yad-implement` loop for task **T03** (server-owned status: `test/order.create.test.js`
   exercising AC #1 + AC #3). T01 was merged into the backend's `master` by hand (Step E ship is not
   built yet) so subsequent task PRs build on it — Phase 3 is run by hand; nothing auto-advances.
 
@@ -299,7 +299,7 @@
 ## Phase 3 decisions (build-half Step E)
 
 > Recorded 2026-06-06 while building Step E (`yad-engineer-review`) — AI review + engineer review + ship — and
-> shipping story `EP-istifta-inquiries-S01` end to end. Per `docs/phase-3-build-plan.md` §E.
+> shipping story `EP-checkout-S01` end to end. Per `docs/phase-3-build-plan.md` §E.
 
 - **Two sets of eyes.** AI review is **advisory** — CodeRabbit (`.coderabbit.yaml`, `request_changes_workflow: false`)
   comments on every PR but never approves or merges. The **engineer review** is the authority: a human
@@ -324,15 +324,15 @@
 ## Phase 3 decisions (build-half Step F)
 
 > Recorded 2026-06-06 while widening to multi-repo (Step F) on the cross-repo story
-> `EP-istifta-inquiries-S03` (`repos: [backend, mobile]`). Per `docs/phase-3-build-plan.md` §F: run
+> `EP-checkout-S03` (`repos: [backend, mobile]`). Per `docs/phase-3-build-plan.md` §F: run
 > A–E in each repo independently, all derived from the one locked contract; prove a per-repo bypass is
 > blocked. **No new skill** — the existing skills already take a `repo` input.
 
 - **One contract, two repos.** A second throwaway repo `demo-repos/mobile/` (own git, gitignored) was
   scaffolded with the **same** canonical gate scripts + PR template + `.coderabbit.yaml`. S03 was
   spec'd (`yad-spec`) in **both** `backend` and `mobile` under the same story id; both `link.md` pin
-  the **identical** contract hash `sha256:4abbbbc5…`, equal to the product repo's
-  `contract-lock.json`. The backend slice implements the scholar endpoints; the mobile slice consumes
+  the **identical** contract hash `sha256:3c8094c8…`, equal to the product repo's
+  `contract-lock.json`. The backend slice implements the merchant endpoints; the mobile slice consumes
   them — neither defines the surface.
 - **The pipeline runs per repo.** One atomic task (`S03-T01`) was implemented in each repo and the
   three gates passed **pre-merge** in both (spec-link, contract-check, build/test/lint). Both ships are
@@ -340,7 +340,7 @@
   `carol`/backend, `dave`/mobile — the Step D routing feeding the Step E engineer review). S03 is now
   `status: in-build` (one of three tasks shipped per repo).
 - **Per-repo contract enforcement proven (DoD).** A bypass in the **mobile** repo — widening
-  `specs/EP-istifta-inquiries-S03/contracts/queue.md` with a `Task:` trailer but **no**
+  `specs/EP-checkout-S03/contracts/queue.md` with a `Task:` trailer but **no**
   `Contract-Change` — was **blocked** by mobile's own contract-check (spec-link passed, contract-check
   FAILED, routing back to the architecture gate). Backend's contract-check was already proven blocking
   in Step C. So each code repo independently enforces the single locked contract; the shared surface
@@ -365,7 +365,7 @@
   the convention and confirmed by a human before packing.
 - **Gated per touched feature (DoD).** `checks/backfill-check.sh` blocks a change touching a feature
   whose backfill spec is not `verified: true` — and **only** that feature: a change to `src/health`
-  FAILED while its spec was unverified and PASSED after approval, while `src/inquiry` (forward-spec'd,
+  FAILED while its spec was unverified and PASSED after approval, while `src/order` (forward-spec'd,
   no backfill spec) was never blocked. Never the whole repo at once.
 
 ## Phase 3 — done
@@ -430,7 +430,7 @@
     `approved-unchanged`. The slice computes **5 runs, 100% unchanged → clears the threshold**, so
     `checks` is **earned**. `tasks`/`implement`/`spec` have **0 runs → not earned**, so `set-dial`
     would refuse them (verified by computing the predicate).
-  - `build-state/EP-istifta-inquiries-S03.json` shows the multi-repo story (backend + mobile) with
+  - `build-state/EP-checkout-S03.json` shows the multi-repo story (backend + mobile) with
     `checks` flipped to `machine_advance` (earned) and `engineer-review` `locked`. **Step B** is thereby
     realized: the next task on either repo auto-advances on a clean gate pass and stops at the human
     engineer review.
@@ -530,7 +530,7 @@
   backfilled spec and an epic to thread from. No new gate logic.
 - **Validated:** `cli/test-threads.mjs` (resolveThread linear/cycle/missing/cache-mismatch;
   resolveCurrentArtifacts; the inherited short-circuit; seal + debt); the worked demo
-  `EP-istifta-inquiries → EP-istifta-queue-filter` (epic-open FAILs a further change to the sealed
+  `EP-checkout → EP-checkout-queue-filter` (epic-open FAILs a further change to the sealed
   change-epic; lineage/contract/reconcile PASS; `yad reconcile`/`yad doctor` flag open hotfix debt).
 
 ## License note (for any future commercial intent)

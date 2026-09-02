@@ -18,7 +18,7 @@ There is **no `sm` agent** (Phase 0 Deviation 1): the `pm` lens breaks down the 
 
 - `{project-root}` resolves from the project working directory.
 - Stories live under `{project-root}/epics/EP-<slug>/stories/` (build plan §6).
-- Story files are named `EP-<slug>-S0N.md` (zero-padded, e.g. `EP-istifta-inquiries-S01.md`).
+- Story files are named `EP-<slug>-S0N.md` (zero-padded, e.g. `EP-checkout-S01.md`).
 - Speak in the configured `communication_language`; write documents in `document_output_language`.
 
 ## On Activation

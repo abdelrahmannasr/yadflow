@@ -160,7 +160,7 @@ When Step 3b generated or linked a design, write the machine-readable screen→f
   "generatedAt": "<YYYY-MM-DD>",
   "direction": "generated | linked",
   "screens": [
-    { "name": "Submit Inquiry", "platform": "mobile",
+    { "name": "Checkout", "platform": "mobile",
       "nodeId": "123:45", "url": "https://www.figma.com/file/<key>/?node-id=123-45" }
   ],
   "source": "figma-mcp"

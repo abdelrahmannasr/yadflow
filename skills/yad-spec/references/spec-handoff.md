@@ -48,11 +48,11 @@ comes from the story's acceptance criteria and the **locked contract surface** �
   contract endpoints/entities the story touches.
 - **`research.md`** — list the decisions and any unknowns; if the story is unambiguous, say so. Note
   where the contract already settles a question (e.g. status is server-owned).
-- **`data-model.md`** — the entities/fields **this repo** implements. Shared entities (e.g. `Inquiry`,
-  `InquiryStatus`) are **quoted from the contract** and marked as contract-owned; repo-private fields
+- **`data-model.md`** — the entities/fields **this repo** implements. Shared entities (e.g. `Order`,
+  `OrderStatus`) are **quoted from the contract** and marked as contract-owned; repo-private fields
   are marked as local.
 - **`contracts/`** — the slice of the API/event surface this repo implements, **quoted from the locked
-  `contract.md`** (e.g. `POST /inquiries` request/response). Add a one-line note that this is a quote of
+  `contract.md`** (e.g. `POST /orders` request/response). Add a one-line note that this is a quote of
   the locked surface, not a new definition.
 - **`plan.md`** — the technical approach for this repo at story altitude (components, sequence,
   test approach). No new cross-repo surface.

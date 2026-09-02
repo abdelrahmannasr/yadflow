@@ -24,9 +24,9 @@ PR, build log) is keyed on them, so renaming one breaks the chain.
 
 | Thing | Format | Example |
 |-------|--------|---------|
-| Epic | `EP-<slug>` (lowercase words + hyphens) | `EP-istifta-inquiries` |
-| Story | `EP-<slug>-S0N` (zero-padded) | `EP-istifta-inquiries-S01` |
-| Task | `EP-<slug>-S0N-T0N` (zero-padded) | `EP-istifta-inquiries-S01-T03` |
+| Epic | `EP-<slug>` (lowercase words + hyphens) | `EP-checkout` |
+| Story | `EP-<slug>-S0N` (zero-padded) | `EP-checkout-S01` |
+| Task | `EP-<slug>-S0N-T0N` (zero-padded) | `EP-checkout-S01-T03` |
 
 ---
 
@@ -86,7 +86,7 @@ Task: <story-id>-<task-id>
 [Co-Authored-By: <AI name> <email>]
 ```
 
-- `Task: <story-id>-<task-id>` (e.g. `Task: EP-istifta-inquiries-S01-T01`) is **required** — the
+- `Task: <story-id>-<task-id>` (e.g. `Task: EP-checkout-S01-T01`) is **required** — the
   spec-link check finds it with git's order-independent trailer parser, so it need not be the last line,
   but all trailers must sit together in the last paragraph (no blank lines between them).
 - **Trailer order:** `Task:` → `Contract-Change:` (if any) → `Co-Authored-By:` (if any), last.
@@ -136,7 +136,7 @@ feat/<story-id>-<task-id>-<short-slug>
 ```
 
 `<short-slug>` is 2–4 hyphenated words naming the change. Example:
-`feat/EP-istifta-inquiries-S01-T01-create-inquiry`. Never reuse a branch for a different task, and never
+`feat/EP-checkout-S01-T01-create-order`. Never reuse a branch for a different task, and never
 fork a second branch for the same task.
 
 When you open the PR/MR, fill the template's **Story / task** and **Impact & Risk** blocks

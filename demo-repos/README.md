@@ -16,7 +16,7 @@ run. Only this README is version-controlled; the repos themselves are regenerabl
 - `backend/` — a deliberately thin Node backend, just believable enough to be a valid Spec Kit target.
   Step A (`yad-spec`) writes its spec under `backend/specs/<story-id>/`.
 - `mobile/` — a second thin repo, added for **Step F (multi-repo)**. A cross-repo story tagged
-  `repos: [backend, mobile]` (e.g. `EP-istifta-inquiries-S03`) is spec'd and built in **both** repos
+  `repos: [backend, mobile]` (e.g. `EP-checkout-S03`) is spec'd and built in **both** repos
   independently, each pinning the **same** locked contract hash. Both carry the same gate scripts and
   PR template, so the contract-check blocks a surface bypass in either repo.
 
@@ -33,13 +33,13 @@ run. Only this README is version-controlled; the repos themselves are regenerabl
 
 ```bash
 cd demo-repos
-mkdir -p backend/src/inquiry backend/.specify/memory
+mkdir -p backend/src/order backend/.specify/memory
 cd backend
 git init -q
 # minimal Node marker so Spec Kit detects a real project
 printf '%s\n' '{ "name": "demo-backend", "private": true, "version": "0.0.0" }' > package.json
 # thin placeholder so the repo is plausible (not a working service)
-printf '%s\n' '// Inquiry service — placeholder for the demo backend.' > src/inquiry/index.js
+printf '%s\n' '// Order service — placeholder for the demo backend.' > src/order/index.js
 # Spec Kit constitution stub (constitution itself is out of Step A scope)
 printf '%s\n' '# Demo backend constitution (stub)' > .specify/memory/constitution.md
 git add -A && git commit -qm "chore: scaffold throwaway demo backend"

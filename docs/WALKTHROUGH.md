@@ -217,28 +217,28 @@ contract lock, story repo tags, and which approvals the active gate still needs.
 
 ## Worked example (already in this repo)
 
-`epics/EP-istifta-inquiries/` shows the **whole front half** walked end to end:
+`epics/EP-checkout/` shows the **whole front half** walked end to end:
 - `epic.md` authored + approved (epic gate, base rule) — 2026-06-04.
 - `architecture.md` + `contract.md` authored; contract surface hash-locked in
-  `.sdlc/contract-lock.json`. Architecture gate **escalated** (contract): owner *alice* + reviewer
+  `.sdlc/contract-lock.json`. Architecture gate **escalated** (contract, payments): owner *alice* + reviewer
   *bob* + domain owners *carol* (backend) and *dave* (mobile).
 - `ui-design.md` + `DESIGN.md` authored (Impeccable not installed → graceful fallback). UI gate base
   rule (alice + bob).
-- Five repo-tagged stories `stories/EP-istifta-inquiries-S01..S05.md`. Stories gate **per-repo**: base
+- Five repo-tagged stories `stories/EP-checkout-S01..S05.md`. Stories gate **per-repo**: base
   rule + a domain owner for each touched repo (carol/backend, dave/mobile).
 - `state.json` now reads `currentStep: ready-for-build`, every front step `done` — the Phase 3
   handoff point.
 
 Inspect it:
 ```bash
-cat epics/EP-istifta-inquiries/.sdlc/state.json
-cat epics/EP-istifta-inquiries/.sdlc/approvals.json
-cat epics/EP-istifta-inquiries/.sdlc/contract-lock.json
-ls  epics/EP-istifta-inquiries/reviews/
-ls  epics/EP-istifta-inquiries/stories/
+cat epics/EP-checkout/.sdlc/state.json
+cat epics/EP-checkout/.sdlc/approvals.json
+cat epics/EP-checkout/.sdlc/contract-lock.json
+ls  epics/EP-checkout/reviews/
+ls  epics/EP-checkout/stories/
 # re-verify the contract surface still matches its lock:
 awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
-  epics/EP-istifta-inquiries/contract.md | tr -d '\r' | shasum -a 256
+  epics/EP-checkout/contract.md | tr -d '\r' | shasum -a 256
 ```
 
 ## Run the full build half by hand (Phase 3)

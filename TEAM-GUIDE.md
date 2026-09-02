@@ -487,10 +487,10 @@ IDs are **immutable once assigned** — renaming them breaks every downstream li
 
 | Thing | Format | Example |
 |-------|--------|---------|
-| Epic ID | `EP-<slug>` | `EP-istifta-inquiries` |
-| Story ID | `EP-<slug>-S0N` | `EP-istifta-inquiries-S01` |
-| Task ID | `EP-<slug>-S0N-T0N` | `EP-istifta-inquiries-S01-T03` |
-| Branch | `feat/<story-id>-<task-id>-<short-slug>` | `feat/EP-istifta-inquiries-S01-T01-create-inquiry` |
+| Epic ID | `EP-<slug>` | `EP-checkout` |
+| Story ID | `EP-<slug>-S0N` | `EP-checkout-S01` |
+| Task ID | `EP-<slug>-S0N-T0N` | `EP-checkout-S01-T03` |
+| Branch | `feat/<story-id>-<task-id>-<short-slug>` | `feat/EP-checkout-S01-T01-create-order` |
 | Commit trailer | `Task: <story-id>-<task-id>` (add `Contract-Change: yes` only if the locked contract surface is touched) | — |
 
 Commits and PR titles follow Conventional Commits (lowercase after the type, e.g. `feat: …`, `fix: …`).
@@ -545,4 +545,4 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
 - **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
-- **`epics/EP-istifta-inquiries/`** — a full worked epic (front half + build half) you can copy from.
+- **`epics/EP-checkout/`** — a full worked epic (front half + build half) you can copy from.

@@ -23,9 +23,9 @@ declares; it does not redesign, does not widen the contract, and does not pick u
 - The work happens **inside the code repo** (a separate git repo) at
   `{project-root}/demo-repos/<repo>/` (`config.yaml` `build.code_repos_root`). Use absolute paths.
 - **Branch name:** `feat/<story-id>-<task-id>-<short-slug>` (e.g.
-  `feat/EP-istifta-inquiries-S01-T01-create-inquiry`). Branched off the code repo's default branch.
+  `feat/EP-checkout-S01-T01-create-order`). Branched off the code repo's default branch.
 - **Commit message:** a conventional subject, body describing the change, and a **required `Task:`
-  trailer** (e.g. `Task: EP-istifta-inquiries-S01-T01`) in the trailer block. Add `Contract-Change: yes`
+  trailer** (e.g. `Task: EP-checkout-S01-T01`) in the trailer block. Add `Contract-Change: yes`
   **only** if the diff touches the locked contract surface (see Step 5), and a per-commit
   `Co-Authored-By:` for any AI tool that helped author the diff (the human author owns the commit;
   trailer order `Task:` → `Contract-Change:` → `Co-Authored-By:`). The skill installs a `.gitmessage`
@@ -84,7 +84,7 @@ boundary breach). The same applies to the Step 5 contract-surface stop (`contrac
 ### Step 5 — Contract-surface check (local pre-flight for Step C)
 Determine whether the diff touches the **locked contract surface** (the API/event/data-model shapes in
 `epics/<epic>/contract.md`'s `CONTRACT-SURFACE` block). Normal implementation **consumes** the
-contract (e.g. implementing `POST /inquiries` to the agreed shape) — that is **not** a contract change.
+contract (e.g. implementing `POST /orders` to the agreed shape) — that is **not** a contract change.
 A contract change means the diff alters the agreed cross-repo shape itself.
 
 - If the diff does **not** change the surface: proceed; no `Contract-Change` trailer.

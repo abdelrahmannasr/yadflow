@@ -94,7 +94,7 @@ build:
   spec_layout: speckit          # follow Spec Kit's native spec/plan/tasks layout
   speckit_ceremony: [specify, clarify, plan, analyze, checklist, tasks]   # heavy run, once per story per repo
   # Step B (yad-implement) — the light per-task loop. One atomic task = one branch = one PR/MR.
-  branch_convention: "feat/<story-id>-<task-id>-<short-slug>"   # e.g. feat/EP-istifta-inquiries-S01-T01-create-inquiry
+  branch_convention: "feat/<story-id>-<task-id>-<short-slug>"   # e.g. feat/EP-checkout-S01-T01-create-order
   commit_task_trailer: "Task: <story-id>-<task-id>"             # final commit trailer; anchors the spec-link check (Step C)
   contract_change_trailer: "Contract-Change: yes"              # ONLY when the locked contract surface is touched (routes back to architecture gate)
   # Commit subject + PR/MR title style (Conventional Commits — see CONTRIBUTING.md). PRs are squash-merged,

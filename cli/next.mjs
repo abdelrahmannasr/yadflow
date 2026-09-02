@@ -46,7 +46,7 @@ const actionFor = (root, id) => ({
   lineageKind: epicLineage(root, id).kind,
 });
 
-// EP-istifta-inquiries-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
+// EP-checkout-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
 const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
 
 // Every per-repo lane across the build, flattened with its story id attached.

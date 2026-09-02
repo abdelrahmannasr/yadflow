@@ -173,9 +173,9 @@ This is the backbone that keeps everything traceable. One ID flows from epic →
 
 Three short, stable IDs, assigned once and never changed:
 
-- **Epic ID:** `EP-<slug>` where slug is 2-4 lowercase words joined by hyphens. Example: `EP-istifta-inquiries`. Assigned at epic creation.
-- **Story ID:** `<EpicID>-S<NN>` — the epic ID plus a zero-padded story number. Example: `EP-istifta-inquiries-S01`. Assigned at the story-split step.
-- **Task ID:** `<StoryID>-T<NN>` — the story ID plus a zero-padded task number. Example: `EP-istifta-inquiries-S01-T03`. Assigned when Spec Kit produces tasks.
+- **Epic ID:** `EP-<slug>` where slug is 2-4 lowercase words joined by hyphens. Example: `EP-checkout`. Assigned at epic creation.
+- **Story ID:** `<EpicID>-S<NN>` — the epic ID plus a zero-padded story number. Example: `EP-checkout-S01`. Assigned at the story-split step.
+- **Task ID:** `<StoryID>-T<NN>` — the story ID plus a zero-padded task number. Example: `EP-checkout-S01-T03`. Assigned when Spec Kit produces tasks.
 
 Rules: IDs are lowercase except the fixed prefixes (`EP`, `S`, `T`); numbers are always two digits (`S01`, not `S1`); IDs never get renamed once assigned (rename breaks every downstream link); a story or task that spans repos keeps the same ID in each repo.
 
@@ -183,15 +183,15 @@ Rules: IDs are lowercase except the fixed prefixes (`EP`, `S`, `T`); numbers are
 
 **Product repo (shared thinking):**
 ```
-epics/EP-istifta-inquiries/
+epics/EP-checkout/
   epic.md
   architecture.md
   contract.md
   ui-design.md
   DESIGN.md
   stories/
-    EP-istifta-inquiries-S01.md
-    EP-istifta-inquiries-S02.md
+    EP-checkout-S01.md
+    EP-checkout-S02.md
   reviews/
     epic--2026-06-04--approved.md
     architecture--2026-06-04--approved.md
@@ -205,7 +205,7 @@ Review file pattern: `<artifact>--<YYYY-MM-DD>--<status>.md` where status is `co
 
 **Code repo (building), one folder per story (confirm exact base path in Phase 0):**
 ```
-specs/EP-istifta-inquiries-S01/
+specs/EP-checkout-S01/
   spec.md
   plan.md
   tasks.md
@@ -216,24 +216,24 @@ The `link.md` (or a frontmatter field) records the product-repo URL/path of the 
 ### Branch naming
 
 `<type>/<TaskID>-<short-desc>` — type is one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
-Example: `feat/EP-istifta-inquiries-S01-T03-add-inquiry-endpoint`.
+Example: `feat/EP-checkout-S01-T03-add-order-endpoint`.
 One atomic task = one branch = one PR.
 
 ### Commit conventions (Conventional Commits + task ID)
 
 Format: `<type>(<scope>): <subject>  [<TaskID>]`
 - `type`: `feat` | `fix` | `refactor` | `test` | `docs` | `chore` | `perf` | `build` | `ci`.
-- `scope`: the area touched (e.g. `inquiry`, `auth`, `ui`). Optional but encouraged.
+- `scope`: the area touched (e.g. `order`, `auth`, `ui`). Optional but encouraged.
 - `subject`: imperative, lowercase, no trailing period, <= 72 chars.
 - Always end with the task ID in brackets so commits are traceable.
 
-Example: `feat(inquiry): add submit-inquiry endpoint  [EP-istifta-inquiries-S01-T03]`
+Example: `feat(order): add place-order endpoint  [EP-checkout-S01-T03]`
 
 If the change touches the shared contract, add a body line: `Contract-Change: yes` — the check gate looks for this together with an updated `contract.md`.
 
 ### PR / MR conventions
 
-- **Title:** `[<StoryID>] <type>: <summary>` — example: `[EP-istifta-inquiries-S01] feat: submit inquiry flow`.
+- **Title:** `[<StoryID>] <type>: <summary>` — example: `[EP-checkout-S01] feat: checkout flow`.
 - **One PR/MR per atomic task** (small diff, <= 3 files where possible).
 - **Must link its story** (paste the product-repo story path/URL) — the spec-link check fails it without one.
 - **Uses the platform template below.** GitHub repos use the PR template; GitLab repos use the MR template. Both carry the same sections so review is identical regardless of platform.
@@ -331,8 +331,8 @@ Note: the GitLab template can use quick actions (the `/assign`, `/label` lines) 
 
 ```markdown
 ---
-id: EP-istifta-inquiries-S01
-epic: EP-istifta-inquiries
+id: EP-checkout-S01
+epic: EP-checkout
 repos: [backend, mobile]        # which repos must implement this story
 status: draft                    # draft | approved | in-progress | shipped
 owner:
@@ -358,7 +358,7 @@ As a <user>, I want <goal>, so that <reason>.
 
 ```markdown
 ---
-id: EP-istifta-inquiries
+id: EP-checkout
 status: draft
 owner:
 technical_product_owner:

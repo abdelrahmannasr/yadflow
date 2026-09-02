@@ -905,7 +905,7 @@ const COMMIT_MSG = path.join(CHECKS, 'commit-message.sh');
 
 test('commit-message gate: conventional subject + ordered trailers passes', () => {
   const T = scaffoldRepo();
-  commit(T, 'feat: add the inquiry endpoint\n\nTask: EP-demo-S01-T01\nCo-Authored-By: Claude <noreply@anthropic.com>', { 'a.js': 'x' });
+  commit(T, 'feat: add the order endpoint\n\nTask: EP-demo-S01-T01\nCo-Authored-By: Claude <noreply@anthropic.com>', { 'a.js': 'x' });
   const r = runGate(COMMIT_MSG, T, ['--profile', 'code', 'main']);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /PASS \[commit-message\]/);
@@ -970,7 +970,7 @@ const PR_TITLE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-tit
 
 test('pr-title gate: conventional code title passes; trailing period fails', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-'));
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add the inquiry endpoint']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add the order endpoint']).code, 0);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat(api)!: drop legacy']).code, 0); // scope + breaking
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'code', 'feat: add it.']).code, 1);
   assert.equal(runGate(PR_TITLE, T, ['Add it']).code, 1); // no type, default profile

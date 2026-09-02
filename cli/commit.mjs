@@ -38,7 +38,7 @@ export function buildCommitMessage({ type, subject, task, contractChange = false
   return parts.join('\n');
 }
 
-// feat/EP-istifta-inquiries-S01-T01-create-inquiry -> EP-istifta-inquiries-S01-T01
+// feat/EP-checkout-S01-T01-create-order -> EP-checkout-S01-T01
 export function taskFromBranch(branch = '') {
   const m = branch.match(/(.+-S\d+-T\d+)(?:-|$)/i);
   return m ? m[1].replace(/^[a-z]+\//i, '') : null;

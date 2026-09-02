@@ -731,7 +731,7 @@ test('buildCommitMessage rejects a malformed --task the spec-link gate would fai
 });
 
 test('taskFromBranch derives the story-task id', () => {
-  assert.equal(taskFromBranch('feat/EP-istifta-inquiries-S01-T01-create-inquiry'), 'EP-istifta-inquiries-S01-T01');
+  assert.equal(taskFromBranch('feat/EP-checkout-S01-T01-create-order'), 'EP-checkout-S01-T01');
   assert.equal(taskFromBranch('main'), null);
 });
 
@@ -3029,10 +3029,10 @@ test('contractSurfaceHash: equals the documented awk | shasum recipe byte for by
   fs.writeFileSync(contract, [
     '# Contract', '',
     '<!-- CONTRACT-SURFACE:BEGIN -->',
-    'POST /inquiries { subject, body }',
-    'GET  /inquiries?status=<open|closed>',
+    'POST /orders { items, address, payment }',
+    'GET  /orders?status=<placed|fulfilled>',
     '',
-    'status: open -> assigned -> answered',
+    'status: placed -> assigned -> fulfilled',
     '<!-- CONTRACT-SURFACE:END -->',
     '', '## Notes outside the surface', '',
   ].join('\n'));
@@ -3696,15 +3696,15 @@ test('registerTesting: an unknown tool falls back to the primary; `none` is arti
 // ---------------------------------------------------------------------------------------------
 test('registerLearning records a known tool with source unconfirmed (CLI detection is the AI step)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-learning-'));
-  const l = registerLearning(T, { tool: 'deeptutor', kb: 'yadflow-istifta', today: '2026-06-14' });
+  const l = registerLearning(T, { tool: 'deeptutor', kb: 'yadflow-checkout', today: '2026-06-14' });
   assert.equal(l.tool, 'deeptutor');
   assert.equal(l.auth, 'user');
   assert.equal(l.source, null, 'CLI not yet confirmed at setup time');
   assert.equal(l.provider, null);
-  assert.equal(l.kb, 'yadflow-istifta', 'the kb reference round-trips');
+  assert.equal(l.kb, 'yadflow-checkout', 'the kb reference round-trips');
   const onDisk = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/learning.json')));
   assert.equal(onDisk.tool, 'deeptutor');
-  assert.equal(onDisk.kb, 'yadflow-istifta');
+  assert.equal(onDisk.kb, 'yadflow-checkout');
   assert.ok(!JSON.stringify(onDisk).includes('token'), 'no token field — references only');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -4172,7 +4172,7 @@ test('canonicalApprovals/canonicalComments impose a TOTAL order (no ties keep in
 
 test('parseReviewBranch accepts review/EP-*/<base> and rejects everything else', () => {
   assert.deepEqual(parseReviewBranch('review/EP-x/architecture'), { epic: 'EP-x', base: 'architecture' });
-  assert.deepEqual(parseReviewBranch('review/EP-istifta-inquiries/stories'), { epic: 'EP-istifta-inquiries', base: 'stories' });
+  assert.deepEqual(parseReviewBranch('review/EP-checkout/stories'), { epic: 'EP-checkout', base: 'stories' });
   assert.equal(parseReviewBranch('feature/foo'), null);
   assert.equal(parseReviewBranch('review/notanepic'), null);
   assert.equal(parseReviewBranch('review/notanepic/epic'), null);
@@ -6398,14 +6398,14 @@ test('backHalfPathspecs lists only the back-half ledgers that exist — never th
 test('runCheckpoint commits ONLY the back-half ledgers with a chore(hub) audit subject', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
-  writeBackHalf(T, 'EP-istifta-inquiries', 'EP-istifta-inquiries-S03');
+  writeBackHalf(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.equal(subject, 'chore(hub): sync back-half state — EP-istifta-inquiries/EP-istifta-inquiries-S03 by @abdelrahmannasr [skip ci]');
+  assert.equal(subject, 'chore(hub): sync back-half state — EP-checkout/EP-checkout-S03 by @abdelrahmannasr [skip ci]');
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only back-half: ${files.join()}`);
   assert.ok(!files.some((f) => f.endsWith('state.json')), 'front-half state.json must not be committed');
-  assert.ok(fs.existsSync(path.join(T, 'epics/EP-istifta-inquiries/.sdlc/state.json')), 'state.json still present, uncommitted');
+  assert.ok(fs.existsSync(path.join(T, 'epics/EP-checkout/.sdlc/state.json')), 'state.json still present, uncommitted');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
 });
