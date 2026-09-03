@@ -181,5 +181,6 @@ workflow-hygiene flags — derived read-only, so an EM can see how the team actu
 end-to-end harness on both). On **Windows use [WSL](https://learn.microsoft.com/windows/wsl/)** — native
 PowerShell is not yet supported. Requires **Node.js ≥ 18**.
 
-**Releases** are automated via [semantic-release](https://semantic-release.gitbook.io/) on merge to
-`main` (Conventional Commits → npm, with provenance). See [RELEASING.md](RELEASING.md).
+**Releases** are a human decision. Merging to `main` never publishes; a person fast-forwards the
+`release` branch, and [semantic-release](https://semantic-release.gitbook.io/) publishes from there
+(Conventional Commits → npm, with provenance). See [RELEASING.md](RELEASING.md).

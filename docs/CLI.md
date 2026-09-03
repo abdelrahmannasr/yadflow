@@ -150,11 +150,11 @@ input you already gave; re-running `setup` carries your profile forward.
 `skills/`, which a `bmad-method` update does not touch, so after any BMAD update just re-run the CLI
 (`… check --fix`) or the script.
 
-> **Releases are automated.** A `feat:`/`fix:` commit merged to `main` triggers
-> [semantic-release](https://semantic-release.gitbook.io/): it computes the version from the
-> [Conventional Commits](../CONTRIBUTING.md), publishes to npm with build provenance (tokenless OIDC),
-> ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No manual `npm publish`. See
-> [`RELEASING.md`](../RELEASING.md).
+> **The publish is automated; the decision is not.** Merging to `main` publishes nothing. When a person
+> fast-forwards the `release` branch to `main`, [semantic-release](https://semantic-release.gitbook.io/)
+> computes the version from the [Conventional Commits](../CONTRIBUTING.md), publishes to npm with build
+> provenance (tokenless OIDC), ships the `CHANGELOG.md` in the tarball, and cuts a GitHub release. No
+> manual `npm publish`. See [`RELEASING.md`](../RELEASING.md).
 
 ## Managed files: what `yad` owns, and what you edited
 

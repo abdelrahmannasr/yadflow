@@ -144,6 +144,28 @@ When you open the PR/MR, fill the template's **Story / task** and **Impact & Ris
 the review to domain owners — the same escalation `yad-review-gate` applies. Run
 `bash checks/risk-route.sh <description>` to list them.
 
+## Releases — a human decision
+
+Merging to `main` **never publishes**. semantic-release only runs from the `release` branch
+(`.releaserc.json` → `"branches": ["release"]`), and that branch moves only when a person
+fast-forwards it to `main`:
+
+```
+git fetch origin
+git push origin origin/main:release   # fast-forward only; never force
+```
+
+Push `origin/main`, not your local `main` — a stale local branch would cut a release from an outdated
+snapshot without any error. The full procedure, including the one-time branch protection this relies on,
+is in [`RELEASING.md`](RELEASING.md).
+
+So `main` can take any number of merges — including a half-finished engine change or a
+docs-only fix — without anyone on `npx yad` seeing a new version. A `docs:` commit no longer
+bumps a version (the old `docs → patch` rule is gone). The release check that must pass before
+that fast-forward, and the `next` pre-release channel for v4, are the next roadmap tasks
+(E106, E107 in [`docs/roadmap-idea-1.md`](docs/roadmap-idea-1.md)). Full details in
+[`RELEASING.md`](RELEASING.md).
+
 ---
 
 ## The two hard rules behind the trailers

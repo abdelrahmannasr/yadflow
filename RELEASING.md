@@ -1,8 +1,10 @@
 # Releasing
 
-The `yad` CLI is published to npm as **`yadflow`**. Releases are **automated**
+The `yad` CLI is published to npm as **`yadflow`**. The publish itself is **automated**
 with [semantic-release](https://semantic-release.gitbook.io/): there is no manual `npm publish` in the
-steady state. This doc covers the one-time bootstrap and the ongoing flow.
+steady state. **The decision to release is not automated.** Nothing reaches `yadflow@latest` until a
+person fast-forwards the `release` branch to `main` (roadmap rule: *a release is a human decision*).
+This doc covers the one-time bootstrap and the ongoing flow.
 
 > **Renamed at v1.4.0.** The package was previously published as `@abdelrahmannasr/sdlc-workflow`
 > (through v1.3.2); that scoped package is **deprecated** and points here. Same CLI, same repo —
@@ -11,37 +13,55 @@ steady state. This doc covers the one-time bootstrap and the ongoing flow.
 
 ## How it works
 
-`.github/workflows/release.yml` runs on every push to `main`:
+Two branches take part:
 
-1. install deps (`npm ci`) and run tests (`npm test`),
-2. run `npx semantic-release`, which:
+- **`main`** — where PRs merge. Merging to `main` **never publishes**.
+- **`release`** — the only branch semantic-release publishes from (`.releaserc.json` →
+  `"branches": ["release"]`). A person moves it with a fast-forward: `git push origin main:release`.
+
+`.github/workflows/release.yml` still runs on every push to `main`, but semantic-release sees that
+`main` is not a configured release branch, logs *"configured to only publish from release, therefore a
+new version won't be published"*, and exits without doing anything. (For that skip to be clean the
+`release` branch must exist on origin — semantic-release fails with `ERELEASEBRANCHES` when none of
+its configured branches exist.) Wiring the workflow to run on `release` behind a release check is
+roadmap task E106; until it lands, a fast-forward of `release` does not publish either. That is the
+intended state while the engine is changing (`docs/roadmap-idea-1.md`, Part 2 rule 8).
+
+When the workflow does run on `release`, it:
+
+1. installs deps (`npm ci`) and runs tests (`npm test`),
+2. runs `npx semantic-release`, which:
    - reads the [Conventional Commits](CONTRIBUTING.md) since the last release to pick the next version
-     (`docs:`/`fix:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major),
+     (`fix:`/`perf:`/`revert:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major;
+     `docs:`/`chore:`/`ci:`/`test:`/`refactor:` → nothing),
    - regenerates `CHANGELOG.md` and ships it **inside the npm tarball**,
    - **publishes to npm via tokenless Trusted Publishing (OIDC) with build provenance** — no `NPM_TOKEN`,
-   - commits the regenerated `CHANGELOG.md` + `package.json` + `package-lock.json` back to `main`
-     (`@semantic-release/git`, authenticated with `RELEASE_TOKEN` — see step D),
+   - commits the regenerated `CHANGELOG.md` + `package.json` + `package-lock.json` back to the branch
+     it ran on — now **`release`**, not `main` (`@semantic-release/git` pushes `HEAD:<branch>`),
    - pushes the `vX.Y.Z` git tag and cuts a GitHub release with the notes.
 
 Auth is the `id-token: write` permission in the workflow plus the npm trusted-publisher entry — there is
 no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs the Node 18/20/22 test matrix and a
 tarball-leak smoke on every PR.
 
-> **Note — commit back to `main` (hardened path).** The pipeline includes `@semantic-release/git`, so
-> after publishing it commits the regenerated `CHANGELOG.md`, `package.json`, and `package-lock.json`
-> back to `main` as a `chore(release): X.Y.Z [skip ci]` commit. This keeps the in-repo changelog and
-> `version` field in lockstep with the git tags and the published npm artifact.
+> **Note — the commit back, and why `release` then leads `main`.** The pipeline includes
+> `@semantic-release/git`, so after publishing it commits the regenerated `CHANGELOG.md`,
+> `package.json`, and `package-lock.json` as a `chore(release): X.Y.Z [skip ci]` commit. It pushes that
+> to **the branch it ran on** (`HEAD:<branch>` — `@semantic-release/git/lib/git.js`), which since E105
+> is `release`, not `main`.
 >
-> Because `main` is protected with a required-PR rule that the default `GITHUB_TOKEN` **cannot** bypass,
-> the release job authenticates with a **`RELEASE_TOKEN`** secret (see step D) — a PAT owned by a user in
-> the branch-protection bypass list. The `[skip ci]` marker on the release commit stops it from
-> re-triggering the workflow (a PAT push, unlike a `GITHUB_TOKEN` push, would otherwise start a new run).
-> If `RELEASE_TOKEN` is unset the job falls back to `GITHUB_TOKEN` and the commit-back push will be
-> **rejected**, failing the release — so provision the secret before relying on this path.
+> So after a real publish `release` is one commit ahead of `main`, and the next sync is **no longer a
+> fast-forward**. That commit has to come back to `main` (a PR, or an admin push) or `main`'s
+> `package.json` version drifts behind npm. Automating that reconciliation belongs to the release check,
+> roadmap task **E106**; it cannot arise before then, because the workflow does not yet run on `release`.
+>
+> `RELEASE_TOKEN` (step D) exists because the commit-back used to target protected `main`, which the
+> default `GITHUB_TOKEN` cannot push to. Now that the target is `release`, that bypass is only needed if
+> `release` is protected too — and it **should** be (see step E). The `[skip ci]` marker stops the
+> release commit from re-triggering the workflow.
 
-Because `main` is protected with a required review, **merging each release PR needs an approval or an
-admin merge** (`gh pr merge --squash --admin`). The release job's own `chore(release)` commit is the only
-automated write to `main`, and it bypasses protection via `RELEASE_TOKEN`.
+`main` is protected with a required review, so **every PR into `main` needs an approval or an admin
+merge** (`gh pr merge --squash --admin`). That is unchanged by E105 and is separate from releasing.
 
 ## One-time setup (already done once per package)
 
@@ -81,8 +101,8 @@ GitHub release.) The source repo must also be **public** — npm provenance is r
 
 ### D. Release PAT for the commit-back (`RELEASE_TOKEN`)
 
-`@semantic-release/git` pushes the `chore(release)` commit to `main`, which the required-PR rule blocks
-for the default `GITHUB_TOKEN`. Provision a bypass token:
+`@semantic-release/git` pushes the `chore(release)` commit to the release branch. Once that branch is
+protected (step E), the default `GITHUB_TOKEN` cannot push to it. Provision a bypass token:
 
 1. Create a **fine-grained PAT** (GitHub → Settings → Developer settings → Fine-grained tokens), scoped
    to the `yadflow` repo, with **Contents: Read and write**, **Pull requests: Read and write**, and
@@ -90,19 +110,40 @@ for the default `GITHUB_TOKEN`. Provision a bypass token:
    The token owner must be a user that **bypasses `main`'s branch protection** (a repo admin does).
 2. Add it as a repo secret: **Settings → Secrets and variables → Actions → New repository secret**, named
    **`RELEASE_TOKEN`**.
-3. Ensure the bypass list for `main` includes that user (Settings → Branches/Rules).
+3. Ensure the bypass lists for `main` **and `release`** include that user (Settings → Branches/Rules).
 
 Rotate the PAT before it expires; until `RELEASE_TOKEN` exists the release will fail at the commit-back
 step (the workflow falls back to `GITHUB_TOKEN`, which cannot bypass protection).
 
+### E. Protect the `release` branch — **not yet done**
+
+E105 makes `release` the only branch that can publish, so pushing it is the act of shipping. Right now
+nothing enforces that a human does it: `release` has **no branch protection and no ruleset**, so anyone
+with write access can push or force-push it. Before E106 wires the workflow to `release`, add a ruleset
+(Settings → Rules → Rulesets) targeting `release` with: **restrict who can push** (the release PAT owner
+and repo admins), **block force pushes**, and **block deletions**. Deleting `release` also breaks the
+clean skip on `main` — see Troubleshooting.
+
+Until that is in place, "a release is a human decision" is a convention this doc states, not a rule the
+platform enforces.
+
 ## Cutting a release (ongoing)
 
-1. Merge a PR to `main` with a Conventional-Commit title (**squash-merge** keeps the PR title as the
+1. Merge PRs to `main` with Conventional-Commit titles (**squash-merge** keeps the PR title as the
    commit subject, which is what semantic-release reads).
-   - `feat: …` → minor, `fix: …`/`perf: …`/`docs: …` → patch, `feat!:` or a `BREAKING CHANGE:` footer → major.
-   - `docs:` triggers a patch so README/docs that ship in the npm tarball reach the registry without a manual nudge (custom `releaseRules` in `.releaserc.json`).
-   - `chore:`/`ci:`/`test:`/`refactor:` alone → **no release**.
-2. `release.yml` runs automatically. Watch it under the repo's **Actions** tab.
+   - `feat: …` → minor, `fix: …`/`perf: …`/`revert: …` → patch, `feat!:` or a `BREAKING CHANGE:`
+     footer → major.
+   - `docs:`/`chore:`/`ci:`/`test:`/`refactor:` alone → **no release**. Docs that ship in the npm
+     tarball reach the registry with the next real release.
+2. When a human decides it is time to release, fast-forward `release` to `main`:
+   ```bash
+   git fetch origin
+   git push origin origin/main:release   # fast-forward only; never force
+   ```
+   Until roadmap task E106 lands, this only records the decision — the workflow is not yet wired to
+   `release`, so no publish happens. After E106 the release check runs first and semantic-release
+   publishes only if it passes.
+3. Watch the run under the repo's **Actions** tab.
 
 ## Verify
 
@@ -127,7 +168,15 @@ The npm package page shows a green **Provenance** badge linking back to the `rel
 - **Release fails at the commit-back / `git push` step ("protected branch" / 403):** `RELEASE_TOKEN` is
   missing, expired, or its owner isn't in `main`'s branch-protection bypass list. Re-check step D. The
   job falls back to `GITHUB_TOKEN`, which cannot bypass the required-PR rule.
-- **No release was cut:** the merged commits were all non-releasing types (`chore:`, `ci:`, `test:`,
-  `refactor:`). That's expected — only `feat`/`fix`/`perf`/`docs`/breaking trigger a version.
+- **No release was cut after a merge to `main`:** expected — `main` never publishes. Only a
+  fast-forward of `release` does (once E106 wires the workflow to it).
+- **No release was cut from `release`:** the commits since the last tag were all non-releasing types
+  (`docs:`, `chore:`, `ci:`, `test:`, `refactor:`). Only `feat`/`fix`/`perf`/`revert`/breaking trigger
+  a version.
+- **`git push origin origin/main:release` is rejected as non-fast-forward:** `release` carries a
+  `chore(release)` commit from the last publish that `main` does not have. Bring that commit back to
+  `main` first (a PR, or an admin push), then sync again. See the commit-back note under *How it works*.
+- **Release job on `main` fails with `ERELEASEBRANCHES`:** the `release` branch is missing on origin.
+  Recreate it at the last released commit: `git push origin <tag-commit>:refs/heads/release`.
 - **A `2FA` prompt blocks automated publish:** it shouldn't — OIDC trusted publishing satisfies the
   publish requirement without an OTP. Only the one-time manual bootstrap (step A) prompts.
