@@ -202,6 +202,11 @@ genesis epic carries `kind: feature` + `thread: <self>` frontmatter; a change-ep
   and the Phase 6 thread gates lineage-check / epic-open / reconcile-debt must pass).
 - Run the CLI suites: `npm test` (unit + bash gates) and `npm run test:e2e` (the installed tarball
   end-to-end). New behavior needs tests — the coverage gate floors at 70% lines/branches.
+- **If the golden test fails, stop.** `cli/test-golden.mjs` reads a real v3 project frozen in
+  `cli/fixtures/golden-v3/` and compares `yad next`, `yad doctor` and the gate predicate against a
+  committed snapshot. A failure means your change altered how the engine sees a project that did not
+  change. Do not refresh the snapshot to go green: find what moved, and if the new behavior is
+  genuinely intended, update `golden-v3.expected.json` in the same PR and say what changed and why.
 - `yad doctor` should be clean (or warnings-only) in any project you touched.
 - Make atomic commits — one logical change per commit.
 - Open the PR/MR with the wired template; let the engineer review (a human) be the merge gate.

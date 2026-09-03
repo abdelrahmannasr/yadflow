@@ -1,0 +1,11 @@
+{
+  "target": "github-pages",
+  "scope": "hub",
+  "publishRepo": "yadflow",
+  "basePath": "/yadflow/",
+  "public": true,
+  "auth": "user",
+  "connectedAt": "2026-06-15",
+  "lastSyncedAt": "2026-06-15",
+  "source": "gh"
+}

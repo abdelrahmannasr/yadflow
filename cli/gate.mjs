@@ -111,7 +111,7 @@ export function loadHub(root) {
 // Solo mode (a lone developer): waive the approval requirement — on GitHub you cannot approve your own
 // PR, so an approval gate would deadlock. The review PR/MR and its merge stay (CI runs on the PR; the
 // merge advances the step). Recorded per-project in hub.json by `yad setup`.
-const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
+export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 
 // Bridge mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
 // defined once in manifest.mjs (`isBridgeHub`) and shared with plan.mjs's wiring and the ledger
@@ -121,7 +121,7 @@ const isBridge = isBridgeHub;
 // requireEngagement (config `hub.review.requireEngagement`): when on, the predicate counts only
 // approvals carrying a verified engagement signal. Soft-off by default — a bare approve still counts
 // but is recorded `engagement: none` and draws the friendly nudge.
-const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
+export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
 
 // Re-add this step's bridge approvals from the current platform state (drop+re-add => dismissals and
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
