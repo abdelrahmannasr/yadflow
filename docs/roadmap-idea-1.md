@@ -213,6 +213,15 @@ Permanent policy. Applies to every change from now on.
 6. **A golden test that never changes.** A real v3 project, frozen. If it breaks,
    the change is wrong. No exceptions.
 7. **File-shape changes wait for v4**, shipped together with the migration guide.
+8. **No automatic releases while the engine is changing.** Today every push to
+   `main` publishes to npm — even a docs commit (`docs → patch` in
+   `.releaserc.json`). On 2026-09-03 two documentation merges published 3.17.1 and
+   3.17.2 within an hour, with no human deciding either. Under that setup, the first
+   Wave 2 PR to merge would ship a half-migrated engine to every `npx yad` user.
+   So: releases move to a `release` branch that only a human fast-forwards, after a
+   release check that runs the golden test, `yad migrate --preview`, `yad doctor`
+   and a fresh `yad setup`. v4 ships on a `next` pre-release channel until
+   `yad migrate` is proven; v3 users see nothing until then.
 
 ---
 
@@ -445,12 +454,16 @@ Sizes are relative: **S** < **M** < **L**. See *The estimate* below for what the
 
 | ID | Task | Size | Needs |
 |---|---|---|---|
-| **E15** | **Freeze a real project as the golden compatibility test — first, before anything is touched** | S | — |
+| **E105** | **Turn off auto-release** — `.releaserc.json` branches → `["release"]`; drop the `docs → patch` rule; `main` no longer publishes. **Before any other Wave 1 work** | S | — |
+| **E15** | **Freeze a real project as the golden compatibility test — before anything else is touched** | S | E105 |
 | E13 | `schemaVersion` on every file — **19 file kinds** in `manifest.mjs`: state, approvals, comments, hub-prs, contract-lock, build-log, trust-log, change, reconcile-debt, hub, repos, design, testing, learning, docs, managed, cli-version, plus two shard folders | M | E15 |
 | E14 | `yad migrate` — preview, back up, rewrite, report, re-runnable | M | E13 |
 | E16 | `yad doctor` reports shape drift and points at migrate | S | E13 |
+| E106 | Release check — `scripts/release-check.sh` + a workflow on the `release` branch: tests, coverage, the golden test, `yad migrate --preview` on the golden project, `yad doctor` on a clean v3 install, a fresh `npx yad setup`, and a CHANGELOG migration note when a shape changed. Semantic-release runs only after it passes | M | E15 + E14 + E16 |
+| E107 | `next` pre-release channel — `{ "name": "next", "prerelease": true }` so v4 publishes as `yadflow@next` while `latest` stays 3.x; `update-notice.mjs` warns v3 users to run `yad migrate --preview` before upgrading | S | E106 |
 
-E15 comes first on purpose: the golden test freezes *today's* behaviour. Stamp the
+E105 comes first because nothing else in this plan is safe to merge until the
+robot is off. E15 comes next on purpose: the golden test freezes *today's* behaviour. Stamp the
 files first and you have frozen already-changed files.
 
 ## Wave 2 — The engine owns the lifecycle
@@ -587,8 +600,8 @@ Claude Code changes the ratio **per kind of task**, not uniformly:
 
 | Scope | Tasks | Working days |
 |---|---|---|
-| **Full plan** | 99 | **~170 optimistic · ~250 realistic** (about a year) |
-| **v4.0 cut line** | ~36 | **~60 optimistic · ~90 realistic** (three to four months) |
+| **Full plan** | 102 | **~170 optimistic · ~250 realistic** (about a year) |
+| **v4.0 cut line** | ~39 | **~60 optimistic · ~90 realistic** (three to four months) |
 
 Assumes one person reviewing and deciding 2–3 hours a day. The bottleneck is not
 typing. It is: reviewing ~100 pull requests, clearing the open decisions (each one
@@ -778,6 +791,9 @@ Everything in this plan is negotiable except these.
 9. **The ledger is written by one trusted identity only.** In `verified` mode that
    is the CI bot with a platform-Verified signature. If that ever changes, it
    changes by design, not by accident.
+10. **A release is a human decision.** Nothing reaches `yadflow@latest` unless a
+    person fast-forwards `release` after the release check passes. A robot may
+    build, test and tag; it may not decide that users get a new version.
 
 ---
 
