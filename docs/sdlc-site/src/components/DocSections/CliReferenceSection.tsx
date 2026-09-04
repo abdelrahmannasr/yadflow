@@ -11,6 +11,7 @@ const GROUPS = [
       'npx yadflow check [--fix] — report / reconcile drift vs the manifest',
       'npx yadflow update — apply drift only (also migrates pre-2.0 sdlc-* installs)',
       'npx yadflow doctor [--json] — environment + state health (exit 1 on failure)',
+      'npx yadflow migrate [--apply] — move state files onto this release\'s file shape (previews by default, backs up before writing)',
     ],
   },
   {
