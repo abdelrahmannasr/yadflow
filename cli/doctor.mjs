@@ -1,12 +1,14 @@
 // `yad doctor` — environment + state health, the complement of `yad check` (file drift).
-// Three sections: environment (tools on PATH, auth), project state (config files parse and
-// point at real repos), epics (each ledger loads). Pure reporting: exit 1 on any FAIL,
-// 0 with warnings. `--json` emits the checks for CI / bug reports.
+// Five sections: environment (tools on PATH, auth), project state (config files parse and point at
+// real repos), shape (what schemaVersion the files are on vs the engine), epics (each ledger loads),
+// and threads (feature-thread lineage). Pure reporting: exit 1 on any FAIL, 0 with warnings.
+// `--json` emits the checks for CI / bug reports.
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isBridgeHub } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
+import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -32,9 +34,11 @@ const underProjectRoot = (root, p) => {
 // corruption, and must not be reassured away as an expected sibling.
 const isRegistrableSibling = (root, rpath) => insideWorkspace(root, rpath);
 
-// Each check: { id, section, status: 'ok'|'warn'|'fail', message, hint? }
-function check(checks, id, section, status, message, hint = '') {
-  checks.push({ id, section, status, message, ...(hint ? { hint } : {}) });
+// Each check: { id, section, status: 'ok'|'warn'|'fail', message, hint?, …extra }
+// `extra` carries structured detail for the `--json` consumer that would be unreadable in the prose
+// line — e.g. the per-file shape table behind a one-sentence drift summary.
+function check(checks, id, section, status, message, hint = '', extra = null) {
+  checks.push({ id, section, status, message, ...(hint ? { hint } : {}), ...(extra || {}) });
 }
 
 export function envChecks(checks) {
@@ -507,6 +511,111 @@ export function epicChecks(checks, root) {
   }
 }
 
+// ---- file shape (schemaVersion) -------------------------------------------------------------
+// What shape this project's files are in, against the shape this engine writes. The stamp itself is
+// silent by design (cli/lib.mjs), and `yad migrate` only speaks when you run it — so without this
+// section a project could sit a shape behind, or a shape ahead, with nothing ever saying so. Rule 6:
+// the engine never goes quiet about what is unprotected.
+//
+// The reading comes from `planMigration`, the same function `yad migrate` previews with, so doctor and
+// migrate can never disagree about what state a project is in or what would fix it.
+//
+// Three outcomes, and the middle one is the whole point:
+//   ok    every file is on the engine's shape
+//   warn  a file is BEHIND — `yad migrate` walks it forward, and the message says so
+//   fail  a file is AHEAD — written by a newer yadflow than this one; migrating would downgrade it,
+//         so the fix is to upgrade the CLI, not to touch the file
+const scopeOf = (rel) => {
+  const parts = rel.split(path.sep);
+  return parts[0] === 'epics' && parts.length > 1 ? parts[1] : null;
+};
+
+function shapeCheckFor(checks, id, label, rows, engine) {
+  // A file that does not parse has no shape to compare. It still gets said out loud here, because
+  // nothing else in doctor reads these files — a corrupt change.json or build-log shard would
+  // otherwise pass a clean health check while `yad migrate` refuses to touch the project over it.
+  const unreadable = rows.filter((r) => r.from === null);
+  if (unreadable.length) {
+    check(checks, `${id}:unreadable`, 'shape', 'fail',
+      `${label}: ${unreadable.length} state file(s) do not parse — ${unreadable.map((r) => r.file).join(', ')}`,
+      'restore them from git — a broken state file blocks `yad migrate` and cannot be read by the gate');
+  }
+
+  const readable = rows.filter((r) => r.from !== null);
+  if (!readable.length) return;
+  const ahead = readable.filter((r) => r.action === 'ahead');
+  // A file behind the engine on a VERIFIED hub is real drift, but `yad migrate` deliberately refuses
+  // to touch it — CI is its only writer. Pointing at migrate there would send someone to a command
+  // that changes nothing while the warning never clears, so those are counted and named separately.
+  const behind = readable.filter((r) => r.from < engine && r.action !== 'ci-owned');
+  const behindCi = readable.filter((r) => r.from < engine && r.action === 'ci-owned');
+  // An object with no key yet is shape 1 by rule 1 — correct, not drifted. Read from the bytes
+  // (`stamped`), not from `action`: that fires on any byte difference, a re-indent included.
+  const unstamped = readable.filter((r) => !r.stamped).length;
+  const shapes = [...new Set(readable.map((r) => r.from))].sort((a, b) => a - b);
+  const on = shapes.length === 1 ? `shape ${shapes[0]}` : `shapes ${shapes.join(' and ')}`;
+  const detail = { shape: { engine, files: readable.map((r) => ({ file: r.file, shape: r.from, stamped: !!r.stamped })) } };
+
+  if (ahead.length) {
+    check(checks, id, 'shape', 'fail',
+      `${label} is on ${on}, the engine is on shape ${engine} — ${ahead.length} file(s) are newer than this yadflow`,
+      'upgrade yadflow (`npm i -g yadflow@latest`) — migrating would move those files BACKWARD and lose what the newer version wrote',
+      detail);
+    return;
+  }
+  if (behind.length || behindCi.length) {
+    const parts = [];
+    if (behind.length) parts.push(`${behind.length} file(s) are behind`);
+    if (behindCi.length) parts.push(`${behindCi.length} are CI-owned and behind`);
+    check(checks, id, 'shape', 'warn',
+      `${label} is on ${on}, the engine is on shape ${engine} — ${parts.join(', ')}`,
+      behind.length
+        ? 'run `yad migrate` to see what would change, then `yad migrate --apply` (each file is backed up first)'
+        : 'nothing to run — in verified mode CI owns these files and moves them on its next gate sync',
+      detail);
+    return;
+  }
+  // The suggestion lives in the MESSAGE, not the hint: runDoctor prints hints only for warn/fail, so a
+  // hint on a passing check would reach `--json` and never the person reading the terminal.
+  check(checks, id, 'shape', 'ok',
+    `${label} is on shape ${engine}, the engine is on shape ${engine}`
+      + (unstamped ? ` (${unstamped} file(s) do not record it yet — counted as shape 1; \`yad migrate --apply\` writes it in)` : ''),
+    '',
+    detail);
+}
+
+// `plan` is injectable for the same reason `yad migrate` takes an injectable migration list: while the
+// engine is on shape 1 nothing can be BEHIND it, so the warn branch — the one this section exists for —
+// is unreachable from a real project until the first real shape change lands. Tests supply a plan that
+// reaches it, which is how the drift report is proven before there is any drift to report.
+export function shapeChecks(checks, root, { plan: injected = null } = {}) {
+  if (!injected && !exists(path.join(root, PROJECT_FILES.hubConfig)) && !exists(path.join(root, PROJECT_FILES.version))) return;
+  let plan = injected;
+  if (!plan) {
+    try {
+      plan = planMigration(root);
+    } catch (e) {
+      // Say so rather than returning quietly. The failure modes here do not overlap with the other
+      // sections — an unreadable shard DIRECTORY, say, throws while `loadLedger` never looks at it —
+      // so a silent return would drop this whole section and let doctor print "all clear" over it.
+      check(checks, 'shape', 'shape', 'warn',
+        `could not read this project's file shapes: ${e.message}`,
+        'fix the path in the message, then re-run — until then neither doctor nor `yad migrate` can tell you what shape this project is on');
+      return;
+    }
+  }
+  const { rows, engine } = plan;
+  // A list ledger has no key to read and never will (rule 1's second half) — reporting it as a file
+  // that "does not record its shape" would be a permanent nag about something that is already correct.
+  const relevant = rows.filter((r) => r.action !== 'list');
+
+  shapeCheckFor(checks, 'shape', 'this project', relevant.filter((r) => scopeOf(r.file) === null), engine);
+  const epics = [...new Set(relevant.map((r) => scopeOf(r.file)).filter(Boolean))].sort();
+  for (const e of epics) {
+    shapeCheckFor(checks, `shape:${e}`, e, relevant.filter((r) => scopeOf(r.file) === e), engine);
+  }
+}
+
 // Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
 // `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
 // on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
@@ -535,13 +644,15 @@ export function threadChecks(checks, root) {
   }
 }
 
-// Run every check section and return the diagnostic object without printing. This is the shared
-// core of `runDoctor` — the reporter (cli/report.mjs) consumes it to derive a *scrubbed* safe
-// subset (never the raw checks, which carry names + paths). Same shape `--json` prints.
+// Run every check section and return the diagnostic object without printing. The shared core of
+// `runDoctor`, and the same shape `--json` prints. Checks carry names and paths, so anything that
+// leaves the machine must scrub them — `yad report` does NOT consume this; it builds its own
+// allowlisted subset (cli/report.mjs `sanitizeContext`).
 export function collectDoctor(root) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
+  shapeChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

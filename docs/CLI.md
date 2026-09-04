@@ -246,6 +246,28 @@ override), else `$XDG_CACHE_HOME/yadflow/`, else `%LOCALAPPDATA%\yadflow\` on Wi
 
 ## Troubleshooting (`yad doctor` + error codes)
 
+### The `shape` section — is this project on the right file shape?
+
+`yad doctor` reports what shape your state files are in, against the shape this release writes, one
+line for the project and one per epic:
+
+```text
+  shape
+  ✓ this project is on shape 1, the engine is on shape 1
+  ✓ EP-checkout is on shape 1, the engine is on shape 1
+```
+
+| What it says | What it means | What to do |
+|---|---|---|
+| on the same shape | nothing to do | nothing |
+| *N file(s) do not record it yet* | those files predate the stamp. They count as shape 1, so they are **correct**, just silent | optional: `yad migrate --apply` writes it in |
+| *N file(s) are **behind*** (warn) | this release expects a newer shape | `yad migrate` to preview, then `yad migrate --apply` |
+| *N file(s) are **newer** than this yadflow* (fail) | they were written by a newer release | upgrade the CLI. **Never** migrate — that would move them backward and lose what the newer version wrote |
+
+The reading comes from the same code `yad migrate` previews with, so the two can never disagree. In
+`--json`, each shape check carries a `shape` object with the engine's version and a per-file list, so
+CI can act on the detail rather than parsing the sentence.
+
 When something is off, run `yad doctor` first — it checks the environment (git, gh/glab auth, node
 version), the project state (`.sdlc/*.json` parse and point at real repos), and every epic ledger,
 with a fix-it hint per finding. Failures carry stable, greppable codes, also printed by any failing
