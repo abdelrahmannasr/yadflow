@@ -147,6 +147,22 @@ export const TESTING_PRIMARY = 'playwright';
 export const LEARNING_TOOLS = ['deeptutor'];
 export const LEARNING_PRIMARY = 'deeptutor';
 
+// The shape (schema version) every file the engine writes declares, as `"schemaVersion": 1`.
+//
+// Rule 1 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): every file states its shape,
+// and a file with no version counts as 1.
+//
+// Today the stamp is written and read back, and nothing yet acts on it: raising this number would move
+// what new files say without upgrading existing ones. The two halves that make it usable are the next
+// tasks on the roadmap — `yad migrate` (E14), which moves a project from one shape to the next, and a
+// `yad doctor` report (E16) for a project whose files disagree with the engine. Do NOT raise this
+// number before both exist.
+//
+// Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
+// running and moves on every publish; this is what the files on disk look like and moves only when
+// their shape actually changes.
+export const SCHEMA_VERSION = 1;
+
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
   reposRegistry: '.sdlc/repos.json',

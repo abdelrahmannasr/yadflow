@@ -200,6 +200,25 @@ never a silent reset — restore it from git, or delete it to start over from th
 > **Not yet supported:** marking a customization as *accepted* so it stops being reported (an
 > opt-out list of managed paths you own). Until then, `modified` is a permanent, deliberate nag.
 
+## File shape: `schemaVersion`
+
+Every JSON **object** `yad` writes under a `.sdlc/` directory starts with `"schemaVersion": 1`. It
+records what shape the file is in, so a later release can recognise a file written by an older one and
+upgrade it rather than guess.
+
+You do not have to do anything about it. Three things are worth knowing:
+
+- **An older project is not broken.** A file with no `schemaVersion` counts as shape 1. Existing
+  projects keep working untouched, and each file picks up the key the next time `yad` writes it.
+- **Four files never carry it.** `approvals.json`, `comments.json`, `hub-prs.json` and
+  `reconcile-debt.json` are JSON lists, and a list cannot hold a key. They count as shape 1 too.
+- **It is not the CLI version.** `.sdlc/cli-version.json` says which release of `yad` set the project
+  up and moves with every release. `schemaVersion` describes the file itself and moves only when the
+  shape genuinely changes.
+
+Files `yad` writes that are not part of a project — your editor's `.claude/settings.json`, the daily
+update-check cache in your home directory — are never stamped.
+
 ## Staying up to date
 
 Every `yad` command checks — at most once a day, and never in CI — whether a newer `yadflow` has been
