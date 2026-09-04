@@ -5283,6 +5283,150 @@ async function doctorOn(T) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// doctor — the `shape` section (schemaVersion drift, E16)
+// ---------------------------------------------------------------------------------------------
+const { shapeChecks } = await import('./doctor.mjs');
+
+// The warn branch is the one this section exists for, and it is unreachable from a real project until
+// the engine's shape moves past 1 — nothing can be BEHIND shape 1. So the plan is injected, exactly as
+// `yad migrate` takes an injectable migration list.
+const shapeOf = (rows, engine) => {
+  const checks = [];
+  shapeChecks(checks, '/nowhere', { plan: { engine, rows, bridge: false } });
+  return checks;
+};
+// `stamped` is read from the bytes by planMigration, so a row must carry it explicitly here too —
+// the section must never infer it from `action`.
+const row = (file, from, action = 'unchanged', stamped = true) => ({ file, from, to: from, action, changes: false, stamped });
+
+test('doctor shape: a project on the engine\'s shape reads back as ok, and names the engine', () => {
+  const [c] = shapeOf([row('.sdlc/hub.json', 1)], 1);
+  assert.equal(c.section, 'shape');
+  assert.equal(c.status, 'ok');
+  assert.equal(c.message, 'this project is on shape 1, the engine is on shape 1');
+  assert.equal(c.shape.engine, 1, '--json carries the per-file detail behind the sentence');
+  assert.deepEqual(c.shape.files, [{ file: '.sdlc/hub.json', shape: 1, stamped: true }]);
+});
+
+test('doctor shape: a file BEHIND the engine warns and names the command that fixes it', () => {
+  const [c] = shapeOf([row('.sdlc/hub.json', 1), row('.sdlc/repos.json', 2)], 2);
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /on shapes 1 and 2, the engine is on shape 2 — 1 file\(s\) are behind/);
+  assert.match(c.hint, /yad migrate --apply/);
+});
+
+test('doctor shape: a file AHEAD of the engine FAILS — the fix is a newer CLI, never a migration', () => {
+  // Migrating here would move the file backward and throw away what the newer yadflow wrote, so this
+  // must never point at `yad migrate`.
+  const [c] = shapeOf([row('.sdlc/hub.json', 2, 'ahead')], 1);
+  assert.equal(c.status, 'fail');
+  assert.match(c.message, /newer than this yadflow/);
+  assert.match(c.hint, /upgrade yadflow/);
+  assert.doesNotMatch(c.hint, /yad migrate/, 'never advise migrating a file this engine cannot understand');
+});
+
+test('doctor shape: an unstamped file is correct, counted, and told how to settle it', () => {
+  // No key means shape 1 by rule 1 — not drift. Saying so explains why `yad migrate` still has
+  // something to do on a project this section calls healthy.
+  const [c] = shapeOf([row('.sdlc/hub.json', 1, 'stamp', false)], 1);
+  assert.equal(c.status, 'ok');
+  assert.match(c.message, /1 file\(s\) do not record it yet — counted as shape 1; `yad migrate --apply` writes it in/);
+  assert.equal(c.shape.files[0].stamped, false);
+  // The advice is in the MESSAGE, not the hint: runDoctor prints hints only for warn/fail, so a hint
+  // here would reach --json and never the person reading the terminal.
+  assert.equal(c.hint, undefined);
+});
+
+test('doctor shape: "does not record it yet" reads the bytes, not the action', () => {
+  // planMigration sets action 'stamp' whenever the serialized bytes differ for ANY reason — a hand
+  // re-indent included. A file that plainly carries the key must not be reported as missing it.
+  const [c] = shapeOf([row('.sdlc/hub.json', 1, 'stamp', true)], 1);
+  assert.equal(c.message, 'this project is on shape 1, the engine is on shape 1');
+  assert.equal(c.shape.files[0].stamped, true);
+});
+
+test('doctor shape: a CI-owned file behind the engine is named, and never sent to migrate', () => {
+  // In verified mode CI is the only writer of these, and `yad migrate` refuses to touch them. Telling
+  // someone to run migrate would send them to a command that changes nothing while the warning never
+  // clears — the one thing that would make doctor and migrate disagree.
+  const [c] = shapeOf([row(path.join('epics', 'EP-a', '.sdlc', 'state.json'), 1, 'ci-owned')], 2);
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /1 are CI-owned and behind/);
+  assert.match(c.hint, /CI owns these files and moves them on its next gate sync/);
+  assert.doesNotMatch(c.hint, /yad migrate/, 'migrate cannot fix a file it deliberately skips');
+});
+
+test('doctor shape: a project it cannot read is a warning, never a silent gap', () => {
+  // planMigration walks the shard directories; an unreadable one throws. Returning quietly would drop
+  // the whole section and let doctor print "all clear" over a project nothing could read.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-boom-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{}\n');
+  fs.mkdirSync(path.join(T, 'epics'), { recursive: true }); // so the walk actually reaches a readdir
+  const checks = [];
+  const realReaddir = fs.readdirSync;
+  fs.readdirSync = () => { throw new Error('EACCES: permission denied'); };
+  try { shapeChecks(checks, T); } finally { fs.readdirSync = realReaddir; }
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0].status, 'warn');
+  assert.match(checks[0].message, /could not read this project's file shapes: EACCES/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor shape: list ledgers are never reported — they cannot carry a key at all', () => {
+  // approvals/comments/hub-prs/reconcile-debt are JSON arrays. Reporting them as "does not record its
+  // shape" would be a permanent nag about something that is already correct.
+  const checks = shapeOf([row('epics/EP-x/.sdlc/approvals.json', 1, 'list')], 1);
+  assert.deepEqual(checks, [], 'nothing to say about a file that is correct by definition');
+});
+
+test('doctor shape: a state file that does not parse is a FAILURE, not silence', () => {
+  // Nothing else in doctor reads change.json, the shard folders, or docs-build.json. Without this, a
+  // corrupt one passes a clean health check while `yad migrate` refuses to touch the project over it.
+  const checks = shapeOf([
+    row('.sdlc/hub.json', 1),
+    { file: '.sdlc/docs.json', from: null, to: null, action: 'unreadable', changes: false, stamped: false },
+  ], 1);
+  const bad = checks.find((c) => c.id === 'shape:unreadable');
+  assert.equal(bad.status, 'fail');
+  assert.match(bad.message, /1 state file\(s\) do not parse — \.sdlc\/docs\.json/);
+  assert.match(bad.hint, /restore them from git/);
+  // …and the readable files are still reported alongside it, rather than the whole scope going quiet.
+  assert.equal(checks.find((c) => c.id === 'shape').status, 'ok');
+});
+
+test('doctor shape: each epic is reported separately, so drift can be located', () => {
+  const checks = shapeOf([
+    row('.sdlc/hub.json', 1),
+    row(path.join('epics', 'EP-a', '.sdlc', 'state.json'), 1),
+    row(path.join('epics', 'EP-b', '.sdlc', 'state.json'), 1, 'ahead'),
+  ], 1);
+  assert.deepEqual(checks.map((c) => [c.id, c.status]), [
+    ['shape', 'ok'], ['shape:EP-a', 'ok'], ['shape:EP-b', 'fail'],
+  ]);
+});
+
+test('doctor shape: a real project reports its shape, and the section reaches --json', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const r = await doctorOn(T);
+  const shape = r.checks.filter((x) => x.section === 'shape');
+  assert.ok(shape.length, 'the section is wired into collectDoctor, not just exported');
+  assert.equal(shape[0].id, 'shape');
+  assert.equal(shape[0].status, 'ok', shape[0].message);
+  assert.match(shape[0].message, /this project is on shape 1, the engine is on shape 1/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor shape: outside a project the section is silent, not a finding', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-none-'));
+  const checks = [];
+  shapeChecks(checks, T);
+  assert.deepEqual(checks, [], 'no project means nothing to say about its file shapes');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor: healthy project has no failures (warnings allowed)', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });

@@ -133,6 +133,9 @@ build half by hand"** below.
 
 - **`yad-status [EP-<slug>]`** — read-only: the front chain, each build step's dial + status, the
   trust record, and (across epics) the fleet roll-up. Start here to see what's blocking.
+- **`yad doctor`** — health check. Its `shape` section says whether this project's state files match
+  the shape this release expects, one line for the project and one per epic, and names the command to
+  run if they do not.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.

@@ -163,6 +163,12 @@ export function projectJsonFiles(root) {
 //   ahead             the file's shape is NEWER than this engine — never touched, always reported
 //   ci-owned          a verified (bridge) hub's ledger file: CI is its only writer
 //   unreadable        does not parse — reported, never rewritten
+//
+// Each row also carries `stamped`: whether the file literally holds a `schemaVersion` key. That is a
+// fact about the bytes, read the same way for every branch, so a caller never has to infer it from
+// `action` — which would be wrong twice over: `stamp` fires whenever the serialized bytes differ for
+// ANY reason (a hand re-indent, say), and `ci-owned`/`ahead`/`list` short-circuit before the byte
+// comparison happens at all.
 export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
   const bridge = isBridgeHub(hub);
@@ -176,20 +182,23 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     const rel = path.relative(root, file);
     const raw = readRaw(file);
     if (!raw.ok) {
-      rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, detail: raw.error });
+      rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, stamped: false, detail: raw.error });
       continue;
     }
     const from = shapeOf(raw.value);
+    // Read from the bytes, before any branch: a list can never carry the key, and every other kind
+    // either does or does not, whoever owns the file.
+    const isStamped = isPlainObject(raw.value) && Number.isInteger(raw.value.schemaVersion);
     if (!isPlainObject(raw.value)) {
-      rows.push({ file: rel, from, to: from, action: 'list', changes: false });
+      rows.push({ file: rel, from, to: from, action: 'list', changes: false, stamped: false });
       continue;
     }
     if (from > SCHEMA_VERSION) {
-      rows.push({ file: rel, from, to: from, action: 'ahead', changes: false });
+      rows.push({ file: rel, from, to: from, action: 'ahead', changes: false, stamped: isStamped });
       continue;
     }
     if (bridge && ciOwned.has(path.basename(file))) {
-      rows.push({ file: rel, from, to: from, action: 'ci-owned', changes: false });
+      rows.push({ file: rel, from, to: from, action: 'ci-owned', changes: false, stamped: isStamped });
       continue;
     }
     const { obj, version, applied } = applyMigrations(raw.value, migrations);
@@ -199,7 +208,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     const action = version !== from ? 'migrate' : (changes ? 'stamp' : 'unchanged');
     // `steps` lists the migrations that actually moved the file's shape. The baseline 1 → 1 runs on
     // every file by design and moves nothing, so naming it on every row would be noise reported as work.
-    rows.push({ file: rel, from, to: version, action, changes, ...(version !== from ? { steps: applied } : {}) });
+    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(version !== from ? { steps: applied } : {}) });
   }
   return { engine: SCHEMA_VERSION, bridge, rows };
 }
