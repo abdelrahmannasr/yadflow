@@ -1,0 +1,32 @@
+{
+  "repos": [
+    {
+      "name": "backend",
+      "path": "demo-repos/backend",
+      "git_url": null,
+      "platform": null,
+      "domain_owner": "carol",
+      "default_branch": "master",
+      "connectedAt": "2026-06-08",
+      "lastSyncedAt": "2026-06-08",
+      "syncedHead": "4826e8ff2b6d423eca3fcd2457cf6526003f7448",
+      "contextPack": ".sdlc/code-context/backend/pack.md",
+      "codeMap": ".sdlc/code-context/backend/code-map.md",
+      "source": "repomix"
+    },
+    {
+      "name": "mobile",
+      "path": "demo-repos/mobile",
+      "git_url": null,
+      "platform": null,
+      "domain_owner": "dave",
+      "default_branch": "master",
+      "connectedAt": "2026-06-08",
+      "lastSyncedAt": "2026-06-08",
+      "syncedHead": "691297e715678d65cce7d559dcd9aae6e5aa644f",
+      "contextPack": ".sdlc/code-context/mobile/pack.md",
+      "codeMap": ".sdlc/code-context/mobile/code-map.md",
+      "source": "repomix"
+    }
+  ]
+}

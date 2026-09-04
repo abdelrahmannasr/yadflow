@@ -1,0 +1,232 @@
+{
+  "files": {
+    ".sdlc/cli-version.json": "sha256:bcdeb89a28cd7cc0dd53e3e92957d97c23e98110afec207d635de3ae86e8d164",
+    ".sdlc/code-context/backend/code-map.md": "sha256:9bea7bc6df1e0d27e0f12e5d742eda9da6c75b94aaece6f722dfb8142d155d58",
+    ".sdlc/code-context/mobile/code-map.md": "sha256:21750ce93f55cfc4f4c780dcc1b3d8a89dc31745dd28c2c41e941f6e6d1f1f07",
+    ".sdlc/docs.json": "sha256:482cedaed0e55903651f23899de4e2c004bff13512f42ec62ee8a1bb688e1997",
+    ".sdlc/hub.json": "sha256:9871d00da9ac555de8876afaab92707a44c3b52821286e1e0087f0e30338c551",
+    ".sdlc/repos.json": "sha256:42ce37869574836106d1979864b74a12a8221b5a96b6a5df15bc21fef2923a49",
+    "epics/EP-checkout/.sdlc/approvals.json": "sha256:92e05cc3a79f0a57f4b0129feb07aa15ad9c2043b32943042fbd7ddb39a55367",
+    "epics/EP-checkout/.sdlc/build-log.json": "sha256:3511c07d75429318850e4698085068c46077ec70cf1e1d83583f40696512bdbc",
+    "epics/EP-checkout/.sdlc/build-state/EP-checkout-S03.json": "sha256:5a4476dd205b27e48a814a40d06b0d40cf2373286fa629d4c08b86eec8f409fa",
+    "epics/EP-checkout/.sdlc/contract-lock.json": "sha256:61f66dd8e36451ce2735237f06878ee6a453897be14fe9dc779e29c3aecb2d4f",
+    "epics/EP-checkout/.sdlc/state.json": "sha256:3fdbf4a95482e9dab1b86292cceb3758ce90c25051aa464e2a40fe35fc794abb",
+    "epics/EP-checkout/.sdlc/trust-log.json": "sha256:ed6d007068b70f094defe0211a019e5d217bbaf2994e6a6fdfb3c6bc1bbf0440",
+    "epics/EP-checkout/DEFECTS.md": "sha256:928640c25f5eb246bf3b56c9de574560595867de680223d3a018363243a92d67",
+    "epics/EP-checkout/DESIGN.md": "sha256:9fc93e13a251c278d7615d9851a60a8e45b507a3ebb711f2c9ec93fd2ba160af",
+    "epics/EP-checkout/TIMELINE.md": "sha256:f0333157fd0e5a19042989d8f94d0bac17db8e2e598e71ed5b1d5f519d9a548e",
+    "epics/EP-checkout/architecture.md": "sha256:19dff5e6804f22a42eedd69640d558ab539090396eb3acd82171bf2407a706a1",
+    "epics/EP-checkout/contract.md": "sha256:6c7eea8a0a661a116d523d0de0cefb5119855f037c420fd54cc7e17716ae0523",
+    "epics/EP-checkout/epic.md": "sha256:94118ba8732694ec6c1bc8feb71695bf7589f2f1bdc0800d06461d0d3c38a93f",
+    "epics/EP-checkout/reviews/architecture--2026-06-06--approved.md": "sha256:2c9b0070e6d9e734b5f5169afc0e4a31439b4e799cff8a447d67b770e2575c86",
+    "epics/EP-checkout/reviews/architecture--2026-06-06--comments.md": "sha256:ff1a75cd26cc03cec591208882bb9dcd08f5a9967c5285bec15f319efe5e0068",
+    "epics/EP-checkout/reviews/epic--2026-06-04--approved.md": "sha256:c3710ba01ecd2c40bc430aa45115a3874ceb541cc503fa83c662b1329b6defaf",
+    "epics/EP-checkout/reviews/epic--2026-06-04--comments.md": "sha256:7d85201e614400cc741fcbf014b4b01a3b32cf6acac684358a58ef0255ce50f5",
+    "epics/EP-checkout/reviews/stories--2026-06-06--approved.md": "sha256:7bb292e2585245400b93635dbbfd262022f411160785c0ab28b24ba5d5e1c2cc",
+    "epics/EP-checkout/reviews/stories--2026-06-06--comments.md": "sha256:65ea93782f89475f3532f390c813b620614cb429199faa705d590b74e5bd7cd8",
+    "epics/EP-checkout/reviews/ui-design--2026-06-06--approved.md": "sha256:2b66e68aee786c260399dded7d7d4d2b4a736870321e582df591ded3f2751641",
+    "epics/EP-checkout/reviews/ui-design--2026-06-06--comments.md": "sha256:ce3bc10e40c24d1a543289b240dd9be644c84a12b35e8728cc7c77ea1d584912",
+    "epics/EP-checkout/stories/.gitkeep": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "epics/EP-checkout/stories/EP-checkout-S01.md": "sha256:0acd4fb561f4624a59f42f966d942811b90f464caf7bd637943e1fa7b3651857",
+    "epics/EP-checkout/stories/EP-checkout-S02.md": "sha256:76d0809aae35123e520e56fd07bde72504bc9a5cb4ec8b2df242bcdeca567b12",
+    "epics/EP-checkout/stories/EP-checkout-S03.md": "sha256:ab05ad94c3369338e7595fc02cdc13ec7c449328eaa6b1ff98898c6dbf45c0dd",
+    "epics/EP-checkout/stories/EP-checkout-S04.md": "sha256:9c7ac87319f685d8581a53130a5d62d6670e377ae1efbe0a430b4a53a98daa7e",
+    "epics/EP-checkout/stories/EP-checkout-S05.md": "sha256:130c75e321da25648356d305231c2b49c62d5cfa9b99cba0f6de95da925f93af",
+    "epics/EP-checkout/thread-resolved.md": "sha256:2ab4e670f683e6e85dbb1b84a79ff93a9d6854b54ebf5a8e2374d8d5372ea782",
+    "epics/EP-checkout/ui-design.md": "sha256:0b210200ba83ccf873afaccb2f67b4f9b0014009f5773d1e0543d3e1b80c2278",
+    "epics/EP-checkout-queue-filter/.sdlc/approvals.json": "sha256:5870ce7d2923ada904142ca5fcf18aa13977eac60a2f5d03e58cbfdd3474cac3",
+    "epics/EP-checkout-queue-filter/.sdlc/build-log.json": "sha256:5741a6284c973073e6b26f65e52883178402f9df8dcc90e01e7a6c79fad75e87",
+    "epics/EP-checkout-queue-filter/.sdlc/change.json": "sha256:58a57f8bc7730aa75df29c789d557ae42165b54aa710ec9a54ff0996584cbeb6",
+    "epics/EP-checkout-queue-filter/.sdlc/comments.json": "sha256:37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "epics/EP-checkout-queue-filter/.sdlc/contract-lock.json": "sha256:5bf61c72fabe1cce92d1371f0f24cba0ca5d5f391a8b8794fd2bdd0da132840e",
+    "epics/EP-checkout-queue-filter/.sdlc/state.json": "sha256:c7b08a1dc03fb99fca546c659cd3d3543057c276f2f9895c097eac0a907412a1",
+    "epics/EP-checkout-queue-filter/epic.md": "sha256:c955a5030194960d8d19d12d3b61147e719ee6f636f2f2bf1b007219afb55f46",
+    "epics/EP-checkout-queue-filter/stories/EP-checkout-queue-filter-S01.md": "sha256:fd69f20fcfc446dcb5d50c7131d8ee0c57a6ad0e30e89afae62c3d1fc71a4002",
+    "epics/EP-checkout-queue-filter/test-cases.md": "sha256:b89ae988123e74d3b73f13f0ac86f68831a0994c60e8b151ed37a12be25a0baa"
+  },
+  "next": {
+    "ok": true,
+    "actions": [
+      {
+        "epicId": "EP-checkout",
+        "kind": "build",
+        "step": "ready-for-build",
+        "status": "ready-for-build",
+        "parallel": null,
+        "builds": [
+          {
+            "story": "EP-checkout-S03",
+            "repos": [
+              {
+                "repo": "backend",
+                "step": null,
+                "status": "done",
+                "shipped": true,
+                "skill": null,
+                "automation": null,
+                "locked": false,
+                "chain": []
+              },
+              {
+                "repo": "mobile",
+                "step": null,
+                "status": "done",
+                "shipped": true,
+                "skill": null,
+                "automation": null,
+                "locked": false,
+                "chain": []
+              }
+            ]
+          }
+        ],
+        "why": "build half — every story/repo lane is shipped",
+        "lineageKind": "feature"
+      },
+      {
+        "epicId": "EP-checkout-queue-filter",
+        "kind": "build",
+        "step": "ready-for-build",
+        "status": "ready-for-build",
+        "parallel": null,
+        "why": "front half approved — the build half can run",
+        "lineageKind": "defect"
+      }
+    ]
+  },
+  "doctor": [
+    {
+      "id": "epic:EP-checkout",
+      "section": "epics",
+      "status": "ok",
+      "message": "EP-checkout: currentStep ready-for-build"
+    },
+    {
+      "id": "epic:EP-checkout:contract-lock",
+      "section": "epics",
+      "status": "ok",
+      "message": "EP-checkout: contract surface matches its lock (sha256:3c8094c88f7d…)"
+    },
+    {
+      "id": "epic:EP-checkout-queue-filter",
+      "section": "epics",
+      "status": "ok",
+      "message": "EP-checkout-queue-filter: currentStep ready-for-build"
+    },
+    {
+      "id": "epic:EP-checkout-queue-filter:contract-lock",
+      "section": "epics",
+      "status": "ok",
+      "message": "EP-checkout-queue-filter: pointer-lock matches EP-checkout (sha256:3c8094c88f7d…)"
+    },
+    {
+      "id": "thread:EP-checkout-queue-filter",
+      "section": "threads",
+      "status": "ok",
+      "message": "EP-checkout-queue-filter: defect threaded to EP-checkout"
+    }
+  ],
+  "gates": [
+    {
+      "epic": "EP-checkout",
+      "step": "epic-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "base"
+    },
+    {
+      "epic": "EP-checkout",
+      "step": "architecture-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "escalated"
+    },
+    {
+      "epic": "EP-checkout",
+      "step": "ui-design-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "base"
+    },
+    {
+      "epic": "EP-checkout",
+      "step": "stories-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "per-repo"
+    },
+    {
+      "epic": "EP-checkout-queue-filter",
+      "step": "epic-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": false,
+      "missing": [
+        "inherited artifact drifted from EP-checkout — re-thread"
+      ],
+      "rule": "inherited"
+    },
+    {
+      "epic": "EP-checkout-queue-filter",
+      "step": "architecture-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "inherited"
+    },
+    {
+      "epic": "EP-checkout-queue-filter",
+      "step": "ui-design-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "inherited"
+    },
+    {
+      "epic": "EP-checkout-queue-filter",
+      "step": "stories-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "per-repo"
+    },
+    {
+      "epic": "EP-checkout-queue-filter",
+      "step": "test-cases-review",
+      "approvalsSatisfied": true,
+      "threadsResolved": true,
+      "merged": true,
+      "staleDropped": 0,
+      "passed": true,
+      "missing": [],
+      "rule": "base"
+    }
+  ]
+}
