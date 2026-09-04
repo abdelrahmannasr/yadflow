@@ -778,6 +778,7 @@ export const MODULES: Module[] = [
           { cmd: 'yad-status', note: 'where is everything, what is blocking' },
           { cmd: 'yad next', note: 'the one next action' },
           { cmd: 'yad doctor', note: 'health check' },
+          { cmd: 'yad migrate', note: 'preview the file-shape upgrade (--apply to do it)' },
         ],
       },
     ],

@@ -16,6 +16,7 @@ import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
+import { runMigrate } from '../cli/migrate.mjs';
 import { runNext } from '../cli/next.mjs';
 import { runSkip } from '../cli/skip.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
@@ -47,6 +48,11 @@ ${c.bold('Setup & maintenance')}
                        'yad check --fix --push'; --allow-branch permits a non-default branch
   yad doctor [--json]  Environment + state health: tools/auth, config files,
                        repo paths, epic ledgers (exit 1 on any failure)
+  yad migrate [--apply] [--json]   Move this project's state files onto the shape
+                       this yadflow expects. Prints what WOULD change and writes
+                       nothing until --apply, which copies each file it rewrites to
+                       <file>.yad-orig first. Safe to run twice — the second run
+                       reports there is nothing to do
   yad sync-status [epic]   Update artifact frontmatter status (draft/in-review/approved)
                        from .sdlc/state.json — all epics if omitted (--dry-run to preview)
   yad report [-m <text>]   File a bug in the yadflow repo with auto-scrubbed diagnostics
@@ -218,6 +224,10 @@ function parseArgs(argv) {
     else if (a === '--repos') o.repos = true;
     else if (a === '--wire') o.wire = true;
     else if (a === '--dry-run') o.dryRun = true;
+    else if (a === '--apply') o.apply = true;
+    // The roadmap and the release check spell the default `--preview`. Accepting it means a script can
+    // say what it means rather than relying on the absence of a flag.
+    else if (a === '--preview') o.apply = false;
     else if (a === '--json') o.json = true;
     else if (a === '-h' || a === '--help') o.help = true;
     else if (a === '-v' || a === '--version') o.version = true;
@@ -259,6 +269,9 @@ async function main() {
       break;
     case 'doctor':
       await runDoctor(o.dir, { json: o.json });
+      break;
+    case 'migrate':
+      await runMigrate(o.dir, { apply: o.apply, json: o.json });
       break;
     // Harness-invoked, not typed by a human: a tool-call payload arrives on stdin and the exit code
     // is the verdict (0 allow, 2 deny). See cli/hook.mjs for the contract.

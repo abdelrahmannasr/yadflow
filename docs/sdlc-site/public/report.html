@@ -1083,6 +1083,15 @@ npx yadflow update       # apply updates only</code></pre>
   </div>
 
   <div class="skillcard">
+    <h4><code>… migrate</code> &nbsp;/&nbsp; <code>… migrate --apply</code></h4>
+    <div class="row"><span class="lbl lbl-what">What</span> Moves this project’s <strong>state files</strong> onto the shape this release expects. Every JSON object <code>yad</code> writes carries a <code>schemaVersion</code>; when a release changes what those files look like, this is the one command that walks an existing project forward. It <strong>previews by default</strong> — printing a table of what would change and writing nothing — and <code>--apply</code> copies each file it rewrites to <code>&lt;file&gt;.yad-orig</code> before touching it. Safe to run twice: the second run says there is nothing to do. A file newer than your CLI, or one that does not parse, is reported and left alone.</div>
+    <div class="row"><span class="lbl lbl-how">How</span></div>
+<pre><code>npx yadflow migrate          # show me what would change
+npx yadflow migrate --apply  # do it, backing up first</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> After upgrading to a release whose notes mention a file-shape change. Never automatic — an upgrade only happens when you ask for it.</div>
+  </div>
+
+  <div class="skillcard">
     <h4><code>… --version</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Prints the installed CLI version.</div>
     <div class="row"><span class="lbl lbl-how">How</span> <code>npx yadflow --version</code></div>
