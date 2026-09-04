@@ -128,6 +128,7 @@ steps **locked**. Use this exact shape (see `references/state-schema.md`):
 
 ```json
 {
+  "schemaVersion": 1,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
   "currentStep": "epic-review",

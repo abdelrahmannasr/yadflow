@@ -93,6 +93,7 @@ into normal authoring with zero re-seeding.
 
 ```json
 {
+  "schemaVersion": 1,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
   "kind": "stub",

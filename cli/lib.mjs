@@ -1,6 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { err } from './errors.mjs';
+import { SCHEMA_VERSION } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -100,10 +101,50 @@ export function dirMatches(src, dest) {
   return files.every((rel) => sameContent(path.join(src, rel), path.join(dest, rel)));
 }
 
+// ---- file shape (schemaVersion) -----------------------------------------
+// Rule 1 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): every file the engine writes
+// states its shape, and a file with no version counts as 1.
+//
+// Both halves live here, in the one JSON reader/writer pair, rather than at the ~30 call sites. Two
+// writers that disagreed about whether — or where — a file carries the stamp would flip its bytes back
+// and forth on every sync, which is the ledger-churn failure issue #163 exists to prevent.
+//
+// Two conditions gate it, and both are load-bearing:
+//
+//   * the path runs through a `.sdlc` directory. writeJSON is also how the CLI writes
+//     `.claude/settings.json` (cli/plan.mjs) and the per-user update cache (cli/update-notice.mjs).
+//     Stamping a file the engine does not own would be a bug, not a feature.
+//   * the value is a plain object. Four ledger kinds — approvals, comments, hub-prs and
+//     reconcile-debt — are top-level JSON arrays, which cannot carry a key. Rule 1's second half
+//     already covers them: no version means version 1. Wrapping them in an object would be a shape
+//     change, and shape changes wait for v4 (rule 7).
+// Matched against the file's own directory and its parent, NOT any ancestor. Every kind the engine
+// writes sits either directly in a `.sdlc/` (state.json, hub.json, …) or one level down in a shard
+// folder (build-log/, trust-log/, build-state/). Matching any ancestor instead would stamp every JSON
+// file in a project that merely happened to live somewhere under a directory called `.sdlc` — the
+// user's own .claude/settings.json included, which is exactly what this must never touch. A new kind
+// nested deeper than that has to be added here on purpose.
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const underSdlcDir = (p) => {
+  const dir = path.dirname(path.resolve(p));
+  return path.basename(dir) === '.sdlc' || path.basename(path.dirname(dir)) === '.sdlc';
+};
+const carriesShape = (p, v) => isPlainObject(v) && underSdlcDir(p);
+
+// Always FIRST in the serialized object. A stamp that moved around between writers would change the
+// bytes without changing the meaning. An existing version is preserved, never forced back to 1, so a
+// file already on a newer shape survives being read and written by this release.
+const withShape = (p, v) =>
+  (carriesShape(p, v) ? { schemaVersion: v.schemaVersion ?? SCHEMA_VERSION, ...v } : v);
+
 export function readJSON(p, def = null) {
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
+    // "Read old, write new" (rule 2): an unstamped file reads back as shape 1, so a caller never has
+    // to ask whether the file it just loaded predates the stamp.
+    return withShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
   } catch {
+    // The caller's own default is returned untouched: it is not a file, and stamping it would invent
+    // a shape for something that was never read from disk.
     return def;
   }
 }
@@ -113,7 +154,7 @@ export function readJSON(p, def = null) {
 export function readJSONStrict(p, def = null) {
   if (!fs.existsSync(p)) return def;
   try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
+    return withShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
   } catch (e) {
     throw err('YAD-STATE-001', `corrupt JSON in ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
@@ -122,7 +163,7 @@ export function readJSONStrict(p, def = null) {
 // then rename over the target. A killed process can never leave a truncated ledger
 // file, and a failed rename never leaves a stray .tmp for `git add -A` to pick up.
 export function writeJSON(p, obj) {
-  const data = JSON.stringify(obj, null, 2) + '\n';
+  const data = JSON.stringify(withShape(p, obj), null, 2) + '\n';
   // Byte-identical content is not a write. The ledger writers are unconditional — they re-serialize
   // whether or not anything changed — so this keeps an unchanged sync from touching the file at all
   // (no mtime churn, nothing for a watcher or a `git add -A` to notice). A backstop, not the fix: the

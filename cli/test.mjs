@@ -697,6 +697,106 @@ test('writeJSON failure leaves a pre-existing target intact and cleans up the tm
 });
 
 // ---------------------------------------------------------------------------------------------
+// lib.mjs — schemaVersion, the file-shape stamp (roadmap Part 2, rules 1 and 2)
+// ---------------------------------------------------------------------------------------------
+const { readJSON: readJSONShape, readJSONStrict: readJSONStrictShape } = await import('./lib.mjs');
+const shapeTmp = (name) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-shape-${name}-`));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  return T;
+};
+
+test('schemaVersion: an object written under .sdlc is stamped, and the stamp leads the file', () => {
+  const T = shapeTmp('obj');
+  const f = path.join(T, '.sdlc/hub.json');
+  writeJSON(f, { platform: 'github' });
+  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "schemaVersion": 1,\n  "platform": "github"\n}\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a top-level ARRAY ledger is never stamped (approvals/comments/hub-prs/debt)', () => {
+  const T = shapeTmp('arr');
+  const f = path.join(T, '.sdlc/approvals.json');
+  writeJSON(f, [{ step: 'epic-review' }]);
+  // A key cannot be added to an array. Rule 1's second half covers these: no version means version 1.
+  assert.deepEqual(JSON.parse(fs.readFileSync(f, 'utf8')), [{ step: 'epic-review' }]);
+  assert.deepEqual(readJSONShape(f), [{ step: 'epic-review' }], 'reads back as the same bare array');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a file OUTSIDE .sdlc is never stamped (.claude/settings.json, caches)', () => {
+  const T = shapeTmp('outside');
+  const settings = path.join(T, '.claude/settings.json');
+  writeJSON(settings, { hooks: {} });
+  assert.equal(fs.readFileSync(settings, 'utf8'), '{\n  "hooks": {}\n}\n', 'a file the engine does not own is left alone');
+  const cache = path.join(T, 'update-check.json');
+  writeJSON(cache, { latest: '9.9.9' });
+  assert.equal(fs.readFileSync(cache, 'utf8'), '{\n  "latest": "9.9.9"\n}\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a project living under a directory called .sdlc does not stamp everything', () => {
+  // The stamp keys off the file's own directory and its parent, never an arbitrary ancestor. A user
+  // whose checkout happens to sit under a path containing `.sdlc` must not get their own
+  // .claude/settings.json rewritten.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-anc-'));
+  const root = path.join(T, '.sdlc', 'my-project');
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  writeJSON(path.join(root, '.claude/settings.json'), { hooks: {} });
+  assert.equal(fs.readFileSync(path.join(root, '.claude/settings.json'), 'utf8'), '{\n  "hooks": {}\n}\n');
+  // …while that project's own .sdlc files are still stamped normally, at both depths.
+  writeJSON(path.join(root, '.sdlc/hub.json'), { platform: 'github' });
+  writeJSON(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), { story: 'EP-x-S01' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/hub.json'), 'utf8')).schemaVersion, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), 'utf8')).schemaVersion, 1, 'shard folders are one level down and still count');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: an unstamped file reads back as shape 1 (read old, write new)', () => {
+  const T = shapeTmp('read');
+  const f = path.join(T, '.sdlc/state.json');
+  fs.writeFileSync(f, '{\n  "currentStep": "epic"\n}\n');
+  assert.deepEqual(readJSONShape(f), { schemaVersion: 1, currentStep: 'epic' });
+  assert.deepEqual(readJSONStrictShape(f), { schemaVersion: 1, currentStep: 'epic' });
+  // The caller's own default is not a file, so it is handed back untouched.
+  assert.equal(readJSONShape(path.join(T, '.sdlc/absent.json')), null);
+  assert.deepEqual(readJSONStrictShape(path.join(T, '.sdlc/absent.json'), []), []);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a newer shape survives a read/write round trip — never forced back to 1', () => {
+  const T = shapeTmp('newer');
+  const f = path.join(T, '.sdlc/state.json');
+  fs.writeFileSync(f, '{\n  "schemaVersion": 7,\n  "currentStep": "epic"\n}\n');
+  assert.equal(readJSONShape(f).schemaVersion, 7, 'an older engine must not silently downgrade a newer file');
+  writeJSON(f, readJSONShape(f));
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).schemaVersion, 7);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: stamping settles after one write — a re-write is a byte-identical no-op', () => {
+  const T = shapeTmp('settle');
+  const f = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(f, '{\n  "platform": "github"\n}\n');       // pre-stamp file on disk
+  writeJSON(f, readJSONShape(f));                                // first write: the one-time stamp
+  const after = fs.readFileSync(f, 'utf8');
+  const mtime = fs.statSync(f).mtimeMs;
+  writeJSON(f, readJSONShape(f));                                // second write: must not touch the file
+  assert.equal(fs.readFileSync(f, 'utf8'), after, 'bytes settled');
+  assert.equal(fs.statSync(f).mtimeMs, mtime, 'the byte-identical guard held — no mtime churn (#163)');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a mid-object stamp is moved to the front, so its position cannot churn', () => {
+  const T = shapeTmp('order');
+  const f = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(f, '{\n  "platform": "github",\n  "schemaVersion": 1\n}\n');
+  writeJSON(f, readJSONShape(f));
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')))[0], 'schemaVersion');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------------------------
 // `yad commit` — message builder + branch-derived task
 // ---------------------------------------------------------------------------------------------
 const { buildCommitMessage, taskFromBranch } = await import('./commit.mjs');
@@ -7063,7 +7163,10 @@ test('writeRetroShip: writes a retroactive shard for a pre-tracking story; refus
   assert.equal(r.written, true);
   assert.match(r.file, /EP-x-S01-retro-be\.json$/, 'shard named <story>-retro-<repo>');
   const ship = JSON.parse(fs.readFileSync(r.file, 'utf8'));
-  assert.deepEqual(ship, { story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
+  // schemaVersion is stamped by writeJSON on every .sdlc file the engine writes (lib.mjs) — the shard
+  // states its shape like everything else, and the stamp leads the object.
+  assert.deepEqual(ship, { schemaVersion: 1, story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
+  assert.deepEqual(Object.keys(ship)[0], 'schemaVersion', 'the stamp leads the object, so its position can never churn the bytes');
   assert.ok(!('mergeCommit' in ship), 'no mergeCommit is invented when the caller omits it');
   assert.ok(readShips(epicDir).some((s) => s.story === 'EP-x-S01'), 'readShips now proves the story shipped');
   // A second call for the SAME repo refuses — it is no longer pre-tracking there.
@@ -7097,6 +7200,25 @@ test('foldBuild puts a retro shard INTO the aggregate build-log.json and deletes
     'the retroactive ship reaches the aggregate — via the fold, which is the only writer of that file');
   assert.ok(!fs.existsSync(r.file), 'the shard is removed once folded — never counted twice');
   assert.equal(readShips(epicDir).length, 1, 'and the union read is unchanged across the fold');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('folding a stamped shard does NOT copy schemaVersion into the ledger rows', () => {
+  // schemaVersion describes a FILE. A shard is a file and carries it; once folded, that same object
+  // becomes a row inside build-log.json, which states its own shape. Letting the stamp cross that
+  // boundary would bake a per-row version into an append-only ledger permanently — after
+  // SCHEMA_VERSION moves to 2, a file stamped 2 would hold rows stamped 1 from today's folds.
+  const { T, epicDir } = ledgerEpic();
+  const r = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' });
+  assert.equal(JSON.parse(fs.readFileSync(r.file, 'utf8')).schemaVersion, 1, 'the shard FILE is stamped');
+  foldBuild(epicDir, () => true);
+  const folded = JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/build-log.json'), 'utf8'));
+  assert.equal(folded.schemaVersion, 1, 'the folded file states its own shape');
+  assert.deepEqual(folded.ships.map((s) => Object.keys(s).includes('schemaVersion')), [false],
+    'no row carries a shape of its own');
+  assert.equal(folded.ships[0].story, 'EP-x-S01', 'and the row itself survives the fold intact');
+  // The same holds for the union reader, which is what every downstream report actually consumes.
+  assert.deepEqual(readShips(epicDir).map((s) => Object.keys(s).includes('schemaVersion')), [false]);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

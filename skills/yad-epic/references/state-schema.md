@@ -3,6 +3,39 @@
 All SDLC state lives in plain files under `epics/EP-<slug>/.sdlc/` (build plan §1: "All state lives
 in files on disk. Nothing hidden."). No database, no browser storage.
 
+## Every file states its shape — `schemaVersion`
+
+Each JSON **object** the CLI writes under a `.sdlc/` directory carries `"schemaVersion": 1` as its
+first key. It says what shape the file is in, so a future release can recognise an older file and
+upgrade it instead of guessing.
+
+**When you author one of these files by hand, include the key**, exactly as the examples below show.
+Several kinds here — `state.json` on the seeding path, `change.json`, `contract-lock.json`,
+`build-state/<story-id>.json`, `design-links.json`, `test-links.json` — are written by skills, not by
+the CLI. `state.json` is the one both write, so omitting the key there makes the file flip between two
+byte forms: the skill writes it without, the next `yad gate sync` adds it back. Write it and there is
+nothing to flip.
+
+```json
+{
+  "schemaVersion": 1,
+  "epicId": "EP-checkout"
+}
+```
+
+Three rules go with it, and they are permanent (`docs/roadmap-idea-1.md`, Part 2):
+
+1. **A file with no version counts as version 1.** Nothing has to be rewritten to be readable. Files
+   written before the stamp existed are read as shape 1, and get the key the next time the engine
+   writes them.
+2. **The four list files never carry it.** `approvals.json`, `comments.json`, `hub-prs.json` and
+   `reconcile-debt.json` are JSON arrays at the top level, and an array cannot hold a key. Rule 1
+   covers them: no version means version 1.
+3. **`schemaVersion` is not the CLI version.** `.sdlc/cli-version.json` records which release of the
+   `yad` CLI set the project up, and changes on every release. `schemaVersion` describes the file's
+   shape and changes only when that shape really changes — which is rare, and always paired with a
+   `yad migrate` step that moves existing projects onto it.
+
 ## `state.json`
 The per-epic state machine.
 

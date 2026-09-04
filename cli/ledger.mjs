@@ -89,12 +89,21 @@ export const buildShardName = (e) => `${safe(e.story)}-${safe(e.task)}-${safe(e.
 
 // Read every shard object under `dir` (each file = ONE entry object). Sorted for determinism; a
 // corrupt/non-object shard is skipped (these ledgers are advisory evidence, never fatal).
+//
+// `schemaVersion` is dropped here on purpose. It describes the shape of a FILE, and a shard file has
+// one — but `fold()` copies these objects into the folded log's `ships`/`runs` array, where they stop
+// being files and become records inside one. Carrying the stamp across that boundary would bake a
+// per-record version into an append-only ledger for good: after SCHEMA_VERSION moves to 2, a
+// build-log.json stamped 2 would hold entries stamped 1 from shards folded today. The folded file
+// states its own shape; its rows do not have one.
 function readShardDir(dir) {
   if (!fs.existsSync(dir)) return [];
   const out = [];
   for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort()) {
     const obj = readJSON(path.join(dir, name), null);
-    if (obj && typeof obj === 'object' && !Array.isArray(obj)) out.push({ name, obj });
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
+    delete obj.schemaVersion;
+    out.push({ name, obj });
   }
   return out;
 }
