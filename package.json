@@ -42,6 +42,7 @@
     "lint": "eslint cli bin",
     "test": "node --test cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs",
     "test:e2e": "bash test/e2e/run.sh",
+    "release-check": "bash scripts/release-check.sh",
     "coverage": "node --test --experimental-test-coverage --test-coverage-exclude='cli/test*.mjs' --test-coverage-lines=70 --test-coverage-branches=70 cli/test.mjs cli/test-checks.mjs cli/test-threads.mjs cli/test-golden.mjs cli/test-migrate.mjs",
     "diagrams": "npx -y @mermaid-js/mermaid-cli -i docs/diagrams/sdlc-overview.mmd -o docs/diagrams/sdlc-overview.svg -b transparent && npx -y @mermaid-js/mermaid-cli -i docs/diagrams/review-loop.mmd -o docs/diagrams/review-loop.svg -b transparent",
     "prepublishOnly": "npm test"

@@ -162,9 +162,10 @@ is in [`RELEASING.md`](RELEASING.md).
 So `main` can take any number of merges — including a half-finished engine change or a
 docs-only fix — without anyone on `npx yad` seeing a new version. A `docs:` commit no longer
 bumps a version (the old `docs → patch` rule is gone). The release check that must pass before
-that fast-forward, and the `next` pre-release channel for v4, are the next roadmap tasks
-(E106, E107 in [`docs/roadmap-idea-1.md`](docs/roadmap-idea-1.md)). Full details in
-[`RELEASING.md`](RELEASING.md).
+that fast-forward is `scripts/release-check.sh` — tests, coverage, the golden compatibility test, a
+migration preview on a real v3 project, a fresh install, `yad doctor` on what it creates, and the
+migration guide when the file shape moved. Run it yourself with `npm run release-check`. Full details
+in [`RELEASING.md`](RELEASING.md).
 
 ---
 
