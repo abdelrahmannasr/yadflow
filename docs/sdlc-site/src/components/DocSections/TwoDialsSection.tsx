@@ -27,7 +27,7 @@ const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[
     endpoint: 'state.json · per step',
     color: '#1e8449',
     steps: [
-      { name: 'human_approve', description: 'Default. A human advances the step. Front states + engineer-review are locked here forever.', type: 'notify' },
+      { name: 'human_approve', description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.', type: 'notify' },
       { name: 'machine_advance', description: 'Earned per back step; yad-run advances it on its own once trust is proven.', type: 'persist' },
     ],
   },
@@ -38,7 +38,7 @@ const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[
     steps: [
       { name: 'back_steps only', description: 'spec · tasks · implement · checks — the only steps that MAY be automated, safest-end first.', type: 'sideEffect' },
       { name: '≥5 runs · ≥80% approved-unchanged', description: 'A step becomes a candidate only once its trust slice clears the threshold. "It seems fine" is not evidence.', type: 'sideEffect' },
-      { name: 'set-dial → machine_advance', description: 'Flips the dial; refused if evidence is short, or for any front state / the engineer review.', type: 'persist' },
+      { name: 'set-dial → machine_advance', description: 'Flips the dial; refused if evidence is short, or for any Shape step / the engineer review.', type: 'persist' },
       { name: 'kill switch', description: 'yad-run action: kill forces every step back to human_approve system-wide — reversible in one move.', type: 'notify' },
     ],
   },

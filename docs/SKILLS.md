@@ -79,22 +79,22 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   brownfield — a code-aware current-state study, then distil a **functional + non-functional
   requirements** list and a **phased roadmap** (an explicit **MVP** phase, then later phases) under the
   reserved `EP-discovery` ("epic zero"). It is gated by the same review gate (base rule: owner + 1
-  reviewer); on approval it terminates at `discovery-done` (no build half). Its `roadmap.md` is the menu
+  reviewer); on approval it terminates at `discovery-done` (no Build). Its `roadmap.md` is the menu
   of features — each `yad-epic` reads it for project context (reference-only; discovery never
   auto-seeds epics).
 
-## Front half — author the "thinking" (once per epic, human-gated)
+## Shape — author the "thinking" (once per epic, human-gated)
 
-- **`yad-analysis`** — *Optional* front state 1. With the analyst, pressure-test a feature idea
+- **`yad-analysis`** — *Optional* Shape step 1. With the analyst, pressure-test a feature idea
   and write the discovery brief into `analysis.md`. Assigns the `EP-<slug>` ID and seeds `.sdlc/` state
   (the 12-step chain that puts analysis before epic). If skipped, the epic step does this shaping inline.
-- **`yad-epic`** — The epic front state. Shape the idea with the analyst (or read `analysis.md`
+- **`yad-epic`** — The epic Shape step. Shape the idea with the analyst (or read `analysis.md`
   when it already ran), then write the epic with the pm into `epic.md`. The entry point when analysis is
   skipped: assigns the `EP-<slug>` ID and seeds `.sdlc/` state.
-- **`yad-architecture`** — Front state 3. With the architect, author `architecture.md` and the
+- **`yad-architecture`** — Shape step 3. With the architect, author `architecture.md` and the
   locked `contract.md` (the shared cross-repo surface), then hash-lock the contract surface into
   `.sdlc/contract-lock.json`. Reads `epic.md`; escalates on the contract risk tag.
-- **`yad-ui`** — Front state 5. With the ux-designer, author `ui-design.md` and `DESIGN.md`,
+- **`yad-ui`** — Shape step 5. With the ux-designer, author `ui-design.md` and `DESIGN.md`,
   driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring
   directly when not. When a design tool is connected (`yad-connect-design`), also **materializes the
   feature design** — mobile screens / web pages — in the tool (generate or link), recording the
@@ -102,11 +102,11 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   **Optional** — an epic with no user-facing surface (backend/API, data, infra) skips it, keeping the
   step visible and auditable, with `yad skip <epic> ui-design --reason "<why>"` (reverse with `--undo`
   until the stories review opens).
-- **`yad-stories`** — Front state 7. With the pm, break the approved epic into user stories, each
+- **`yad-stories`** — Shape step 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI.
-- **`yad-test-cases`** — Front state 9, a **parallel, non-blocking** track: it opens when the stories
-  gate passes (the epic is already `ready-for-build`, so the build half runs alongside it). With the
+- **`yad-test-cases`** — Shape step 9, a **parallel, non-blocking** track: it opens when the stories
+  gate passes (the epic is already `ready-for-build`, so Build runs alongside it). With the
   test architect (Murat), author `test-cases.md` covering the approved stories (risk-based P0–P3 cases +
   story→case traceability). When a testing tool is connected (`yad-connect-testing`), also **implements
   the automation tests** in the connected code repo(s) (generate or link), recording the case→test map in
@@ -120,25 +120,25 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   domain owners on contract/auth/payments), and advances the epic state **only** when approval is
   recorded.
 - **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
-  back half). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
+  Build). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
   review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records
   an **engagement** signal on each approval (`verified` vs `none`) and posts a friendly public nudge on a
   bare rubber-stamp. Soft by default ("visible, not impossible"); gates only when
   `hub.review.requireEngagement`. Companion comments carry `<!-- yad:noblock -->` so they never block.
 - **`yad-pair-review`** — The guided, two-way, **teaching** walkthrough — the AI-driven 5th companion
-  face (front **and** back half). The AI walks the engineer through the change **one risk-ordered stop at
+  face (front **and** Build). The AI walks the engineer through the change **one risk-ordered stop at
   a time** (`yad review walkthrough` / `yad gate walkthrough`), gives comprehensive context per change,
   then **asks them about it**; the engineer answers and asks back until **both are satisfied** (dual
   sign-off). It doubles as a learning session — demonstrates a transferable review method, scores the
   engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (`yad status`
   rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
   surfaces genuine concerns as normal blocking comments.
-- **`yad-hub-bridge`** — The templated PR/MR bridge for the front-half gate. When the hub has a platform
+- **`yad-hub-bridge`** — The templated PR/MR bridge for the Shape gate. When the hub has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
   ledger. The file ledger stays the source of truth; degrades to a file-only gate with no platform.
 
-## Build half — turn stories into shipped code (once per story, per repo)
+## Build — turn stories into shipped code (once per story, per repo)
 
 - **`yad-spec`** — Step A. For one ready-for-build story and one of its repos, run the Spec Kit ceremony
   once (specify → clarify → plan → analyze → checklist → tasks) → `specs/<story-id>/`. Drives `/speckit.*`
@@ -182,12 +182,12 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 
 ## Automation & status
 
-- **`yad-run`** — The Phase 4 orchestrator. Drives a story's back-half loop (spec → tasks → implement →
+- **`yad-run`** — The Phase 4 orchestrator. Drives a story's Build loop (spec → tasks → implement →
   checks) on each step's automation dial, recording every run in the trust log. A clean `checks` pass
   auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS for a
   human. Also sets a step's dial (gated by trust evidence) and flips the system-wide kill switch.
 - **`yad-status`** — Read-only view of an epic: the current step, each step's dials (assistance/
-  automation) and status, which approvals are still required, per-story back-half trust records, the
+  automation) and status, which approvals are still required, per-story Build trust records, the
   kill-switch state, and a fleet roll-up across epics.
 - **`yad-report`** — Self issue reporter. When a `yad` flow breaks, files a bug in the upstream
   yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool
@@ -202,7 +202,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 
 After the contract locks and code ships, a change must **not** mutate a locked artifact — it becomes a
 **new epic threaded to its parent**. A feature is a *thread* of linked epics (genesis → change → defect →
-…); a change-epic **inherits** the front artifacts it does not change (by reference) and **re-authors**
+…); a change-epic **inherits** the Shape artifacts it does not change (by reference) and **re-authors**
 only what it does. So artifacts never go stale — they are *superseded*; the feature's current truth is the
 head of the thread. This is what keeps the SDLC a trusted source of truth for AI on the next change.
 
@@ -225,6 +225,6 @@ head of the thread. This is what keeps the SDLC a trusted source of truth for AI
 
 Three CI gates (in `yad-checks`) enforce it: **lineage-check** (a change links a real threaded epic),
 **epic-open** (a *sealed* epic — all stories shipped — refuses new behaviour, forcing a change-epic so the
-front artifacts can never go stale), and **reconcile-debt** (a thread with open hotfix debt is frozen
+Shape artifacts can never go stale), and **reconcile-debt** (a thread with open hotfix debt is frozen
 until paid). Two read-only CLIs surface it: `yad thread <epic>` (the thread + resolved truth + open debt)
 and `yad reconcile` (the drift sweep).

@@ -2,7 +2,7 @@ import type { FlowPath, FlowStep } from "./types";
 
 // ───────────────────────────────────────────────────────────────────────────
 // yadflow pipeline, modeled as one FlowPath per PHASE.
-//   1 Setup & connect   2 Front half (human-gated)   3 Build half   4 Automation
+//   1 Setup & connect   2 Shape (human-gated)   3 Build   4 Automation
 // Every step = a yad-* skill or the review gate, in pipeline order. Titles are
 // the module-help.csv display-names; descriptions paraphrase its `description`;
 // status reuses the SDLC step status; stepState carries the .sdlc artifact
@@ -113,7 +113,7 @@ const setupSteps: FlowStep[] = [
     id: "detect-hub",
     title: "Detect Hub & Roster",
     description:
-      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With the bridge enabled, the front-half review runs through a real PR/MR.",
+      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With the bridge enabled, the Shape review runs through a real PR/MR.",
     actor: "system",
     status: "connected",
     stepState: ".sdlc/hub.json",
@@ -127,7 +127,7 @@ const setupSteps: FlowStep[] = [
   },
 ];
 
-// ── Phase 2 — Front half (author → review gate, repeated) ───────────────────
+// ── Phase 2 — Shape (author → review gate, repeated) ───────────────────
 
 // Reusable review-gate step factory — the one gate, reused for all five reviews.
 function gateStep(
@@ -163,7 +163,7 @@ const discoverySteps: FlowStep[] = [
     id: "discovery",
     title: "Project Discovery (optional front-zero)",
     description:
-      "Optional front-zero, once per project: with the analyst, pressure-test the product idea — market, competitor, current-state, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Greenfield AND brownfield; modelled as the reserved epic-zero EP-discovery, it terminates at discovery-done (no build half).",
+      "Optional front-zero, once per project: with the analyst, pressure-test the product idea — market, competitor, current-state, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Greenfield AND brownfield; modelled as the reserved epic-zero EP-discovery, it terminates at discovery-done (no Build).",
     actor: "analyst",
     status: "draft",
     stepState: "EP-discovery/ · roadmap.md",
@@ -180,14 +180,14 @@ const discoverySteps: FlowStep[] = [
   gateStep("discovery", "discovery artifacts", "owner + 1 reviewer (base rule)", "#1e8449"),
 ];
 
-// ── Phase 3 — Front half (author → review gate, repeated per epic) ───────────
+// ── Phase 3 — Shape (author → review gate, repeated per epic) ───────────
 
 const frontSteps: FlowStep[] = [
   {
     id: "analysis",
     title: "Author Analysis (optional)",
     description:
-      "Optional front state 1: with the analyst, pressure-test a feature idea and write the discovery brief into analysis.md. Assigns the EP-<slug> ID and seeds .sdlc state. If skipped, the epic step does this inline.",
+      "Optional Shape step 1: with the analyst, pressure-test a feature idea and write the discovery brief into analysis.md. Assigns the EP-<slug> ID and seeds .sdlc state. If skipped, the epic step does this inline.",
     actor: "analyst",
     status: "draft",
     stepState: "analysis.md",
@@ -206,7 +206,7 @@ const frontSteps: FlowStep[] = [
     id: "epic",
     title: "Author Epic",
     description:
-      "Front state for the epic: shape the idea with the analyst then the pm into epic.md. The entry point when analysis is skipped — assigns the EP-<slug> ID and seeds .sdlc state. Never auto-advances.",
+      "Shape step for the epic: shape the idea with the analyst then the pm into epic.md. The entry point when analysis is skipped — assigns the EP-<slug> ID and seeds .sdlc state. Never auto-advances.",
     actor: "pm",
     status: "draft",
     stepState: "epic.md",
@@ -224,7 +224,7 @@ const frontSteps: FlowStep[] = [
     id: "architecture",
     title: "Author Architecture + Contract",
     description:
-      "Front state 3: with the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the CONTRACT-SURFACE into contract-lock.json. Escalates on the contract risk tag.",
+      "Shape step 3: with the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the CONTRACT-SURFACE into contract-lock.json. Escalates on the contract risk tag.",
     actor: "architect",
     status: "draft",
     stepState: "architecture.md · contract.md",
@@ -243,7 +243,7 @@ const frontSteps: FlowStep[] = [
     id: "ui",
     title: "Author UI Design",
     description:
-      "Front state 5 (optional): with the ux-designer, author ui-design.md and DESIGN.md, driving Impeccable slash-commands when installed. When a design tool is connected, materializes the screens; degrades to markdown-only. A UI-less epic (backend/API, data, infra) skips it with `yad skip <epic> ui-design --reason …`, keeping the step visible and auditable.",
+      "Shape step 5 (optional): with the ux-designer, author ui-design.md and DESIGN.md, driving Impeccable slash-commands when installed. When a design tool is connected, materializes the screens; degrades to markdown-only. A UI-less epic (backend/API, data, infra) skips it with `yad skip <epic> ui-design --reason …`, keeping the step visible and auditable.",
     actor: "ux",
     status: "draft",
     stepState: "ui-design.md · DESIGN.md",
@@ -261,7 +261,7 @@ const frontSteps: FlowStep[] = [
     id: "stories",
     title: "Author Stories",
     description:
-      "Front state 7: with the pm, break the approved epic into repo-tagged stories with stable EP-<slug>-S0N IDs, one file each under stories/. Reaching ready-for-build lets the build half start.",
+      "Shape step 7: with the pm, break the approved epic into repo-tagged stories with stable EP-<slug>-S0N IDs, one file each under stories/. Reaching ready-for-build lets Build start.",
     actor: "pm",
     status: "draft",
     stepState: "stories/EP-<slug>-S0N.md",
@@ -279,7 +279,7 @@ const frontSteps: FlowStep[] = [
     id: "test-cases",
     title: "Author Test Cases (parallel)",
     description:
-      "Front state 9 — a PARALLEL, non-blocking track that opens when the stories gate passes (the epic is already ready-for-build). With the test architect, author test-cases.md; implement automation when a tool is connected.",
+      "Shape step 9 — a PARALLEL, non-blocking track that opens when the stories gate passes (the epic is already ready-for-build). With the test architect, author test-cases.md; implement automation when a tool is connected.",
     actor: "tester",
     status: "ready-for-build",
     stepState: "test-cases.md · test-links.json",
@@ -295,7 +295,7 @@ const frontSteps: FlowStep[] = [
   gateStep("test-cases", "test-cases.md", "owner + 1 reviewer (base rule)", "#1e8449"),
 ];
 
-// ── Phase 3 — Build half (per story, per repo) ──────────────────────────────
+// ── Phase 3 — Build (per story, per repo) ──────────────────────────────
 
 const buildSteps: FlowStep[] = [
   {
@@ -394,7 +394,7 @@ const automationSteps: FlowStep[] = [
     id: "run",
     title: "Run (Automation)",
     description:
-      "The Phase 4 orchestrator: drive a story's back-half loop (spec→tasks→implement→checks) in one repo, reading each step's automation dial. On machine_advance it advances on its own; on human_approve it stops for a human.",
+      "The Phase 4 orchestrator: drive a story's Build loop (spec→tasks→implement→checks) in one repo, reading each step's automation dial. On machine_advance it advances on its own; on human_approve it stops for a human.",
     actor: "system",
     status: "running",
     stepState: "build-state/<story-id>.json",
@@ -406,7 +406,7 @@ const automationSteps: FlowStep[] = [
       { id: "rn-2", from: "product-hub", to: "trust-log", label: "advance / halt + record run", type: "job", color: "#b7950b", delay: 800, duration: 700 },
       { id: "rn-3", from: "trust-log", to: "product-hub", label: "yad checkpoint --push (chore(hub) commit)", type: "job", color: "#b7950b", delay: 1600, duration: 700 },
     ],
-    sideEffects: { jobs: "build-state/<story-id>.json · yad checkpoint commits the back-half ledgers (chore(hub))", notifications: "halts on FAIL / scope overrun / contract touch; always stops at engineer review" },
+    sideEffects: { jobs: "build-state/<story-id>.json · yad checkpoint commits the Build ledgers (chore(hub))", notifications: "halts on FAIL / scope overrun / contract touch; always stops at engineer review" },
   },
   {
     id: "trust-log",
@@ -429,7 +429,7 @@ const automationSteps: FlowStep[] = [
     id: "set-dial",
     title: "Set Dial (earn automation)",
     description:
-      "Once a back step's trust slice clears the threshold, `yad-run set-dial step:<step> to: machine_advance` flips it. The setter REFUSES if evidence is short, or for any front state / the engineer review. Earned per step.",
+      "Once a back step's trust slice clears the threshold, `yad-run set-dial step:<step> to: machine_advance` flips it. The setter REFUSES if evidence is short, or for any Shape step / the engineer review. Earned per step.",
     actor: "engineer",
     status: "earned",
     stepState: "state.json (automation dial)",
@@ -440,7 +440,7 @@ const automationSteps: FlowStep[] = [
       { id: "sd-1", from: "trust-log", to: "engineer", label: "threshold cleared?", type: "event", color: "#1e8449", delay: 0, duration: 700 },
       { id: "sd-2", from: "engineer", to: "state-json", label: "set dial → machine_advance", type: "write", color: "#2471a3", delay: 800, duration: 700 },
     ],
-    sideEffects: { jobs: "back_steps: spec · tasks · implement · checks", notifications: "front states + engineer-review hard-locked" },
+    sideEffects: { jobs: "back_steps: spec · tasks · implement · checks", notifications: "Shape steps + engineer-review hard-locked" },
   },
   {
     id: "kill-switch",
@@ -484,7 +484,7 @@ const changeSteps: FlowStep[] = [
     id: "change",
     title: "Change Intake & Triage",
     description:
-      "The entry point of a feature thread. Classify a post-lock change into a depth (defect-fix / behavioral-no-surface / contract-surface / new-capability) and seed a new EP-<slug> change-epic threaded to its parent (genesis → change → defect). Inherits unchanged front artifacts by reference; re-authors only what changes, so locked artifacts are never mutated — only superseded. Hotfixes open reconcile-debt.",
+      "The entry point of a feature thread. Classify a post-lock change into a depth (defect-fix / behavioral-no-surface / contract-surface / new-capability) and seed a new EP-<slug> change-epic threaded to its parent (genesis → change → defect). Inherits unchanged Shape artifacts by reference; re-authors only what changes, so locked artifacts are never mutated — only superseded. Hotfixes open reconcile-debt.",
     actor: "pm",
     status: "draft",
     stepState: "change.json · pointer-lock contract-lock.json",
@@ -519,7 +519,7 @@ const changeSteps: FlowStep[] = [
     id: "defects",
     title: "Defect Escape Analysis",
     description:
-      "Quality-gap report over the thread: DEFECTS.md groups each defect by escape_stage (which gate let it through) and root cause, so the front gates can be tightened where escapes cluster.",
+      "Quality-gap report over the thread: DEFECTS.md groups each defect by escape_stage (which gate let it through) and root cause, so the Shape gates can be tightened where escapes cluster.",
     actor: "tester",
     status: "draft",
     stepState: "DEFECTS.md",
@@ -568,13 +568,13 @@ export const PATHS: FlowPath[] = [
     icon: "travel_explore",
     color: "#2471a3",
     description:
-      "Optional front-zero, once per project: pressure-test the product — market, competitor, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Modelled as the reserved epic-zero EP-discovery; terminates at discovery-done, no build half.",
+      "Optional front-zero, once per project: pressure-test the product — market, competitor, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Modelled as the reserved epic-zero EP-discovery; terminates at discovery-done, no Build.",
     category: "front",
     steps: discoverySteps,
   },
   {
     id: 3,
-    label: "Front Half (human-gated)",
+    label: "Shape (human-gated)",
     icon: "edit_note",
     color: "#2471a3",
     description:
@@ -584,7 +584,7 @@ export const PATHS: FlowPath[] = [
   },
   {
     id: 4,
-    label: "Build Half (per story)",
+    label: "Build (per story)",
     icon: "build",
     color: "#1e8449",
     description:
@@ -598,7 +598,7 @@ export const PATHS: FlowPath[] = [
     icon: "smart_toy",
     color: "#ca6f1e",
     description:
-      "The second dial made real: run the back half on each step's dial, record every run in the trust log, earn machine_advance per step, and keep the kill switch.",
+      "The second dial made real: run Build on each step's dial, record every run in the trust log, earn machine_advance per step, and keep the kill switch.",
     category: "automate",
     steps: automationSteps,
   },

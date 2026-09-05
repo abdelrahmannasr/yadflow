@@ -18,7 +18,7 @@ flowchart LR
       inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> phub
     end
 
-    subgraph FRONT["A · Front half — product hub · human-gated"]
+    subgraph FRONT["A · Shape — product hub · human-gated"]
       direction TB
       disc["yad-discovery<br/>optional front-zero · once per project<br/>market · competitor · feasibility · requirements · roadmap.md"]:::artifact
       gDisc{{"gate · discovery · base"}}:::gated
@@ -41,7 +41,7 @@ flowchart LR
       gSt -. opens in parallel .-> tc --> gTc
     end
 
-    subgraph BUILD["B · Build half — per story, per code repo"]
+    subgraph BUILD["B · Build — per story, per code repo"]
       direction TB
       sp["yad-spec<br/>Spec Kit ceremony → specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
@@ -85,7 +85,7 @@ flowchart LR
     rfb --> sp
     merged -. story pipeline repeats · next story .-> sp
     merged -. build-log committed by .-> cpt
-    merged -. next epic · front pipeline repeats .-> ep
+    merged -. next epic · Shape pipeline repeats .-> ep
     merged -. sealed epic · post-lock change .-> chg
     cepic -. re-author only the changed artifacts .-> ar
     cepic -. defect / behavioural change .-> st

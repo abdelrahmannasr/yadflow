@@ -15,13 +15,13 @@ version see [`TEAM-GUIDE.md`](../TEAM-GUIDE.md).
 
 Defaults: every step starts `human_approve`. The four **front** authoring steps (epic, architecture,
 UI, stories) and their reviews are **locked** — they may not be set to `machine_advance` in this
-version. A front state advances only on a **human act** — recording an approval and `advance`, or
+version. A Shape step advances only on a **human act** — recording an approval and `advance`, or
 merging the approved, fully-resolved review PR — never on a machine.
 
 As of **Phase 4a** the `automation` dial is no longer inert: the orchestrator `yad-run` reads it and,
 for the safe **back** steps, advances on its own when a step is set to `machine_advance` (and has
-*earned* it — see "Run the back half on the dial" below). The engineer review and all five front
-states stay `human_approve` forever.
+*earned* it — see "Run Build on the dial" below). The engineer review and all five Shape
+steps stay `human_approve` forever.
 
 ## 0 — One-time setup
 
@@ -41,7 +41,7 @@ states stay `human_approve` forever.
 4. **Wire each code repo once:** `yad-checks repo:<repo> action: wire` (installs the CI gates —
    *merges* with any existing CI, never clobbers), `yad-pr-template repo:<repo> action: wire` (PR/MR
    template + risk routing).
-5. **Connect each code repo to the hub** (so the front phases see what's already built):
+5. **Connect each code repo to the hub** (so the Shape phases see what's already built):
    `yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>`. It
    registers the repo in `.sdlc/repos.json` and caches a Repomix pack + a lightweight **code-map**
    (existing endpoints/events/data-models/modules, secret-scanned). Clones/fetches as the **local user**
@@ -55,22 +55,22 @@ states stay `human_approve` forever.
    `yad-ui` materialize screens), `yad-connect-testing action: connect` (Playwright-first →
    `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
    (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
-7. **(Optional) Put the hub on a platform** so the front-half review runs through real PRs:
+7. **(Optional) Put the hub on a platform** so the Shape review runs through real PRs:
    `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
    SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
    sets one directly), and `yad-pr-template repo:hub action: wire` /
-   `yad-checks repo:hub action: wire`. With no hub platform the front gate runs file-only.
+   `yad-checks repo:hub action: wire`. With no hub platform the Shape gate runs file-only.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
-## A — Front half (human-authored, once per epic)
+## A — Shape (human-authored, once per epic)
 
 Each author step writes its artifact, sets itself `done`, moves `currentStep` to its review, and
 **stops at the gate**. Run every gate with **`yad-review-gate`** — or, when the hub is on a platform,
 drive it deterministically with the **`yad gate`** CLI (`open → sync → … → merge`): the review rides
 the per-step PR/MR and the step **auto-advances on merge** once approvals are satisfied and all comment
-threads are resolved. Details: **"Run the full front half by hand"** below.
+threads are resolved. Details: **"Run the full Shape by hand"** below.
 
 0. *(optional, once per project)* `yad-discovery` → the discovery set (`market-research.md`,
    `competitor-analysis.md`, `current-state.md`, `feasibility.md`, `requirements.md`, `roadmap.md`)
@@ -80,15 +80,15 @@ threads are resolved. Details: **"Run the full front half by hand"** below.
 7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
 8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).
 9. `yad-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (**per-repo**).
-   → `state.json` reaches `currentStep: ready-for-build` — **the build half can start now.**
+   → `state.json` reaches `currentStep: ready-for-build` — **Build can start now.**
 10. `yad-test-cases` → `test-cases.md` (+ automation tests when a testing tool is connected) → review (base rule).
-    **Parallel, non-blocking:** opens when the stories gate passes and runs alongside the build half; its
+    **Parallel, non-blocking:** opens when the stories gate passes and runs alongside Build; its
     review never moves `currentStep` off `ready-for-build`.
 
-## B — Build half (per story, per repo)
+## B — Build (per story, per repo)
 
 From a `ready-for-build` story, for **each** repo the story is tagged with. Details: **"Run the full
-build half by hand"** below.
+Build by hand"** below.
 
 10. `yad-spec story:<id> repo:<repo>` → writes `specs/<story-id>/` (spec/plan/tasks + `link.md`).
 11. `yad-implement story:<id> repo:<repo> task:<T0N>` → one atomic task = one branch = one commit
@@ -110,7 +110,7 @@ build half by hand"** below.
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
     ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**
-    — a `chore(hub)` audit-trail commit the back half runs for you, so no one hand-commits this state.
+    — a `chore(hub)` audit-trail commit Build runs for you, so no one hand-commits this state.
     The `trust-log`/`build-log` entries are written as per-entry **shard files** (so parallel stories of one
     epic never conflict on them); once the story ships, **`yad tidy up [<epic>] [--push]`** folds its
     finished shards back into the single ledger file (the manual "pack it up", like `git gc`).
@@ -121,17 +121,17 @@ build half by hand"** below.
 
 15. After a back step accumulates trust evidence, earn it:
     `yad-run action: set-dial step:<step> to: machine_advance` (refused if evidence is short or for a
-    front state / the engineer review).
-16. Drive a story's back half on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
+    Shape step / the engineer review).
+16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
     earned steps and stops for a human otherwise, always halting at the engineer review. Each iteration
     it runs `yad checkpoint --push` to commit the new `trust-log/` shard + `build-state/` it just wrote (a
     `chore(hub)` commit, default branch only) — so the shared trust evidence stays current with no human commit.
 17. **Kill switch any time:** `yad-run action: kill` (everything → manual) / `action: unkill`.
-    Details: **"Run the back half on the dial"** below.
+    Details: **"Run Build on the dial"** below.
 
 ## Any time
 
-- **`yad-status [EP-<slug>]`** — read-only: the front chain, each build step's dial + status, the
+- **`yad-status [EP-<slug>]`** — read-only: the Shape chain, each build step's dial + status, the
   trust record, and (across epics) the fleet roll-up. Start here to see what's blocking.
 - **`yad doctor`** — health check. Its `shape` section says whether this project's state files match
   the shape this release expects, one line for the project and one per epic, and names the command to
@@ -146,14 +146,13 @@ build half by hand"** below.
 
 ---
 
-## Run the full front half by hand
+## Run the full Shape by hand
 
 Optionally preceded once per project by the **front-zero** — **`yad-discovery` → review →
 `discovery-done`** — which frames the whole product (market, competitor, feasibility, requirements,
-roadmap) under the reserved `EP-discovery`; its approved `roadmap.md` then feeds each epic. The front
-half itself walks **epic → review → architecture+contract → review → UI design → review → stories
+roadmap) under the reserved `EP-discovery`; its approved `roadmap.md` then feeds each epic. Shape itself walks **epic → review → architecture+contract → review → UI design → review → stories
 → review → `ready-for-build`**, then **test cases → review** runs as a **parallel, non-blocking track**
-alongside the build half. It is all files under `epics/EP-<slug>/`. The skills below guide you, but you
+alongside Build. It is all files under `epics/EP-<slug>/`. The skills below guide you, but you
 can also edit the files directly — that's the point.
 
 Each authoring step is the same shape: an author skill produces an artifact, sets its step `done`,
@@ -175,7 +174,7 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 ### Author steps
 
 1. **`yad-epic`** (state 1) → `epic.md`; assigns the stable `EP-<slug>` ID; seeds
-   `.sdlc/state.json` (all `human_approve`, front steps locked) + empty `.sdlc/approvals.json`.
+   `.sdlc/state.json` (all `human_approve`, Shape steps locked) + empty `.sdlc/approvals.json`.
 2. **`yad-architecture`** (state 3) → `architecture.md` + the locked `contract.md`; writes the
    contract-surface SHA-256 to `.sdlc/contract-lock.json`.
 3. **`yad-ui`** (state 5) → `ui-design.md` + `DESIGN.md` (drives Impeccable
@@ -223,7 +222,7 @@ contract lock, story repo tags, and which approvals the active gate still needs.
 
 ## Worked example (already in this repo)
 
-`epics/EP-checkout/` shows the **whole front half** walked end to end:
+`epics/EP-checkout/` shows the **whole Shape** walked end to end:
 - `epic.md` authored + approved (epic gate, base rule) — 2026-06-04.
 - `architecture.md` + `contract.md` authored; contract surface hash-locked in
   `.sdlc/contract-lock.json`. Architecture gate **escalated** (contract, payments): owner *alice* + reviewer
@@ -232,7 +231,7 @@ contract lock, story repo tags, and which approvals the active gate still needs.
   rule (alice + bob).
 - Five repo-tagged stories `stories/EP-checkout-S01..S05.md`. Stories gate **per-repo**: base
   rule + a domain owner for each touched repo (carol/backend, dave/mobile).
-- `state.json` now reads `currentStep: ready-for-build`, every front step `done` — the Phase 3
+- `state.json` now reads `currentStep: ready-for-build`, every Shape step `done` — the Phase 3
   handoff point.
 
 Inspect it:
@@ -247,14 +246,14 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
   epics/EP-checkout/contract.md | tr -d '\r' | shasum -a 256
 ```
 
-## Run the full build half by hand (Phase 3)
+## Run the full Build by hand (Phase 3)
 
-From a `ready-for-build` story, the **build half** turns one atomic task into shipped code through
+From a `ready-for-build` story, the **Build** turns one atomic task into shipped code through
 gates that protect production. Per-repo specs live in each code repo; the contract stays singular in
 the product repo. Code repos are **separate git repos** under `demo-repos/<repo>/` (gitignored;
 `demo-repos/README.md` explains regeneration). **Nothing auto-advances** — every gate is human-owned.
 
-> **Lost in the build half?** `yad next <epic>` reads each story's `build-state` and tells you the
+> **Lost in Build?** `yad next <epic>` reads each story's `build-state` and tells you the
 > next sub-step per repo (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and
 > the automation dial — so you never have to remember which step comes after `yad-spec`.
 
@@ -291,11 +290,11 @@ by default), drafts an *unverified* spec ("describe what exists, do not invent")
 and `backfill-check.sh` blocks a change to that feature until its spec is approved — gated per touched
 feature, never the whole repo.
 
-The build half is walked end to end on the worked epic: story **S01** shipped (`status: shipped`,
+Build is walked end to end on the worked epic: story **S01** shipped (`status: shipped`,
 three tasks in `build-log.json`), **S03** built across backend + mobile, and a `health` feature
 backfilled. The code repos are regenerable from `demo-repos/README.md`.
 
-## Run the back half on the dial (Phase 4 — automation, earned)
+## Run Build on the dial (Phase 4 — automation, earned)
 
 Phase 4 is **automation, earned with evidence and reversible in one move**. Phase 4a made the
 `automation` dial real and earned the safest step (the check-gate advance); Phase 4b added the
@@ -304,7 +303,7 @@ evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>
 with their dials, per repo) and `trust-log.json` (every run's verdict). See
 `docs/phase-4-build-plan.md` and `docs/phase-4b-build-plan.md`.
 
-- **Drive a story's back half:** `yad-run {story} {repo}` walks `spec → tasks → implement → checks`,
+- **Drive a story's Build:** `yad-run {story} {repo}` walks `spec → tasks → implement → checks`,
   reading each step's dial. On `machine_advance` it advances on its own; on `human_approve` it stops
   for a human; on any FAIL, scope overrun, or contract-surface touch it **halts and pulls in a human**.
   It always stops at the engineer review (`yad-engineer-review`), which is never automated.
@@ -315,7 +314,7 @@ with their dials, per repo) and `trust-log.json` (every run's verdict). See
   failed one is `rejected`).
 - **Earn automation for a step:** once a step's trust record clears the threshold,
   `yad-run action: set-dial step: checks to: machine_advance` flips it. The setter **refuses** if the
-  evidence is short, or for any front state / the engineer review. Reverting
+  evidence is short, or for any Shape step / the engineer review. Reverting
   (`to: human_approve`) is always allowed — automation is reversible in one move.
 - **Kill switch:** `yad-run action: kill` forces every step back to `human_approve` system-wide
   instantly (no code change, no per-step edits); `yad-run action: unkill` restores earned automation.
@@ -331,7 +330,7 @@ genuine runs (never fabricated). See `docs/phase-4b-build-plan.md`.
 **Phase 4b Step C** (the remaining automation): `tasks` generation advance — gated until real
 `tasks`/`spec` trust evidence accrues. The hook that records that evidence is built; the dial flips
 only once the threshold is genuinely met. The scope guard and contract-surface halt always override
-the dial, and **front states and the engineer review stay `human_approve`, permanently.**
+the dial, and **Shape steps and the engineer review stay `human_approve`, permanently.**
 
 **Phase 5 (conditional):** the optional service layer (watch repos, run earned-automation steps
 unattended, read-only dashboards), built only when the CLI genuinely can't keep up, with git remaining

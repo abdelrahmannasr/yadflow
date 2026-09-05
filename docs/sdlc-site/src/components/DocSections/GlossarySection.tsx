@@ -4,9 +4,9 @@ const TERM_GROUPS = [
   {
     phase: 'Phases & artifacts',
     steps: [
-      'Epic — the unit of front-half work, identified by a stable EP-<slug> ID; everything hangs off it.',
-      'Front half — the human-gated thinking: analysis → epic → architecture → ui → stories → test-cases.',
-      'Build half — turning a ready-for-build story into shipped code, once per story per repo.',
+      'Epic — the unit of Shape work, identified by a stable EP-<slug> ID; everything hangs off it.',
+      'Shape — the human-gated thinking: analysis → epic → architecture → ui → stories → test-cases.',
+      'Build — turning a ready-for-build story into shipped code, once per story per repo.',
       'Contract surface — the shared cross-repo API/event surface, delimited in contract.md and hash-locked.',
     ],
   },
@@ -31,10 +31,10 @@ const TERM_GROUPS = [
 ];
 
 const KEY_FILES = [
-  { label: 'state.json', query: 'currentStep + each step\'s assistance/automation dials + front_steps_locked' },
+  { label: 'state.json', query: 'currentStep + each step\'s assistance/automation dials + shape_steps_locked' },
   { label: 'approvals.json', query: 'recorded approvals, hash-bound to the reviewed artifact' },
   { label: 'contract-lock.json', query: 'the SHA-256 of the CONTRACT-SURFACE block in contract.md' },
-  { label: 'trust-log.json', query: 'every back-half run\'s verdict — the evidence base for earning automation' },
+  { label: 'trust-log.json', query: 'every Build run\'s verdict — the evidence base for earning automation' },
   { label: 'schemaVersion', query: 'the shape a state file is in, stamped as the first key of every JSON object yad writes under .sdlc/ — a file without it counts as version 1' },
 ];
 

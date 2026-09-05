@@ -171,9 +171,9 @@ fa_status "$CIE/epic.md" approved
 MERGE_FILES="$(git -C "$HUB" show --name-only --format= HEAD | grep '^epics/EP-cici/' || true)"
 echo "$MERGE_FILES" | grep -q '^epics/EP-cici/epic.md' || die "merge must commit the artifact status flip: $MERGE_FILES"
 
-say "yad next drives the build half and guards step order"
+say "yad next drives Build and guards step order"
 NEXT_OUT="$(yad next EP-e2e --dir "$HUB")" || die "yad next failed"
-echo "$NEXT_OUT" | grep -qi "build\|yad-run" || die "yad next should point at the build half at ready-for-build: $NEXT_OUT"
+echo "$NEXT_OUT" | grep -qi "build\|yad-run" || die "yad next should point at Build at ready-for-build: $NEXT_OUT"
 yad next EP-e2e --check epic --dir "$HUB" && die "precondition --check must exit non-zero for a done step"
 yad next --dir "$HUB" >/dev/null || die "general yad next failed"
 

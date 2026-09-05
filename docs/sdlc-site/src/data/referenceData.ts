@@ -91,7 +91,7 @@ export const AUTOMATION_DIAL_STATES: DialState[] = [
     endpoint: 'state.json · per step',
     schemaValue: 'automation: human_approve',
     isTerminal: false,
-    description: 'Default. A human advances the step. Front states + engineer-review are locked here forever.',
+    description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.',
     visibleTo: ALL,
   },
   {
@@ -168,7 +168,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'pr-template',
     queue: 'pattern-gate',
     timing: 'once the PR exists',
-    description: 'The PR/MR body uses the committed template (Impact & Risk block). On the hub it rejects a non-review branch that changes a front-half artifact (epics/**).',
+    description: 'The PR/MR body uses the committed template (Impact & Risk block). On the hub it rejects a non-review branch that changes a Shape artifact (epics/**).',
     triggeredBy: 'PR/MR opened',
     visibleTo: ALL,
   },
@@ -184,7 +184,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'epic-open',
     queue: 'yad-checks',
     timing: 'per commit',
-    description: 'A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic — so the front artifacts can never go stale, only superseded.',
+    description: 'A sealed epic (all stories shipped) refuses new behaviour, forcing a new threaded change-epic — so the Shape artifacts can never go stale, only superseded.',
     triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
     visibleTo: ALL,
   },
@@ -234,7 +234,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     defaultValue: true,
     stagingValue: true,
     productionValue: true,
-    description: 'Connect code repos (GitHub/GitLab) and cache a Repomix pack + code-map per repo so the front phases are code-aware. Staleness tracked by HEAD sha.',
+    description: 'Connect code repos (GitHub/GitLab) and cache a Repomix pack + code-map per repo so the Shape phases are code-aware. Staleness tracked by HEAD sha.',
     visibleTo: ALL,
   },
   {
@@ -277,7 +277,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
 
 // ─── The yad CLI commands — rendered via the CLI-command chips ───
 // Reuses the CliCommand shape: constant / value / target / category / description.
-// target 'setup' = setup/front commands · 'build' = build/automation commands.
+// target 'setup' = setup/Shape commands · 'build' = build/automation commands.
 
 export interface CliCommand extends Filterable {
   constant: string;
@@ -289,18 +289,18 @@ export interface CliCommand extends Filterable {
 
 export const CLI_COMMANDS: CliCommand[] = [
   { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: a short profile interview (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps — install, detect the hub, connect tools + repos.', visibleTo: ALL },
-  { constant: 'NEXT', value: 'yad next', target: 'setup', category: 'setup', description: 'Where am I / what next: the one concrete next action — project-wide or per epic (yad next <epic>). In the build half it reads each story\'s build-state and prints the next build sub-step per repo (spec → tasks → implement → checks → engineer-review) plus the remaining chain; --check <step> guards step order.', visibleTo: ALL },
+  { constant: 'NEXT', value: 'yad next', target: 'setup', category: 'setup', description: 'Where am I / what next: the one concrete next action — project-wide or per epic (yad next <epic>). In Build it reads each story\'s build-state and prints the next build sub-step per repo (spec → tasks → implement → checks → engineer-review) plus the remaining chain; --check <step> guards step order.', visibleTo: ALL },
   { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed. A managed file you edited (gate script, CI fragment, PR/MR template) is reported as modified and never silently overwritten — .sdlc/managed.json records the sha of every file yad wrote; --overwrite-local replaces them, saving a <file>.yad-orig backup (#164).', visibleTo: ALL },
   { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI). Its shape section reports what schemaVersion this project\'s state files are on against the shape the running release writes — one line for the project and one per epic — warning when files are behind (run yad migrate) and failing when they were written by a NEWER yadflow (upgrade the CLI; migrating would move them backward).', visibleTo: ALL },
   { constant: 'MIGRATE', value: 'yad migrate', target: 'setup', category: 'setup', description: 'Move this project\'s state files onto the shape this yadflow expects. Previews by default — prints what would change and writes nothing; --apply rewrites, copying each file to <file>.yad-orig first. Safe to run twice. A file newer than the engine, or one that does not parse, is reported and never touched. In verified mode the CI-owned gate ledger is skipped, because CI stamps it on its next sync.', visibleTo: ALL },
   { constant: 'HOOK', value: 'yad hook ledger-guard', target: 'setup', category: 'setup', description: 'Harness-invoked, never typed: refuses an agent\'s edit to the CI-owned gate ledger in bridge mode and names the command that owns the transition (yad gate open) — the local half of the ledger-guard CI gate (#171). Reads a tool-call payload on stdin (or --path); exit 0 allows, exit 2 denies with the reason on stderr. A no-op without the bridge, and fails open. Wired into .claude/settings.json by setup / check --fix; YAD_HOOK_DISABLE=1 skips it.', visibleTo: ALL },
   { constant: 'SYNC_STATUS', value: 'yad sync-status', target: 'setup', category: 'setup', description: 'Reconcile each artifact’s frontmatter status (draft → in-review → approved) with .sdlc/state.json — all epics, or one (yad sync-status <epic>); --dry-run to preview. Advance-only; locked/in-build/shipped are left alone. Runs automatically after a local gate open/sync.', visibleTo: ALL },
   { constant: 'ROSTER', value: 'yad roster', target: 'setup', category: 'setup', description: 'Manage the reviewer roster + per-repo roles any time: list / add (repo-driven walk) / grant / revoke / remove. Domain-owner grants sync repos.json.', visibleTo: ALL },
-  { constant: 'GATE', value: 'yad gate open|sync', target: 'setup', category: 'front', description: 'Drive the front-half review PR/MR; sync approvals into the ledger and auto-advance on merge.', visibleTo: ALL },
+  { constant: 'GATE', value: 'yad gate open|sync', target: 'setup', category: 'front', description: 'Drive the Shape review PR/MR; sync approvals into the ledger and auto-advance on merge.', visibleTo: ALL },
   { constant: 'COMMIT', value: 'yad commit', target: 'build', category: 'build', description: 'Commit one staged atomic change by the conventions (subject + trailers + ≤3-file guard).', visibleTo: BUILD },
   { constant: 'OPEN_PR', value: 'yad open-pr', target: 'build', category: 'build', description: 'Open a code-repo task PR/MR from the committed platform template, based on the repo\'s RESOLVED default branch (repos.json default_branch → the platform → origin/HEAD → main; --base overrides) — never a hardcoded main. Warns when the base is not the platform default, because CodeRabbit skips auto-review there and retargeting later does not undo it (#168).', visibleTo: BUILD },
   { constant: 'SHIP', value: 'yad ship', target: 'build', category: 'build', description: 'Commit AND open the task PR/MR in one step (commit, then open-pr) — same resolved-default-branch base as open-pr.', visibleTo: BUILD },
-  { constant: 'CHECKPOINT', value: 'yad checkpoint', target: 'build', category: 'build', description: 'Commit the machine-written back-half ledgers (trust-log/build-log/build-state) — plus any story status: flip (→ in-build/shipped) now backed by a build-log ship (#112) — as one chore(hub) audit-trail commit; default branch only, allowlist-scoped; called by yad-run / yad-engineer-review.', visibleTo: BUILD },
+  { constant: 'CHECKPOINT', value: 'yad checkpoint', target: 'build', category: 'build', description: 'Commit the machine-written Build ledgers (trust-log/build-log/build-state) — plus any story status: flip (→ in-build/shipped) now backed by a build-log ship (#112) — as one chore(hub) audit-trail commit; default branch only, allowlist-scoped; called by yad-run / yad-engineer-review.', visibleTo: BUILD },
   { constant: 'TIDY', value: 'yad tidy up', target: 'build', category: 'build', description: 'Fold a shipped story\'s finished trust-log/build-log shards back into the single folded ledger file — the manual "pack it up" companion to the shard-then-fold storage (like git gc for loose objects). Default branch only, --push to push; a no-op when nothing is foldable.', visibleTo: BUILD },
   { constant: 'REPO', value: 'yad repo list|refresh', target: 'build', category: 'build', description: 'List connected repos as fresh/stale and re-pack a stale one.', visibleTo: BUILD },
   { constant: 'DOCS', value: 'yad docs', target: 'build', category: 'automation', description: 'Build / deploy the generated documentation sites.', visibleTo: BUILD },

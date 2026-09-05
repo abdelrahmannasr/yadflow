@@ -38,11 +38,11 @@ one product hub + many code repos, solo or team.
 ## How the workflow looks
 
 <!-- Source: docs/diagrams/sdlc-overview.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
-![Yadflow SDLC overview — setup, human-gated front half, per-story build half, earned automation](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
+![Yadflow SDLC overview — setup, human-gated Shape, per-story Build, earned automation](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
 
 **Legend:** 🟨 **artifact** (a step writes a file and stops) · 🟧 **gate** (a human review that must
 pass) · 🟦 **earns automation** (a back step that can later auto-advance once it proves itself) ·
-⬜ **locked** (the engineer review and every front state — permanently human).
+⬜ **locked** (the engineer review and every Shape step — permanently human).
 
 ## Quickstart
 
@@ -56,7 +56,7 @@ Then, in your AI IDE, drive the lifecycle by invoking skills by name:
 
 ```text
 run yad-epic             # 2. author + gate the "thinking": epic → architecture → UI → stories
-run yad-spec   …         # 3. build half: spec → implement → checks → ship (per story, per repo)
+run yad-spec   …         # 3. Build: spec → implement → checks → ship (per story, per repo)
 ```
 
 Every step stops at a gate until a human approves. New here? **Walk it lesson-by-lesson in the
@@ -116,14 +116,14 @@ Every step is the same contract: *AI proposes → a human decides → the trail 
 
 ## How it works (in five points)
 
-- **Front half = decide.** Once per epic, in the product hub: epic, architecture + a locked contract,
+- **Shape = decide.** Once per epic, in the product hub: epic, architecture + a locked contract,
   UI, stories, test cases. Always human-gated — nothing auto-advances.
-- **Build half = build.** Once per story per code repo: spec → implement → checks → ship.
+- **Build = build.** Once per story per code repo: spec → implement → checks → ship.
 - **Every step stops at a gate.** A human moves it forward (file-only, or by merging a review PR/MR).
   <!-- IMAGE: docs/media/pr-gate.png — "The review gate rides a real PR/MR: approve to advance, comment to block." -->
-- **Automation is opt-in and earned.** A safe back-half step can earn auto-advance after it proves
+- **Automation is opt-in and earned.** A safe Build step can earn auto-advance after it proves
   itself — and a one-command kill switch reverts everything to manual. The engineer review and all
-  front states are never automatable.
+  Shape steps are never automatable.
 - **Everything is files.** State, approvals, the contract lock, the build log — all plain files under
   `epics/EP-<slug>/`. No database. The audit trail *is* the repo.
 

@@ -1,8 +1,8 @@
 # Phase 3 — Build Plan
 
-Builds on Phase 0 (research), Phase 1 (module + gate), Phase 2 (full front half: epic → review → architecture+contract → review → UI → review → stories → review → `ready-for-build`).
+Builds on Phase 0 (research), Phase 1 (module + gate), Phase 2 (full Shape: epic → review → architecture+contract → review → UI → review → stories → review → `ready-for-build`).
 
-Phase 3 is the **build half**: turning approved, repo-tagged stories into shipped code, with all the gates that protect production. This is the largest and riskiest phase — it touches real code, real PRs, and real CI. Same rules throughout: tools via their real interface (Spec Kit + Impeccable are slash-commands, confirm Repomix), all state in files, smallest-useful-first, and **nothing in this phase auto-advances** — automation is a later phase.
+Phase 3 is the **Build**: turning approved, repo-tagged stories into shipped code, with all the gates that protect production. This is the largest and riskiest phase — it touches real code, real PRs, and real CI. Same rules throughout: tools via their real interface (Spec Kit + Impeccable are slash-commands, confirm Repomix), all state in files, smallest-useful-first, and **nothing in this phase auto-advances** — automation is a later phase.
 
 ---
 
@@ -44,7 +44,7 @@ Build these as the CI checks that must pass before merge. Each is a separate, si
 
 ### Step E — AI review + engineer review, then ship
 - **AI review**: wire the automated first-pass reviewer (e.g. CodeRabbit) on the PR/MR. It is a second set of eyes, never the authority.
-- **Engineer review**: a human reads the diff against the spec and owns the merge. This is a human gate, same `human_approve` discipline as the front states.
+- **Engineer review**: a human reads the diff against the spec and owns the merge. This is a human gate, same `human_approve` discipline as the Shape steps.
 - **Ship**: on merge, update the story state and record it. The PR links up to the story so the whole chain (epic → story → task → PR) is traceable.
 
 ### Step F — Widen to multi-repo (only after A–E work on one repo)
@@ -94,10 +94,10 @@ Build these as the CI checks that must pass before merge. Each is a separate, si
 - AI review wired; engineer review gate works; a story ships end to end and updates state.
 - Multi-repo proven: one story builds in two repos from one contract, and a contract bypass in one repo is blocked.
 - `yad-backfill` produces a human-approved draft spec for one existing feature, gated on touched features.
-- `README.md` updated so the team can run the full build half by hand.
+- `README.md` updated so the team can run the full Build by hand.
 
 ---
 
 ## Then Phase 4 (preview, do not build yet)
 
-End-first automation: move the safe back steps toward `machine_advance` one at a time (tasks → implement → checks first), keeping front states human-authored. Then, much later, the optional service layer (watch repos, run unattended, dashboards) — built only when the CLI genuinely can't keep up, with git remaining the source of truth.
+End-first automation: move the safe back steps toward `machine_advance` one at a time (tasks → implement → checks first), keeping Shape steps human-authored. Then, much later, the optional service layer (watch repos, run unattended, dashboards) — built only when the CLI genuinely can't keep up, with git remaining the source of truth.

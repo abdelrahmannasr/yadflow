@@ -1,6 +1,6 @@
 import { Icon } from '../shared/Icon';
 
-// The build-half check gates (yad-checks). CI-agnostic bash invoked by GitHub
+// The Build check gates (yad-checks). CI-agnostic bash invoked by GitHub
 // Actions and GitLab CI; blocking in CI, but the human still owns the merge.
 const GATE_GROUPS = [
   {
