@@ -1,3 +1,11 @@
+## [3.18.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.18.0...v3.18.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **docs:** raise the template's react-router-dom floor to the patched version ([ca510d4](https://github.com/abdelrahmannasr/yadflow/commit/ca510d40d42600254aa39821de99ae5990698605))
+* **docs:** ship the docs template with a patched react-router-dom ([28b6ff7](https://github.com/abdelrahmannasr/yadflow/commit/28b6ff768fb6b11799ab28e4e4d780aa6bfca5bc)), closes [hi#severity](https://github.com/hi/issues/severity)
+
 # [3.18.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.17.3...v3.18.0) (2026-09-05)
 
 
