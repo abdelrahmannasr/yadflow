@@ -244,6 +244,16 @@ The last result is cached in `update-check.json`, resolved in this order: `$YAD_
 override), else `$XDG_CACHE_HOME/yadflow/`, else `%LOCALAPPDATA%\yadflow\` on Windows, else
 `~/.cache/yadflow/`. On macOS `XDG_CACHE_HOME` is normally unset, so the file lands in `~/.cache/yadflow/`.
 
+On a **major** upgrade the notice says one extra thing: preview the migration first, with
+`npx yadflow@<new version> migrate`. A major is the only release allowed to change the shape of your
+state files, and that command shows you exactly what would change in *your* project without writing
+anything. It names `npx` rather than your installed `yad` on purpose — the migration steps ship inside
+the version that introduces them, so the copy you already have would report that nothing changes.
+Minor and patch upgrades never say this, because everything below a major is additive.
+
+Major versions are also published to a separate channel first. `npm install yadflow` always gives you
+the stable line; `npm install yadflow@next` opts you into the next major while it is being proven.
+
 ## Troubleshooting (`yad doctor` + error codes)
 
 ### The `shape` section — is this project on the right file shape?

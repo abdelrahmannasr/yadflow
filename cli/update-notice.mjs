@@ -124,18 +124,48 @@ export function shouldSuppress({ env = process.env, pkgRoot = PKG_ROOT } = {}) {
 // ---- banner -------------------------------------------------------------
 // `yad update` is the necessary second half: upgrading the global CLI leaves this project's installed
 // yad-* skills stamped at the old version in .sdlc/cli-version.json, which `yad doctor` then flags.
+// A MAJOR jump is the only upgrade that may change the shape of the files in a project (rule 7:
+// file-shape changes wait for a major, and ship with their migration guide). Everything else is
+// additive by policy, so the plain banner is right for it.
+//
+// This is the last moment the engine can speak before someone types the upgrade command, so it says
+// the one thing that makes a major safe: look at what it would change to YOUR project first.
+//
+// It has to be `npx yadflow@<new> migrate`, NOT the installed `yad migrate`. A migration list ships
+// inside the engine that introduces it (cli/migrate.mjs), so the copy already installed knows only its
+// own steps — on 3.x that is the 1 -> 1 baseline, which reports "nothing would change" for every
+// project. Advising the installed binary would hand the reader false reassurance about exactly the
+// upgrade this warning exists for. `npx` runs the NEW engine against the current project without
+// installing anything, and a preview writes nothing either way.
+const crossesMajor = (current, latest) => {
+  const cur = parseVersion(current);
+  const l = parseVersion(latest);
+  return !!cur && !!l && l.major > cur.major;
+};
+
 export function formatBanner(current, latest) {
   // Normalize so a `v`-prefixed input can never produce `.../releases/tag/vv3.11.0`. Callers only
   // reach here after isNewer(), so parseVersion has already accepted both — the ?? is belt and braces.
   const v = normalizeVersion(latest) ?? latest;
   const url = `https://github.com/${UPSTREAM_REPO}/releases/tag/v${v}`;
-  return [
+  const lines = [
     '',
     `  ${c.yellow('!')} ${c.bold(`${PKG_NAME} update available`)} — ${c.dim(current)} → ${c.green(v)}`,
     `    ${c.dim('Changelog:')}  ${url}`,
+  ];
+  if (crossesMajor(current, v)) {
+    lines.push(
+      `    ${c.yellow('Major:')}      ${c.bold('this may change the shape of your project files.')}`,
+      `                ${c.dim('Preview it first, with the new engine — this writes nothing:')}`,
+      `                ${c.cyan(`npx ${PKG_NAME}@${v} migrate`)}`,
+      `                ${c.dim('Then upgrade, and run')} ${c.cyan('yad migrate --apply')} ${c.dim('(backs up every file it rewrites)')}`,
+    );
+  }
+  lines.push(
     `    ${c.dim('Update:')}     ${c.cyan(`npm install ${PKG_NAME} -g`)}`,
     `    ${c.dim('Then:')}       ${c.cyan('yad update')}   ${c.dim("(re-sync this project's yad-* skills)")}`,
-  ].join('\n');
+  );
+  return lines.join('\n');
 }
 
 // ---- orchestrator -------------------------------------------------------

@@ -26,9 +26,16 @@ case "$CURRENT" in
   ''|*[!0-9]*) die "could not read a numeric SCHEMA_VERSION from cli/manifest.mjs (got '${CURRENT}')" ;;
 esac
 
-# The last release, by tag. A repo with no tags yet has nothing to compare against — the first release
-# defines the baseline rather than migrating from one.
-LAST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -1 || true)"
+# The last release, as the nearest release tag REACHABLE from HEAD.
+#
+# Deliberately not `git tag --sort=-v:refname | head -1`. Git's version sort puts a suffixed tag above
+# the bare one — with v4.0.0 and v4.0.0-next.2 both present it picks the pre-release — so once the
+# `next` channel is in use that would compare against the wrong release. Reachability is what "the last
+# release" actually means, and it is immune to how a tag happens to be spelled.
+LAST_TAG="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+# Fallback for the case where tags exist but none is an ancestor of HEAD (an unrelated or truncated
+# history). Better to compare against something than to silently call this a first release.
+[ -n "$LAST_TAG" ] || LAST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -1 || true)"
 if [ -z "$LAST_TAG" ]; then
   printf '   no release tag yet — shape %s is the baseline, nothing to migrate from\n' "$CURRENT"
   exit 0

@@ -1685,6 +1685,21 @@ test('shape guide: a shape that went DOWN is refused — a release may add, neve
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('shape guide: a stable release beats a pre-release tag on the same commit', () => {
+  // Git's version sort ranks v4.0.0-next.2 ABOVE v4.0.0, so picking the "last" tag by name would
+  // compare against the pre-release once the `next` channel is in use. The nearest REACHABLE tag is
+  // what "the last release" means; this pins that the two do not agree and the right one wins.
+  const T = shapeRepo({ tagged: 1, current: 1 });
+  git(T, 'tag', '-a', 'v4.0.0-next.2', '-m', 'v4.0.0-next.2');   // a pre-release of the SAME commit
+  git(T, 'tag', '-a', 'v4.0.0', '-m', 'v4.0.0');                 // …then the stable it became
+  const byName = execFileSync('git', ['tag', '--list', 'v*', '--sort=-v:refname'], { cwd: T, encoding: 'utf8' }).split('\n')[0];
+  assert.equal(byName, 'v4.0.0-next.2', 'name sorting really does prefer the pre-release');
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /next\.2/, 'the pre-release is not what this release is measured against');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('shape guide: with no release tag at all, this shape is the baseline', () => {
   const T = shapeRepo({ tagged: 1, current: 1 });
   git(T, 'tag', '-d', 'v1.0.0');
