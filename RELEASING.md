@@ -13,13 +13,19 @@ This doc covers the one-time bootstrap and the ongoing flow.
 
 ## How it works
 
-Two branches take part:
+Three branches take part:
 
 - **`main`** — where PRs merge. Merging to `main` **never publishes**.
-- **`release`** — the only branch semantic-release publishes from (`.releaserc.json` →
-  `"branches": ["release"]`). A person moves it with a fast-forward: `git push origin main:release`.
+- **`release`** — publishes to `yadflow@latest`, what `npx yadflow` and a plain `npm install` give
+  people. A person moves it with a fast-forward: `git push origin origin/main:release`.
+- **`next`** — publishes to `yadflow@next`, the **pre-release** channel
+  (`.releaserc.json` → `{ "name": "next", "prerelease": true }`). Versions land as `4.0.0-next.1` and
+  reach only people who ask for them by name. `latest` is untouched.
 
-`.github/workflows/release.yml` runs **only** on `release`. Nothing about a merge to `main` starts it.
+Both publishing branches run the same release check first.
+
+`.github/workflows/release.yml` runs **only** on those two publishing branches. Nothing about a merge
+to `main` starts it.
 
 The workflow has two jobs, and the second cannot start without the first:
 
@@ -128,17 +134,31 @@ protected (step E), the default `GITHUB_TOKEN` cannot push to it. Provision a by
 Rotate the PAT before it expires; until `RELEASE_TOKEN` exists the release will fail at the commit-back
 step (the workflow falls back to `GITHUB_TOKEN`, which cannot bypass protection).
 
-### E. Protect the `release` branch — **not yet done**
+### E. Protect the publishing branches
 
-E105 makes `release` the only branch that can publish, so pushing it is the act of shipping. Right now
-nothing enforces that a human does it: `release` has **no branch protection and no ruleset**, so anyone
-with write access can push or force-push it. Before E106 wires the workflow to `release`, add a ruleset
-(Settings → Rules → Rulesets) targeting `release` with: **restrict who can push** (the release PAT owner
-and repo admins), **block force pushes**, and **block deletions**. Deleting `release` also breaks the
-clean skip on `main` — see Troubleshooting.
+Pushing a publishing branch **is** the act of shipping, so both are protected by a ruleset
+(Settings → Rules → Rulesets):
 
-Until that is in place, "a release is a human decision" is a convention this doc states, not a rule the
-platform enforces.
+| | |
+|---|---|
+| **Target** | `release` — **done**. `next` should get the same treatment before the first pre-release |
+| **Rules** | *Restrict deletions* and *Block force pushes*. Nothing else |
+| **Bypass** | none |
+
+Those two rules stop released history being rewritten and stop the branch being deleted, while leaving
+the ordinary fast-forward that performs a release untouched.
+
+**Three rules to deliberately NOT enable on these branches:**
+
+- **Require a pull request.** A release is a fast-forward push. This rule would block it outright.
+- **Require signed commits.** The `chore(release)` commit is written by `semantic-release-bot` and is
+  unsigned; this would fail every release at the commit-back.
+- **Require status checks.** The release check runs *on* the push, so it cannot gate that push. The
+  gating already happens through the job dependency in `release.yml`.
+
+This repo is user-owned rather than in an organization, so "restrict who can push" is not available and
+there is one account with write access anyway. These rules protect against accident, not against a
+second person; the real gate on a release is the check job.
 
 ## Cutting a release (ongoing)
 
@@ -185,6 +205,50 @@ release:
 ```bash
 npm run release-check
 ```
+
+## The `next` channel — shipping v4 without moving anyone onto it
+
+A major changes the shape of the files in people's projects. Nobody should be carried onto that by an
+ordinary `npm install`, and `yad migrate` should be proven on real projects before it is the only thing
+standing between a user and their ledger. So v4 goes to `next` first:
+
+```bash
+git fetch origin
+git push origin origin/main:next     # publishes 4.0.0-next.N to yadflow@next
+```
+
+Anyone on 3.x keeps getting 3.x. People who want to try it opt in by name:
+
+```bash
+npm install yadflow@next -g
+```
+
+**Each pre-release needs the same sync-back as a stable one.** semantic-release commits
+`chore(release): 4.0.0-next.N` to `next`, so it is immediately one commit ahead of `main` and the next
+`git push origin origin/main:next` is refused. Bring it back the same way as step 4 above:
+
+```bash
+git push origin origin/next:main
+```
+
+Do **not** force-push `next` instead. That orphans the commit the `v4.0.0-next.N` tag points at,
+semantic-release then derives the same version again, and npm rejects the republish. Note that `main`'s
+`package.json` will read `4.0.0-next.N` between the first pre-release and promotion; that is correct,
+not drift.
+
+When `yad migrate` has been exercised on enough real projects, promote it by fast-forwarding `release`
+in the normal way — semantic-release turns the last pre-release into the stable `4.0.0` and moves the
+`latest` tag then, and only then.
+
+Meanwhile the update banner does the other half. On a **major** jump it tells a 3.x user to preview the
+migration against their own project before upgrading (`cli/update-notice.mjs`). It names
+`npx yadflow@<new version> migrate` rather than the installed `yad migrate`, and the distinction
+matters: a migration list ships inside the engine that introduces it, so the copy already installed
+knows only its own steps and would report "nothing would change" for every project. `npx` runs the new
+engine without installing it, and a preview writes nothing either way.
+
+Minor and patch upgrades say nothing about migrating, because everything below a major is additive by
+policy — a note on every release is how the one that matters gets ignored.
 
 ## Verify
 

@@ -1,11 +1,17 @@
 name: Release
 
-# Runs ONLY on the `release` branch. Merging to `main` publishes nothing — a release happens when a
-# person fast-forwards `release` to `main` (RELEASING.md), which is what triggers this. Rule 10 of the
-# change-safety rules: a robot may build, test and tag; it may not decide that users get a new version.
+# Runs ONLY on the two publishing branches. Merging to `main` publishes nothing — a release happens
+# when a person pushes one of these, which is what triggers this. Rule 10 of the change-safety rules:
+# a robot may build, test and tag; it may not decide that users get a new version.
+#
+#   release  →  `yadflow@latest`, what `npx yadflow` installs. A fast-forward from `main`.
+#   next     →  `yadflow@next`, the pre-release channel. Where v4 goes while `yad migrate` is being
+#               proven, so nobody is moved onto a changing engine by an ordinary upgrade.
+#
+# The check below gates both: a pre-release reaches real users too, just fewer of them.
 on:
   push:
-    branches: [release]
+    branches: [release, next]
 
 # Least privilege at the WORKFLOW level, so nothing is granted by inheritance. The publishing
 # credentials are declared on the `release` job alone — see the note on the check job below.

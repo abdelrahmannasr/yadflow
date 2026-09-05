@@ -8279,6 +8279,42 @@ test('formatBanner names both versions, the release-tag changelog, and the globa
   assert.match(b, /yad update/, 'the follow-up that re-syncs the project skills');
 });
 
+test('formatBanner: a MAJOR upgrade tells you to preview the migration first', () => {
+  // The last moment the engine can speak before someone types the upgrade command. A major is the only
+  // release that may change the shape of the files in a project (rule 7), so it is the only one that
+  // needs this — and `yad migrate` previews without writing, so the advice is free to follow.
+  const b = notice.formatBanner('3.18.0', '4.0.0');
+  assert.match(b, /Major:/);
+  assert.match(b, /shape of your project files/);
+  // It must name the NEW engine via npx. A migration list ships inside the engine that introduces it,
+  // so the installed 3.x copy knows only its own baseline step and would report "nothing would change"
+  // — false reassurance about the one upgrade this warning exists for.
+  assert.match(b, /npx yadflow@4\.0\.0 migrate/, 'previews with the version being upgraded TO');
+  assert.match(b, /yad migrate --apply/, 'and what to run after upgrading');
+  assert.ok(b.indexOf('npx yadflow@4.0.0 migrate') < b.indexOf('npm install yadflow -g'),
+    'the preview has to come BEFORE the install command it is warning about');
+  assert.ok(b.indexOf('npx yadflow@4.0.0 migrate') < b.indexOf('yad migrate --apply'),
+    'preview first, apply only after upgrading');
+});
+
+test('formatBanner: a minor or patch upgrade says nothing about migrating', () => {
+  // Everything below a major is additive by policy, so a migration note there would be noise — and
+  // noise on every release is how a warning stops being read by the release that needs it.
+  for (const [from, to] of [['3.17.3', '3.18.0'], ['3.17.3', '3.17.4'], ['4.0.0', '4.1.0']]) {
+    const b = notice.formatBanner(from, to);
+    assert.doesNotMatch(b, /Major:/, `${from} → ${to}`);
+    assert.doesNotMatch(b, /migrate/, `${from} → ${to}`);
+  }
+});
+
+test('formatBanner: the major warning survives a v-prefixed version and never mis-fires backwards', () => {
+  assert.match(notice.formatBanner('3.18.0', 'v4.0.0'), /Major:/, 'normalized before the comparison');
+  // A downgrade or unparseable input must not produce the warning; isNewer already gates the caller,
+  // but formatBanner is exported and must not invent a major jump from garbage.
+  assert.doesNotMatch(notice.formatBanner('4.0.0', '3.18.0'), /Major:/);
+  assert.doesNotMatch(notice.formatBanner('3.18.0', 'not-a-version'), /Major:/);
+});
+
 test('registryBase prefers YAD_REGISTRY_URL, then npm_config_registry, and strips trailing slashes', () => {
   assert.equal(notice.registryBase({ env: { YAD_REGISTRY_URL: 'http://a/', npm_config_registry: 'http://b' } }), 'http://a');
   assert.equal(notice.registryBase({ env: { npm_config_registry: 'http://b//' } }), 'http://b');

@@ -146,9 +146,9 @@ the review to domain owners — the same escalation `yad-review-gate` applies. R
 
 ## Releases — a human decision
 
-Merging to `main` **never publishes**. semantic-release only runs from the `release` branch
-(`.releaserc.json` → `"branches": ["release"]`), and that branch moves only when a person
-fast-forwards it to `main`:
+Merging to `main` **never publishes**. semantic-release only runs from the publishing branches named
+in `.releaserc.json` — `release` for `yadflow@latest`, and `next` for pre-releases — and `release` moves
+only when a person fast-forwards it to `main`:
 
 ```
 git fetch origin
@@ -164,8 +164,12 @@ docs-only fix — without anyone on `npx yad` seeing a new version. A `docs:` co
 bumps a version (the old `docs → patch` rule is gone). The release check that must pass before
 that fast-forward is `scripts/release-check.sh` — tests, coverage, the golden compatibility test, a
 migration preview on a real v3 project, a fresh install, `yad doctor` on what it creates, and the
-migration guide when the file shape moved. Run it yourself with `npm run release-check`. Full details
-in [`RELEASING.md`](RELEASING.md).
+migration guide when the file shape moved. Run it yourself with `npm run release-check`.
+
+A second branch, **`next`**, publishes to `yadflow@next` instead of `yadflow@latest`. That is where a
+major goes first, so a release that changes the shape of people's project files reaches only those who
+ask for it by name — never someone running an ordinary `npm install`. Full details in
+[`RELEASING.md`](RELEASING.md).
 
 ---
 
