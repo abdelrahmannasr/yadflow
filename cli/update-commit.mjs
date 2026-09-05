@@ -2,7 +2,7 @@
 // trees, commit the applied changes PER REPO (the hub and every connected repo) and push them
 // straight to the default branch, so a package update "just lands" everywhere instead of leaving
 // dirty trees for someone to hand-commit across N repos. This is the update-flow analogue of the
-// back-half `yad checkpoint` (cli/checkpoint.mjs) and reuses its machine-commit machinery.
+// Build `yad checkpoint` (cli/checkpoint.mjs) and reuses its machine-commit machinery.
 //
 // Invariants (shared with checkpoint):
 //   1. Stage an EXPLICIT per-repo allowlist — exactly the paths the reconcile actions declared they

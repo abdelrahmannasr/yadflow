@@ -1,6 +1,6 @@
-// `yad open-pr` — open a code-repo task PR/MR from the repo's platform template (build half).
+// `yad open-pr` — open a code-repo task PR/MR from the repo's platform template (Build).
 // Detects the platform, pushes the current branch, and creates the PR/MR with Summary / Story-task /
-// Impact & Risk prefilled. Distinct from `yad gate open`, which opens a front-half artifact-review PR
+// Impact & Risk prefilled. Distinct from `yad gate open`, which opens a Shape artifact-review PR
 // on the product hub.
 import path from 'node:path';
 import fs from 'node:fs';
@@ -26,7 +26,7 @@ function resolveRepo(root, { repo, dir }) {
 // Which SDLC stage is this PR? The hub serves two vehicles; a code repo only one. Mirrors the
 // `--head` split the hub pattern gates (pr-title.sh/pr-template.sh) already apply:
 //   code-repo    — NOT the product hub (a registry repo via --repo, or root is not a hub).
-//   hub-front    — the hub itself AND head is a review/EP-* branch (artifact-review PR).
+//   hub-shape    — the hub itself AND head is a review/EP-* branch (artifact-review PR).
 //   hub-tooling  — the hub itself AND head is anything else (a tooling/CI change to the hub).
 // `meta` (truthy when resolved from the repos registry via --repo) is a connected code repo, so it is
 // never the hub regardless of its path. Otherwise "is the hub" = repoRoot resolves to root AND root
@@ -36,7 +36,7 @@ export function detectStage(root, repoRoot, head, meta) {
   const isHub = path.resolve(repoRoot) === path.resolve(root)
     && exists(path.join(root, PROJECT_FILES.hubConfig));
   if (!isHub) return 'code-repo';
-  return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'hub-front' : 'hub-tooling';
+  return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'hub-shape' : 'hub-tooling';
 }
 
 // The bundled code-task template — the same file `REPO_WIRING` installs into code repos, resolved
@@ -108,11 +108,11 @@ export async function runOpenPr(root, opts = {}) {
   const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot }).stdout;
   const stage = detectStage(root, repoRoot, branch, meta);
 
-  // hub-front: this is a front-half artifact-review PR (review/EP-*/<artifact> head on the hub). The
+  // hub-shape: this is a Shape artifact-review PR (review/EP-*/<artifact> head on the hub). The
   // artifact-review title, body, and ledger bookkeeping all live in `yad gate open` — delegate to it
   // rather than emit the code-task shape (which the hub gate would reject). Push first (gateOpen does
   // not push), then hand off; any --title/--message is dropped (gateOpen sets `review: …`).
-  if (stage === 'hub-front') {
+  if (stage === 'hub-shape') {
     const parsed = parseReviewBranch(branch);
     if (!parsed) { fail(`could not parse review branch '${branch}' (expected review/EP-<slug>/<artifact>)`); process.exitCode = 1; return; }
     info(`pushing ${branch} …`);
@@ -130,7 +130,7 @@ export async function runOpenPr(root, opts = {}) {
 
   // The hub roster + its default_branch. The latter only applies when the PR targets the hub ITSELF
   // (a hub-tooling branch) — for a connected code repo the hub's trunk belongs to a different repo and
-  // must never leak in. Resolved AFTER the hub-front hand-off above, which delegates its own base to
+  // must never leak in. Resolved AFTER the hub-shape hand-off above, which delegates its own base to
   // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
   // delegated path then ignores.
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });

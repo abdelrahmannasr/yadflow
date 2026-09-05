@@ -903,10 +903,10 @@ test('detectStage: code-repo when the root is not a hub, or the target repo is a
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('detectStage: on the hub, a review/EP-* head is hub-front, anything else is hub-tooling', () => {
+test('detectStage: on the hub, a review/EP-* head is hub-shape, anything else is hub-tooling', () => {
   const T = hubDir();
-  assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'hub-front');
-  assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-front');
+  assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'hub-shape');
+  assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-shape');
   assert.equal(detectStage(T, T, 'ci/some-fix'), 'hub-tooling');
   assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'hub-tooling'); // must be review/EP-*
   // path.resolve normalises a trailing-slash / "." repoRoot to the same hub
@@ -948,7 +948,7 @@ test('fillHubTemplate: the generated review-PR body carries every section the hu
   });
   // check_hub_body requires all four; `## Checklist` was the one missing before the fix.
   assert.match(b, /^## Artifact under review$/m);
-  assert.match(b, /^## Impact & Risk \(front-half\)$/m);
+  assert.match(b, /^## Impact & Risk \(Shape\)$/m);
   assert.match(b, /^## Checklist$/m);
   assert.match(b, /Risk tags:/);
 });
@@ -972,7 +972,7 @@ test('fillHubTemplate: the generated body passes the real pr-template hub gate (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('templateBody: code-repo / hub-front stages read the repo\'s own committed template', () => {
+test('templateBody: code-repo / hub-shape stages read the repo\'s own committed template', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
   fs.mkdirSync(path.join(T, '.github'), { recursive: true });
   fs.writeFileSync(path.join(T, '.github/pull_request_template.md'), '## Summary\n- **Risk level:** medium\n');
@@ -1033,7 +1033,7 @@ test('templateBody: without a task/summary the Spec + Summary placeholders degra
 });
 
 // ---------------------------------------------------------------------------------------------
-// gateOpen head override (P1) + runOpenPr hub-front delegation failure signalling (P2)
+// gateOpen head override (P1) + runOpenPr hub-shape delegation failure signalling (P2)
 // ---------------------------------------------------------------------------------------------
 const { gateOpen } = await import('./gate.mjs');
 const { branchExists } = await import('./platform.mjs');
@@ -1091,7 +1091,7 @@ test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain la
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit code (P2)', async () => {
+test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit code (P2)', async () => {
   const prev = process.exitCode;
   const T = hubWithStoriesStep();
   let bare;
@@ -1106,7 +1106,7 @@ test('runOpenPr: a hub-front delegation that opens no PR sets a non-zero exit co
     git(T, 'checkout', '-q', '-b', 'review/EP-demo/stories-S01');
     process.exitCode = 0;
     // pass --platform so open-pr's OWN platform detection passes (a bare-file remote is neither
-    // github nor gitlab) and execution actually reaches the hub-front delegation, not the early abort.
+    // github nor gitlab) and execution actually reaches the hub-shape delegation, not the early abort.
     let res;
     const out = await grab(() => runOpenPr(T, { platform: 'github' }).then((r) => { res = r; }));
     assert.match(out, /no hub platform/);                 // proves the delegated gateOpen was reached
@@ -1338,7 +1338,7 @@ test('gatePredicate: a SKIPPED step short-circuits — passes with zero approval
 // ---------------------------------------------------------------------------------------------
 // Build a single state-machine step record for the test chains below.
 const S = (id, type, status, artifact, extra = {}) => ({ id, type, status, artifact, risk_tags: [], ...extra });
-// A small front chain at an arbitrary point: epic, epic-review, architecture, architecture-review.
+// A small Shape chain at an arbitrary point: epic, epic-review, architecture, architecture-review.
 const chain = (overrides) => ({
   epicId: 'EP-x',
   currentStep: overrides.currentStep,
@@ -1393,7 +1393,7 @@ test('nextAction: ready-for-build → build; an open test-cases track is surface
   assert.equal(a.parallel.skill, 'yad-test-cases');
 });
 
-// --- build half: nextAction surfaces each story/repo's next sub-step from build-state ---
+// --- Build: nextAction surfaces each story/repo's next sub-step from build-state ---
 const { buildNextForRepo, buildNextActions } = await import('./epic-state.mjs');
 // One repo's build-state at an arbitrary point: pass which steps are done + the active step.
 const repoBS = (currentStep, done = [], extra = {}) => ({
@@ -1473,7 +1473,7 @@ test('nextAction: ready-for-build with NO build-state keeps the static start hin
   const a = nextAction({ state, hubPrs: [], buildStates: [] });
   assert.equal(a.kind, 'build');
   assert.equal(a.builds, undefined);
-  assert.match(a.why, /front half approved/);
+  assert.match(a.why, /Shape approved/);
 });
 
 test('nextAction: no state → kind new (seed with yad-epic)', () => {
@@ -1482,7 +1482,7 @@ test('nextAction: no state → kind new (seed with yad-epic)', () => {
   assert.equal(a.skill, 'yad-epic');
 });
 
-// --- discovery ("epic zero") — a 2-step author→review chain with no build half/parallel track ---
+// --- discovery ("epic zero") — a 2-step author→review chain with no Build/parallel track ---
 const dstate = (over) => ({
   epicId: 'EP-discovery', kind: 'discovery', currentStep: over.currentStep,
   steps: [
@@ -1508,7 +1508,7 @@ test('nextAction: discovery in review → open the gate; with a PR → sync (no 
   assert.equal(sync.pr, 3);
 });
 
-test('nextAction: an approved discovery (discovery-done) points at yad-epic, not the build half', () => {
+test('nextAction: an approved discovery (discovery-done) points at yad-epic, not Build', () => {
   const a = nextAction({ state: dstate({ currentStep: 'discovery-done', discovery: 'done', review: 'done' }), hubPrs: [] }, { epic: 'EP-discovery' });
   assert.equal(a.kind, 'discovery-done');
   assert.match(a.why, /roadmap\.md/);
@@ -2169,13 +2169,13 @@ test('gate sync: a genuine unresolved thread still holds the gate in_review', as
 });
 
 // ---------------------------------------------------------------------------------------------
-// `yad review` — back-half companion + bridge (code PR/MR)
+// `yad review` — Build companion + bridge (code PR/MR)
 // ---------------------------------------------------------------------------------------------
 const { reviewReconcile, reviewContext, reviewNudge, reviewWalkthrough } = await import('./review.mjs');
 const { gateWalkthrough } = await import('./gate.mjs');
 const { sequenceDiff, riskTagsForPath } = await import('./walkthrough.mjs');
 
-test('gate walkthrough: front-half bundle + stops sequenced from the artifact review diff', async () => {
+test('gate walkthrough: Shape bundle + stops sequenced from the artifact review diff', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gwalk-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [] }));
@@ -2216,7 +2216,7 @@ test('review nudge: posts a friendly @-mention only on bare (un-engaged) approva
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('review reconcile: stamps engagement onto the matching build-log ship record (back-half bridge)', async () => {
+test('review reconcile: stamps engagement onto the matching build-log ship record (Build bridge)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-review-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
@@ -4308,7 +4308,7 @@ test('discovery: artifact mapping uses the virtual discovery/ set (mirrors stori
   assert.deepEqual(artifactPaths('discovery'), DISCOVERY_FILES);
 });
 
-test('advanceState: approving discovery-review terminates at discovery-done (no build half)', () => {
+test('advanceState: approving discovery-review terminates at discovery-done (no Build)', () => {
   const state = {
     epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review',
     steps: [
@@ -4349,7 +4349,7 @@ test('advanceState: approving stories-review opens test-cases AND makes the epic
     ],
   };
   advanceState(state, state.steps[0]);
-  // the build half keys off ready-for-build, so implementation can start immediately …
+  // Build keys off ready-for-build, so implementation can start immediately …
   assert.equal(state.currentStep, 'ready-for-build', 'stories-review => ready-for-build (build unblocked)');
   // … while the tester works the parallel test-cases track
   assert.equal(state.steps[1].status, 'in_progress', 'test-cases opens in parallel');
@@ -4488,7 +4488,7 @@ test('markInReview: the parallel test-cases-review does not pull currentStep bac
 // ---------------------------------------------------------------------------------------------
 // Optional (skippable) steps — ui-design N/A for an epic with no user-facing surface
 // ---------------------------------------------------------------------------------------------
-// A front chain sitting at `currentStep`, with the ui-design pair present. Steps before ui-design
+// A Shape chain sitting at `currentStep`, with the ui-design pair present. Steps before ui-design
 // are `done`; ui-design onward take the caller-supplied statuses.
 const uiChain = (currentStep, { ui = 'blocked', uiReview = 'blocked', stories = 'blocked' } = {}) => ({
   epicId: 'EP-x', currentStep,
@@ -6566,10 +6566,10 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
 });
 
 // ---------------------------------------------------------------------------------------------
-// yad checkpoint — commit the machine-written back-half hub state (trust-log/build-log/build-state)
+// yad checkpoint — commit the machine-written Build hub state (trust-log/build-log/build-state)
 // ---------------------------------------------------------------------------------------------
 const {
-  runCheckpoint, backHalfPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip, retroShipRepos,
+  runCheckpoint, buildLedgerPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip, retroShipRepos,
 } = await import('./checkpoint.mjs');
 const { hubGit } = await import('./hubcommit.mjs');
 
@@ -6592,14 +6592,14 @@ function hubForCheckpoint() {
   return T;
 }
 
-// Dirty the back-half ledgers for one story, plus a FRONT-half state.json that checkpoint must never
+// Dirty the Build ledgers for one story, plus a Shape state.json that checkpoint must never
 // stage (it is the CI-owned ledger guarded by ledger-guard).
 function writeBackHalf(T, epic, story) {
   const sdlc = path.join(T, 'epics', epic, '.sdlc');
   fs.mkdirSync(path.join(sdlc, 'build-state'), { recursive: true });
   fs.writeFileSync(path.join(sdlc, 'trust-log.json'), JSON.stringify({ epic, runs: [] }));
   fs.writeFileSync(path.join(sdlc, 'build-state', `${story}.json`), JSON.stringify({ story }));
-  fs.writeFileSync(path.join(sdlc, 'state.json'), JSON.stringify({ step: 'x' })); // front-half — must stay out
+  fs.writeFileSync(path.join(sdlc, 'state.json'), JSON.stringify({ step: 'x' })); // Shape — must stay out
 }
 
 test('summarizeStaged labels one story, N stories, or the epic when only ledgers changed', () => {
@@ -6622,33 +6622,33 @@ test('buildCheckpointMessage: chore(hub) subject, no trailing period, no AI foot
     label: 'EP-a/EP-a-S03', author: '@abdelrahmannasr',
     basenames: ['trust-log.json', 'build-state/EP-a-S03.json'],
   });
-  assert.equal(msg.split('\n')[0], 'chore(hub): sync back-half state — EP-a/EP-a-S03 by @abdelrahmannasr [skip ci]');
+  assert.equal(msg.split('\n')[0], 'chore(hub): sync Build state — EP-a/EP-a-S03 by @abdelrahmannasr [skip ci]');
   assert.ok(!/\.$/.test(msg.split('\n')[0]), 'subject must not end with a period');
   assert.ok(!/Co-Authored-By/.test(msg), 'no AI co-author footer');
   assert.match(msg, /\nUpdated: trust-log\.json, build-state\/EP-a-S03\.json$/);
 });
 
-test('backHalfPathspecs lists only the back-half ledgers that exist — never the front-half', () => {
+test('buildLedgerPathspecs lists only the Build ledgers that exist — never the Shape', () => {
   const T = hubForCheckpoint();
   writeBackHalf(T, 'EP-a', 'EP-a-S03');
-  const specs = backHalfPathspecs(T);
+  const specs = buildLedgerPathspecs(T);
   assert.ok(specs.includes('epics/EP-a/.sdlc/trust-log.json'));
   assert.ok(specs.includes('epics/EP-a/.sdlc/build-state'));
   assert.ok(!specs.some((s) => s.endsWith('build-log.json')), 'absent build-log is not listed');
-  assert.ok(!specs.some((s) => s.endsWith('state.json')), 'front-half state.json is never listed');
+  assert.ok(!specs.some((s) => s.endsWith('state.json')), 'Shape state.json is never listed');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runCheckpoint commits ONLY the back-half ledgers with a chore(hub) audit subject', async () => {
+test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subject', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
   writeBackHalf(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.equal(subject, 'chore(hub): sync back-half state — EP-checkout/EP-checkout-S03 by @abdelrahmannasr [skip ci]');
+  assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by @abdelrahmannasr [skip ci]');
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
-  assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only back-half: ${files.join()}`);
-  assert.ok(!files.some((f) => f.endsWith('state.json')), 'front-half state.json must not be committed');
+  assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only Build: ${files.join()}`);
+  assert.ok(!files.some((f) => f.endsWith('state.json')), 'Shape state.json must not be committed');
   assert.ok(fs.existsSync(path.join(T, 'epics/EP-checkout/.sdlc/state.json')), 'state.json still present, uncommitted');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
@@ -6663,7 +6663,7 @@ test('runCheckpoint commits ONLY the allowlist even when an unrelated file is al
   await grab(() => runCheckpoint(T, {}));
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(!files.includes('unrelated.txt'), 'the unrelated staged file must not ride in the checkpoint commit');
-  assert.ok(files.every((f) => f.startsWith('epics/')), `only back-half files committed: ${files.join()}`);
+  assert.ok(files.every((f) => f.startsWith('epics/')), `only Build files committed: ${files.join()}`);
   assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), 'unrelated.txt', 'the unrelated file stays staged, uncommitted');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
@@ -6706,7 +6706,7 @@ test('runCheckpoint --dry-run prints the message but commits nothing and leaves 
   writeBackHalf(T, 'EP-a', 'EP-a-S01');
   const head0 = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, { dryRun: true }));
-  assert.match(out, /chore\(hub\): sync back-half state/);
+  assert.match(out, /chore\(hub\): sync Build state/);
   assert.equal(git(T, 'rev-parse', 'HEAD').toString().trim(), head0, 'dry run makes no commit');
   assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'dry run leaves the index clean');
   process.exitCode = prev;
@@ -6760,16 +6760,16 @@ function writeStory(T, epic, story, status, { ship = true } = {}) {
   }
 }
 
-test('storyStatusPathspecs lists ONLY ship-backed stories at a back-half status', () => {
+test('storyStatusPathspecs lists ONLY ship-backed stories at a Build status', () => {
   const T = hubForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'shipped');           // ship + shipped ⇒ carried
   writeStory(T, 'EP-a', 'EP-a-S02', 'in-build');          // ship + in-build ⇒ carried
-  writeStory(T, 'EP-a', 'EP-a-S03', 'approved');          // ship but front-gate status ⇒ excluded
+  writeStory(T, 'EP-a', 'EP-a-S03', 'approved');          // ship but Shape gate status ⇒ excluded
   writeStory(T, 'EP-b', 'EP-b-S01', 'shipped', { ship: false }); // shipped but no ship evidence ⇒ excluded
   const specs = storyStatusPathspecs(T);
   assert.ok(specs.includes('epics/EP-a/stories/EP-a-S01.md'), 'shipped + ship is carried');
   assert.ok(specs.includes('epics/EP-a/stories/EP-a-S02.md'), 'in-build + ship is carried');
-  assert.ok(!specs.includes('epics/EP-a/stories/EP-a-S03.md'), 'approved is a front-gate status, never carried');
+  assert.ok(!specs.includes('epics/EP-a/stories/EP-a-S03.md'), 'approved is a Shape gate status, never carried');
   assert.ok(!specs.includes('epics/EP-b/stories/EP-b-S01.md'), 'no build-log ship ⇒ never carried');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -6792,7 +6792,7 @@ test('runCheckpoint carries the story status flip (approved → shipped) alongsi
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.deepEqual(files, ['epics/EP-a/stories/EP-a-S01.md'], 'the story flip rides in the checkpoint commit');
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.match(subject, /^chore\(hub\): sync back-half state — EP-a\/EP-a-S01 by @abdelrahmannasr \[skip ci\]$/);
+  assert.match(subject, /^chore\(hub\): sync Build state — EP-a\/EP-a-S01 by @abdelrahmannasr \[skip ci\]$/);
   assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'nothing left uncommitted — no raw git-to-main needed');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
@@ -6881,7 +6881,7 @@ test('runCheckpoint --retro-ship refuses a story that already has a real build-l
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runCheckpoint --retro-ship REFUSES (no shard, no commit) when frontmatter is not back-half — evidence + flip stay atomic (#142)', async () => {
+test('runCheckpoint --retro-ship REFUSES (no shard, no commit) when frontmatter is not Build — evidence + flip stay atomic (#142)', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
@@ -7601,7 +7601,7 @@ test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, co
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/build-log.json'))).ships.length, 1, 'S01 ship folded in');
   // the union reader still sees BOTH the folded S01 and the loose S02
   assert.equal(readTrustRuns(ep).length, 2, 'union: folded S01 + loose S02');
-  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy back-half ledgers — EP-demo by @abdelrahmannasr [skip ci]');
+  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy Build ledgers — EP-demo by @abdelrahmannasr [skip ci]');
   const out = await grab(() => runTidy(T, {}));
   assert.match(out, /nothing to tidy/);
   assert.ok(!process.exitCode);

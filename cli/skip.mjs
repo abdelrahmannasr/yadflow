@@ -1,4 +1,4 @@
-// `yad skip <epic> <step> --reason "<why>"` (and `--undo`) — mark an OPTIONAL front step N/A for one
+// `yad skip <epic> <step> --reason "<why>"` (and `--undo`) — mark an OPTIONAL Shape step N/A for one
 // epic. Today only `ui-design` is skippable: an epic with no user-facing surface (backend/API, data,
 // infra) does not need a UI-design artifact + review gate. The skip stays VISIBLE and auditable — the
 // step is pre-marked `done` with a recorded reason (and actor/date), short-circuited at the gate — and

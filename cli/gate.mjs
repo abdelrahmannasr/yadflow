@@ -1,7 +1,7 @@
-// `yad gate open|sync|comments|status` — the PR/MR-driven front-half review gate.
+// `yad gate open|sync|comments|status` — the PR/MR-driven Shape review gate.
 // The platform PR/MR is the review UI; this command syncs its state into the file ledger and, when
 // the gate passes (approvals satisfied + all comment threads resolved + PR merged), auto-advances the
-// step. The merge click is the human approval act, so front steps still never machine_advance.
+// step. The merge click is the human approval act, so Shape steps still never machine_advance.
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -850,7 +850,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 // to generate the 60-sec trailer / swipe cards and to run the grounded chat (artifact + risk tags +
 // contract + PR + repo code-maps). The CLI never calls an LLM; the skill (yad-review-companion)
 // consumes this JSON, generates, and posts back via the platform (trailer/comments/approval).
-// Build (but don't print) the front-half grounding bundle. Shared by `review` and `walkthrough` so the
+// Assemble (but don't print) the Shape grounding bundle. Shared by `review` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
 // Returns { error } when there is no epic state, else { bundle, epicDir, hub }.
 function reviewBundle(root, { epic, artifact } = {}) {
@@ -890,7 +890,7 @@ export async function gateReview(root, { epic, artifact } = {}) {
   return r.bundle;
 }
 
-// `yad gate walkthrough <epic> [artifact]` — the front-half pair-review grounding: the same bundle PLUS
+// `yad gate walkthrough <epic> [artifact]` — the Shape pair-review grounding: the same bundle PLUS
 // an ordered `stops[]` from the artifact's review diff (highest-risk first). The skill (yad-pair-review)
 // walks the stops and runs the two-way teaching session. Deterministic sequencing only — no LLM here.
 export async function gateWalkthrough(root, { epic, artifact, runner = run } = {}) {
@@ -946,7 +946,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains }) {
     `- Gate step: \`${step.id}\``,
     `- Owner: \`${owner}\``,
     '',
-    '## Impact & Risk (front-half)',
+    '## Impact & Risk (Shape)',
     `- **Domains / repos touched:** ${domains.join(', ') || 'n/a'}`,
     `- **Risk tags:** ${(step.risk_tags || []).join(', ') || 'none'}`,
     '',
