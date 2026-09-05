@@ -64,12 +64,12 @@ source: repomix
 <!-- the main directories/modules and what each owns -->
 ```
 
-The code-map is deliberately small so every front phase can load it cheaply. The full `pack.md` is read
+The code-map is deliberately small so every Shape phase can load it cheaply. The full `pack.md` is read
 only when a phase needs depth (the architecture phase, primarily).
 
 ## Layer 3 — live on-demand (a specific area, not a stale repo)
 
-When a front phase needs an area not captured in the code-map, it may re-pack that **slice** live,
+When a Shape phase needs an area not captured in the code-map, it may re-pack that **slice** live,
 scoped to the area, without writing the cache:
 
 ```bash

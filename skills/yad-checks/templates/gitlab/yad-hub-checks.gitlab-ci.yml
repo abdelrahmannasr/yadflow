@@ -3,7 +3,7 @@
 # .gitlab-ci.yml via:
 #   include:
 #     - local: '.gitlab/ci/yad-hub-checks.yml'
-# MRs run with `--profile hub` and split by source branch: review/EP-* MRs are front-half artifact-
+# MRs run with `--profile hub` and split by source branch: review/EP-* MRs are Shape artifact-
 # review vehicles (a `review: <artifact> (EP-<slug>)` title + the hub artifact-review template body);
 # every other MR is a tooling/code change to the hub itself and follows the code convention (a
 # Conventional-Commits title + the code task template body). The source branch is passed via --head so
@@ -28,7 +28,7 @@ yad-hub-commit-message:
     - bash checks/commit-message.sh --profile hub "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 # GIT_DEPTH: 0 (above) gives the changed paths, so the gate can reject an artifact change (epics/**)
-# riding a non-review source branch past the front-half review with a plain code title/template.
+# riding a non-review source branch past the Shape review with a plain code title/template.
 yad-hub-pr-title:
   extends: .yad_hub_mr_only
   needs: []

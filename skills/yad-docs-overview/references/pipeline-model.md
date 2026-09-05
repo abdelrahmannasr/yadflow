@@ -10,7 +10,7 @@ ordering source of truth is `skills/sdlc/module-help.csv` (`phase`, `preceded-by
 
 | Shell primitive | Overview meaning |
 |-----------------|------------------|
-| `FlowPath` (`paths.ts`) | a **phase**: Setup, Front-zero (discovery), Front half, Build half, Automation, Change management (feature threads). |
+| `FlowPath` (`paths.ts`) | a **phase**: Setup, Front-zero (discovery), Shape, Build, Automation, Change management (feature threads). |
 | `FlowStep` (within a path) | a **skill or gate** in order; `messages` = its `outputs`; `sideEffects` = the `.sdlc/` files it writes; `status`/`bookingStatus` annotate gated vs. enrichment vs. earned. |
 | `SystemComponent` (`components.ts`) | a **durable state object** (the hub, each `.sdlc/*.json`, code repos, the design/testing/learning tools, the platform). |
 | `RoleConfig` (`roles.ts`) | a **lens** → its relevant sections + paths. |
@@ -35,7 +35,7 @@ and never gates.
 ### Path: Front-zero (`phase: 0-front`)
 The OPTIONAL once-per-project discovery phase, modelled as the reserved "epic zero" `EP-discovery`.
 Greenfield AND brownfield; a 2-step author→review chain whose review binds to the whole artifact set
-and terminates at `discovery-done` (no build half).
+and terminates at `discovery-done` (no Build).
 
 | Step (skill) | Gate | Outputs / sideEffects |
 |--------------|------|------------------------|
@@ -44,7 +44,7 @@ and terminates at `discovery-done` (no build half).
 `roadmap.md` is the menu of features each `yad-epic` reads (Step 2c) — reference-only, never
 auto-seeds epics.
 
-### Path: Front half (`phase: 1-front`)
+### Path: Shape (`phase: 1-front`)
 The gated authoring chain + the reusable review gate (10 steps, or 12 with the optional analysis).
 
 | Step (skill) | Gate | Outputs / sideEffects |
@@ -59,7 +59,7 @@ The gated authoring chain + the reusable review gate (10 steps, or 12 with the o
 | `yad-review-companion` | the fun/visible review layer (trailer/cards/chat + engagement) | `approvals.json` `engagement`, platform trailer/cards |
 | `yad-hub-bridge` | the platform PR/MR bridge | `hub-prs.json` |
 
-### Path: Build half (`phase: 3-build`)
+### Path: Build (`phase: 3-build`)
 Per-story, per-repo: `spec → tasks → implement → checks → engineer-review`, plus the commit/PR helpers.
 
 | Step (skill) | Outputs / sideEffects |
@@ -78,7 +78,7 @@ node classes from the diagram.
 
 | Step (skill) | Outputs / sideEffects |
 |--------------|------------------------|
-| `yad-run` | drives the back-half loop; `build-state/<story>.json`, `trust-log.json`, kill switch |
+| `yad-run` | drives the Build loop; `build-state/<story>.json`, `trust-log.json`, kill switch |
 | `yad-learn` | tutoring; `learning-records.json` (LOCAL-ONLY, gitignored) |
 | `yad-status` | read-only view (no writes) |
 | `yad-docs` / `yad-docs-overview` / `yad-docs-sync` | the docs sites + their `docs-build.json` manifests |
@@ -86,9 +86,9 @@ node classes from the diagram.
 ### Path: Change management — feature threads (`phase: 6-change`)
 The post-lock evolution layer. Once an epic is **sealed** (all stories shipped), behaviour can no longer
 be mutated in place — a change request becomes a **new epic threaded to its parent** (genesis → change →
-defect), inheriting unchanged front artifacts **by reference** and re-authoring only what changes, so
+defect), inheriting unchanged Shape artifacts **by reference** and re-authoring only what changes, so
 locked artifacts are never mutated and never go stale, only superseded. Three CI gates enforce the thread
-(`lineage-check`, `epic-open`, `reconcile-debt`). This path never gates the front chain; `yad-change` is
+(`lineage-check`, `epic-open`, `reconcile-debt`). This path never gates the Shape chain; `yad-change` is
 the intake, then it hands off to the normal authoring skills + the review gate.
 
 | Step (skill) | Outputs / sideEffects |
@@ -99,7 +99,7 @@ the intake, then it hands off to the normal authoring skills + the review gate.
 | `yad-reconcile` | advisory drift / orphan / debt sweep (read-only; mirrors `yad-docs-sync`) |
 
 CLI: `yad thread [<epic>]` prints a thread + its resolved current truth + open debt; `yad reconcile`
-runs the sweep. The three thread gates ride in the build-half `yad-checks` set above.
+runs the sweep. The three thread gates ride in the Build `yad-checks` set above.
 
 ## System components = the durable state objects
 
@@ -121,11 +121,11 @@ The eight yadflow lenses, each to its relevant phase sections + paths:
 
 | Lens | Relevant phases / sections |
 |------|----------------------------|
-| analyst | Setup intent, project discovery (front-zero), analysis step, front-half discovery |
-| pm | project discovery (market/feasibility/roadmap), epic, stories; the front gates |
+| analyst | Setup intent, project discovery (front-zero), analysis step, Shape discovery |
+| pm | project discovery (market/feasibility/roadmap), epic, stories; the Shape gates |
 | architect | architecture + the locked contract; escalation |
 | ux | UI design, design tool connection, the design system |
-| dev | build half: spec → implement, the per-repo loop |
+| dev | Build: spec → implement, the per-repo loop |
 | tester | test-cases (parallel track), the testing tool, checks |
 | reviewer | the review gate, comments, the hub bridge |
 | engineer | engineer review + ship, the merge gate, automation dial/trust |

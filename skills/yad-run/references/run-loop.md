@@ -4,7 +4,7 @@ This is the detail behind `SKILL.md`. It restates the orchestration so the skill
 and pins down the two judgments the skill makes: **what trust verdict to record** and **when a step
 has earned `machine_advance`**.
 
-## The back-half steps
+## The Build steps
 
 From `config.yaml` `automation.back_steps` plus the human merge gate:
 
@@ -50,14 +50,14 @@ nudge; otherwise `human`. Persist build-state after every transition so a halt l
 resumable record.
 
 `checkpoint` = run `yad checkpoint --push` from `{project-root}`. It commits the machine-written
-back-half ledgers (in this loop, the loose `trust-log/` shards this run wrote + `build-state/<story>.json`;
+Build ledgers (in this loop, the loose `trust-log/` shards this run wrote + `build-state/<story>.json`;
 also the `build-log/` shards at engineer-review) — the shard dirs are what checkpoint stages, the same
 way `git gc` folds loose objects later (`yad tidy up` folds finished shards into the folded
 `trust-log.json` / `build-log.json`) — plus any story `status:` flip (→ in-build/shipped) once that
 story has a build-log ship (#112) — as one
-`chore(hub): sync back-half state — <epic>/<story> by @<login> [skip ci]`
+`chore(hub): sync Build state — <epic>/<story> by @<login> [skip ci]`
 audit-trail commit, on the default branch only,
-staging *only* those files by an explicit allowlist (never a front-half gate file — so `ledger-guard`
+staging *only* those files by an explicit allowlist (never a Shape gate file — so `ledger-guard`
 never trips). It is idempotent (a no-op when nothing changed), so calling it after every transition —
 including a halt — is safe and keeps the shared trust evidence current for CI, teammates, and
 `yad status` on other machines. It refuses to run off the default branch (an unsigned `[skip ci]`
@@ -73,7 +73,7 @@ if step in cfg.locked_steps:       eff = "human_approve"
 ```
 
 So a kill switch, a `locked` flag, or membership in `locked_steps` forces a stop no matter what the
-per-step dial says. `engineer-review` and the five front states are covered by `locked` / `locked_steps`.
+per-step dial says. `engineer-review` and the five Shape steps are covered by `locked` / `locked_steps`.
 
 ## Deriving signals & the provisional verdict
 
@@ -134,7 +134,7 @@ Reverting (`to: human_approve`) is never gated — automation must be reversible
 ## What stays human, always
 
 - `engineer-review` — the merge gate. `yad-run` always stops here and hands to `yad-engineer-review`.
-- The five front states (`epic`, `architecture`, `ui-design`, `stories`, `test-cases`) — not in
+- The five Shape steps (`epic`, `architecture`, `ui-design`, `stories`, `test-cases`) — not in
   `back_steps`, in `locked_steps`; the dial-setter refuses them.
 - Any contract-surface change — halts the loop and routes back to the architecture gate, regardless of
   the dial.

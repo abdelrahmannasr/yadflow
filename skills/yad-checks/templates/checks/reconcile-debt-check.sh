@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# reconcile-debt gate (Phase 6 — hotfix debt). A hotfix may ship code BEFORE its front gates approve
-# (ship-first), but it opens a reconcile-debt.json entry: the front artifacts do not yet describe what
+# reconcile-debt gate (Phase 6 — hotfix debt). A hotfix may ship code BEFORE its Shape gates approve
+# (ship-first), but it opens a reconcile-debt.json entry: the Shape artifacts do not yet describe what
 # is in production. That debt must be PAID (artifacts updated + a regression test added) before the NEXT
 # normal change on the same feature thread can ship. This gate FAILs a non-maintenance commit whose
 # owning epic is on a thread carrying an OPEN debt that this epic does not itself own.
@@ -148,7 +148,7 @@ while IFS= read -r sha; do
   if [ -n "$blockers" ]; then
     echo "FAIL [reconcile-debt]: thread ${thread} carries OPEN hotfix debt:"
     printf '%s\n' "$blockers" | sed 's/^/    /'
-    echo "  -> Pay it first: update the front artifacts + add the regression test, then mark the"
+    echo "  -> Pay it first: update the Shape artifacts + add the regression test, then mark the"
     echo "     reconcile-debt.json entry status: paid. The thread is frozen for new changes until then."
     rc=1
     continue

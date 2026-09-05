@@ -159,7 +159,7 @@ trusted_bot() {
 # A brand-new epic's ledger has no CI author. `gate ci` only ADVANCES an existing chain — it bails on
 # a missing state.json ("the review branch is cut from the default branch, so it should carry it") and
 # writes only at merge, on the default branch — and the engine itself reads a missing state.json as
-# "not seeded yet". `gate open` writes nothing in bridge mode, and `checkpoint` stages back-half
+# "not seeded yet". `gate open` writes nothing in bridge mode, and `checkpoint` stages Build
 # ledgers only. So the seed the authoring skills write (yad-epic / yad-change / yad-analysis /
 # yad-discovery / yad-stub) can reach the trunk ONLY through the first review PR/MR — the one place
 # this gate runs. Guarding it there makes the documented flow unshippable on a protected trunk, so an

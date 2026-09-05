@@ -5,12 +5,12 @@
 # that bypassed the template.
 #   --profile code (default) — the code-repo task template (yad-pr-template templates/<platform>/):
 #     requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:` (low|medium|high).
-#   --profile hub — the front-half artifact-review template (templates/hub/<platform>/):
-#     requires `## Artifact under review`, `## Impact & Risk (front-half)`, `## Checklist`, and a `Risk tags:` line.
+#   --profile hub — the Shape artifact-review template (templates/hub/<platform>/):
+#     requires `## Artifact under review`, `## Impact & Risk (Shape)`, `## Checklist`, and a `Risk tags:` line.
 #     BUT only for review/EP-* head branches. Every other hub PR is a tooling/code change to the hub
 #     itself and uses the code task template instead; pass the head ref via --head so the gate knows
 #     which template to require. With no --head, the hub profile stays strict (artifact-review template).
-#     Branch name is not enough on its own: a non-review head that actually changes front-half
+#     Branch name is not enough on its own: a non-review head that actually changes Shape
 #     artifacts (epics/**) would otherwise slip past the review workflow with only the code template.
 #     Pass the PR's changed paths via --changed <file> (one path per line); when they touch epics/**
 #     on a non-review head the gate FAILS — artifact changes must go through a review/EP-* PR.
@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
 done
 case "$PROFILE" in code|hub) ;; *) echo "FAIL [pr-template]: unknown --profile '$PROFILE' (code|hub)."; exit 1 ;; esac
 
-# True when the PR changes a front-half artifact (anything under epics/**). Reads the --changed list
+# True when the PR changes a Shape artifact (anything under epics/**). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
 artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -qE '^epics/' "$CHANGED"; }
 
@@ -91,13 +91,17 @@ check_code_body() {
   fi
 }
 
-# The front-half artifact-review template.
+# The Shape artifact-review template.
 check_hub_body() {
   require_heading '## Artifact under review' '## Artifact under review'
-  require_heading '## Impact & Risk \(front-half\)' '## Impact & Risk (front-half)'
+  # Add before you remove (change-safety rule 3). This heading was `## Impact & Risk (Shape)`
+  # before the Shape/Build/Run rename, and it lives in a PR template committed inside every existing
+  # project — a repo that has not run `yad update` yet still opens reviews with the old wording. So
+  # both spellings pass. The old one is removed in the next major, after `yad doctor` has warned.
+  require_heading '## Impact & Risk \((Shape|Shape)\)' '## Impact & Risk (Shape)'
   require_heading '## Checklist' '## Checklist'
   if ! grep -qiE '(\*\*)?Risk tags:' "$BODY"; then
-    echo "FAIL [pr-template]: missing 'Risk tags:' line (front-half Impact & Risk)."
+    echo "FAIL [pr-template]: missing 'Risk tags:' line (Shape Impact & Risk)."
     rc=1
   fi
 }
@@ -107,11 +111,11 @@ if [ "$PROFILE" = hub ]; then
   case "$HEADREF" in
     review/EP-*|"") check_hub_body ;;            # artifact-review PR (or unknown head — stay strict)
     *)
-      # tooling/code change to the hub itself — UNLESS it changes front-half artifacts (epics/**),
+      # tooling/code change to the hub itself — UNLESS it changes Shape artifacts (epics/**),
       # which must go through a review/EP-* PR. Without this guard a non-review head could carry an
-      # artifact change past the front-half review with only the code template.
+      # artifact change past the Shape review with only the code template.
       if artifact_changed; then
-        echo "FAIL [pr-template]: head '${HEADREF}' changes front-half artifacts (epics/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
+        echo "FAIL [pr-template]: head '${HEADREF}' changes Shape artifacts (epics/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
         rc=1
       else
         check_code_body; KIND="hub-tooling"

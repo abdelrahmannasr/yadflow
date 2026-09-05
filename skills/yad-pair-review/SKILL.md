@@ -1,6 +1,6 @@
 ---
 name: yad-pair-review
-description: 'The guided, two-way, teaching pair-review walkthrough for the SDLC review gates — the AI-driven companion face. The human opens a PR/MR with an AI session and the AI walks them through the change ONE STOP AT A TIME (highest-risk first), giving comprehensive context per change, then asking the human a Socratic question about it; the human answers and asks back, and both keep going until BOTH declare satisfied. The session doubles as a learning session: it demonstrates a transferable review method, scores the engineer against it, and records their review-skill growth in the local-only yad-learn ledger (rolled up by yad status). Works on the back-half code PR/MR (yad review) and the front-half artifact-review PR/MR (yad gate). Soft and additive — it NEVER blocks a merge or gate; it rides the existing engagement signal and surfaces genuine concerns as normal blocking comments. Use when the user says "pair review this", "walk me through the PR/MR", "review with me", "co-review", or "teach me to review".'
+description: 'The guided, two-way, teaching pair-review walkthrough for the SDLC review gates — the AI-driven companion face. The human opens a PR/MR with an AI session and the AI walks them through the change ONE STOP AT A TIME (highest-risk first), giving comprehensive context per change, then asking the human a Socratic question about it; the human answers and asks back, and both keep going until BOTH declare satisfied. The session doubles as a learning session: it demonstrates a transferable review method, scores the engineer against it, and records their review-skill growth in the local-only yad-learn ledger (rolled up by yad status). Works on the Build code PR/MR (yad review) and the Shape artifact-review PR/MR (yad gate). Soft and additive — it NEVER blocks a merge or gate; it rides the existing engagement signal and surfaces genuine concerns as normal blocking comments. Use when the user says "pair review this", "walk me through the PR/MR", "review with me", "co-review", or "teach me to review".'
 ---
 
 # SDLC — Pair Review (the guided, two-way, teaching walkthrough)
@@ -27,8 +27,8 @@ platform.**
 ## Conventions
 
 - `{project-root}` resolves from the project working directory — the **product hub**.
-- Back half (code PR/MR): grounded by `yad review walkthrough --repo <r> --pr <n>`.
-- Front half (artifact-review PR/MR): grounded by `yad gate walkthrough <epic> [artifact]`.
+- Build (code PR/MR): grounded by `yad review walkthrough --repo <r> --pr <n>`.
+- Shape (artifact-review PR/MR): grounded by `yad gate walkthrough <epic> [artifact]`.
 - The transferable review method + scorecard live in `references/review-rubric.md`.
 - The session-record comment shape, the dual sign-off, and the learning record this writes live in
   `references/session-state.md` (it reuses [`yad-learn`](../yad-learn/SKILL.md)'s ledger + gitignore
@@ -38,7 +38,7 @@ platform.**
 
 ## Inputs
 
-- Back half: `repo` + `pr`. Front half: `epic` + `artifact`.
+- Build: `repo` + `pr`. Shape: `epic` + `artifact`.
 - `member` — the learner being paired with (default: the invoking user). Used for the learning record.
 - `action` — `walkthrough` (the full session, default) | `record` (just write the session comment +
   learning record from an already-finished session) | `rubric` (print the review method and stop).
@@ -47,9 +47,9 @@ platform.**
 
 ### Step 1 — Get the ordered stops (the grounding)
 Run the walkthrough grounding for the half you're on:
-- Back half: `yad review walkthrough --repo <r> --pr <n>` → prints the grounding bundle **plus an ordered
+- Build: `yad review walkthrough --repo <r> --pr <n>` → prints the grounding bundle **plus an ordered
   `stops[]`** (the code diff parsed into hunk-anchored, risk-tagged review stops, highest-risk first).
-- Front half: `yad gate walkthrough <epic> [artifact]` → the same, over the artifact's review diff.
+- Shape: `yad gate walkthrough <epic> [artifact]` → the same, over the artifact's review diff.
 
 **Read the real material yourself** — run the bundle's `diffCmd`, and read the named `codeMap` / `pack` /
 `contract` / `artifactPath` / `specs/<story>/` files. Never invent content. If a stop's material isn't
@@ -87,8 +87,8 @@ After the last stop:
   concern remains*.
 - **Human sign-off.** The human decides: **approve** or **request changes**. When they approve through
   this session, submit the approval carrying the engagement marker so the gate records
-  `engagement: verified` — back half: `gh pr review <n> --approve --body "<note>\n\n<!-- yad:engagement verified -->"`
-  (GitLab: `glab mr approve <n>` then a note with the marker); front half: the human approves via
+  `engagement: verified` — Build: `gh pr review <n> --approve --body "<note>\n\n<!-- yad:engagement verified -->"`
+  (GitLab: `glab mr approve <n>` then a note with the marker); Shape: the human approves via
   [`yad-review-gate`](../yad-review-gate/SKILL.md) the normal way.
 
 "**Both satisfied**" = the human approved **and** your verdict holds no unresolved blocking concern. If
@@ -101,7 +101,7 @@ addresses them) — nothing advances on a half-finished session.
    never holds the gate): the transcript summary, the **review-skill scorecard**, your AI verdict, and
    both sign-offs. Post it with the platform CLI (`gh pr comment` / `glab mr note`).
 2. **Learning record (local-only).** Append a `yad-learn` record for the `member`: `concept` =
-   `review <repo> PR #<n> — <title>` (front half: `review <artifact> (<epic>)`), `stage` =
+   `review <repo> PR #<n> — <title>` (Shape: `review <artifact> (<epic>)`), `stage` =
    `engineer-review` (back) / `<artifact>-review` (front), `mode` = `deep` (or `quiz` when you scored
    comprehension), `comprehension` = the scorecard roll-up, `tutorial` = a rendered
    `learning/<member>--review-<pr>.md` capturing the method as applied to this PR + the engineer's gaps.
@@ -138,7 +138,7 @@ the posting surface differs.
 - The transferable review method + scorecard schema: `references/review-rubric.md`.
 - The session comment shape, dual sign-off, and learning record: `references/session-state.md`.
 - The four skim faces this complements: [`yad-review-companion`](../yad-review-companion/SKILL.md).
-- The back-half merge gate it enriches: [`yad-engineer-review`](../yad-engineer-review/SKILL.md).
-- The front-half gate it enriches: [`yad-review-gate`](../yad-review-gate/SKILL.md).
+- The Build merge gate it enriches: [`yad-engineer-review`](../yad-engineer-review/SKILL.md).
+- The Shape gate it enriches: [`yad-review-gate`](../yad-review-gate/SKILL.md).
 - The learning layer it records into: [`yad-learn`](../yad-learn/SKILL.md) and its
   `references/learning-state.md`.

@@ -7,13 +7,13 @@ description: 'Phase 6 post-lock change management — the change-request/defect 
 
 **Goal:** Turn a post-lock change request, defect, or hotfix into a **new epic threaded to its parent**,
 so the feature's locked artifacts are never mutated — only *superseded*. The change-epic **inherits**
-the front artifacts it does not change (by reference) and **re-authors** only the ones it does, so the
+the Shape artifacts it does not change (by reference) and **re-authors** only the ones it does, so the
 thread head always describes current behaviour and the SDLC stays a trusted source of truth for the next
 change. This skill does the **intake + triage + seeding** and then hands off to the normal authoring
-skills + `yad-review-gate`. It is a **front state**: human-confirmed, **never auto-advances**.
+skills + `yad-review-gate`. It is a **Shape step**: human-confirmed, **never auto-advances**.
 
 This is the answer to "the front/spec docs go stale after the contract locks": a behavioural change can
-no longer ship through the build half against an old story — `epic-open` seals a fully-shipped epic, so
+no longer ship through Build against an old story — `epic-open` seals a fully-shipped epic, so
 new behaviour must enter here, and its re-authored stories/test-cases describe the change.
 
 ## Conventions
@@ -21,7 +21,7 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 - `{project-root}` resolves from the product hub.
 - Artifacts live under `{project-root}/epics/EP-<slug>/` — the change-epic gets its OWN `EP-<slug>`
   (assigned here, never renamed) and its own `stories/EP-<slug>-S0N`, so every existing gate, the bridge,
-  `yad next`, and the build-half traceability keep working unchanged.
+  `yad next`, and the Build traceability keep working unchanged.
 - The thread is **derived** from `parent:` frontmatter (no registry); `thread:` is a cache that must
   equal the computed root (`yad doctor` flags a mismatch). Thread id = the genesis epic's id.
 - Lineage frontmatter, the inherited-step shape, the pointer-lock, `change.json`, and
@@ -67,7 +67,7 @@ in `references/triage.md`).
 
 ### Step 2 — Gather the change + triage the DEPTH (auto-propose, human-confirm)
 With the requester, classify the change into one **depth** (the `yad-backfill` discipline: auto-propose,
-human-confirm). The depth decides which front states are **re-authored** vs **inherited**:
+human-confirm). The depth decides which Shape steps are **re-authored** vs **inherited**:
 
 | depth | re-authors (active) | inherits (pre-done, by reference) | first step |
 |-------|---------------------|-----------------------------------|-----------|
@@ -166,16 +166,16 @@ defect to the gate that should have caught it. Add `"parentStub": true` when the
 un-promoted stub (Step 5) — omit it (or `false`) otherwise.
 
 ### Step 7 — Hotfix only: record the ship-first exception + open reconcile debt
-If `kind: hotfix`, the build half MAY run before these front gates approve (severity demands it). Record
+If `kind: hotfix`, Build MAY run before these Shape gates approve (severity demands it). Record
 `hotfix: { "shipFirst": true }` in `change.json` and **append** to `.sdlc/reconcile-debt.json`:
 `{ "thread": "<…>", "epicId": "<…>", "openedDate": "<today>", "reason": "<why>", "requires": ["artifacts-updated","regression-test"], "status": "open", "paidDate": null, "paidBy": null, "evidence": { "artifacts": [], "regressionTest": "" } }`.
 Tell the user the debt **freezes the next normal change** on this thread (`reconcile-debt` gate) until it
-is paid (front artifacts updated **and** a regression test added, then `status: "paid"`).
+is paid (Shape artifacts updated **and** a regression test added, then `status: "paid"`).
 
 ### Step 8 — Stop; hand off (NO auto-advance)
 Report: the new `EP-<slug>`, its thread + parent, the re-author-vs-inherit split, the seeded
 `currentStep`, and the next skill — `yad-architecture` (contract-surface), else `yad-stories` /
-`yad-test-cases` — followed by `yad-review-gate`. Front states do not auto-advance. Suggest
+`yad-test-cases` — followed by `yad-review-gate`. Shape steps do not auto-advance. Suggest
 `yad thread <thread>` to see the evolution and `yad-timeline` / `yad-defects` to render it.
 
 ## Hard rules
@@ -186,7 +186,7 @@ Report: the new `EP-<slug>`, its thread + parent, the re-author-vs-inherit split
   `boundHash`; the pointer-lock carries the parent hash verbatim. The gate never re-reviews them.
 - **Contract-surface ⇒ re-author architecture.** Omitting `architecture` from `inherits` is the ONLY way
   to change the surface; it re-locks (new hash) and routes through the escalated architecture review —
-  the same mechanism as the build-half `Contract-Change` route, unified.
+  the same mechanism as the Build `Contract-Change` route, unified.
 - **A hotfix opens debt, never waives it.** Ship-first is allowed once; the thread freezes for new work
   until the debt is paid.
 - **Never auto-advances.** This skill seeds + records; humans author and approve via the normal gates.

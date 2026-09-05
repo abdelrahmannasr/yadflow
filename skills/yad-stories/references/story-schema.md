@@ -1,6 +1,6 @@
 # Story schema
 
-Each story authored at front state 7 is one Markdown file under `epics/EP-<slug>/stories/`, named
+Each story authored at Shape step 7 is one Markdown file under `epics/EP-<slug>/stories/`, named
 `EP-<slug>-S0N.md` (zero-padded, never renamed).
 
 ## Frontmatter
@@ -9,10 +9,10 @@ Each story authored at front state 7 is one Markdown file under `epics/EP-<slug>
 |-------|--------|---------|
 | `id` | `EP-<slug>-S0N` | Stable story ID. Engine-assigned, zero-padded, never renamed. |
 | `epic` | `EP-<slug>` | Parent epic ID — the unbroken link back to the epic. |
-| `owner` | name | Inherited from `epic.md` `owner` (the single source — not retyped per story). Carries the responsible owner through to the build half. |
+| `owner` | name | Inherited from `epic.md` `owner` (the single source — not retyped per story). Carries the responsible owner through to Build. |
 | `status` | `draft` \| `in_review` \| `approved` | Story lifecycle within the stories gate. |
 | `repos` | subset of the epic's `repos` | Which repos must implement this story. **Drives per-repo review routing now and (Phase 3) where specs are scaffolded.** |
-| `code-context` | `{ repos: [<name@sha>], loaded: <date> }` | Optional. Which connected-repo code-maps anchored "Notes for build" (front state 7 Step 2b). The `@sha` (a repo's `syncedHead`) is recommended so freshness is recorded but may be omitted; the SKILL templates show the empty placeholder `{ repos: [], loaded: <date or none> }`. `none` / `[]` when no repos are connected. |
+| `code-context` | `{ repos: [<name@sha>], loaded: <date> }` | Optional. Which connected-repo code-maps anchored "Notes for build" (Shape step 7 Step 2b). The `@sha` (a repo's `syncedHead`) is recommended so freshness is recorded but may be omitted; the SKILL templates show the empty placeholder `{ repos: [], loaded: <date or none> }`. `none` / `[]` when no repos are connected. |
 
 ## Body
 

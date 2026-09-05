@@ -1,6 +1,6 @@
 # Check gates — definitions, scripts, CI wiring, convention map
 
-The gates are the production-safety core of the build half (Phase 3 build plan §C). They are
+The gates are the production-safety core of Build (Phase 3 build plan §C). They are
 deliberately small, separate, and CI-agnostic: plain bash in `checks/`, invoked by whatever CI the
 repo uses. Each reads conventions established by earlier steps — it invents nothing.
 
@@ -176,13 +176,13 @@ from the event payload):
   period (`config.yaml build.pr_title_style: same_as_commit_subject` — one task = one PR, the title is
   the squash-merge subject).
 - `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
-  - `review/EP-*` head (or no `--head` — stays strict) → a front-half artifact-review title
+  - `review/EP-*` head (or no `--head` — stays strict) → a Shape artifact-review title
     `review: <artifact> (EP-<slug>)`, the shape `yad gate open` creates.
   - any other head → a tooling/code change to the hub itself, so it follows the `code` convention (a
     Conventional-Commits subject). This is what lets a PR that changes the hub's own workflows/checks
     pass — it has no EP artifact to review.
   - **Anti-bypass guard.** The branch name alone is not trusted: a non-review head that actually
-    changes front-half artifacts (any path under `epics/**`) **FAILS** — those changes must go through
+    changes Shape artifacts (any path under `epics/**`) **FAILS** — those changes must go through
     a `review/EP-*` PR and the artifact-review workflow. CI passes the PR's changed paths via
     `--changed <file>` (computed from the diff against the base ref); without that list (a direct
     by-hand caller) the guard is inert and the branch split alone applies.
@@ -196,10 +196,10 @@ catches a free-form description that bypassed it:
   `Risk level:` (`low|medium|high`).
 - `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head`) → requires the artifact-review template: `## Artifact under
-    review`, `## Impact & Risk (front-half)`, `## Checklist`, and a `Risk tags:` line.
+    review`, `## Impact & Risk (Shape)`, `## Checklist`, and a `Risk tags:` line.
   - any other head → a hub tooling PR, so it requires the `code` task template (`## Summary`,
     `## Impact & Risk`, `## Checklist`, filled `Risk level:`).
-  - **Anti-bypass guard** (same as pr-title): a non-review head that changes front-half artifacts
+  - **Anti-bypass guard** (same as pr-title): a non-review head that changes Shape artifacts
     (`epics/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
     must go through a `review/EP-*` PR.
 
@@ -244,7 +244,7 @@ four copies stay byte-identical.
   epic in a thread" enforcement, layered on spec-link.
 - **epic-open** — an epic is **sealed** iff it has ≥1 story and **every** `stories/*.md` `status:` is
   `shipped`. A commit whose owning epic is sealed **FAILS**: new behaviour cannot mutate a shipped epic;
-  it must land in a new threaded change-epic. This is what stops the front artifacts from going stale.
+  it must land in a new threaded change-epic. This is what stops the Shape artifacts from going stale.
 - **reconcile-debt** — resolves the epic's `thread` (its `thread:` frontmatter, else the epic id) and
   scans every thread epic's `reconcile-debt.json`. An **open** entry the current epic does not own
   **FAILS** the change (the thread is frozen until the hotfix debt is paid: artifacts updated + a
@@ -344,7 +344,7 @@ merge-not-clobber logic, with a **hub-flavored gate set** appropriate to a "thin
 - **approvals-present** — an epic at `ready-for-build` has the approvals its gate rule requires recorded
   in `.sdlc/approvals.json` (the same predicate `yad-review-gate` enforces).
 
-These are advisory checks on the hub's own PRs (the front-half review PRs the bridge opens); they keep
+These are advisory checks on the hub's own PRs (the Shape review PRs the bridge opens); they keep
 the hub's artifacts internally consistent. The hub never runs the code-repo `spec-link`/`build-test-lint`
 gates. Author the hub gate scripts under the hub's `checks/` following the same CI-agnostic-bash pattern.
 
@@ -353,11 +353,11 @@ plus a standalone workflow (`templates/github/yad-verified-commits.yml` →
 `.github/workflows/yad-verified-commits.yml`, or the GitLab fragment
 `templates/gitlab/yad-verified-commits.gitlab-ci.yml` → `.gitlab/ci/yad-verified-commits.yml` +
 its one include line) whenever `.sdlc/hub.json` has a platform with the bridge enabled. So the
-front-half review PRs are held to the same rule as code-repo PRs: signed, known authors only.
+Shape review PRs are held to the same rule as code-repo PRs: signed, known authors only.
 
 The hub **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
 `--profile hub`. The pattern gates split by the PR/MR **head branch** (passed via `--head`): a
-`review/EP-*` head is a front-half review PR — Conventional-Commits commit subjects, a
+`review/EP-*` head is a Shape review PR — Conventional-Commits commit subjects, a
 `review: <artifact> (EP-<slug>)` title, and the hub artifact-review template body; **any other head is
 a tooling/code change to the hub itself** and follows the `code` convention (a Conventional-Commits
 title + the code task template), so a PR that changes the hub's own workflows/checks can pass.

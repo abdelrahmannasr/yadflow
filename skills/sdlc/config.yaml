@@ -13,7 +13,7 @@ epics_folder: "{project-root}/epics"
 # Project discovery (yad-discovery) — the OPTIONAL front-zero, run once per project (greenfield AND
 # brownfield). It is modelled as the reserved "epic zero" `EP-discovery` so the entire review gate +
 # PR/MR bridge + CI sync + `yad next` operate on it unchanged. A 2-step author→review chain whose
-# review binds to the whole artifact set; on approval it terminates at `discovery-done` (no build half).
+# review binds to the whole artifact set; on approval it terminates at `discovery-done` (no Build).
 # Output: a phased roadmap (incl. MVP) that each feature epic reads (yad-epic Step 2c) — reference-only,
 # never auto-seeds epics.
 discovery:
@@ -33,15 +33,15 @@ output_folder: "{project-root}/_bmad-output"
 defaults:
   assistance: review          # none | review | heavy
   automation: human_approve   # human_approve | machine_advance
-  # Front steps (discovery [optional front-zero], analysis [optional], epic, architecture,
+  # Shape steps (discovery [optional front-zero], analysis [optional], epic, architecture,
   # ui-design [optional — skippable N/A for UI-less epics via `yad skip <epic> ui-design --reason "<why>"`],
   # stories, test-cases) are locked to human_approve and may NOT be set to machine_advance in this
   # version (build plan §1, §8.7).
-  front_steps_locked: true
-  # Each front authoring step opens its own branch at the start of the step (the <step> is the step id:
+  shape_steps_locked: true
+  # Each Shape authoring step opens its own branch at the start of the step (the <step> is the step id:
   # discovery | analysis | epic | architecture | ui-design | stories | test-cases). Git/greenfield-safe; distinct
   # from the bridge's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
-  front_authoring_branch: "<step>/EP-<slug>"
+  shape_authoring_branch: "<step>/EP-<slug>"
 
 # Team review gate defaults (build plan §3 piece 2, §4).
 review_gate:
@@ -58,7 +58,7 @@ review_gate:
   # PR-driven automation (the `yad gate` CLI). With a hub platform, the review rides the per-step
   # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
   # AUTO-ADVANCES on merge, once (a) the reviewer rule is met, (b) every comment thread is resolved,
-  # and (c) the review PR/MR is merged. The merge is the human approval act, so front steps still never
+  # and (c) the review PR/MR is merged. The merge is the human approval act, so Shape steps still never
   # machine_advance. The file ledger stays the source of truth; no platform / no gh|glab => file-only.
   advance_on: merge             # merge of the approved, fully-resolved review PR advances the step
   revoke_on: artifact-change    # re-hash the artifact (contract surface for architecture); a changed
@@ -85,11 +85,11 @@ review_gate:
     never_blocks: true          # invariant: a pair session is advisory; the gate predicate is untouched
     rubric: review-rubric.md    # the transferable review method (skills/yad-pair-review/references/)
 
-# Build half (Phase 3). Code repos are SEPARATE git repos (one .git each), not subfolders
+# Build (Phase 3). Code repos are SEPARATE git repos (one .git each), not subfolders
 # of the product repo — faithful to "per-repo specs in each code repo, contract singular in the
 # product repo" (phase-3-build-plan.md, Cross-cutting). Documentation-as-config for yad-spec (Step A).
 build:
-  code_repos_root: "{project-root}/demo-repos"   # throwaway demo code repos for this build half
+  code_repos_root: "{project-root}/demo-repos"   # throwaway demo code repos for this Build
   feature_id: story_id          # specs/<story-id>/ — pinned to the permanent story ID, not Spec Kit's auto-slug
   spec_layout: speckit          # follow Spec Kit's native spec/plan/tasks layout
   speckit_ceremony: [specify, clarify, plan, analyze, checklist, tasks]   # heavy run, once per story per repo
@@ -119,7 +119,7 @@ build:
   # Step C (yad-checks) — the CI gates that must pass before merge. CI-agnostic bash in checks/.
   # Phase 6 adds three thread-aware gates: lineage-check (every change links a real threaded epic),
   # epic-open (a SEALED epic — all stories shipped — refuses new behaviour, forcing a change-epic so the
-  # front artifacts can never go stale), and reconcile-debt (a hotfix's ship-first debt blocks the next
+  # Shape artifacts can never go stale), and reconcile-debt (a hotfix's ship-first debt blocks the next
   # change on its thread until paid). See the `change:` block below.
   gates: [spec-link, contract-check, build-test-lint, lineage-check, epic-open, reconcile-debt]
   # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub): code
@@ -133,13 +133,13 @@ build:
   pr_templates:
     github: ".github/pull_request_template.md"
     gitlab: ".gitlab/merge_request_templates/Default.md"
-    hub:                                # front-half artifact-review PR/MR on the product hub (yad-pr-template repo:hub)
+    hub:                                # Shape artifact-review PR/MR on the product hub (yad-pr-template repo:hub)
       github: ".github/pull_request_template.md"
       gitlab: ".gitlab/merge_request_templates/Default.md"
   risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (yad-review-gate escalation)
   # Step E (yad-engineer-review) — AI review (advisory) + engineer review (the human gate) + merge.
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
-  # Append-only ship ledger (back-half analogue of approvals.json), stored shard-then-fold: writers add one
+  # Append-only ship ledger (Build analogue of approvals.json), stored shard-then-fold: writers add one
   # shard per ship under build_log_dir; `yad tidy up` folds a SHIPPED story's shards into build_log.
   # READERS MUST UNION the two (dedupe by (story, task, repo); a shard wins) — build_log alone omits every
   # unfolded ship, e.g. a `yad checkpoint --retro-ship` backfill or any ship on an `in-build` story.
@@ -157,16 +157,16 @@ build:
 # Code context (yad-connect-repos) — the front/"brain" phases are made code-aware. Code repos are
 # connected to the product hub once (or any time a new repo is added), and an AI-readable picture of
 # each is cached so epic/architecture/ui/stories consider what already exists in the code. The product
-# repo is the FRONT-PHASE TOOLCHAIN HUB: repomix (and Impeccable) are installed/run here and target the
-# connected code repos by path — code repos need no install for this. (The build-half CI gates are the
+# repo is the Shape phase TOOLCHAIN HUB: repomix (and Impeccable) are installed/run here and target the
+# connected code repos by path — code repos need no install for this. (The Build CI gates are the
 # exception: they live INSIDE each code repo and run in that repo's CI — see build.gates above.)
 code_context:
   registry: "{project-root}/.sdlc/repos.json"        # project-wide repo registry (NOT per-epic)
   cache_dir: "{project-root}/.sdlc/code-context"      # per-repo pack.md + code-map.md live here
-  tools: [repomix, impeccable]                        # front-phase toolchain, installed in the product hub
+  tools: [repomix, impeccable]                        # Shape phase toolchain, installed in the product hub
   pack_flags: "--compress --include-logs --style markdown"   # reuse backfill flags; Secretlint by default
   staleness: head-sha                                 # stale when a repo's HEAD != registry syncedHead
-  refresh: human                                      # a stale repo is a HUMAN decision: front-phase
+  refresh: human                                      # a stale repo is a HUMAN decision: Shape phase
                                                       # skills FLAG it and stop (pointing at
                                                       # `yad repo refresh <repo>`) — they never silently
                                                       # re-pack. `yad repo list` shows fresh/stale;
@@ -174,7 +174,7 @@ code_context:
   # `yad repo sync [<repo>]` (yad-sync-repos) switches every connected repo to its default_branch and
   # fast-forwards it from origin before work starts — working-tree only (never writes the registry);
   # a dirty repo is skipped, a diverged branch is left for manual resolution (fast-forward only).
-  load_in_front_phases: true                          # epic, architecture, ui-design, stories read the maps
+  load_in_shape_phases: true                          # epic, architecture, ui-design, stories read the maps
   # Auth: `yad-connect-repos` clones/fetches as the LOCAL user (SSH key or git credential helper),
   # works for both github and gitlab (and self-hosted), and stores NO tokens in the registry.
   platforms: [github, gitlab]
@@ -251,8 +251,8 @@ docs:
   # tokens — publishing runs as the LOCAL user's own gh/glab or the platform CI. Idempotent, refreshable.
   auth: user
 
-# Hub platform + front-half review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
-# The product hub is itself a git repo on a platform. With the bridge enabled, the front-half review/
+# Hub platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
+# The product hub is itself a git repo on a platform. With the bridge enabled, the Shape review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
 # approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `yad-review-gate action: sync`
 # pulls that state into the file ledger (approvals.json/reviews/*.md) and runs the UNCHANGED gate predicate.
@@ -260,7 +260,7 @@ docs:
 hub:
   config: "{project-root}/.sdlc/hub.json"             # hub platform + reviewer roster (committed, like repos.json)
   pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"   # per-step review-PR record (sibling of approvals.json)
-  bridge: true                                         # master enable; false => file-only front gates everywhere
+  bridge: true                                         # master enable; false => file-only Shape gates everywhere
   platforms: [github, gitlab]                          # detected from the hub's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
   # roster (in hub.json) maps a platform login -> yad name + role; domain-owners are DERIVED from
@@ -268,7 +268,7 @@ hub:
 
 # Phase 4 (automation) — the SECOND dial made real. Until Phase 4 nothing read this dial; the
 # orchestrator (yad-run) now does. Governing rule: automation is EARNED per step, with trust-log
-# evidence, and is reversible in one move (phase-4-build-plan.md §"one principle"). Front states are
+# evidence, and is reversible in one move (phase-4-build-plan.md §"one principle"). Shape steps are
 # never listed in back_steps and can never be flipped — the engineer keeps authority over decisions.
 automation:
   # The only steps that MAY be automated, safest-end first (phase-4-build-plan.md build order).
@@ -281,7 +281,7 @@ automation:
     min_runs: 5                     # at least this many recorded runs at the step
     min_approved_unchanged: 0.8     # >= this fraction "approved-unchanged" over those runs
   # Hard lock — the dial-setter REFUSES machine_advance for these, regardless of trust evidence.
-  # The front authoring steps (already locked:true in state.json; analysis is optional) + the human
+  # The Shape authoring steps (already locked:true in state.json; analysis is optional) + the human
   # merge gate.
   locked_steps: [discovery, analysis, epic, architecture, ui-design, stories, test-cases, engineer-review]
   # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
@@ -291,7 +291,7 @@ automation:
 # Phase 6 (post-lock change management) — FEATURE THREADS. After the contract locks and code ships, a
 # change must not MUTATE a locked artifact (that destroys the audit trail and the lock). Instead every
 # change request becomes a NEW epic, threaded to its parent: a feature is a thread of linked epics
-# (genesis -> change -> defect -> ...). A change-epic INHERITS unchanged front artifacts from its parent
+# (genesis -> change -> defect -> ...). A change-epic INHERITS unchanged Shape artifacts from its parent
 # BY REFERENCE and only RE-AUTHORS what it changes — so artifacts are never stale, only superseded; the
 # feature's current truth is the head of the thread, and the chain IS the evolution timeline. See
 # docs/phase-6-build-plan.md and skills/yad-change. yad-defects/yad-timeline render it; yad-reconcile
@@ -299,7 +299,7 @@ automation:
 change:
   # The kind of an epic (epic.md frontmatter `kind:`). `feature` is the genesis (default when absent).
   kinds: [feature, change, defect, hotfix]
-  # Triage DEPTH (yad-change auto-proposes, human confirms) -> which front states are re-authored vs
+  # Triage DEPTH (yad-change auto-proposes, human confirms) -> which Shape steps are re-authored vs
   # inherited. defect-fix re-authors stories+test-cases only; contract-surface re-authors architecture
   # and RE-LOCKS (a new hash routes architecture-review through the contract escalation, as today).
   depths: [defect-fix, behavioral-no-surface, contract-surface, new-capability]
@@ -321,7 +321,7 @@ change:
   # `architecture` from `inherits` is what triggers a real re-lock + the architecture gate.
   inherit_by: reference
   # An epic is SEALED once every story is `shipped` (build.story_build_states). epic-open.sh refuses new
-  # behaviour on a sealed epic -> the change must land in a new threaded change-epic (the front half is
+  # behaviour on a sealed epic -> the change must land in a new threaded change-epic (Shape is
   # forced to stay current; staleness is unshippable).
   seal_on: all-stories-shipped
   # Brownfield stub anchor (yad-stub): an already-built feature with NO epic can't be a change parent
@@ -337,6 +337,6 @@ change:
     allow_stub_parent: true             # a change/defect MAY thread off an un-promoted stub (default on)
     promote_by: yad-backfill            # `yad-backfill promote EP-<slug>` documents + flips the stub to real
   hotfix:
-    ship_first: true                    # a hotfix may run the build half BEFORE its front gates approve
+    ship_first: true                    # a hotfix may run Build BEFORE its Shape gates approve
     debt_blocks_next_change: true       # but opens reconcile-debt.json; the next change on the thread is blocked until paid
     debt_requires: [artifacts-updated, regression-test]   # evidence that clears the debt

@@ -1,19 +1,19 @@
 ---
 name: yad-run
-description: 'Phase 4 (automation) — the orchestrator that makes the second dial real. Drives a story''s back-half loop (spec → tasks → implement → checks) in one code repo, reading each step''s automation dial from build-state: on machine_advance it advances on its own, on human_approve it stops for a human. Records every run in the trust log (the evidence base for earning automation). Realizes Step B: when checks is earned, a clean gate pass auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS and pulls in a human. Also sets a step''s dial (gated by trust evidence) and flips the system-wide kill switch. Never advances a front state or the engineer review. Use when the user says "run the build half", "advance story <id>", "set the checks dial", or "kill switch".'
+description: 'Phase 4 (automation) — the orchestrator that makes the second dial real. Drives a story''s Build loop (spec → tasks → implement → checks) in one code repo, reading each step''s automation dial from build-state: on machine_advance it advances on its own, on human_approve it stops for a human. Records every run in the trust log (the evidence base for earning automation). Realizes Step B: when checks is earned, a clean gate pass auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS and pulls in a human. Also sets a step''s dial (gated by trust evidence) and flips the system-wide kill switch. Never advances a Shape step or the engineer review. Use when the user says "run Build", "advance story <id>", "set the checks dial", or "kill switch".'
 ---
 
 # SDLC — Run (Phase 4 orchestrator)
 
 **Goal:** Be the **engine** that the `automation` dial finally drives. Until Phase 4 the dial was inert
-config; this skill reads it and acts. For ONE story in ONE code repo, walk the back-half steps —
+config; this skill reads it and acts. For ONE story in ONE code repo, walk the Build steps —
 `spec → tasks → implement → checks → engineer-review` — and at each step either **advance on its own**
 (dial `machine_advance`, step succeeded) or **stop for a human** (dial `human_approve`, or any halt
 condition). Every run is recorded in the **trust log**, the evidence that earns a step its automation.
 
 This is the most dangerous skill in the system, so it is built to **halt-and-escalate over guess**:
 a failing check, ambiguity, a scope overrun, or a contract-surface touch stops the loop and pulls in a
-human regardless of any dial. The **front states and the engineer review never auto-advance** — they
+human regardless of any dial. The **Shape steps and the engineer review never auto-advance** — they
 are not in `automation.back_steps` and `engineer-review` is `locked`.
 
 Earned so far: **`checks`** (Step B, Phase 4a — safest, a gate's pass/fail was never human judgment)
@@ -30,14 +30,14 @@ signal to seed them from, so they are earned only on real runs.
   (`config.yaml` `build.code_repos_root`). Operate inside them with absolute paths.
 - Automation config is `skills/sdlc/config.yaml` → `automation:` (`back_steps`, `default`,
   `trust_threshold`, `locked_steps`, `kill_switch`).
-- Per-story build-half state: `epics/<epic>/.sdlc/build-state/<story-id>.json` (per repo).
+- Per-story Build state: `epics/<epic>/.sdlc/build-state/<story-id>.json` (per repo).
 - Trust ledger: **shard-then-fold** — each run is its own shard file
   `epics/<epic>/.sdlc/trust-log/<story>-<repo>-<step>-<uid>.json` (a fresh `uid` per run, so concurrent
   writers never conflict); readers UNION the folded `trust-log.json` with every loose shard, and
   `yad tidy up` folds finished shards back into `trust-log.json`. Schemas:
   `../yad-epic/references/state-schema.md`.
-- These machine-written back-half files (`build-state/<story>.json`, the `trust-log/` shards) are
-  committed by **`yad checkpoint`** — the back-half analogue of the front-half `yad gate` sync; the loop
+- These machine-written Build files (`build-state/<story>.json`, the `trust-log/` shards) are
+  committed by **`yad checkpoint`** — the Build analogue of the Shape `yad gate` sync; the loop
   calls it each iteration so the state is durable and shared without a human commit. (`yad checkpoint`
   stages the shard dirs; `yad tidy up` later folds finished shards — loose objects + `git gc`.)
 - The orchestrator **calls the existing step skills unchanged** — `yad-spec` (A), `yad-implement`
@@ -86,7 +86,7 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 
 **Commit the machine-written state.** After each iteration's writes (the trust-log shard in 2 and the
 build-state change in 4), run `yad checkpoint --push` from `{project-root}`. It commits *only* the
-`trust-log/` shards + `build-state/<story>.json` (never a front-half gate file) as one `chore(hub): …`
+`trust-log/` shards + `build-state/<story>.json` (never a Shape gate file) as one `chore(hub): …`
 audit-trail commit, and only ever on the default branch. It is a safe no-op when nothing changed, so
 call it every iteration — teammates don't review these machine writes, but CI and `yad status` on
 other machines must see current trust evidence. Never run it off the default branch (it will refuse):
@@ -94,8 +94,8 @@ an unpushed or branch-stranded trust log quietly undermines the "earned automati
 
 ### `action: set-dial` — earn (or revert) a step's automation
 Flip `step`'s `automation` to `to` in build-state. Enforce, in order:
-- **Refuse** if `step` is in `automation.locked_steps` or is a front state or `engineer-review` —
-  these can never be `machine_advance` (front-state lock, build plan §E). Report the refusal reason.
+- **Refuse** if `step` is in `automation.locked_steps` or is a Shape step or `engineer-review` —
+  these can never be `machine_advance` (Shape step lock, build plan §E). Report the refusal reason.
 - For `to: machine_advance`, **refuse unless the trust threshold is met**: the step's slice of the trust
   ledger — the **union** of the folded `trust-log.json` `runs` PLUS every `trust-log/` shard, filtered to
   this step (and repo) — has `>= trust_threshold.min_runs` entries AND the fraction with
@@ -117,7 +117,7 @@ reversible (build plan §Safety). Report the new state and that `yad-status` wil
   one command and no code change.
 - **Halt-and-escalate beats guess.** A failing check, ambiguity, scope overrun, or contract-surface
   touch halts the loop and pulls in a human, regardless of the dial.
-- **Front states and the engineer review never auto-advance.** They are not in `back_steps`;
+- **Shape steps and the engineer review never auto-advance.** They are not in `back_steps`;
   `engineer-review` is `locked`; the kill switch and locks always override the dial.
 - **The orchestrator never changes what a step does** — it calls the existing skills and owns only the
   advance decision and the trust record.

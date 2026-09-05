@@ -3,7 +3,7 @@
 # .gitlab-ci.yml via:
 #   include:
 #     - local: '.gitlab/ci/yad-verified-commits.yml'
-# Every MR (including the front-half review/EP-* MRs) must contain only commits whose signature the
+# Every MR (including the Shape review/EP-* MRs) must contain only commits whose signature the
 # platform marks Verified AND whose author email is a known identity (.sdlc/verified-authors).
 #
 # Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot
