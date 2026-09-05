@@ -1,4 +1,4 @@
-// `yad tidy up` — fold FINISHED back-half shards back into their single folded ledger, on demand.
+// `yad tidy up` — fold FINISHED Build shards back into their single folded ledger, on demand.
 //
 // The two logs are shard-then-fold (cli/ledger.mjs): writers drop one loose file per entry so
 // concurrent writers never conflict. Left alone they accumulate; `yad tidy up` is the "pack it up"
@@ -72,7 +72,7 @@ export async function runTidy(root, opts = {}) {
 
   const author = checkpointAuthor(resolveCommitterLogin(root, hub?.roster || []), git('config', 'user.name').stdout);
   const label = touched.length === 1 ? touched[0] : `${touched.length} epics`;
-  const message = `chore(hub): tidy back-half ledgers — ${label} by ${author} [skip ci]`;
+  const message = `chore(hub): tidy Build ledgers — ${label} by ${author} [skip ci]`;
 
   if (opts.dryRun) {
     log('\n' + c.dim(message) + '\n');

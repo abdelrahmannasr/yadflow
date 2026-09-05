@@ -1,6 +1,6 @@
 # yad-managed: yad-checks
 # Pattern gates for the PRODUCT HUB. They run with `--profile hub` and split by head branch:
-#   review/EP-* PRs are front-half artifact-review vehicles — a `review: <artifact> (EP-<slug>)` title
+#   review/EP-* PRs are Shape artifact-review vehicles — a `review: <artifact> (EP-<slug>)` title
 #     and the hub artifact-review template body.
 #   every other PR is a tooling/code change to the hub itself — a Conventional-Commits title and the
 #     code task template body (same convention the code repos use).
@@ -27,7 +27,7 @@ jobs:
 
   # Pass the title via env (never interpolate untrusted ${{ }} into a run line — injection-safe).
   # fetch-depth: 0 + the base ref give us the PR's changed paths, so the gate can reject an artifact
-  # change (epics/**) riding a non-review head past the front-half review with a plain code title.
+  # change (epics/**) riding a non-review head past the Shape review with a plain code title.
   pr-title:
     runs-on: ubuntu-latest
     env:

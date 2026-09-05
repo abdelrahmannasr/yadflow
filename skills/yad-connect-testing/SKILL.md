@@ -10,7 +10,7 @@ runnable specs in a connected code repo — alongside the Markdown artifact (`te
 **connects** a testing tool such as **Playwright** to the product hub and records *how* to reach it (the
 tool, the suite references, which MCP runs it) — never a credential.
 
-This is **setup/maintenance**, not a gated front state — it never touches `.sdlc/state.json` or any
+This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
 epic's approvals. It only writes the project-wide testing registry. `yad-test-cases` consumes it: when a
 tool is connected and its MCP is available, the `test architect` lens **generates** automation tests
 into the connected repo(s) (or **links** an existing suite and reads it back); when nothing is

@@ -55,9 +55,9 @@ Everything *from the spec onward* (specs, tasks, code) lives in each **code repo
 
 ### The whole workflow, end to end
 
-Setup is one-time. The **front half** is human-gated and runs once per epic in the hub; the **build
-half** runs once per story per code repo; **automation** is opt-in and earned. `yad-status` reads it
-all; `yad-hub-bridge` mirrors front-half reviews to real PR/MRs on the hub.
+Setup is one-time. The **Shape** part is human-gated and runs once per epic in the hub; **Build**
+runs once per story per code repo; **automation** is opt-in and earned. `yad-status` reads it
+all; `yad-hub-bridge` mirrors Shape reviews to real PR/MRs on the hub.
 
 ```mermaid
 flowchart TD
@@ -75,7 +75,7 @@ flowchart TD
       inst --> conn --> sync
     end
 
-    subgraph FRONT["A · Front half — product hub · human-gated · once per epic"]
+    subgraph FRONT["A · Shape — product hub · human-gated · once per epic"]
       direction TB
       an["yad-analysis<br/>optional → analysis.md"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
@@ -93,7 +93,7 @@ flowchart TD
       an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> tc --> gTc --> rfb
     end
 
-    subgraph BUILD["B · Build half — per story, per code repo"]
+    subgraph BUILD["B · Build — per story, per code repo"]
       direction TB
       sp["yad-spec<br/>→ specs/&lt;story&gt;/"]
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
@@ -115,7 +115,7 @@ flowchart TD
 
     conn --> an
     rfb --> sp
-    run -. drives earned back steps .-> im
+    run -. drives earned Build steps .-> im
     bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
     bridge -. syncs approvals .-> gEp
     status["yad-status — read-only view over all of it"]
@@ -124,19 +124,21 @@ flowchart TD
 ```
 
 **Legend.** 🟨 **artifact** = an author step writes a file and stops · 🟧 **gate** = a human review
-that must pass (`open → comment → approve → advance`) · 🟦 **earns automation** = a back step that
+that must pass (`open → comment → approve → advance`) · 🟦 **earns automation** = a Build step that
 can later auto-advance once it proves itself · ⬜ dashed **locked** = the engineer review and every
-front state, **permanently human**.
+Shape step, **permanently human**.
 
 ---
 
-## 2. The workflow has two halves
+## 2. The workflow has three parts
 
-- **Front half = decide.** Done once per epic, in the **product hub**. Always human-approved — nothing
+- **Shape = decide.** Done once per epic, in the **product hub**. Always human-approved — nothing
   auto-advances. This is where you agree on the epic, the architecture, the locked contract, the UI, and
   the stories.
-- **Back half = build.** Done once per story, per code repo, **inside that code repo**. Spec → implement →
+- **Build = make it real.** Done once per story, per code repo, **inside that code repo**. Spec → implement →
   check → ship.
+- **Run = operate it.** Release and Operate — the part that closes the loop back to Shape. Named
+  here because the vocabulary is settled, but **planned, not built yet**.
 
 Each step writes a file and then **stops at a gate**. A human moves it forward. That is the whole idea.
 
@@ -216,19 +218,19 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 > (GitHub: a separate `yad-checks.yml`; GitLab: an `include:` of `.gitlab/ci/yad-checks.yml`) — it
 > never edits a foreign workflow. Re-running any `wire` is a no-op.
 
-**d2. Wire the product hub itself** (so the front-half review can run through real PRs on the hub):
+**d2. Wire the product hub itself** (so the Shape review can run through real PRs on the hub):
 
 ```text
 yad-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
 yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
-yad-pr-template     repo:hub action: wire                         # hub's front-half PR/MR body template
+yad-pr-template     repo:hub action: wire                         # hub's Shape PR/MR body template
 yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
 yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
 The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
 derived from each repo's `domain_owner` in `repos.json` (not retyped). With the hub on a platform, the
-front-half gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
+Shape gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
 comments back. No platform (or `bridge_enabled: false`)? The gate just runs file-only — skip d2.
 
 With the gate-sync CI wired, you usually don't run `sync` at all: the **merge** of a review PR triggers
@@ -251,7 +253,7 @@ yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owne
 
 This registers the repo in `.sdlc/repos.json` and caches an AI-readable picture of it (a Repomix pack +
 a lightweight **code-map** of its existing endpoints/events/data-models/modules, secret-scanned). The
-front-half steps then read that map so they don't re-design or contradict code that already exists.
+Shape steps then read that map so they don't re-design or contradict code that already exists.
 It clones/fetches as **you** (your own SSH key or git credential helper — GitHub *or* GitLab, no stored
 tokens). Greenfield with no code yet? Skip this — the brain just proceeds. When a repo's code moves,
 `yad-connect-repos action: refresh repo:<repo>`; to see freshness, `action: list`.
@@ -292,7 +294,7 @@ you can also read and edit directly.
 
 ---
 
-## 5. Running an epic — the front half (in the product hub)
+## 5. Running an epic — Shape (in the product hub)
 
 Do these in order. After each author step, the matching review opens and **waits** — you clear it with
 `yad-review-gate` (`action: open → comment → approve → advance`).
@@ -310,7 +312,7 @@ Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discover
 and the epic step does that analyst shaping inline. Each author step opens its own branch
 (`<step>/EP-<slug>`) at the start. When the **stories** gate (step 4) passes, the epic state reaches
 **`currentStep: ready-for-build`** — you can build **now**. Step 5 (`yad-test-cases`) is a **parallel,
-non-blocking** track: it opens at the same moment and the tester works it **alongside** the build half;
+non-blocking** track: it opens at the same moment and the tester works it **alongside** Build;
 its review never blocks building.
 
 > **The brain is code-aware.** If you connected your code repos in setup (step 3e), each author step
@@ -348,7 +350,7 @@ flowchart LR
 
 ---
 
-## 6. Building a story — the back half (in a code repo)
+## 6. Building a story — Build (in a code repo)
 
 From a `ready-for-build` story, do this **inside each code repo the story is tagged with**:
 
@@ -376,7 +378,7 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    shipping different tasks never collide, readers union those shards with the folded `build-log.json`, and
    `yad tidy up` folds them in later. An empty `build-log.json` is normal — it is only half the ledger.
    The machine-written ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed for you
-   by **`yad checkpoint`** — a `chore(hub)` audit-trail commit the back half runs so you never hand-commit
+   by **`yad checkpoint`** — a `chore(hub)` audit-trail commit Build runs so you never hand-commit
    this state; you don't review these machine writes, but CI and `yad status` on other machines must see them.
    The `trust-log`/`build-log` entries are written as small **shard files** (one per entry), so two people
    driving different stories of the same epic never conflict; once a story ships, **`yad checkpoint`**'s
@@ -429,9 +431,9 @@ is fully shipped and a new change must go in its own threaded epic.
    The bug is captured now; `yad-backfill promote` turns the stub into a real, verified epic later. The
    list of bugs threaded off the stub is derived by `yad thread` — you never hand-maintain it.
 
-**Hotfixes** (`kind: hotfix`) may ship the fix **first** (an outage can't wait for the front gates), but
+**Hotfixes** (`kind: hotfix`) may ship the fix **first** (an outage can't wait for the Shape gates), but
 `yad-change` opens **reconcile debt**: the thread's *next* change is blocked until you pay it — update the
-front artifacts + add a regression test. `yad reconcile` and `yad doctor` show open debt.
+Shape artifacts + add a regression test. `yad reconcile` and `yad doctor` show open debt.
 
 **See the evolution:** `yad thread EP-<feature>` (the chain + the resolved current truth + open debt),
 `yad-timeline` (the visual evolution), and `yad-defects` (a quality report showing **which gate your
@@ -460,8 +462,8 @@ surfaces (`contract`, `auth`, `payments`):
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start
   here when stuck.
 - **Automation is opt-in and earned.** You can ignore `yad-run` entirely at first — every step is
-  human-approved by default. Later, safe back-half steps can *earn* auto-advance once they prove
-  themselves. The engineer review and all five front steps are **never** automatable.
+  human-approved by default. Later, safe Build steps can *earn* auto-advance once they prove
+  themselves. The engineer review and all five Shape steps are **never** automatable.
 - **Global "back to manual" switch:** `yad-run action: kill` forces every step to human approval
   instantly; `yad-run action: unkill` restores it.
 - **See how the team uses the flow (for a team lead / EM):** `yad usage` builds a per-member
@@ -516,7 +518,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
-| `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (front gate & code PRs). |
+| `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (Shape gate & code PRs). |
 | `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
@@ -532,8 +534,8 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-defects` | Per-epic/per-thread **quality-gap report** by escape stage + root cause. |
 | `yad-reconcile` | Read-only **drift/orphan/debt sweep** across threads (advisory). |
 | `yad-stub` | **Mint a stub genesis epic** for a brownfield feature with no epic, so a defect/change can thread off it now; `yad-backfill promote` makes it real. |
-| `yad-run` | Drive the back half on the automation dial; kill switch. |
-| `yad checkpoint` *(CLI)* | Commit the machine-written back-half ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(hub)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
+| `yad-run` | Drive Build on the automation dial; kill switch. |
+| `yad checkpoint` *(CLI)* | Commit the machine-written Build ledgers (`trust-log`/`build-log`/`build-state`) as one `chore(hub)` audit-trail commit — default branch only, allowlist-scoped. Called by `yad-run` / `yad-engineer-review`, or run by hand; a no-op when nothing changed. |
 | `yad tidy up` *(CLI)* | Fold a shipped story's finished `trust-log`/`build-log` **shards** back into the single ledger file — the manual "pack it up" companion to the shard-then-fold storage (like `git gc`). Default branch only, `--push` to push; a no-op when nothing is foldable. |
 | `yad-status` | Read-only: where an epic is, dials, approvals owed, trust records. |
 
@@ -545,4 +547,4 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 - **[`docs/CLI.md`](docs/CLI.md)** — the full `yad` command reference and `yad doctor` error codes.
 - **[`docs/SKILLS.md`](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
 - **`RELEASING.md`** — how the `yad` CLI is published to npm.
-- **`epics/EP-checkout/`** — a full worked epic (front half + build half) you can copy from.
+- **`epics/EP-checkout/`** — a full worked epic (Shape + Build) you can copy from.

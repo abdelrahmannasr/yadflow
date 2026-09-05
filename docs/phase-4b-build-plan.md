@@ -5,7 +5,7 @@
 > two trust hooks (`spec`, `tasks`), and earns `implement` (Step D — the `implement → check` hand-off)
 > by seeding its evidence honestly from the five real ships (diffs merged as authored). `tasks`
 > (Step C) has its hook + gate but stays `human_approve`: there is no historical signal to seed it
-> from, so it is earned only on genuine runs (never fabricated). Front states and the engineer review
+> from, so it is earned only on genuine runs (never fabricated). Shape steps and the engineer review
 > stay `human_approve` permanently.
 >
 > The trust log and build log both use **shard-then-fold** storage — one shard file per entry, so
@@ -15,8 +15,8 @@
 ## Context
 
 Phase 4a made the `automation` dial real and proved it on the safest step. The orchestrator
-`yad-run` already **walks every back step generically** (`spec → tasks → implement → checks`) reading
-each step's dial, and `set-dial` can already flip any non-locked back step once its trust slice clears
+`yad-run` already **walks every Build step generically** (`spec → tasks → implement → checks`) reading
+each step's dial, and `set-dial` can already flip any non-locked Build step once its trust slice clears
 the threshold. So the *engine* for C and D already exists. What 4b adds is the part 4a deliberately
 left out: **the evidence and the per-step trust signal** that let `tasks` and `implement` be earned
 honestly — plus the two step-specific behaviours below.
@@ -72,7 +72,7 @@ machine self-grade.
 
 ### What stays human, permanently (unchanged from 4a)
 - The **engineer review before merge** (`engineer-review`, `locked`).
-- **All four front states** (`epic`, `architecture`, `ui-design`, `stories`) — never `machine_advance`.
+- **All four Shape steps** (`epic`, `architecture`, `ui-design`, `stories`) — never `machine_advance`.
 - **Any contract-surface change** routes back to the architecture gate.
 
 ## What gets built (small — the engine is already there)
@@ -109,13 +109,13 @@ machine self-grade.
 - With evidence present, `implement` (Step D) auto-runs the check gates after a committed branch; a
   scope overrun and a contract-surface touch are each shown halting that automated run and pulling in
   a human.
-- The engineer review and all four front states are re-verified locked; the kill switch still reverts
+- The engineer review and all four Shape steps are re-verified locked; the kill switch still reverts
   everything in one move.
 - No `tasks`/`spec` evidence was fabricated to unlock automation; Step C is enabled only on genuine
   runs that clear the threshold (demonstrated on a project that has earned it, or explicitly left
   `human_approve` with the reason shown in `yad-status`).
 
 ## Explicitly NOT in Phase 4b
-- No automation of any front state; no removing the engineer review before merge.
+- No automation of any Shape step; no removing the engineer review before merge.
 - No service/daemon — that remains the conditional Phase 5 (build only when the CLI can't keep up).
 - No earning a step on fabricated or borrowed evidence — `tasks`/`spec` accrue their own.

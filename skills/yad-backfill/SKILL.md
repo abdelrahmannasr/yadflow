@@ -1,6 +1,6 @@
 ---
 name: yad-backfill
-description: 'Build-half Step G of the gated SDLC — backfill: generate specs for already-built features in an existing repo so new work does not break them. Confirm Repomix (the one true CLI subprocess: npx repomix), pack ONE feature at a time (compress + git logs, secret-scan), feed it to AI with a "describe what exists, do not invent" prompt, and write a DRAFT spec marked unverified. Require human approval (reuse yad-review-gate) before the spec counts as real. Boundary is auto-proposed from the project convention and human-confirmed. A change is blocked only until the features IT touches have approved specs. The `promote` action flips a brownfield stub epic (minted by yad-stub, so defects could thread off it) to a real, verified feature epic once its backfill spec is approved. Use when the user says "backfill specs", "document an existing feature", "spec the legacy code", or "promote the stub epic".'
+description: 'Build Step G of the gated SDLC — backfill: generate specs for already-built features in an existing repo so new work does not break them. Confirm Repomix (the one true CLI subprocess: npx repomix), pack ONE feature at a time (compress + git logs, secret-scan), feed it to AI with a "describe what exists, do not invent" prompt, and write a DRAFT spec marked unverified. Require human approval (reuse yad-review-gate) before the spec counts as real. Boundary is auto-proposed from the project convention and human-confirmed. A change is blocked only until the features IT touches have approved specs. The `promote` action flips a brownfield stub epic (minted by yad-stub, so defects could thread off it) to a real, verified feature epic once its backfill spec is approved. Use when the user says "backfill specs", "document an existing feature", "spec the legacy code", or "promote the stub epic".'
 ---
 
 # SDLC — Backfill (existing-code specs)
@@ -92,10 +92,10 @@ thread off it, `promote` is what makes that anchor real — run it once the feat
   - **`state.json`:** **remove** the top-level `kind: "stub"`, and move `currentStep` off the
     `backfill-pending` sentinel (per the promote flavour below).
 - **Light promote (default):** the feature's documentation lives in the approved backfill spec — do NOT
-  wake the front chain. Set `state.json` `currentStep: "backfill-done"` (a terminal sentinel, like
+  wake the Shape chain. Set `state.json` `currentStep: "backfill-done"` (a terminal sentinel, like
   `discovery-done`): the epic is now a real, verified anchor and its later evolution threads normally with
   `yad-change`. `yad next` then reports it as a documented anchor, not a pending stub.
-- **Full promote (opt-in):** to bring the feature fully under the front half and lock a real contract,
+- **Full promote (opt-in):** to bring the feature fully under Shape and lock a real contract,
   "wake" the state chain — set `currentStep: "epic"`, `epic` step `status: "in_progress"` — then run
   `yad-epic` → `yad-architecture` → … the normal way. This re-locks a contract that subsequent thread
   changes will inherit.

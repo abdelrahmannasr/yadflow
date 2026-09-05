@@ -27,6 +27,27 @@ export const useProgress = create<ProgressState>()(
       isComplete: (lessonId) => Boolean(get().completed[lessonId]),
       reset: () => set({ completed: {} }),
     }),
-    { name: 'yadflow-tutorial-progress' },
+    {
+      name: 'yadflow-tutorial-progress',
+      // The Shape/Build/Run rename changed six lesson ids, and those ids are the KEYS of `completed`
+      // in a learner's browser. Without this, everyone who had finished those lessons would silently
+      // lose the ticks. Bump `version` again if ids ever move again.
+      version: 1,
+      migrate: (state, from) => {
+        if (from >= 1) return state as ProgressState;
+        const renamed: Record<string, string> = {
+          'front-epic': 'shape-epic',
+          'front-architecture': 'shape-architecture',
+          'front-ui': 'shape-ui',
+          'front-stories': 'shape-stories',
+          'front-test-cases': 'shape-test-cases',
+          'why-two-halves': 'why-three-parts',
+        };
+        const old = (state as ProgressState | undefined)?.completed ?? {};
+        const completed: Record<string, true> = {};
+        for (const id of Object.keys(old)) completed[renamed[id] ?? id] = true;
+        return { ...(state as ProgressState), completed };
+      },
+    },
   ),
 );

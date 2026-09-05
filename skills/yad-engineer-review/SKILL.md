@@ -1,14 +1,14 @@
 ---
 name: yad-engineer-review
-description: 'Build-half Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same human_approve discipline as the front gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
+description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same human_approve discipline as the Shape gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
 ---
 
-# SDLC — Engineer Review & Merge (build-half Step E)
+# SDLC — Engineer Review & Merge (Build Step E)
 
 **Goal:** Take a task PR/MR that has passed the **check gates** (Step C) through two sets of eyes and
 out to production: an **AI first-pass** (advisory) and a **human engineer review** (the authority),
-then **ship** — merge, record the ship, and update the story state. This is the last build-half step
-(build plan §E). It is a **human gate**, the same `human_approve` discipline as the front states:
+then **ship** — merge, record the ship, and update the story state. This is the last Build step
+(build plan §E). It is a **human gate**, the same `human_approve` discipline as the Shape steps:
 **nothing auto-advances**; the engineer owns the merge.
 
 ## Conventions
@@ -66,7 +66,7 @@ approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto 
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
 `hub.review.requireEngagement: true`. The signal is gameable by design and sits **beside** the CI gates,
 never above them.
-Recording an approval does **not** ship — shipping is a separate, explicit step. Front-half discipline:
+Recording an approval does **not** ship — shipping is a separate, explicit step. Shape discipline:
 the gate talks only through files; refuse to treat AI review as a human approval.
 
 ### Step 3 — `ship` (merge + record + update state)
@@ -94,18 +94,18 @@ engineer-review rule is satisfied (Step 2). Then:
   a rejected one is `rejected`. This is the evidence that later earns a step its `machine_advance`
   (it never weakens the merge gate — the engineer still owns the merge).
 - **Commit the machine-written ledgers.** Run `yad checkpoint --push` from `{project-root}` to commit
-  the back-half ledgers just written (the `build-log/` shard, and the `trust-log/` shard /
+  the Build ledgers just written (the `build-log/` shard, and the `trust-log/` shard /
   `build-state/<story>.json` if the story ran through `yad-run`) as one `chore(hub): …` audit-trail
   commit — default branch only, staging the shard dirs (`yad tidy up` folds finished shards later),
-  never a front-half gate file. It is the back-half analogue of the front-half `yad gate` sync. The
+  never a Shape gate file. It is the Build analogue of the Shape `yad gate` sync. The
   same commit also **carries the story `status:` flip** you just wrote (`approved → in-build/shipped`,
   #112) — because that story now has a build-log ship, checkpoint stages `stories/<story>.md` alongside
   the ledgers, so the artifact never drifts from build-log and you never fall back to a raw git-to-main
   push. (The code-repo `tasks.md` is committed in its own repo as usual.)
 
 ### Step 4 — Stop
-Report what shipped and the story's state. Do not advance anything else; the front-half `state.json`
-stays as it was (`ready-for-build`). The build half is recorded in `build-log.json` + the story status.
+Report what shipped and the story's state. Do not advance anything else; the Shape `state.json`
+stays as it was (`ready-for-build`). Build is recorded in `build-log.json` + the story status.
 
 ## Hard rules (build plan §E, Cross-cutting)
 

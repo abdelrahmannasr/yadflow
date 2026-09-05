@@ -86,7 +86,7 @@ Leave `owner` for the human to set. Set `repos` to the code repo(s) the feature 
 
 ### Step 5 — Seed the stub `state.json` (a `backfill-pending` sentinel)
 Create `{project-root}/epics/EP-<slug>/.sdlc/state.json`. It carries the top-level marker
-`kind: "stub"` and the sentinel `currentStep: "backfill-pending"`, and the **same 10-step front chain**
+`kind: "stub"` and the sentinel `currentStep: "backfill-pending"`, and the **same 10-step Shape chain**
 as a normal epic (`yad-epic` Step 5) but with **every step `status: "blocked"`** — so the state is valid
 (`validateState` needs a non-empty `steps` + a string `currentStep`) and `promote` can later "wake" it
 into normal authoring with zero re-seeding.
@@ -130,7 +130,7 @@ Report the new `EP-<slug>`, that it is a **stub (backfill pending)**, and the tw
 - **Make it real later:** `yad-backfill` for the code repo, then `yad-backfill promote EP-<slug>` to flip
   the stub to `verified: true`.
 
-Front states do not auto-advance. Suggest `yad next EP-<slug>` (prints the backfill-pending guidance) and
+Shape steps do not auto-advance. Suggest `yad next EP-<slug>` (prints the backfill-pending guidance) and
 `yad thread EP-<slug>` to see the anchor and everything threaded off it.
 
 ## Hard rules

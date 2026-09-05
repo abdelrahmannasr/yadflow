@@ -37,7 +37,7 @@ not under any `epics/EP-<slug>/.sdlc/`.
 
 ## Rules
 
-- **`name`** is the join key. It MUST match the names used in epic/story `repos:` tags so the front
+- **`name`** is the join key. It MUST match the names used in epic/story `repos:` tags so the Shape
   phases can map `epic.repos` → registry entries → code-maps. Keep it stable.
 - **Auth is never stored.** No tokens, passwords, or PATs in the registry. `git_url` is a plain remote;
   `connect` clones/fetches as the local user (SSH key or git credential helper).
@@ -51,7 +51,7 @@ not under any `epics/EP-<slug>/.sdlc/`.
 ## Git tracking
 
 Commit the **registry** (`repos.json`) and each repo's **`code-map.md`** — they are small, reviewable,
-and are what the front phases actually read (a diff on a code-map shows when a repo's surface moved).
+and are what the Shape phases actually read (a diff on a code-map shows when a repo's surface moved).
 `yad repo refresh --push` commits and pushes exactly these (never `pack.md`) to the hub's default
 branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
 **Ignore** the full Repomix `pack.md` — it is large and regenerable (`action: refresh`). The product
@@ -60,6 +60,6 @@ hub's `.gitignore` carries `.sdlc/code-context/*/pack.md` for this. This mirrors
 
 ## Greenfield
 
-A brand-new product hub has no `repos.json` (or an empty `{ "repos": [] }`). That is valid — the front
+A brand-new product hub has no `repos.json` (or an empty `{ "repos": [] }`). That is valid — the Shape
 phases treat "no repos connected" as "nothing to consider yet" and proceed unchanged. The registry
 appears the first time `connect` runs.

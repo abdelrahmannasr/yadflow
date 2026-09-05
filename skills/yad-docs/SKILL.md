@@ -1,6 +1,6 @@
 ---
 name: yad-docs
-description: 'Generates the per-epic interactive documentation site — a vendored React/Vite/Tailwind SPA with an animated flow canvas and role-based stakeholder doc pages — from the epic''s approved artifacts (epic, architecture, the locked contract, UI design, stories, code-context, test cases). Themes it from the design tokens, wires the docs.json base path, and drives `yad docs build/deploy` to publish to Pages (or build-only when no target). This is an OUTPUT ENRICHMENT, never a gated front state: it never mutates state.json steps, approvals, or the contract lock. Use when the user says "generate the docs site", "build the interactive docs", or "deploy the epic docs".'
+description: 'Generates the per-epic interactive documentation site — a vendored React/Vite/Tailwind SPA with an animated flow canvas and role-based stakeholder doc pages — from the epic''s approved artifacts (epic, architecture, the locked contract, UI design, stories, code-context, test cases). Themes it from the design tokens, wires the docs.json base path, and drives `yad docs build/deploy` to publish to Pages (or build-only when no target). This is an OUTPUT ENRICHMENT, never a gated Shape step: it never mutates state.json steps, approvals, or the contract lock. Use when the user says "generate the docs site", "build the interactive docs", or "deploy the epic docs".'
 ---
 
 # SDLC — Author the Interactive Docs Site (per-epic, output enrichment)
@@ -12,7 +12,7 @@ stakeholder doc pages** (each lens → a set of doc sections). The shell is gene
 generated entirely into `src/data/*.ts` and the theme into `src/index.css`.
 
 This is an **output enrichment**, exactly like `design-links.json` / `test-links.json` — **NOT a gated
-front state.** It **never** mutates `.sdlc/state.json` `steps[]`, `approvals.json`, or
+Shape step.** It **never** mutates `.sdlc/state.json` `steps[]`, `approvals.json`, or
 `contract-lock.json`, and it never adds a `state.json` step. It reads the *approved* shape and renders
 it; it never decides approval. When a docs target is connected (`yad-connect-docs` → `.sdlc/docs.json`)
 the site is built + deployed; when none is, it is npm-built to a local `dist/` (build-only).
@@ -152,7 +152,7 @@ the default-theme degrade), the **deploy URL** or "build-only", and the **stalen
 - The connected docs target + base-path resolution: `../yad-connect-docs/SKILL.md`.
 - The design tokens this themes from: `../yad-connect-design/SKILL.md`.
 - The code-context the data enriches: `../yad-connect-repos/SKILL.md`.
-- The authoring pattern (front-state author that writes link artifacts without gating):
+- The authoring pattern (Shape step author that writes link artifacts without gating):
   `../yad-ui/SKILL.md`.
 - State schema + the "Authoring branches" procedure: `../yad-epic/references/state-schema.md`.
 - The project overview site + the staleness/CI reconciler: `../yad-docs-overview/SKILL.md`,

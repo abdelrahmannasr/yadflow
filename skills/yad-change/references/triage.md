@@ -69,15 +69,14 @@ Write `.sdlc/contract-lock.json` with the parent's hash **verbatim**:
 ```
 
 Get the parent hash from the owning epic's `.sdlc/contract-lock.json` `hash` field (do NOT recompute — copy
-it). `contract-check.sh` reads only `hash`, so a build-half story in the change-epic pins this identical
+it). `contract-check.sh` reads only `hash`, so a Build story in the change-epic pins this identical
 hash via its `link.md` and the gate passes unchanged. There is no `contract.md` in the change-epic, so
 the surface physically cannot drift.
 
 **To CHANGE the surface instead:** do not inherit `architecture`. Then `yad-architecture` re-authors
 `contract.md` in the change-epic between fresh `CONTRACT-SURFACE` markers, computes a **new** hash, and
 writes a real (non-pointer) `contract-lock.json`. `architecture-review` carries `risk_tags: ["contract"]`
-→ the escalated domain-owner review. This is the same re-lock-invalidates-approvals behaviour the front
-half already has, relocated from "edit the locked file" to "author a contract-surface change-epic".
+→ the escalated domain-owner review. This is the same re-lock-invalidates-approvals behaviour Shape already has, relocated from "edit the locked file" to "author a contract-surface change-epic".
 
 ## Genesis migration (one-time, per feature)
 

@@ -2,7 +2,7 @@
 
 The PR/MR template (Phase 3 build plan §D) carries an **Impact & Risk** block so every change states
 its blast radius before review, and so high-risk changes pull in the right reviewers automatically —
-reusing the escalation `yad-review-gate` already applies on the front-half gates.
+reusing the escalation `yad-review-gate` already applies on the Shape gates.
 
 ## The Impact & Risk block
 

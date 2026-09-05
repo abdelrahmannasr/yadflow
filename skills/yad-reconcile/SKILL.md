@@ -52,7 +52,7 @@ Writes nothing. This is the read-only sweep a human (or CI) runs to see the pict
 
 ### Step 2 — `refresh` (advisory, never silent)
 For each flagged thread, **point the human at the fix** — open a reconcile change-epic with `yad-change`
-(`kind: change`, threaded to the affected feature) to bring the front artifacts back in step with what
+(`kind: change`, threaded to the affected feature) to bring the Shape artifacts back in step with what
 shipped, and pay any open debt (update the artifacts + add a regression test, then set the
 `reconcile-debt.json` entry `status: paid`). It never seeds the epic itself — opening a change-epic is a
 human, triaged act (`yad-change` Step 2).

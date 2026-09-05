@@ -1,6 +1,6 @@
 # Contract surface — format, altitude, and hash-lock
 
-The `contract.md` produced at front state 3 is the **single source of truth for the shared cross-repo
+The `contract.md` produced at Shape step 3 is the **single source of truth for the shared cross-repo
 surface** of an epic. Phase 3's contract-check (not built yet) fails a PR when a repo drifts from this
 surface. To make that check possible, the surface is delimited and hash-locked now.
 
@@ -70,6 +70,5 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 
 ## Why a hash (vs structured diff)
 
-A hash is the smallest representation that proves "did the agreed surface change?" — which is all the
-front half needs. A field-by-field structured diff is a Phase 3 concern (it tells you *what* drifted in
+A hash is the smallest representation that proves "did the agreed surface change?" — which is all Shape needs. A field-by-field structured diff is a Phase 3 concern (it tells you *what* drifted in
 a failing PR); the lock established here is what that future check compares against.

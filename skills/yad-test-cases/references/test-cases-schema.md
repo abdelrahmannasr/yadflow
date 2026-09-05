@@ -1,6 +1,6 @@
 # Test-cases schema
 
-The test cases authored at front state 9 are one Markdown file under `epics/EP-<slug>/`, named
+The test cases authored at Shape step 9 are one Markdown file under `epics/EP-<slug>/`, named
 `test-cases.md` (one per epic — mirrors `ui-design.md`, not a per-story folder). The optional automation
 linkage is a sibling `test-links.json`.
 

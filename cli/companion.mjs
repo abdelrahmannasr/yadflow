@@ -1,5 +1,5 @@
-// cli/companion.mjs — pure, perspective-neutral helpers for the Review Companion, shared by the front
-// half (yad gate …) and the back half (yad review …). The CLI never calls an LLM — generation happens
+// cli/companion.mjs — pure, perspective-neutral helpers for the Review Companion, shared by Shape
+// (yad gate …) and Build (yad review …). The CLI never calls an LLM — generation happens
 // in the skill/harness layer (like yad-learn/yad-docs). This module owns the platform MARKERS, the
 // engagement parsing, the trailer-block upsert, and the message text the skill and the gate share.
 //

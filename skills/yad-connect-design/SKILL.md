@@ -10,7 +10,7 @@ and/or web pages — inside a design tool such as **Figma**, alongside the Markd
 (`ui-design.md` / `DESIGN.md`). This skill **connects** a design tool to the product hub and records
 *how* to reach it (the tool, the project/file references, which MCP renders it) — never a credential.
 
-This is **setup/maintenance**, not a gated front state — it never touches `.sdlc/state.json` or any
+This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
 epic's approvals. It only writes the project-wide design registry. `yad-ui` consumes it: when a tool is
 connected and its MCP is available, the `ux-designer` lens **generates** screens into the tool (or
 **links** an existing human-made design and reads it back); when nothing is connected, `yad-ui` runs

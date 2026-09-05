@@ -13,7 +13,7 @@ const CONNECTORS = [
 const ORDER = [
   { step: 'Install the module', detail: 'npx yadflow setup copies all 37 yad-* skills and registers _bmad/sdlc/.' },
   { step: 'Detect the hub & roster', detail: 'Detect GitHub/GitLab from the remote; record reviewers (login → name + role) into hub.json.' },
-  { step: 'Connect code repos', detail: 'Register each repo in repos.json and cache a Repomix pack + code-map so the front phases are code-aware.' },
+  { step: 'Connect code repos', detail: 'Register each repo in repos.json and cache a Repomix pack + code-map so the Shape phases are code-aware.' },
   { step: 'Connect design / testing / learning', detail: 'Optional, one per project — each degrades gracefully and records that it is absent.' },
   { step: 'Connect a docs target', detail: 'Resolve the Pages host + Vite base path from hub.json so the generated sites can deploy.' },
 ];

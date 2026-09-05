@@ -1,14 +1,14 @@
 ---
 name: yad-pr-template
-description: 'Build-half Step D of the gated SDLC. Detect a code repo''s platform and commit the matching PR/MR template — .github/pull_request_template.md (GitHub) or .gitlab/merge_request_templates/Default.md (GitLab). The template carries an Impact & Risk block; a high risk level (or a touched contract/auth/payments surface) routes the review to domain owners, reusing yad-review-gate''s escalation. Includes risk-route.sh to print the required reviewers from a PR body. Never auto-advances. Use when the user says "add the PR template" or "set up the MR template" for a repo.'
+description: 'Build Step D of the gated SDLC. Detect a code repo''s platform and commit the matching PR/MR template — .github/pull_request_template.md (GitHub) or .gitlab/merge_request_templates/Default.md (GitLab). The template carries an Impact & Risk block; a high risk level (or a touched contract/auth/payments surface) routes the review to domain owners, reusing yad-review-gate''s escalation. Includes risk-route.sh to print the required reviewers from a PR body. Never auto-advances. Use when the user says "add the PR template" or "set up the MR template" for a repo.'
 ---
 
-# SDLC — PR/MR Template (build-half Step D)
+# SDLC — PR/MR Template (Build Step D)
 
 **Goal:** Commit the platform-correct PR/MR template into a code repo so every PR/MR carries an
 **Impact & Risk** block and a checklist tied to the check gates. A **high** risk level (or a touched
 contract/auth/payments surface) **routes the review to domain owners** — the same escalation
-`yad-review-gate` applies on the front-half gates (owner + 1 reviewer, plus one domain-owner per
+`yad-review-gate` applies on the Shape gates (owner + 1 reviewer, plus one domain-owner per
 touched domain). This step **never auto-advances**; it sets up the template and the routing helper.
 
 ## Conventions
@@ -21,7 +21,7 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   - `templates/gitlab/merge_request_templates/Default.md` → installs to
     `<repo>/.gitlab/merge_request_templates/Default.md`
   - `templates/checks/risk-route.sh` → installs to `<repo>/checks/risk-route.sh` (advisory routing helper)
-  - **Hub variants** (`repo: hub`) — front-half artifact-review PR/MR bodies:
+  - **Hub variants** (`repo: hub`) — Shape artifact-review PR/MR bodies:
     `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
     `templates/hub/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The hub body carries no `Task:` trailer

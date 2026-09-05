@@ -1,9 +1,9 @@
 // `yad next` — the unified next-step driver. Read-only: it never writes state or acts. It reads the
 // file ledger and prints the ONE concrete, copy-pasteable next action (and a one-line why), so a user
 // never has to remember which of the 38 skills / gate commands comes next. "Guide, don't act" — the
-// front half still never auto-advances. Once an epic is `ready-for-build`, it reads each story's
+// Shape still never auto-advances. Once an epic is `ready-for-build`, it reads each story's
 // build-state and prints the next BUILD sub-step per repo (spec → tasks → implement → checks → engineer-review)
-// plus the remaining chain — so the build half is guided too, not just hinted at.
+// plus the remaining chain — so Build is guided too, not just hinted at.
 //
 //   yad next                  general orientation across the whole project
 //   yad next <epic>           the single next action for one epic
@@ -87,10 +87,10 @@ function actionLine(a, { solo } = {}) {
     case 'review-sync':
       return `${c.bold(a.command)}${solo ? c.dim('   (solo: no approval needed — just merge your own PR)') : ''}`;
     case 'build': {
-      // In the build half: compact the lanes to "N lane(s) in build — next: <skill> @ <story>/<repo>".
+      // In Build: compact the lanes to "N lane(s) in build — next: <skill> @ <story>/<repo>".
       if (a.builds?.length) {
         const open = buildLanes(a.builds).filter((r) => !r.shipped);
-        if (!open.length) return c.dim('build half — every lane shipped');
+        if (!open.length) return c.dim('Build — every lane shipped');
         // Headline the first lane with a resolvable next skill; if none, the half is started but unspecced.
         const first = open.find((r) => r.skill);
         if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet`);
@@ -115,7 +115,7 @@ function printAction(a, { solo } = {}) {
   // kind of work this is. The discovery front-zero is not a feature epic — leave it un-prefixed.
   const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${kindNoun(a.lineageKind)} ` : '';
   log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)} ${c.dim(`— ${a.why}`)}`);
-  // In the build half with live lanes, print each story/repo's next sub-step + remaining chain instead
+  // In Build with live lanes, print each story/repo's next sub-step + remaining chain instead
   // of the single static hint; otherwise the one actionable line.
   if (a.kind === 'build' && a.builds?.length) printBuildLanes(a.builds);
   else hand(actionLine(a, { solo }));

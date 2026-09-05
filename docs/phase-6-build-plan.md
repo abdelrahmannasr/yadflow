@@ -15,7 +15,7 @@ architecture gate. Two gaps remained:
 1. **No change-request or defect/bug intake.** Every change had to be born from a story, so a post-lock
    fix had nowhere idiomatic to enter.
 2. **Silent staleness.** A behavioural change that does **not** touch the contract surface shipped through
-   the build half *without updating* `epic.md` / `stories/` / `spec.md` / `test-cases.md`. Those source
+   Build *without updating* `epic.md` / `stories/` / `spec.md` / `test-cases.md`. Those source
    artifacts drifted from reality, so the SDLC stopped being a trusted source of truth for AI on the next
    change — exactly the value the system exists to protect.
 
@@ -23,7 +23,7 @@ architecture gate. Two gaps remained:
 
 Mutating a locked artifact fights the immutability/audit philosophy and destroys the lock. Instead **every
 change request becomes a new epic, threaded to its parent**. A feature is a **thread** of linked epics
-(genesis → change → defect → …). A change-epic **inherits** the front artifacts it does not change (by
+(genesis → change → defect → …). A change-epic **inherits** the Shape artifacts it does not change (by
 reference) and **re-authors** only the ones it does. So:
 
 - Artifacts are never stale — they are **superseded**. The feature's current truth is the **head of the
@@ -100,7 +100,7 @@ not reachable from CI.
 
 ## Explicitly NOT in Phase 6
 - No mutation of any locked artifact — ever. A change is a new epic.
-- No auto-advance of any front state (a change-epic's re-authored steps are `human_approve`, like genesis).
+- No auto-advance of any Shape step (a change-epic's re-authored steps are `human_approve`, like genesis).
 - No new derivation in the existing gates — the thread is derived from `parent:` frontmatter, not a
   registry. (`spec-link`/`contract-check` were unchanged *by this phase*; both were later corrected for
   issues #149/#157, which altered neither what they derive nor where the thread comes from.)
