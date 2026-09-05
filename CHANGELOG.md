@@ -1,3 +1,13 @@
+# [3.18.0](https://github.com/abdelrahmannasr/yadflow/compare/v3.17.3...v3.18.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** add yad migrate with preview, backup and report ([39dde87](https://github.com/abdelrahmannasr/yadflow/commit/39dde87b9f38936b05b6cd6243a67b9a2aea7fb9))
+* **doctor:** report shape drift against the engine ([f2dc377](https://github.com/abdelrahmannasr/yadflow/commit/f2dc377815a1135b4015cff9f46f3384dc08ee56))
+* **release:** publish majors to a next channel and warn before upgrading ([70d2334](https://github.com/abdelrahmannasr/yadflow/commit/70d23347021a3635e8d71f6465d516bd6e72322d))
+* **state:** stamp schemaVersion 1 on every engine-written file ([872dde6](https://github.com/abdelrahmannasr/yadflow/commit/872dde61975b942e95670c60f329621802256ab8)), closes [#163](https://github.com/abdelrahmannasr/yadflow/issues/163)
+
 ## [3.17.3](https://github.com/abdelrahmannasr/yadflow/compare/v3.17.2...v3.17.3) (2026-09-03)
 
 ## [3.17.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.17.1...v3.17.2) (2026-09-03)
