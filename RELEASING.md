@@ -19,17 +19,29 @@ Two branches take part:
 - **`release`** — the only branch semantic-release publishes from (`.releaserc.json` →
   `"branches": ["release"]`). A person moves it with a fast-forward: `git push origin main:release`.
 
-`.github/workflows/release.yml` still runs on every push to `main`, but semantic-release sees that
-`main` is not a configured release branch, logs *"configured to only publish from release, therefore a
-new version won't be published"*, and exits without doing anything. (For that skip to be clean the
-`release` branch must exist on origin — semantic-release fails with `ERELEASEBRANCHES` when none of
-its configured branches exist.) Wiring the workflow to run on `release` behind a release check is
-roadmap task E106; until it lands, a fast-forward of `release` does not publish either. That is the
-intended state while the engine is changing (`docs/roadmap-idea-1.md`, Part 2 rule 8).
+`.github/workflows/release.yml` runs **only** on `release`. Nothing about a merge to `main` starts it.
 
-When the workflow does run on `release`, it:
+The workflow has two jobs, and the second cannot start without the first:
 
-1. installs deps (`npm ci`) and runs tests (`npm test`),
+**1. `release check`** — `scripts/release-check.sh`. Six steps, each one a way an upgrade could hurt
+somebody:
+
+| # | Step | What it protects against |
+|---|---|---|
+| 1 | tests + coverage | the ordinary bar, at the configured floors |
+| 2 | the golden compatibility test | a real frozen v3 project reading differently than it did (rule 6) |
+| 3 | `yad migrate --preview` on that project | an upgrade path that cannot even be planned — and it proves the preview writes nothing |
+| 4 | a fresh install of the packed tarball, then `yad setup` | a `files` mistake, or a release that cannot create a project |
+| 5 | `yad doctor` on the project that install just created | a release whose own health check fails on its own output |
+| 6 | the migration guide, if the file shape moved | shipping a shape change with no page explaining it (rule 7) |
+
+It checks out with `persist-credentials: false`: this job only reads, and the token that can bypass
+branch protection has no business being in scope while the test suite runs. Run it yourself any time
+with `npm run release-check`.
+
+**2. `release`** — only if the check passed. It:
+
+1. installs deps (`npm ci`),
 2. runs `npx semantic-release`, which:
    - reads the [Conventional Commits](CONTRIBUTING.md) since the last release to pick the next version
      (`fix:`/`perf:`/`revert:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major;
@@ -51,9 +63,10 @@ tarball-leak smoke on every PR.
 > is `release`, not `main`.
 >
 > So after a real publish `release` is one commit ahead of `main`, and the next sync is **no longer a
-> fast-forward**. That commit has to come back to `main` (a PR, or an admin push) or `main`'s
-> `package.json` version drifts behind npm. Automating that reconciliation belongs to the release check,
-> roadmap task **E106**; it cannot arise before then, because the workflow does not yet run on `release`.
+> fast-forward**. That commit has to come back to `main` — see step 4 of *Cutting a release* — or
+> `main`'s `package.json` version drifts behind npm and the following release is refused. Nothing
+> automates this: it is one manual step per release, on purpose, because the alternative is a robot
+> pushing to `main`.
 >
 > `RELEASE_TOKEN` (step D) exists because the commit-back used to target protected `main`, which the
 > default `GITHUB_TOKEN` cannot push to. Now that the target is `release`, that bypass is only needed if
@@ -140,10 +153,38 @@ platform enforces.
    git fetch origin
    git push origin origin/main:release   # fast-forward only; never force
    ```
-   Until roadmap task E106 lands, this only records the decision — the workflow is not yet wired to
-   `release`, so no publish happens. After E106 the release check runs first and semantic-release
-   publishes only if it passes.
+   This is the release. It starts the workflow: the release check runs first, and semantic-release
+   publishes only if every step passes.
 3. Watch the run under the repo's **Actions** tab.
+4. **After a successful publish, bring the release commit back to `main`.** semantic-release commits
+   the regenerated `CHANGELOG.md` + `package.json` + `package-lock.json` to the branch it ran on, so
+   `release` is now one commit ahead. Until that commit reaches `main`, `main`'s version is behind npm
+   and the next fast-forward (step 2) is refused as a non-fast-forward.
+
+   Push it straight to `main`, with the same account that owns `RELEASE_TOKEN`:
+
+   ```bash
+   git fetch origin
+   git push origin origin/release:main
+   ```
+
+   **Not a pull request.** The `chore(release)` commit is authored by `semantic-release-bot` and is
+   unsigned, and `yad-verified-commits` runs on every PR into any branch — so a sync-back PR is red by
+   construction and could only be merged with an admin override. Pushing directly is the honest route,
+   and it is the same bypass the release job itself already uses.
+
+   If you do open one anyway, **merge it with a merge commit**. A squash or rebase rewrites that commit
+   into a new SHA, `release` stops being an ancestor of `main`, and the next release's fast-forward
+   breaks — the exact failure this step exists to prevent.
+
+   The `[skip ci]` marker on the commit stops it from starting another release.
+
+Run the same check locally before you decide, so a failure costs you a minute rather than a red
+release:
+
+```bash
+npm run release-check
+```
 
 ## Verify
 

@@ -1597,3 +1597,99 @@ test('ledger-guard wrapper: resolution order, and fail-open when nothing resolve
     assert.ok(!fs.existsSync(path.join(onPath, 'argv.txt')), 'the PATH copy was never invoked');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------------------------
+// scripts/shape-guide-check.sh — rule 7: a file-shape change ships WITH its migration guide
+// ---------------------------------------------------------------------------------------------
+// The gate the release check leans on (E106). It compares the SCHEMA_VERSION in the tree against the
+// one in the last release tag, so the tests build a scratch repo with a tag rather than mutating this
+// one: the whole point is what happens when the number moves, and it must not move here to find out.
+const SHAPE_GUIDE = path.join(ROOT, 'scripts/shape-guide-check.sh');
+
+// A repo shaped like this one as far as the script is concerned: a manifest that exports
+// SCHEMA_VERSION, and a `v*` tag holding an earlier copy of it.
+function shapeRepo({ tagged, current, guides = [] }) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-guide-'));
+  fs.mkdirSync(path.join(T, 'cli'), { recursive: true });
+  fs.mkdirSync(path.join(T, 'scripts'), { recursive: true });
+  fs.copyFileSync(SHAPE_GUIDE, path.join(T, 'scripts/shape-guide-check.sh'));
+  const manifest = (v) => (v === null
+    ? 'export const VERSION = "0.0.0";\n'            // pre-E13: no SCHEMA_VERSION at all
+    : `export const SCHEMA_VERSION = ${v};\n`);
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.name', 'shape');
+  git(T, 'config', 'user.email', 'shape@local');
+  fs.writeFileSync(path.join(T, 'cli/manifest.mjs'), manifest(tagged));
+  git(T, 'add', '-A');
+  git(T, 'commit', '-qm', 'released');
+  git(T, 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'); // annotated, as semantic-release tags
+  fs.writeFileSync(path.join(T, 'cli/manifest.mjs'), manifest(current));
+  for (const g of guides) {
+    fs.mkdirSync(path.join(T, 'docs/migrations'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'docs/migrations', g), '# guide\n');
+  }
+  return T;
+}
+const runShapeGuide = (T) => spawnSync('bash', [path.join(T, 'scripts/shape-guide-check.sh')], { cwd: T, encoding: 'utf8', env: GIT_ENV });
+
+test('shape guide: an unchanged shape needs no guide', () => {
+  const T = shapeRepo({ tagged: 1, current: 1 });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /file shape unchanged/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: a shape that moved WITHOUT its guide blocks the release', () => {
+  const T = shapeRepo({ tagged: 1, current: 2 });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 1, 'a shape change with no migration guide must not be releasable');
+  assert.match(r.stderr, /docs\/migrations\/shape-2\.md/, 'the missing file is named');
+  assert.match(r.stderr, /ships WITH its migration guide/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: a shape that moved WITH its guide passes', () => {
+  const T = shapeRepo({ tagged: 1, current: 2, guides: ['shape-2.md'] });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /file shape moved 1 -> 2/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: skipping a shape needs a guide for EVERY step, not just the last', () => {
+  // A user can be sitting on any released shape, so 1 → 3 has to explain 2 as well.
+  const T = shapeRepo({ tagged: 1, current: 3, guides: ['shape-3.md'] });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /shape-2\.md/, 'the intermediate step is still required');
+  assert.doesNotMatch(r.stderr, /shape-3\.md/, 'the one that exists is not reported missing');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: a release from BEFORE the stamp existed counts as shape 1', () => {
+  // v3.17.3 has no SCHEMA_VERSION in its manifest. That is not a missing value — everything the
+  // engine wrote then was shape 1 by rule 1, so moving to 2 still needs a guide.
+  const T = shapeRepo({ tagged: null, current: 2 });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /moved from 1 to 2/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: a shape that went DOWN is refused — a release may add, never remove', () => {
+  const T = shapeRepo({ tagged: 2, current: 1 });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /went DOWN/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: with no release tag at all, this shape is the baseline', () => {
+  const T = shapeRepo({ tagged: 1, current: 1 });
+  git(T, 'tag', '-d', 'v1.0.0');
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /baseline/);
+  fs.rmSync(T, { recursive: true, force: true });
+});

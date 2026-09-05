@@ -1,33 +1,82 @@
 name: Release
 
+# Runs ONLY on the `release` branch. Merging to `main` publishes nothing — a release happens when a
+# person fast-forwards `release` to `main` (RELEASING.md), which is what triggers this. Rule 10 of the
+# change-safety rules: a robot may build, test and tag; it may not decide that users get a new version.
 on:
   push:
-    branches: [main]
+    branches: [release]
 
+# Least privilege at the WORKFLOW level, so nothing is granted by inheritance. The publishing
+# credentials are declared on the `release` job alone — see the note on the check job below.
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
+  # The gate. Everything that could hurt someone upgrading is proved here, on a runner, before any
+  # credential capable of publishing is in scope. See scripts/release-check.sh for what each step is
+  # protecting against.
+  check:
+    name: release check
+    runs-on: ubuntu-latest
+    # Read-only, and deliberately WITHOUT `id-token: write`. npm Trusted Publishing binds to the repo
+    # and the workflow FILENAME, not the job, so any job holding that permission can mint a token and
+    # publish. This job runs `npm ci` (dependency install scripts), the whole test suite, and a
+    # globally installed copy of the tarball it just built — the last place a publishing credential
+    # should be reachable. Granting it here would mean the gate could be bypassed by the very code it
+    # exists to gate.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history + tags: the shape-guide check compares this tree's SCHEMA_VERSION against the
+          # one in the last release tag, and cannot see tags in a shallow clone.
+          fetch-depth: 0
+          # No release PAT here. This job only reads, and the token that can bypass branch protection
+          # has no business being in scope while arbitrary test code runs.
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Tests, coverage, the golden compatibility test, `yad migrate --preview` on a real frozen v3
+      # project, a fresh install of the packed tarball, `yad doctor` on the project that install
+      # creates, and the migration guide when the file shape moved.
+      - name: Release check
+        run: bash scripts/release-check.sh
+
   release:
     name: release
+    needs: check
     runs-on: ubuntu-latest
+    # The only job that can publish, and it cannot start until the check above passes.
+    permissions:
+      contents: write        # the chore(release) commit + the git tag
+      issues: write          # @semantic-release/github comments on released issues
+      pull-requests: write   # …and on released PRs
+      id-token: write        # npm Trusted Publishing (OIDC) — the actual publish credential
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           # Persist the release PAT so @semantic-release/git can push the
-          # chore(release) commit to protected main. The PAT must belong to a
-          # user in main's branch-protection bypass list; the default
-          # GITHUB_TOKEN cannot bypass the required-PR rule. Falls back to
-          # GITHUB_TOKEN only so non-release CI still checks out.
+          # chore(release) commit back to the release branch. If `release` is
+          # protected (RELEASING.md step E — recommended, since pushing it is
+          # the act of shipping), the PAT owner must be in its bypass list;
+          # the default GITHUB_TOKEN cannot bypass a protection rule. Falls
+          # back to GITHUB_TOKEN only so a checkout still works without it.
           persist-credentials: true
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -47,14 +96,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Test
-        run: npm test
-
+      # No explicit test step: the check job ran the whole suite plus coverage, and this job cannot
+      # start without it. Note that `prepublishOnly` (package.json) still runs `npm test` inside
+      # `npm publish` — kept on purpose as the last-line guard for a MANUAL publish, which no workflow
+      # gates (RELEASING.md step A).
       - name: Semantic Release
         env:
           # Release PAT (bypasses branch protection) so @semantic-release/git
-          # can commit CHANGELOG.md + package.json back to main. Also used by
-          # @semantic-release/github for the release/tag. npm publish stays
-          # tokenless via OIDC (id-token: write), independent of this token.
+          # can commit CHANGELOG.md + package.json back to the release branch.
+          # Also used by @semantic-release/github for the release/tag. npm
+          # publish stays tokenless via OIDC (id-token: write), independent of
+          # this token.
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: npx semantic-release
