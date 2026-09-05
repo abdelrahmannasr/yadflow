@@ -44,6 +44,12 @@ and terminates at `discovery-done` (no Build).
 `roadmap.md` is the menu of features each `yad-epic` reads (Step 2c) — reference-only, never
 auto-seeds epics.
 
+<!-- `1-front` and `3-build` are DATA — the `phase` column in skills/sdlc/module-help.csv, which
+     the overview build reads. The Shape/Build/Run rename deliberately left them alone: change-safety
+     rule 3 says a release may add but never rename, so a stored value moves in a major with a
+     migration, not in a wording sweep. The display names below are the new vocabulary; the ids are
+     the old one, on purpose. -->
+
 ### Path: Shape (`phase: 1-front`)
 The gated authoring chain + the reusable review gate (10 steps, or 12 with the optional analysis).
 

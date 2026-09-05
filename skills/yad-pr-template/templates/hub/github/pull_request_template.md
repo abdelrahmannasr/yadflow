@@ -12,7 +12,7 @@
 ## What changed
 <!-- One or two sentences on what this artifact says / what changed since the last review round. -->
 
-## Impact & Risk (Shape)
+## Impact & Risk (front-half)
 - **Domains / repos touched:** <epic.repos, e.g. backend, mobile>
 - **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => escalates to domain owners -->
 - **Contract surface:** <n/a | locked @ sha256:…>  <!-- architecture only; a re-lock invalidates prior approvals -->

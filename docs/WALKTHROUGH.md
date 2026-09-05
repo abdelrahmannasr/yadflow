@@ -70,7 +70,7 @@ Each author step writes its artifact, sets itself `done`, moves `currentStep` to
 **stops at the gate**. Run every gate with **`yad-review-gate`** — or, when the hub is on a platform,
 drive it deterministically with the **`yad gate`** CLI (`open → sync → … → merge`): the review rides
 the per-step PR/MR and the step **auto-advances on merge** once approvals are satisfied and all comment
-threads are resolved. Details: **"Run the full Shape by hand"** below.
+threads are resolved. Details: **"Run all of Shape by hand"** below.
 
 0. *(optional, once per project)* `yad-discovery` → the discovery set (`market-research.md`,
    `competitor-analysis.md`, `current-state.md`, `feasibility.md`, `requirements.md`, `roadmap.md`)
@@ -119,7 +119,7 @@ Build by hand"** below.
 
 ## C — Automation (optional, earned over time)
 
-15. After a back step accumulates trust evidence, earn it:
+15. After a Build step accumulates trust evidence, earn it:
     `yad-run action: set-dial step:<step> to: machine_advance` (refused if evidence is short or for a
     Shape step / the engineer review).
 16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
@@ -146,7 +146,7 @@ Build by hand"** below.
 
 ---
 
-## Run the full Shape by hand
+## Run all of Shape by hand
 
 Optionally preceded once per project by the **front-zero** — **`yad-discovery` → review →
 `discovery-done`** — which frames the whole product (market, competitor, feasibility, requirements,
@@ -299,7 +299,7 @@ backfilled. The code repos are regenerable from `demo-repos/README.md`.
 Phase 4 is **automation, earned with evidence and reversible in one move**. Phase 4a made the
 `automation` dial real and earned the safest step (the check-gate advance); Phase 4b added the
 `implement → check` hand-off and the `spec`/`tasks` trust hooks. The engine is `yad-run`; the
-evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>.json` (the back steps
+evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>.json` (the Build steps
 with their dials, per repo) and `trust-log.json` (every run's verdict). See
 `docs/phase-4-build-plan.md` and `docs/phase-4b-build-plan.md`.
 
@@ -307,7 +307,7 @@ with their dials, per repo) and `trust-log.json` (every run's verdict). See
   reading each step's dial. On `machine_advance` it advances on its own; on `human_approve` it stops
   for a human; on any FAIL, scope overrun, or contract-surface touch it **halts and pulls in a human**.
   It always stops at the engineer review (`yad-engineer-review`), which is never automated.
-- **Read the trust log:** `yad-status {epic}` shows each back step's dial, status, and trust record —
+- **Read the trust log:** `yad-status {epic}` shows each Build step's dial, status, and trust record —
   runs, % `approved-unchanged`, and whether that clears the threshold (`automation.trust_threshold` in
   `config.yaml`, default ≥5 runs and ≥80% unchanged). The engineer review records each run's verdict
   (a diff merged as-authored is `approved-unchanged`; one edited first is `approved-with-edits`; a

@@ -429,7 +429,7 @@ const automationSteps: FlowStep[] = [
     id: "set-dial",
     title: "Set Dial (earn automation)",
     description:
-      "Once a back step's trust slice clears the threshold, `yad-run set-dial step:<step> to: machine_advance` flips it. The setter REFUSES if evidence is short, or for any Shape step / the engineer review. Earned per step.",
+      "Once a Build step's trust slice clears the threshold, `yad-run set-dial step:<step> to: machine_advance` flips it. The setter REFUSES if evidence is short, or for any Shape step / the engineer review. Earned per step.",
     actor: "engineer",
     status: "earned",
     stepState: "state.json (automation dial)",

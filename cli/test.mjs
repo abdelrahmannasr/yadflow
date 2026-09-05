@@ -940,6 +940,31 @@ test('templateBody: the hub-tooling body passes the real pr-template hub gate on
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// Change-safety rule 3 (add before you remove) for the Shape/Build/Run rename. The hub gate is
+// refreshed by `yad update`; the PR template beside it is NOT (it is wired by a skill nobody runs
+// automatically), so a hub will sit with a new checker and an old template. BOTH spellings of the
+// Impact & Risk heading must pass the real script, or every artifact-review PR on that hub fails.
+// A sweep once rewrote the compatibility regex itself into `(Shape|Shape)`; these two cases are
+// what would have caught that.
+for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape)']) {
+  test(`pr-template hub gate accepts '${heading}' (rule 3: add before you remove)`, () => {
+    const T = hubDir();
+    const bodyFile = path.join(T, 'pr-body.md');
+    fs.writeFileSync(bodyFile, [
+      '## Artifact under review', '', 'architecture.md (EP-demo)', '',
+      heading, '', 'Risk tags: contract', '',
+      '## Checklist', '', '- [x] reviewed', '',
+    ].join('\n'));
+    const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+    const r = (() => {
+      try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return { code: 0, out: '' }; }
+      catch (e) { return { code: e.status, out: String(e.stdout || '') + String(e.stderr || '') }; }
+    })();
+    assert.equal(r.code, 0, `the hub gate rejected '${heading}':\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('fillHubTemplate: the generated review-PR body carries every section the hub gate requires (#103)', () => {
   const b = fillHubTemplate({
     epic: 'EP-demo', artifact: 'architecture.md',
@@ -948,7 +973,7 @@ test('fillHubTemplate: the generated review-PR body carries every section the hu
   });
   // check_hub_body requires all four; `## Checklist` was the one missing before the fix.
   assert.match(b, /^## Artifact under review$/m);
-  assert.match(b, /^## Impact & Risk \(Shape\)$/m);
+  assert.match(b, /^## Impact & Risk \(front-half\)$/m);
   assert.match(b, /^## Checklist$/m);
   assert.match(b, /Risk tags:/);
 });
@@ -6594,7 +6619,7 @@ function hubForCheckpoint() {
 
 // Dirty the Build ledgers for one story, plus a Shape state.json that checkpoint must never
 // stage (it is the CI-owned ledger guarded by ledger-guard).
-function writeBackHalf(T, epic, story) {
+function writeBuildLedgers(T, epic, story) {
   const sdlc = path.join(T, 'epics', epic, '.sdlc');
   fs.mkdirSync(path.join(sdlc, 'build-state'), { recursive: true });
   fs.writeFileSync(path.join(sdlc, 'trust-log.json'), JSON.stringify({ epic, runs: [] }));
@@ -6630,7 +6655,7 @@ test('buildCheckpointMessage: chore(hub) subject, no trailing period, no AI foot
 
 test('buildLedgerPathspecs lists only the Build ledgers that exist — never the Shape', () => {
   const T = hubForCheckpoint();
-  writeBackHalf(T, 'EP-a', 'EP-a-S03');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S03');
   const specs = buildLedgerPathspecs(T);
   assert.ok(specs.includes('epics/EP-a/.sdlc/trust-log.json'));
   assert.ok(specs.includes('epics/EP-a/.sdlc/build-state'));
@@ -6642,7 +6667,7 @@ test('buildLedgerPathspecs lists only the Build ledgers that exist — never the
 test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subject', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
-  writeBackHalf(T, 'EP-checkout', 'EP-checkout-S03');
+  writeBuildLedgers(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
   assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by @abdelrahmannasr [skip ci]');
@@ -6657,7 +6682,7 @@ test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subje
 test('runCheckpoint commits ONLY the allowlist even when an unrelated file is already staged', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   fs.writeFileSync(path.join(T, 'unrelated.txt'), 'hi'); // stage something outside the allowlist
   git(T, 'add', 'unrelated.txt');
   await grab(() => runCheckpoint(T, {}));
@@ -6672,7 +6697,7 @@ test('runCheckpoint commits ONLY the allowlist even when an unrelated file is al
 test('runCheckpoint is a clean no-op when nothing changed', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   await grab(() => runCheckpoint(T, {}));
   const head1 = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, {}));
@@ -6687,7 +6712,7 @@ test('runCheckpoint refuses off the default branch, and --allow-branch overrides
   const prev = process.exitCode;
   const T = hubForCheckpoint();
   git(T, 'checkout', '-q', '-b', 'wip/side');
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, {}));
   assert.match(out, /not the default branch/);
@@ -6703,7 +6728,7 @@ test('runCheckpoint refuses off the default branch, and --allow-branch overrides
 test('runCheckpoint --dry-run prints the message but commits nothing and leaves the index clean', async () => {
   const prev = process.exitCode;
   const T = hubForCheckpoint();
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const head0 = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, { dryRun: true }));
   assert.match(out, /chore\(hub\): sync Build state/);
@@ -6720,7 +6745,7 @@ test('runCheckpoint --push lands the commit on the bare remote default branch', 
   git(bare, 'init', '-q', '--bare');
   git(T, 'remote', 'add', 'origin', bare);
   git(T, 'push', '-q', 'origin', 'main');
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   await grab(() => runCheckpoint(T, { push: true }));
   assert.equal(
     git(T, 'rev-parse', 'HEAD').toString().trim(),
@@ -6805,7 +6830,7 @@ test('runCheckpoint does NOT carry a story flip lacking a build-log ship, even w
   writeStory(T, 'EP-a', 'EP-a-S09', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed unshipped story');
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S09.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S09\n`);
-  writeBackHalf(T, 'EP-a', 'EP-a-S01'); // give checkpoint a real ledger change so it commits
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01'); // give checkpoint a real ledger change so it commits
   await grab(() => runCheckpoint(T, {}));
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.length, 'the ledger change was committed');
@@ -7097,7 +7122,7 @@ test('runCheckpoint drops a ship-backed story whose change is MORE than the stat
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
   // The flip AND an unrelated prose edit in the same file — the prose must NOT ride a [skip ci] commit.
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01 — secretly reworded\n`);
-  writeBackHalf(T, 'EP-a', 'EP-a-S02'); // a real ledger change so checkpoint still commits something
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S02'); // a real ledger change so checkpoint still commits something
   const out = await grab(() => runCheckpoint(T, {}));
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(!files.includes('epics/EP-a/stories/EP-a-S01.md'), 'the mixed prose+status edit must not ride the chore commit');
@@ -7116,7 +7141,7 @@ test('runCheckpoint: a corrupt build-log in one epic does not block checkpointin
   fs.mkdirSync(path.join(T, 'epics/EP-bad/stories'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-bad/.sdlc/build-log.json'), '{ this is not json');
   fs.writeFileSync(path.join(T, 'epics/EP-bad/stories/EP-bad-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-bad-S01\n`);
-  writeBackHalf(T, 'EP-ok', 'EP-ok-S01');
+  writeBuildLedgers(T, 'EP-ok', 'EP-ok-S01');
   const out = await grab(() => runCheckpoint(T, {}));
   assert.doesNotMatch(out, /yad failed|YAD-STATE/, 'a corrupt build-log must not abort the whole checkpoint');
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
@@ -7152,7 +7177,7 @@ test('runCheckpoint guard fires even with hub.default_branch UNSET — never tru
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed'); git(T, 'branch', '-q', '-M', 'main');
   git(T, 'checkout', '-q', '-b', 'feat/side'); // no origin/HEAD ⇒ derives 'main'; we sit on feat/side
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, {}));
   assert.match(out, /not the default branch/);
@@ -7166,7 +7191,7 @@ test('runCheckpoint --force does NOT bypass the branch guard — only --allow-br
   const prev = process.exitCode;
   const T = hubForCheckpoint();
   git(T, 'checkout', '-q', '-b', 'wip/x');
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const out = await grab(() => runCheckpoint(T, { force: true }));
   assert.match(out, /not the default branch/);
   assert.ok(process.exitCode, '--force must not disable the safety guard');
@@ -7184,7 +7209,7 @@ test('runCheckpoint --allow-branch --push pushes the CURRENT branch, never the d
   const mainAtStart = git(bare, 'rev-parse', 'main').toString().trim();
   git(T, 'checkout', '-q', '-b', 'wip/side');
   fs.writeFileSync(path.join(T, 'wip.txt'), 'half done'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'feat: wip');
-  writeBackHalf(T, 'EP-a', 'EP-a-S01');
+  writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   await grab(() => runCheckpoint(T, { push: true, allowBranch: true }));
   assert.equal(git(bare, 'rev-parse', 'main').toString().trim(), mainAtStart, 'origin/main is NOT advanced by a WIP-branch checkpoint');
   assert.equal(

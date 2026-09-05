@@ -946,7 +946,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains }) {
     `- Gate step: \`${step.id}\``,
     `- Owner: \`${owner}\``,
     '',
-    '## Impact & Risk (Shape)',
+    '## Impact & Risk (front-half)',
     `- **Domains / repos touched:** ${domains.join(', ') || 'n/a'}`,
     `- **Risk tags:** ${(step.risk_tags || []).join(', ') || 'none'}`,
     '',

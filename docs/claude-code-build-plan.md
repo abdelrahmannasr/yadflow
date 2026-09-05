@@ -401,7 +401,7 @@ The same epic ID appears in: the epic folder name, every story file, every spec 
 4. **The glue + state files (pieces 1 and 6)** — make the engine run steps in order and read/write `.sdlc/` state.
 5. **UI design step (Impeccable)** and **backfill step (Repomix)**.
 6. **Multi-repo contract (piece 3)** — add when a feature first spans more than one repo.
-7. **End-first automation** — only after months of evidence the AI is trustworthy on this codebase. Move back steps toward `machine_advance` one at a time. Never the Shape steps in this version.
+7. **End-first automation** — only after months of evidence the AI is trustworthy on this codebase. Move Build steps toward `machine_advance` one at a time. Never the Shape steps in this version.
 
 Add each tool only when it removes a real, measured bottleneck.
 

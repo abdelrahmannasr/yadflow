@@ -30,7 +30,7 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
   that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use
   the template" (#164). Both GitLab templates say so in a comment and keep `## Summary` /
-  `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (Shape)`
+  `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (front-half)`
   / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
   Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
 - **Installed templates are yad-managed.** `yad update` rewrites them on upgrade. An edit yad can

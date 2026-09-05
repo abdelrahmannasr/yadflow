@@ -28,7 +28,7 @@ const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[
     color: '#1e8449',
     steps: [
       { name: 'human_approve', description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.', type: 'notify' },
-      { name: 'machine_advance', description: 'Earned per back step; yad-run advances it on its own once trust is proven.', type: 'persist' },
+      { name: 'machine_advance', description: 'Earned per Build step; yad-run advances it on its own once trust is proven.', type: 'persist' },
     ],
   },
   {

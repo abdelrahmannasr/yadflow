@@ -17,7 +17,7 @@ import { TroubleshootingSection } from './TroubleshootingSection';
 const STEP_ADVANCE_RULES = [
   { status: 'Setup & connectors', canCancel: 'Not gated', color: '#b7950b', dotColor: '#b7950b' },
   { status: 'Shape steps (epic … stories)', canCancel: 'Human (locked)', color: '#566573', dotColor: '#566573' },
-  { status: 'Back steps (spec … checks)', canCancel: 'Earnable', color: '#1e8449', dotColor: '#1e8449' },
+  { status: 'Build steps (spec … checks)', canCancel: 'Earnable', color: '#1e8449', dotColor: '#1e8449' },
   { status: 'Engineer review & merge', canCancel: 'Human (locked)', color: '#ca6f1e', dotColor: '#ca6f1e' },
 ];
 

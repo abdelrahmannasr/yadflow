@@ -100,4 +100,4 @@ Build these as the CI checks that must pass before merge. Each is a separate, si
 
 ## Then Phase 4 (preview, do not build yet)
 
-End-first automation: move the safe back steps toward `machine_advance` one at a time (tasks → implement → checks first), keeping Shape steps human-authored. Then, much later, the optional service layer (watch repos, run unattended, dashboards) — built only when the CLI genuinely can't keep up, with git remaining the source of truth.
+End-first automation: move the safe Build steps toward `machine_advance` one at a time (tasks → implement → checks first), keeping Shape steps human-authored. Then, much later, the optional service layer (watch repos, run unattended, dashboards) — built only when the CLI genuinely can't keep up, with git remaining the source of truth.

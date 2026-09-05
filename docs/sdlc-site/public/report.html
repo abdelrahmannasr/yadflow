@@ -713,7 +713,7 @@ each code repo/
     <tr><td>Spec-link check</td><td>On from day one</td><td><strong>Add it</strong> + mark do-not-touch zones</td><td>Add with the rest of the wiring</td></tr>
     <tr><td>Impeccable order (UI)</td><td><code>craft</code> → <code>extract</code></td><td><code>document</code> → <code>extract</code> → <code>craft</code></td><td><code>document</code> → <code>extract</code> → <code>craft</code></td></tr>
     <tr><td>AI scope at start</td><td>Full (specs from the start)</td><td>Full, minus do-not-touch zones</td><td><strong>Safe tasks only</strong> (tests, docs, refactors)</td></tr>
-    <tr><td>Automation pace</td><td colspan="3">Identical for all: every dial starts <code>human_approve</code>; back steps earn <code>machine_advance</code> via the trust log; Shape steps + engineer review locked human forever.</td></tr>
+    <tr><td>Automation pace</td><td colspan="3">Identical for all: every dial starts <code>human_approve</code>; Build steps earn <code>machine_advance</code> via the trust log; Shape steps + engineer review locked human forever.</td></tr>
   </table>
 </section>
 
@@ -970,7 +970,7 @@ yad commit --type fix -m "handle null user" --dry-run   # preview only</code></p
 
   <div class="skillcard" id="sk-ship">
     <h4><code>yad-ship</code> — Build helper</h4>
-    <div class="row"><span class="lbl lbl-what">What</span> Does the two routine Build hand-actions for one task in <strong>one step</strong>: commit by convention, then open the task PR/MR. A thin wrapper over <code>yad-commit</code> then <code>yad-open-pr</code> — the PR step runs <em>only</em> if the commit lands (a failed commit, tripped guard, or <code>--dry-run</code> stops before pushing). It never merges.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> Does both routine Build hand-actions for one task in <strong>one step</strong>: commit by convention, then open the task PR/MR. A thin wrapper over <code>yad-commit</code> then <code>yad-open-pr</code> — the PR step runs <em>only</em> if the commit lands (a failed commit, tripped guard, or <code>--dry-run</code> stops before pushing). It never merges.</div>
     <div class="row"><span class="lbl lbl-how">How</span> On the task branch, with the change staged:</div>
 <pre><code>yad ship --type feat -m "add the order endpoint" --ai claude --repo backend --risk low</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> The common case — turn an implemented, staged task into a reviewable PR/MR in one command.</div>
@@ -1005,12 +1005,12 @@ yad-run action: set-dial step: checks to: machine_advance    # earn automation (
 yad-run action: set-dial step: checks to: human_approve      # revert — always allowed
 yad-run action: kill      # everything back to human, system-wide, instantly
 yad-run action: unkill    # restore earned automation</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Entirely optional — ignore it at first; every step is human-approved by default. Reach for it once a back step’s trust record clears the threshold (default: ≥5 runs, ≥80% approved-unchanged). Use <code>kill</code> the moment anything feels wrong.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Entirely optional — ignore it at first; every step is human-approved by default. Reach for it once a Build step’s trust record clears the threshold (default: ≥5 runs, ≥80% approved-unchanged). Use <code>kill</code> the moment anything feels wrong.</div>
   </div>
 
   <div class="skillcard" id="sk-status">
     <h4><code>yad-status</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> dashboard in text: the epic’s full step chain, every step’s two dials and status, the contract lock, which approvals the active gate is still waiting on, each back step’s trust record, the kill-switch state — and across epics, the fleet roll-up. It changes nothing.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> A <strong>read-only</strong> dashboard in text: the epic’s full step chain, every step’s two dials and status, the contract lock, which approvals the active gate is still waiting on, each Build step’s trust record, the kill-switch state — and across epics, the fleet roll-up. It changes nothing.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-status                          # everything, across epics (fleet view)
 yad-status EP-checkout     # one epic in detail</code></pre>

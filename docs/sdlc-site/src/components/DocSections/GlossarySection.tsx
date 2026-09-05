@@ -24,7 +24,7 @@ const TERM_GROUPS = [
     steps: [
       'assistance — none | review | heavy: how much AI helps author a step.',
       'automation — human_approve | machine_advance: who advances a step.',
-      'Earned automation — a back step set to machine_advance after its trust slice clears ≥5 runs / ≥80% unchanged.',
+      'Earned automation — a Build step set to machine_advance after its trust slice clears ≥5 runs / ≥80% unchanged.',
       'Kill switch — one line that forces every step back to human_approve system-wide, instantly reversible.',
     ],
   },

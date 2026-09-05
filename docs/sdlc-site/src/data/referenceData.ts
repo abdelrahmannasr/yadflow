@@ -99,7 +99,7 @@ export const AUTOMATION_DIAL_STATES: DialState[] = [
     endpoint: 'state.json · per step',
     schemaValue: 'automation: machine_advance',
     isTerminal: true,
-    description: 'Earned per back step once its trust slice clears the threshold; the orchestrator advances it on its own.',
+    description: 'Earned per Build step once its trust slice clears the threshold; the orchestrator advances it on its own.',
     visibleTo: ALL,
   },
 ];

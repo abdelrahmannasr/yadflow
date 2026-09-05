@@ -196,7 +196,7 @@ catches a free-form description that bypassed it:
   `Risk level:` (`low|medium|high`).
 - `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head`) → requires the artifact-review template: `## Artifact under
-    review`, `## Impact & Risk (Shape)`, `## Checklist`, and a `Risk tags:` line.
+    review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
   - any other head → a hub tooling PR, so it requires the `code` task template (`## Summary`,
     `## Impact & Risk`, `## Checklist`, filled `Risk level:`).
   - **Anti-bypass guard** (same as pr-title): a non-review head that changes Shape artifacts

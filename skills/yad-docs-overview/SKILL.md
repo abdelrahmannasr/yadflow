@@ -39,7 +39,7 @@ It only reads the pipeline definition and writes a project-level site. When a do
 There is no epic; the inputs are the workflow's own config + manifest (full mapping in
 `references/pipeline-model.md`):
 
-- `skills/sdlc/config.yaml` — the front/back steps, the **two dials** (assistance, automation),
+- `skills/sdlc/config.yaml` — the Shape/Build steps, the **two dials** (assistance, automation),
   defaults, the review-gate rule, the build conventions, the automation/trust thresholds.
 - `skills/sdlc/module-help.csv` — the **canonical skill manifest**: each skill's `phase`,
   `preceded-by` / `followed-by`, and `outputs`. This is the ordering source of truth.

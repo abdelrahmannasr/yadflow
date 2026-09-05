@@ -6,7 +6,7 @@
 #   --profile code (default) — the code-repo task template (yad-pr-template templates/<platform>/):
 #     requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:` (low|medium|high).
 #   --profile hub — the Shape artifact-review template (templates/hub/<platform>/):
-#     requires `## Artifact under review`, `## Impact & Risk (Shape)`, `## Checklist`, and a `Risk tags:` line.
+#     requires `## Artifact under review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
 #     BUT only for review/EP-* head branches. Every other hub PR is a tooling/code change to the hub
 #     itself and uses the code task template instead; pass the head ref via --head so the gate knows
 #     which template to require. With no --head, the hub profile stays strict (artifact-review template).
@@ -94,11 +94,15 @@ check_code_body() {
 # The Shape artifact-review template.
 check_hub_body() {
   require_heading '## Artifact under review' '## Artifact under review'
-  # Add before you remove (change-safety rule 3). This heading was `## Impact & Risk (Shape)`
-  # before the Shape/Build/Run rename, and it lives in a PR template committed inside every existing
-  # project — a repo that has not run `yad update` yet still opens reviews with the old wording. So
-  # both spellings pass. The old one is removed in the next major, after `yad doctor` has warned.
-  require_heading '## Impact & Risk \((Shape|Shape)\)' '## Impact & Risk (Shape)'
+  # Add before you remove (change-safety rule 3). `front-half` is the ORIGINAL spelling and it is
+  # still what `yad gate open` emits and what the shipped hub template carries; `Shape` is the
+  # replacement, accepted here first so that this script is lenient BEFORE anything starts writing
+  # the new wording. That ordering is the whole point: this file is refreshed by `yad update`
+  # (HUB_WIRING, cli/manifest.mjs), but the PR template beside it is NOT — it is installed only by
+  # the `yad-pr-template repo:hub action: wire` skill, which nothing runs automatically. So a hub
+  # WILL sit with a refreshed checker next to an old template, and the checker has to accept both.
+  # The emitter flips to `(Shape)` in the next major; only after that may `front-half` be dropped.
+  require_heading '## Impact & Risk \((front-half|Shape)\)' '## Impact & Risk (front-half)'
   require_heading '## Checklist' '## Checklist'
   if ! grep -qiE '(\*\*)?Risk tags:' "$BODY"; then
     echo "FAIL [pr-template]: missing 'Risk tags:' line (Shape Impact & Risk)."

@@ -41,7 +41,7 @@ one product hub + many code repos, solo or team.
 ![Yadflow SDLC overview — setup, human-gated Shape, per-story Build, earned automation](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
 
 **Legend:** 🟨 **artifact** (a step writes a file and stops) · 🟧 **gate** (a human review that must
-pass) · 🟦 **earns automation** (a back step that can later auto-advance once it proves itself) ·
+pass) · 🟦 **earns automation** (a Build step that can later auto-advance once it proves itself) ·
 ⬜ **locked** (the engineer review and every Shape step — permanently human).
 
 ## Quickstart
@@ -118,7 +118,7 @@ Every step is the same contract: *AI proposes → a human decides → the trail 
 
 - **Shape = decide.** Once per epic, in the product hub: epic, architecture + a locked contract,
   UI, stories, test cases. Always human-gated — nothing auto-advances.
-- **Build = build.** Once per story per code repo: spec → implement → checks → ship.
+- **Build = make it real.** Once per story per code repo: spec → implement → checks → ship.
 - **Every step stops at a gate.** A human moves it forward (file-only, or by merging a review PR/MR).
   <!-- IMAGE: docs/media/pr-gate.png — "The review gate rides a real PR/MR: approve to advance, comment to block." -->
 - **Automation is opt-in and earned.** A safe Build step can earn auto-advance after it proves

@@ -15,8 +15,8 @@
 ## Context
 
 Phase 4a made the `automation` dial real and proved it on the safest step. The orchestrator
-`yad-run` already **walks every back step generically** (`spec → tasks → implement → checks`) reading
-each step's dial, and `set-dial` can already flip any non-locked back step once its trust slice clears
+`yad-run` already **walks every Build step generically** (`spec → tasks → implement → checks`) reading
+each step's dial, and `set-dial` can already flip any non-locked Build step once its trust slice clears
 the threshold. So the *engine* for C and D already exists. What 4b adds is the part 4a deliberately
 left out: **the evidence and the per-step trust signal** that let `tasks` and `implement` be earned
 honestly — plus the two step-specific behaviours below.

@@ -12,7 +12,7 @@
 - Gate step: `<epic-review | architecture-review | ui-design-review | stories-review>`
 - Owner: `<epic.md owner>`
 
-## Impact & Risk (Shape)
+## Impact & Risk (front-half)
 - **Domains / repos touched:** <epic.repos, e.g. backend, mobile>
 - **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => escalates to domain owners -->
 - **Contract surface:** <n/a | locked @ sha256:…>  <!-- architecture only; a re-lock invalidates prior approvals -->

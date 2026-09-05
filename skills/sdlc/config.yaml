@@ -274,8 +274,8 @@ automation:
   # The only steps that MAY be automated, safest-end first (phase-4-build-plan.md build order).
   # Phase 4a ships the engine + earns `checks` (Step B). `tasks`/`implement` advance are Phase 4b.
   back_steps: [spec, tasks, implement, checks]
-  default: human_approve            # every back step starts manual; machine_advance must be earned
-  # A back step is a CANDIDATE for machine_advance only once its trust-log slice clears this bar.
+  default: human_approve            # every Build step starts manual; machine_advance must be earned
+  # A Build step is a CANDIDATE for machine_advance only once its trust-log slice clears this bar.
   # "It seems fine" is not evidence (phase-4-build-plan.md §"Explicitly NOT").
   trust_threshold:
     min_runs: 5                     # at least this many recorded runs at the step

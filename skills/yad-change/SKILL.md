@@ -12,7 +12,7 @@ thread head always describes current behaviour and the SDLC stays a trusted sour
 change. This skill does the **intake + triage + seeding** and then hands off to the normal authoring
 skills + `yad-review-gate`. It is a **Shape step**: human-confirmed, **never auto-advances**.
 
-This is the answer to "the front/spec docs go stale after the contract locks": a behavioural change can
+This is the answer to "the Shape/spec docs go stale after the contract locks": a behavioural change can
 no longer ship through Build against an old story — `epic-open` seals a fully-shipped epic, so
 new behaviour must enter here, and its re-authored stories/test-cases describe the change.
 

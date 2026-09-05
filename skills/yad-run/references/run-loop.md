@@ -23,7 +23,7 @@ cfg   = config.yaml.automation
 bs    = build-state/<story>.json.repos[<repo>]        # create from defaults if absent
 step  = from or bs.currentStep
 
-while step is a back step (not engineer-review):
+while step is a Build step (not engineer-review):
     result = run_step_skill(step)                     # yad-spec | yad-implement | yad-checks
 
     signals = derive_signals(step, result)            # see "Deriving signals"
@@ -93,7 +93,7 @@ finalizes the entry — a human always has the last word on the trust signal.
 - `contract_touch` — `true` if the diff touched the locked contract surface without an upstream
   re-lock (routes back to the architecture gate).
 
-`derive_verdict(signals)` — the same three-way shape for every back step:
+`derive_verdict(signals)` — the same three-way shape for every Build step:
 ```
 edited = human_edited_diff or human_edited_spec or task_rescoped
 if checks == "fail" or scope_overrun or contract_touch:   verdict = "rejected"

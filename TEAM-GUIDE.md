@@ -115,7 +115,7 @@ flowchart TD
 
     conn --> an
     rfb --> sp
-    run -. drives earned back steps .-> im
+    run -. drives earned Build steps .-> im
     bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
     bridge -. syncs approvals .-> gEp
     status["yad-status — read-only view over all of it"]
@@ -124,7 +124,7 @@ flowchart TD
 ```
 
 **Legend.** 🟨 **artifact** = an author step writes a file and stops · 🟧 **gate** = a human review
-that must pass (`open → comment → approve → advance`) · 🟦 **earns automation** = a back step that
+that must pass (`open → comment → approve → advance`) · 🟦 **earns automation** = a Build step that
 can later auto-advance once it proves itself · ⬜ dashed **locked** = the engineer review and every
 Shape step, **permanently human**.
 
@@ -135,11 +135,10 @@ Shape step, **permanently human**.
 - **Shape = decide.** Done once per epic, in the **product hub**. Always human-approved — nothing
   auto-advances. This is where you agree on the epic, the architecture, the locked contract, the UI, and
   the stories.
-- **Build = build.** Done once per story, per code repo, **inside that code repo**. Spec → implement →
+- **Build = make it real.** Done once per story, per code repo, **inside that code repo**. Spec → implement →
   check → ship.
-
-**Run = operate.** Release and Operate — the part that closes the loop back to Shape. Planned, not
-built yet.
+- **Run = operate it.** Release and Operate — the part that closes the loop back to Shape. Named
+  here because the vocabulary is settled, but **planned, not built yet**.
 
 Each step writes a file and then **stops at a gate**. A human moves it forward. That is the whole idea.
 

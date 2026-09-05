@@ -82,7 +82,7 @@ Print, in this order:
    each such story and each of its repos print the Build chain
    `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
    `automation` dial, and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
-   which back steps are automated and where a run is waiting. (For the single *next* build sub-step to
+   which Build steps are automated and where a run is waiting. (For the single *next* build sub-step to
    take per story/repo — rather than this full status view — point the user at `yad next <epic>`, which
    reads the same `build-state` files.)
 8. **Automation & trust** — print the system-wide **kill switch** state from `config.yaml`
@@ -95,7 +95,7 @@ Print, in this order:
    the predicate (self-contained): `earned = runs >= min_runs AND unchanged/runs >= min_approved_unchanged`.
    Never recommend flipping a locked step or a Shape step — those can never be `machine_advance`.
 
-   **Nudge-cost signal (Phase 5 instrumentation).** For each back step that is **earned but its dial
+   **Nudge-cost signal (Phase 5 instrumentation).** For each Build step that is **earned but its dial
    is still `human_approve`** (and it is not locked / not a Shape step), flag it:
    `⚠ earned but manual — could be machine_advance`. This is the *nudge cost* the Phase 5 trigger
    watches: automation that is proven safe but still hand-started. It is a read-only observation, not a
@@ -120,7 +120,7 @@ Print, in this order:
     `currentStep` (Shape gate) and, for stories in Build, a count of Build steps **waiting
     at a human gate** and of steps flagged **earned-but-manual**, plus a **local skills-log** count (records
     in the local-only `learning-records.json`: learned / in-progress). Close with fleet totals (epics at
-    each Shape gate; total earned-but-manual back steps; total concepts learned locally across the fleet).
+    each Shape gate; total earned-but-manual Build steps; total concepts learned locally across the fleet).
     This is the
     *scale-of-read* signal the Phase 5 trigger watches — when this roll-up stops fitting in one glance,
     that is the measured bottleneck. Still strictly read-only; it only scans the per-epic files.

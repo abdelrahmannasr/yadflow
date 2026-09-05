@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Hub review routing — the Shape analogue of yad-pr-template's risk-route.sh. Reads a hub review
-# PR/MR description's "Impact & Risk (Shape)" block and prints the required reviewers, reusing
+# PR/MR description's "Impact & Risk (front-half)" block and prints the required reviewers, reusing
 # yad-review-gate's rule: base = owner + 1 reviewer; if a risk tag (contract|auth|payments) is set OR
 # the artifact is the stories set, ALSO a domain-owner per touched repo. Advisory: it ROUTES the human
 # review; it does not approve or merge.
