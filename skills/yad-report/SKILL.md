@@ -19,7 +19,7 @@ hand-craft issues.
 Issues post to a **public** repo, so the reporter is **allowlist-first**. It sends ONLY:
 - `yadflow` version, Node version, OS platform;
 - tool state as booleans (`git` present; `gh` present + authenticated);
-- the hub **platform enum** (`github` / `gitlab` / `file-only`) — never the URL, host, or roster;
+- the hub **platform enum** (`github` / `gitlab` / `local`) — never the URL, host, or roster;
 - the `YadError` **code** + **hint**, and a **path-scrubbed** error message;
 - the failing **command name and flag names only** — never flag values.
 

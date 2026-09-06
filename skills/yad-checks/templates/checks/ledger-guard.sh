@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ledger-guard gate.
-# In BRIDGE mode the gate ledger is CI-owned: only the yad gate-sync bot may change the
+# In verified mode the gate ledger is CI-owned: only the yad gate-sync bot may change the
 # machine-written gate-state files. A commit on a review PR by anyone else that modifies them is
 # rejected — the human keeps the artifact, CI keeps the ledger. This makes "CI is the sole writer of
 # the ledger" a mechanical guarantee instead of a convention.
@@ -20,9 +20,9 @@
 # distinguishes CI-generated commits. A spoofed-author commit that is not Verified is treated as a
 # human edit and rejected.
 #
-# Scope: enforced ONLY when the bridge is enabled — hub.json carries BOTH a `platform` and
+# Scope: enforced ONLY when the ledger is verified — hub.json carries BOTH a `platform` and
 # `bridge_enabled` (or the legacy `bridge`) true, the same predicate `isBridge` (cli/gate.mjs) and
-# `hubActions` (cli/plan.mjs) apply. Without the bridge (file-only / non-bridge, or a platform-less
+# `hubActions` (cli/plan.mjs) apply. with a local ledger (local / local, or a platform-less
 # hub) humans legitimately write the ledger locally, so the gate is a no-op.
 #
 # Degradation: a base ref that cannot be resolved FAILs closed; no platform (cannot read the Verified
@@ -30,11 +30,11 @@
 set -euo pipefail
 
 # ---- bridge gate: only CI-owned ledgers are guarded -------------------------------------------
-# The predicate is BOTH a platform and the bridge flag, exactly as `isBridge` (cli/gate.mjs) and
+# The predicate is BOTH a platform and the verified ledger flag, exactly as `isBridge` (cli/gate.mjs) and
 # `hubActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
-# other bridge detector (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
+# other ledger reader (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
 # have its human ledger commits rejected here while the CLI, reading the same file, called it
-# file-only and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate
+# local and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate
 # could advance. Reachable through a stale install (platform set, script wired, platform later
 # nulled), not through `yad setup`, which derives both from one value.
 #
@@ -180,7 +180,7 @@ trusted_bot() {
 # A brand-new epic's ledger has no CI author. `gate ci` only ADVANCES an existing chain — it bails on
 # a missing state.json ("the review branch is cut from the default branch, so it should carry it") and
 # writes only at merge, on the default branch — and the engine itself reads a missing state.json as
-# "not seeded yet". `gate open` writes nothing in bridge mode, and `checkpoint` stages Build
+# "not seeded yet". `gate open` writes nothing in verified mode, and `checkpoint` stages Build
 # ledgers only. So the seed the authoring skills write (yad-epic / yad-change / yad-analysis /
 # yad-discovery / yad-stub) can reach the trunk ONLY through the first review PR/MR — the one place
 # this gate runs. Guarding it there makes the documented flow unshippable on a protected trunk, so an

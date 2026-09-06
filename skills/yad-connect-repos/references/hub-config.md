@@ -18,7 +18,7 @@ login to an SDLC name + role. It is a single object for the hub itself — the s
   "platform": "github",                                       // github | gitlab (from the hub's own remote host); null when local-only
   "git_url": "https://github.com/abdelrahmannasr/yadflow.git", // REQUIRED when platform is non-null (scopes auth + opens PRs); yad doctor warns YAD-CFG-005 if absent
   "default_branch": "main",
-  "bridge_enabled": true,                                     // open review PRs/MRs on the hub for Shape reviews; travels WITH platform — bridge mode is both (isBridge), so never true beside platform: null (#186)
+  "bridge_enabled": true,                                     // open review PRs/MRs on the hub for Shape reviews; travels WITH platform — verified mode is both (isBridge), so never true beside platform: null (#186)
   "gate_sync_version": "3.15.3",                              // OPTIONAL exact pin for the wired gate-sync job; an exact 3.x.y, prereleases included (3.16.0-rc.1) — anything else is skipped. Omitted => the .sdlc/cli-version.json stamp if that qualifies, else floating 3
   "review": { "requireEngagement": false },                   // Review Companion: false (soft) counts bare approves but nudges; true counts only verified-engagement approvals
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
@@ -72,7 +72,7 @@ as the registry). `detect-hub` upserts `hub.json` in place — it is idempotent 
 
 **`git_url` is required whenever `platform` is non-null.** `yad doctor` uses it to scope the auth
 probe to the hub's own host (an unscoped `glab auth status` fails on any unrelated broken instance),
-and the bridge/PR flow uses it to open PRs. Doctor flags its absence with a warn (`YAD-CFG-005`);
+and the verified ledger/PR flow uses it to open PRs. Doctor flags its absence with a warn (`YAD-CFG-005`);
 re-running `yad setup` backfills it from the origin remote (idempotent, non-interactive).
 
 ## Bridge enable / degradation
@@ -80,8 +80,8 @@ re-running `yad setup` backfills it from the origin remote (idempotent, non-inte
 - `bridge_enabled: true` **and** a non-null `platform` **and** `gh`/`glab` authenticated → the Shape
   review opens a PR/MR on the hub and `yad-review-gate action: sync` pulls platform state into the ledger.
 - `bridge_enabled: false`, `platform: null`, or no/unauthenticated CLI → the gate falls back to the
-  existing **file-only** flow with no error. The file ledger is the source of truth in both modes.
-- The master switch `config.yaml` `hub.bridge: false` disables the bridge globally regardless of `hub.json`.
+  existing **local** flow with no error. The file ledger is the source of truth in both modes.
+- The master switch `config.yaml` `hub.bridge: false` disables the verified ledger globally regardless of `hub.json`.
 
 ## Review Companion engagement (`review.requireEngagement`)
 
@@ -99,6 +99,6 @@ This mirrors how `repos.json` and the per-epic `.sdlc/` state are committed.
 
 ## Greenfield
 
-A brand-new hub has no `hub.json`. That is valid — the Shape gate runs file-only until `detect-hub`
-records a platform. The bridge is purely additive; nothing about authoring or the gate predicate changes.
+A brand-new hub has no `hub.json`. That is valid — the Shape gate runs local until `detect-hub`
+records a platform. the verified ledger is purely additive; nothing about authoring or the gate predicate changes.
 ```

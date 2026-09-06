@@ -34,7 +34,7 @@
 # default branch — the merge advance pushes there) and store it as a masked CI/CD variable
 # SDLC_GATE_TOKEN. Without it the job fails visibly; recover by setting the token, then re-run the
 # pipeline or run `yad gate ci --branch <review-branch> --pr <iid> --merged` locally on the default
-# branch (advisory `yad gate sync` is read-only in bridge mode and cannot recover a stuck gate).
+# branch (advisory `yad gate sync` is read-only in verified mode and cannot recover a stuck gate).
 #
 # Which yadflow this job runs: an EXACT version resolved from the repo at run time — see the `yad-pin`
 # block in the script below for the precedence. It no longer floats on the major, because floating let a

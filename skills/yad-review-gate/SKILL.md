@@ -12,14 +12,14 @@ recorded as a file. The `analysis-review`, `epic`/`ui-design`, and `test-cases` 
 rule (owner + 1 reviewer); escalation applies only where `risk_tags` or per-repo routing call for it.
 
 This gate is **swappable and file-driven**: it talks only through files. A Shape step advances only on a
-human act — recording an approval and `advance`, or (with the bridge) **merging the approved,
+human act — recording an approval and `advance`, or (with a verified ledger) **merging the approved,
 fully-resolved review PR/MR**. It works the same whether a human or the `yad gate` CLI triggers it — the
 trigger is a parameter, not a hardcoded human.
 
 ## Conventions
 - `{project-root}` resolves from the project working directory.
 - Operate on one epic: `{project-root}/epics/EP-<slug>/`.
-- State files: `.sdlc/state.json`, `.sdlc/approvals.json`, `.sdlc/comments.json`, and (when the bridge is
+- State files: `.sdlc/state.json`, `.sdlc/approvals.json`, `.sdlc/comments.json`, and (when the verified ledger is
   used) `.sdlc/hub-prs.json`. Review records: `reviews/`.
 - The artifact base name drops the extension (`epic.md` → `epic`; story `stories/...S01.md` → `stories-S01`).
 
@@ -54,13 +54,13 @@ touched `repos` — never a forked or copied gate.
 
 ### Step 2 — Dispatch on `action`
 
-> **Check the mode first — in bridge mode you write nothing to the ledger.** Read `.sdlc/hub.json`:
-> **bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`. Under the bridge
+> **Check the mode first — in verified mode you write nothing to the ledger.** Read `.sdlc/hub.json`:
+> **verified mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`. Under the verified ledger
 > the ledger is CI-owned — `ledger-guard` rejects any non-bot commit touching
 > `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`, local `yad gate
 > sync` is advisory, and `yad gate ci --merged` writes the whole transition when the review PR merges.
-> So every "set / append / write" instruction below is the **file-only, or a platform with no
-> gate-sync CI** path. In bridge mode do the human-facing half — present the artifact, route the
+> So every "set / append / write" instruction below is the **local, or a platform with no
+> gate-sync CI** path. In verified mode do the human-facing half — present the artifact, route the
 > required reviewers, help the owner address comments — and let the platform PR/MR carry the review
 > state; the approvals, comments, review records and the advance all land through CI at merge.
 
@@ -73,8 +73,8 @@ If `.sdlc/hub.json` has a non-null `platform` and `bridge_enabled: true` (or leg
 is authenticated, **also open a review PR/MR on the hub** by invoking `yad-hub-bridge action: open`
 (epic + artifact), and report the URL + required reviewers. **CI records the PR** in
 `epics/<epic>/.sdlc/hub-prs.json` (`{step, artifact, platform, number, url, branch, lastSyncedAt}`) —
-write that file yourself only on the file-only path. Otherwise (no platform / disabled / no CLI)
-proceed **file-only** exactly as before — no error. Opening the PR records no approvals and never
+write that file yourself only on the local path. Otherwise (no platform / disabled / no CLI)
+proceed **local** exactly as before — no error. Opening the PR records no approvals and never
 advances.
 
 **`comment`** — Capture reviewer feedback. Append/create a review file
@@ -187,7 +187,7 @@ PR only — against the `review/<epic>/<artifact>` branch, which must already ex
 `yad open-pr` from it, which pushes it first). CI (`yad gate ci`) writes the `.sdlc/` + `reviews/`
 records this skill describes. The skill's
 job is the human half: presenting the artifact, helping the owner address comments, and narrating the
-gate. Local `yad gate sync` is advisory in bridge mode (reads the platform, prints status, writes
+gate. Local `yad gate sync` is advisory in verified mode (reads the platform, prints status, writes
 nothing); a human must never commit gate-state files (the `ledger-guard` check rejects it, and the
 `hooks/ledger-guard.sh` harness hook refuses an agent the edit up front, naming `yad gate open`
 instead — see `yad-checks`). The single
@@ -210,7 +210,7 @@ platform PR/MR is the source of truth (native approvals + threads), and CI never
 branch (so an in-flight approval is never dismissed and required checks never strand). On the human
 **merge** CI re-reads approvals, advances the step, and flips the artifact `status:` on the **default
 branch**. After a merge, `git checkout <default> && git pull` to see it. The predicate and the human
-merge are unchanged — CI never approves and never merges. File-only mode (no platform) keeps the local
+merge are unchanged — CI never approves and never merges. local mode (no platform) keeps the local
 write path.
 
 ### Hard rules (build plan §1, §5)
@@ -223,7 +223,7 @@ write path.
 - The gate talks only through `.sdlc/` and `reviews/` files — never hidden state.
 - **The platform is an input path only.** `open`/`sync` use the local user's own `gh`/`glab` (no stored
   tokens), and the **file ledger remains the source of truth** — the Step 3 predicate is unchanged
-  whether approvals arrive manually or via `sync`. With no hub platform / no CLI, the gate runs file-only
+  whether approvals arrive manually or via `sync`. With no hub platform / no CLI, the gate runs local
   with no error (record approvals manually and `advance`).
 
 ## Reference

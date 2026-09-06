@@ -1139,13 +1139,13 @@ test('pr-template gate: both GitLab templates keep their required sections insid
 
 // ---------- ledger-guard.sh ----------
 // No origin remote in these scratch repos, so the platform signature check is waived (WARN) — the
-// tests exercise the bridge gate + author half hermetically (the signature half mirrors
+// tests exercise the verified ledger gate + author half hermetically (the signature half mirrors
 // verified-commits, whose signature path is likewise not unit-mocked).
 const LEDGER_GUARD = path.join(CHECKS, 'ledger-guard.sh');
 // The default hub is the canonical bridge shape: a platform AND the flag. `hub` overrides it so a
 // test can exercise a divergent config (no platform, legacy key, key/value split across lines).
-const BRIDGE_HUB = '{"platform":"github","bridge_enabled":true}\n';
-const enableBridge = (T, hub = BRIDGE_HUB) => {
+const VERIFIED_HUB = '{"platform":"github","bridge_enabled":true}\n';
+const enableVerified = (T, hub = VERIFIED_HUB) => {
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), hub);
 };
@@ -1153,9 +1153,9 @@ const enableBridge = (T, hub = BRIDGE_HUB) => {
 // Put an epic's ledger on `main` (the base ref) so the branch that follows MUTATES a CI-owned ledger
 // rather than seeding a new one. scaffoldRepo cuts `feature` off the first commit, so the ledger has
 // to land on main and the working branch be re-cut from it.
-const seedLedgerOnBase = (T, epic = 'EP-x', files = {}, hub = BRIDGE_HUB) => {
+const seedLedgerOnBase = (T, epic = 'EP-x', files = {}, hub = VERIFIED_HUB) => {
   git(T, 'checkout', '-q', 'main');
-  enableBridge(T, hub);
+  enableVerified(T, hub);
   commit(T, 'seed epic ledger', {
     [`epics/${epic}/epic.md`]: '# e\n',
     [`epics/${epic}/.sdlc/state.json`]: '{"epicId":"' + epic + '"}\n',
@@ -1229,7 +1229,7 @@ test('ledger-guard: the PREVIOUS release of this script still arms on a migrated
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('ledger-guard: with the bridge ON, a non-bot commit MUTATING an existing ledger FAILS', () => {
+test('ledger-guard: with a verified ledger ON, a non-bot commit MUTATING an existing ledger FAILS', () => {
   const T = scaffoldRepo();
   seedLedgerOnBase(T);
   commit(T, 'review: epic', { 'epics/EP-x/epic.md': 'x\n' }); // artifact ok
@@ -1245,7 +1245,7 @@ test('ledger-guard: with the bridge ON, a non-bot commit MUTATING an existing le
 // one place this gate runs. Creation is exempt; mutation stays guarded by the test above.
 test('ledger-guard: a human seeding a NEW epic PASSES — creation is not mutation', () => {
   const T = scaffoldRepo();
-  enableBridge(T);
+  enableVerified(T);
   commit(T, 'enable bridge', {});
   commit(T, 'review: epic', {
     'epics/EP-new/epic.md': '# e\n',
@@ -1299,7 +1299,7 @@ test('ledger-guard: a mixed range fails for the existing epic only, not the newl
 
 test('ledger-guard: reviews/*.md for a not-yet-seeded epic rides the same carve-out', () => {
   const T = scaffoldRepo();
-  enableBridge(T);
+  enableVerified(T);
   commit(T, 'enable bridge', {});
   commit(T, 'review: epic', {
     'epics/EP-new/.sdlc/state.json': '{"currentStep":"epic"}\n',
@@ -1333,7 +1333,7 @@ test('ledger-guard: a newline inside the epic path cannot slip a mutation past t
       { cwd: T, env: GIT_ENV, input: `100644 ${blob}\t${p}\0` });
   };
   git(T, 'checkout', '-q', 'main');
-  enableBridge(T);
+  enableVerified(T);
   git(T, 'add', '.sdlc/hub.json');      // never `add -A` after write(): the path is index-only, so a
   write(`epics/${slug}/.sdlc/state.json`, '{}\n'); // worktree rescan would stage its deletion
   git(T, 'commit', '-q', '-m', 'seed epic ledger');
@@ -1364,7 +1364,7 @@ test('ledger-guard: a case-folded slug cannot launder a mutation as a creation',
 
 test('ledger-guard: artifact + contract-lock edits by a human PASS', () => {
   const T = scaffoldRepo();
-  enableBridge(T);
+  enableVerified(T);
   commit(T, 'enable bridge', {});
   commit(T, 'review: architecture', {
     'epics/EP-x/architecture.md': '# a\n',
@@ -1388,7 +1388,7 @@ test('ledger-guard: a bot-authored ledger commit is allowed (signature waived wi
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('ledger-guard: with the bridge OFF it is a no-op (humans own the ledger locally)', () => {
+test('ledger-guard: with a verified ledger OFF it is a no-op (humans own the ledger locally)', () => {
   const T = scaffoldRepo(); // no .sdlc/hub.json → the ledger is local
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   const r = runGate(LEDGER_GUARD, T);
@@ -1400,10 +1400,10 @@ test('ledger-guard: with the bridge OFF it is a no-op (humans own the ledger loc
 // #186: the gate used to enable itself on the flag ALONE, while `isBridge` (cli/gate.mjs) and
 // `hubActions` (cli/plan.mjs) both also require a `platform`. A hub holding one without the other
 // deadlocked — the shell rejected the human's ledger commit while the CLI, reading the same file,
-// called it file-only and kept the local write path, so nothing could write the ledger at all.
-test('ledger-guard: the bridge flag WITHOUT a platform is not bridge mode — no-op (issue #186)', () => {
+// called it local and kept the local write path, so nothing could write the ledger at all.
+test('ledger-guard: the verified ledger flag WITHOUT a platform is not verified mode — no-op (issue #186)', () => {
   const T = scaffoldRepo();
-  enableBridge(T, '{"bridge_enabled":true}\n'); // no platform → the CLI calls this file-only
+  enableVerified(T, '{"bridge_enabled":true}\n'); // no platform → the CLI calls this local
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
@@ -1411,9 +1411,9 @@ test('ledger-guard: the bridge flag WITHOUT a platform is not bridge mode — no
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('ledger-guard: a platform WITHOUT the bridge flag is not bridge mode — no-op (issue #186)', () => {
+test('ledger-guard: a platform with a local ledger flag is not verified mode — no-op (issue #186)', () => {
   const T = scaffoldRepo();
-  enableBridge(T, '{"platform":"github"}\n');
+  enableVerified(T, '{"platform":"github"}\n');
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
@@ -1422,12 +1422,12 @@ test('ledger-guard: a platform WITHOUT the bridge flag is not bridge mode — no
 });
 
 // Flattening the JSON to read it must not make the read depth-blind. A `bridge` key NESTED in some
-// other object is not the bridge flag, and treating it as one would enable this gate on a hub whose
+// other object is not the verified ledger flag, and treating it as one would enable this gate on a hub whose
 // `isBridge` is false — the same no-writer deadlock #186 is about, reached from the other side.
 test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #186)', () => {
   const T = scaffoldRepo();
   // Root-level platform, but the only `bridge: true` is nested — `isBridge` would say false.
-  enableBridge(T, '{"platform":"github","review":{"bridge":true},"roster":[{"bridge_enabled":true}]}\n');
+  enableVerified(T, '{"platform":"github","review":{"bridge":true},"roster":[{"bridge_enabled":true}]}\n');
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   let r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
@@ -1435,7 +1435,7 @@ test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #
 
   // Mirror image: the flag is root-level but `platform` only appears nested.
   const T2 = scaffoldRepo();
-  enableBridge(T2, '{"bridge_enabled":true,"profile":{"platform":"github"}}\n');
+  enableVerified(T2, '{"bridge_enabled":true,"profile":{"platform":"github"}}\n');
   commit(T2, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   r = runGate(LEDGER_GUARD, T2);
   assert.equal(r.code, 0, r.out);
@@ -1484,7 +1484,7 @@ test('ledger-guard: the legacy `bridge` key still enforces when a platform is se
 
 test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
   const T = scaffoldRepo();
-  enableBridge(T);
+  enableVerified(T);
   commit(T, 'enable bridge', {});
   assert.equal(runGate(LEDGER_GUARD, T, ['origin/nope']).code, 1);
   fs.rmSync(T, { recursive: true, force: true });

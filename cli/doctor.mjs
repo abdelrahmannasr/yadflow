@@ -67,7 +67,7 @@ export function projectChecks(checks, root) {
   // version stamp
   const ver = readJSON(verPath, null);
   if (!ver) check(checks, 'cli-version', 'project', 'warn', `${PROJECT_FILES.version} missing or unreadable`, 'run `yad check --fix`');
-  // The stamp is not only cosmetic: in bridge mode the wired gate-sync job resolves the yadflow it
+  // The stamp is not only cosmetic: in verified mode the wired gate-sync job resolves the yadflow it
   // RUNS from it — unless hub.json pins `gate_sync_version`, a YAD_VERSION variable overrides, or the
   // stamp is not an exact release of the current major (then the job skips it and floats). So a stale
   // stamp can mean CI is running an old gate; say so, or the warning reads as bookkeeping.
@@ -77,7 +77,7 @@ export function projectChecks(checks, root) {
   // hub.json: parse + shape
   let hub = null;
   if (!exists(hubPath)) {
-    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — file-only gate`, 'run `yad setup` to configure a platform + roster');
+    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform + roster');
   } else {
     let hubBroken = false;
     try {
@@ -92,13 +92,13 @@ export function projectChecks(checks, root) {
     // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a hub the gate would reject.
     else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
-      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'file-only'}, ${(hub.roster || []).length} reviewer(s)`);
+      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
       // platform CLI + auth (best-effort; auth probing is the user's own session)
       const cli = cliFor(hub.platform);
       if (cli) {
         // git_url is required whenever a platform is set — doctor needs it to scope the auth probe
-        // and the bridge/PR flow needs it to open PRs. Warn on its absence directly (not on the
+        // and the verified ledger/PR flow needs it to open PRs. Warn on its absence directly (not on the
         // resolved host), so it fires even when an origin remote can substitute: the field itself
         // is required regardless.
         if (!hostFromGitUrl(hub.git_url)) {
@@ -113,7 +113,7 @@ export function projectChecks(checks, root) {
         // rather than run the flaky unscoped form.
         const host = hostFromGitUrl(hub.git_url)
           || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
-        if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to file-only without it`);
+        if (!has(cli)) check(checks, 'platform-cli', 'project', 'warn', `${cli} not found on PATH [YAD-ENV-002]`, `install ${cli} — the gate degrades to local without it`);
         else if (!host) check(checks, 'platform-cli', 'project', 'warn', 'auth check skipped — hub host unknown (no git_url / origin)', 'add git_url to hub.json so the auth probe can target the right host');
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
@@ -155,9 +155,9 @@ export function projectChecks(checks, root) {
     }
   }
 
-  // The harness ledger guard (#171). Only meaningful in bridge mode: there the ledger is CI-owned and
+  // The harness ledger guard (#171). Only meaningful in verified mode: there the ledger is CI-owned and
   // an agent's hand-edit is always rejected later by `ledger-guard`, so the local hook that refuses it
-  // up front should be installed. Without the bridge the ledger is locally owned and the hand-edit the
+  // up front should be installed. With a local ledger nothing guards it, and the hand-edit the
   // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
   const hubForHooks = readJSON(hubPath, null);
   if (isVerifiedLedger(hubForHooks)) {
@@ -322,7 +322,7 @@ export function ciTagsChecks(checks, root, hub, registry) {
     } catch { return false; } // absent fragment is not this check's concern
   };
   const fragments = [];
-  if (hub?.platform === 'gitlab' && (hub.bridge_enabled === true || hub.bridge === true)) {
+  if (hub?.platform === 'gitlab' && isVerifiedLedger(hub)) {
     fragments.push(
       { scope: 'hub', file: '.gitlab/ci/yad-gate-sync.yml', path: path.join(root, '.gitlab/ci/yad-gate-sync.yml') },
       { scope: 'hub', file: '.gitlab/ci/yad-verified-commits.yml', path: path.join(root, '.gitlab/ci/yad-verified-commits.yml') },

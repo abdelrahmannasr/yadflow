@@ -113,7 +113,7 @@ const setupSteps: FlowStep[] = [
     id: "detect-hub",
     title: "Detect Hub & Roster",
     description:
-      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With the bridge enabled, the Shape review runs through a real PR/MR.",
+      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). with a verified ledger, the Shape review runs through a real PR/MR.",
     actor: "system",
     status: "connected",
     stepState: ".sdlc/hub.json",

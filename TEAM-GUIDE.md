@@ -231,7 +231,7 @@ yad-hub-bridge      action: wire                                  # merge-time g
 The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
 derived from each repo's `domain_owner` in `repos.json` (not retyped). With the hub on a platform, the
 Shape gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
-comments back. No platform (or `bridge_enabled: false`)? The gate just runs file-only — skip d2.
+comments back. No platform (or `bridge_enabled: false`)? The gate just runs local — skip d2.
 
 With the gate-sync CI wired, you usually don't run `sync` at all: the **merge** of a review PR triggers
 it in the hub's CI, and the ledger update is committed straight to the hub's default branch (`git pull`

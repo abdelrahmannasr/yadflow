@@ -71,7 +71,7 @@ never renamed** — renaming breaks every downstream link (build plan §6b). Che
 Open the analysis authoring branch `analysis/EP-<slug>` per the shared procedure
 (`references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
 is not a git work tree), check out the branch if it exists, else create it from the hub's default
-branch. Author and commit `analysis.md` on it. This is **distinct** from the bridge's `review/…` branch.
+branch. Author and commit `analysis.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 5 — Write the analysis (assist: analyst)
 Write `{project-root}/epics/EP-<slug>/analysis.md` using EXACTLY this template:
@@ -140,7 +140,7 @@ Notes:
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
   `[]`, and the `reviews/` directory.
 - Commit the seed on the `analysis/EP-<slug>` branch, and cut `review/EP-<slug>/analysis` from it so the
-  epic's **first** review PR/MR carries the ledger to the default branch. In bridge mode `ledger-guard`
+  epic's **first** review PR/MR carries the ledger to the default branch. In verified mode `ledger-guard`
   exempts a new epic's ledger (creation, not mutation, #162); every later change to it is CI's. See
   `../yad-epic/references/state-schema.md`, "Authoring branches".
 
@@ -151,7 +151,7 @@ here** — only real reviewers do that through the gate. Shape steps do not auto
 analysis gate passes, control moves to `yad-epic`, which reads `analysis.md` as input. When the
 hub has a platform, the gate opens a review PR on the hub (via `yad-hub-bridge`) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
-is recorded file-only.
+is recorded local.
 
 ## Reference
 - State schema, the two chain shapes, and the authoring-branch procedure:

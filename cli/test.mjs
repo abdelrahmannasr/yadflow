@@ -1158,7 +1158,7 @@ test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit co
   let bare;
   try {
     // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
-    // file-only "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
+    // local "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
     // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
     bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, default_branch: 'main', roster: [] }));
@@ -2576,12 +2576,12 @@ test('gate sync: a failed platform read flags the run non-zero (no green no-op) 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gate sync local: writes when the bridge is OFF, advisory (no writes) when ON', async () => {
+test('gate sync local: writes when the verified ledger is OFF, advisory (no writes) when ON', async () => {
   // bridge OFF (a platform but no gate-sync CI wired): local sync stays the writer and advances.
   const a = scaffoldEpic();
   await gateSync(a.T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval, local: true });
   const sa = JSON.parse(fs.readFileSync(path.join(a.ep, '.sdlc/state.json')));
-  assert.equal(sa.steps.find((s) => s.id === 'architecture-review').status, 'done', 'non-bridge local sync advances');
+  assert.equal(sa.steps.find((s) => s.id === 'architecture-review').status, 'done', 'local local sync advances');
   fs.rmSync(a.T, { recursive: true, force: true });
 
   // bridge ON: local sync is advisory — CI owns the ledger, so it writes nothing.
@@ -2612,7 +2612,7 @@ test('gate sync advisory (bridge, local): unresolved comments do not dirty revie
 
 // The re-open loop (issue #156): an already-approved architecture step is re-opened, the contract
 // surface is edited + re-locked, a FRESH review PR is opened, the same reviewers approve it, and it is
-// merged. In bridge mode nothing ever moves the step back to `in_review` (CI is the sole ledger
+// merged. In verified mode nothing ever moves the step back to `in_review` (CI is the sole ledger
 // writer), so the merge-time sync used to hit a blanket "already done — skipping" and write only the
 // PR pointer: the step read `done` with every approval bound to the pre-edit hash.
 async function reopenAndReapprove(reviews) {
@@ -2838,11 +2838,11 @@ test('gate sync: a done step never posts engagement nudges on its merged PR', as
 });
 
 
-// Under the bridge the ledger records the PR pointer only at merge, so a review a human must push
+// Under the verified ledger the ledger records the PR pointer only at merge, so a review a human must push
 // through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.
 test('gate sync: resolves an unrecorded review PR from the review branch (issue #158)', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the bridge case
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the verified ledger case
   const seen = [];
   const finder = (platform, branch) => { seen.push([platform, branch]); return { ok: true, number: 42, url: 'http://x/42' }; };
   await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => fullApproval, finder });
@@ -3252,7 +3252,7 @@ test('a wrong-shape state.json fails with the file named', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('an unknown hub platform fails fast instead of degrading to file-only', async () => {
+test('an unknown hub platform fails fast instead of degrading to local', async () => {
   const { T } = scaffoldEpic();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'bitbucket', roster: [] }));
   await assert.rejects(
@@ -5070,19 +5070,19 @@ test('gate ci sweep: one corrupt epic is skipped (exit 1) while the rest still s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('check --fix wires the hub gate-sync CI only when the bridge is enabled', async () => {
+test('check --fix wires the hub gate-sync CI only when the ledger is verified', async () => {
   const { T } = scaffold();
   // no hub.json -> no hub action
   await reconcile(T, { fix: true });
   assert.ok(!fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'no hub.json => not wired');
-  // hub on github with the bridge -> wired + idempotent
+  // hub on github with a verified ledger -> wired + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'hub workflow installed');
   const again = await reconcile(T, { fix: false });
   assert.equal(again.counts.missing, 0);
   assert.equal(again.counts.outdated, 0);
-  // gitlab with the bridge -> fragment installed + idempotent
+  // gitlab with a verified ledger -> fragment installed + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml')), 'gitlab fragment installed');
@@ -8925,7 +8925,7 @@ test('ledger hook allows when the base cannot be read — unknown never blocks',
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('ledger hook is a no-op without the bridge — there the hand-edit is correct', () => {
+test('ledger hook is a no-op with a local ledger — there the hand-edit is correct', () => {
   for (const hub of [
     { platform: 'gitlab', bridge_enabled: false },
     { platform: null, bridge_enabled: true },
@@ -9118,7 +9118,7 @@ test('hookMatcherFires tells an armed entry from an installed-but-dead one', () 
   assert.equal(hookMatcherFires({ hooks: { PreToolUse: [{ matcher: HOOK_TOOL_MATCHER, hooks: [{ command: 'echo' }] }] } }), false, 'not our entry');
 });
 
-test('hookActions wires the guard on a bridge hub, and nothing without the bridge', () => {
+test('hookActions wires the guard on a verified hub, and nothing with a local ledger', () => {
   const T = hookHub();
   try {
     fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
@@ -9212,7 +9212,7 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
     assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
-  // Without the bridge there is nothing to guard, so the check is silent rather than ok.
+  // with a local ledger there is nothing to guard, so the check is silent rather than ok.
   const fileOnly = hookHub({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
     assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);

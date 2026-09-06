@@ -1,6 +1,6 @@
 // `yad hook ledger-guard` — the harness-side half of the ledger rule (#171).
 //
-// In BRIDGE mode the gate ledger is CI-owned: `templates/checks/ledger-guard.sh` rejects any non-bot
+// In verified mode the gate ledger is CI-owned: `templates/checks/ledger-guard.sh` rejects any non-bot
 // commit that changes `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`.
 // That gate is the authority, but it only speaks at CI time — an agent that hand-edits `state.json`
 // learns twenty minutes later, from a failed pipeline with nothing connecting cause to effect. This
@@ -148,7 +148,7 @@ export function denyMessage({ epic, rel, hubRoot }) {
   return [
     `[yad] Blocked: ${rel} is CI-owned gate state.`,
     '',
-    'This hub runs in bridge mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
+    'This hub runs in verified mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
     'check rejects any non-bot commit that changes it, so this edit cannot reach the default branch —',
     'it would fail the review PR/MR and have to be reverted.',
     '',

@@ -299,7 +299,7 @@ export function readPr(platform, n, opts = {}) {
 }
 
 // ---- find the PR/MR for a branch ----------------------------------------------------------------
-// The review PR/MR opened for `review/EP-<slug>/<artifact>`, by HEAD/source branch. Under the bridge
+// The review PR/MR opened for `review/EP-<slug>/<artifact>`, by HEAD/source branch. Under the verified ledger
 // the ledger records that pointer only at merge (CI is the sole writer), so without this a human has
 // no way to name the review a merged PR belongs to — `gate sync` would just report "no open review PR
 // recorded" for a PR that is sitting merged on the platform (issue #158).

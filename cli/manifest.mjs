@@ -289,7 +289,7 @@ export const wiringFor = (platform) => [
 ];
 
 // Hub wiring: CI installed on the PRODUCT HUB itself (dest is the project root — the hub IS the
-// root). Installed only when hub.json has a platform and the bridge is enabled. Carries the
+// root). Installed only when hub.json has a platform and the ledger is verified. Carries the
 // event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
 // verified-commits gate (no unverified commits from unverified users reach merge on the hub).
 export const HUB_WIRING = {
@@ -319,7 +319,7 @@ export const HUB_WIRING = {
 };
 
 // Harness hooks: the LOCAL half of the ledger rule, installed on the hub beside the CI gates and
-// active under the same bridge predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
+// active under the same verified-ledger predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
 // CI gate — it is advisory, fails open, and its adapter (below) is per-harness, not per-platform.
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },

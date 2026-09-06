@@ -1,12 +1,12 @@
 ---
 name: yad-hub-bridge
-description: 'The templated PR/MR bridge for the Shape review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the hub: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the Shape review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the hub: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the local gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
 
 **Goal:** Run the Shape review/comment/approval cycle through a **real PR/MR on the product hub**,
-without changing the gate's predicate or making the file ledger optional. The bridge is an **alternate
+without changing the gate's predicate or making the file ledger optional. the verified ledger is an **alternate
 input path** into `yad-review-gate`: it opens a review PR for an artifact, reviewers approve/comment on
 the platform with **their own** `gh`/`glab` auth, and the gate's `sync` action (which calls this skill's
 read recipes) maps that platform state into `approvals.json` / `comments.json` / `reviews/*.md`, then
@@ -24,7 +24,7 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 - The review-PR body is the hub template from `yad-pr-template` (`templates/hub/<platform>/…`).
 - Branch per artifact: `review/EP-<slug>/<artifact-base>` (`config.yaml` `hub.artifact_branch`).
 - **Local-user auth only; store no tokens.** Use the user's own `gh`/`glab`. If neither is installed/
-  authenticated, STOP this path and tell the gate to fall back to file-only — never embed a credential.
+  authenticated, STOP this path and tell the gate to fall back to local — never embed a credential.
 
 ## Inputs
 
@@ -33,11 +33,11 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 - `action`   — `open` | `route` | `wire` (default `route`). (`sync`'s ledger writes live in
   `yad-review-gate`; this skill provides the read recipes `sync` calls — see `references/bridge.md`.)
 
-## Preconditions (the bridge runs only when all hold)
+## Preconditions (the verified ledger runs only when all hold)
 
 `.sdlc/hub.json` exists with a non-null `platform`, `bridge_enabled: true`, `config.yaml` `hub.bridge:
 true`, and `gh` (GitHub) / `glab` (GitLab) installed **and authenticated**. If any fails, report that the
-gate proceeds **file-only** (no error) and stop.
+gate proceeds **local** (no error) and stop.
 
 ## On Activation
 
@@ -70,7 +70,7 @@ each required domain-owner to a platform `login` via the roster (a roster `name`
    ```
    A human commit touching the gate-state files (`.sdlc/{state,approvals,comments,hub-prs}.json` or
    `reviews/*.md`; `.sdlc/contract-lock.json` is artifact-side and allowed) on a review PR is rejected
-   by the `ledger-guard` check. (The `yad gate open` CLI behaves the same: in bridge mode it opens the
+   by the `ledger-guard` check. (The `yad gate open` CLI behaves the same: in verified mode it opens the
    PR only and writes no ledger.) The **one** exception is a brand-new epic's **seed** — no CI path can
    create a ledger, so an epic whose `.sdlc/state.json` is absent from the base ref may be created by a
    human on this first PR/MR (#162). Every later change to it is CI's alone.
@@ -94,10 +94,10 @@ Revoke-on-change is enforced at merge: on **GitHub** in code (an approval whose 
 head is dropped — no setting needed); on **GitLab** it has no per-approval commit SHA, so enabling the
 platform's **"remove all approvals when commits are added to the source branch"** is **required** for
 the guarantee. Either way it is safe because CI never pushes the review branch — only the owner's own
-artifact pushes dismiss approvals. In bridge mode `yad gate sync` is advisory (read-only) and is **not**
+artifact pushes dismiss approvals. In verified mode `yad gate sync` is advisory (read-only) and is **not**
 a recovery path; if a merge-time run fails, the scheduled reconcile job re-advances it automatically, or
 a maintainer can force it with `yad gate ci --branch <review-branch> --pr <n> --merged` locally on the
-default branch. (File-only mode keeps `yad gate sync` as the local writer.)
+default branch. (local mode keeps `yad gate sync` as the local writer.)
 
 1. Run `yad check --fix` (the wiring is manifest-driven, like `yad-checks`): with a platform +
    enabled bridge in `.sdlc/hub.json` it installs
@@ -139,9 +139,9 @@ default branch. (File-only mode keeps `yad gate sync` as the local writer.)
 ## Hard rules
 
 - **Local-user auth only; store no tokens.** Reviewers use their own `gh`/`glab`.
-- **The bridge is an input path, never the authority.** It opens PRs and reads state; the **file ledger
+- **the verified ledger is an input path, never the authority.** It opens PRs and reads state; the **file ledger
   is the source of truth** and the gate predicate (in `yad-review-gate`) is unchanged.
-- **The bridge never approves on a reviewer's behalf.** Reviewers approve/merge with their own auth. The
+- **the verified ledger never approves on a reviewer's behalf.** Reviewers approve/merge with their own auth. The
   step advances when a human **merges** the approved, fully-resolved review PR (the merge is that human
   act) — `yad gate sync` records the approvals + resolution + merged state and advances; unresolved
   comments or a changed artifact hold it `in_review`. The mechanical sync is the `yad gate` CLI.
@@ -159,7 +159,7 @@ default branch. (File-only mode keeps `yad gate sync` as the local writer.)
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
   "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
   nobody needs a direct push to the default branch to start an epic (#162).
-- **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs file-only with no error.
+- **Degrade gracefully.** No platform / disabled bridge / no CLI → the gate runs local with no error.
 
 ## Reference
 - PR-body→ledger mapping, the read-only gh/glab recipes, idempotent re-sync, contract re-lock handling:

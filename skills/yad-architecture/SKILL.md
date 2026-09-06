@@ -37,7 +37,7 @@ Open the architecture authoring branch `architecture/EP-<slug>` per the shared p
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
 hub's default branch. Author and commit `architecture.md` / `contract.md` / `contract-lock.json` on it.
-This is **distinct** from the bridge's `review/…` branch.
+This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 2 — Read the epic as input context
 Read `epic.md`. Note `repos` (the touched domains), the goal, scope, and acceptance signals. The
@@ -179,9 +179,9 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 
 ### Step 6 — Advance the authoring step (NOT the gate)
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
-**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+**verified mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
 
-**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+**verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
 any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
@@ -189,7 +189,7 @@ fails the gate if it rides the review PR, and desynchronises the ledger CI is ab
 is pushed around the gate. Commit the artifact set — **`architecture.md`, `contract.md`, and
 `.sdlc/contract-lock.json`** (artifact-side, not ledger) — then hand off to `yad-review-gate`.
 
-**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
 `architecture.status: "done"`, set `architecture-review.status: "in_review"`, and set
 `currentStep: "architecture-review"`. Write `state.json`. Do **not** touch `approvals.json` — only
 real reviewers approve, through the gate. On this branch `yad gate open` makes the same edit, so it
@@ -202,7 +202,7 @@ and that the next action is **review** via `yad-review-gate`. Note that this rev
 **Never record approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate
 opens a review PR on the hub (via `yad-hub-bridge`, labelled per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock
-invalidates prior platform approvals too. Otherwise the review is recorded file-only.
+invalidates prior platform approvals too. Otherwise the review is recorded local.
 
 ## Reference
 - Contract surface, altitude rule, and hashing recipe: `references/contract-format.md`.

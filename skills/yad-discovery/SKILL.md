@@ -63,7 +63,7 @@ roadmap extends the real system rather than re-proposing it.
 Open the discovery authoring branch `discovery/EP-discovery` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-hub's default branch. Author and commit the discovery set on it. Distinct from the bridge's
+hub's default branch. Author and commit the discovery set on it. Distinct from the verified ledger's
 `review/EP-discovery/discovery` branch.
 
 ### Step 4 — Write the discovery set
@@ -113,7 +113,7 @@ Notes:
 - Also create an empty approvals ledger `.sdlc/approvals.json` and comments ledger
   `.sdlc/comments.json`, each containing `[]`, and the `reviews/` directory.
 - Commit the seed on the `discovery/EP-discovery` branch, and cut `review/EP-discovery/discovery` from
-  it so the **first** review PR/MR carries the ledger to the default branch. In bridge mode
+  it so the **first** review PR/MR carries the ledger to the default branch. In verified mode
   `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162); every later change to it
   is CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
 
@@ -125,7 +125,7 @@ state moves to the `discovery-done` sentinel (not `ready-for-build` — discover
 roadmap is now the input that each `yad-epic` reads (its "Step 2c — read the roadmap"). When the hub
 has a platform, the gate opens a review PR on the hub (via `yad-hub-bridge`) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
-is recorded file-only.
+is recorded local.
 
 ## Reference
 - Discovery artifact templates + the 2-step state shape: `references/discovery-schema.md`.

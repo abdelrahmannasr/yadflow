@@ -84,12 +84,12 @@ function warnIncompleteDiscovery(epicDir, artifact) {
 }
 
 // Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
-// every gate to file-only without anyone noticing, and a typo'd platform would read as "no bridge".
+// every gate to local without anyone noticing, and a typo'd platform would read as a local ledger.
 export function loadHub(root) {
   const hubFile = path.join(root, PROJECT_FILES.hubConfig);
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
-  // Distinguish an ABSENT hub.json (null default → fine, file-only gate) from one that exists but
-  // holds literal `null` (malformed — must not silently downgrade to file-only).
+  // Distinguish an ABSENT hub.json (null default → fine, local gate) from one that exists but
+  // holds literal `null` (malformed — must not silently downgrade to local).
   const hub = readJSONStrict(hubFile, null);
   if (hub === null && fs.existsSync(hubFile)) {
     throw err('YAD-STATE-002', `${hubFile}: contains \`null\` — expected a config object`, 'fix the file or re-run `yad setup`');
@@ -113,10 +113,9 @@ export function loadHub(root) {
 // merge advances the step). Recorded per-project in hub.json by `yad setup`.
 export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 
-// Bridge mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
+// verified mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
 // defined once in manifest.mjs (`isVerifiedLedger`) and shared with plan.mjs's wiring and the ledger
 // hook, so no two readers can disagree about who owns the ledger (#186).
-const isBridge = isVerifiedLedger;
 
 // requireEngagement (config `hub.review.requireEngagement`): when on, the predicate counts only
 // approvals carrying a verified engagement signal. Soft-off by default — a bare approve still counts
@@ -246,7 +245,7 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
 
 // ---- actions ------------------------------------------------------------------------------------
 
-// The review PR/MR(s) to sync. Normally the ledger's own pointer — but under the bridge the ledger
+// The review PR/MR(s) to sync. Normally the ledger's own pointer — but with a verified ledger the record
 // records that pointer only at merge (CI is the sole writer), so a review a human needs to push
 // through by hand has NO recorded pointer at all. Fall back to the PR number the caller named
 // (`--pr`), else resolve it from the review branch on the platform. Without this, `gate sync` reported
@@ -298,18 +297,18 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
   const { hub, repos } = loadHub(root);
-  if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — file-only gate, nothing to sync'); return { synced: 0 }; }
+  if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
   const roster = hub.roster || [];
   const defaultReviewers = 1;
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
-  // Local invocation in bridge mode is ADVISORY: CI is the sole ledger writer, so a human run reads
+  // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
   // the platform and prints the predicate but writes nothing. CI calls gateSync with local=false.
-  // Without the bridge (platform but no gate-sync CI) the local command stays the writer.
-  // dryRun forces the same read-only behavior regardless of bridge — used for the Path B pre-merge
+  // With a local ledger (platform but no gate-sync CI) the local command stays the writer.
+  // dryRun forces the same read-only behavior regardless of the ledger — used for the Path B pre-merge
   // evaluation, which must persist nothing (gateCi passes dryRun for a held branch event).
-  const readOnly = (local && isBridge(hub)) || dryRun;
+  const readOnly = (local && isVerifiedLedger(hub)) || dryRun;
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
@@ -343,7 +342,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     return { synced: 0 };
   }
   // A pointer resolved from the platform is adopted into the ledger on the WRITER path only. In
-  // bridge mode this run is advisory and writes nothing, so the human never ends up with a gate-state
+  // verified mode this run is advisory and writes nothing, so the human never ends up with a gate-state
   // file in their working tree for the ledger-guard check to reject.
   if (resolved.discovered && !readOnly) hubPrs = upsertHubPr(hubPrs, targets[0]);
 
@@ -357,7 +356,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const step = findReviewStep(state, pr.artifact);
     if (!step) { warn(`no review step for ${pr.artifact}`); continue; }
     // A step that already advanced is never advanced AGAIN (that would reset the next step's status /
-    // currentStep backward) — the gate is one-way per step. But it is still SYNCED: in bridge mode
+    // currentStep backward) — the gate is one-way per step. But it is still SYNCED: in verified mode
     // nothing ever moves a step back to in_review (CI is the sole ledger writer), so a re-opened
     // review — surface re-locked, fresh PR, fresh approvals, merged — used to hit a blanket skip here
     // and write nothing but the PR pointer. The step then read `done` while its approvals were all
@@ -367,7 +366,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
     // (the wired workflow's reconcile/sweep aggregates this exit) instead of silently not advancing.
-    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (file-only)`); process.exitCode = 1; continue; }
+    if (!pull.ok) { warn(`${pr.artifact}: ${pull.reason} — skipping (local)`); process.exitCode = 1; continue; }
 
     const curHash = artifactHash(epicDir, pr.artifact);
     warnUnlockedContract(epicDir, pr.artifact);
@@ -444,7 +443,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   }
 
   if (readOnly) {
-    info('bridge mode: advisory view — CI owns the ledger, nothing written locally');
+    info('verified mode: advisory view — CI owns the ledger, nothing written locally');
     return { synced, advanced };
   }
   // Belt-and-braces: the upserts above already return canonical order, but a ledger this run only
@@ -782,7 +781,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   warnUnlockedContract(epicDir, artifact);
   warnIncompleteDiscovery(epicDir, artifact);
 
-  const bridge = isBridge(hub);
+  const verified = isVerifiedLedger(hub);
   // The review branch must exist ON ORIGIN: this command opens a PR against it, it never creates or
   // pushes it, and `gh pr create --head` explicitly does NOT push either — so a branch that is only
   // local still fails inside the platform CLI, which is the opaque error this guard exists to replace.
@@ -804,21 +803,21 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     if (present === null) warn(`could not verify that '${branch}' is on origin — opening the PR against it anyway`);
   }
 
-  // Outside bridge mode (file-only, OR a platform with no gate-sync CI) there is no CI to write the
-  // ledger, so the local command marks the step in_review. In bridge mode CI is the sole writer.
-  if (!bridge) {
+  // Outside verified mode (local, OR a platform with no gate-sync CI) there is no CI to write the
+  // ledger, so the local command marks the step in_review. In verified mode CI is the sole writer.
+  if (!verified) {
     ledger.state = markInReview(ledger.state, step);
     writeJSON(ledger.files.state, ledger.state);
   }
   if (!hub?.platform) {
-    warn('no hub platform — marked in_review file-only (no PR opened)');
+    warn('no hub platform — marked in_review locally (no PR opened)');
     ok(`${step.id} → in_review`);
     return;
   }
 
-  // Open the PR. In bridge mode CI records the hub-prs entry (and advances) on the default branch at
+  // Open the PR. In verified mode CI records the hub-prs entry (and advances) on the default branch at
   // merge — `yad gate open` never commits gate-state files (the ledger-guard check enforces that), and
-  // CI writes nothing pre-merge. Without the bridge, the local command records the PR itself (no CI will).
+  // CI writes nothing pre-merge. With a local ledger the local command records the PR itself (no CI will).
   const body = fillHubTemplate({ epic, artifact, step, owner: ownerOf(epicDir), domains });
   // Assignee = whoever opens the review PR (the committer); reviewers = the hub's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
@@ -829,18 +828,18 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
-  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${bridge ? ' — open it manually; CI records the gate on merge' : '; step is in_review file-only'}`); return; }
+  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review local'}`); return; }
   // Surface routing: who was assigned as a reviewer, who was @-mentioned (GitLab field cap), and any
   // login the platform could not add (dropped) so a partial roster is visible, not silent.
   if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);
   if (r.dropped?.length) warn(`could not request as reviewer (unknown/non-collaborator login): ${r.dropped.join(', ')}`);
 
-  if (!bridge) {
+  if (!verified) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
     writeJSON(ledger.files.hubPrs, ledger.hubPrs);
   }
   ok(`opened ${r.url}`);
-  hand(bridge
+  hand(verified
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);
   return { url: r.url };
@@ -920,13 +919,13 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
 // delimited block, so regenerating on every artifact change never duplicates it. A platform write only.
 export async function gateTrailer(root, { epic, artifact, body, number, getBody = getPrBody, editBody = editPrBody } = {}) {
   const { hub } = loadHub(root);
-  if (!hub?.platform) { warn('no hub platform configured — the trailer posts to the PR/MR (file-only has none)'); return; }
+  if (!hub?.platform) { warn('no hub platform configured — the trailer posts to the PR/MR (local has none)'); return; }
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad gate trailer <epic> <artifact> --body <text>` (the companion generates it)'); process.exitCode = 1; return; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const pr = (ledger.hubPrs || []).find((p) => !artifact || p.artifact === artifact) || null;
   const n = number || pr?.number;
-  if (!n) { warn('no PR number — pass `--pr <n>` (in bridge mode the PR is recorded in the ledger only at merge)'); return; }
+  if (!n) { warn('no PR number — pass `--pr <n>` (in verified mode the PR is recorded in the ledger only at merge)'); return; }
   const cur = getBody(hub.platform, n, { cwd: root });
   if (!cur.ok) { fail(`could not read PR #${n} description: ${cur.reason || 'unknown'}`); process.exitCode = 1; return; }
   const r = editBody(hub.platform, n, upsertTrailerBlock(cur.body, String(body).trim()), { cwd: root });

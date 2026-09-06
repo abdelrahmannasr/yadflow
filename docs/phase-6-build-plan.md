@@ -34,7 +34,7 @@ reference) and **re-authors** only the ones it does. So:
 
 **Why it's cheap.** The CI gates already derive an epic from a story by stripping the `-S0N` suffix and
 read *that epic's own* `contract-lock.json`. A change-epic is a new `EP-<slug2>` with its own stories, so
-every existing derivation, the review gate, the bridge, and `yad next` keep working — the change needed no
+every existing derivation, the review gate, the verified ledger, and `yad next` keep working — the change needed no
 reshaping of `contract-check.sh` or `spec-link.sh`. (Both have since been corrected in place: they share
 the four gates' `product-repo` resolution, and their type exemption no longer waives a Task trailer that
 is actually present.)

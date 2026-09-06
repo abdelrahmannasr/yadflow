@@ -81,7 +81,7 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
   proof. The strict-mode switch is `hub.review.requireEngagement` (off by default).
 - **The companion never approves on a human's behalf and never merges.** It assists; the human acts.
 
-## File-only mode (no platform)
+## local mode (no platform)
 
 With no hub platform, there is no PR to post to: write the trailer to
 `reviews/<artifact-base>--<date>--trailer.md` and the card/chat notes alongside the existing

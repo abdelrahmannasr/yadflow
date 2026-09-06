@@ -150,7 +150,7 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
   `git_url`, `default_branch`, `detectedAt`, and `bridge_enabled` — **`true` only when a platform was
   detected, `false` alongside `platform: null`** (preserve an existing roster). The two travel
-  together: bridge mode is a platform AND the flag (`isBridge`, `cli/gate.mjs`), and `yad setup`
+  together: verified mode is a platform AND the flag (`isBridge`, `cli/gate.mjs`), and `yad setup`
   derives both from one value, so writing the flag onto a platform-less hub creates a state no CLI
   path can produce and the gates read differently (#186).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
@@ -166,8 +166,8 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   connected repo's role); `yad roster grant|revoke <name> <repo> <role>`; `yad roster remove <login>`.
   A `domain-owner` grant/revoke keeps `repos.json` `domain_owners` in sync so the gate never drifts.
 
-If the hub has no remote (`platform: null`) or the bridge is disabled, the Shape gate runs
-file-only with no error — the bridge is purely additive.
+If the hub has no remote (`platform: null`) or the verified ledger is disabled, the Shape gate runs
+local with no error — the verified ledger is purely additive.
 
 ## Live on-demand (the third context layer)
 The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may

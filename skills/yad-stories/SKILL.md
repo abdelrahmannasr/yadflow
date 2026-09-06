@@ -38,7 +38,7 @@ Open the stories authoring branch `stories/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
 hub's default branch. Author and commit the story files under `stories/` on it. This is **distinct**
-from the bridge's `review/…` branch.
+from the verified ledger's `review/…` branch.
 
 ### Step 2 — Read inputs
 Read `epic.md` (scope, acceptance signals, `repos`), `architecture.md` (components by repo, flows),
@@ -102,9 +102,9 @@ As a <role>, I want <capability>, so that <outcome>.
 
 ### Step 6 — Advance the authoring step (NOT the gate)
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
-**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+**verified mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
 
-**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+**verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
 any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
@@ -112,14 +112,14 @@ fails the gate if it rides the review PR, and desynchronises the ledger CI is ab
 is pushed around the gate. Commit **the story files under `stories/` only** — nothing else
 under `.sdlc/` — then hand off to `yad-review-gate`.
 
-**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
 `stories.status: "done"`, set `stories-review.status: "in_review"`, and set
 `currentStep: "stories-review"`. Write `state.json`. Do **not** touch `approvals.json`.
 
-> **File-only branch only.** Since 3.11 the CLI also closes the authoring step when its review gate
+> **local branch only.** Since 3.11 the CLI also closes the authoring step when its review gate
 > opens or advances, so this edit is a no-op once `yad gate open` has run. A `stories` step left
 > `in_progress` behind a passed `stories-review` used to block the parallel `test-cases` track
-> (`YAD-STATE-005`). In bridge mode `gate open` writes nothing and local `gate sync` is advisory —
+> (`YAD-STATE-005`). In verified mode `gate open` writes nothing and local `gate sync` is advisory —
 > `gate ci` closes the step at merge.
 
 ### Step 7 — Stop at the gate (do NOT advance)
@@ -131,7 +131,7 @@ passes the epic becomes **`ready-for-build`** — Build can start **and** the pa
 approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate opens a review
 PR on the hub (via `yad-hub-bridge`, with a `domain:<repo>` label per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
-is recorded file-only.
+is recorded local.
 
 ## Reference
 - Story frontmatter and body template: `references/story-schema.md`.

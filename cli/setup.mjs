@@ -484,7 +484,7 @@ export async function runSetup(root, opts = {}) {
   S(solo ? 'Hub platform (solo — no roster)' : 'Hub platform & reviewer roster');
   guide(solo
     ? [
-      'Your hub is this repo on GitHub/GitLab (or none for a file-only gate).',
+      'Your hub is this repo on GitHub/GitLab (or none for a local gate).',
       'Solo: no roster needed — you review by merging your own PR (approval waived).',
     ]
     : [
@@ -501,7 +501,7 @@ export async function runSetup(root, opts = {}) {
     let platform = detectPlatform(remote.ok ? remote.stdout : '');
     platform = (await ask('Hub platform (github/gitlab/none)', platform || 'none')).toLowerCase();
     if (!['github', 'gitlab', 'none'].includes(platform)) {
-      warn(`unknown platform '${platform}' — using none (file-only gate)`);
+      warn(`unknown platform '${platform}' — using none (local gate)`);
       platform = 'none';
     }
     const roster = [];
@@ -534,7 +534,7 @@ export async function runSetup(root, opts = {}) {
     // that has not been refreshed by `yad update` yet still reads, and what a hub that is rolled back
     // to a 3.x CLI would fall back to. They go in a later major, once nothing on either side reads them.
     const enabled = platform !== 'none';
-    // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the bridge/PR flow
+    // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the verified ledger/PR flow
     // needs it to open PRs. Derived from the origin remote already resolved above; null when local-only.
     const git_url = enabled ? ((remote.ok && remote.stdout.trim()) || null) : null;
     // Merge into the existing file, never clobber: roster + verified_authors are user-owned identity
@@ -739,7 +739,7 @@ export async function runSetup(root, opts = {}) {
   }
   applyActions(legacyHubActions(root), { force: true });
   // the hub, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
-  // the moment it tries it rather than by a failed pipeline later (#171). Bridge-gated like the CI
+  // the moment it tries it rather than by a failed pipeline later (#171). Verified-only like the CI
   // above — with no bridge the ledger is locally owned and the guard would be wrong.
   const hookWiring = hookActions(root, ideTargets);
   if (hookWiring.length) {

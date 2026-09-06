@@ -457,7 +457,7 @@ export function repoActions(root, repo) {
 }
 
 // Hub wiring (gate-sync + verified-commits CI on the product hub itself). Only when the hub has a
-// platform and the bridge is explicitly enabled — a file-only hub stays file-only, with no error.
+// platform and the verified ledger is explicitly enabled — a local hub stays local, with no error.
 export function hubActions(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
   // `bridge_enabled` is the canonical flag (the documented hub-config schema); older setup versions
@@ -602,7 +602,7 @@ function hookSettingsAction(root, ide, relDest) {
 }
 
 // Harness-hook wiring on the hub: the guard script plus, per IDE target that defines a hook protocol,
-// the entry that invokes it. Bridge-gated exactly like `hubActions` — with no bridge the ledger is
+// the entry that invokes it. Verified-only exactly like `hubActions` — with a local ledger it is
 // locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
 export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));

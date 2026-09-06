@@ -59,7 +59,7 @@ ${c.bold('Setup & maintenance')}
                        (no paths/hosts/repo names/logins/flag values). Also offered
                        automatically after an unexpected failure. YAD_NO_REPORT=1 disables.
   yad hook ledger-guard    ${c.dim('harness-invoked, not typed')} — refuse an agent's edit to the
-                       CI-owned gate ledger in bridge mode and name the command that owns
+                       CI-owned gate ledger in verified mode and name the command that owns
                        the transition. Reads a tool-call payload on stdin (or --path <p>);
                        exit 0 allows, exit 2 denies with the reason on stderr. Wired into
                        .claude/settings.json by setup / check --fix. YAD_HOOK_DISABLE=1 skips.
@@ -98,7 +98,7 @@ ${c.bold('Review gate (Shape)')}
                                        Pull PR state -> ledger; advance on approved+resolved+merged.
                                        With no recorded PR, resolves it from the review branch; --pr
                                        names one (and overrides a stale recorded pointer). Advisory
-                                       in bridge mode — there, recover with 'yad gate ci' below
+                                       in verified mode — there, recover with 'yad gate ci' below
   yad gate comments <epic> [artifact]  Fetch unresolved review comments to address
   yad gate status <epic>               Show each review step + approvals
   yad gate repair <epic> [--push]      Close an author step stranded behind a passed review gate
@@ -320,9 +320,9 @@ async function main() {
       if (!epic) { log(c.red('usage: yad gate <open|sync|comments|status|repair|review|walkthrough|trailer|ci> <epic> [artifact]')); process.exitCode = 1; break; }
       // The epic id becomes a path segment under epics/ — reject anything but EP-<slug> outright.
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      // In bridge mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
+      // In verified mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
-      // CI's job at merge — never wired into the local gate. File-only mode keeps local writes.
+      // CI's job at merge — never wired into the local gate. local mode keeps local writes.
       if (action === 'open') await gateOpen(o.dir, { epic, artifact });
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });

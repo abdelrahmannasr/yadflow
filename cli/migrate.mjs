@@ -197,7 +197,7 @@ export function projectJsonFiles(root) {
 //   unchanged         already on the engine's shape, bytes identical
 //   list              a top-level JSON array: shape 1 by rule 1, and it cannot carry a key
 //   ahead             the file's shape is NEWER than this engine — never touched, always reported
-//   ci-owned          a verified (bridge) hub's ledger file: CI is its only writer
+//   ci-owned          a verified hub's ledger file: CI is its only writer
 //   unreadable        does not parse — reported, never rewritten
 //
 // Each row also carries `stamped`: whether the file literally holds a `schemaVersion` key. That is a
@@ -207,7 +207,7 @@ export function projectJsonFiles(root) {
 // comparison happens at all.
 export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
-  const bridge = isVerifiedLedger(hub);
+  const verified = isVerifiedLedger(hub);
   // On a verified hub the ledger guard refuses a human commit to these, so rewriting them locally
   // would produce a change that cannot be committed. Of the four the guard names, only state.json is
   // an object; the rest are arrays and would be skipped anyway.
@@ -233,7 +233,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
       rows.push({ file: rel, from, to: from, action: 'ahead', changes: false, stamped: isStamped });
       continue;
     }
-    if (bridge && ciOwned.has(path.basename(file))) {
+    if (verified && ciOwned.has(path.basename(file))) {
       rows.push({ file: rel, from, to: from, action: 'ci-owned', changes: false, stamped: isStamped });
       continue;
     }
@@ -246,7 +246,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     // every file by design and moves nothing, so naming it on every row would be noise reported as work.
     rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(version !== from ? { steps: applied } : {}) });
   }
-  return { engine: SCHEMA_VERSION, bridge, rows };
+  return { engine: SCHEMA_VERSION, verified, rows };
 }
 
 // ---- the report ----------------------------------------------------------------------------
@@ -319,7 +319,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       ok: blocked.length === 0,
       engine: plan.engine,
       applied: apply,
-      bridge: plan.bridge,
+      verified: plan.verified,
       changed: apply ? written : pending.map((r) => r.file),
       ...(ignored ? { gitignored: BACKUP_IGNORE_GLOB } : {}),
       rows: plan.rows,
@@ -341,7 +341,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       info(`${pending.length} file(s) would change — nothing has been written`);
       hand('run `yad migrate --apply` to make the change (each file is backed up first)');
     }
-    if (plan.bridge && plan.rows.some((r) => r.action === 'ci-owned')) {
+    if (plan.verified && plan.rows.some((r) => r.action === 'ci-owned')) {
       info('this project is in verified mode: CI owns some ledger files and stamps them on its next gate sync');
     }
     for (const r of blocked) {
