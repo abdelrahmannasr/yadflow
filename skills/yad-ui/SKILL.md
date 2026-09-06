@@ -172,7 +172,7 @@ Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. 
 
 ### Step 5 — Advance the authoring step (NOT the gate)
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
-**verified mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+**verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
 any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or

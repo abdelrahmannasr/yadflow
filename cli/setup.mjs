@@ -543,9 +543,17 @@ export async function runSetup(root, opts = {}) {
     // Read strict so a corrupt hub aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
     // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
     const cur = readJSONStrict(hubPath, {}) || {};
+    // `ledger` belongs to shape 2. On a project still on shape 1 — one that has not run
+    // `yad migrate` yet — writing it would leave a file DECLARING shape 1 while carrying a shape-2
+    // field, which is rule 1 read backwards and makes `yad doctor`'s drift report a lie about the
+    // one file this shape change is about. The old booleans below say the same thing and are what
+    // the reader falls back to when `ledger` is absent, so nothing is lost by waiting: `yad migrate`
+    // adds the key, and the setting it computes is the one these booleans just recorded.
+    const onNewShape = (cur.schemaVersion ?? 1) >= 2 || !Object.keys(cur).length;
     const next = buildReconfiguredHub(cur, {
       platform: enabled ? platform : null, git_url,
-      ledger: enabled ? 'verified' : 'local', bridge_enabled: enabled, bridge: enabled,
+      ...(onNewShape ? { ledger: enabled ? 'verified' : 'local' } : {}),
+      bridge_enabled: enabled, bridge: enabled,
       default_branch, roster, solo, profile: { codebase, repo_layout, team_size },
     });
     if (!roster.length && Array.isArray(cur.roster) && cur.roster.length) {

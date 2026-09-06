@@ -252,7 +252,7 @@ docs:
   auth: user
 
 # Hub platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
-# The product hub is itself a git repo on a platform. with a verified ledger, the Shape review/
+# The product hub is itself a git repo on a platform. With a verified ledger, the Shape review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
 # approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `yad-review-gate action: sync`
 # pulls that state into the file ledger (approvals.json/reviews/*.md) and runs the UNCHANGED gate predicate.

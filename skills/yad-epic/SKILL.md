@@ -171,7 +171,7 @@ Notes:
 ### Step 5b — Advance the authoring step — analysis-ran only
 *(Only when analysis ran — `state.json` already exists from `yad-analysis`.)*
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
-**verified mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+**verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
 any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or

@@ -1187,6 +1187,10 @@ test('ledger-guard: the bash reader and isVerifiedLedger agree on every hub.json
     ['ledger: local beats a stale bridge_enabled', { platform: 'github', ledger: 'local', bridge_enabled: true }],
     ['ledger: verified but no platform', { ledger: 'verified' }],
     ['ledger: an unknown value is not verified', { platform: 'github', ledger: 'banana' }],
+    // An EMPTY ledger is a present key, so it decides — it does not fall through to the old
+    // booleans. bash tested non-emptiness here and the two readers gave opposite answers.
+    ['ledger: empty string, with the old flag on', { platform: 'github', ledger: '', bridge_enabled: true }],
+    ['ledger: empty string, no old flag', { platform: 'github', ledger: '' }],
     ['a migrated verified hub carries both', { schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }],
   ];
   for (const [name, hub] of variants) {
@@ -1397,7 +1401,7 @@ test('ledger-guard: with a verified ledger OFF it is a no-op (humans own the led
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// #186: the gate used to enable itself on the flag ALONE, while `isBridge` (cli/gate.mjs) and
+// #186: the gate used to enable itself on the flag ALONE, while `isVerifiedLedger` (`cli/manifest.mjs`) and
 // `hubActions` (cli/plan.mjs) both also require a `platform`. A hub holding one without the other
 // deadlocked — the shell rejected the human's ledger commit while the CLI, reading the same file,
 // called it local and kept the local write path, so nothing could write the ledger at all.
@@ -1423,10 +1427,10 @@ test('ledger-guard: a platform with a local ledger flag is not verified mode —
 
 // Flattening the JSON to read it must not make the read depth-blind. A `bridge` key NESTED in some
 // other object is not the verified ledger flag, and treating it as one would enable this gate on a hub whose
-// `isBridge` is false — the same no-writer deadlock #186 is about, reached from the other side.
+// `isVerifiedLedger` is false — the same no-writer deadlock #186 is about, reached from the other side.
 test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #186)', () => {
   const T = scaffoldRepo();
-  // Root-level platform, but the only `bridge: true` is nested — `isBridge` would say false.
+  // Root-level platform, but the only `bridge: true` is nested — `isVerifiedLedger` would say false.
   enableVerified(T, '{"platform":"github","review":{"bridge":true},"roster":[{"bridge_enabled":true}]}\n');
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   let r = runGate(LEDGER_GUARD, T);

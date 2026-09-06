@@ -322,7 +322,7 @@ async function main() {
       if (!isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       // In verified mode CI is the sole ledger writer: `open` only opens the PR, and local `sync` is
       // advisory (reads the platform, prints status, writes nothing). The artifact status flip is
-      // CI's job at merge — never wired into the local gate. local mode keeps local writes.
+      // CI's job at merge — never wired into the local gate. Local mode keeps local writes.
       if (action === 'open') await gateOpen(o.dir, { epic, artifact });
       else if (action === 'sync') await gateSync(o.dir, { epic, artifact, today, number: o.pr, local: true });
       else if (action === 'comments') await gateComments(o.dir, { epic, artifact, today });

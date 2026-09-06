@@ -55,7 +55,7 @@ touched `repos` — never a forked or copied gate.
 ### Step 2 — Dispatch on `action`
 
 > **Check the mode first — in verified mode you write nothing to the ledger.** Read `.sdlc/hub.json`:
-> **verified mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`. Under the verified ledger
+> **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present. Under the verified ledger
 > the ledger is CI-owned — `ledger-guard` rejects any non-bot commit touching
 > `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`, local `yad gate
 > sync` is advisory, and `yad gate ci --merged` writes the whole transition when the review PR merges.
@@ -68,8 +68,8 @@ touched `repos` — never a forked or copied gate.
 the rule above, and tell reviewers how to comment/approve. Set the step `status` to `in_review` and
 `currentStep` to this step in `state.json` if not already. Do not advance.
 
-If `.sdlc/hub.json` has a non-null `platform` and `bridge_enabled: true` (or legacy `bridge: true` —
-`.sdlc/hub.json` is the only source the CLI reads, see `isBridge` in `cli/gate.mjs`), and `gh`/`glab`
+If `.sdlc/hub.json` has a non-null `platform` and `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true` / legacy `bridge: true` —
+`.sdlc/hub.json` is the only source the CLI reads, see `isVerifiedLedger` in `cli/manifest.mjs`), and `gh`/`glab`
 is authenticated, **also open a review PR/MR on the hub** by invoking `yad-hub-bridge action: open`
 (epic + artifact), and report the URL + required reviewers. **CI records the PR** in
 `epics/<epic>/.sdlc/hub-prs.json` (`{step, artifact, platform, number, url, branch, lastSyncedAt}`) —
@@ -210,7 +210,7 @@ platform PR/MR is the source of truth (native approvals + threads), and CI never
 branch (so an in-flight approval is never dismissed and required checks never strand). On the human
 **merge** CI re-reads approvals, advances the step, and flips the artifact `status:` on the **default
 branch**. After a merge, `git checkout <default> && git pull` to see it. The predicate and the human
-merge are unchanged — CI never approves and never merges. local mode (no platform) keeps the local
+merge are unchanged — CI never approves and never merges. Local mode (no platform) keeps the local
 write path.
 
 ### Hard rules (build plan §1, §5)

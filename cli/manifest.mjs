@@ -147,16 +147,21 @@ export const TESTING_PRIMARY = 'playwright';
 export const LEARNING_TOOLS = ['deeptutor'];
 export const LEARNING_PRIMARY = 'deeptutor';
 
-// The shape (schema version) every file the engine writes declares, as `"schemaVersion": 1`.
+// The shape (schema version) every file the engine writes declares, as `"schemaVersion": <n>`.
 //
 // Rule 1 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): every file states its shape,
 // and a file with no version counts as 1.
 //
-// Today the stamp is written and read back, and nothing yet acts on it: raising this number would move
-// what new files say without upgrading existing ones. The two halves that make it usable are the next
-// tasks on the roadmap — `yad migrate` (E14), which moves a project from one shape to the next, and a
-// `yad doctor` report (E16) for a project whose files disagree with the engine. Do NOT raise this
-// number before both exist.
+// Raising this number is not a one-line change. Three things move together, or a project is left
+// holding files it cannot upgrade:
+//   1. a step appended to MIGRATIONS (cli/migrate.mjs) taking a file from the old shape to the new
+//      one — the chain from 1 upwards must have no gap, which cli/test-migrate.mjs asserts;
+//   2. `docs/migrations/shape-<n>.md`, which scripts/shape-guide-check.sh REFUSES to release without;
+//   3. every writer of the changed file taught to write the new shape's fields.
+// `yad doctor` reports a project whose files disagree with this number, and `yad migrate` is what
+// closes the gap.
+//
+// 2 — `.sdlc/hub.json` records who writes the ledger as `ledger: verified | local` (E104).
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when

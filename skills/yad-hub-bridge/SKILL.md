@@ -6,7 +6,7 @@ description: 'The templated PR/MR bridge for the Shape review gate. When the pro
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
 
 **Goal:** Run the Shape review/comment/approval cycle through a **real PR/MR on the product hub**,
-without changing the gate's predicate or making the file ledger optional. the verified ledger is an **alternate
+without changing the gate's predicate or making the file ledger optional. The verified ledger is an **alternate
 input path** into `yad-review-gate`: it opens a review PR for an artifact, reviewers approve/comment on
 the platform with **their own** `gh`/`glab` auth, and the gate's `sync` action (which calls this skill's
 read recipes) maps that platform state into `approvals.json` / `comments.json` / `reviews/*.md`, then
@@ -35,7 +35,7 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 ## Preconditions (the verified ledger runs only when all hold)
 
-`.sdlc/hub.json` exists with a non-null `platform`, `bridge_enabled: true`, `config.yaml` `hub.bridge:
+`.sdlc/hub.json` exists with a non-null `platform`, `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true`), `config.yaml` `hub.bridge:
 true`, and `gh` (GitHub) / `glab` (GitLab) installed **and authenticated**. If any fails, report that the
 gate proceeds **local** (no error) and stop.
 

@@ -113,7 +113,7 @@ export function loadHub(root) {
 // merge advances the step). Recorded per-project in hub.json by `yad setup`.
 export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 
-// verified mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
+// Verified mode: CI is the sole ledger writer, so `gate open`/`sync` stay hands-off. The predicate is
 // defined once in manifest.mjs (`isVerifiedLedger`) and shared with plan.mjs's wiring and the ledger
 // hook, so no two readers can disagree about who owns the ledger (#186).
 
@@ -828,7 +828,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
-  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review local'}`); return; }
+  if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`); return; }
   // Surface routing: who was assigned as a reviewer, who was @-mentioned (GitLab field cap), and any
   // login the platform could not add (dropped) so a partial roster is visible, not silent.
   if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);

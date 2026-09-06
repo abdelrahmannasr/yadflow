@@ -460,7 +460,7 @@ export function repoActions(root, repo) {
 // platform and the verified ledger is explicitly enabled — a local hub stays local, with no error.
 export function hubActions(root) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
-  // `bridge_enabled` is the canonical flag (the documented hub-config schema); older setup versions
+  // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions
   // wrote `bridge` — `isVerifiedLedger` accepts an explicit true in either spelling, and is the one
   // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
   if (!isVerifiedLedger(hub)) return [];

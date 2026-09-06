@@ -52,15 +52,18 @@ export const MIGRATIONS = [
     //    `yad migrate`. A hub running yesterday's guard against a migrated hub.json would read no
     //    flag, conclude the ledger is local, and stop rejecting human commits to it. That is the one
     //    guarantee verified mode exists to provide, so removing the old key here would silently
-    //    disarm the audit trail. Add before you remove (rule 3): both keys, doctor warns, and the
-    //    old one goes in a later major.
+    //    disarm the audit trail. Add before you remove (rule 3): both keys are written, the new one
+    //    wins, and the old one goes in a later major — once nothing on either side still reads it.
     //
     // 2. It does not copy the flag. `bridge_enabled: true` on a hub with NO platform is `local`
     //    today, because the reader has always required a platform — there is no Verified badge to
     //    read without one. Writing `verified` there would change what the engine does to a project
     //    during an upgrade. So the value is computed from the reader's own answer, which means no
     //    project's behaviour moves: whatever it was before the migration, it is after.
-    apply: (obj, ctx) => (ctx?.base === 'hub.json'
+    // Matched on the exact project-relative path, not the basename. `hub.json` is a name a
+    // connected repo or a nested folder could also use, and injecting `ledger` into some other
+    // file is precisely the silent rewrite that passing a context was meant to prevent.
+    apply: (obj, ctx) => (ctx?.rel === PROJECT_FILES.hubConfig
       ? { ...obj, ledger: isVerifiedLedger(obj) ? 'verified' : 'local' }
       : obj),
   },

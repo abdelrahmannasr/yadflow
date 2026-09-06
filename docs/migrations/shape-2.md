@@ -81,6 +81,11 @@ thing that matters:
 If `yad doctor` reports files still behind, run `yad migrate` again and read the rows — a file that
 CI owns on a verified hub is skipped on purpose and is stamped by the next gate sync.
 
+## One output field changed name
+
+`yad migrate --json` reports `"verified": true|false` where it used to say `"bridge"`. If you have a
+script reading that field, rename it. Nothing else in any command's JSON output moved.
+
 ## If something goes wrong
 
 `--apply` copies every file it rewrites to `<file>.yad-orig` first. To undo it by hand, move those

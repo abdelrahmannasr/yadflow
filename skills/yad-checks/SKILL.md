@@ -52,8 +52,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   into each code repo):
   - `templates/checks/{spec-link,contract-check,build-test-lint,verified-commits}.sh`
   - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in verified mode** — hub.json
-    carries BOTH a `platform` and `bridge_enabled` (or the legacy `bridge`) true, the same predicate
-    `isBridge` (`cli/gate.mjs`) applies, so the gate and the CLI can never disagree about who owns the
+    carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
+    (or the legacy `bridge`) true. The same predicate
+    `isVerifiedLedger` (`cli/manifest.mjs`) applies, so the gate and the CLI can never disagree about who owns the
     ledger (#186). A no-op otherwise, when humans legitimately own it. On review PRs it FAILs any
     commit that touches the
     CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`, `reviews/*.md`) unless it

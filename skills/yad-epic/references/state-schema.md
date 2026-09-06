@@ -125,7 +125,7 @@ The shared procedure (run once the `EP-<slug>` is known):
    tree — no error.
 2. Branch name = `<step>/EP-<slug>`. If it already exists, check it out; otherwise create it from the
    hub's default branch (`git checkout -b <step>/EP-<slug>`).
-3. Author and commit the step's artifact(s) on that branch. the verified ledger's `review/…` branch is created
+3. Author and commit the step's artifact(s) on that branch. The verified ledger's `review/…` branch is created
    separately at review time and is untouched by this step.
 
 **How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once, by hand, on the
