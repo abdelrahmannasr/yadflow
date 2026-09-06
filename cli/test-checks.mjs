@@ -1216,14 +1216,17 @@ test('ledger-guard: an un-migrated hub.json still arms the guard (new script, ol
 });
 
 test('ledger-guard: the PREVIOUS release of this script still arms on a migrated hub.json (old script, new file)', () => {
-  // `git show main:…` is the script as it ships today. A hub that runs `yad migrate` before the next
-  // `yad update` is guarded by exactly this copy, so the migration keeping `bridge_enabled` is what
-  // holds the audit trail together — this test is what makes removing that key impossible by accident.
+  // The guard exactly as v3.18.1 shipped it, frozen in cli/fixtures/ and never edited — the same
+  // reasoning as the golden project. A hub that runs `yad migrate` before its next `yad update` is
+  // guarded by precisely this copy, so the migration keeping `bridge_enabled` is what holds the
+  // audit trail together, and this test is what makes removing that key impossible by accident.
+  //
+  // Deliberately a checked-in file rather than `git show <ref>:…`: CI checks out shallow, with no
+  // `main` and no tags, so a git-resolved baseline passes locally and dies in CI with
+  // "invalid object name" — which reads like a broken test rather than a missing ref.
   const T = scaffoldRepo();
-  const prev = path.join(T, 'ledger-guard-main.sh');
-  const shipped = execFileSync('git', ['show', 'main:skills/yad-checks/templates/checks/ledger-guard.sh'],
-    { cwd: ROOT, encoding: 'utf8' });
-  fs.writeFileSync(prev, shipped, { mode: 0o755 });
+  const prev = path.join(T, 'ledger-guard-v3.sh');
+  fs.writeFileSync(prev, fs.readFileSync(path.join(ROOT, 'cli/fixtures/ledger-guard-v3.18.1.sh')), { mode: 0o755 });
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'),
     JSON.stringify({ schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }, null, 2) + '\n');
