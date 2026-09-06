@@ -915,6 +915,40 @@ test('install-deps: accepts an exact pnpm version carrying a Corepack integrity 
 });
 
 for (const packageManager of [
+  'pnpm@9.15.0-rc.1',
+  'npm@10.8.2-beta.0',
+  `npm@10.8.2+sha512.${'A'.repeat(COREPACK_SHA512_HEX_LENGTH)}`,
+]) {
+  test(`install-deps: accepts supported exact packageManager ${packageManager}`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.equal(r.code, 0, r.out);
+    assert.ok(fs.existsSync(commandLog), 'the validated package manager ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+for (const packageManager of [
+  `pnpm@9.15.0+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH - 1)}`,
+  `npm@10.8.2+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH - 1)}g`,
+  `pnpm@9.15.0+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH)}.extra`,
+  'npm@10.8.2+sha1.0123456789abcdef0123456789abcdef01234567',
+  'pnpm@9.15.0+md5.0123456789abcdef0123456789abcdef',
+  'npm@10.8.2+build.1',
+]) {
+  test(`install-deps: rejects unsupported Corepack integrity metadata ${packageManager}`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.notEqual(r.code, 0, `${packageManager} must fail closed`);
+    assert.match(r.out, /sha512 integrity suffix/);
+    assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+for (const packageManager of [
   'pnpm@9',
   'pnpm@9.15',
   'pnpm@9.x',

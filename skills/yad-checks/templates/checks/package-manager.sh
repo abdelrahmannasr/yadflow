@@ -15,13 +15,16 @@ yad_validate_exact_package_manager_spec() {
     const spec = process.env.YAD_PACKAGE_MANAGER_SPEC;
     const at = spec.indexOf("@");
     const version = spec.slice(at + 1);
+    const COREPACK_SHA512_HEX_LENGTH = 128;
     const exactSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
     const match = exactSemver.exec(version);
     const invalidNumericPrerelease = match?.[4]?.split(".").some(
       identifier => /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith("0"),
     );
-    if (!match || match[0] !== version || invalidNumericPrerelease) {
-      process.stderr.write(`FAIL [package-manager]: packageManager ${JSON.stringify(spec)} must name an exact semantic version.\n`);
+    const corepackIntegrity = new RegExp(`^sha512\\.[0-9A-Fa-f]{${COREPACK_SHA512_HEX_LENGTH}}$`);
+    const invalidBuildMetadata = match?.[5] !== undefined && !corepackIntegrity.test(match[5]);
+    if (!match || match[0] !== version || invalidNumericPrerelease || invalidBuildMetadata) {
+      process.stderr.write(`FAIL [package-manager]: packageManager ${JSON.stringify(spec)} must name an exact semantic version with no build metadata or a sha512 integrity suffix containing ${COREPACK_SHA512_HEX_LENGTH} hexadecimal characters.\n`);
       process.exit(1);
     }
   '
