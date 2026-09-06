@@ -4,7 +4,7 @@
 stages: [spec-link, contract-check, build-test-lint, verified-commits]
 
 default:
-  image: node:20
+  image: node:${YAD_NODE_VERSION}
 
 .mr_only:
   rules:
@@ -12,6 +12,9 @@ default:
 
 variables:
   GIT_DEPTH: "0"   # full history so the gates can diff against the target branch
+  YAD_NODE_VERSION: "22" # override with a project/group CI variable when the repo requires another release
+  NX_BASE: $CI_MERGE_REQUEST_DIFF_BASE_SHA
+  NX_HEAD: $CI_COMMIT_SHA
 
 spec-link:
   stage: spec-link
@@ -28,7 +31,10 @@ contract-check:
 build-test-lint:
   stage: build-test-lint
   extends: .mr_only
+  variables:
+    YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:
+    - bash checks/install-deps.sh
     - bash checks/build-test-lint.sh
 
 # Needs a CI/CD variable GITLAB_TOKEN (or SDLC_API_TOKEN) with read_api scope — CI_JOB_TOKEN cannot

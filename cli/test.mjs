@@ -201,6 +201,7 @@ test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs 
 test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {
   const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
   const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  const gitlabStandalone = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/.gitlab-ci.yml'), 'utf8');
   assert.match(github, /filter:\s*blob:none/, 'GitHub checkout avoids materializing unrelated history blobs');
   assert.match(github, /NX_BASE:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
   assert.match(github, /NX_HEAD:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
@@ -216,6 +217,14 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.doesNotMatch(gitlab, /image:\s*node:20/, 'GitLab must not pin the obsolete Node 20 runtime');
   assert.match(gitlab, /bash checks\/install-deps\.sh/);
   assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
+  assert.match(gitlabStandalone, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
+  assert.match(gitlabStandalone, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
+  assert.match(gitlabStandalone, /YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(gitlabStandalone, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
+  assert.doesNotMatch(gitlabStandalone, /image:\s*node:20/, 'standalone GitLab must not pin the obsolete Node 20 runtime');
+  assert.match(gitlabStandalone, /bash checks\/install-deps\.sh/);
+  assert.doesNotMatch(gitlabStandalone, /^\s*- npm ci/m, 'standalone GitLab must use the package-manager-aware installer');
+  assert.match(gitlabStandalone, /YAD_TEST_MAX_WORKERS:\s*["']2["']/);
 });
 
 // #164 — `yad update` used to rewrite every managed file that merely DIFFERED from the shipped

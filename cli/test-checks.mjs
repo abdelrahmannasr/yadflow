@@ -767,6 +767,7 @@ test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes 
 // ---------- build-test-lint.sh ----------
 const BTL = path.join(CHECKS, 'build-test-lint.sh');
 const INSTALL_DEPS = path.join(CHECKS, 'install-deps.sh');
+const COREPACK_SHA512_HEX_LENGTH = 128;
 const npmStub = (lint, build, test_) => JSON.stringify({
   name: 'fixture', version: '0.0.0',
   scripts: { lint, build, test: test_ },
@@ -895,6 +896,64 @@ test('install-deps: packageManager selects and pins pnpm with a frozen lockfile'
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('install-deps: accepts an exact pnpm version carrying a Corepack integrity suffix', () => {
+  const integrity = `sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH)}`;
+  const packageManager = `pnpm@9.15.0+${integrity}`;
+  const { T, commandLog, env } = packageFixture({
+    packageManager,
+    lockfile: 'pnpm-lock.yaml',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack enable',
+    `corepack prepare ${packageManager} --activate`,
+    'pnpm install --frozen-lockfile',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+for (const packageManager of [
+  'pnpm@9',
+  'pnpm@9.15',
+  'pnpm@9.x',
+  'pnpm@latest',
+  'pnpm@^9.15.0',
+  'npm@10',
+  'npm@10.8',
+  'npm@10.x',
+  'npm@latest',
+  'npm@~10.8.2',
+  'pnpm@9.15.0\n',
+]) {
+  test(`install-deps: rejects non-exact packageManager ${JSON.stringify(packageManager)}`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.notEqual(r.code, 0, `${packageManager} must fail closed`);
+    assert.match(r.out, /exact semantic version/);
+    assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('install-deps: packageManager selects and pins npm before invoking it through Corepack', () => {
+  const { T, commandLog, env } = packageFixture({
+    packageManager: 'npm@10.8.2',
+    lockfile: 'package-lock.json',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack enable',
+    'corepack prepare npm@10.8.2 --activate',
+    'corepack npm ci',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('install-deps: an npm lockfile preserves the packageManager-absent npm contract', () => {
   const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
   const r = runGate(INSTALL_DEPS, T, [], env);
@@ -910,7 +969,7 @@ test('install-deps: packageManager text is data, never executable shell', () => 
   });
   const r = runGate(INSTALL_DEPS, T, [], env);
   assert.notEqual(r.code, 0, 'an invalid package-manager spec must fail closed');
-  assert.match(r.out, /unsupported packageManager/);
+  assert.match(r.out, /must name an exact semantic version/);
   assert.ok(!fs.existsSync(path.join(T, 'owned')), 'packageManager content was not evaluated');
   assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
   fs.rmSync(T, { recursive: true, force: true });

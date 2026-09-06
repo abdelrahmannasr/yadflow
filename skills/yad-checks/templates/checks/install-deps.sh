@@ -17,7 +17,16 @@ case "$package_manager" in
       echo "FAIL [install-deps]: npm requires package-lock.json or npm-shrinkwrap.json." >&2
       exit 1
     fi
-    npm ci
+    if [[ "$package_manager_spec" == npm@* ]]; then
+      corepack enable
+      corepack prepare "$package_manager_spec" --activate
+      # npm's shim is not enabled by Corepack, so dispatch it explicitly through Corepack. This
+      # guarantees package.json#packageManager selects the npm version instead of the Node image's
+      # ambient npm binary.
+      corepack npm ci
+    else
+      npm ci
+    fi
     ;;
   pnpm)
     if [ ! -f "$YAD_PNPM_LOCKFILE" ]; then

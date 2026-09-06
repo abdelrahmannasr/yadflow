@@ -96,9 +96,12 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 - Reads the standard `package.json#packageManager` field and runs `lint`, `build`, and `test` through
   that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported. A repo
   without the field retains npm behavior unless it carries `pnpm-lock.yaml`.
-- CI runs `install-deps.sh` first. npm uses `npm ci`; pnpm enables Corepack, activates the exact
-  version declared by `packageManager`, and uses `pnpm install --frozen-lockfile`. A pnpm CI repo
-  without an exact declared version fails closed instead of floating to a different toolchain.
+- CI runs `install-deps.sh` first. A declared npm or pnpm manager must use a full, exact semantic
+  version; Corepack integrity suffixes such as `+sha512.<hex>` remain valid. The installer activates
+  the declared version through Corepack. Pinned npm is dispatched as `corepack npm ci` so Node's
+  ambient npm cannot override the declaration; packageManager-absent npm preserves the historical
+  `npm ci` path. pnpm uses `pnpm install --frozen-lockfile`. Partial versions, ranges, and tags fail
+  closed instead of floating to a different toolchain.
 - The workflows default to Node 22. Set the GitHub repository variable or GitLab project/group CI/CD
   variable `YAD_NODE_VERSION` when the repo requires another supported Node release; generated files
   remain managed instead of accumulating consumer-specific edits.
@@ -314,7 +317,9 @@ The gates run identically under either CI; the config just invokes the scripts w
   and `$CI_MERGE_REQUEST_DESCRIPTION`. The quality job uses the same package-manager-aware installer;
   `NX_BASE=$CI_MERGE_REQUEST_DIFF_BASE_SHA` and `NX_HEAD=$CI_COMMIT_SHA` provide the equivalent Nx
   range. Its `node:${YAD_NODE_VERSION}` image defaults to `22` and a project/group CI/CD variable may
-  override it without editing the managed fragment. All `--profile code`.
+  override it without editing the managed fragment. The retained greenfield standalone template
+  (`templates/gitlab/.gitlab-ci.yml`) carries the same Node default, exact Nx range, and dependency
+  installer and test-worker-cap semantics. All `--profile code`.
 
 ## Sync with existing CI (merge, never clobber)
 

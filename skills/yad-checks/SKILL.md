@@ -19,7 +19,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
    CI installs and runs through the package manager declared by the repo's standard
    `package.json#packageManager` field (`npm` and `pnpm` are supported); an npm repo without that
-   field retains the historical npm behavior. A pnpm CI install requires a pinned version.
+   field retains the historical npm behavior. A declared manager requires a full, exact semantic
+   version (with Corepack's optional integrity suffix supported), and CI activates that exact version.
    The managed workflows use Node 22 by default and expose `YAD_NODE_VERSION` as a GitHub repository
    variable or GitLab CI/CD variable for repos whose declared runtime differs.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
@@ -85,7 +86,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     it uses the same installer, honors a project/group `YAD_NODE_VERSION` CI/CD variable, and exports
     the MR's exact `NX_BASE`/`NX_HEAD`.
   - `templates/gitlab/gitlab-ci.include-root.yml` → minimal root written only when no root `.gitlab-ci.yml` exists
-  - `templates/gitlab/.gitlab-ci.yml` → legacy standalone root (greenfield single-file option)
+  - `templates/gitlab/.gitlab-ci.yml` → legacy standalone root (greenfield single-file option), kept
+    semantically aligned with the includable fragment's Node version, Nx range, dependency install,
+    and test-worker cap
 - The gates depend on the conventions from earlier steps: the `Task:`/`Contract-Change:` commit
   trailers (`yad-implement`), the `specs/<story>/link.md` + `contracts/` slice (`yad-spec`), and the
   locked `contract.md` (`yad-architecture`).
