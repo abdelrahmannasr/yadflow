@@ -34,12 +34,18 @@ jobs:
     if: github.event.action != 'edited'
     env:
       YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
+      YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }}
+      NX_BASE: ${{ github.event.pull_request.base.sha }}
+      NX_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          filter: blob:none
       - uses: actions/setup-node@v4
-        with: { node-version: "20", cache: "npm" }
-      - run: npm ci # install deps so the real lint/build/test toolchain can run (mirrors the GitLab template)
+        with:
+          node-version: ${{ env.YAD_NODE_VERSION }}
+      - run: bash checks/install-deps.sh
       - run: bash checks/build-test-lint.sh
 
   # Phase 6 — feature-thread gates. lineage-check: the change links a real threaded epic. epic-open:

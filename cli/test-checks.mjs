@@ -766,6 +766,7 @@ test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes 
 
 // ---------- build-test-lint.sh ----------
 const BTL = path.join(CHECKS, 'build-test-lint.sh');
+const INSTALL_DEPS = path.join(CHECKS, 'install-deps.sh');
 const npmStub = (lint, build, test_) => JSON.stringify({
   name: 'fixture', version: '0.0.0',
   scripts: { lint, build, test: test_ },
@@ -829,6 +830,89 @@ test('build-test-lint gate: no cap env means no --maxWorkers even for jest/vites
   });
   const r = runGate(BTL, T, []); // YAD_TEST_MAX_WORKERS unset
   assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('build-test-lint gate: packageManager selects pnpm for every configured script', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pnpm'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "pnpm $*" >> "$YAD_COMMAND_LOG"\n');
+  fs.chmodSync(path.join(bin, 'pnpm'), 0o755);
+  commit(T, 'chore: wire pnpm scripts', {
+    'package.json': JSON.stringify({
+      name: 'fixture', version: '0.0.0', packageManager: 'pnpm@9.15.0',
+      scripts: { lint: 'eslint .', build: 'nx build', test: 'node --test' },
+    }),
+    'pnpm-lock.yaml': 'lockfileVersion: 9',
+  });
+  const r = runGate(BTL, T, [], {
+    PATH: `${bin}:${GIT_ENV.PATH}`,
+    YAD_COMMAND_LOG: commandLog,
+  });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'pnpm run --silent lint',
+    'pnpm run --silent build',
+    'pnpm run --silent test',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+const packageFixture = ({ packageManager, lockfile }) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-package-manager-'));
+  const bin = path.join(T, 'bin');
+  fs.mkdirSync(bin);
+  const pkg = { name: 'fixture', version: '0.0.0', scripts: {} };
+  if (packageManager !== undefined) pkg.packageManager = packageManager;
+  fs.writeFileSync(path.join(T, 'package.json'), JSON.stringify(pkg));
+  fs.writeFileSync(path.join(T, lockfile), 'lock');
+  const commandLog = path.join(T, 'commands.log');
+  for (const command of ['corepack', 'pnpm', 'npm']) {
+    const stub = path.join(bin, command);
+    fs.writeFileSync(stub, `#!/usr/bin/env bash\nprintf '%s\\n' '${command} '"$*" >> "$YAD_COMMAND_LOG"\n`);
+    fs.chmodSync(stub, 0o755);
+  }
+  const env = { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog };
+  return { T, commandLog, env };
+};
+
+test('install-deps: packageManager selects and pins pnpm with a frozen lockfile', () => {
+  const { T, commandLog, env } = packageFixture({
+    packageManager: 'pnpm@9.15.0',
+    lockfile: 'pnpm-lock.yaml',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack enable',
+    'corepack prepare pnpm@9.15.0 --activate',
+    'pnpm install --frozen-lockfile',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: an npm lockfile preserves the packageManager-absent npm contract', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: packageManager text is data, never executable shell', () => {
+  const { T, commandLog, env } = packageFixture({
+    packageManager: 'pnpm@9.15.0; touch owned',
+    lockfile: 'pnpm-lock.yaml',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0, 'an invalid package-manager spec must fail closed');
+  assert.match(r.out, /unsupported packageManager/);
+  assert.ok(!fs.existsSync(path.join(T, 'owned')), 'packageManager content was not evaluated');
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

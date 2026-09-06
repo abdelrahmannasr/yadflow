@@ -63,11 +63,14 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
     '_bmad/sdlc/config.yaml',
     'demo/backend/.github/workflows/yad-checks.yml',
     'demo/backend/checks/spec-link.sh',
+    'demo/backend/checks/package-manager.sh',
+    'demo/backend/checks/install-deps.sh',
     'demo/backend/.github/pull_request_template.md',
     '.sdlc/cli-version.json',
   ]) assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
 
   assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/spec-link.sh')).mode & 0o100, 'gate script executable');
+  assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/install-deps.sh')).mode & 0o100, 'dependency installer executable');
 
   const r2 = await reconcile(T, { fix: false });
   assert.equal(r2.counts.missing, 0);
@@ -193,6 +196,26 @@ test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs 
   for (const job of ['spec-link', 'contract-check', 'build-test-lint', 'commit-message', 'verified-commits']) {
     assert.match(jobBlock(job), SKIP_GUARD, `${job} must skip a bare edited event`);
   }
+});
+
+test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {
+  const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  assert.match(github, /filter:\s*blob:none/, 'GitHub checkout avoids materializing unrelated history blobs');
+  assert.match(github, /NX_BASE:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(github, /NX_HEAD:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(github, /YAD_NODE_VERSION:\s*\$\{\{ vars\.YAD_NODE_VERSION \|\| '22' \}\}/);
+  assert.match(github, /node-version:\s*\$\{\{ env\.YAD_NODE_VERSION \}\}/);
+  assert.doesNotMatch(github, /node-version:\s*["']?20/, 'GitHub must not pin the obsolete Node 20 runtime');
+  assert.match(github, /bash checks\/install-deps\.sh/);
+  assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
+  assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
+  assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
+  assert.match(gitlab, /YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(gitlab, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
+  assert.doesNotMatch(gitlab, /image:\s*node:20/, 'GitLab must not pin the obsolete Node 20 runtime');
+  assert.match(gitlab, /bash checks\/install-deps\.sh/);
+  assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
 });
 
 // #164 — `yad update` used to rewrite every managed file that merely DIFFERED from the shipped

@@ -10,7 +10,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 |------|-------|-------------|
 | spec-link | the `Task: <story>-<task>` commit trailer; `specs/<story>/link.md` | `yad-implement` (trailer), `yad-spec` (link.md) |
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
-| build/test/lint | the repo's `npm run lint` / `npm run build` / `npm test` | the repo |
+| build/test/lint | the repo's configured package manager running `lint` / `build` / `test` | the repo |
 | lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the hub | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
 | epic-open | the `Task:` trailer → `link.md` → the hub epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
 | reconcile-debt | the `Task:` trailer → `link.md` → the hub epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
@@ -93,7 +93,15 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 
 ## 3. build/test/lint (`templates/checks/build-test-lint.sh`)
 
-- Runs `npm run lint`, `npm run build`, `npm test` in order; any non-zero exit fails the gate.
+- Reads the standard `package.json#packageManager` field and runs `lint`, `build`, and `test` through
+  that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported. A repo
+  without the field retains npm behavior unless it carries `pnpm-lock.yaml`.
+- CI runs `install-deps.sh` first. npm uses `npm ci`; pnpm enables Corepack, activates the exact
+  version declared by `packageManager`, and uses `pnpm install --frozen-lockfile`. A pnpm CI repo
+  without an exact declared version fails closed instead of floating to a different toolchain.
+- The workflows default to Node 22. Set the GitHub repository variable or GitLab project/group CI/CD
+  variable `YAD_NODE_VERSION` when the repo requires another supported Node release; generated files
+  remain managed instead of accumulating consumer-specific edits.
 - Tests must actually exercise behavior (build plan §C) — an empty or trivially-passing suite does not
   satisfy the gate's intent.
 - **Test worker cap.** When the CI job sets `YAD_TEST_MAX_WORKERS` (the templates default it to `2`)
@@ -296,11 +304,17 @@ The gates run identically under either CI; the config just invokes the scripts w
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
   The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) run as their own jobs with
-  `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base.
+  `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout also
+  uses `filter: blob:none`; its installer follows `package.json#packageManager`, and `NX_BASE` /
+  `NX_HEAD` carry the exact base/head SHAs so Nx affected commands evaluate the PR rather than a
+  stale default. `YAD_NODE_VERSION` is read from GitHub repository variables with `22` as the default.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`
-  and `$CI_MERGE_REQUEST_DESCRIPTION`. All `--profile code`.
+  and `$CI_MERGE_REQUEST_DESCRIPTION`. The quality job uses the same package-manager-aware installer;
+  `NX_BASE=$CI_MERGE_REQUEST_DIFF_BASE_SHA` and `NX_HEAD=$CI_COMMIT_SHA` provide the equivalent Nx
+  range. Its `node:${YAD_NODE_VERSION}` image defaults to `22` and a project/group CI/CD variable may
+  override it without editing the managed fragment. All `--profile code`.
 
 ## Sync with existing CI (merge, never clobber)
 

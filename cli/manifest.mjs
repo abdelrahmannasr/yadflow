@@ -235,6 +235,8 @@ export const REPO_WIRING = {
   common: [
     { src: 'skills/yad-checks/templates/checks/spec-link.sh', dest: 'checks/spec-link.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/contract-check.sh', dest: 'checks/contract-check.sh', exec: true },
+    { src: 'skills/yad-checks/templates/checks/package-manager.sh', dest: 'checks/package-manager.sh', exec: true },
+    { src: 'skills/yad-checks/templates/checks/install-deps.sh', dest: 'checks/install-deps.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/build-test-lint.sh', dest: 'checks/build-test-lint.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/lineage-check.sh', dest: 'checks/lineage-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/epic-open.sh', dest: 'checks/epic-open.sh', exec: true },

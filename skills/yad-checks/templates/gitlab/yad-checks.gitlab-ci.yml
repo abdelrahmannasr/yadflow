@@ -17,7 +17,7 @@
 # never touches the host root.
 
 .sdlc_mr_only:
-  image: node:20
+  image: node:${YAD_NODE_VERSION}
   # Runner selection. These jobs need a docker/dind executor; on instances whose runners are all
   # tag-locked (run_untagged: false) an untagged image job never starts. Set the YAD_RUNNER_TAGS
   # CI/CD variable (Settings → CI/CD → Variables, e.g. `dind_runner`) to route them — it lives in
@@ -31,6 +31,9 @@
 
 variables:
   GIT_DEPTH: "0"   # full history so the gates can diff against the target branch
+  YAD_NODE_VERSION: "22" # override with a project/group CI variable when the repo requires another release
+  NX_BASE: $CI_MERGE_REQUEST_DIFF_BASE_SHA
+  NX_HEAD: $CI_COMMIT_SHA
 
 yad-spec-link:
   extends: .sdlc_mr_only
@@ -50,7 +53,7 @@ yad-build-test-lint:
   variables:
     YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:
-    - npm ci
+    - bash checks/install-deps.sh
     - bash checks/build-test-lint.sh
 
 # Phase 6 — feature-thread gates (lineage / seal / hotfix-debt). Build on spec-link's story->epic
