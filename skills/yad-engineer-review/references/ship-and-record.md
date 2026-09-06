@@ -1,6 +1,6 @@
 # Ship — the build ledger and the story state
 
-Step E (`yad-engineer-review`) closes the build half: AI review (advisory) → engineer review (the human gate) →
+Step E (`yad-engineer-review`) closes Build: AI review (advisory) → engineer review (the human gate) →
 ship. Shipping records the merge and updates the story state so the whole chain is traceable.
 
 ## Two sets of eyes
@@ -59,16 +59,16 @@ without the `{ epic, ships }` wrapper):
 }
 ```
 
-This is the back-half analogue of the front half's `approvals.json` — files only, no hidden state, so a
+This is the Build analogue of Shape's `approvals.json` — files only, no hidden state, so a
 future service can drive ship by writing the same records. Like the trust log and build-state, it is a
-machine-written ledger committed by **`yad checkpoint`** (the back-half analogue of `yad gate` sync),
+machine-written ledger committed by **`yad checkpoint`** (the Build analogue of `yad gate` sync),
 not by hand: after recording the ship, `yad checkpoint --push` lands the new `build-log/` shard as a
-`chore(hub): …` audit-trail commit on the default branch (allowlist-scoped to the back-half ledgers,
-never a front-half gate file); `yad tidy up` folds finished shards into `build-log.json` later.
+`chore(hub): …` audit-trail commit on the default branch (allowlist-scoped to the Build ledgers,
+never a Shape gate file); `yad tidy up` folds finished shards into `build-log.json` later.
 
 ### Retroactive ship — a pre-tracking story (#142)
 
-A story that was merged and shipped **before** the back-half ledger existed has no build-log ship, so
+A story that was merged and shipped **before** the Build ledger existed has no build-log ship, so
 `yad checkpoint` can't carry its `status: shipped` flip (the flip is only carried when a ship backs it,
 #112) — leaving a raw `git push origin main` as the only way to land it, against the never-raw-git
 convention. To reconcile it through yad, record a **retroactive** ship, then checkpoint carries the flip
@@ -83,7 +83,7 @@ It writes ONE minimal ship shard marked `retroactive: true` (`task` defaults to 
 the normal checkpoint so the story's already-made `status:` flip rides along in the **same** commit. It
 refuses when the story already has a ship **in that repo** (then it isn't pre-tracking there — use the
 normal flow). It does **not** author the story frontmatter — and to keep evidence and the flip atomic (the no-drift
-invariant), it **refuses** unless you have already set a back-half `status:` (`in-build` or `shipped`) in
+invariant), it **refuses** unless you have already set a Build `status:` (`in-build` or `shipped`) in
 `stories/<story>.md`, so a ship shard is never committed while the artifact still says `approved`.
 
 **Where the record lands — it is a shard, not an append to `build-log.json`.** Like every other ship, a
@@ -129,7 +129,7 @@ a bare approve draws a friendly `yad review nudge`); it only gates ship when
 `hub.review.requireEngagement: true`. `yad review reconcile --epic <id> --repo <r> --pr <n>` reads the
 code PR's approvals (with the engagement signal) and stamps them onto the matching ship record — writing
 back into the ship's shard where it lives (or its folded entry if the story was already tidied) — the
-back-half **bridge**, the analogue of `yad gate sync`. The signal is gameable by design ("visible, not
+Build **bridge**, the analogue of `yad gate sync`. The signal is gameable by design ("visible, not
 impossible"): it makes engineer-review quality visible, it does not prove a human read the diff. It sits
 **beside** the CI gates (build/test/lint/contract/verified-commits) — never above them; CI still
 decides machine safety, the merge is still the human act.

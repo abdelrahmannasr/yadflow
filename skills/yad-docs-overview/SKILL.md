@@ -7,7 +7,7 @@ description: 'Generates the project-level SDLC-overview interactive site — the
 
 **Goal:** Render the **whole yadflow pipeline** — every stage from setup → ship — as an interactive site,
 reusing the same shell as the per-epic docs (`skills/yad-docs/templates/app/`). Where `yad-docs`
-animates one epic's flows, this animates the **workflow itself**: the front gates, the build half, the
+animates one epic's flows, this animates the **workflow itself**: the Shape gates, Build, the
 automation dial, the setup connectors. The hand-maintained overview report stays the **main
 documentation at the Pages root** (`<base>/`, served from `public/report.html` and `public/index.html`);
 this interactive SPA mounts under `<base>/app/` and is reached from the report — the report links
@@ -39,7 +39,7 @@ It only reads the pipeline definition and writes a project-level site. When a do
 There is no epic; the inputs are the workflow's own config + manifest (full mapping in
 `references/pipeline-model.md`):
 
-- `skills/sdlc/config.yaml` — the front/back steps, the **two dials** (assistance, automation),
+- `skills/sdlc/config.yaml` — the Shape/Build steps, the **two dials** (assistance, automation),
   defaults, the review-gate rule, the build conventions, the automation/trust thresholds.
 - `skills/sdlc/module-help.csv` — the **canonical skill manifest**: each skill's `phase`,
   `preceded-by` / `followed-by`, and `outputs`. This is the ordering source of truth.
@@ -56,7 +56,7 @@ git work tree). Generate and commit on it.
 Map the pipeline onto the same data structures `yad-docs` uses (concrete mapping in
 `references/pipeline-model.md`):
 
-- **Flow paths** = the **phases** — `Setup`, `Front-zero` (discovery), `Front half`, `Build half`, `Automation`, `Change management` (feature threads).
+- **Flow paths** = the **phases** — `Setup`, `Front-zero` (discovery), `Shape`, `Build`, `Automation`, `Change management` (feature threads).
 - **Flow steps** = the **skills/gates in order** (from `module-help.csv` `preceded-by`/`followed-by`),
   each step's `messages` = the skill's `outputs`, and `sideEffects` = the `.sdlc/` files it writes.
 - **System components** = the **durable state objects** — the product hub, each `.sdlc/*.json`

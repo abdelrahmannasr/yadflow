@@ -40,7 +40,7 @@ Keeping these separate is important. It lets us say "heavy AI help, but a human 
 We automate from the **safe end** toward the **valuable end**:
 
 - The back states (tasks, implement, checks) can move toward "machine advances" first — a mistake there is one revert, caught by gates.
-- The front states (epic, architecture, UI design) stay **human-authored with AI assist** the longest, and never auto-advance. This protects the decisions that are the whole point of the system.
+- The Shape steps (epic, architecture, UI design) stay **human-authored with AI assist** the longest, and never auto-advance. This protects the decisions that are the whole point of the system.
 
 ---
 
@@ -95,7 +95,7 @@ Contract rule: a task may use the contract but may not silently change it. A cha
 
 ## 6. The full workflow (states)
 
-Front states are human-authored with AI assist; they never auto-advance.
+Shape steps are human-authored with AI assist; they never auto-advance.
 
 The BMAD agents (from its "BMM" module) that assist each step:
 
@@ -196,6 +196,6 @@ Add each tool only when it removes a real, measured bottleneck — not before.
 ## 10. Honest cautions
 
 - BMAD is young (v6, parts in alpha) — it has rough edges. Prefer the stable version where possible and test the builder carefully.
-- Never let the front states auto-advance — that would quietly turn engineers from authors into rubber stamps, defeating the purpose.
+- Never let the Shape steps auto-advance — that would quietly turn engineers from authors into rubber stamps, defeating the purpose.
 - Keep the shared contract at the right altitude: shared scope, contract, and goal only. Per-repo detail (files, tasks, do-not-touch) stays in each repo.
 - If we ever sell this, read each tool's license first (BMAD and Impeccable are open-source with their own rules).

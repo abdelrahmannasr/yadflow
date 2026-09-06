@@ -653,12 +653,12 @@ export async function runSetup(root, opts = {}) {
   guide(repo_layout === 'monorepo'
     ? [
       'One repo holds all the code; the contract lives in the hub and stories tag this single repo.',
-      codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: the repo is packed so the front phases see what already exists.',
+      codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: the repo is packed so the Shape phases see what already exists.',
     ]
     : [
       'Register each code repo the feature touches; stories get tagged with the repos that implement them.',
       'Per repo: name → path (inside this project) → platform → domain owner(s).',
-      codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: each repo is packed so the front phases see what already exists.',
+      codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: each repo is packed so the Shape phases see what already exists.',
     ]);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const registry = readJSON(regPath, { repos: [] });

@@ -22,7 +22,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#2471a3",
     position: { x: 9, y: 50 },
     description:
-      "The product repo — the front-phase brain. Holds every epic's .sdlc ledger and the singular cross-repo contract.",
+      "The product repo — the Shape phase brain. Holds every epic's .sdlc ledger and the singular cross-repo contract.",
   },
   {
     id: "state-json",
@@ -31,7 +31,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#2471a3",
     position: { x: 28, y: 14 },
     description:
-      "Per-epic state machine: currentStep, each step's assistance/automation dials, and front_steps_locked.",
+      "Per-epic state machine: currentStep, each step's assistance/automation dials, and shape_steps_locked.",
   },
   {
     id: "approvals-json",
@@ -139,7 +139,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#7d3c98",
     position: { x: 88, y: 33 },
     description:
-      "The hub's git platform. The front-half review rides a real review PR/MR here; CI runs the check gates.",
+      "The hub's git platform. The Shape review rides a real review PR/MR here; CI runs the check gates.",
   },
   {
     id: "trust-log",
@@ -148,7 +148,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#b7950b",
     position: { x: 88, y: 67 },
     description:
-      "Every back-half run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
+      "Every Build run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
   },
   // Phase 6 — the feature-thread ledgers (post-lock change management).
   {
@@ -158,7 +158,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#7d3c98",
     position: { x: 18, y: 92 },
     description:
-      "The feature-thread record: a change-epic's kind (change/defect/hotfix), its parent, and the thread lineage — inherit unchanged front artifacts by reference, re-author only what changes.",
+      "The feature-thread record: a change-epic's kind (change/defect/hotfix), its parent, and the thread lineage — inherit unchanged Shape artifacts by reference, re-author only what changes.",
   },
   {
     id: "reconcile-debt-json",

@@ -34,7 +34,7 @@ Resolve the scope (`yad thread <id> --json` for a thread). Collect, across the s
   (`origin`, `severity`, `escape_stage`, `root_cause`);
 - the shipped regression fixes from each epic's build ledger (the fix that closed the defect, linking
   the change-epic → its regression story/test);
-- open reconcile debt (a hotfix whose front truth is not yet restored).
+- open reconcile debt (a hotfix whose Shape truth is not yet restored).
 
 The build ledger is **shard-then-fold**: read it as the **union** of the folded `.sdlc/build-log.json`
 `ships` PLUS every loose `.sdlc/build-log/` shard, deduped by `(story, task, repo)` — a shard WINS over a

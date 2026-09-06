@@ -62,7 +62,7 @@ cross-project), using yad-learn's exact field shape:
 ```
 
 Field notes:
-- `stage` = `engineer-review` (back half) or `<artifact>-review` (front half, e.g. `architecture-review`).
+- `stage` = `engineer-review` (Build) or `<artifact>-review` (Shape, e.g. `architecture-review`).
 - `mode` = `deep` for a walkthrough that didn't score, `quiz` when you captured a comprehension roll-up.
 - `comprehension` = the scorecard roll-up string (null when `mode: deep`).
 - `tool` = `harness-native` (or `deeptutor` if a DeepTutor session backed the tutoring).
@@ -74,7 +74,7 @@ engineer's specific gaps and how to close them. Both files are **local-only, git
 or pushed, and never written into a code repo** — they are a private personal skills log. `yad status`
 rolls them up by stage (e.g. "engineer-review: 3").
 
-## Optional: stamp the build-log (back half)
+## Optional: stamp the build-log (Build)
 
 When the task later ships, [`yad-engineer-review`](../../yad-engineer-review/SKILL.md) may record on the
 ship record's `companion` block that a pair session ran: `"companion": { "trailer": true, "cards": false,

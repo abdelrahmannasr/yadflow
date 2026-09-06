@@ -1,11 +1,11 @@
 ---
 name: yad-hub-bridge
-description: 'The templated PR/MR bridge for the front-half review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the hub: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the Shape review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the hub: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the file-only gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
 
-**Goal:** Run the front-half review/comment/approval cycle through a **real PR/MR on the product hub**,
+**Goal:** Run the Shape review/comment/approval cycle through a **real PR/MR on the product hub**,
 without changing the gate's predicate or making the file ledger optional. The bridge is an **alternate
 input path** into `yad-review-gate`: it opens a review PR for an artifact, reviewers approve/comment on
 the platform with **their own** `gh`/`glab` auth, and the gate's `sync` action (which calls this skill's
@@ -148,7 +148,7 @@ default branch. (File-only mode keeps `yad gate sync` as the local writer.)
 - **CI never approves and never merges.** The wired workflow only runs `gate ci` — the same sync +
   unchanged predicate. It does **nothing pre-merge** (the platform PR/MR holds the review state); at
   merge it re-reads approvals from the platform, advances the step, and flips the artifact status on
-  the **default branch** (the only place CI ever commits). CI is the sole ledger writer; front gates
+  the **default branch** (the only place CI ever commits). CI is the sole ledger writer; Shape gates
   stay permanently human.
 - **The CI tokens are the one documented bend of "no stored tokens".** GitHub uses the platform's own
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`

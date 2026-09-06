@@ -1,19 +1,19 @@
-// `yad checkpoint` — commit the machine-written back-half hub state (trust-log / build-log /
-// build-state) as one audit-trail commit. This is the back-half analogue of the front-half gate sync
-// (cli/gate.mjs): the SDLC back half (yad-run, yad-engineer-review) WRITES these ledgers into the
+// `yad checkpoint` — commit the machine-written Build hub state (trust-log / build-log /
+// build-state) as one audit-trail commit. This is the Build analogue of the Shape gate sync
+// (cli/gate.mjs): the SDLC's Build part (yad-run, yad-engineer-review) WRITES these ledgers into the
 // working tree but never commits them, so teammates/CI/`yad status` on other machines see stale trust
 // evidence. checkpoint lands them with a `chore(hub): ...` message.
 //
-// It also carries the back-half story `status:` flip (approved → in-build/shipped) that
+// It also carries the Build story `status:` flip (approved → in-build/shipped) that
 // yad-engineer-review writes into stories/<id>.md but no command committed — the #112 drift where
 // build-log said shipped while the story artifact still said approved. Only story files with build-log
 // ship evidence are carried (storyStatusPathspecs), AND only when their staged change is the `status:`
-// line alone (stagedStoryIsStatusOnly) — so it stays a back-half record, never a raw edit that would
+// line alone (stagedStoryIsStatusOnly) — so it stays a Build record, never a raw edit that would
 // slip prose onto the default branch under a `[skip ci]` commit that bypasses review.
 //
 // Two invariants keep it out of the gates' way:
-//   1. It stages ONLY the back-half ledgers + build-log-backed story flips by an explicit allowlist —
-//      never `git add -A`, which would sweep the CI-owned front-half ledger (state/approvals/
+//   1. It stages ONLY the Build ledgers + build-log-backed story flips by an explicit allowlist —
+//      never `git add -A`, which would sweep the CI-owned Shape ledger (state/approvals/
 //      comments/hub-prs.json, reviews/*.md) and trip the ledger-guard gate. (ledger-guard does NOT
 //      protect stories/*.md, and this commits to the default branch, never a PR range, so the carried
 //      story flip is safe.)
@@ -30,7 +30,7 @@ import { hubGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mj
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter } from './epic-state.mjs';
 
-// The machine-written back-half ledgers, relative to an epic's dir. The two append-only logs are
+// The machine-written Build ledgers, relative to an epic's dir. The two append-only logs are
 // shard-then-fold (cli/ledger.mjs): each is a folded file PLUS a shard dir of loose per-entry files —
 // both are allowlisted so a checkpoint commits new shards and any `yad tidy up` fold. `build-state` is
 // the whole dir (one JSON per story). Keep in sync with cli/manifest.mjs epicFiles.
@@ -40,9 +40,9 @@ const BACK_HALF = [
   '.sdlc/build-state',
 ];
 
-// PURE — the repo-relative pathspecs to stage: every back-half ledger that exists under any epic.
+// PURE — the repo-relative pathspecs to stage: every Build ledger that exists under any epic.
 // Explicit allowlist by design (see invariant 1 above).
-export function backHalfPathspecs(root) {
+export function buildLedgerPathspecs(root) {
   const epicsDir = path.join(root, 'epics');
   if (!fs.existsSync(epicsDir)) return [];
   const out = [];
@@ -55,17 +55,17 @@ export function backHalfPathspecs(root) {
   return out;
 }
 
-// The two back-half story statuses. `in-build` = some of a story's tasks shipped; `shipped` = all did.
-// Both are set ONLY by the build half (yad-engineer-review), never by the front-gate ladder
+// The two Build story statuses. `in-build` = some of a story's tasks shipped; `shipped` = all did.
+// Both are set ONLY by Build (yad-engineer-review), never by the Shape gate ladder
 // (cli/artifact-status.mjs PRESERVEs them). See #112.
 const BACK_HALF_STATUSES = new Set(['in-build', 'shipped']);
 
-// The repo-relative pathspecs for story files whose back-half `status:` flip we carry alongside the
+// The repo-relative pathspecs for story files whose Build `status:` flip we carry alongside the
 // ledgers (#112). The flip is authored by yad-engineer-review into the working tree but no command
 // committed it, so it drifted (build-log said shipped, stories/<id>.md still said approved) and the
 // only recovery was a raw git-to-main push. A story is a CANDIDATE iff BOTH hold:
-//   1. it has >=1 ship recorded in build-log (the build-half evidence), and
-//   2. its current frontmatter `status:` is a back-half value (in-build | shipped).
+//   1. it has >=1 ship recorded in build-log (the Build evidence), and
+//   2. its current frontmatter `status:` is a Build value (in-build | shipped).
 // A candidate is only actually carried when its staged diff is the `status:` line ALONE — runCheckpoint
 // drops any candidate whose working tree also changed prose/other frontmatter (stagedStoryIsStatusOnly),
 // so an unrelated edit can never ride into a `chore(hub) … [skip ci]` commit that bypasses review.
@@ -74,7 +74,7 @@ const BACK_HALF_STATUSES = new Set(['in-build', 'shipped']);
 //
 // A corrupt build-log in one epic must not block checkpointing every OTHER epic's ledgers, so a
 // readShips throw is caught per epic (that epic simply carries no story flip; its corrupt ledger is
-// still staged by backHalfPathspecs for a human to see).
+// still staged by buildLedgerPathspecs for a human to see).
 export function storyStatusPathspecs(root) {
   const epicsDir = path.join(root, 'epics');
   if (!fs.existsSync(epicsDir)) return [];
@@ -107,7 +107,7 @@ export function summarizeStaged(files = []) {
   const epics = new Set();
   const basenames = [];
   for (const f of files) {
-    // A back-half ledger (…/.sdlc/…) or a carried story-status flip (…/stories/<id>.md, #112).
+    // A Build ledger (…/.sdlc/…) or a carried story-status flip (…/stories/<id>.md, #112).
     const m = f.match(/^epics\/([^/]+)\/(?:\.sdlc\/(.+)|stories\/(.+\.md))$/);
     if (!m) continue;
     const [, epic] = m;
@@ -143,7 +143,7 @@ export function checkpointAuthor(login, name) {
 // Co-Authored-By footer: this is human-owned machine state, not an authored code change. `label` and
 // `author` are collapsed to one line so nothing can split the subject or forge a trailer.
 export function buildCheckpointMessage({ label, author, basenames = [] }) {
-  const subject = `chore(hub): sync back-half state — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
+  const subject = `chore(hub): sync Build state — ${oneLine(label)} by ${oneLine(author)} [skip ci]`;
   const body = basenames.length ? `Updated: ${basenames.join(', ')}` : '';
   return body ? `${subject}\n\n${body}` : subject;
 }
@@ -170,7 +170,7 @@ export function stagedStoryIsStatusOnly(git, file) {
 // normal checkpoint path carries the story's already-made `status:` flip. Returns { ok, file } — ok:false
 // (with a printed reason) aborts the commit; `file` is the shard just written, so a dry run can delete it
 // and leave no side effect. Does NOT author the story frontmatter — it only supplies the missing
-// evidence, and the human must have ALREADY flipped `status:` to a back-half value in the working tree.
+// evidence, and the human must have ALREADY flipped `status:` to a Build value in the working tree.
 //
 // ONE repo per run (#166). A story that shipped in several repos is backfilled by re-running with each
 // `--repo`; the second run finds the flip already committed, so it lands only the new ship shard.
@@ -201,7 +201,7 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   if (!exists(storyFile)) { fail(`no story ${story} under epics/${epic}/stories/`); return { ok: false }; }
 
   // Evidence and the flip must land TOGETHER — the #112 no-drift invariant. Refuse unless the human has
-  // already flipped the story frontmatter to a back-half status in the working tree; otherwise the ship
+  // already flipped the story frontmatter to a Build status in the working tree; otherwise the ship
   // shard would commit while the artifact still says e.g. `approved` — the very drift #112 prevents.
   const storyStatus = readFrontmatter(storyFile).status;
   if (!BACK_HALF_STATUSES.has(storyStatus)) {
@@ -290,7 +290,7 @@ export async function runCheckpoint(root, opts = {}) {
   log(c.bold('\nyad checkpoint'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
   if (!exists(path.join(root, PROJECT_FILES.hubConfig))) {
-    fail('no .sdlc/hub.json — checkpoint commits the hub back-half ledger; run it from the product hub');
+    fail('no .sdlc/hub.json — checkpoint commits the hub Build ledger; run it from the product hub');
     process.exitCode = 1;
     return;
   }
@@ -304,7 +304,7 @@ export async function runCheckpoint(root, opts = {}) {
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad checkpoint' })) return;
 
   // --retro-ship (#142): record a retroactive build-log ship for a PRE-TRACKING story (merged before
-  // the back-half ledger existed, so it has no ship and its `status:` flip can't be carried). Done
+  // the Build ledger existed, so it has no ship and its `status:` flip can't be carried). Done
   // AFTER the branch guard so we never leave a dangling shard on the wrong branch; the flip the human
   // already wrote is then carried by the normal storyStatusPathspecs path below — no raw git needed.
   let retroFile;
@@ -324,8 +324,8 @@ export async function runCheckpoint(root, opts = {}) {
 
   // The machine ledgers PLUS any build-log-backed story `status:` flip (#112) — one commit records
   // both, so the story artifact never drifts from build-log and no raw git-to-main push is needed.
-  const pathspecs = [...backHalfPathspecs(root), ...storyStatusPathspecs(root)];
-  if (!pathspecs.length) { rollbackRetro(); info('no back-half ledgers found — nothing to checkpoint'); return; }
+  const pathspecs = [...buildLedgerPathspecs(root), ...storyStatusPathspecs(root)];
+  if (!pathspecs.length) { rollbackRetro(); info('no Build ledgers found — nothing to checkpoint'); return; }
 
   // Stage the allowlist. `git add -- <spec>` picks up new + modified files, and deletions of tracked
   // files WITHIN a still-present spec (e.g. a removed build-state/<story>.json). A wholesale-deleted
@@ -348,7 +348,7 @@ export async function runCheckpoint(root, opts = {}) {
 
   if (git('diff', '--cached', '--quiet', '--', ...pathspecs).ok) {
     rollbackRetro();
-    info('back-half state unchanged — nothing to commit');
+    info('Build state unchanged — nothing to commit');
     return;
   }
   // The exact files staged from the allowlist — all known to git by construction, so they are the

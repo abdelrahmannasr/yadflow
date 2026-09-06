@@ -1,5 +1,5 @@
-// `yad review trailer|context|nudge|reconcile` — the BACK-HALF Review Companion + bridge for code
-// PR/MRs (the analogue of `yad gate …` for the front half). The fun process (trailer/cards/chat/nudge)
+// `yad review trailer|context|nudge|reconcile` — the Build Review Companion + bridge for code
+// PR/MRs (the analogue of `yad gate …` for Shape). The fun process (trailer/cards/chat/nudge)
 // makes the engineer review easy and visible; the bridge process (reconcile) maps the code PR's review
 // state — including the engagement signal — into the build ledger (build-log.json) at merge.
 //
@@ -38,7 +38,7 @@ function platformOf(root, repoRoot, meta) {
   return detectPlatform(remote) || readJSON(path.join(root, PROJECT_FILES.hubConfig), {}).platform || null;
 }
 
-// Build (but don't print) the back-half grounding bundle. Shared by `context` and `walkthrough` so the
+// Assemble (but don't print) the Build grounding bundle. Shared by `context` and `walkthrough` so the
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
 // Returns { error } on a bad --repo, else { bundle, repoRoot, base }.
 function contextBundle(root, { repo, dir, pr, runner = run } = {}) {
@@ -136,7 +136,7 @@ export async function reviewNudge(root, { repo, dir, pr, reader = readPr, poster
   return { nudged };
 }
 
-// `yad review reconcile --epic <id> --repo <r> --pr <n>` — the back-half BRIDGE: read the code PR's
+// `yad review reconcile --epic <id> --repo <r> --pr <n>` — the Build BRIDGE: read the code PR's
 // approvals (with the engagement signal) and stamp them onto the matching build-log.json ship record,
 // so the build ledger reflects who actually engaged. The first CLI to write build-log.json. Matches the
 // ship record by its `pr` field (url or number); if none exists yet, prints the engineer_review block

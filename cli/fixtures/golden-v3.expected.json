@@ -80,7 +80,7 @@
             ]
           }
         ],
-        "why": "build half — every story/repo lane is shipped",
+        "why": "Build — every story/repo lane is shipped",
         "lineageKind": "feature"
       },
       {
@@ -89,7 +89,7 @@
         "step": "ready-for-build",
         "status": "ready-for-build",
         "parallel": null,
-        "why": "front half approved — the build half can run",
+        "why": "Shape approved — Build can run",
         "lineageKind": "defect"
       }
     ]

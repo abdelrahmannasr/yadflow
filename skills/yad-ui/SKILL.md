@@ -1,14 +1,14 @@
 ---
 name: yad-ui
-description: 'Front state 5 of the gated SDLC. With the ux-designer, author ui-design.md and DESIGN.md for an approved architecture, driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring directly when not. Reads epic + architecture as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the UI design" or after the architecture gate passes.'
+description: 'Shape step 5 of the gated SDLC. With the ux-designer, author ui-design.md and DESIGN.md for an approved architecture, driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring directly when not. Reads epic + architecture as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the UI design" or after the architecture gate passes.'
 ---
 
-# SDLC — Author UI Design (front state 5)
+# SDLC — Author UI Design (Shape step 5)
 
 **Goal:** Produce a human-authored, AI-assisted `ui-design.md` and `DESIGN.md` for an approved
 architecture **and**, when a design tool is connected, the **actual feature design** — the mobile
 screens and/or web pages — inside that tool (e.g. Figma), linked back from the artifacts. This is a
-**front state**: human-authored with AI assist, **never auto-advances**. When the UI is drafted, control
+**Shape step**: human-authored with AI assist, **never auto-advances**. When the UI is drafted, control
 passes to `yad-review-gate` (base rule: owner + 1 reviewer).
 
 UI work is shaped by **Impeccable**, invoked as **harness slash-commands** (not a subprocess CLI) per
@@ -92,7 +92,7 @@ components/tokens into the design system; `/impeccable craft` is shape-then-buil
 **Graceful degradation:** if Impeccable is not installed (no `/impeccable …` commands available), the
 `ux-designer` lens authors `ui-design.md` and `DESIGN.md` directly, and you **note in `ui-design.md`
 that Impeccable was not used**. Do not run `npx impeccable skills install` as part of this step — tool
-installation is out of scope for the front half.
+installation is out of scope for Shape.
 
 ### Step 3b — Materialize the design in the connected tool (generate or link)
 Read `{project-root}/.sdlc/design.json` (`config.yaml` `design.registry`). Decide the path:
@@ -192,7 +192,7 @@ branch `yad gate open` makes the same edit, so it is a no-op once the gate has r
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, the connected design
 tool and what it produced (e.g. "Figma — 4 screens generated", the file URL + `design-links.json` path,
 or "no design tool — markdown-only"), and that the next action is **review** via `yad-review-gate` (base
-rule: owner + 1 reviewer). **Never record approval here.** Front states do not auto-advance. When the hub has a platform, the gate opens a review PR on the
+rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate opens a review PR on the
 hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
 the ledger; otherwise the review is recorded file-only.
 

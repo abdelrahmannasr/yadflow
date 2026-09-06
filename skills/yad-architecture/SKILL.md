@@ -1,18 +1,18 @@
 ---
 name: yad-architecture
-description: 'Front state 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (which escalates on the contract risk tag). Use when the user says "author the architecture" or after the epic gate passes.'
+description: 'Shape step 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (which escalates on the contract risk tag). Use when the user says "author the architecture" or after the epic gate passes.'
 ---
 
-# SDLC — Author Architecture + Contract (front state 3)
+# SDLC — Author Architecture + Contract (Shape step 3)
 
 **Goal:** Produce a human-authored, AI-assisted `architecture.md` and the **locked** `contract.md`
 for an approved epic, then record a hash-lock of the contract surface so a later contract-check can
-detect drift. This is a **front state**: human-authored with AI assist, **never auto-advances**.
+detect drift. This is a **Shape step**: human-authored with AI assist, **never auto-advances**.
 When both artifacts are drafted, control passes to `yad-review-gate`, which **escalates** this review
 by default (the architecture step carries `risk_tags: ["contract"]`).
 
 This skill enforces the build plan's core rules: all state lives in files; the contract holds only the
-shared cross-repo surface at charter altitude; front steps stay locked to `human_approve`.
+shared cross-repo surface at charter altitude; Shape steps stay locked to `human_approve`.
 
 ## Conventions
 
@@ -199,7 +199,7 @@ is a no-op once the gate has run.
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
 and that the next action is **review** via `yad-review-gate`. Note that this review **escalates**
 (risk tag `contract`): it needs owner + 1 reviewer **plus a domain owner for each touched repo**.
-**Never record approval here.** Front states do not auto-advance. When the hub has a platform, the gate
+**Never record approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate
 opens a review PR on the hub (via `yad-hub-bridge`, labelled per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock
 invalidates prior platform approvals too. Otherwise the review is recorded file-only.

@@ -1,17 +1,17 @@
 ---
 name: yad-test-cases
-description: 'Front state 9 of the gated SDLC — a PARALLEL, non-blocking track. Opens when the stories gate passes (the epic is already ready-for-build, so the build half can start at the same time) and runs alongside implementation. With the test architect (Murat), author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
+description: 'Shape step 9 of the gated SDLC — a PARALLEL, non-blocking track. Opens when the stories gate passes (the epic is already ready-for-build, so Build can start at the same time) and runs alongside implementation. With the test architect (Murat), author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
 ---
 
-# SDLC — Author Test Cases (front state 9 — parallel, non-blocking)
+# SDLC — Author Test Cases (Shape step 9 — parallel, non-blocking)
 
 **Goal:** Produce a human-authored, AI-assisted `test-cases.md` for an approved epic — the risk-based
 test cases that cover the stories' acceptance criteria — **and**, when a testing tool is connected, the
 **actual automation tests** inside the connected code repo(s), linked back from the artifact. This is a
-**front state**: human-authored with AI assist, **never auto-advances**. When the test cases are
+**Shape step**: human-authored with AI assist, **never auto-advances**. When the test cases are
 drafted, control passes to `yad-review-gate` (base rule: owner + 1 reviewer).
 
-**This step does NOT block the build half.** It opens when the **stories** gate passes — at which point
+**This step does NOT block Build.** It opens when the **stories** gate passes — at which point
 the epic is already `ready-for-build`, so implementation (`yad-spec` → `yad-implement` → …) can start
 **at the same time** the tester works here. The test-cases track is driven by its own step `status`
 (it opens to `in_progress` when `stories-review` passes) and its review **never moves `currentStep`
@@ -176,16 +176,15 @@ own code repo, not here) — then hand off to `yad-review-gate`.
 
 **Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
 `test-cases.status: "done"` and set `test-cases-review.status: "in_review"`. **Leave `currentStep` at
-`ready-for-build`** — this is the parallel track; moving `currentStep` would pull it back from the
-build half. Write `state.json`. Do **not** touch `approvals.json`. On this branch `yad gate open`
+`ready-for-build`** — this is the parallel track; moving `currentStep` would pull it back from Build. Write `state.json`. Do **not** touch `approvals.json`. On this branch `yad gate open`
 makes the same edit — `markInReview` leaves `currentStep` alone once it is `ready-for-build`
 (`cli/epic-state.mjs`) — so it is a no-op once the gate has run.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the path to `test-cases.md`, the connected testing tool and what it produced (e.g. "Playwright —
 6 tests generated", the suite path + `test-links.json` path, or "no testing tool — artifacts-only"), that
-the build half may already be underway in parallel, and that the next action is **review** via
-`yad-review-gate` (base rule: owner + 1 reviewer). **Never record approval here.** Front states do not
+Build may already be underway in parallel, and that the next action is **review** via
+`yad-review-gate` (base rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not
 auto-advance. When the hub has a platform, the gate opens a review
 PR on the hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
 into the ledger; otherwise the review is recorded file-only.

@@ -24,7 +24,7 @@ export const loadBuildLog = (root, epic) => ({ epic, ships: readShips(epicRoot(r
 
 // An epic is SEALED once every authored story is `shipped` (config.yaml change.seal_on). A sealed epic
 // refuses new behaviour (epic-open.sh) — a further change must open a new threaded change-epic, which is
-// what keeps the front artifacts from going stale. An epic with no stories is NOT sealed (nothing built).
+// what keeps the Shape artifacts from going stale. An epic with no stories is NOT sealed (nothing built).
 export function sealedEpic(root, epic) {
   const dir = path.join(epicRoot(root, epic), 'stories');
   if (!exists(dir)) return false;

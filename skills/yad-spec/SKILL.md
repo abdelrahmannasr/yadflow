@@ -1,17 +1,17 @@
 ---
 name: yad-spec
-description: 'Build-half Step A of the gated SDLC. For one ready-for-build story and one of its repos, run the heavy Spec Kit ceremony ONCE (specify → clarify → plan → analyze → checklist → tasks) inside that code repo, writing specs/<story-id>/ in Spec Kit''s own layout. Drives /speckit.* as harness slash-commands when installed; authors the same files by hand and records speckit: not-installed when absent. References the locked contract — never re-invents the surface. Writes link.md back to the story. Never auto-advances. Use when the user says "spec story <id> in <repo>" or after a story is ready-for-build.'
+description: 'Build Step A of the gated SDLC. For one ready-for-build story and one of its repos, run the heavy Spec Kit ceremony ONCE (specify → clarify → plan → analyze → checklist → tasks) inside that code repo, writing specs/<story-id>/ in Spec Kit''s own layout. Drives /speckit.* as harness slash-commands when installed; authors the same files by hand and records speckit: not-installed when absent. References the locked contract — never re-invents the surface. Writes link.md back to the story. Never auto-advances. Use when the user says "spec story <id> in <repo>" or after a story is ready-for-build.'
 ---
 
-# SDLC — Author Spec (build-half Step A)
+# SDLC — Author Spec (Build Step A)
 
 **Goal:** Turn ONE `ready-for-build` story into a per-repo Spec Kit spec/plan/tasks inside that
 story's code repo. The heavy spec ceremony runs **once per story per repo**; the light
 tasks → implement loop is **Step B** (`yad-implement`). This step **never re-locks the contract** —
 the cross-repo surface is owned upstream by the architecture gate (build plan §A, Cross-cutting
-"Heavy spec once per story, light loop per task"). It does not advance the front-half state machine;
+"Heavy spec once per story, light loop per task"). It does not advance the Shape state machine;
 when driven by the orchestrator (`yad-run`, Phase 4) it records a `spec`/`tasks` trust signal
-(Step 8) — but it never auto-advances a contract change or a front state.
+(Step 8) — but it never auto-advances a contract change or a Shape step.
 
 Spec Kit is driven as **harness slash-commands** (`/speckit.*`), not a subprocess CLI (Phase 0
 Deviation 3). When Spec Kit is not installed, the same files are hand-authored in Spec Kit's exact
@@ -43,11 +43,10 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
 
 ### Step 1 — Resolve the story and check readiness
 Read `{project-root}/epics/<epic>/.sdlc/state.json`. Proceed only when
-`currentStep == "ready-for-build"` (the gating front half — through the **stories** gate — is `done`).
-The **`test-cases` track may still be `in_progress`**: it is parallel and non-blocking, so the build
-half runs alongside it — its status does not affect readiness here. Read the story file
+`currentStep == "ready-for-build"` (the gating Shape — through the **stories** gate — is `done`).
+The **`test-cases` track may still be `in_progress`**: it is parallel and non-blocking, so Build runs alongside it — its status does not affect readiness here. Read the story file
 `epics/<epic>/stories/<story>.md`; confirm `repo` is in its `repos`. If the epic is not ready, STOP
-and point the user at `yad-status`. **Do not mutate front-half state** — `ready-for-build` semantics
+and point the user at `yad-status`. **Do not mutate Shape state** — `ready-for-build` semantics
 stay intact.
 
 ### Step 2 — Resolve the target code repo
@@ -87,13 +86,13 @@ frontmatter linking the spec back to the product repo: `story`, `epic`, `repo`, 
 in the code repo), `speckit` (`installed | not-installed`), `generated` (date). This `link.md` plus the
 spec folder is the authoritative record that this story's spec exists.
 
-### Step 7 — Stop (front-half state untouched)
+### Step 7 — Stop (Shape state untouched)
 Report: the spec folder path, the files written, whether Spec Kit was used, the task count from
 `tasks.md`, and that the next action is **Step B — `yad-implement`**. Do **not** edit the epic's
-`state.json`, `approvals.json`, or `contract-lock.json`. Step A is a generation step, not a front gate.
+`state.json`, `approvals.json`, or `contract-lock.json`. Step A is a generation step, not a Shape gate.
 
 ### Step 8 — Record the `spec` trust signal (Phase 4b)
-When this step runs under the orchestrator (`yad-run`), the generated spec is a back-half run that the
+When this step runs under the orchestrator (`yad-run`), the generated spec is a Build run that the
 trust log measures (it is the evidence that could later earn the `spec` step a `machine_advance`). The
 verdict is **anchored to the human who accepts the spec**, never self-graded:
 - the human approves the generated `specs/<story>/` untouched → `approved-unchanged`;

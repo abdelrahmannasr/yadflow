@@ -10,8 +10,8 @@ import { CATEGORY_ICONS } from '../../utils/iconMap';
 
 const CATEGORY_LABELS: Record<PathCategory, string> = {
   setup: 'Setup & Connect',
-  front: 'Front Half',
-  build: 'Build Half',
+  front: 'Shape',
+  build: 'Build',
   automate: 'Automation',
   change: 'Change Management',
 };

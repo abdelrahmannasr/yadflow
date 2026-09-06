@@ -1,9 +1,9 @@
 ---
 name: yad-checks
-description: 'Build-half Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the hub and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
+description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the hub and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
-# SDLC — Check Gates (build-half Step C)
+# SDLC — Check Gates (Build Step C)
 
 **Goal:** Install and run the **check gates** that protect production for a code repo. They run
 in CI on every PR/MR and must pass before merge (build plan §C). Each is a small, separate check:
@@ -30,7 +30,7 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    resolution; the every-code-change-has-a-threaded-epic enforcement.
 6. **epic-open** (Phase 6, the staleness preventer) — an epic is **sealed** once every story is
    `shipped`; a commit targeting a sealed epic **FAILS**, forcing new behaviour into a new threaded
-   change-epic (so the front artifacts can never go stale).
+   change-epic (so the Shape artifacts can never go stale).
 7. **reconcile-debt** (Phase 6) — a hotfix that shipped first opens debt; the **next** change on its
    thread **FAILS** until the debt is paid (artifacts updated + a regression test added).
 

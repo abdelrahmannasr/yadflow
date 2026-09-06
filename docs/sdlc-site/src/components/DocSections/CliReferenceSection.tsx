@@ -15,7 +15,7 @@ const GROUPS = [
     ],
   },
   {
-    phase: 'Front-half review gate',
+    phase: 'Shape review gate',
     color: '#ca6f1e',
     items: [
       'yad gate open <epic> <artifact> — open the review PR/MR (branch must be on origin), mark in_review',
@@ -26,7 +26,7 @@ const GROUPS = [
     ],
   },
   {
-    phase: 'Build-half commit & PR',
+    phase: 'Build commit & PR',
     color: '#1e8449',
     items: [
       'yad commit --type <t> -m <subject> — Conventional subject + trailers + atomic guard',

@@ -259,7 +259,7 @@ test('promote (light) clears BOTH sources: nextAction stops calling it a stub an
   assert.doesNotMatch(a.why, /pending/i);
 });
 
-test('preconditionsMet: no front step is runnable on a stub or a documented anchor', () => {
+test('preconditionsMet: no Shape step is runnable on a stub or a documented anchor', () => {
   const blockedChain = [{ id: 'epic', type: 'author', status: 'blocked' }];
   // Un-promoted stub: `yad next EP-x --check epic` must NOT say "ready" (its blocked steps otherwise read as entry-ready).
   const stub = preconditionsMet({ kind: 'stub', currentStep: 'backfill-pending', steps: blockedChain }, 'epic');

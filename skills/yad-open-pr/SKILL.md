@@ -1,14 +1,14 @@
 ---
 name: yad-open-pr
-description: 'Build-half helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Auto-assigns from the hub roster: assignee = the committer, reviewers = the repo''s reviewers + domain-owners. High risk / contract surface routes to domain owners (risk-route.sh). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
+description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Auto-assigns from the hub roster: assignee = the committer, reviewers = the repo''s reviewers + domain-owners. High risk / contract surface routes to domain owners (risk-route.sh). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
 ---
 
-# SDLC — Open Task PR/MR (build-half helper)
+# SDLC — Open Task PR/MR (Build helper)
 
 **Goal:** Open the PR/MR for the current task branch from the repo's committed PR/MR template
 (installed by `yad-pr-template`, Step D), with the body prefilled and the right reviewers requested.
 This is the standalone open-PR step; it **never merges** — the engineer review (`yad-engineer-review`,
-Step E) owns the merge. Distinct from `yad gate open`, which opens a front-half artifact-review PR on
+Step E) owns the merge. Distinct from `yad gate open`, which opens a Shape artifact-review PR on
 the product hub.
 
 ## Conventions
@@ -23,7 +23,7 @@ the product hub.
   touched:`, and `Domains` prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate.
 - **Stage-aware on the product hub** — `open-pr` mirrors the `--head` split the hub gates apply:
-  - a **`review/EP-*/<artifact>`** branch is a front-half artifact-review PR → it **delegates to
+  - a **`review/EP-*/<artifact>`** branch is a Shape artifact-review PR → it **delegates to
     `yad gate open`** (artifact-review title `review: <artifact> (EP-<slug>)`, the hub artifact-review
     body, and the gate ledger bookkeeping all in one place). Any `--title`/`-m` is ignored here.
   - any **other hub branch** is a tooling/CI change → it uses the bundled **code-task** template

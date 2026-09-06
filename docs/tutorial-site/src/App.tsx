@@ -1,10 +1,20 @@
 import { useState } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { TopNav } from './components/TopNav';
 import { Sidebar } from './components/Sidebar';
 import { HomePage } from './pages/HomePage';
 import { LessonPage } from './pages/LessonPage';
+
+/** Lesson ids the Shape/Build/Run rename moved. Kept beside the routes that redirect them. */
+const RENAMED_LESSONS: Record<string, string> = {
+  'front-epic': 'shape-epic',
+  'front-architecture': 'shape-architecture',
+  'front-ui': 'shape-ui',
+  'front-stories': 'shape-stories',
+  'front-test-cases': 'shape-test-cases',
+  'why-two-halves': 'why-three-parts',
+};
 
 /** Root layout: top bar, the lesson-only sidebar (desktop + mobile drawer), and routes. */
 export default function App() {
@@ -50,6 +60,12 @@ export default function App() {
             <Routes location={location} key={location.pathname}>
               <Route path="/" element={<HomePage />} />
               <Route path="/lesson/:lessonId" element={<LessonPage />} />
+              {/* The Shape/Build/Run rename moved six lesson ids. A bookmark or a shared link to an
+                  old one would otherwise fall through to the catch-all and land on the home page
+                  with no explanation, so send it to the renamed lesson instead. */}
+              {Object.entries(RENAMED_LESSONS).map(([from, to]) => (
+                <Route key={from} path={`/lesson/${from}`} element={<Navigate to={`/lesson/${to}`} replace />} />
+              ))}
               <Route path="*" element={<HomePage />} />
             </Routes>
           </AnimatePresence>

@@ -1,12 +1,12 @@
 ---
 name: yad-stories
-description: 'Front state 7 of the gated SDLC. With the pm, break the approved epic into user stories, each tagged with the repos that must implement it. Assigns zero-padded EP-<slug>-S0N IDs and writes one file per story under stories/. Reads epic + architecture + contract + UI as input. Never auto-advances — hands off to the team review gate (per-repo reviewer routing). Use when the user says "author the stories" or after the UI gate passes.'
+description: 'Shape step 7 of the gated SDLC. With the pm, break the approved epic into user stories, each tagged with the repos that must implement it. Assigns zero-padded EP-<slug>-S0N IDs and writes one file per story under stories/. Reads epic + architecture + contract + UI as input. Never auto-advances — hands off to the team review gate (per-repo reviewer routing). Use when the user says "author the stories" or after the UI gate passes.'
 ---
 
-# SDLC — Author Stories (front state 7)
+# SDLC — Author Stories (Shape step 7)
 
 **Goal:** Break an approved epic into human-authored, AI-assisted user stories, each with a stable
-`EP-<slug>-S0N` ID and a `repos` tag listing which repos must implement it. This is a **front state**:
+`EP-<slug>-S0N` ID and a `repos` tag listing which repos must implement it. This is a **Shape step**:
 human-authored with AI assist, **never auto-advances**. When the stories are drafted, control passes
 to `yad-review-gate`, which routes **per-repo reviewers** (each repo's engineer reviews the stories
 touching their repo).
@@ -126,9 +126,9 @@ under `.sdlc/` — then hand off to `yad-review-gate`.
 Report: the story IDs created, the repos each touches, and that the next action is **review** via
 `yad-review-gate`. Note that this review routes **per-repo reviewers**: owner + 1 reviewer **plus**, for
 each repo appearing in any story's `repos`, a `domain-owner` approval for that repo. When this gate
-passes the epic becomes **`ready-for-build`** — the build half can start **and** the parallel
+passes the epic becomes **`ready-for-build`** — Build can start **and** the parallel
 **`test-cases`** track opens for the tester (`yad-test-cases`); the two run at the same time. **Never record
-approval here.** Front states do not auto-advance. When the hub has a platform, the gate opens a review
+approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate opens a review
 PR on the hub (via `yad-hub-bridge`, with a `domain:<repo>` label per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
 is recorded file-only.

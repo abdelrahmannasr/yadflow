@@ -192,7 +192,7 @@ Full detail: `skills/yad-implement/references/implement-conventions.md`.
 
 Once a feature's epic is **sealed** (every story shipped), you cannot add new behaviour to it — the
 `epic-open` gate FAILs a commit targeting a sealed epic. New behaviour goes in a **new epic threaded to
-its parent** (`yad-change`): it inherits the unchanged front artifacts by reference and re-authors only
+its parent** (`yad-change`): it inherits the unchanged Shape artifacts by reference and re-authors only
 what it changes, so the locked artifacts are never mutated and never go stale. Three CI gates enforce the
 thread: **lineage-check** (a `change`/`defect`/`hotfix` epic must declare a real `parent:`), **epic-open**
 (the seal above), and **reconcile-debt** (a thread with an open hotfix debt is frozen until paid). A

@@ -44,7 +44,7 @@ The per-epic state machine.
 | `epicId` | The stable `EP-<slug>` ID. Never renamed. |
 | `createdAt` | ISO date the epic was created. |
 | `currentStep` | `id` of the step the workflow is waiting on right now. |
-| `steps[]` | Ordered list of every front-state step. |
+| `steps[]` | Ordered list of every Shape step step. |
 
 Each `steps[]` entry:
 
@@ -99,8 +99,8 @@ skippable today (engine `SKIPPABLE_STEPS`).
 ### `test-cases` is a parallel, non-blocking track
 
 `test-cases` (and its `test-cases-review` gate) sit in `steps[]` after `stories-review`, but they are a
-**parallel track that does not gate the build half**. When `stories-review` passes, `advanceState`:
-- sets `currentStep` to the **`ready-for-build`** sentinel — so the build half (`yad-spec` → … keyed off
+**parallel track that does not gate Build**. When `stories-review` passes, `advanceState`:
+- sets `currentStep` to the **`ready-for-build`** sentinel — so Build (`yad-spec` → … keyed off
   `currentStep == "ready-for-build"`) can start **immediately**, and
 - opens `test-cases` (`blocked` → `in_progress`) so the tester can work **in parallel**.
 
@@ -116,7 +116,7 @@ unchanged.)
 
 Each front **authoring** step opens its own git branch at the start of the step, named
 `<step>/EP-<slug>` where `<step>` ∈ `analysis | epic | architecture | ui-design | stories | test-cases`
-(`config.yaml` `defaults.front_authoring_branch`). This is **distinct** from the review branch
+(`config.yaml` `defaults.shape_authoring_branch`). This is **distinct** from the review branch
 `review/EP-<slug>/<artifact-base>` that `yad-hub-bridge` opens later for the review PR/MR.
 
 The shared procedure (run once the `EP-<slug>` is known):
@@ -141,7 +141,7 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `artifact` | filename or folder | The file/folder this step produces or gates. |
 | `assistance` | `none` \| `review` \| `heavy` | Dial 1 — how much AI helps (build plan §2). |
 | `automation` | `human_approve` \| `machine_advance` | Dial 2 — who advances (build plan §2). |
-| `locked` | `true` \| `false` | Front steps are `true`: may NOT be set to `machine_advance` in this version. |
+| `locked` | `true` \| `false` | Shape steps are `true`: may NOT be set to `machine_advance` in this version. |
 | `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `blocked` = upstream step not yet approved. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4). |
 
@@ -178,7 +178,7 @@ Append-only ledger (an array), the machine-readable counterpart to the `reviews/
 ```
 
 ## `hub-prs.json`
-Present only when the front-half review runs through the platform bridge. Per review step, the review
+Present only when the Shape review runs through the platform bridge. Per review step, the review
 PR/MR opened on the hub (sibling of `approvals.json`, so the locked `state.json` step shape is untouched):
 
 ```json
@@ -219,29 +219,29 @@ and `<artifact-base>` is the artifact without extension (e.g. `epic`, `architect
 
 ## Dial defaults & locks
 - Every step defaults to `automation: human_approve` (build plan §2).
-- The five authoring front steps and their reviews are `locked: true` — the engine refuses to set
+- The five authoring Shape steps and their reviews are `locked: true` — the engine refuses to set
   them to `machine_advance` in this version (build plan §1, §8.7). Only back states (build pipeline,
   steps 9–14) may move toward machine-advance in a later iteration.
 
 ---
 
-# Phase 4 build-half state (the back half made dial-bearing)
+# Phase 4 Build state (Build made dial-bearing)
 
-Phase 3 recorded build progress only *after the fact* in `build-log.json`. Phase 4 needs the back
+Phase 3 recorded build progress only *after the fact* in `build-log.json`. Phase 4 needs the Build
 steps to carry their own `automation` dial so the orchestrator (`yad-run`) can read it and decide
 whether to advance on its own. Two new files under `.sdlc/` do this.
 
 > **Who commits these.** `build-state/<story-id>.json`, `trust-log.json`, and `build-log.json` are
-> **machine-written** by the back half (`yad-run`, `yad-engineer-review`) and committed by
-> **`yad checkpoint`** — the back-half analogue of the front-half `yad gate ci` sync. It lands them as
-> one `chore(hub): sync back-half state — <epic>/<story> by @<login>` audit-trail commit, on the
-> default branch, staging **only** these three ledgers by an explicit allowlist (never a front-half
+> **machine-written** by Build (`yad-run`, `yad-engineer-review`) and committed by
+> **`yad checkpoint`** — the Build analogue of the Shape `yad gate ci` sync. It lands them as
+> one `chore(hub): sync Build state — <epic>/<story> by @<login>` audit-trail commit, on the
+> default branch, staging **only** these three ledgers by an explicit allowlist (never a Shape
 > gate file — `state/approvals/comments/hub-prs.json`, `reviews/*.md` — so `ledger-guard` never trips).
 > Teammates don't review these machine writes; the commit exists so CI, `yad status`, and other
 > machines always see current trust evidence.
 
 ## `build-state/<story-id>.json`
-One file per story that has entered the build half. The build half is **per-story, per-repo**, so the
+One file per story that has entered Build. Build is **per-story, per-repo**, so the
 steps live under each repo (mirrors the per-repo shape of `build-log.json`).
 
 ```json
@@ -266,22 +266,22 @@ Each `steps[]` entry:
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Back-half step identity (the `back_steps` from `config.yaml` + the human merge gate). |
+| `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Build step identity (the `back_steps` from `config.yaml` + the human merge gate). |
 | `automation` | `human_approve` \| `machine_advance` | Dial 2. Defaults to `human_approve`; flipped to `machine_advance` only after the trust threshold is met (and never for `locked` steps). |
 | `locked` | `true` \| `false` | `engineer-review` is `true` — it never auto-advances (build plan §E). |
 | `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `yad-run` advances `done` steps and `blocked`s on a halt. |
 
 `currentStep` is the `id` the orchestrator is waiting on / about to run for that repo. The file is
-created when a story enters the build half; all dials start `human_approve` (the `config.yaml`
+created when a story enters Build; all dials start `human_approve` (the `config.yaml`
 `automation.default`).
 
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
 story/repo's `currentStep` into the next build sub-step (`spec`/`tasks` → `yad-spec`, `implement` →
 `yad-implement`, `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`) and prints it with
-the remaining chain and the step's automation dial — so the build half is guided, not just hinted at.
+the remaining chain and the step's automation dial — so Build is guided, not just hinted at.
 
 ## `trust-log.json` (shard-then-fold)
-Append-only ledger, the back-half analogue of `approvals.json`. **This is the evidence base** that
+Append-only ledger, the Build analogue of `approvals.json`. **This is the evidence base** that
 decides when a step is safe to automate (build plan Step A). One entry per step run.
 
 **Storage — loose shards + a folded file (the "loose objects + `git gc`" model).** Two people driving
@@ -302,7 +302,7 @@ back:
   the folded file and no shard dir still reads correctly — nothing to union.
 - **`yad tidy up`** (manual, one person) folds a SHIPPED story's finished shards into the folded file's
   `runs` and deletes them. Writers never fold — they only add shards; `yad checkpoint` commits the shard
-  dir, and `yad tidy up` is the back-half analogue of `git gc` folding loose objects.
+  dir, and `yad tidy up` is the Build analogue of `git gc` folding loose objects.
 - The **threshold slice** (below) reads this same union, filtered to the step (and repo).
 
 ```json
@@ -377,7 +377,7 @@ storage layout is noted here (it mirrors `trust-log.json`):
 After the contract locks and code ships, a change must not **mutate** a locked artifact (that destroys
 the lock + the audit trail). Instead every change request becomes a **new epic, threaded to its parent**
 (`config.yaml` `change:`). A feature is a **thread** of linked epics (genesis → change → defect → …); a
-change-epic **inherits** unchanged front artifacts from its parent by reference and only **re-authors**
+change-epic **inherits** unchanged Shape artifacts from its parent by reference and only **re-authors**
 what it changes. So artifacts are never stale, only *superseded*; the feature's current truth is the
 head of the thread, composed by the resolver (`yad-timeline`). `yad-change` seeds a change-epic;
 `yad-defects` / `yad-timeline` render the thread; `yad-reconcile` flags drift; three CI gates enforce it.
@@ -411,7 +411,7 @@ A stub is a normal genesis (`kind: feature`, `thread == id`, no `parent`) whose 
 `stub: backfill-pending` + `verified: false` and whose `state.json` uses a **sentinel**, mirroring
 `EP-discovery` / `discovery-done`:
 - top-level `kind: "stub"` and `currentStep: "backfill-pending"`;
-- the **same 10-step front chain** as a normal epic, every step `status: "blocked"` (so `validateState`
+- the **same 10-step Shape chain** as a normal epic, every step `status: "blocked"` (so `validateState`
   passes and `promote` can "wake" the chain into normal authoring with no re-seed);
 - empty `approvals.json` / `comments.json`; **no** `contract-lock.json` (no surface locked yet).
 
@@ -433,10 +433,10 @@ approved backfill spec, **and** rewrites `state.json` — removing `kind: "stub"
 off the sentinel:
 - **light promote (default)** → `currentStep: "backfill-done"`, a **terminal sentinel** (like
   `discovery-done`): the feature is a real, verified anchor documented by its backfill spec; `nextAction`
-  reports "documented anchor — evolve it by threading a change/defect", never a pending stub, and no build
-  half runs directly against it;
-- **full promote (opt-in)** → `currentStep: "epic"`, `epic.status: "in_progress"`, to run the normal front
-  half and lock a real contract.
+  reports "documented anchor — evolve it by threading a change/defect", never a pending stub, and Build
+  never runs directly against it;
+- **full promote (opt-in)** → `currentStep: "epic"`, `epic.status: "in_progress"`, to run the normal Shape
+  part and lock a real contract.
 
 From promotion on, the thread's contract protection is live.
 
@@ -506,7 +506,7 @@ Thread-level rollups (`yad-timeline` / `yad-defects`) are **derived** — walk e
 sharing `thread` and read each `change.json`; there is no duplicated thread registry.
 
 ## `reconcile-debt.json`
-Append-only ledger of hotfix ship-first debt (a hotfix shipped code before its front gates approved).
+Append-only ledger of hotfix ship-first debt (a hotfix shipped code before its Shape gates approved).
 
 ```json
 [ { "thread": "EP-checkout", "epicId": "EP-checkout-hotfix-x", "openedDate": "<date>",
@@ -516,5 +516,5 @@ Append-only ledger of hotfix ship-first debt (a hotfix shipped code before its f
 ```
 
 `status: "open"` blocks the **next** normal change on the thread (`reconcile-debt-check.sh`) until it is
-`"paid"` (evidence: the front artifacts updated **and** a regression test added). The debt lets a hotfix
+`"paid"` (evidence: the Shape artifacts updated **and** a regression test added). The debt lets a hotfix
 jump the queue once, but freezes new thread work until the SDLC again describes production.

@@ -11,15 +11,15 @@ stories that contradict or duplicate what is built. This skill **connects** code
 hub and caches an AI-readable picture of each. It is the product → code half of the 2-way link (the
 code → product half is the existing `link.md` back-pointer each spec carries).
 
-This is **setup/maintenance**, not a gated front state — it never touches `.sdlc/state.json` or any
+This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
 epic's approvals. It only writes the project-wide registry and the per-repo context cache.
 
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **product hub**).
-- The **product repo is the front-phase toolchain hub** (`config.yaml` `code_context`): Repomix (and
+- The **product repo is the Shape phase toolchain hub** (`config.yaml` `code_context`): Repomix (and
   Impeccable, later) are installed/run **here** and target the connected code repos **by path**. The
-  code repos themselves need no install for this. (The build-half CI gates are the exception — they
+  code repos themselves need no install for this. (The Build CI gates are the exception — they
   live inside each code repo; see `yad-checks`.)
 - **Repomix is a true CLI subprocess** (Phase 0 / RESEARCH-NOTES §3): `npx repomix@latest [flags]` —
   NOT a slash-command. It secret-scans by default (Secretlint).
@@ -90,7 +90,7 @@ Feed the pack to the AI with the **"describe what exists, do not invent"** instr
 (`references/code-context.md`) and write `{project-root}/.sdlc/code-context/<repo>/code-map.md`: a small
 index of **stack/conventions, entry points, public endpoints/APIs, events, data models/entities, and
 module layout**. Mark anything unclear `<!-- unverified: ... -->`; never fill gaps with invented
-behaviour. This is the cheap artifact every front phase loads by default (the full pack is read only
+behaviour. This is the cheap artifact every Shape phase loads by default (the full pack is read only
 when a phase needs depth).
 
 ### Step 4 — Record the repo in the registry
@@ -122,7 +122,7 @@ new repo later is the same `connect` action.
 
 ### Step 5 — Report
 Report the connected repo, its `platform`, the pack + code-map paths, the secret-scan result, and that
-the front phases will now load this repo's code-map. Nothing auto-advances; this is setup.
+the Shape phases will now load this repo's code-map. Nothing auto-advances; this is setup.
 
 ## Other actions
 
@@ -139,9 +139,9 @@ the front phases will now load this repo's code-map. Nothing auto-advances; this
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo
   itself untouched**.
 
-## Hub detection + reviewer roster (the front-half review bridge)
+## Hub detection + reviewer roster (the Shape review bridge)
 
-The hub is itself a git repo on a platform. These actions record that so the front-half review/comment/
+The hub is itself a git repo on a platform. These actions record that so the Shape review/comment/
 approval cycle can run through a real PR/MR on the hub (`yad-review-gate` + `yad-hub-bridge`). They
 write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — never an epic's state/approvals.
 
@@ -166,11 +166,11 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   connected repo's role); `yad roster grant|revoke <name> <repo> <role>`; `yad roster remove <login>`.
   A `domain-owner` grant/revoke keeps `repos.json` `domain_owners` in sync so the gate never drifts.
 
-If the hub has no remote (`platform: null`) or the bridge is disabled, the front-half gate runs
+If the hub has no remote (`platform: null`) or the bridge is disabled, the Shape gate runs
 file-only with no error — the bridge is purely additive.
 
 ## Live on-demand (the third context layer)
-The cached pack + map are the default. When a front phase needs an **area** not in the map, it may
+The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may
 re-run Repomix **live**, scoped to that area:
 ```bash
 npx repomix@latest --compress --include "<area globs>" --style markdown -o -

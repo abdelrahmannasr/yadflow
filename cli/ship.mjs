@@ -1,4 +1,4 @@
-// `yad ship` — commit the staged atomic change AND open its task PR/MR, in one step (build half).
+// `yad ship` — commit the staged atomic change AND open its task PR/MR, in one step (Build).
 // A thin orchestration over the two existing engines: `yad commit` then `yad open-pr`. It holds no
 // commit/PR logic of its own — it reuses runCommit/runOpenPr so the conventions stay in one place.
 // The PR step runs ONLY when the commit actually lands: a failed commit, a tripped atomic guard, or a

@@ -10,12 +10,12 @@ requirement-gathering for the whole product — under the reserved `EP-discovery
 hand off to `yad-review-gate`. The output `roadmap.md` is the menu of features; each feature is later
 taken into the normal `yad-epic` flow, which reads the roadmap for project context.
 
-This is a **front state**: human-authored with AI assist and **never auto-advances**. It runs **once
+This is a **Shape step**: human-authored with AI assist and **never auto-advances**. It runs **once
 per project** and is **optional** — a team that already knows what to build can skip it and start at
 `yad-epic`. It supports **both greenfield and brownfield**, and produces a **competitor study in both**.
 
 This skill enforces the build plan's core rules: all state lives in files; IDs are engine-assigned
-(the reserved `EP-discovery`, never a typed feature slug); front steps are locked to `human_approve`.
+(the reserved `EP-discovery`, never a typed feature slug); Shape steps are locked to `human_approve`.
 
 ## Conventions
 
@@ -121,7 +121,7 @@ Notes:
 Report: the path to the discovery set, and that the next action is **review** via `yad-review-gate`
 (base rule: owner + 1 reviewer) on the virtual artifact `discovery/`. **Never mark discovery-review
 approved here** — only real reviewers do that through the gate. When the discovery gate passes, the
-state moves to the `discovery-done` sentinel (not `ready-for-build` — discovery has no build half); the
+state moves to the `discovery-done` sentinel (not `ready-for-build` — discovery has no Build); the
 roadmap is now the input that each `yad-epic` reads (its "Step 2c — read the roadmap"). When the hub
 has a platform, the gate opens a review PR on the hub (via `yad-hub-bridge`) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review

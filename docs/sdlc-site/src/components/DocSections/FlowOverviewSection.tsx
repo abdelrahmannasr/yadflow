@@ -11,8 +11,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const CATEGORY_LABELS: Record<string, string> = {
   setup: 'Setup & connect',
-  front: 'Front half (human-gated)',
-  build: 'Build half (per story)',
+  front: 'Shape (human-gated)',
+  build: 'Build (per story)',
   automate: 'Automation (earned)',
   change: 'Change management (feature threads)',
 };
@@ -36,8 +36,8 @@ export function FlowOverviewSection() {
         <p className="text-sm text-slate-400 leading-relaxed">
           The whole lifecycle, from an empty project to shipped code, is{' '}
           <strong className="text-white">{PATHS.length} phases</strong> and{' '}
-          <strong className="text-white">{totalSteps} steps</strong>. Setup is one-time; the front half is
-          human-gated and runs once per epic; the build half runs once per story per code repo; automation is
+          <strong className="text-white">{totalSteps} steps</strong>. Setup is one-time; Shape is
+          human-gated and runs once per epic; Build runs once per story per code repo; automation is
           opt-in and earned. Each author step writes its artifact and stops at the reusable team review gate.
         </p>
       </div>

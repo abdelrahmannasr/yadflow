@@ -1,6 +1,6 @@
 ---
 name: yad-review-companion
-description: 'The fun, easy, transparent review companion for the SDLC review gates. Generates a 60-second AI "trailer" of what changed and where the risk is, deals a swipe-through deck of small review "cards", and runs a grounded chat where a reviewer asks anything and their questions become the review record — then records an engagement signal on the approval (verified vs none) and posts a friendly public nudge on a bare rubber-stamp. Works on the front-half artifact-review PR/MR (yad gate) and the back-half code PR/MR (yad review). Use when the user says "review this", "run the companion", "give me the trailer/cards", or wants reviewing to be less of a chore.'
+description: 'The fun, easy, transparent review companion for the SDLC review gates. Generates a 60-second AI "trailer" of what changed and where the risk is, deals a swipe-through deck of small review "cards", and runs a grounded chat where a reviewer asks anything and their questions become the review record — then records an engagement signal on the approval (verified vs none) and posts a friendly public nudge on a bare rubber-stamp. Works on the Shape artifact-review PR/MR (yad gate) and the Build code PR/MR (yad review). Use when the user says "review this", "run the companion", "give me the trailer/cards", or wants reviewing to be less of a chore.'
 ---
 
 # SDLC — Review Companion (fun & easy, transparent review)
@@ -14,8 +14,8 @@ reviewers skip, and it makes review *quality* visible to the whole team.
 > raises the cost of a bare rubber-stamp and shines a light on it; it never claims certainty. State that
 > openly — do not oversell it.
 
-This companion is the AI layer on top of [`yad-review-gate`](../yad-review-gate/SKILL.md) (front half)
-and [`yad-engineer-review`](../yad-engineer-review/SKILL.md) (back half). The **gate** still owns the
+This companion is the AI layer on top of [`yad-review-gate`](../yad-review-gate/SKILL.md) (Shape)
+and [`yad-engineer-review`](../yad-engineer-review/SKILL.md) (Build). The **gate** still owns the
 predicate and advancement; the companion only enriches the *input* and records the *engagement* field.
 The CLI never calls an LLM — **you** (this skill) generate the text and post it via the platform.
 
@@ -46,12 +46,12 @@ The CLI never calls an LLM — **you** (this skill) generate the text and post i
 
 ## On activation
 
-Inputs: `epic` + `artifact` (front half) **or** `repo` + `pr` (back half); and the `action`
+Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `action`
 (`trailer` | `cards` | `chat` | `approve` | `nudge`, default the full flow).
 
-1. **Get the grounding bundle.** Front half: `yad gate review <epic> [artifact]` prints JSON with the
+1. **Get the grounding bundle.** Shape: `yad gate review <epic> [artifact]` prints JSON with the
    artifact path, risk tags, PR number, contract path, touched domains, repo code-map paths, and
-   `requireEngagement`. Back half: `yad review chat --repo <r>` (see `yad-engineer-review`) provides the
+   `requireEngagement`. Build: `yad review chat --repo <r>` (see `yad-engineer-review`) provides the
    diff + code-map grounding. Read the named files yourself — never invent content.
 2. **Trailer.** Generate ≤6 lines (what / risk / read-time), grounded only in the bundle. Post it:
    `yad gate trailer <epic> <artifact> --body "<text>" [--pr <n>]` (idempotent; re-run after edits).

@@ -1,4 +1,4 @@
-// Shard-then-fold storage for the two append-only back-half ledgers (trust-log, build-log).
+// Shard-then-fold storage for the two append-only Build ledgers (trust-log, build-log).
 //
 // The problem: both ledgers were ONE file per epic, so two people driving different stories of the
 // SAME epic both appended to the same file → git merge conflict on push. The fix ("loose objects +
@@ -147,7 +147,7 @@ export function readShips(epicDir) {
   return [...byKey.values()];
 }
 
-// Record a RETROACTIVE ship for a pre-tracking story — one merged & shipped before the back-half
+// Record a RETROACTIVE ship for a pre-tracking story — one merged & shipped before the Build
 // ledger existed, so it has no build-log ship and `yad checkpoint` can't carry its `status:` flip
 // (issue #142). Writes ONE minimal ship shard, marked `retroactive: true`, so `readShips` now proves
 // the story shipped and checkpoint carries the human's already-made flip. It is NOT a fabricated real

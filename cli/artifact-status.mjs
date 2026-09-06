@@ -9,20 +9,20 @@ import { c, log, ok, info, readJSONStrict } from './lib.mjs';
 import { epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
-// The front-gate lifecycle this command manages. Forward-only: a status is only ever moved UP this
+// The Shape gate lifecycle this command manages. Forward-only: a status is only ever moved UP this
 // ladder, so a re-run never regresses anything.
 const RANK = { draft: 0, 'in-review': 1, approved: 2 };
 
 // Values owned by other parts of the workflow — left untouched. `locked` is the contract surface;
-// `in-build` / `shipped` are set by the build half (engineer-review) per story; `ready-for-build`,
-// `done`, `blocked` are roll-ups/states we must not overwrite from the front-gate view.
+// `in-build` / `shipped` are set by Build (engineer-review) per story; `ready-for-build`,
+// `done`, `blocked` are roll-ups/states we must not overwrite from the Shape gate view.
 const PRESERVE = new Set(['locked', 'in-build', 'shipped', 'ready-for-build', 'done', 'blocked']);
 
 // The per-epic artifact files this command considers (bases). Story files are handled separately
 // because they live under stories/ and all map to the single stories / stories-review step pair.
 const ARTIFACT_FILES = ['analysis.md', 'epic.md', 'architecture.md', 'contract.md', 'ui-design.md', 'test-cases.md'];
 
-// The desired front-gate status for an artifact base, derived purely from state.json. Returns null
+// The desired Shape gate status for an artifact base, derived purely from state.json. Returns null
 // when the chain has no steps for this base (nothing to manage) — e.g. contract has no own step.
 export function desiredStatus(state, base) {
   if (!state?.steps) return null;

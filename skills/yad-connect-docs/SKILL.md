@@ -10,7 +10,7 @@ description: 'Connects a docs/Pages publishing target to the product hub so the 
 instead of only committing its source. This skill **connects** a publishing target to the product hub
 and records *how* to reach it (the platform, the publish scope, the base path) — never a credential.
 
-This is **setup/maintenance**, not a gated front state — it never touches `.sdlc/state.json` or any
+This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
 epic's approvals. It only writes the project-wide docs registry. `yad-docs` / `yad-docs-overview`
 consume it: when a target is connected, they theme + generate the site and drive `yad docs deploy`;
 when nothing is connected (`target: "none"`), they still generate and **npm-build** the site but stop

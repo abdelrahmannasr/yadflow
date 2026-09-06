@@ -3,7 +3,7 @@
 # is `shipped`. A SEALED epic's artifacts are the final, approved description of shipped behaviour — so
 # new behaviour must NOT be added to it; it belongs in a NEW threaded change-epic whose re-authored
 # stories/test-cases describe the change. This gate FAILs any non-maintenance commit whose owning epic
-# is sealed, forcing the front half to stay current (staleness becomes unshippable).
+# is sealed, forcing Shape to stay current (staleness becomes unshippable).
 #
 # The owning epic lives in the PRODUCT repo (via specs/<story>/link.md `product-repo`). When it is not
 # reachable from CI, the seal cannot be read, so the commit PASSes with a note (degraded, fail-open here

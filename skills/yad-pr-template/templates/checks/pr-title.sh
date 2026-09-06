@@ -4,12 +4,12 @@
 #   --profile code (default) — a Conventional-Commits subject "<type>: <description>", no trailing
 #     period (config.yaml build.pr_title_style: same_as_commit_subject; one task = one PR, the title is
 #     the squash-merge subject). Keep <type> in sync with cli/manifest.mjs COMMIT_TYPES.
-#   --profile hub — a front-half artifact-review title "review: <artifact> (EP-<slug>)", the shape
+#   --profile hub — a Shape artifact-review title "review: <artifact> (EP-<slug>)", the shape
 #     `yad gate open` creates (cli/gate.mjs) — BUT only for review/EP-* head branches. Every other
 #     hub PR is a tooling/code change to the hub itself and follows the code convention; pass the
 #     head ref via --head so the gate can tell the two apart (a tooling PR has no EP artifact to
 #     review). With no --head, the hub profile stays strict (requires the review shape).
-#     Branch name is not enough on its own: a non-review head that actually changes front-half
+#     Branch name is not enough on its own: a non-review head that actually changes Shape
 #     artifacts (epics/**) would otherwise slip past the review workflow with a plain code title.
 #     Pass the PR's changed paths via --changed <file> (one path per line); when they touch epics/**
 #     on a non-review head the gate FAILS — artifact changes must go through a review/EP-* PR.
@@ -34,7 +34,7 @@ while [ $# -gt 0 ]; do
 done
 case "$PROFILE" in code|hub) ;; *) echo "FAIL [pr-title]: unknown --profile '$PROFILE' (code|hub)."; exit 1 ;; esac
 
-# True when the PR changes a front-half artifact (anything under epics/**). Reads the --changed list
+# True when the PR changes a Shape artifact (anything under epics/**). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
 artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -qE '^epics/' "$CHANGED"; }
 
@@ -62,7 +62,7 @@ check_code_title() {
 }
 
 if [ "$PROFILE" = hub ]; then
-  # review/EP-* head branch (or unknown head ref) => front-half artifact-review PR: 'review: <artifact> (EP-<slug>)'.
+  # review/EP-* head branch (or unknown head ref) => Shape artifact-review PR: 'review: <artifact> (EP-<slug>)'.
   case "$HEADREF" in
     review/EP-*|"")
       if printf '%s' "$TITLE" | grep -qE '^review: .+ \(EP-[a-z0-9-]+\)$'; then
@@ -73,11 +73,11 @@ if [ "$PROFILE" = hub ]; then
       exit 1
       ;;
     *)
-      # Any other hub PR is a tooling/code change to the hub itself — UNLESS it changes front-half
+      # Any other hub PR is a tooling/code change to the hub itself — UNLESS it changes Shape
       # artifacts (epics/**), which must go through a review/EP-* PR. Without this guard a non-review
-      # head could carry an artifact change past the front-half review with only a code title.
+      # head could carry an artifact change past the Shape review with only a code title.
       if artifact_changed; then
-        echo "FAIL [pr-title]: head '${HEADREF}' changes front-half artifacts (epics/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
+        echo "FAIL [pr-title]: head '${HEADREF}' changes Shape artifacts (epics/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
         exit 1
       fi
       # tooling only — fall through to the code convention.

@@ -1,4 +1,4 @@
-// Shared machinery for committing the machine-written back-half ledgers to the hub — used by both
+// Shared machinery for committing the machine-written Build ledgers to the hub — used by both
 // `yad checkpoint` (sync new state) and `yad tidy up` (fold finished shards). Both must commit ONLY on
 // the default branch, so their `[skip ci]` commit never enters a PR's base..HEAD range (where it would
 // strand required checks and fail verified-commits). This module is the single home of that guard.

@@ -1,6 +1,6 @@
 ---
 name: yad-status
-description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in the build half it also prints each back-half step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Also prints the cross-cutting personal skills-log roll-up from the LOCAL-ONLY learning ledger (gitignored, never committed/pushed — the local learner''s own learning, by stage). Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
+description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in Build it also prints each Build step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Also prints the cross-cutting personal skills-log roll-up from the LOCAL-ONLY learning ledger (gitignored, never committed/pushed — the local learner''s own learning, by stage). Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
 ---
 
 # SDLC — Status (read-only)
@@ -20,7 +20,7 @@ report all if the user asked for an overview).
 
 ### Step 2 — Read state
 Read `.sdlc/state.json`, `.sdlc/approvals.json`, `epic.md` frontmatter (for `repos`), and — if present
-— `.sdlc/contract-lock.json`. For the build half (Phase 4), also read — if present — every
+— `.sdlc/contract-lock.json`. For Build (Phase 4), also read — if present — every
 `.sdlc/build-state/<story-id>.json`, and the trust ledger read as the **union** of the folded
 `.sdlc/trust-log.json` `runs` PLUS every loose `.sdlc/trust-log/` shard (concatenate — every shard is a
 distinct run; never dedup by story/repo/step — but DO skip a shard whose full identity
@@ -40,13 +40,13 @@ Print, in this order:
    absent) — followed by `epicId`, then `status` from `epic.md` frontmatter, `currentStep`, and `repos`
    (the touched domains). Example: `Defect EP-checkout-queue-filter — draft @ stories`. A bug is a defect
    (`kind: defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
-2. **Steps table** — for every front step in `steps[]` order (10, or 12 when the optional analysis step
+2. **Steps table** — for every Shape step in `steps[]` order (10, or 12 when the optional analysis step
    was run): `id`, `type`, `status`, `assistance`, `automation`, `locked`, and `risk_tags`. Mark the
    `currentStep` with `→`. The gating chain is `[analysis → analysis-review →] epic → epic-review →
    architecture → architecture-review → ui-design → ui-design-review → stories → stories-review` →
    **`ready-for-build`** (the bracketed `analysis` prefix is present only when `yad-analysis` seeded it).
    `test-cases → test-cases-review` is a **parallel, non-blocking track**: it opens when `stories-review`
-   passes and runs alongside the build half, so when `currentStep` is `ready-for-build` the `test-cases`
+   passes and runs alongside Build, so when `currentStep` is `ready-for-build` the `test-cases`
    step may still be `in_progress`/`in_review` — show its status, and note "parallel" so it is clear it
    does not gate the build. Always render exactly the steps present in `steps[]`.
    - **Skipped (N/A) steps:** the optional `ui-design` step may be marked N/A for an epic with no
@@ -78,25 +78,25 @@ Print, in this order:
    (and, when at/after `architecture-review`, whether the current surface still matches it).
 5. **Stories** — if `stories/` has files, list each story `id` and its `repos` tags.
 6. **Files** — list the review records present under `reviews/` for the current artifact.
-7. **Build half (per story, per repo)** — if any `.sdlc/build-state/<story-id>.json` exists, then for
-   each such story and each of its repos print the back-half chain
+7. **Build (per story, per repo)** — if any `.sdlc/build-state/<story-id>.json` exists, then for
+   each such story and each of its repos print the Build chain
    `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
    `automation` dial, and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
-   which back steps are automated and where a run is waiting. (For the single *next* build sub-step to
+   which Build steps are automated and where a run is waiting. (For the single *next* build sub-step to
    take per story/repo — rather than this full status view — point the user at `yad next <epic>`, which
    reads the same `build-state` files.)
 8. **Automation & trust** — print the system-wide **kill switch** state from `config.yaml`
    `automation.kill_switch` (when `on`, note that every step is forced to `human_approve`). Then, for
-   each back-half step that has entries in the trust ledger — the **union** of the folded
+   each Build step that has entries in the trust ledger — the **union** of the folded
    `.sdlc/trust-log.json` `runs` plus every loose `.sdlc/trust-log/` shard — print its **trust record**:
    number of runs, the fraction with `verdict == "approved-unchanged"`, and whether that clears
    `automation.trust_threshold` (`min_runs`, `min_approved_unchanged`) — i.e. whether the step is
    **earned** (eligible to be flipped to `machine_advance`) or still **gathering evidence**. Restate
    the predicate (self-contained): `earned = runs >= min_runs AND unchanged/runs >= min_approved_unchanged`.
-   Never recommend flipping a locked step or a front state — those can never be `machine_advance`.
+   Never recommend flipping a locked step or a Shape step — those can never be `machine_advance`.
 
-   **Nudge-cost signal (Phase 5 instrumentation).** For each back step that is **earned but its dial
-   is still `human_approve`** (and it is not locked / not a front state), flag it:
+   **Nudge-cost signal (Phase 5 instrumentation).** For each Build step that is **earned but its dial
+   is still `human_approve`** (and it is not locked / not a Shape step), flag it:
    `⚠ earned but manual — could be machine_advance`. This is the *nudge cost* the Phase 5 trigger
    watches: automation that is proven safe but still hand-started. It is a read-only observation, not a
    recommendation to flip — earning the evidence and flipping the dial stay deliberate human acts
@@ -117,10 +117,10 @@ Print, in this order:
 
 10. **Fleet roll-up (overview only).** When the user asked for an overview, or more than one epic exists
     under `{project-root}/epics/`, print a one-line-per-epic roll-up across the fleet: each epic's
-    `currentStep` (front gate) and, for stories in the build half, a count of back-half steps **waiting
+    `currentStep` (Shape gate) and, for stories in Build, a count of Build steps **waiting
     at a human gate** and of steps flagged **earned-but-manual**, plus a **local skills-log** count (records
     in the local-only `learning-records.json`: learned / in-progress). Close with fleet totals (epics at
-    each front gate; total earned-but-manual back steps; total concepts learned locally across the fleet).
+    each Shape gate; total earned-but-manual Build steps; total concepts learned locally across the fleet).
     This is the
     *scale-of-read* signal the Phase 5 trigger watches — when this roll-up stops fitting in one glance,
     that is the measured bottleneck. Still strictly read-only; it only scans the per-epic files.

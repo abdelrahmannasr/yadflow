@@ -5,7 +5,7 @@ description: 'Brings every connected code repo up to date in one shot: switches 
 
 # SDLC — Sync Connected Repos (one command, every repo on its default branch)
 
-**Goal:** Before front/build work starts, get every connected code repo onto its default branch at the
+**Goal:** Before Shape/Build work starts, get every connected code repo onto its default branch at the
 latest commit, so nobody implements on a stale or wrong branch. This is the deterministic counterpart to
 the `sync-before-implementation` discipline: one command instead of N manual `git checkout && git pull`.
 

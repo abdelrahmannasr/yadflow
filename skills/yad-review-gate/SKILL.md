@@ -11,7 +11,7 @@ UI, stories, test-cases) uses this exact gate. **No step advances until its revi
 recorded as a file. The `analysis-review`, `epic`/`ui-design`, and `test-cases` reviews use the **base**
 rule (owner + 1 reviewer); escalation applies only where `risk_tags` or per-repo routing call for it.
 
-This gate is **swappable and file-driven**: it talks only through files. A front step advances only on a
+This gate is **swappable and file-driven**: it talks only through files. A Shape step advances only on a
 human act — recording an approval and `advance`, or (with the bridge) **merging the approved,
 fully-resolved review PR/MR**. It works the same whether a human or the `yad gate` CLI triggers it — the
 trigger is a parameter, not a hardcoded human.
@@ -156,7 +156,7 @@ gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-
 
 ### Step 3 — Gate predicate (the only path that advances)
 The step may advance **iff ALL hold**:
-1. `automation` is `human_approve` (it always is for front steps) and the required approvals exist:
+1. `automation` is `human_approve` (it always is for Shape steps) and the required approvals exist:
    ≥1 `owner` AND ≥`review_gate.default_reviewers` (1) distinct non-owner `reviewer`, AND — if the
    step is escalated — ≥1 `domain-owner` for each touched domain.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
@@ -172,10 +172,10 @@ If the predicate **passes**:
 - Mark this review step `status: "done"`.
 - **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
   handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track
-  (set its step `blocked` → `in_progress`). The build half can now start **and** the tester can work
+  (set its step `blocked` → `in_progress`). Build can now start **and** the tester can work
   `test-cases` at the same time.
 - **`test-cases-review`** is the parallel track's gate: mark it `done` but **leave `currentStep` at
-  `ready-for-build`** — completing test cases must never pull the epic back from the build half.
+  `ready-for-build`** — completing test cases must never pull the epic back from Build.
 - Any **other** review step: set the next step in `steps[]` from `blocked` to `in_progress` (authoring)
   or `in_review`, and set `currentStep` to that next step.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is
@@ -214,7 +214,7 @@ merge are unchanged — CI never approves and never merges. File-only mode (no p
 write path.
 
 ### Hard rules (build plan §1, §5)
-- **The merge click is the human approval act.** A front step advances only when a human merges the
+- **The merge click is the human approval act.** A Shape step advances only when a human merges the
   approved, fully-resolved review PR — there is no machine-driven advance. A step `locked: true` may not
   be switched to `machine_advance`; refuse such a request.
 - **Approvals are revoked when the reviewed artifact changes.** `sync` re-hashes the artifact (the locked

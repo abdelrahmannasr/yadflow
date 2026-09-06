@@ -1,6 +1,6 @@
-# demo-repos/ — throwaway code repos for the build half
+# demo-repos/ — throwaway code repos for Build
 
-These are **separate, throwaway git repos** used to exercise the Phase 3 build half on real code,
+These are **separate, throwaway git repos** used to exercise the Phase 3 Build on real code,
 without coupling the product repo to any one application. They model the real architecture:
 
 > **Per-repo specs in each code repo, one shared contract in the product repo.**

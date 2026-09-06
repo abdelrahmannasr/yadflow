@@ -191,7 +191,7 @@ function validateState(state, file) {
   return state;
 }
 
-// Every build-state/<story>.json under the epic, story-sorted. Missing dir = the build half hasn't
+// Every build-state/<story>.json under the epic, story-sorted. Missing dir = Build hasn't
 // started yet, a normal state → []. The per-story files drive `yad next`'s build sub-step guidance —
 // advisory, read-only hints, NOT a source-of-truth ledger. So a corrupt file is skipped (non-throwing
 // `readJSON`), not fatal: `yad next` (and especially the all-epics roll-up) must still orient the user
@@ -353,8 +353,8 @@ export function gatePredicate({
 // Advance the step in state.json once the predicate passes. Mirrors yad-review-gate Step 3:
 // mark this review step done, unblock the next step, or set `ready-for-build` for the last one.
 //
-// `test-cases` is a PARALLEL, non-blocking track so the build half can start while the tester works:
-// approving `stories-review` makes the epic `ready-for-build` (the build half keys off this) AND opens
+// `test-cases` is a PARALLEL, non-blocking track so Build can start while the tester works:
+// approving `stories-review` makes the epic `ready-for-build` (Build keys off this) AND opens
 // `test-cases` for the tester; completing `test-cases-review` never pulls `currentStep` back from
 // `ready-for-build`. Both rules degrade safely for an old chain that has no test-cases steps.
 export function advanceState(state, step) {
@@ -374,9 +374,9 @@ export function advanceState(state, step) {
     state.currentStep = 'ready-for-build';
     return state;
   }
-  // Discovery is the project front-zero ("epic zero"): it has no build half, so its review terminates
+  // Discovery is the project front-zero ("epic zero"): it has no Build part, so its review terminates
   // at a `discovery-done` sentinel rather than `ready-for-build` (which would make `yad next` claim the
-  // build half can run). The roadmap it approved is the input the real feature epics read.
+  // Build can run). The roadmap it approved is the input the real feature epics read.
   if (step.id === 'discovery-review') {
     state.currentStep = 'discovery-done';
     return state;
@@ -396,7 +396,7 @@ export function advanceState(state, step) {
   return state;
 }
 
-// The front steps that may be marked N/A ("skipped") for an epic that does not need them. Only the
+// The Shape steps that may be marked N/A ("skipped") for an epic that does not need them. Only the
 // UI-design step is optional today: an epic with no user-facing surface (backend/API, data, infra)
 // can skip it. A skip carries a recorded reason and stays VISIBLE in the chain (both the author step
 // and its review gate pre-marked `done`, short-circuited by `gatePredicate`) — the auditable,
@@ -508,7 +508,7 @@ export function unskipStep(state, stepId) {
 }
 
 // Mark a step in-review (idempotent) and point currentStep at it — EXCEPT once the epic is
-// `ready-for-build`: the parallel `test-cases` track must not pull currentStep back (the build half
+// `ready-for-build`: the parallel `test-cases` track must not pull currentStep back (Build
 // runs alongside the tester, and only the test-cases review is in flight at that point).
 export function markInReview(state, step) {
   const i = state.steps.findIndex((s) => s.id === step.id);
@@ -520,7 +520,7 @@ export function markInReview(state, step) {
   return state;
 }
 
-// The front authoring step a `yad next` action maps to — the skill the user invokes for that step.
+// The Shape authoring step a `yad next` action maps to — the skill the user invokes for that step.
 // Review (review+approve) steps are driven by the `yad gate` CLI, not a skill, so they are not here.
 export const STEP_SKILL = {
   discovery: 'yad-discovery',
@@ -532,7 +532,7 @@ export const STEP_SKILL = {
   'test-cases': 'yad-test-cases',
 };
 
-// The skill that runs each BACK-half (build) step — the build-state analogue of STEP_SKILL. `spec`
+// The skill that runs each Build (build) step — the build-state analogue of STEP_SKILL. `spec`
 // and `tasks` are the two legs of the SAME yad-spec ceremony (run-loop.md), so both map to yad-spec;
 // the chain renderer collapses the consecutive duplicate. `engineer-review` is the human merge gate.
 export const BUILD_STEP_SKILL = {
@@ -543,12 +543,12 @@ export const BUILD_STEP_SKILL = {
   'engineer-review': 'yad-engineer-review',
 };
 
-// The fixed back-half order. Used to derive the "remaining chain" from the active step onward even if a
+// The fixed Build order. Used to derive the "remaining chain" from the active step onward even if a
 // repo's `steps` array is partial or out of order.
 const BUILD_STEP_ORDER = ['spec', 'tasks', 'implement', 'checks', 'engineer-review'];
 
 // Collapse consecutive identical skills (spec+tasks → one yad-spec) so the rendered chain reads
-// yad-spec → yad-implement → yad-checks → yad-engineer-review, matching the build-half mental model.
+// yad-spec → yad-implement → yad-checks → yad-engineer-review, matching the Build mental model.
 // Folds against the last KEPT element (not the raw neighbor) so a dropped null between duplicates can't
 // reintroduce one.
 function dedupeConsecutive(skills) {
@@ -621,8 +621,8 @@ export function preconditionsMet(state, stepId) {
     const ok = stepId === 'epic' || stepId === 'analysis' || stepId === 'discovery';
     return { ok, blockedBy: null, reason: ok ? 'entry step (no state seeded yet)' : `start with yad-epic — no epic state for '${stepId}'` };
   }
-  // A stub anchor (backfill-pending) or a light-promoted anchor (backfill-done) has NO runnable front
-  // step: its front chain is intentionally left `blocked`. It evolves via `yad-backfill promote` / a
+  // A stub anchor (backfill-pending) or a light-promoted anchor (backfill-done) has NO runnable Shape
+  // step: its Shape chain is intentionally left `blocked`. It evolves via `yad-backfill promote` / a
   // threaded `yad-change`, never by authoring `epic` against the anchor itself — so the precondition
   // guard must not green-light one (its blocked steps would otherwise read as "entry step ready").
   const anchorKind = backfillAnchorKind(state);
@@ -681,17 +681,17 @@ export function repairState(state) {
 // PURE next-action resolver for ONE epic's ledger — what `yad next <epic>` prints. Reads state + the
 // recorded review PRs only. kind:
 //   'new'         — no epic state yet (seed one with yad-epic)
-//   'author'      — invoke a front authoring skill (STEP_SKILL)
+//   'author'      — invoke a Shape authoring skill (STEP_SKILL)
 //   'review-open' — open the review PR/MR (`yad gate open`)
 //   'review-sync' — a review PR/MR is open; sync its state (`yad gate sync`)
-//   'build'       — front half approved (ready-for-build); the build half can run
+//   'build'       — Shape approved (ready-for-build); Build can run
 export function nextAction(ledger, { epic } = {}) {
   const state = ledger?.state;
   const epicId = epic || state?.epicId || null;
   if (!state) return { epicId, kind: 'new', skill: 'yad-epic', why: 'no epic state yet — seed it with yad-epic' };
 
-  // EP-discovery ("epic zero") is the project front-zero: a 2-step author→review chain with no build
-  // half and no parallel track. Resolve its action in isolation so the feature-epic logic below never
+  // EP-discovery ("epic zero") is the project front-zero: a 2-step author→review chain with no Build
+  // part and no parallel track. Resolve its action in isolation so the feature-epic logic below never
   // applies to it.
   if (state.kind === 'discovery') {
     if (state.currentStep === 'discovery-done') {
@@ -721,17 +721,17 @@ export function nextAction(ledger, { epic } = {}) {
   // atomically (see state-schema.md), keeping this sentinel in step with `isStubEpic` (frontmatter).
   const anchorKind = backfillAnchorKind(state);
   if (anchorKind === 'stub') {
-    // No build half until backfilled + promoted — route to yad-backfill (not to authoring the epic),
+    // No Build until backfilled + promoted — route to yad-backfill (not to authoring the epic),
     // and remind that bugs can thread off it now with yad-change.
     return { epicId, kind: 'backfill-pending', step: 'backfill-pending', status: 'stub',
       why: 'stub epic (backfill pending) — document the code with yad-backfill then `yad-backfill promote` to make it real; thread bugs now with yad-change' };
   }
   if (anchorKind === 'documented') {
-    // `yad-backfill promote` documented the feature (verified) but did NOT wake the front chain (its docs
-    // live in the backfill spec). Terminal like `discovery-done` — no build half runs directly; the
+    // `yad-backfill promote` documented the feature (verified) but did NOT wake the Shape chain (its docs
+    // live in the backfill spec). Terminal like `discovery-done` — Build never runs directly; the
     // feature evolves by threading a change/defect off it.
     return { epicId, kind: 'backfill-done', step: 'backfill-done', status: 'documented',
-      why: 'backfilled anchor (documented) — no build half runs directly; evolve it by threading a change/defect with yad-change' };
+      why: 'backfilled anchor (documented) — Build never runs directly; evolve it by threading a change/defect with yad-change' };
   }
 
   // The parallel test-cases track stays workable even once the epic is ready-for-build.
@@ -740,20 +740,20 @@ export function nextAction(ledger, { epic } = {}) {
   const parallel = tcOpen ? { step: 'test-cases', skill: STEP_SKILL['test-cases'], artifact: tc.artifact } : null;
 
   if (state.currentStep === 'ready-for-build') {
-    // Once stories enter the build half, surface each story/repo's CONCRETE next sub-step (spec →
-    // implement → checks → engineer-review) from build-state, not one static "run the build half" hint.
+    // Once stories enter Build, surface each story/repo's CONCRETE next sub-step (spec →
+    // implement → checks → engineer-review) from build-state, not one static "run Build" hint.
     const builds = buildNextActions(ledger?.buildStates || []);
     const lanes = builds.flatMap((b) => b.repos);
     const open = lanes.filter((r) => !r.shipped);
     if (builds.length) {
       let why;
-      if (!lanes.length) why = 'build half started — no repo lanes recorded yet';
-      else if (!open.length) why = 'build half — every story/repo lane is shipped';
-      else why = `build half in progress — ${open.length} story/repo lane(s) still moving`;
+      if (!lanes.length) why = 'Build started — no repo lanes recorded yet';
+      else if (!open.length) why = 'Build — every story/repo lane is shipped';
+      else why = `Build in progress — ${open.length} story/repo lane(s) still moving`;
       return { epicId, kind: 'build', step: 'ready-for-build', status: 'ready-for-build', parallel, builds, why };
     }
     return { epicId, kind: 'build', step: 'ready-for-build', status: 'ready-for-build', parallel,
-      why: 'front half approved — the build half can run' };
+      why: 'Shape approved — Build can run' };
   }
 
   const step = state.steps.find((s) => s.id === state.currentStep)
@@ -761,7 +761,7 @@ export function nextAction(ledger, { epic } = {}) {
   if (!step) {
     const builds = buildNextActions(ledger?.buildStates || []);
     return { epicId, kind: 'build', step: 'ready-for-build', parallel,
-      builds: builds.length ? builds : undefined, why: 'all front steps are done' };
+      builds: builds.length ? builds : undefined, why: 'all Shape steps are done' };
   }
 
   if (step.type === 'author') {

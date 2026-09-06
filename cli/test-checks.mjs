@@ -1006,7 +1006,7 @@ test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review h
   // non-review head touching epics/** => FAIL even with an otherwise-valid code title
   const r = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', artifact, 'chore: sneak in an artifact']);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /front-half artifacts/);
+  assert.match(r.out, /Shape artifacts/);
   // non-review head touching only tooling paths => still a tooling PR, code title passes
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the hub gates']).code, 0);
   // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
@@ -1072,7 +1072,7 @@ test('pr-template gate: hub rejects an artifact change (epics/**) on a non-revie
   // non-review head touching epics/** => FAIL even with an otherwise-valid code template body
   const r = runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', artifact, CODE_TPL]);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.out, /front-half artifacts/);
+  assert.match(r.out, /Shape artifacts/);
   // non-review head touching only tooling paths => code task template passes
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, CODE_TPL]).code, 0);
   // the legitimate path: a review/EP-* head still requires the artifact-review template

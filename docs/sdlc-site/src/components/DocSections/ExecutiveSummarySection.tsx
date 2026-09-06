@@ -3,16 +3,16 @@ import { Icon } from '../shared/Icon';
 const METRICS = [
   { label: 'yad-* Skills', value: '35', icon: 'extension', color: '#2471a3' },
   { label: 'Pipeline Phases', value: '6', icon: 'route', color: '#1e8449' },
-  { label: 'Front Gates', value: '5', icon: 'rate_review', color: '#ca6f1e' },
+  { label: 'Shape gates', value: '5', icon: 'rate_review', color: '#ca6f1e' },
   { label: 'Check Gates', value: '10', icon: 'verified', color: '#b7950b' },
 ];
 
 const KEY_POINTS = [
   'Every step does its work, writes its output to a file, and waits at a gate — nothing hidden, no database.',
   'All state lives in files under .sdlc/ (state.json, approvals.json, contract-lock.json, trust-log.json) that you can also edit directly.',
-  'The front half is human-gated and runs once per epic in the product hub; the build half runs once per story per code repo.',
+  'Shape is human-gated and runs once per epic in the product hub; Build runs once per story per code repo.',
   'Two per-step dials: assistance (none | review | heavy) and automation (human_approve | machine_advance).',
-  'Automation is earned with trust-log evidence and reversible in one move; front states and the engineer review are permanently human.',
+  'Automation is earned with trust-log evidence and reversible in one move; Shape steps and the engineer review are permanently human.',
 ];
 
 export function ExecutiveSummarySection() {

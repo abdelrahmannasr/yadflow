@@ -29,7 +29,7 @@ object and the 2-step chain.
   `yad gate open` / `yad gate sync` warn with the missing filenames. Write all six (in greenfield,
   `current-state.md` is a short clean-slate note) before handing off to the gate.
 - On approval the gate sets `currentStep: "discovery-done"` (a terminal sentinel — discovery has **no**
-  build half, so it never becomes `ready-for-build`).
+  Build, so it never becomes `ready-for-build`).
 - The discovery files (relative to the epic dir) the gate commits on the review branch and re-hashes at
   merge are: `market-research.md`, `competitor-analysis.md`, `current-state.md`, `feasibility.md`,
   `requirements.md`, `roadmap.md` (the `DISCOVERY_FILES` list).

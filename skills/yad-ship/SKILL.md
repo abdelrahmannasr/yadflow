@@ -1,11 +1,11 @@
 ---
 name: yad-ship
-description: 'Build-half helper of the gated SDLC — commit AND open the task PR/MR in one step. A thin orchestration over yad-commit then yad-open-pr: commit the staged atomic change by the conventions (Conventional-Commits subject, Task → Contract-Change trailers, an OPTIONAL Co-Authored-By footer that is OFF by default and added only when --ai <id> is explicitly passed, ≤3-file atomic guard), then push the branch and open the PR/MR from the committed template with the roster auto-assigned. The PR step runs ONLY if the commit lands (a failed commit, tripped guard, or --dry-run stops before pushing). Drives the `yad ship` CLI; never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR". (For the engineer review + merge, use yad-engineer-review.)'
+description: 'Build helper of the gated SDLC — commit AND open the task PR/MR in one step. A thin orchestration over yad-commit then yad-open-pr: commit the staged atomic change by the conventions (Conventional-Commits subject, Task → Contract-Change trailers, an OPTIONAL Co-Authored-By footer that is OFF by default and added only when --ai <id> is explicitly passed, ≤3-file atomic guard), then push the branch and open the PR/MR from the committed template with the roster auto-assigned. The PR step runs ONLY if the commit lands (a failed commit, tripped guard, or --dry-run stops before pushing). Drives the `yad ship` CLI; never merges. Use when the user says "ship this task", "commit and open the PR", or "commit and raise the MR". (For the engineer review + merge, use yad-engineer-review.)'
 ---
 
-# SDLC — Commit + Open PR/MR (build-half helper)
+# SDLC — Commit + Open PR/MR (Build helper)
 
-**Goal:** Do the two routine build-half hand-actions for ONE atomic task in a single step — **commit by
+**Goal:** Do the two routine Build hand-actions for ONE atomic task in a single step — **commit by
 convention, then open the task PR/MR** — so an implemented diff becomes a reviewable PR/MR without two
 separate invocations. It is a thin wrapper over `yad-commit` and `yad-open-pr`; it holds no logic of
 its own and **never merges**. The engineer review + merge are Step E (`yad-engineer-review`).
@@ -23,7 +23,7 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
 - **Order matters:** the PR/MR is opened **only if the commit lands**. A failed commit, a tripped
   atomic guard, or `--dry-run` stops the step before anything is pushed.
 - **Stage-aware on the product hub** (via `yad-open-pr`): on a `review/EP-*` branch `ship` opens the
-  front-half **artifact-review** PR (delegating to `yad gate open` — `--title` is ignored); on any
+  Shape **artifact-review** PR (delegating to `yad gate open` — `--title` is ignored); on any
   other hub branch it opens the **code-task** PR from the bundled code-task template. In a code repo
   it is unchanged.
 

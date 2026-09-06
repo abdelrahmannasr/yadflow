@@ -54,7 +54,7 @@ The whole system is a **state machine**: each step (state) does its work, writes
 ### Core rules that must hold everywhere
 - **Talk to every tool through its commands and files, never through its internal code.** This keeps tools swappable.
 - **All state lives in files on disk** (current step, approvals, dial settings). Nothing hidden. This is what makes later automation possible.
-- **Front states never auto-advance.** They are human-authored with AI assist. Only the back states may move toward machine-advance, and only later.
+- **Shape steps never auto-advance.** They are human-authored with AI assist. Only the back states may move toward machine-advance, and only later.
 
 ---
 
@@ -65,7 +65,7 @@ Each step carries two independent settings:
 - `assistance`: `none` | `review` | `heavy` — how much AI helps.
 - `automation`: `human_approve` | `machine_advance` — who advances the step.
 
-Store these per step in the product repo (see Section 6). Default for all steps at first: `automation: human_approve`. Front steps must be locked so they cannot be set to `machine_advance` in this version.
+Store these per step in the product repo (see Section 6). Default for all steps at first: `automation: human_approve`. Shape steps must be locked so they cannot be set to `machine_advance` in this version.
 
 ---
 
@@ -87,7 +87,7 @@ Three are the real value, three are plumbing.
 
 ## 4. The workflow steps and their BMAD agents
 
-Front states (human-authored, AI-assist, never auto-advance).
+Shape steps (human-authored, AI-assist, never auto-advance).
 
 **Every authoring step is followed by its own review + approval step.** The pattern is identical for all four: author with AI assist → real engineers comment → owner addresses comments and iterates → reviewers approve → advance. No step advances until its review step is approved.
 
@@ -387,7 +387,7 @@ The same epic ID appears in: the epic folder name, every story file, every spec 
   - `init` — set up a product repo and register the code repos for a project.
   - `link` — connect an existing code repo (drops `/specs` folder + the spec-link CI check). On-ramp for existing projects.
   - `backfill` — run the backfill step (piece 4) for a feature.
-  - `feature` — start a new feature: runs the front states (epic → architecture → UI → stories) with their gates.
+  - `feature` — start a new feature: runs the Shape steps (epic → architecture → UI → stories) with their gates.
   - `check` — the CI command: verifies spec-link and contract rules for a PR.
 - Design the engine so a future **service** can trigger the same steps (do not hardcode "a human typed this"; the trigger is a parameter). Do not build the service now.
 
@@ -401,7 +401,7 @@ The same epic ID appears in: the epic folder name, every story file, every spec 
 4. **The glue + state files (pieces 1 and 6)** — make the engine run steps in order and read/write `.sdlc/` state.
 5. **UI design step (Impeccable)** and **backfill step (Repomix)**.
 6. **Multi-repo contract (piece 3)** — add when a feature first spans more than one repo.
-7. **End-first automation** — only after months of evidence the AI is trustworthy on this codebase. Move back steps toward `machine_advance` one at a time. Never the front steps in this version.
+7. **End-first automation** — only after months of evidence the AI is trustworthy on this codebase. Move Build steps toward `machine_advance` one at a time. Never the Shape steps in this version.
 
 Add each tool only when it removes a real, measured bottleneck.
 
@@ -413,7 +413,7 @@ Add each tool only when it removes a real, measured bottleneck.
 - **Do not hardcode any AI vendor.** Steps call whichever model/agent is configured. Vendor must be swappable.
 - **Do not build browser storage or a database** in this version. Files + git are the source of truth.
 - **Respect licenses.** BMAD and Impeccable are open-source with their own terms; note them in `RESEARCH-NOTES.md` if a commercial product is intended later.
-- **Keep the front states human-authored.** Do not add any path that lets epic/architecture/UI auto-advance.
+- **Keep the Shape steps human-authored.** Do not add any path that lets epic/architecture/UI auto-advance.
 - If anything in this plan conflicts with what the real tools actually do (found in Phase 0), **prefer the real tool behavior** and note the deviation. This plan is the design intent; the tools are the ground.
 
 ---

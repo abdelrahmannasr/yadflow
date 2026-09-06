@@ -91,7 +91,7 @@ ${c.bold('Where am I / what next')}
                                        Stays visible & auditable (pre-done, gate short-circuited);
                                        --undo reverses it until the stories review opens
 
-${c.bold('Review gate (front half)')}
+${c.bold('Review gate (Shape)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
                                        branch must already be on origin (it is never created here)
   yad gate sync <epic> [artifact] [--pr <n>]
@@ -117,11 +117,11 @@ ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
   yad open-pr [--repo <name>]          Open a task PR/MR against the repo's DEFAULT branch (never a
                                        hardcoded main; --base overrides) — stage-aware on the hub: a
-                                       review/EP-* branch opens the front-half artifact-review PR
+                                       review/EP-* branch opens the Shape artifact-review PR
                                        (delegates to gate open), any other hub branch uses the
                                        code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
-  yad checkpoint [--push]              Commit the machine-written back-half hub state
+  yad checkpoint [--push]              Commit the machine-written Build hub state
                                        (trust-log/build-log/build-state) — plus any story
                                        status: flip (→ in-build/shipped) backed by a build-log
                                        ship — as one audit-trail chore(hub) commit; default
@@ -131,7 +131,7 @@ ${c.bold('Build helpers')}
                                        (merged before ledger tracking), then carry its status: shipped
                                        flip in the same commit (--merge-commit <sha>, --task <t> opt.);
                                        one repo per run — re-run per --repo for a multi-repo story
-  yad tidy up [<epic>] [--push]        Fold FINISHED back-half shards (a shipped story's
+  yad tidy up [<epic>] [--push]        Fold FINISHED Build shards (a shipped story's
                                        trust-log/build-log entries) back into the single folded
                                        ledger, as one chore(hub) commit — the manual "pack it up"
                                        for the shard files; a no-op when nothing is foldable
