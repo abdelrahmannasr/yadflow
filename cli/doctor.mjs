@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isBridgeHub } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
@@ -160,7 +160,7 @@ export function projectChecks(checks, root) {
   // up front should be installed. Without the bridge the ledger is locally owned and the hand-edit the
   // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
   const hubForHooks = readJSON(hubPath, null);
-  if (isBridgeHub(hubForHooks)) {
+  if (isVerifiedLedger(hubForHooks)) {
     const unwired = [];
     const broken = [];
     if (!exists(path.join(root, 'hooks', 'ledger-guard.sh'))) unwired.push('hooks/ledger-guard.sh');

@@ -783,8 +783,8 @@ test('schemaVersion: a project living under a directory called .sdlc does not st
   // …while that project's own .sdlc files are still stamped normally, at both depths.
   writeJSON(path.join(root, '.sdlc/hub.json'), { platform: 'github' });
   writeJSON(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), { story: 'EP-x-S01' });
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/hub.json'), 'utf8')).schemaVersion, 1);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), 'utf8')).schemaVersion, 1, 'shard folders are one level down and still count');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/hub.json'), 'utf8')).schemaVersion, ENGINE_SHAPE);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), 'utf8')).schemaVersion, ENGINE_SHAPE, 'shard folders are one level down and still count');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5468,15 +5468,38 @@ test('doctor shape: each epic is reported separately, so drift can be located', 
   ]);
 });
 
-test('doctor shape: a real project reports its shape, and the section reaches --json', async () => {
+test('doctor shape: a project with an un-migrated file is reported as behind, in --json', async () => {
+  // The scaffold writes .sdlc/repos.json with a raw fs.writeFileSync, so it carries no stamp and is
+  // shape 1 by rule 1 — exactly the state a real project is in before it runs `yad migrate`. This is
+  // the case the shape section exists for, so it is worth asserting on a project that is genuinely
+  // in it rather than one contrived to be clean.
   const { T } = scaffold();
   await reconcile(T, { fix: true });
   const r = await doctorOn(T);
   const shape = r.checks.filter((x) => x.section === 'shape');
   assert.ok(shape.length, 'the section is wired into collectDoctor, not just exported');
   assert.equal(shape[0].id, 'shape');
+  assert.equal(shape[0].status, 'warn', shape[0].message);
+  assert.match(shape[0].message, new RegExp(`the engine is on shape ${ENGINE_SHAPE}`));
+  assert.match(shape[0].message, /behind/);
+  // --json carries the per-file detail, so a reader can see WHICH file, not just that one exists.
+  const behind = shape[0].shape.files.filter((f) => f.shape < ENGINE_SHAPE);
+  assert.ok(behind.some((f) => f.file === '.sdlc/repos.json'), JSON.stringify(behind));
+  assert.equal(behind.every((f) => f.stamped === false), true, 'a file behind the engine is one that carries no stamp');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor shape: a project this engine wrote is on this engine shape, and says ok', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // Re-write the one hand-written file through the engine's own writer, which is what `yad migrate
+  // --apply` does for a real project. After that nothing is behind and the section goes quiet.
+  const reposPath = path.join(T, '.sdlc/repos.json');
+  writeJSON(reposPath, JSON.parse(fs.readFileSync(reposPath, 'utf8')));
+  const r = await doctorOn(T);
+  const shape = r.checks.filter((x) => x.section === 'shape');
   assert.equal(shape[0].status, 'ok', shape[0].message);
-  assert.match(shape[0].message, /this project is on shape 1, the engine is on shape 1/);
+  assert.match(shape[0].message, new RegExp(`on shape ${ENGINE_SHAPE}, the engine is on shape ${ENGINE_SHAPE}`));
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -7370,7 +7393,7 @@ test('writeRetroShip: writes a retroactive shard for a pre-tracking story; refus
   const ship = JSON.parse(fs.readFileSync(r.file, 'utf8'));
   // schemaVersion is stamped by writeJSON on every .sdlc file the engine writes (lib.mjs) — the shard
   // states its shape like everything else, and the stamp leads the object.
-  assert.deepEqual(ship, { schemaVersion: 1, story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
+  assert.deepEqual(ship, { schemaVersion: ENGINE_SHAPE, story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
   assert.deepEqual(Object.keys(ship)[0], 'schemaVersion', 'the stamp leads the object, so its position can never churn the bytes');
   assert.ok(!('mergeCommit' in ship), 'no mergeCommit is invented when the caller omits it');
   assert.ok(readShips(epicDir).some((s) => s.story === 'EP-x-S01'), 'readShips now proves the story shipped');
@@ -7412,13 +7435,13 @@ test('folding a stamped shard does NOT copy schemaVersion into the ledger rows',
   // schemaVersion describes a FILE. A shard is a file and carries it; once folded, that same object
   // becomes a row inside build-log.json, which states its own shape. Letting the stamp cross that
   // boundary would bake a per-row version into an append-only ledger permanently — after
-  // SCHEMA_VERSION moves to 2, a file stamped 2 would hold rows stamped 1 from today's folds.
+  // the shape moves again, a file stamped 3 would hold rows stamped 2 from today's folds.
   const { T, epicDir } = ledgerEpic();
   const r = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' });
-  assert.equal(JSON.parse(fs.readFileSync(r.file, 'utf8')).schemaVersion, 1, 'the shard FILE is stamped');
+  assert.equal(JSON.parse(fs.readFileSync(r.file, 'utf8')).schemaVersion, ENGINE_SHAPE, 'the shard FILE is stamped');
   foldBuild(epicDir, () => true);
   const folded = JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/build-log.json'), 'utf8'));
-  assert.equal(folded.schemaVersion, 1, 'the folded file states its own shape');
+  assert.equal(folded.schemaVersion, ENGINE_SHAPE, 'the folded file states its own shape');
   assert.deepEqual(folded.ships.map((s) => Object.keys(s).includes('schemaVersion')), [false],
     'no row carries a shape of its own');
   assert.equal(folded.ships[0].story, 'EP-x-S01', 'and the row itself survives the fold intact');
@@ -8914,7 +8937,7 @@ test('ledger hook is a no-op without the bridge — there the hand-edit is corre
       assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json').allow, true, JSON.stringify(hub));
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   }
-  // ...and the legacy `bridge` spelling still arms it, exactly as isBridgeHub reads it.
+  // ...and the legacy `bridge` spelling still arms it, exactly as isVerifiedLedger reads it.
   const legacy = hookHub({ hub: { platform: 'github', bridge: true } });
   try {
     assert.equal(decide(legacy, 'epics/EP-seeded/.sdlc/state.json').allow, false);

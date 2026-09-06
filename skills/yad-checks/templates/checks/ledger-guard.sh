@@ -68,8 +68,29 @@ done
 hub_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$HUB_ROOT"; }
 hub_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$HUB_ROOT"; }
 
-if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || { ! hub_true bridge_enabled && ! hub_true bridge; }; then
-  echo "PASS [ledger-guard]: bridge not enabled — the ledger is locally owned, nothing to guard."
+# READ ORDER, identical to `isVerifiedLedger` (cli/manifest.mjs) — the two must never disagree:
+#   1. `ledger`, if hub.json carries it — shape 2 and later. "verified" and nothing else.
+#   2. otherwise the old booleans `bridge_enabled` (canonical) or `bridge` (older still).
+# A platform is required either way, for the reason in the header.
+#
+# Step 2 is NOT dead weight. This script is committed inside the user's repo and refreshed by
+# `yad update`, which is a separate act from `yad migrate` — so an un-migrated hub.json (no `ledger`
+# key at all) will be read by this version of the script, and it has to keep saying "verified".
+# cli/test-checks.mjs runs a table of hub.json variants through this script AND through the JS
+# reader and asserts they agree on every row.
+# Written as if/else rather than `cmd; verified=$?`: under the `set -e` above, a bare failing test
+# would EXIT the script instead of recording a false — and exiting mid-guard is indistinguishable
+# from passing, so the gate would silently stop guarding.
+LEDGER="$(hub_str ledger)"
+verified=no
+if [ -n "$LEDGER" ]; then
+  if [ "$LEDGER" = "verified" ]; then verified=yes; fi
+elif hub_true bridge_enabled || hub_true bridge; then
+  verified=yes
+fi
+
+if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || [ "$verified" != yes ]; then
+  echo "PASS [ledger-guard]: the ledger is locally owned (ledger: local) — nothing to guard."
   exit 0
 fi
 

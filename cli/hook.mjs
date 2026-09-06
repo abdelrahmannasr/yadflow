@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, isBridgeHub } from './manifest.mjs';
+import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -180,7 +180,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
     // Non-strict on purpose: a hub.json that does not parse is a real problem, but refusing every
     // edit in the repo is not this hook's way of reporting it (`yad doctor` says so properly).
     const hub = readJSON(path.join(hubRoot, PROJECT_FILES.hubConfig), null);
-    if (!isBridgeHub(hub)) continue;
+    if (!isVerifiedLedger(hub)) continue;
     const rel = path.relative(hubRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;

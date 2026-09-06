@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON } from './lib.mjs';
-import { BACKUP_SUFFIX, epicFiles, isBridgeHub, MANAGED_LEDGER, PROJECT_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
+import { BACKUP_SUFFIX, epicFiles, isVerifiedLedger, MANAGED_LEDGER, PROJECT_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
 import { isValidEpicId } from './epic-state.mjs';
 
@@ -36,6 +36,33 @@ export const MIGRATIONS = [
     to: 1,
     title: 'baseline — every file states its shape',
     apply: (obj) => obj,
+  },
+  {
+    from: 1,
+    to: 2,
+    title: 'hub.json — record who writes the ledger as `ledger: verified | local`',
+    // "bridge mode" is renamed to `ledger: verified`, and the switch becomes a named value instead
+    // of a boolean. Only .sdlc/hub.json carries it; every other file passes through untouched and
+    // simply moves to shape 2 with the rest of the project.
+    //
+    // Two things this deliberately does NOT do:
+    //
+    // 1. It does not DELETE `bridge_enabled`. `templates/checks/ledger-guard.sh` is committed inside
+    //    the user's own repo and is refreshed only by `yad update` — which is a separate act from
+    //    `yad migrate`. A hub running yesterday's guard against a migrated hub.json would read no
+    //    flag, conclude the ledger is local, and stop rejecting human commits to it. That is the one
+    //    guarantee verified mode exists to provide, so removing the old key here would silently
+    //    disarm the audit trail. Add before you remove (rule 3): both keys, doctor warns, and the
+    //    old one goes in a later major.
+    //
+    // 2. It does not copy the flag. `bridge_enabled: true` on a hub with NO platform is `local`
+    //    today, because the reader has always required a platform — there is no Verified badge to
+    //    read without one. Writing `verified` there would change what the engine does to a project
+    //    during an upgrade. So the value is computed from the reader's own answer, which means no
+    //    project's behaviour moves: whatever it was before the migration, it is after.
+    apply: (obj, ctx) => (ctx?.base === 'hub.json'
+      ? { ...obj, ledger: isVerifiedLedger(obj) ? 'verified' : 'local' }
+      : obj),
   },
 ];
 
@@ -58,15 +85,24 @@ const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const shapeOf = (v) => (isPlainObject(v) && Number.isInteger(v.schemaVersion) ? v.schemaVersion : 1);
 
 // Walk the migration list once. Returns the migrated object, the shape it ended on, and which steps ran.
-function applyMigrations(obj, migrations) {
+// `ctx` is `{ base, rel }` — the file's basename and its project-relative path. A step that only
+// concerns one kind of file (the 1 → 2 hub switch below is the first) needs to know which file it is
+// holding; every other step ignores the argument. Passing it is what keeps such a step from having
+// to guess from the object's own fields, which would mean a hub-shaped ledger got silently rewritten.
+function applyMigrations(obj, migrations, ctx) {
   let out = obj;
   let version = shapeOf(obj);
   const applied = [];
   for (const m of migrations) {
     if (version !== m.from) continue;
-    out = m.apply({ ...out });
+    const next = m.apply({ ...out }, ctx);
+    // A step that does not apply to this file returns it unchanged — but the file's SHAPE still
+    // moves, because the shape describes the whole project's file format, not this one file's
+    // fields. Only steps that actually changed something are named in the report.
+    const moved = JSON.stringify(next) !== JSON.stringify(out);
+    out = next;
     version = m.to;
-    applied.push(m.title);
+    if (moved) applied.push(m.title);
   }
   return { obj: out, version, applied };
 }
@@ -171,7 +207,7 @@ export function projectJsonFiles(root) {
 // comparison happens at all.
 export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
-  const bridge = isBridgeHub(hub);
+  const bridge = isVerifiedLedger(hub);
   // On a verified hub the ledger guard refuses a human commit to these, so rewriting them locally
   // would produce a change that cannot be committed. Of the four the guard names, only state.json is
   // an object; the rest are arrays and would be skipped anyway.
@@ -201,7 +237,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
       rows.push({ file: rel, from, to: from, action: 'ci-owned', changes: false, stamped: isStamped });
       continue;
     }
-    const { obj, version, applied } = applyMigrations(raw.value, migrations);
+    const { obj, version, applied } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel });
     const next = serialize(stamped(obj, version));
     const current = fs.readFileSync(file, 'utf8');
     const changes = next !== current;
@@ -268,7 +304,10 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       // file's bytes are provably ours — a ledger has no provenance record, so there is nothing to
       // prove and the copy is unconditional.
       fs.copyFileSync(file, backupPathFor(file));
-      const { obj, version } = applyMigrations(raw.value, migrations);
+      // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
+      // promises one thing and an apply writes another — the single worst failure this command can
+      // have, because the preview is the reason anyone trusts it enough to run --apply.
+      const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel: row.file });
       writeJSON(file, stamped(obj, version));
       written.push(row.file);
     }

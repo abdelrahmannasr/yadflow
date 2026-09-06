@@ -152,7 +152,7 @@ export function buildReconfiguredHub(cur, fields) {
 export function upsertRosterEntry(root, { login, name, email, roles = {}, platform } = {}) {
   if (!login) { warn('roster upsert needs a login — skipped'); return { entry: null, created: false }; }
   const hubPath = path.join(root, PROJECT_FILES.hubConfig);
-  const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
+  const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, ledger: 'local', bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
   if (!Array.isArray(hub.roster)) hub.roster = [];
   let entry = hub.roster.find((e) => e.login === login);
   const created = !entry;
@@ -528,8 +528,11 @@ export async function runSetup(root, opts = {}) {
       }
     }
     const default_branch = platform === 'none' ? 'main' : await ask('Hub default branch', 'main');
-    // `bridge_enabled` is the canonical flag (hub-config schema); keep the legacy `bridge` spelling
-    // for anything that still reads it.
+    // `ledger` is the canonical switch (shape 2): "verified" = CI writes the ledger, "local" = this
+    // machine does. The two booleans below say the same thing in the older spelling and are written
+    // ALONGSIDE it, not instead of it — add before you remove (rule 3). They are what a check gate
+    // that has not been refreshed by `yad update` yet still reads, and what a hub that is rolled back
+    // to a 3.x CLI would fall back to. They go in a later major, once nothing on either side reads them.
     const enabled = platform !== 'none';
     // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the bridge/PR flow
     // needs it to open PRs. Derived from the origin remote already resolved above; null when local-only.
@@ -541,7 +544,8 @@ export async function runSetup(root, opts = {}) {
     // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
     const cur = readJSONStrict(hubPath, {}) || {};
     const next = buildReconfiguredHub(cur, {
-      platform: enabled ? platform : null, git_url, bridge_enabled: enabled, bridge: enabled,
+      platform: enabled ? platform : null, git_url,
+      ledger: enabled ? 'verified' : 'local', bridge_enabled: enabled, bridge: enabled,
       default_branch, roster, solo, profile: { codebase, repo_layout, team_size },
     });
     if (!roster.length && Array.isArray(cur.roster) && cur.roster.length) {

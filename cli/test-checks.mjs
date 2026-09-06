@@ -1165,6 +1165,70 @@ const seedLedgerOnBase = (T, epic = 'EP-x', files = {}, hub = BRIDGE_HUB) => {
   git(T, 'checkout', '-q', '-B', 'feature');
 };
 
+// The JS reader and this bash one decide the SAME question — who is allowed to write the ledger —
+// in two languages, from one file. Issue #186 was two readers disagreeing when there were two keys
+// to disagree about; the `ledger` switch makes it three. So the agreement is asserted directly, on a
+// table of every hub.json shape a real project can be in, rather than trusted to two comments.
+test('ledger-guard: the bash reader and isVerifiedLedger agree on every hub.json shape', async () => {
+  const { isVerifiedLedger } = await import('./manifest.mjs');
+  const T = scaffoldRepo();
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  const variants = [
+    ['platform + bridge_enabled', { platform: 'github', bridge_enabled: true }],
+    ['platform + legacy bridge', { platform: 'github', bridge: true }],
+    ['platform + flag false', { platform: 'github', bridge_enabled: false }],
+    ['platform, no flag at all', { platform: 'github' }],
+    ['flag true but NO platform', { bridge_enabled: true }],
+    ['platform null + flag true', { platform: null, bridge_enabled: true }],
+    ['ledger: verified', { platform: 'github', ledger: 'verified' }],
+    ['ledger: local', { platform: 'github', ledger: 'local' }],
+    // The new key WINS over the old one. A hub that was migrated and then had its ledger switched
+    // to local must not be dragged back to verified by the flag the migration deliberately kept.
+    ['ledger: local beats a stale bridge_enabled', { platform: 'github', ledger: 'local', bridge_enabled: true }],
+    ['ledger: verified but no platform', { ledger: 'verified' }],
+    ['ledger: an unknown value is not verified', { platform: 'github', ledger: 'banana' }],
+    ['a migrated verified hub carries both', { schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }],
+  ];
+  for (const [name, hub] of variants) {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub, null, 2) + '\n');
+    const r = runGate(LEDGER_GUARD, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
+    const bashSaysVerified = !/locally owned/.test(r.out);
+    assert.equal(bashSaysVerified, isVerifiedLedger(hub), `${name}: bash and JS disagree — ${r.out}`);
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The two halves of an upgrade land at different times: `yad migrate` rewrites hub.json, `yad update`
+// refreshes this script. Neither implies the other, so BOTH mixed states are real and both must keep
+// the guard armed. If either fails, a verified project silently stops being guarded — which is the
+// single guarantee the mode exists to provide.
+test('ledger-guard: an un-migrated hub.json still arms the guard (new script, old file)', () => {
+  const T = scaffoldRepo();
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","bridge_enabled":true}\n');
+  const r = runGate(LEDGER_GUARD, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
+  assert.doesNotMatch(r.out, /locally owned/, 'a hub that has not run yad migrate is still verified');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('ledger-guard: the PREVIOUS release of this script still arms on a migrated hub.json (old script, new file)', () => {
+  // `git show main:…` is the script as it ships today. A hub that runs `yad migrate` before the next
+  // `yad update` is guarded by exactly this copy, so the migration keeping `bridge_enabled` is what
+  // holds the audit trail together — this test is what makes removing that key impossible by accident.
+  const T = scaffoldRepo();
+  const prev = path.join(T, 'ledger-guard-main.sh');
+  const shipped = execFileSync('git', ['show', 'main:skills/yad-checks/templates/checks/ledger-guard.sh'],
+    { cwd: ROOT, encoding: 'utf8' });
+  fs.writeFileSync(prev, shipped, { mode: 0o755 });
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'),
+    JSON.stringify({ schemaVersion: 2, platform: 'github', bridge_enabled: true, ledger: 'verified' }, null, 2) + '\n');
+  const r = runGate(prev, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
+  assert.doesNotMatch(r.out, /bridge not enabled|locally owned/,
+    'the shipped guard must still see a migrated hub as verified — otherwise migrating disarms it');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('ledger-guard: with the bridge ON, a non-bot commit MUTATING an existing ledger FAILS', () => {
   const T = scaffoldRepo();
   seedLedgerOnBase(T);
@@ -1325,11 +1389,11 @@ test('ledger-guard: a bot-authored ledger commit is allowed (signature waived wi
 });
 
 test('ledger-guard: with the bridge OFF it is a no-op (humans own the ledger locally)', () => {
-  const T = scaffoldRepo(); // no .sdlc/hub.json → bridge not enabled
+  const T = scaffoldRepo(); // no .sdlc/hub.json → the ledger is local
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /bridge not enabled/);
+  assert.match(r.out, /locally owned/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1343,7 +1407,7 @@ test('ledger-guard: the bridge flag WITHOUT a platform is not bridge mode — no
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /bridge not enabled/);
+  assert.match(r.out, /locally owned/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1353,7 +1417,7 @@ test('ledger-guard: a platform WITHOUT the bridge flag is not bridge mode — no
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   const r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /bridge not enabled/);
+  assert.match(r.out, /locally owned/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1367,7 +1431,7 @@ test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #
   commit(T, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   let r = runGate(LEDGER_GUARD, T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /bridge not enabled/);
+  assert.match(r.out, /locally owned/);
 
   // Mirror image: the flag is root-level but `platform` only appears nested.
   const T2 = scaffoldRepo();
@@ -1375,7 +1439,7 @@ test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #
   commit(T2, 'human ledger edit', { 'epics/EP-x/.sdlc/approvals.json': '[]\n' });
   r = runGate(LEDGER_GUARD, T2);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /bridge not enabled/);
+  assert.match(r.out, /locally owned/);
 
   for (const d of [T, T2]) fs.rmSync(d, { recursive: true, force: true });
 });

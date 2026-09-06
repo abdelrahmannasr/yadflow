@@ -161,7 +161,7 @@ export const LEARNING_PRIMARY = 'deeptutor';
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
@@ -174,17 +174,31 @@ export const PROJECT_FILES = {
   version: '.sdlc/cli-version.json',
 };
 
-// Bridge mode: a platform AND the gate-sync CI explicitly enabled (the canonical `bridge_enabled`,
-// or the older `bridge`). ONLY then is CI the sole ledger writer — so `gate open`/`sync` stay
-// hands-off, `hubActions` wires the hub CI, and the ledger guards (the `ledger-guard` check gate and
-// the `yad hook ledger-guard` harness hook) are live. A platform without the bridge keeps the local
-// write path, or reviews could never advance.
+// Who writes the ledger. Two values, and the switch lives in `.sdlc/hub.json`:
 //
-// ONE definition, imported by every JS caller. Copies that drift are how #186 happened — a hub that
-// one reader called bridge and another called file-only had no permitted ledger writer at all.
-// `templates/checks/ledger-guard.sh` re-implements it in bash because the check gates are standalone
-// by design; that copy is the only one, and its header says so.
-export const isBridgeHub = (hub) => !!(hub?.platform && (hub.bridge_enabled === true || hub.bridge === true));
+//   ledger: "verified"  CI only, with a platform-Verified signature. A local `gate open` is
+//                       advisory and writes nothing; `ledger-guard` rejects any non-bot commit.
+//   ledger: "local"     your machine. Works offline, no CI needed, guarded by nothing.
+//
+// `verified` is the old "bridge mode" renamed. The old name described a mechanism; this one
+// describes what you get, and it is the word the platform shows next to the commits.
+//
+// READ ORDER, and it matters (rule 2 — read old, write new):
+//   1. `ledger`, if the file carries it — shape 2 and later.
+//   2. otherwise the old booleans `bridge_enabled` (canonical) or `bridge` (older still).
+// A platform is required either way. Without one there is no Verified badge to read, so CI cannot
+// be the sole writer and the local path has to stay open — otherwise a hub has no permitted writer
+// at all and no gate can ever advance (issue #186).
+//
+// ONE definition, imported by every JS caller. `templates/checks/ledger-guard.sh` re-implements the
+// SAME order in bash because the check gates are standalone by design; that copy is the only one,
+// its header says so, and cli/test-checks.mjs runs a table of hub.json variants through both and
+// asserts they agree on every row. Three keys is three ways for two readers to drift.
+export const isVerifiedLedger = (hub) => {
+  if (!hub?.platform) return false;
+  if (typeof hub.ledger === 'string') return hub.ledger === 'verified';
+  return hub.bridge_enabled === true || hub.bridge === true;
+};
 
 // ---- `yad commit` conventions (mirror skills/sdlc/config.yaml `build`) ----
 // Conventional-commit types (config.yaml commit_subject_style).
