@@ -706,11 +706,47 @@ const shapeTmp = (name) => {
   return T;
 };
 
+const { SCHEMA_VERSION: ENGINE_SHAPE } = await import('./manifest.mjs');
+
 test('schemaVersion: an object written under .sdlc is stamped, and the stamp leads the file', () => {
   const T = shapeTmp('obj');
   const f = path.join(T, '.sdlc/hub.json');
   writeJSON(f, { platform: 'github' });
-  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "schemaVersion": 1,\n  "platform": "github"\n}\n');
+  // A brand-new object has no shape of its own, so it gets THIS engine's. Asserted against the
+  // constant, never a literal: hard-coding 1 here would turn every future shape bump into a puzzle.
+  assert.equal(fs.readFileSync(f, 'utf8'), `{\n  "schemaVersion": ${ENGINE_SHAPE},\n  "platform": "github"\n}\n`);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Rule 1: a file with no version counts as 1 — NOT as whatever shape this engine happens to be on.
+// These three are the difference between `yad migrate` having work to do and silently believing an
+// un-migrated project is already current. The literal 1 below is the point of the test; do not
+// "fix" it to ENGINE_SHAPE.
+test('schemaVersion: an UNSTAMPED file reads back as shape 1, whatever shape the engine is on', () => {
+  const T = shapeTmp('read-default');
+  const f = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(f, JSON.stringify({ platform: 'github' }, null, 2) + '\n');
+  assert.equal(readJSONShape(f).schemaVersion, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: reading an unstamped file and writing it back does not silently upgrade it', () => {
+  const T = shapeTmp('no-silent-upgrade');
+  const f = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(f, JSON.stringify({ platform: 'github' }, null, 2) + '\n');
+  const round = readJSONShape(f);
+  writeJSON(f, round);
+  // Still 1. Only `yad migrate` moves a file's shape, because only it also moves the CONTENT. A
+  // writer that raised the number on its own would leave a file claiming a shape it does not have.
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).schemaVersion, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a file already on a newer shape is never dragged backwards', () => {
+  const T = shapeTmp('ahead');
+  const f = path.join(T, '.sdlc/hub.json');
+  writeJSON(f, { schemaVersion: ENGINE_SHAPE + 7, platform: 'github' });
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).schemaVersion, ENGINE_SHAPE + 7);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
