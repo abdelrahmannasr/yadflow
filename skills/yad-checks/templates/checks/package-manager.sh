@@ -125,8 +125,16 @@ yad_detect_package_manager() {
       printf '%s\n' "pnpm"
       ;;
     *)
-      echo "FAIL [package-manager]: unsupported packageManager '$spec' (supported: npm, pnpm)." >&2
-      return 1
+      # yarn/bun declared for local use while CI installs from an npm lockfile was green before this
+      # field was read; keep that repo on the historical npm path, with a warning, rather than
+      # failing every PR on upgrade. Without an npm lockfile there is nothing to fall back to.
+      if [ -f "$YAD_NPM_LOCKFILE" ] || [ -f "$YAD_NPM_SHRINKWRAP" ]; then
+        echo "WARN [package-manager]: packageManager '$spec' is not supported by the gate (npm, pnpm); an npm lockfile is present, so continuing on the historical npm path." >&2
+        printf '%s\n' "npm"
+      else
+        echo "FAIL [package-manager]: unsupported packageManager '$spec' (supported: npm, pnpm)." >&2
+        return 1
+      fi
       ;;
   esac
 }

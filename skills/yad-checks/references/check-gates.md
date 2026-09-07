@@ -94,7 +94,10 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 ## 3. build/test/lint (`templates/checks/build-test-lint.sh`)
 
 - Reads the standard `package.json#packageManager` field and runs `lint`, `build`, and `test` through
-  that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported. A repo
+  that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported; another
+  manager (yarn, bun) fails closed unless an npm lockfile is present, in which case the repo stays on
+  the historical npm path with a warning — a yarn-locally, npm-in-CI repo was green before this
+  field was read and must not go red on upgrade. A repo
   without the field retains npm behavior unless it carries `pnpm-lock.yaml` and no npm lockfile
   (`package-lock.json` / `npm-shrinkwrap.json`) — a repo with both keeps the npm path rather than
   silently changing toolchains.

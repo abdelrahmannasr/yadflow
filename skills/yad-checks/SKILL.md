@@ -18,8 +18,9 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    Every story whose slice the diff touches is checked, not just the first — see `references/check-gates.md`.
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
    CI installs and runs through the package manager declared by the repo's standard
-   `package.json#packageManager` field (`npm` and `pnpm` are supported); an npm repo without that
-   field retains the historical npm behavior. A declared manager requires a full, exact semantic
+   `package.json#packageManager` field (`npm` and `pnpm` are supported; any other manager stays on
+   npm with a warning when an npm lockfile is present, and fails closed otherwise); an npm repo
+   without that field retains the historical npm behavior. A declared manager requires a full, exact semantic
    version (with Corepack's optional integrity suffix supported), and CI activates that exact version.
    The build/test/lint job of the code-repo `yad-checks` workflow uses Node 22 by default and reads
    `YAD_NODE_VERSION` (a GitHub repository variable or GitLab CI/CD variable) for repos whose declared

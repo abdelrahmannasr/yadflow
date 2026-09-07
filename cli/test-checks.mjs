@@ -867,7 +867,7 @@ test('build-test-lint gate: packageManager selects pnpm for every configured scr
 for (const [label, packageManager, message] of [
   ['a non-string packageManager', { a: 1 }, /must be a string/],
   ['shell text in packageManager', 'pnpm@9.15.0; touch owned', /exact semantic version/],
-  ['an unsupported manager', 'yarn@4.0.0', /unsupported packageManager/],
+  ['an unsupported manager with no npm lockfile', 'yarn@4.0.0', /unsupported packageManager/],
 ]) {
   test(`build-test-lint gate: fails closed on ${label}`, () => {
     const T = scaffoldRepo();
@@ -1212,6 +1212,27 @@ test('build-test-lint gate: the worker cap survives a byte-order mark on package
   const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog, YAD_TEST_MAX_WORKERS: '2' });
   assert.equal(r.code, 0, r.out);
   assert.match(fs.readFileSync(commandLog, 'utf8'), /npm run --silent test -- --maxWorkers=2/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A yarn/bun declaration with a committed npm lockfile was green under the old npm-only gate;
+// upgrading must not turn every PR red, so it stays on npm with a warning.
+test('install-deps: an unsupported packageManager with an npm lockfile stays on npm, with a warning', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'yarn@1.22.22', lockfile: 'package-lock.json' });
+  // spawnSync rather than runGate: the warning goes to stderr, which runGate only surfaces on failure.
+  const r = spawnSync('bash', [INSTALL_DEPS], { cwd: T, env: { ...GIT_ENV, ...env }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /WARN \[package-manager\]: packageManager 'yarn@1\.22\.22' is not supported/);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: an unsupported packageManager without an npm lockfile fails closed', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'bun@1.1.0', lockfile: 'bun.lockb' });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /unsupported packageManager 'bun@1\.1\.0'/);
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
