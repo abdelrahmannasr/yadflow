@@ -6,6 +6,8 @@
 
 readonly YAD_PACKAGE_JSON="package.json"
 readonly YAD_PNPM_LOCKFILE="pnpm-lock.yaml"
+readonly YAD_NPM_LOCKFILE="package-lock.json"
+readonly YAD_NPM_SHRINKWRAP="npm-shrinkwrap.json"
 
 yad_validate_exact_package_manager_spec() {
   local spec="$1"
@@ -65,7 +67,14 @@ yad_detect_package_manager() {
   local spec="${1-}"
   case "$spec" in
     "")
-      if [ -f "$YAD_PNPM_LOCKFILE" ]; then printf '%s\n' "pnpm"; else printf '%s\n' "npm"; fi
+      # No declaration: npm, exactly as before this field was read — UNLESS the repo carries a pnpm
+      # lockfile and no npm one. A repo with both (a stale package-lock.json after a migration is
+      # common) keeps the historical npm path rather than silently flipping toolchains.
+      if [ -f "$YAD_PNPM_LOCKFILE" ] && [ ! -f "$YAD_NPM_LOCKFILE" ] && [ ! -f "$YAD_NPM_SHRINKWRAP" ]; then
+        printf '%s\n' "pnpm"
+      else
+        printf '%s\n' "npm"
+      fi
       ;;
     npm@*)
       yad_validate_exact_package_manager_spec "$spec" || return 1

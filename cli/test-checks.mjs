@@ -1075,6 +1075,24 @@ test('install-deps: an npm lockfile preserves the packageManager-absent npm cont
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('install-deps: with no packageManager and BOTH lockfiles the historical npm path wins', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  fs.writeFileSync(path.join(T, 'pnpm-lock.yaml'), 'lock');
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n', 'did not flip to pnpm');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: with no packageManager and only pnpm-lock.yaml, CI still demands an exact pin', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'pnpm-lock.yaml' });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /pnpm CI requires an exact package\.json#packageManager/);
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('install-deps: packageManager text is data, never executable shell', () => {
   const { T, commandLog, env } = packageFixture({
     packageManager: 'pnpm@9.15.0; touch owned',

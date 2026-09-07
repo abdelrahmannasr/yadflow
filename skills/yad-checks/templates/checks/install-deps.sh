@@ -23,7 +23,7 @@ yad_require_corepack() {
 
 case "$package_manager" in
   npm)
-    if [ ! -f "package-lock.json" ] && [ ! -f "npm-shrinkwrap.json" ]; then
+    if [ ! -f "$YAD_NPM_LOCKFILE" ] && [ ! -f "$YAD_NPM_SHRINKWRAP" ]; then
       echo "FAIL [install-deps]: npm requires package-lock.json or npm-shrinkwrap.json." >&2
       exit 1
     fi

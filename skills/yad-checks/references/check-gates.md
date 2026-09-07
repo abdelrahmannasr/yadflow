@@ -95,7 +95,9 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 
 - Reads the standard `package.json#packageManager` field and runs `lint`, `build`, and `test` through
   that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported. A repo
-  without the field retains npm behavior unless it carries `pnpm-lock.yaml`.
+  without the field retains npm behavior unless it carries `pnpm-lock.yaml` and no npm lockfile
+  (`package-lock.json` / `npm-shrinkwrap.json`) — a repo with both keeps the npm path rather than
+  silently changing toolchains.
 - CI runs `install-deps.sh` first. A declared npm or pnpm manager must use a full, exact semantic
   version with either no build metadata or Corepack's integrity suffix,
   `+<sha1|sha224|sha256|sha384|sha512>.<lowercase hex digest>` at that algorithm's digest length
