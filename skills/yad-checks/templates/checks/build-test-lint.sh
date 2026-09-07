@@ -14,11 +14,14 @@ source "$YAD_CHECKS_DIR/package-manager.sh"
 # had just rejected. Each step fails the gate on its own under `set -e`.
 package_manager_spec="$(yad_package_manager_spec)"
 package_manager="$(yad_detect_package_manager "$package_manager_spec")"
+# `npm`, `pnpm`, or `corepack npm` for a pinned npm — see yad_package_manager_command.
+run_with_words="$(yad_package_manager_command "$package_manager_spec" "$package_manager")"
+read -r -a run_with <<< "$run_with_words"
 
 echo "[build/test/lint] lint…"
-"$package_manager" run --silent lint
+"${run_with[@]}" run --silent lint
 echo "[build/test/lint] build…"
-"$package_manager" run --silent build
+"${run_with[@]}" run --silent build
 
 # Worker cap: when YAD_TEST_MAX_WORKERS is set AND the repo's test script is jest/vitest (the
 # runners that accept --maxWorkers), forward it to bound CI test concurrency. For any other runner
@@ -32,6 +35,6 @@ fi
 echo "[build/test/lint] test…"
 # Intentional word-splitting: $extra is either empty or `-- --maxWorkers=N`.
 # shellcheck disable=SC2086
-"$package_manager" run --silent test $extra
+"${run_with[@]}" run --silent test $extra
 
 echo "PASS [build/test/lint]: lint, build, and tests all green."

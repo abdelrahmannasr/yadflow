@@ -9,6 +9,31 @@ readonly YAD_PNPM_LOCKFILE="pnpm-lock.yaml"
 readonly YAD_NPM_LOCKFILE="package-lock.json"
 readonly YAD_NPM_SHRINKWRAP="npm-shrinkwrap.json"
 
+# Corepack is the Node tool that downloads and activates the declared version. It is only bundled
+# with Node 20 through 24 (Node 25+ dropped it), and the copy in early 18/20 images predates the
+# 2025 npm registry key rotation. A declared packageManager without a working Corepack must say so
+# instead of dying with "command not found" in the middle of the job.
+yad_require_corepack() {
+  if command -v corepack >/dev/null 2>&1; then return 0; fi
+  echo "FAIL [package-manager]: package.json#packageManager is set but corepack is not on PATH. Corepack ships with Node 20 (20.19+), 22 and 24 only — set YAD_NODE_VERSION to one of those, or install it first (npm install -g corepack)." >&2
+  return 1
+}
+
+# The command that runs the declared manager. Corepack activates a pinned npm but never shims it
+# (`corepack enable` covers pnpm and yarn only), so a bare `npm` would be the Node image's ambient
+# npm; a pinned npm is dispatched through Corepack instead, for `npm ci` and for the gate's `run`s.
+# Prints the words space-separated so callers can `read -r -a` them into an array (bash 3.2 has no
+# mapfile); the words are fixed literals, never repo input.
+yad_package_manager_command() {
+  local spec="$1" manager="$2"
+  if [[ "$spec" == npm@* ]]; then
+    yad_require_corepack || return 1
+    printf '%s\n' "corepack npm"
+  else
+    printf '%s\n' "$manager"
+  fi
+}
+
 yad_validate_exact_package_manager_spec() {
   local spec="$1"
   # The JavaScript is deliberately single-quoted so Bash cannot expand its template literals.

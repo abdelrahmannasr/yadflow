@@ -896,6 +896,54 @@ test('build-test-lint gate: fails closed when package.json is not valid JSON', (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A pinned npm is activated by Corepack but never shimmed by it, so the gate dispatches `corepack npm`
+// for every script — otherwise install ran under the declared version and lint/build/test under the
+// image's ambient npm.
+test('build-test-lint gate: a pinned npm runs every script through corepack npm', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  for (const command of ['corepack', 'npm']) {
+    fs.writeFileSync(path.join(bin, command), `#!/usr/bin/env bash\nprintf '%s\\n' '${command} '"$*" >> "$YAD_COMMAND_LOG"\n`);
+    fs.chmodSync(path.join(bin, command), 0o755);
+  }
+  commit(T, 'chore: pin npm', {
+    'package.json': JSON.stringify({
+      name: 'fixture', version: '0.0.0', packageManager: 'npm@10.8.2',
+      scripts: { lint: 'eslint .', build: 'tsc', test: 'node --test' },
+    }),
+    'package-lock.json': 'lock',
+  });
+  const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack npm run --silent lint',
+    'corepack npm run --silent build',
+    'corepack npm run --silent test',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('build-test-lint gate: a pinned npm without corepack on PATH fails with guidance', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  fs.mkdirSync(bin);
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  fs.writeFileSync(path.join(bin, 'npm'), '#!/usr/bin/env bash\ntouch "$YAD_RAN_NPM"\n');
+  fs.chmodSync(path.join(bin, 'npm'), 0o755);
+  commit(T, 'chore: pin npm', {
+    'package.json': JSON.stringify({ name: 'fixture', version: '0.0.0', packageManager: 'npm@10.8.2', scripts: { lint: 'true', build: 'true', test: 'true' } }),
+  });
+  const ran = path.join(T, 'ran-npm');
+  const r = runGate(BTL, T, [], { PATH: `${bin}:/usr/bin:/bin`, YAD_RAN_NPM: ran });
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /corepack is not on PATH/);
+  assert.ok(!fs.existsSync(ran), 'the ambient npm did not run in its place');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 const packageFixture = ({ packageManager, lockfile }) => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-package-manager-'));
   const bin = path.join(T, 'bin');
