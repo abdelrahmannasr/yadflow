@@ -1,3 +1,10 @@
+# [3.19.0-next.2](https://github.com/abdelrahmannasr/yadflow/compare/v3.19.0-next.1...v3.19.0-next.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **release:** let a pre-release publish past its own test suite ([70286ce](https://github.com/abdelrahmannasr/yadflow/commit/70286ce833b300d02d2781ac589d727481f5e7eb))
+
 # [3.19.0-next.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.18.1...v3.19.0-next.1) (2026-09-07)
 
 
