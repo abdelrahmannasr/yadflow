@@ -329,7 +329,9 @@ The gates run identically under either CI; the config just invokes the scripts w
   and `$CI_MERGE_REQUEST_DESCRIPTION`. The quality job uses the same package-manager-aware installer;
   `NX_BASE=$CI_MERGE_REQUEST_DIFF_BASE_SHA` and `NX_HEAD=$CI_COMMIT_SHA` provide the equivalent Nx
   range. Its `node:${YAD_NODE_VERSION}` image defaults to `22` and a project/group CI/CD variable may
-  override it without editing the managed fragment. The retained greenfield standalone template
+  override it without editing the managed fragment. Those three variables sit on the `.sdlc_mr_only`
+  anchor, not the fragment's top-level `variables:` — an included top-level block merges into the host
+  pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup. The retained greenfield standalone template
   (`templates/gitlab/.gitlab-ci.yml`) carries the same Node default, exact Nx range, and dependency
   installer and test-worker-cap semantics. All `--profile code`.
 

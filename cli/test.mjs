@@ -268,6 +268,17 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.match(gitlabStandalone, /bash checks\/install-deps\.sh/);
   assert.doesNotMatch(gitlabStandalone, /^\s*- npm ci/m, 'standalone GitLab must use the package-manager-aware installer');
   assert.match(gitlabStandalone, /YAD_TEST_MAX_WORKERS:\s*["']2["']/);
+
+  // The includable fragment's top-level `variables:` merges into the HOST pipeline's globals, so the
+  // gate jobs' own variables live on the .sdlc_mr_only anchor, not there. Only GIT_DEPTH is global.
+  const topLevelVars = gitlab.match(/^variables:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
+  assert.match(topLevelVars, /GIT_DEPTH/);
+  for (const name of ['YAD_NODE_VERSION', 'NX_BASE', 'NX_HEAD']) {
+    assert.doesNotMatch(topLevelVars, new RegExp(name), `${name} must not leak into the host pipeline's globals`);
+  }
+  const anchor = gitlab.match(/^\.sdlc_mr_only:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
+  assert.match(anchor, /variables:\n\s+(?:#.*\n\s+)*YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(anchor, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
 });
 
 // #164 — `yad update` used to rewrite every managed file that merely DIFFERED from the shipped
