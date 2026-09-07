@@ -253,6 +253,12 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   assert.doesNotMatch(github, /node-version:\s*["']?20/, 'GitHub build-test-lint must not hard-pin Node 20');
   assert.match(github, /bash checks\/install-deps\.sh/);
   assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
+  // Dependency caching survived the move off setup-node's npm-only `cache:` and now covers pnpm too.
+  const cacheStep = github.match(/uses: actions\/cache@v4\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
+  assert.match(cacheStep, /~\/\.npm/, 'npm cache dir');
+  assert.match(cacheStep, /pnpm\/store/, 'pnpm store dir');
+  assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml'\)/, 'keyed on the lockfile');
+  assert.ok(github.indexOf('actions/cache@v4') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
   assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
   assert.match(gitlab, /YAD_NODE_VERSION:\s*["']22["']/);
