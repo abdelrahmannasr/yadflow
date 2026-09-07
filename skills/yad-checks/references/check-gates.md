@@ -106,7 +106,10 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   floating to a different toolchain.
 - The workflows default to Node 22. Set the GitHub repository variable or GitLab project/group CI/CD
   variable `YAD_NODE_VERSION` when the repo requires another supported Node release; generated files
-  remain managed instead of accumulating consumer-specific edits.
+  remain managed instead of accumulating consumer-specific edits. A declared `packageManager` needs
+  Corepack, which only ships with Node 20 (20.19+), 22 and 24 — Node 25+ dropped it — so the
+  override must stay on one of those lines (or install Corepack first). The installer checks for it
+  and fails with that guidance instead of a bare "command not found".
 - Tests must actually exercise behavior (build plan §C) — an empty or trivially-passing suite does not
   satisfy the gate's intent.
 - **Test worker cap.** When the CI job sets `YAD_TEST_MAX_WORKERS` (the templates default it to `2`)

@@ -1006,6 +1006,32 @@ for (const packageManager of [
   });
 }
 
+// A PATH with the fixture's stubs and this node binary only, so the runtime's own corepack (nvm,
+// setup-node, docker images) cannot leak in and satisfy the guard.
+const withoutCorepack = (T, env) => {
+  fs.rmSync(path.join(T, 'bin/corepack'));
+  fs.symlinkSync(process.execPath, path.join(T, 'bin/node'));
+  return { ...env, PATH: `${path.join(T, 'bin')}:/usr/bin:/bin` };
+};
+
+test('install-deps: a declared packageManager without corepack on PATH fails with guidance', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'pnpm@9.15.0', lockfile: 'pnpm-lock.yaml' });
+  const r = runGate(INSTALL_DEPS, T, [], withoutCorepack(T, env));
+  assert.notEqual(r.code, 0, 'must fail closed');
+  assert.match(r.out, /corepack is not on PATH/);
+  assert.match(r.out, /YAD_NODE_VERSION/);
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: packageManager-absent npm does not need corepack', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  const r = runGate(INSTALL_DEPS, T, [], withoutCorepack(T, env));
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('install-deps: packageManager selects and pins npm before invoking it through Corepack', () => {
   const { T, commandLog, env } = packageFixture({
     packageManager: 'npm@10.8.2',

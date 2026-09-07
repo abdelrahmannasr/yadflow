@@ -22,7 +22,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    field retains the historical npm behavior. A declared manager requires a full, exact semantic
    version (with Corepack's optional integrity suffix supported), and CI activates that exact version.
    The managed workflows use Node 22 by default and expose `YAD_NODE_VERSION` as a GitHub repository
-   variable or GitLab CI/CD variable for repos whose declared runtime differs.
+   variable or GitLab CI/CD variable for repos whose declared runtime differs (a declared
+   `packageManager` needs Corepack, so the override must be a line that bundles it: 20.19+, 22 or 24).
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
 4. **verified-commits** — no unverified commits from unverified users: every commit in the range must

@@ -11,6 +11,16 @@ source "$YAD_CHECKS_DIR/package-manager.sh"
 package_manager_spec="$(yad_package_manager_spec)"
 package_manager="$(yad_detect_package_manager "$package_manager_spec")"
 
+# Corepack is the Node tool that downloads and activates the declared version. It is only bundled
+# with Node 20 through 24 (Node 25+ dropped it), and the copy in early 18/20 images predates the
+# 2025 npm registry key rotation. A declared packageManager without a working Corepack must say so
+# instead of dying with "command not found" in the middle of the job.
+yad_require_corepack() {
+  if command -v corepack >/dev/null 2>&1; then return 0; fi
+  echo "FAIL [install-deps]: package.json#packageManager is set but corepack is not on PATH. Corepack ships with Node 20 (20.19+), 22 and 24 only — set YAD_NODE_VERSION to one of those, or install it first (npm install -g corepack)." >&2
+  exit 1
+}
+
 case "$package_manager" in
   npm)
     if [ ! -f "package-lock.json" ] && [ ! -f "npm-shrinkwrap.json" ]; then
@@ -18,6 +28,7 @@ case "$package_manager" in
       exit 1
     fi
     if [[ "$package_manager_spec" == npm@* ]]; then
+      yad_require_corepack
       corepack enable
       corepack prepare "$package_manager_spec" --activate
       # npm's shim is not enabled by Corepack, so dispatch it explicitly through Corepack. This
@@ -37,6 +48,7 @@ case "$package_manager" in
       echo "FAIL [install-deps]: pnpm CI requires an exact package.json#packageManager value (for example pnpm@9.15.0)." >&2
       exit 1
     fi
+    yad_require_corepack
     corepack enable
     corepack prepare "$package_manager_spec" --activate
     pnpm install --frozen-lockfile
