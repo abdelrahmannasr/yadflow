@@ -1,3 +1,34 @@
+# [3.19.0-next.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.18.1...v3.19.0-next.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **checks:** accept every integrity algorithm Corepack accepts in packageManager ([367947d](https://github.com/abdelrahmannasr/yadflow/commit/367947d8d9856138b531061e4b686057ee9f715f))
+* **checks:** cache the Corepack home alongside the dependency cache ([23d92bc](https://github.com/abdelrahmannasr/yadflow/commit/23d92bc8204063bbd7754bfd038585eeb6f705bb))
+* **checks:** close configurable CI review findings ([6d90018](https://github.com/abdelrahmannasr/yadflow/commit/6d900183bbee5785f4ff0d5c868a6a55ce01a9b7))
+* **checks:** fail with guidance when corepack is missing for a declared packageManager ([3a9f576](https://github.com/abdelrahmannasr/yadflow/commit/3a9f5760bcca050d87008e414b856d5b307f30b8))
+* **checks:** give the same guidance when Corepack is present but stale ([0cdf4d1](https://github.com/abdelrahmannasr/yadflow/commit/0cdf4d157946d9185bfcc286ebddcdfb5d65a6aa))
+* **checks:** keep a yarn/bun-declared repo with an npm lockfile on the npm path ([713e707](https://github.com/abdelrahmannasr/yadflow/commit/713e7074b6813de0e0fd6e12e970e8372a1309eb))
+* **checks:** keep the gate jobs' variables off the host GitLab pipeline ([7cb2c35](https://github.com/abdelrahmannasr/yadflow/commit/7cb2c35a3011dbd8bf8d048f7aa02578ac54a1db))
+* **checks:** keep the npm path when a repo carries both lockfiles ([67fbdb4](https://github.com/abdelrahmannasr/yadflow/commit/67fbdb4e2c82188b37b1d175260b48da17d5e051))
+* **checks:** make build-test-lint fail closed on a rejected package.json ([83241ee](https://github.com/abdelrahmannasr/yadflow/commit/83241eed61e4306853151e6105c0b7c8bdd06d55))
+* **checks:** pass the worker cap to jest/vitest under pnpm without npm's `--` ([55db7ee](https://github.com/abdelrahmannasr/yadflow/commit/55db7eed85173472a17e7591636d7fc830a5a5b6))
+* **checks:** read package.json the way npm does before judging it ([8021c78](https://github.com/abdelrahmannasr/yadflow/commit/8021c7850d4f7d0887923165adc585fc27da260a))
+* **checks:** require lowercase Corepack digests ([4750b8b](https://github.com/abdelrahmannasr/yadflow/commit/4750b8b597bfdd4d7d2739a0525f91a2002e41a3))
+* **checks:** restore dependency caching in the GitHub quality job, for pnpm too ([21c92f0](https://github.com/abdelrahmannasr/yadflow/commit/21c92f026aa590ec464eec7152af27ad2be9a49d))
+* **checks:** run the gate's lint/build/test through the pinned npm too ([8404da3](https://github.com/abdelrahmannasr/yadflow/commit/8404da326f8a19ae807c58808b6203572aadb9b4))
+* **checks:** support configurable CI toolchains ([30557e4](https://github.com/abdelrahmannasr/yadflow/commit/30557e419a9fec5adca06a3ecb8ca09469b2a58a))
+* **checks:** validate Corepack integrity metadata ([a6c3fd3](https://github.com/abdelrahmannasr/yadflow/commit/a6c3fd3d84a370f81477ed9b551bc29f5765296f))
+* **skills:** teach the skill layer that `ledger` is the switch ([d4622ab](https://github.com/abdelrahmannasr/yadflow/commit/d4622ab2293cfe49a36791f6cf51472b4d5701ad)), closes [#186](https://github.com/abdelrahmannasr/yadflow/issues/186)
+* **state:** read an unstamped file as shape 1, not as the engine's shape ([6d8c608](https://github.com/abdelrahmannasr/yadflow/commit/6d8c608215175fac98933ffee6f714471454a8d9))
+* **update:** install templates newly added to a wired repo on `yad update` ([8e8d92f](https://github.com/abdelrahmannasr/yadflow/commit/8e8d92f1265e2ed375bf0a53307270a25d8c33f3))
+* **update:** take only yad's own wiring as proof a repo is wired ([3c90134](https://github.com/abdelrahmannasr/yadflow/commit/3c90134985eebb3b7faa91be2c45387d54851324))
+
+
+### Features
+
+* **state:** record who writes the ledger as `ledger: verified | local` ([6623199](https://github.com/abdelrahmannasr/yadflow/commit/66231997156bb1ffa446ebb5edd28d8ebf8def91)), closes [#186](https://github.com/abdelrahmannasr/yadflow/issues/186)
+
 ## [3.18.1](https://github.com/abdelrahmannasr/yadflow/compare/v3.18.0...v3.18.1) (2026-09-05)
 
 
