@@ -9,7 +9,11 @@ readonly YAD_CHECKS_DIR
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=package-manager.sh
 source "$YAD_CHECKS_DIR/package-manager.sh"
-package_manager="$(yad_detect_package_manager "$(yad_package_manager_spec)")"
+# Two assignments on purpose: nested inside another $(...), a failing yad_package_manager_spec would
+# be swallowed, and the gate would fall back to lockfile detection and PASS on a package.json it
+# had just rejected. Each step fails the gate on its own under `set -e`.
+package_manager_spec="$(yad_package_manager_spec)"
+package_manager="$(yad_detect_package_manager "$package_manager_spec")"
 
 echo "[build/test/lint] lint…"
 "$package_manager" run --silent lint

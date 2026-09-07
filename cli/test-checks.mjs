@@ -862,6 +862,40 @@ test('build-test-lint gate: packageManager selects pnpm for every configured scr
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// The gate must fail CLOSED on the same inputs install-deps rejects. It once read the spec inside a
+// nested $(...), which swallowed the FAIL, fell back to lockfile detection, and PASSed anyway.
+for (const [label, packageManager, message] of [
+  ['a non-string packageManager', { a: 1 }, /must be a string/],
+  ['shell text in packageManager', 'pnpm@9.15.0; touch owned', /exact semantic version/],
+  ['an unsupported manager', 'yarn@4.0.0', /unsupported packageManager/],
+]) {
+  test(`build-test-lint gate: fails closed on ${label}`, () => {
+    const T = scaffoldRepo();
+    commit(T, 'chore: scripts', {
+      'package.json': JSON.stringify({
+        name: 'fixture', version: '0.0.0', packageManager,
+        scripts: { lint: 'true', build: 'true', test: 'true' },
+      }),
+    });
+    const r = runGate(BTL, T);
+    assert.notEqual(r.code, 0, 'the gate must not pass on a rejected package.json');
+    assert.match(r.out, message);
+    assert.doesNotMatch(r.out, /PASS \[build\/test\/lint\]/);
+    assert.ok(!fs.existsSync(path.join(T, 'owned')), 'packageManager content was not evaluated');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('build-test-lint gate: fails closed when package.json is not valid JSON', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: broken manifest', { 'package.json': '{not json' });
+  const r = runGate(BTL, T);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /not valid JSON/);
+  assert.doesNotMatch(r.out, /\[build\/test\/lint\] lint/, 'no script ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 const packageFixture = ({ packageManager, lockfile }) => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-package-manager-'));
   const bin = path.join(T, 'bin');
