@@ -108,9 +108,11 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   declaration; packageManager-absent npm preserves the historical `npm ci` path. pnpm uses
   `pnpm install --frozen-lockfile`. Partial versions, ranges, and tags also fail closed instead of
   floating to a different toolchain.
-- The workflows default to Node 22. Set the GitHub repository variable or GitLab project/group CI/CD
-  variable `YAD_NODE_VERSION` when the repo requires another supported Node release; generated files
-  remain managed instead of accumulating consumer-specific edits. A declared `packageManager` needs
+- The build/test/lint job defaults to Node 22. Set the GitHub repository variable or GitLab
+  project/group CI/CD variable `YAD_NODE_VERSION` when the repo requires another supported Node
+  release; generated files remain managed instead of accumulating consumer-specific edits. The
+  variable is read by this job only — the hub-side workflows run the `yad` CLI, not the repo's
+  toolchain, and keep their own pinned Node. A declared `packageManager` needs
   Corepack, which only ships with Node 20 (20.19+), 22 and 24 — Node 25+ dropped it — so the
   override must stay on one of those lines (or install Corepack first). The installer checks for it
   and fails with that guidance instead of a bare "command not found".
