@@ -25,7 +25,7 @@ echo "[build/test/lint] build…"
 # (node --test, mocha, …) it is a deliberate no-op so the gate never breaks on an unknown flag.
 extra=""
 if [ -n "${YAD_TEST_MAX_WORKERS:-}" ]; then
-  case "$(node --input-type=module -e 'import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("package.json", "utf8")); process.stdout.write(p.scripts?.test || "")' 2>/dev/null || true)" in
+  case "$(node --input-type=module -e 'import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("package.json", "utf8").replace(/^\uFEFF/, "")); process.stdout.write(p.scripts?.test || "")' 2>/dev/null || true)" in
     *jest*|*vitest*) extra="-- --maxWorkers=${YAD_TEST_MAX_WORKERS}" ;;
   esac
 fi

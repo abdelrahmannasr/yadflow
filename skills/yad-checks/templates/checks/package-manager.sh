@@ -51,8 +51,13 @@ yad_package_manager_spec() {
   node --input-type=module -e '
     import fs from "node:fs";
     let pkg;
-    try { pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); }
+    // npm strips a UTF-8 byte-order mark before parsing (Windows editors often write one); do the same
+    // so a manifest npm itself installs from is not rejected here.
+    try { pkg = JSON.parse(fs.readFileSync("package.json", "utf8").replace(/^\uFEFF/, "")); }
     catch { process.stderr.write("FAIL [package-manager]: package.json is not valid JSON.\n"); process.exit(1); }
+    if (pkg === null || typeof pkg !== "object" || Array.isArray(pkg)) {
+      process.stderr.write("FAIL [package-manager]: package.json must be a JSON object.\n"); process.exit(1);
+    }
     if (pkg.packageManager !== undefined && typeof pkg.packageManager !== "string") {
       process.stderr.write("FAIL [package-manager]: packageManager must be a string.\n"); process.exit(1);
     }

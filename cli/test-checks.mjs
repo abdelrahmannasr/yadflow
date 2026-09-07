@@ -1093,6 +1093,45 @@ test('install-deps: with no packageManager and only pnpm-lock.yaml, CI still dem
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('install-deps: a UTF-8 byte-order mark on package.json is stripped, as npm does', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  fs.writeFileSync(path.join(T, 'package.json'), '\uFEFF' + fs.readFileSync(path.join(T, 'package.json'), 'utf8'));
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+for (const [label, body] of [['null', 'null'], ['an array', '[]'], ['a string', '"str"']]) {
+  test(`install-deps: a package.json whose top level is ${label} fails with the standard FAIL line`, () => {
+    const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+    fs.writeFileSync(path.join(T, 'package.json'), body);
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /FAIL \[package-manager\]: package\.json must be a JSON object/);
+    assert.doesNotMatch(r.out, /TypeError/, 'no raw stack trace');
+    assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('build-test-lint gate: the worker cap survives a byte-order mark on package.json', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "npm $*" >> "$YAD_COMMAND_LOG"\n');
+  fs.chmodSync(path.join(bin, 'npm'), 0o755);
+  commit(T, 'chore: bom manifest', {
+    'package.json': '\uFEFF' + npmStub('true', 'true', 'jest'),
+    'package-lock.json': 'lock',
+  });
+  const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog, YAD_TEST_MAX_WORKERS: '2' });
+  assert.equal(r.code, 0, r.out);
+  assert.match(fs.readFileSync(commandLog, 'utf8'), /npm run --silent test -- --maxWorkers=2/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('install-deps: packageManager text is data, never executable shell', () => {
   const { T, commandLog, env } = packageFixture({
     packageManager: 'pnpm@9.15.0; touch owned',
