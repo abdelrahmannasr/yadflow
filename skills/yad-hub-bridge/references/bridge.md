@@ -1,7 +1,7 @@
-# The bridge — PR/MR ↔ ledger mapping, read recipes, idempotency
+# the verified ledger — PR/MR ↔ ledger mapping, read recipes, idempotency
 
-The bridge maps platform review state onto the **same file records** the manual gate writes, so the gate
-predicate (`../yad-review-gate/references/gating.md`) runs unchanged. The bridge only changes the
+the verified ledger maps platform review state onto the **same file records** the manual gate writes, so the gate
+predicate (`../yad-review-gate/references/gating.md`) runs unchanged. The verified ledger only changes the
 *input path*; it never changes what passing the gate means.
 
 ## State mapping (platform → ledger)
@@ -12,7 +12,7 @@ predicate (`../yad-review-gate/references/gating.md`) runs unchanged. The bridge
 | GitHub `COMMENTED` / `CHANGES_REQUESTED`; GitLab discussions/notes | a line under `## <name> (<role>)` in `reviews/<artifact>--<date>--comments.md` + a `comments.json` record; **never** an approval. `CHANGES_REQUESTED` is also flagged as blocking in the comments file |
 | GitHub review dismissed / GitLab approval revoked | the prior bridge `approved` record for that approver is removed on re-sync **while the step is open**; once the step is `done` the record is kept as the audit trail of why it passed (see idempotency) |
 
-`approvals.json` records from the bridge carry `"source": "bridge"`; **manual** approvals have no such
+`approvals.json` records from the verified ledger carry `"source": "bridge"`; **manual** approvals have no such
 tag and are **never** touched by `sync` — the two coexist.
 
 ## Read recipes (read-only, local-user auth — no tokens)
@@ -32,8 +32,8 @@ glab api projects/:id/merge_requests/:iid/approvals     # approved_by[].user.use
 glab api projects/:id/merge_requests/:iid/notes          # discussion notes (comments)
 ```
 
-All commands run as the **local user**; the bridge stores no tokens. If the CLI is missing/unauthenticated
-or the remote is unreachable, the bridge stops and the gate falls back to file-only (no error).
+All commands run as the **local user**; the verified ledger stores no tokens. If the CLI is missing/unauthenticated
+or the remote is unreachable, the verified ledger stops and the gate falls back to local (no error).
 
 > **GitLab read parity (GAP-6).** `readPrGitLab` reads approvals (`approved_by[]`) and discussions but
 > does **not** map a "Request changes" reviewer state to `CHANGES_REQUESTED` — on GitLab the blocking
@@ -118,7 +118,7 @@ deliberate act: `yad update` (which re-stamps `.sdlc/cli-version.json`), or a `g
 ## Contract re-lock invalidates prior platform approvals too
 
 For the **architecture+contract** review, the gate already drops approvals when the contract-surface hash
-no longer matches `.sdlc/contract-lock.json`. The bridge extends this to platform-sourced approvals:
+no longer matches `.sdlc/contract-lock.json`. The verified ledger extends this to platform-sourced approvals:
 `sync` discards bridge `approved` records for the architecture step dated **before** the new lock, and
 posts a comment on the review PR noting "contract re-locked — re-approval required". The escalation
 (`risk_tags: ["contract"]` → a domain-owner per repo) is unchanged.
@@ -219,18 +219,18 @@ each `artifactHash` against the merged content, so revoke-on-change still holds.
 commit — the advance plus the `draft → approved` status flip — lands on the **default branch** with
 `[skip ci]`.
 
-**The ledger is CI-owned (bridge mode only).** Humans never commit gate-state files: the `ledger-guard`
+**The ledger is CI-owned (verified mode only).** Humans never commit gate-state files: the `ledger-guard`
 check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
-.json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). "Bridge mode" there
-means the same thing it means everywhere else — a `platform` **and** the bridge flag, `isBridge`'s
+.json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). "verified mode" there
+means the same thing it means everywhere else — a `platform` **and** the verified ledger flag, `isVerifiedLedger`'s
 predicate. The gate used to enable itself on the flag alone, which let a platform-less hub reject the
 human's ledger write while the CLI still expected one (#186). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
 edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
 gate still vets every commit's signature + author;
 its gate-bot exemption is now vestigial in-PR because CI no longer commits there.) `yad gate open`
-opens the PR only; local `yad gate sync` is advisory in bridge mode (writes nothing). After a merge,
-everyone `git checkout <default> && git pull`. (Without the bridge, humans own the ledger locally and
+opens the PR only; local `yad gate sync` is advisory in verified mode (writes nothing). After a merge,
+everyone `git checkout <default> && git pull`. (with a local ledger, humans own the ledger locally and
 these guards are no-ops.)
 
 **The one sanctioned human ledger write *in a review PR*: the seed of a new epic.** `gate ci` only
@@ -269,12 +269,12 @@ push retries with a rebase.
 - Protected default branch (GitHub): the merge advance needs to push it — prefer a ruleset bypass for
   Actions, else a fine-grained PAT as `SDLC_GATE_TOKEN` on the mergesync checkout.
 
-**Manual sync & recovery.** In bridge mode `yad gate sync` is **advisory** (read-only) — it prints the
+**Manual sync & recovery.** In verified mode `yad gate sync` is **advisory** (read-only) — it prints the
 predicate but writes nothing, so it is **not** a recovery path when CI fails. If a merge-time run fails
 (can't push, API hiccup), recovery is the scheduled **reconcile** job (automatic; it re-advances merged
 reviews not yet `done`). To force it immediately, a maintainer runs the same command CI runs, locally on
 the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged` (this writes + pushes,
-unlike advisory `yad gate sync`). File-only mode (no platform) keeps `yad gate sync` as the local writer.
+unlike advisory `yad gate sync`). Local mode (no platform) keeps `yad gate sync` as the local writer.
 The file ledger is still the source of truth.
 
 Because CI records the `hub-prs.json` pointer only at merge, a review the ledger has never seen still
@@ -283,17 +283,17 @@ recorded pointer, `yad gate sync <epic> <artifact>` resolves the PR/MR from the 
 (`review/<epic>/<artifact>`) itself, and `--pr <n>` names it outright:
 
 ```bash
-yad gate sync EP-x architecture.md --pr 42   # advisory in bridge mode; the writer without the bridge
+yad gate sync EP-x architecture.md --pr 42   # advisory in verified mode; the writer with a local ledger
 ```
 
 An explicit `--pr` also **overrides** a recorded pointer, since a re-opened review is a new PR the
 ledger has not seen. Before its reviewers are bound to the artifact's hash, the number is confirmed to
 be the PR for that artifact's review branch — a mismatch is refused, and a platform that cannot answer
-warns and proceeds. The bridge rule is unchanged: the resolved pointer is adopted into the ledger only
+warns and proceeds. The verified ledger rule is unchanged: the resolved pointer is adopted into the ledger only
 on the writer path, so a human never leaves a gate-state file in their working tree for `ledger-guard`
 to reject.
 
-**In bridge mode `gate sync` stays advisory even with `--pr`** — it prints the predicate and writes
+**In verified mode `gate sync` stays advisory even with `--pr`** — it prints the predicate and writes
 nothing, because CI owns the ledger. The recovery that actually writes is the command CI itself runs,
 on the default branch: `yad gate ci --branch <review-branch> --pr <n> --merged`.
 

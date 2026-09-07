@@ -117,9 +117,9 @@ EOF
 
 say "yad gate open opens the PR but writes NO ledger (CI is the sole writer)"
 yad gate open EP-e2e epic.md --dir "$HUB" || die "gate open failed"
-[ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "gate open must not write the ledger in bridge mode"
+[ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "gate open must not write the ledger in verified mode"
 
-say "CI pre-merge is read-only in bridge mode (Path B): no ledger, the platform is the source of truth"
+say "CI pre-merge is read-only in verified mode (Path B): no ledger, the platform is the source of truth"
 echo pending > "$E2E_GH_PHASE_FILE"
 yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
 [ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
@@ -127,7 +127,7 @@ yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$HUB" || die "ga
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 fa_status "$EPIC/epic.md" draft   # CI never touches the artifact pre-merge
 
-say "local yad gate sync is advisory in bridge mode (writes nothing, even on an approved+merged PR)"
+say "local yad gate sync is advisory in verified mode (writes nothing, even on an approved+merged PR)"
 echo approved > "$E2E_GH_PHASE_FILE"
 yad gate sync EP-e2e epic.md --dir "$HUB" || die "advisory gate sync failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
@@ -144,7 +144,7 @@ SYNC_OUT="$(yad sync-status EP-e2e --dir "$HUB")" || die "sync-status failed"
 echo "$SYNC_OUT" | grep -qi "in sync" || die "sync-status should report nothing to do after the gate ran: $SYNC_OUT"
 yad sync-status EP-e2e --dir "$HUB" --dry-run >/dev/null || die "sync-status --dry-run failed"
 
-say "gate ci pre-merge makes NO commit in bridge mode (Path B): nothing rides the review branch"
+say "gate ci pre-merge makes NO commit in verified mode (Path B): nothing rides the review branch"
 CIE="$HUB/epics/EP-cici"
 mkdir -p "$CIE/.sdlc"
 printf -- '---\nid: EP-cici\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-cici\n' > "$CIE/epic.md"

@@ -1,6 +1,6 @@
 // `yad review trailer|context|nudge|reconcile` — the Build Review Companion + bridge for code
 // PR/MRs (the analogue of `yad gate …` for Shape). The fun process (trailer/cards/chat/nudge)
-// makes the engineer review easy and visible; the bridge process (reconcile) maps the code PR's review
+// makes the engineer review easy and visible; the bridge to code PR/MRs (reconcile) maps the code PR's review
 // state — including the engagement signal — into the build ledger (build-log.json) at merge.
 //
 // The CLI never calls an LLM: the skill (yad-review-companion / yad-engineer-review) generates the

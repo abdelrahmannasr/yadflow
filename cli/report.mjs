@@ -73,7 +73,7 @@ export function sanitizeArgv(argv = []) {
 // state but keeps just the booleans, never the raw checks (which carry names + paths).
 export function sanitizeContext(dir, { error = null, argv = process.argv.slice(2) } = {}) {
   const hub = readJSON(path.join(dir, PROJECT_FILES.hubConfig), null);
-  const platform = hub && ['github', 'gitlab'].includes(hub.platform) ? hub.platform : 'file-only';
+  const platform = hub && ['github', 'gitlab'].includes(hub.platform) ? hub.platform : 'local';
   // Derive tool auth from doctor's checks without keeping any check text.
   const toolState = (cli, p) => (has(cli) ? (platformAuthed(p) ? 'present + authenticated' : 'present, not authenticated') : 'not installed');
   const ctx = {

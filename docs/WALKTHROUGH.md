@@ -59,7 +59,7 @@ steps stay `human_approve` forever.
    `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
    SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
    sets one directly), and `yad-pr-template repo:hub action: wire` /
-   `yad-checks repo:hub action: wire`. With no hub platform the Shape gate runs file-only.
+   `yad-checks repo:hub action: wire`. With no hub platform the Shape gate runs local.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](../CONTRIBUTING.md).
@@ -185,14 +185,14 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 ### The one gate (every review)
 
 Every review is the same loop — author writes, reviewers comment (which never advances), approvals
-accumulate, and the step moves forward only when the rule is met. **File-only** ends in an explicit
+accumulate, and the step moves forward only when the rule is met. **local** ends in an explicit
 `advance`; **PR-driven** (hub on a platform) ends when the approved, fully-resolved review PR is
 **merged**:
 
 <!-- Source: docs/diagrams/review-loop.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
 ![Review gate loop — author, open, comment, approve, advance](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/review-loop.svg)
 
-**File-only** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
+**local** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
 `reviews/<artifact>--<date>--comments.md`), `approve` (name + role → `.sdlc/approvals.json`), and
 `advance` (moves **only if** the rule is satisfied, else it names the missing approval).
 
@@ -205,7 +205,7 @@ accumulate, and the step moves forward only when the rule is met. **File-only** 
   a fresh pass. Unresolved comments hold the step `in_review`.
 - `yad gate comments <epic>` fetches the open threads to address; `yad gate status <epic>` shows
   approvals (counting only the non-stale ones). The file ledger stays the source of truth; with no
-  platform / no CLI it degrades to file-only.
+  platform / no CLI it degrades to local.
 
 **The gate rule, by review:**
 - **Base** (epic, UI): `owner + 1 reviewer`.

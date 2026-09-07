@@ -259,7 +259,7 @@ const uniqueBy = (arr, key) => {
 // PURE gate predicate. Given the step, its approvals, the current content hash, the PR thread/merge
 // state and the touched domains, decide whether the gate passes — and exactly what is missing.
 // `currentHash` drops any approval bound to a different hash (revoke-on-change). `merged` /
-// `threadsResolved` come from the platform; with no bridge they default to the "advance" intent.
+// `threadsResolved` come from the platform; with a local ledger they default to the "advance" intent.
 export function gatePredicate({
   step,
   approvals,

@@ -40,7 +40,7 @@ defaults:
   shape_steps_locked: true
   # Each Shape authoring step opens its own branch at the start of the step (the <step> is the step id:
   # discovery | analysis | epic | architecture | ui-design | stories | test-cases). Git/greenfield-safe; distinct
-  # from the bridge's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
+  # from the verified ledger's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
   shape_authoring_branch: "<step>/EP-<slug>"
 
 # Team review gate defaults (build plan §3 piece 2, §4).
@@ -59,7 +59,7 @@ review_gate:
   # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
   # AUTO-ADVANCES on merge, once (a) the reviewer rule is met, (b) every comment thread is resolved,
   # and (c) the review PR/MR is merged. The merge is the human approval act, so Shape steps still never
-  # machine_advance. The file ledger stays the source of truth; no platform / no gh|glab => file-only.
+  # machine_advance. The file ledger stays the source of truth; no platform / no gh|glab => local.
   advance_on: merge             # merge of the approved, fully-resolved review PR advances the step
   revoke_on: artifact-change    # re-hash the artifact (contract surface for architecture); a changed
                                 # hash drops the bound approvals so reviewers re-approve. NOT per-commit.
@@ -252,15 +252,15 @@ docs:
   auth: user
 
 # Hub platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
-# The product hub is itself a git repo on a platform. With the bridge enabled, the Shape review/
+# The product hub is itself a git repo on a platform. With a verified ledger, the Shape review/
 # comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
 # approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `yad-review-gate action: sync`
 # pulls that state into the file ledger (approvals.json/reviews/*.md) and runs the UNCHANGED gate predicate.
-# The file ledger stays the source of truth. Degrades to the file-only gate when there is no platform / no CLI.
+# The file ledger stays the source of truth. Degrades to the local gate when there is no platform / no CLI.
 hub:
   config: "{project-root}/.sdlc/hub.json"             # hub platform + reviewer roster (committed, like repos.json)
   pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"   # per-step review-PR record (sibling of approvals.json)
-  bridge: true                                         # master enable; false => file-only Shape gates everywhere
+  bridge: true                                         # master enable; false => local Shape gates everywhere
   platforms: [github, gitlab]                          # detected from the hub's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
   # roster (in hub.json) maps a platform login -> yad name + role; domain-owners are DERIVED from

@@ -136,7 +136,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 - **`yad-hub-bridge`** — The templated PR/MR bridge for the Shape gate. When the hub has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
-  ledger. The file ledger stays the source of truth; degrades to a file-only gate with no platform.
+  ledger. The file ledger stays the source of truth; degrades to a local gate with no platform.
 
 ## Build — turn stories into shipped code (once per story, per repo)
 
@@ -155,7 +155,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
   with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
   both code repos and the product hub. CI-agnostic bash for GitHub Actions and GitLab CI. Also
-  installs the **agent guardrail** on a bridge hub — `hooks/ledger-guard.sh`, a harness hook that
+  installs the **agent guardrail** on a verified hub — `hooks/ledger-guard.sh`, a harness hook that
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting
   `ledger-guard` reject it in CI twenty minutes later (#171).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with

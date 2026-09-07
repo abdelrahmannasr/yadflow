@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { MIGRATIONS, planMigration, projectJsonFiles, runMigrate } from './migrate.mjs';
+import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 
 const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const write = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s); };
@@ -38,15 +39,26 @@ function project({ bridge = false, files = {} } = {}) {
 const cleanup = (T) => fs.rmSync(T, { recursive: true, force: true });
 
 // A fake shape change, used to prove the machinery works on something real. Never shipped.
-const FAKE_1_TO_2 = [
+// A step that takes a file one shape PAST this engine. Written relative to SCHEMA_VERSION on
+// purpose: pinned to a literal it would have to be edited on every shape bump, and the thing it
+// proves — that a migration runs once rather than looping, and that a file left ahead of the engine
+// is reported rather than rewritten — is exactly what a shape bump most needs still tested.
+const AHEAD = ENGINE_SHAPE + 1;
+const FAKE_AHEAD = [
   ...MIGRATIONS,
-  { from: 1, to: 2, title: 'fake — add a field', apply: (o) => ({ ...o, added: true }) },
+  { from: ENGINE_SHAPE, to: AHEAD, title: 'fake — add a field', apply: (o) => ({ ...o, added: true }) },
 ];
 
-test('migrate: the shipped list is the 1 → 1 baseline, and it changes no field', () => {
-  assert.deepEqual(MIGRATIONS.map((m) => [m.from, m.to]), [[1, 1]],
-    'a real shape change appends here — and lands with its own migration test');
-  assert.deepEqual(MIGRATIONS[0].apply({ a: 1 }), { a: 1 });
+test('migrate: the shipped list starts at the 1 → 1 baseline, which changes no field', () => {
+  assert.deepEqual(MIGRATIONS[0].apply({ a: 1 }), { a: 1 }, 'the baseline stamps, it does not edit');
+  // The list must be a connected chain from 1 up to this engine's shape, with no gap and no step
+  // that goes backwards. A gap would strand every project sitting on the missing shape.
+  assert.equal(MIGRATIONS[0].from, 1, 'the chain starts at shape 1 — rule 1, an unstamped file');
+  assert.equal(MIGRATIONS[MIGRATIONS.length - 1].to, ENGINE_SHAPE, 'and ends at the engine shape');
+  for (const m of MIGRATIONS) assert.ok(m.to >= m.from, `a step may not go backwards: ${m.title}`);
+  for (let i = 1; i < MIGRATIONS.length; i++) {
+    assert.equal(MIGRATIONS[i].from, MIGRATIONS[i - 1].to, `gap before: ${MIGRATIONS[i].title}`);
+  }
 });
 
 test('migrate: preview reports what would change and writes absolutely nothing', async () => {
@@ -71,7 +83,7 @@ test('migrate --apply: stamps the files, backs each one up first, and reports wh
 
   assert.equal(res.ok, true);
   assert.deepEqual(res.written.sort(), ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/repos.json']);
-  assert.equal(read(path.join(T, '.sdlc/repos.json')).schemaVersion, 1);
+  assert.equal(read(path.join(T, '.sdlc/repos.json')).schemaVersion, ENGINE_SHAPE);
   assert.equal(Object.keys(read(path.join(T, '.sdlc/repos.json')))[0], 'schemaVersion', 'the stamp leads the file');
   assert.equal(fs.readFileSync(path.join(T, '.sdlc/repos.json.yad-orig'), 'utf8'), original,
     'the backup is the file exactly as it was before the rewrite');
@@ -105,7 +117,9 @@ test('migrate: the preview predicts exactly what an apply writes — file for fi
     'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n',
     'epics/EP-x/.sdlc/approvals.json': '[]\n',
     'epics/EP-x/.sdlc/build-log/EP-x-S01-T01-be.json': '{\n  "story": "EP-x-S01"\n}\n',
-    'epics/EP-x/.sdlc/contract-lock.json': '{\n  "schemaVersion": 1,\n  "hash": "sha256:abc"\n}\n',
+    // Stamped at the engine's own shape, so it is genuinely already current. A file stamped 1 while
+    // the engine is on 2 is NOT unchanged — it migrates like everything else, which is the point.
+    'epics/EP-x/.sdlc/contract-lock.json': `{\n  "schemaVersion": ${ENGINE_SHAPE},\n  "hash": "sha256:abc"\n}\n`,
   };
   const A = project({ files });
   const B = project({ files });
@@ -126,7 +140,7 @@ test('migrate --apply: cli-version.json is migrated like any other file, and `ve
   const T = project();
   const res = await runMigrate(T, { apply: true });
   const rec = read(path.join(T, '.sdlc/cli-version.json'));
-  assert.equal(rec.schemaVersion, 1, 'stamped, as an ordinary migrated row');
+  assert.equal(rec.schemaVersion, ENGINE_SHAPE, 'stamped, as an ordinary migrated row');
   assert.equal(rec.version, '1.0.2', 'the CLI-sync version is not a migration record and must not move');
   assert.deepEqual(Object.keys(rec), ['schemaVersion', 'version'], 'and nothing else was added to it');
   assert.ok(res.written.includes('.sdlc/cli-version.json'), 'so it is reported like every other write');
@@ -134,18 +148,21 @@ test('migrate --apply: cli-version.json is migrated like any other file, and `ve
   cleanup(T);
 });
 
-test('migrate: a real shape change is applied, reported, and reruns clean (fake 1 → 2)', async () => {
+test('migrate: a real shape change is applied, reported, and reruns clean (fake step past the engine)', async () => {
   const T = project({ files: { '.sdlc/repos.json': '{\n  "repos": []\n}\n' } });
 
-  const preview = planMigration(T, { migrations: FAKE_1_TO_2 });
+  const preview = planMigration(T, { migrations: FAKE_AHEAD });
   const row = rowFor(preview.rows, '.sdlc/repos.json');
-  assert.deepEqual([row.from, row.to, row.action], [1, 2, 'migrate']);
-  assert.deepEqual(row.steps, ['baseline — every file states its shape', 'fake — add a field'],
-    'the list is walked in order and every step that ran is named');
+  assert.deepEqual([row.from, row.to, row.action], [1, AHEAD, 'migrate']);
+  // Only steps that actually CHANGED the file are named. The 1 → 1 baseline runs on every file and
+  // moves nothing, and the shipped 1 → 2 step touches hub.json alone — naming either on a row they
+  // did not alter would report work that never happened.
+  assert.deepEqual(row.steps, ['fake — add a field'],
+    'the list is walked in order and the steps that changed the file are named');
 
-  await runMigrate(T, { apply: true }, { migrations: FAKE_1_TO_2 });
+  await runMigrate(T, { apply: true }, { migrations: FAKE_AHEAD });
   const migrated = read(path.join(T, '.sdlc/repos.json'));
-  assert.equal(migrated.schemaVersion, 2, 'the file now states the new shape');
+  assert.equal(migrated.schemaVersion, AHEAD, 'the file now states the new shape');
   assert.equal(migrated.added, true, 'and the migration actually changed it');
   assert.deepEqual(read(path.join(T, '.sdlc/repos.json.yad-orig')), { repos: [] }, 'the pre-migration file is kept');
 
@@ -154,7 +171,7 @@ test('migrate: a real shape change is applied, reported, and reruns clean (fake 
   // "these are newer than me" — reported, and still not rewritten.
   const exit = process.exitCode;
   try {
-    const again = await runMigrate(T, { apply: true }, { migrations: FAKE_1_TO_2 });
+    const again = await runMigrate(T, { apply: true }, { migrations: FAKE_AHEAD });
     assert.deepEqual(again.written, [], 'a migrated project is not migrated again');
     assert.equal(rowFor(again.rows, '.sdlc/repos.json').action, 'ahead');
     assert.equal(read(path.join(T, '.sdlc/repos.json')).added, true, 'and the migrated content is intact');
@@ -262,16 +279,101 @@ test('migrate: in verified mode the CI-owned ledger is skipped and named, not re
   assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), 'utf8'), '{\n  "currentStep": "epic"\n}\n',
     'CI is the only writer there — a local rewrite could not be committed anyway');
   // Everything the guard does NOT own is still migrated normally.
-  assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/change.json')).schemaVersion, 1);
+  assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/change.json')).schemaVersion, ENGINE_SHAPE);
   cleanup(T);
 });
 
 test('migrate: a project in local (non-verified) mode migrates its gate ledger like any other file', async () => {
   const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
   const res = await runMigrate(T, { apply: true });
-  assert.equal(rowFor(res.rows, path.join('epics', 'EP-x', '.sdlc', 'state.json')).action, 'stamp');
-  assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).schemaVersion, 1);
+  // `migrate`, not `stamp`: the shape genuinely moves (1 -> 2), even though this file's own fields
+  // are untouched by the hub-only step. The shape describes the project's format, not one file's keys.
+  assert.equal(rowFor(res.rows, path.join('epics', 'EP-x', '.sdlc', 'state.json')).action, 'migrate');
+  assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).schemaVersion, ENGINE_SHAPE);
   cleanup(T);
+});
+
+// ---- shape 2: hub.json gains `ledger` -------------------------------------------------------
+// The value is COMPUTED from what the engine already decided about the hub, never copied from the
+// flag. That distinction is the whole safety argument for this migration: an upgrade must not change
+// what a project does. The table covers every hub.json a real project can be sitting on.
+test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every hub shape', async () => {
+  const { isVerifiedLedger } = await import('./manifest.mjs');
+  const cases = [
+    ['platform + bridge_enabled', { platform: 'github', bridge_enabled: true }, 'verified'],
+    ['platform + the legacy `bridge`', { platform: 'github', bridge: true }, 'verified'],
+    ['platform, flag explicitly false', { platform: 'github', bridge_enabled: false }, 'local'],
+    ['platform, no flag at all', { platform: 'github' }, 'local'],
+    // The one that would be wrong if the migration copied the flag instead of asking the reader:
+    // no platform means no Verified badge to read, so this hub has ALWAYS behaved as local.
+    ['flag true but NO platform', { bridge_enabled: true }, 'local'],
+    ['platform null + flag true', { platform: null, bridge_enabled: true }, 'local'],
+  ];
+  for (const [name, hub, expected] of cases) {
+    const T = project({ files: { '.sdlc/hub.json': JSON.stringify(hub, null, 2) + '\n' } });
+    try {
+      const before = isVerifiedLedger(hub);
+      await runMigrate(T, { apply: true });
+      const after = read(path.join(T, '.sdlc/hub.json'));
+      assert.equal(after.ledger, expected, name);
+      assert.equal(after.schemaVersion, 2, `${name}: the file states the new shape`);
+      assert.equal(isVerifiedLedger(after), before, `${name}: migrating changed what the engine DOES`);
+      // Add before you remove (rule 3): the old key survives, because a ledger-guard that has not
+      // been refreshed by `yad update` yet is still reading it.
+      if ('bridge_enabled' in hub) assert.equal(after.bridge_enabled, hub.bridge_enabled, `${name}: old key kept`);
+      if ('bridge' in hub) assert.equal(after.bridge, hub.bridge, `${name}: legacy key kept`);
+    } finally { cleanup(T); }
+  }
+});
+
+// A file must never DECLARE one shape while carrying another's fields. `yad setup` can run on a
+// project that has not migrated yet, and if it wrote `ledger` there the hub would claim shape 1 while
+// holding a shape-2 key — which makes doctor's drift report a lie about the one file this change is
+// about. The old booleans carry the setting until `yad migrate` adds the key.
+test('migrate 1 -> 2: a shape-1 hub written by an older shape stays coherent, then migrates cleanly', async () => {
+  const { isVerifiedLedger } = await import('./manifest.mjs');
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github",\n  "bridge_enabled": true\n}\n' } });
+  try {
+    const before = read(path.join(T, '.sdlc/hub.json'));
+    assert.equal('ledger' in before, false, 'a shape-1 hub carries no shape-2 key');
+    assert.equal(isVerifiedLedger(before), true, 'and the old booleans still answer the question');
+    await runMigrate(T, { apply: true });
+    const after = read(path.join(T, '.sdlc/hub.json'));
+    assert.equal(after.schemaVersion, 2);
+    assert.equal(after.ledger, 'verified', 'the migration records what the booleans were already saying');
+  } finally { cleanup(T); }
+});
+
+test('migrate 1 -> 2: only hub.json gains `ledger`; every other file just records the shape', async () => {
+  const T = project({ files: {
+    '.sdlc/hub.json': '{\n  "platform": "github",\n  "bridge_enabled": true\n}\n',
+    '.sdlc/repos.json': '{\n  "repos": []\n}\n',
+    'epics/EP-x/.sdlc/contract-lock.json': '{\n  "hash": "sha256:abc"\n}\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const repos = read(path.join(T, '.sdlc/repos.json'));
+    const lock = read(path.join(T, 'epics/EP-x/.sdlc/contract-lock.json'));
+    assert.deepEqual(repos, { schemaVersion: 2, repos: [] }, 'a non-hub file gains the stamp and nothing else');
+    assert.deepEqual(lock, { schemaVersion: 2, hash: 'sha256:abc' });
+    assert.equal('ledger' in repos, false, '`ledger` belongs to hub.json alone');
+  } finally { cleanup(T); }
+});
+
+test('migrate 1 -> 2: running it twice is a no-op, and does not overwrite the backup', async () => {
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github",\n  "bridge_enabled": true\n}\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    const first = fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8');
+    const backup = fs.readFileSync(path.join(T, '.sdlc/hub.json.yad-orig'), 'utf8');
+    const again = await runMigrate(T, { apply: true });
+    assert.deepEqual(again.written, [], 'nothing is rewritten the second time');
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), first);
+    // The backup must still be the ORIGINAL, not a copy of the already-migrated file — otherwise a
+    // second run quietly destroys the only way back.
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json.yad-orig'), 'utf8'), backup);
+    assert.equal('ledger' in JSON.parse(backup), false, 'the backup is the pre-migration file');
+  } finally { cleanup(T); }
 });
 
 test('migrate: the file set covers the epic ledger and all three shard folders', () => {

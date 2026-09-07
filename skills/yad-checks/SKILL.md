@@ -51,9 +51,10 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
   - `templates/checks/{spec-link,contract-check,build-test-lint,verified-commits}.sh`
-  - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in bridge mode** — hub.json
-    carries BOTH a `platform` and `bridge_enabled` (or the legacy `bridge`) true, the same predicate
-    `isBridge` (`cli/gate.mjs`) applies, so the gate and the CLI can never disagree about who owns the
+  - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in verified mode** — hub.json
+    carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
+    (or the legacy `bridge`) true. The same predicate
+    `isVerifiedLedger` (`cli/manifest.mjs`) applies, so the gate and the CLI can never disagree about who owns the
     ledger (#186). A no-op otherwise, when humans legitimately own it. On review PRs it FAILs any
     commit that touches the
     CI-owned gate ledger (`.sdlc/{state,approvals,comments,hub-prs}.json`, `reviews/*.md`) unless it
@@ -65,8 +66,8 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     default branch the guard is absolute again. Runs in `yad-hub-checks`
     alongside `verified-commits` (which waives the allowlist for the bot but still requires its
     signature). See `yad-hub-bridge`.
-  - `templates/hooks/ledger-guard.sh` → **hub-only** agent guardrail, active **only in bridge mode**
-    (the same `isBridgeHub` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
+  - `templates/hooks/ledger-guard.sh` → **hub-only** agent guardrail, active **only in verified mode**
+    (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the
     local half of `checks/ledger-guard.sh` (#171). Installed to `<hub>/hooks/ledger-guard.sh` with the
     `PreToolUse` entry in `.claude/settings.json`. Fails OPEN; see "Step 2b" below.
@@ -151,9 +152,9 @@ with a hub-flavored gate set — see "Wiring the hub" in `references/check-gates
 `<hub>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
 and `yad check --fix` install both; there is nothing to do by hand.
 
-### Step 2b — the agent guardrail (harness hooks, bridge mode only)
+### Step 2b — the agent guardrail (harness hooks, verified mode only)
 The CI gates speak at CI time. That is too late for one failure the field kept hitting (#171): in
-bridge mode the gate ledger is **CI-owned**, so an agent that hand-edits
+verified mode the gate ledger is **CI-owned**, so an agent that hand-edits
 `epics/*/.sdlc/state.json` only finds out twenty minutes later, from a `ledger-guard` FAIL with
 nothing connecting cause to effect — and by then the write has to be reverted before the review
 PR/MR can go green.
@@ -171,7 +172,7 @@ file-editing tool call and refuses the write up front, naming the command that o
   `contract-lock.json`, `change.json`, and every artifact. A **new** epic's ledger is exempt too —
   creation, not mutation (#162), decided by listing the epics the **base ref** carries (an
   `origin/` ref, case-folded slugs), never by looking at the working tree.
-- **A no-op without the bridge.** There the ledger is locally owned and the hand-edit the authoring
+- **A no-op with a local ledger.** There the ledger is locally owned and the hand-edit the authoring
   skills describe is *correct*, so nothing is wired and nothing is blocked.
 - **It fails OPEN** — no `yad`, no hub, an unreadable config, an unparseable payload all ALLOW, with
   a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
@@ -181,7 +182,7 @@ file-editing tool call and refuses the write up front, naming the command that o
   hub**, since a harness reads hooks from its own project root — a session opened at the workspace
   above the hub never loads the hub's `.claude/settings.json`.
 
-`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a bridge hub.
+`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a verified hub.
 See `references/check-gates.md` §"The agent guardrail".
 
 ### Step 3 — `run` (run the gates now)

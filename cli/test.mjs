@@ -706,11 +706,47 @@ const shapeTmp = (name) => {
   return T;
 };
 
+const { SCHEMA_VERSION: ENGINE_SHAPE } = await import('./manifest.mjs');
+
 test('schemaVersion: an object written under .sdlc is stamped, and the stamp leads the file', () => {
   const T = shapeTmp('obj');
   const f = path.join(T, '.sdlc/hub.json');
   writeJSON(f, { platform: 'github' });
-  assert.equal(fs.readFileSync(f, 'utf8'), '{\n  "schemaVersion": 1,\n  "platform": "github"\n}\n');
+  // A brand-new object has no shape of its own, so it gets THIS engine's. Asserted against the
+  // constant, never a literal: hard-coding 1 here would turn every future shape bump into a puzzle.
+  assert.equal(fs.readFileSync(f, 'utf8'), `{\n  "schemaVersion": ${ENGINE_SHAPE},\n  "platform": "github"\n}\n`);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Rule 1: a file with no version counts as 1 — NOT as whatever shape this engine happens to be on.
+// These three are the difference between `yad migrate` having work to do and silently believing an
+// un-migrated project is already current. The literal 1 below is the point of the test; do not
+// "fix" it to ENGINE_SHAPE.
+test('schemaVersion: an UNSTAMPED file reads back as shape 1, whatever shape the engine is on', () => {
+  const T = shapeTmp('read-default');
+  const f = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(f, JSON.stringify({ platform: 'github' }, null, 2) + '\n');
+  assert.equal(readJSONShape(f).schemaVersion, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: reading an unstamped file and writing it back does not silently upgrade it', () => {
+  const T = shapeTmp('no-silent-upgrade');
+  const f = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(f, JSON.stringify({ platform: 'github' }, null, 2) + '\n');
+  const round = readJSONShape(f);
+  writeJSON(f, round);
+  // Still 1. Only `yad migrate` moves a file's shape, because only it also moves the CONTENT. A
+  // writer that raised the number on its own would leave a file claiming a shape it does not have.
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).schemaVersion, 1);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('schemaVersion: a file already on a newer shape is never dragged backwards', () => {
+  const T = shapeTmp('ahead');
+  const f = path.join(T, '.sdlc/hub.json');
+  writeJSON(f, { schemaVersion: ENGINE_SHAPE + 7, platform: 'github' });
+  assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).schemaVersion, ENGINE_SHAPE + 7);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -747,8 +783,8 @@ test('schemaVersion: a project living under a directory called .sdlc does not st
   // …while that project's own .sdlc files are still stamped normally, at both depths.
   writeJSON(path.join(root, '.sdlc/hub.json'), { platform: 'github' });
   writeJSON(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), { story: 'EP-x-S01' });
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/hub.json'), 'utf8')).schemaVersion, 1);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), 'utf8')).schemaVersion, 1, 'shard folders are one level down and still count');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/hub.json'), 'utf8')).schemaVersion, ENGINE_SHAPE);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, '.sdlc/build-log/EP-x-S01-t-be.json'), 'utf8')).schemaVersion, ENGINE_SHAPE, 'shard folders are one level down and still count');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1122,7 +1158,7 @@ test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit co
   let bare;
   try {
     // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
-    // file-only "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
+    // local "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
     // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
     bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, default_branch: 'main', roster: [] }));
@@ -2540,12 +2576,12 @@ test('gate sync: a failed platform read flags the run non-zero (no green no-op) 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gate sync local: writes when the bridge is OFF, advisory (no writes) when ON', async () => {
+test('gate sync local: writes when the verified ledger is OFF, advisory (no writes) when ON', async () => {
   // bridge OFF (a platform but no gate-sync CI wired): local sync stays the writer and advances.
   const a = scaffoldEpic();
   await gateSync(a.T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval, local: true });
   const sa = JSON.parse(fs.readFileSync(path.join(a.ep, '.sdlc/state.json')));
-  assert.equal(sa.steps.find((s) => s.id === 'architecture-review').status, 'done', 'non-bridge local sync advances');
+  assert.equal(sa.steps.find((s) => s.id === 'architecture-review').status, 'done', 'local local sync advances');
   fs.rmSync(a.T, { recursive: true, force: true });
 
   // bridge ON: local sync is advisory — CI owns the ledger, so it writes nothing.
@@ -2576,7 +2612,7 @@ test('gate sync advisory (bridge, local): unresolved comments do not dirty revie
 
 // The re-open loop (issue #156): an already-approved architecture step is re-opened, the contract
 // surface is edited + re-locked, a FRESH review PR is opened, the same reviewers approve it, and it is
-// merged. In bridge mode nothing ever moves the step back to `in_review` (CI is the sole ledger
+// merged. In verified mode nothing ever moves the step back to `in_review` (CI is the sole ledger
 // writer), so the merge-time sync used to hit a blanket "already done — skipping" and write only the
 // PR pointer: the step read `done` with every approval bound to the pre-edit hash.
 async function reopenAndReapprove(reviews) {
@@ -2802,11 +2838,11 @@ test('gate sync: a done step never posts engagement nudges on its merged PR', as
 });
 
 
-// Under the bridge the ledger records the PR pointer only at merge, so a review a human must push
+// Under the verified ledger the ledger records the PR pointer only at merge, so a review a human must push
 // through by hand has none — `gate sync` used to refuse it outright and the advance was unreachable.
 test('gate sync: resolves an unrecorded review PR from the review branch (issue #158)', async () => {
   const { T, ep } = scaffoldEpic();
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the bridge case
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), '[]'); // nothing recorded — the verified ledger case
   const seen = [];
   const finder = (platform, branch) => { seen.push([platform, branch]); return { ok: true, number: 42, url: 'http://x/42' }; };
   await gateSync(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-06-09', reader: () => fullApproval, finder });
@@ -3216,7 +3252,7 @@ test('a wrong-shape state.json fails with the file named', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('an unknown hub platform fails fast instead of degrading to file-only', async () => {
+test('an unknown hub platform fails fast instead of degrading to local', async () => {
   const { T } = scaffoldEpic();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'bitbucket', roster: [] }));
   await assert.rejects(
@@ -5034,19 +5070,19 @@ test('gate ci sweep: one corrupt epic is skipped (exit 1) while the rest still s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('check --fix wires the hub gate-sync CI only when the bridge is enabled', async () => {
+test('check --fix wires the hub gate-sync CI only when the ledger is verified', async () => {
   const { T } = scaffold();
   // no hub.json -> no hub action
   await reconcile(T, { fix: true });
   assert.ok(!fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'no hub.json => not wired');
-  // hub on github with the bridge -> wired + idempotent
+  // hub on github with a verified ledger -> wired + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'hub workflow installed');
   const again = await reconcile(T, { fix: false });
   assert.equal(again.counts.missing, 0);
   assert.equal(again.counts.outdated, 0);
-  // gitlab with the bridge -> fragment installed + idempotent
+  // gitlab with a verified ledger -> fragment installed + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'gitlab', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   assert.ok(fs.existsSync(path.join(T, '.gitlab/ci/yad-gate-sync.yml')), 'gitlab fragment installed');
@@ -5432,15 +5468,38 @@ test('doctor shape: each epic is reported separately, so drift can be located', 
   ]);
 });
 
-test('doctor shape: a real project reports its shape, and the section reaches --json', async () => {
+test('doctor shape: a project with an un-migrated file is reported as behind, in --json', async () => {
+  // The scaffold writes .sdlc/repos.json with a raw fs.writeFileSync, so it carries no stamp and is
+  // shape 1 by rule 1 — exactly the state a real project is in before it runs `yad migrate`. This is
+  // the case the shape section exists for, so it is worth asserting on a project that is genuinely
+  // in it rather than one contrived to be clean.
   const { T } = scaffold();
   await reconcile(T, { fix: true });
   const r = await doctorOn(T);
   const shape = r.checks.filter((x) => x.section === 'shape');
   assert.ok(shape.length, 'the section is wired into collectDoctor, not just exported');
   assert.equal(shape[0].id, 'shape');
+  assert.equal(shape[0].status, 'warn', shape[0].message);
+  assert.match(shape[0].message, new RegExp(`the engine is on shape ${ENGINE_SHAPE}`));
+  assert.match(shape[0].message, /behind/);
+  // --json carries the per-file detail, so a reader can see WHICH file, not just that one exists.
+  const behind = shape[0].shape.files.filter((f) => f.shape < ENGINE_SHAPE);
+  assert.ok(behind.some((f) => f.file === '.sdlc/repos.json'), JSON.stringify(behind));
+  assert.equal(behind.every((f) => f.stamped === false), true, 'a file behind the engine is one that carries no stamp');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor shape: a project this engine wrote is on this engine shape, and says ok', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // Re-write the one hand-written file through the engine's own writer, which is what `yad migrate
+  // --apply` does for a real project. After that nothing is behind and the section goes quiet.
+  const reposPath = path.join(T, '.sdlc/repos.json');
+  writeJSON(reposPath, JSON.parse(fs.readFileSync(reposPath, 'utf8')));
+  const r = await doctorOn(T);
+  const shape = r.checks.filter((x) => x.section === 'shape');
   assert.equal(shape[0].status, 'ok', shape[0].message);
-  assert.match(shape[0].message, /this project is on shape 1, the engine is on shape 1/);
+  assert.match(shape[0].message, new RegExp(`on shape ${ENGINE_SHAPE}, the engine is on shape ${ENGINE_SHAPE}`));
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -7334,7 +7393,7 @@ test('writeRetroShip: writes a retroactive shard for a pre-tracking story; refus
   const ship = JSON.parse(fs.readFileSync(r.file, 'utf8'));
   // schemaVersion is stamped by writeJSON on every .sdlc file the engine writes (lib.mjs) — the shard
   // states its shape like everything else, and the stamp leads the object.
-  assert.deepEqual(ship, { schemaVersion: 1, story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
+  assert.deepEqual(ship, { schemaVersion: ENGINE_SHAPE, story: 'EP-x-S01', task: 'retro', repo: 'be', retroactive: true, note: 'pre-tracking backfill', shippedAt: '2026-07-14' });
   assert.deepEqual(Object.keys(ship)[0], 'schemaVersion', 'the stamp leads the object, so its position can never churn the bytes');
   assert.ok(!('mergeCommit' in ship), 'no mergeCommit is invented when the caller omits it');
   assert.ok(readShips(epicDir).some((s) => s.story === 'EP-x-S01'), 'readShips now proves the story shipped');
@@ -7376,13 +7435,13 @@ test('folding a stamped shard does NOT copy schemaVersion into the ledger rows',
   // schemaVersion describes a FILE. A shard is a file and carries it; once folded, that same object
   // becomes a row inside build-log.json, which states its own shape. Letting the stamp cross that
   // boundary would bake a per-row version into an append-only ledger permanently — after
-  // SCHEMA_VERSION moves to 2, a file stamped 2 would hold rows stamped 1 from today's folds.
+  // the shape moves again, a file stamped 3 would hold rows stamped 2 from today's folds.
   const { T, epicDir } = ledgerEpic();
   const r = writeRetroShip(epicDir, { story: 'EP-x-S01', repo: 'be', shippedAt: '2026-07-14' });
-  assert.equal(JSON.parse(fs.readFileSync(r.file, 'utf8')).schemaVersion, 1, 'the shard FILE is stamped');
+  assert.equal(JSON.parse(fs.readFileSync(r.file, 'utf8')).schemaVersion, ENGINE_SHAPE, 'the shard FILE is stamped');
   foldBuild(epicDir, () => true);
   const folded = JSON.parse(fs.readFileSync(path.join(epicDir, '.sdlc/build-log.json'), 'utf8'));
-  assert.equal(folded.schemaVersion, 1, 'the folded file states its own shape');
+  assert.equal(folded.schemaVersion, ENGINE_SHAPE, 'the folded file states its own shape');
   assert.deepEqual(folded.ships.map((s) => Object.keys(s).includes('schemaVersion')), [false],
     'no row carries a shape of its own');
   assert.equal(folded.ships[0].story, 'EP-x-S01', 'and the row itself survives the fold intact');
@@ -8866,7 +8925,7 @@ test('ledger hook allows when the base cannot be read — unknown never blocks',
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('ledger hook is a no-op without the bridge — there the hand-edit is correct', () => {
+test('ledger hook is a no-op with a local ledger — there the hand-edit is correct', () => {
   for (const hub of [
     { platform: 'gitlab', bridge_enabled: false },
     { platform: null, bridge_enabled: true },
@@ -8878,7 +8937,7 @@ test('ledger hook is a no-op without the bridge — there the hand-edit is corre
       assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json').allow, true, JSON.stringify(hub));
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   }
-  // ...and the legacy `bridge` spelling still arms it, exactly as isBridgeHub reads it.
+  // ...and the legacy `bridge` spelling still arms it, exactly as isVerifiedLedger reads it.
   const legacy = hookHub({ hub: { platform: 'github', bridge: true } });
   try {
     assert.equal(decide(legacy, 'epics/EP-seeded/.sdlc/state.json').allow, false);
@@ -9059,7 +9118,7 @@ test('hookMatcherFires tells an armed entry from an installed-but-dead one', () 
   assert.equal(hookMatcherFires({ hooks: { PreToolUse: [{ matcher: HOOK_TOOL_MATCHER, hooks: [{ command: 'echo' }] }] } }), false, 'not our entry');
 });
 
-test('hookActions wires the guard on a bridge hub, and nothing without the bridge', () => {
+test('hookActions wires the guard on a verified hub, and nothing with a local ledger', () => {
   const T = hookHub();
   try {
     fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
@@ -9153,7 +9212,7 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
     assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
-  // Without the bridge there is nothing to guard, so the check is silent rather than ok.
+  // with a local ledger there is nothing to guard, so the check is silent rather than ok.
   const fileOnly = hookHub({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
     assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);

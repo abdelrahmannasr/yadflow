@@ -77,8 +77,8 @@ marker, and the gate **excludes marked threads** from the unresolved-thread bloc
 not "resolve to pass" — it ignores them). A reviewer's *genuine* concern is posted **without** the
 marker and blocks normally, exactly as a `CHANGES_REQUESTED` or any unresolved human thread does.
 
-## Platform-backed input (the bridge)
-When the hub has a platform (`.sdlc/hub.json`) and the bridge is enabled, reviewers can approve/comment
+## Platform-backed input (the verified ledger)
+When the hub has a platform (`.sdlc/hub.json`) and the ledger is verified, reviewers can approve/comment
 on a real PR/MR instead of (or as well as) the skill recording it directly. `action: sync`
 (`yad-hub-bridge`) reads that platform state with the reviewer's own `gh`/`glab` and writes the **same**
 `approvals.json` / `comments.json` / `reviews/*.md` records the manual path writes — bridge approvals
@@ -99,7 +99,7 @@ approvals regardless of how they were recorded.
   new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").
 - The architecture+contract staleness rule applies to bridge approvals too: a re-lock discards bridge
   approvals dated before the new lock.
-- No platform / no CLI → the gate runs file-only with no error. Detail: `../yad-hub-bridge/references/bridge.md`.
+- No platform / no CLI → the gate runs local with no error. Detail: `../yad-hub-bridge/references/bridge.md`.
 
 ## Why this shape
 - Owner + 1 reviewer keeps review load low on a small team (design priority 2) while still requiring

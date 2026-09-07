@@ -22,7 +22,7 @@ Sections (you generate the prose; the helper composes them):
 - **humanSignoff / aiSignoff** — the two satisfaction statements ("both satisfied").
 
 Post it with the platform CLI (`gh pr comment <n> -b "<body>"` / `glab mr note <n> -m "<body>"`). In
-file-only mode write it to `reviews/<base>--<date>--pair-session.md` instead.
+local mode write it to `reviews/<base>--<date>--pair-session.md` instead.
 
 ## 2. The learning record (local-only, reuses yad-learn)
 

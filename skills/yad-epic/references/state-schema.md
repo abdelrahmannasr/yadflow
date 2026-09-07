@@ -125,7 +125,7 @@ The shared procedure (run once the `EP-<slug>` is known):
    tree — no error.
 2. Branch name = `<step>/EP-<slug>`. If it already exists, check it out; otherwise create it from the
    hub's default branch (`git checkout -b <step>/EP-<slug>`).
-3. Author and commit the step's artifact(s) on that branch. The bridge's `review/…` branch is created
+3. Author and commit the step's artifact(s) on that branch. The verified ledger's `review/…` branch is created
    separately at review time and is untouched by this step.
 
 **How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once, by hand, on the
@@ -133,7 +133,7 @@ The shared procedure (run once the `EP-<slug>` is known):
 path creates one (`yad gate ci` only *advances* an existing chain, at merge, on the default branch).
 So for the **first** gate of an epic, cut `review/EP-<slug>/<artifact-base>` from that authoring
 branch: the review PR/MR then carries the seed alongside the artifact, and the ledger lands on the
-default branch when it merges. In bridge mode `ledger-guard` exempts exactly this case — **creation,
+default branch when it merges. In verified mode `ledger-guard` exempts exactly this case — **creation,
 not mutation** (#162) — so no direct push to a protected default branch is needed. For every **later**
 gate the ledger is already on the default branch: cut the review branch from there, commit the
 artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `reviews/*.md` to CI.
@@ -443,7 +443,7 @@ From promotion on, the thread's contract protection is live.
 ## Inherited steps in `state.json`
 
 A change-epic's `state.json` is structurally identical (so `advanceState` / `nextAction` / `gatePredicate`
-/ the bridge run unchanged), but **inherited** steps are pre-marked `done` with two extra fields, and
+/ the verified ledger run unchanged), but **inherited** steps are pre-marked `done` with two extra fields, and
 only re-authored steps run. The seeder sets `currentStep` to the first re-authored step.
 
 ```json

@@ -89,7 +89,7 @@ In one pass it produces:
   push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
   `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
   under `checks/`.
-- **An agent guardrail** on a bridge hub — `hooks/ledger-guard.sh`, a harness hook that refuses an
+- **An agent guardrail** on a verified hub — `hooks/ledger-guard.sh`, a harness hook that refuses an
   agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
   transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
   (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority.
@@ -109,7 +109,7 @@ setup → AI drafts an artifact → ⛔ gate waits → you approve → next step
 1. **`npx yadflow setup`** — the wizard installs skills, connects your repo, and wires the gates.
 2. **Run `yad-epic`** in your assistant — it drafts the epic, then **stops** and writes it to a file.
 3. **A gate waits.** Nothing advances until you review it.
-4. **You approve** — file-only, or by merging the review PR/MR.
+4. **You approve** — local, or by merging the review PR/MR.
 5. **The workflow continues** to the next step, which stops again.
 
 Every step is the same contract: *AI proposes → a human decides → the trail is recorded.*
@@ -119,7 +119,7 @@ Every step is the same contract: *AI proposes → a human decides → the trail 
 - **Shape = decide.** Once per epic, in the product hub: epic, architecture + a locked contract,
   UI, stories, test cases. Always human-gated — nothing auto-advances.
 - **Build = make it real.** Once per story per code repo: spec → implement → checks → ship.
-- **Every step stops at a gate.** A human moves it forward (file-only, or by merging a review PR/MR).
+- **Every step stops at a gate.** A human moves it forward (local, or by merging a review PR/MR).
   <!-- IMAGE: docs/media/pr-gate.png — "The review gate rides a real PR/MR: approve to advance, comment to block." -->
 - **Automation is opt-in and earned.** A safe Build step can earn auto-advance after it proves
   itself — and a one-command kill switch reverts everything to manual. The engineer review and all

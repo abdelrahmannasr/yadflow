@@ -132,16 +132,30 @@ const underSdlcDir = (p) => {
 const carriesShape = (p, v) => isPlainObject(v) && underSdlcDir(p);
 
 // Always FIRST in the serialized object. A stamp that moved around between writers would change the
-// bytes without changing the meaning. An existing version is preserved, never forced back to 1, so a
-// file already on a newer shape survives being read and written by this release.
-const withShape = (p, v) =>
-  (carriesShape(p, v) ? { schemaVersion: v.schemaVersion ?? SCHEMA_VERSION, ...v } : v);
+// bytes without changing the meaning. An existing version is preserved, never forced back or forward,
+// so a file already on another shape survives being read and written by this release.
+//
+// Reading and writing do NOT default the same way, and the difference is load-bearing:
+//
+//   read  — a file with no version IS shape 1 (rule 1). Defaulting it to the engine's current shape
+//           would be the engine telling itself an old file is already current. Everything downstream
+//           believes it: `yad doctor` stops reporting drift, and a plain read-modify-write stamps the
+//           engine's shape onto content that was never migrated — after which `yad migrate` skips the
+//           file forever, because its own claim says there is nothing to do. Silent, permanent, and
+//           invisible until someone asks why a field never got renamed.
+//   write — a NEW object, one that was never read from disk and so has no version of its own, is
+//           written by this engine and therefore has this engine's shape.
+//
+// This was harmless while SCHEMA_VERSION was 1, because the two defaults were the same number. It
+// stops being harmless the moment the shape moves, which is why it is fixed in the commit that moves it.
+const readShape  = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVersion ?? 1, ...v } : v);
+const writeShape = (p, v) => (carriesShape(p, v) ? { schemaVersion: v.schemaVersion ?? SCHEMA_VERSION, ...v } : v);
 
 export function readJSON(p, def = null) {
   try {
     // "Read old, write new" (rule 2): an unstamped file reads back as shape 1, so a caller never has
     // to ask whether the file it just loaded predates the stamp.
-    return withShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
+    return readShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
   } catch {
     // The caller's own default is returned untouched: it is not a file, and stamping it would invent
     // a shape for something that was never read from disk.
@@ -154,7 +168,7 @@ export function readJSON(p, def = null) {
 export function readJSONStrict(p, def = null) {
   if (!fs.existsSync(p)) return def;
   try {
-    return withShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
+    return readShape(p, JSON.parse(fs.readFileSync(p, 'utf8')));
   } catch (e) {
     throw err('YAD-STATE-001', `corrupt JSON in ${p}: ${e.message}`, 'fix the file or restore it from git — never delete a ledger blindly');
   }
@@ -163,7 +177,7 @@ export function readJSONStrict(p, def = null) {
 // then rename over the target. A killed process can never leave a truncated ledger
 // file, and a failed rename never leaves a stray .tmp for `git add -A` to pick up.
 export function writeJSON(p, obj) {
-  const data = JSON.stringify(withShape(p, obj), null, 2) + '\n';
+  const data = JSON.stringify(writeShape(p, obj), null, 2) + '\n';
   // Byte-identical content is not a write. The ledger writers are unconditional — they re-serialize
   // whether or not anything changed — so this keeps an unchanged sync from touching the file at all
   // (no mtime churn, nothing for a watcher or a `git add -A` to notice). A backstop, not the fix: the

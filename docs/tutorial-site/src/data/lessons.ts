@@ -416,12 +416,12 @@ export const MODULES: Module[] = [
       },
       {
         id: 'gate-pr',
-        title: 'PR-driven vs file-only',
+        title: 'PR-driven vs local',
         duration: '5 min',
         level: 'intermediate',
         summary: 'The same gate over a real PR/MR when the hub is on a platform.',
         body: [
-          { kind: 'p', text: 'With no hub platform, the gate runs **file-only**: comments and approvals are recorded as files and you end with an explicit `advance`.' },
+          { kind: 'p', text: 'With no hub platform, the gate runs **local**: comments and approvals are recorded as files and you end with an explicit `advance`.' },
           { kind: 'p', text: 'When the hub is on GitHub/GitLab, the `yad gate` CLI runs the same gate over a real PR/MR. `open` raises the review PR; `sync` pulls approvals and comment threads into the file ledger; the step **auto-advances when the approved, fully-resolved PR is merged** — the merge click is the human approval act.' },
           { kind: 'callout', tone: 'info', text: 'The file ledger always stays the source of truth. The platform is just a nicer surface for the same predicate.' },
         ],
