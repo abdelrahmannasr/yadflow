@@ -121,8 +121,9 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   satisfy the gate's intent.
 - **Test worker cap.** When the CI job sets `YAD_TEST_MAX_WORKERS` (the templates default it to `2`)
   and the repo's `test` script is jest/vitest, the gate forwards `--maxWorkers=<n>` to bound CI
-  concurrency. For any other runner (`node --test`, mocha, …) it is a no-op — the flag is never
-  passed, so the gate cannot break on an unknown option. Override it per repo via the
+  concurrency (as `-- --maxWorkers=<n>` under npm, which consumes the separator, and bare under pnpm,
+  which would forward a literal `--` to the script). For any other runner (`node --test`, mocha, …)
+  it is a no-op — the flag is never passed, so the gate cannot break on an unknown option. Override it per repo via the
   `YAD_TEST_MAX_WORKERS` CI variable, or unset it to remove the cap.
 
 ### Canonical `package.json` scripts (Node demo)

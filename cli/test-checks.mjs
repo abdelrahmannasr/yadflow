@@ -944,6 +944,28 @@ test('build-test-lint gate: a pinned npm without corepack on PATH fails with gui
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// pnpm forwards a literal `--` to the script (npm consumes it), so the cap is passed bare there.
+test('build-test-lint gate: the worker cap reaches jest under pnpm without the npm-only `--`', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pnpm'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "pnpm $*" >> "$YAD_COMMAND_LOG"\n');
+  fs.chmodSync(path.join(bin, 'pnpm'), 0o755);
+  commit(T, 'chore: jest under pnpm', {
+    'package.json': JSON.stringify({
+      name: 'fixture', version: '0.0.0', packageManager: 'pnpm@9.15.0',
+      scripts: { lint: 'true', build: 'true', test: 'jest' },
+    }),
+    'pnpm-lock.yaml': 'lockfileVersion: 9',
+  });
+  const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog, YAD_TEST_MAX_WORKERS: '2' });
+  assert.equal(r.code, 0, r.out);
+  const lines = fs.readFileSync(commandLog, 'utf8').trim().split('\n');
+  assert.equal(lines.at(-1), 'pnpm run --silent test --maxWorkers=2');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 const packageFixture = ({ packageManager, lockfile }) => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-package-manager-'));
   const bin = path.join(T, 'bin');
