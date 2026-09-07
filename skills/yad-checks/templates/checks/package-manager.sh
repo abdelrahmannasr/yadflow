@@ -15,16 +15,25 @@ yad_validate_exact_package_manager_spec() {
     const spec = process.env.YAD_PACKAGE_MANAGER_SPEC;
     const at = spec.indexOf("@");
     const version = spec.slice(at + 1);
-    const COREPACK_SHA512_HEX_LENGTH = 128;
+    // The Corepack integrity suffix is `+<algorithm>.<hex digest>`: it hashes the download with the
+    // named algorithm and compares the LOWERCASE hex string byte for byte. Every algorithm Corepack
+    // has written or accepts is listed with its digest length; anything else is not a Corepack
+    // suffix and fails closed.
+    const COREPACK_DIGEST_HEX_LENGTH = { sha1: 40, sha224: 56, sha256: 64, sha384: 96, sha512: 128 };
     const exactSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
     const match = exactSemver.exec(version);
     const invalidNumericPrerelease = match?.[4]?.split(".").some(
       identifier => /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith("0"),
     );
-    const corepackIntegrity = new RegExp(`^sha512\\.[0-9a-f]{${COREPACK_SHA512_HEX_LENGTH}}$`);
-    const invalidBuildMetadata = match?.[5] !== undefined && !corepackIntegrity.test(match[5]);
+    const isCorepackIntegrity = (build) => {
+      const [algorithm, digest, ...rest] = build.split(".");
+      const length = COREPACK_DIGEST_HEX_LENGTH[algorithm];
+      return rest.length === 0 && length !== undefined && new RegExp(`^[0-9a-f]{${length}}$`).test(digest ?? "");
+    };
+    const invalidBuildMetadata = match?.[5] !== undefined && !isCorepackIntegrity(match[5]);
     if (!match || match[0] !== version || invalidNumericPrerelease || invalidBuildMetadata) {
-      process.stderr.write(`FAIL [package-manager]: packageManager ${JSON.stringify(spec)} must name an exact semantic version with no build metadata or a sha512 integrity suffix containing ${COREPACK_SHA512_HEX_LENGTH} hexadecimal characters.\n`);
+      const algorithms = Object.keys(COREPACK_DIGEST_HEX_LENGTH).join("|");
+      process.stderr.write(`FAIL [package-manager]: packageManager ${JSON.stringify(spec)} must name an exact semantic version, optionally followed by the Corepack integrity suffix +<${algorithms}>.<lowercase hex digest>.\n`);
       process.exit(1);
     }
   '

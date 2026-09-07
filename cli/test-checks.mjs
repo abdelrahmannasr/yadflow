@@ -962,21 +962,40 @@ for (const packageManager of [
   });
 }
 
+// Every algorithm Corepack accepts (it hashes with whatever the suffix names — older releases wrote
+// sha256, yarn's default is sha224), each at its own digest length.
+for (const packageManager of [
+  'npm@10.8.2+sha1.0123456789abcdef0123456789abcdef01234567',
+  `pnpm@9.15.0+sha224.${'b'.repeat(56)}`,
+  `npm@10.8.2+sha256.${'c'.repeat(64)}`,
+  `pnpm@9.15.0+sha384.${'d'.repeat(96)}`,
+]) {
+  test(`install-deps: accepts Corepack integrity suffix ${packageManager.slice(0, 24)}…`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.equal(r.code, 0, r.out);
+    assert.match(fs.readFileSync(commandLog, 'utf8'), new RegExp(`corepack prepare ${packageManager.replace(/[+.]/g, '\\$&')} --activate`));
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 for (const packageManager of [
   `pnpm@9.15.0+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH - 1)}`,
   `npm@10.8.2+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH - 1)}g`,
   `pnpm@9.15.0+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH)}.extra`,
-  'npm@10.8.2+sha1.0123456789abcdef0123456789abcdef01234567',
+  'npm@10.8.2+sha1.0123456789abcdef0123456789abcdef0123456', // sha1 digest one short
+  `npm@10.8.2+sha256.${'c'.repeat(128)}`, // sha512 length under the sha256 name
   'pnpm@9.15.0+md5.0123456789abcdef0123456789abcdef',
   'npm@10.8.2+build.1',
-  `npm@10.8.2+sha512.${'A'.repeat(COREPACK_SHA512_HEX_LENGTH)}`,
+  `npm@10.8.2+sha512.${'A'.repeat(COREPACK_SHA512_HEX_LENGTH)}`, // Corepack compares lowercase hex
 ]) {
   test(`install-deps: rejects unsupported Corepack integrity metadata ${packageManager}`, () => {
     const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
     const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
     const r = runGate(INSTALL_DEPS, T, [], env);
     assert.notEqual(r.code, 0, `${packageManager} must fail closed`);
-    assert.match(r.out, /sha512 integrity suffix/);
+    assert.match(r.out, /integrity suffix \+<sha1\|sha224\|sha256\|sha384\|sha512>\.<lowercase hex digest>/);
     assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
     fs.rmSync(T, { recursive: true, force: true });
   });

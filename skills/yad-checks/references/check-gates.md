@@ -97,9 +97,11 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported. A repo
   without the field retains npm behavior unless it carries `pnpm-lock.yaml`.
 - CI runs `install-deps.sh` first. A declared npm or pnpm manager must use a full, exact semantic
-  version with either no build metadata or Corepack's exact integrity suffix,
-  `+sha512.<128 hexadecimal characters>`. Other build metadata, digest algorithms, digest lengths,
-  or trailing identifiers fail closed. The installer activates the declared version through
+  version with either no build metadata or Corepack's integrity suffix,
+  `+<sha1|sha224|sha256|sha384|sha512>.<lowercase hex digest>` at that algorithm's digest length
+  (Corepack hashes the download with the named algorithm and compares the lowercase hex string).
+  Other build metadata, digest algorithms, digest lengths, uppercase digests, or trailing
+  identifiers fail closed. The installer activates the declared version through
   Corepack. Pinned npm is dispatched as `corepack npm ci` so Node's ambient npm cannot override the
   declaration; packageManager-absent npm preserves the historical `npm ci` path. pnpm uses
   `pnpm install --frozen-lockfile`. Partial versions, ranges, and tags also fail closed instead of
