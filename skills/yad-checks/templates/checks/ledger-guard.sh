@@ -6,7 +6,12 @@
 # the ledger" a mechanical guarantee instead of a convention.
 #
 # Protected (gate-state, machine-written):
-#   epics/*/.sdlc/state.json, approvals.json, comments.json, hub-prs.json
+#   epics/*/.sdlc/state.json, approvals.json, comments.json, product-prs.json, hub-prs.json
+#
+# BOTH names of the PR ledger are guarded. It was renamed `hub-prs.json` -> `product-prs.json`, and
+# the engine writes both for one major so that a copy of THIS script which predates the rename still
+# finds the file it knows. Guarding only one name would leave the other open to a hand-edit on a
+# verified product — the exact thing this gate exists to refuse.
 #   epics/*/reviews/*.md
 # NOT protected:
 #   epics/*/.sdlc/contract-lock.json — artifact-side: the architect locks the contract surface in
@@ -251,7 +256,7 @@ for sha in $commits; do
     [ -n "$f" ] || continue
     case "$f" in
       epics/*/.sdlc/contract-lock.json) ;; # artifact-side — allowed
-      epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
+      epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/product-prs.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
         _slug="${f#epics/}"; _slug="${_slug%%/*}"
         is_seeding "$_slug" && continue      # a new epic's seed — not a mutation of a CI-owned ledger
         touches_ledger=1

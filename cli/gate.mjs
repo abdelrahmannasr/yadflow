@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run, pushWithRebase,
+  writeMirrored,
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
 import {
@@ -454,7 +455,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   hubPrs = canonicalHubPrs(hubPrs);
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
-  writeJSON(ledger.files.hubPrs, hubPrs);
+  writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
   writeJSON(ledger.files.state, state);
   refreshRoster(epicDir, open, approvals, today); // the dated side file lists them in the same order
   return { synced, advanced };
@@ -564,7 +565,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
         step: step.id, artifact: job.artifact, platform: hub.platform, number,
         url: existing?.url ?? null, branch: job.branch, lastSyncedAt: existing?.lastSyncedAt ?? null,
       });
-      writeJSON(ledger.files.hubPrs, ledger.hubPrs);
+      writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
     }
 
     // No overlay: at merge the artifact is on the default branch CI checked out, so artifactHash
@@ -616,10 +617,16 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // and reviews/*.md may be modified and are deliberately left alone: reverting a sync that genuinely
     // ran would discard platform state the run just recorded. A bare `yad gate ci` that advances
     // nothing therefore leaves those files dirty for the operator to inspect and commit (or discard).
+    // BOTH names of the PR ledger. It is written under its new name and its old one (see
+    // MIRRORED_FILES, cli/manifest.mjs), so restoring only one leaves the other behind as an
+    // untracked file — a read-only run that dirties the checkout, which is exactly what this block
+    // exists to prevent.
     for (const e of touched) {
-      const hp = path.join('epics', e, '.sdlc', 'hub-prs.json');
-      git('checkout', '-q', '--', hp); // restore it if it was tracked
-      git('clean', '-fq', '--', hp);   // remove it if the event first-seeded it (untracked)
+      for (const name of ['product-prs.json', 'hub-prs.json']) {
+        const hp = path.join('epics', e, '.sdlc', name);
+        git('checkout', '-q', '--', hp); // restore it if it was tracked
+        git('clean', '-fq', '--', hp);   // remove it if the event first-seeded it (untracked)
+      }
     }
     info('pre-merge: gate evaluated; the ledger reconciles on the default branch at merge — nothing pushed');
     return { synced };
@@ -836,7 +843,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 
   if (!verified) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
-    writeJSON(ledger.files.hubPrs, ledger.hubPrs);
+    writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
   }
   ok(`opened ${r.url}`);
   hand(verified

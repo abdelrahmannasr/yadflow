@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
+import { VERSION, MIRRORED_FILES, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
@@ -588,6 +588,27 @@ function shapeCheckFor(checks, id, label, rows, engine) {
 // engine is on shape 1 nothing can be BEHIND it, so the warn branch — the one this section exists for —
 // is unreachable from a real project until the first real shape change lands. Tests supply a plan that
 // reaches it, which is how the drift report is proven before there is any drift to report.
+// A file that lives under two names must say the same thing under both. The engine writes them
+// together, so they only drift when something outside the engine touched one — a person editing the
+// name they happen to know, a script, a half-finished merge. The older name is the authoritative one
+// this major, so a silent drift means the OTHER copy is being ignored, which is the kind of thing
+// people lose an afternoon to. Say it out loud instead.
+export function mirrorChecks(checks, root) {
+  for (const { canonical, legacy } of MIRRORED_FILES) {
+    const a = path.join(root, canonical);
+    const b = path.join(root, legacy);
+    if (!exists(a) || !exists(b)) continue;
+    let same;
+    try { same = fs.readFileSync(a, 'utf8') === fs.readFileSync(b, 'utf8'); } catch { continue; }
+    if (same) continue;
+    check(
+      checks, `mirror:${path.basename(canonical)}`, 'shape', 'warn',
+      `${canonical} and ${legacy} do not match — ${legacy} is the one being read`,
+      `they are two names for one file while the rename settles. Copy the one you meant to keep over the other, or re-run \`yad setup\` to rewrite both`,
+    );
+  }
+}
+
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
   if (!injected && !exists(path.join(root, PROJECT_FILES.hubConfig)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
@@ -653,6 +674,7 @@ export function collectDoctor(root) {
   envChecks(checks);
   projectChecks(checks, root);
   shapeChecks(checks, root);
+  mirrorChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

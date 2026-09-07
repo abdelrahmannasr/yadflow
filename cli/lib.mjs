@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { err } from './errors.mjs';
-import { MIRRORED_FILES, PROJECT_FILES, SCHEMA_VERSION, productConfigPath } from './manifest.mjs';
+import { MIRRORED_FILES, SCHEMA_VERSION, productConfigPath } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -241,13 +241,35 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
 // Order matters: the CANONICAL file is written first. If the second write fails, the engine's own
 // reader is already correct and only the older copy is stale — the failure that leaves the least
 // broken. The reverse order would leave the engine reading yesterday's settings.
+// Write a file that lives under two names. Returns the paths it actually wrote — empty when there
+// was nothing to do.
+//
+// The "nothing to do" case is load-bearing, not an optimisation. The ledger writers are
+// UNCONDITIONAL: `yad gate` re-serializes and writes every time, and relies on `writeJSON` doing
+// nothing when the bytes match, which is what keeps a read-only pre-merge run from touching the
+// working tree at all. A naive mirror breaks that on day one — the new name does not exist yet, so
+// every read-only run would create it and leave the tree dirty, and `gate ci` would try to push a
+// file it never meant to write. So the comparison happens FIRST, against whichever name is currently
+// readable; only a genuine change writes, and then it writes both.
+export function writeMirrored(canonicalPath, legacyPath, obj) {
+  // Compare against the AUTHORITATIVE copy — the same one readers use (`preferring`,
+  // cli/manifest.mjs), which is the legacy name while it exists. Comparing against the other file
+  // would let the two rules disagree about whether anything changed.
+  const readable = fs.existsSync(legacyPath) ? legacyPath : canonicalPath;
+  const next = `${JSON.stringify(writeShape(canonicalPath, obj), null, 2)}\n`;
+  try {
+    if (fs.readFileSync(readable, 'utf8') === next) return [];
+  } catch { /* neither name is readable — this is a first write, fall through */ }
+  writeJSON(canonicalPath, obj);
+  writeJSON(legacyPath, obj);
+  return [canonicalPath, legacyPath];
+}
+
 export function writeProductConfig(root, obj) {
   const written = [];
-  writeJSON(path.join(root, PROJECT_FILES.productConfig), obj);
-  written.push(PROJECT_FILES.productConfig);
-  for (const { legacy } of MIRRORED_FILES) {
-    writeJSON(path.join(root, legacy), obj);
-    written.push(legacy);
+  for (const { canonical, legacy } of MIRRORED_FILES) {
+    const wrote = writeMirrored(path.join(root, canonical), path.join(root, legacy), obj);
+    if (wrote.length) written.push(canonical, legacy);
   }
   return written;
 }

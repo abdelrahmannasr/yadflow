@@ -2263,9 +2263,14 @@ function scaffoldEpic() {
       { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'blocked', risk_tags: [] },
     ],
   }));
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  // Seed BOTH names. The PR ledger lives under its new name and its old one for one major, and the
+  // engine reads the new one first — so a fixture that wrote only the old name would be silently
+  // ignored, which is precisely the hazard `doctor` now reports for real projects.
+  const reopened = JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
-  ]));
+  ]);
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), reopened);
+  fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), reopened);
   return { T, ep };
 }
 
@@ -5107,6 +5112,8 @@ test('gate ci --merged: commits the ledger allowlist only, never a dirty worktre
     'epics/EP-test/.sdlc/approvals.json',
     'epics/EP-test/.sdlc/comments.json',
     'epics/EP-test/.sdlc/hub-prs.json',
+    // Written under BOTH names for one major, so CI commits both — see MIRRORED_FILES.
+    'epics/EP-test/.sdlc/product-prs.json',
     'epics/EP-test/.sdlc/state.json',
     'epics/EP-test/architecture.md',
     'epics/EP-test/reviews/architecture--2026-06-09--approved.md',
@@ -5618,6 +5625,33 @@ test('doctor shape: a project this engine wrote is on this engine shape, and say
   const shape = r.checks.filter((x) => x.section === 'shape');
   assert.equal(shape[0].status, 'ok', shape[0].message);
   assert.match(shape[0].message, new RegExp(`on shape ${ENGINE_SHAPE}, the engine is on shape ${ENGINE_SHAPE}`));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Two names for one file only stay in step because the engine writes both. Anything else touching
+// one of them — a person, a script, a half-finished merge — makes the other silently ignored.
+test('doctor mirror: two copies of the settings that disagree are reported, not left silent', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab' }, null, 2) + '\n');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }, null, 2) + '\n');
+  const r = await doctorOn(T);
+  const m = r.checks.find((c) => c.id.startsWith('mirror:'));
+  assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
+  assert.equal(m.status, 'warn');
+  assert.match(m.message, /do not match/);
+  assert.match(m.message, /hub\.json is the one being read/, 'and it says WHICH one wins, not just that they differ');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor mirror: two copies that agree say nothing at all', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const same = JSON.stringify({ platform: 'github' }, null, 2) + '\n';
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), same);
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), same);
+  const r = await doctorOn(T);
+  assert.equal(r.checks.filter((c) => c.id.startsWith('mirror:')).length, 0, 'a healthy pair is not a finding');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

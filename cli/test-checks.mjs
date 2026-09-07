@@ -1679,6 +1679,21 @@ test('ledger-guard: with a verified ledger ON, a non-bot commit MUTATING an exis
 // #162: no CI path can seed a new epic's ledger (gate-sync only ADVANCES an existing chain, at merge,
 // on the default branch), so the seed can only reach the trunk through the first review PR/MR — the
 // one place this gate runs. Creation is exempt; mutation stays guarded by the test above.
+// The PR ledger was renamed `hub-prs.json` -> `product-prs.json`, and both are written for one
+// major. Guarding only one name would leave the other hand-editable on a verified product — so the
+// refusal is asserted for BOTH, not just the one that happens to be authoritative today.
+for (const name of ['product-prs.json', 'hub-prs.json']) {
+  test(`ledger-guard: a non-bot commit mutating ${name} FAILS`, () => {
+    const T = scaffoldRepo();
+    seedLedgerOnBase(T, 'EP-x', { [`epics/EP-x/.sdlc/${name}`]: '[]\n' });
+    commit(T, 'chore: tamper', { [`epics/EP-x/.sdlc/${name}`]: '[{"artifact":"architecture.md"}]\n' });
+    const r = runGate(LEDGER_GUARD, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, new RegExp(name.replace('.', '\\.')));
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('ledger-guard: a human seeding a NEW epic PASSES — creation is not mutation', () => {
   const T = scaffoldRepo();
   enableVerified(T);

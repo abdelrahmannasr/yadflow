@@ -207,12 +207,30 @@ export const MIRRORED_FILES = [
   { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.hubConfig },
 ];
 
-// The path to read the product's settings from: the new name when it is there, the old one otherwise.
-// Every reader goes through this, so "which name is this project on?" is answered in one place.
+// Which of the two names to READ.
+//
+// The OLD name wins while it exists, and that is deliberate. Renaming a file across an ecosystem
+// takes three releases, not one:
+//
+//   this major   the new name appears and is written on every save. The OLD name is still the one
+//                that counts, so everything that already reads it keeps working — the ledger-guard
+//                committed in the user's repo, a script somebody wrote, a person editing the file
+//                they know. Nothing can be silently ignored, because the file everyone knows is
+//                still authoritative.
+//   next major   the new name becomes authoritative and `yad doctor` warns about the old one.
+//   the one after that   the old name is deleted.
+//
+// Reading the NEW name first this early looks tidier and is a trap: the moment two names exist and
+// the new one wins, anyone who edits the old one — including our own fixtures, which is how this was
+// found — has their change silently ignored. `yad doctor` reports the two copies drifting apart, so
+// a project that gets into that state is told, rather than left to wonder.
 export const productConfigPath = (root) => {
-  const canonical = path.join(root, PROJECT_FILES.productConfig);
-  return existsSync(canonical) ? canonical : path.join(root, PROJECT_FILES.hubConfig);
+  const legacy = path.join(root, PROJECT_FILES.hubConfig);
+  return existsSync(legacy) ? legacy : path.join(root, PROJECT_FILES.productConfig);
 };
+
+// Same rule for a renamed file inside an epic's ledger.
+export const preferring = (canonical, legacy) => (existsSync(legacy) ? legacy : canonical);
 
 // Who writes the ledger. Two values, and the switch lives in `.sdlc/hub.json`:
 //
@@ -268,6 +286,11 @@ export const epicFiles = (epicRoot) => ({
   state: `${epicRoot}/.sdlc/state.json`,
   approvals: `${epicRoot}/.sdlc/approvals.json`,
   comments: `${epicRoot}/.sdlc/comments.json`,
+  // The record of review PR/MRs opened on the product. `product-prs.json` is the name from shape 3
+  // onward; `hub-prs.json` is what it was called before and is written alongside it for one major —
+  // both `templates/checks/ledger-guard.sh` and `cli/hook.mjs` name it literally, and the guard in a
+  // user's repo only learns the new name when they run `yad update`. See MIRRORED_FILES.
+  productPrs: `${epicRoot}/.sdlc/product-prs.json`,
   hubPrs: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,
   // The two append-only Build ledgers use shard-then-fold storage (cli/ledger.mjs): writers add

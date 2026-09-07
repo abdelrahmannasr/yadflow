@@ -1,7 +1,7 @@
 // `yad hook ledger-guard` — the harness-side half of the ledger rule (#171).
 //
 // In verified mode the gate ledger is CI-owned: `templates/checks/ledger-guard.sh` rejects any non-bot
-// commit that changes `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`.
+// commit that changes `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or `epics/*/reviews/*.md`.
 // That gate is the authority, but it only speaks at CI time — an agent that hand-edits `state.json`
 // learns twenty minutes later, from a failed pipeline with nothing connecting cause to effect. This
 // hook says the same thing at the moment of the edit, and names the command that owns the transition.
@@ -26,7 +26,9 @@ import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
 // human's to write, and both are exempt in the gate too.
-const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', 'hub-prs.json']);
+// Both names of the PR ledger: it was renamed `hub-prs.json` -> `product-prs.json` and the engine
+// writes both for one major, so refusing only one would leave the other hand-editable.
+const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json']);
 
 // `epics/<epic>/.sdlc/<ledger>.json` or `epics/<epic>/reviews/<name>.md` → { epic, rel }; else null.
 // Takes a hub-relative POSIX path.
