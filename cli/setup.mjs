@@ -5,6 +5,7 @@ import os from 'node:os';
 import {
   c, log, step, guide, ok, info, warn, hand, fail, ask, askYesNo, run, has,
   exists, readJSON, readJSONStrict, writeJSON,
+  writeProductConfig,
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
 import {
@@ -115,7 +116,7 @@ export function addRepoRoles(root, repo, grants = {}) {
       entry.roles[repo] = list;
     }
   }
-  if (touched) writeJSON(hubPath, hub);
+  if (touched) writeProductConfig(root, hub);
 }
 
 // Normalize a roster entry's roles in place to the per-scope map, migrating the two legacy shapes
@@ -171,7 +172,7 @@ export function upsertRosterEntry(root, { login, name, email, roles = {}, platfo
     if (v.checked && !v.exists) { warn(`'${login}' not found on ${plat} — saved as unverified`); entry.unverified = true; }
     else if (v.checked && v.exists) { ok(`verified ${login} on ${plat}`); delete entry.unverified; }
   }
-  writeJSON(hubPath, hub);
+  writeProductConfig(root, hub);
   return { entry, created };
 }
 
@@ -188,7 +189,7 @@ export function removeRepoRole(root, name, repo, roles = []) {
   const next = cur.filter((r) => !roles.includes(r));
   if (next.length === cur.length) return; // nothing removed
   if (next.length) entry.roles[repo] = next; else delete entry.roles[repo];
-  writeJSON(hubPath, hub);
+  writeProductConfig(root, hub);
 }
 
 // Keep repos.json `domain_owners` in sync when a domain-owner role is granted/revoked via the roster,
@@ -560,7 +561,7 @@ export async function runSetup(root, opts = {}) {
       info(`kept existing roster (${cur.roster.length} member(s)) — reconfigure collected none`);
     }
     if (cur.verified_authors?.length) info(`preserved ${cur.verified_authors.length} verified_authors entry(ies)`);
-    writeJSON(hubPath, next);
+    writeProductConfig(root, next);
     ok(`wrote ${PROJECT_FILES.hubConfig} (${next.roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
   }
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
@@ -574,7 +575,7 @@ export async function runSetup(root, opts = {}) {
       ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
       : null;
     if (cur.solo !== solo || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
-      writeJSON(hubPath, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), solo, profile: { codebase, repo_layout, team_size } });
+      writeProductConfig(root, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), solo, profile: { codebase, repo_layout, team_size } });
       if (backfillUrl) info(`backfilled hub git_url from origin: ${backfillUrl}`);
       else info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
     }

@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON } from './lib.mjs';
+import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
 import { BACKUP_SUFFIX, epicFiles, isVerifiedLedger, MANAGED_LEDGER, PROJECT_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
 import { isValidEpicId } from './epic-state.mjs';
@@ -66,6 +66,37 @@ export const MIGRATIONS = [
     apply: (obj, ctx) => (ctx?.rel === PROJECT_FILES.hubConfig
       ? { ...obj, ledger: isVerifiedLedger(obj) ? 'verified' : 'local' }
       : obj),
+  },
+  {
+    from: 2,
+    to: 3,
+    title: '`hub` becomes `Product` — the settings file is renamed and the roster key with it',
+    // Two things move, and only one of them is visible in this function.
+    //
+    // The KEY, here: a roster entry's `roles: { hub: [...] }` becomes `roles: { product: [...] }`.
+    // Both are read for one major (see `rolesFor`, cli/roster.mjs), so a project part-way through
+    // the upgrade still resolves its reviewers.
+    //
+    // The FILE NAME is not renamed here, because a migration step transforms an object and cannot
+    // move a file. It happens on WRITE: `writeProductConfig` (cli/lib.mjs) writes `.sdlc/product.json`
+    // AND `.sdlc/hub.json` every time, so applying this step to hub.json creates product.json as a
+    // side effect, and `planMigration` reports the created file so the preview does not under-promise.
+    // Both names survive for one major on purpose — a `ledger-guard.sh` that has not been refreshed
+    // by `yad update` opens `.sdlc/hub.json` by that literal path, and taking it away would disarm it.
+    apply: (obj, ctx) => {
+      if (ctx?.rel !== PROJECT_FILES.hubConfig && ctx?.rel !== PROJECT_FILES.productConfig) return obj;
+      if (!Array.isArray(obj.roster)) return obj;
+      return {
+        ...obj,
+        roster: obj.roster.map((m) => {
+          if (!m || typeof m !== 'object' || !m.roles || typeof m.roles !== 'object') return m;
+          if (!('hub' in m.roles)) return m;
+          const { hub, ...rest } = m.roles;
+          // The new key wins if somebody has already written both; never silently drop a role list.
+          return { ...m, roles: { product: hub, ...rest } };
+        }),
+      };
+    },
   },
 ];
 
@@ -247,7 +278,13 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     const action = version !== from ? 'migrate' : (changes ? 'stamp' : 'unchanged');
     // `steps` lists the migrations that actually moved the file's shape. The baseline 1 → 1 runs on
     // every file by design and moves nothing, so naming it on every row would be noise reported as work.
-    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(version !== from ? { steps: applied } : {}) });
+    // A preview must name every file an apply would write. The product config is written under both
+    // names, so on a project that does not have the new one yet, say so here — otherwise `--apply`
+    // creates a file the preview never mentioned, and the preview stops being worth trusting.
+    const creates = (rel === PROJECT_FILES.hubConfig && changes
+      && !exists(path.join(root, PROJECT_FILES.productConfig)))
+      ? [PROJECT_FILES.productConfig] : undefined;
+    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(creates ? { creates } : {}), ...(version !== from ? { steps: applied } : {}) });
   }
   return { engine: SCHEMA_VERSION, verified, rows };
 }
@@ -270,6 +307,9 @@ function printRows(rows) {
     const line = `  ${r.file.padEnd(width)}  ${shape.padEnd(14)} ${c.dim(ACTION_NOTE[r.action] ?? r.action)}`;
     if (r.action === 'unreadable' || r.action === 'ahead') fail(line.trim());
     else log(line);
+    for (const made of r.creates ?? []) {
+      log(`  ${made.padEnd(width)}  ${''.padEnd(14)} ${c.dim('created — the new name for this file; the old one is kept')}`);
+    }
   }
 }
 
@@ -311,8 +351,17 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       // promises one thing and an apply writes another — the single worst failure this command can
       // have, because the preview is the reason anyone trusts it enough to run --apply.
       const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel: row.file });
-      writeJSON(file, stamped(obj, version));
-      written.push(row.file);
+      // The product config is the one file whose NAME changed (shape 3). Writing it through
+      // `writeProductConfig` puts it under both names, which is what actually creates
+      // `.sdlc/product.json` for an upgrading project. Everything else is an ordinary write.
+      if (row.file === PROJECT_FILES.hubConfig || row.file === PROJECT_FILES.productConfig) {
+        for (const rel of writeProductConfig(root, stamped(obj, version))) {
+          if (!written.includes(rel)) written.push(rel);
+        }
+      } else {
+        writeJSON(file, stamped(obj, version));
+        written.push(row.file);
+      }
     }
   }
 

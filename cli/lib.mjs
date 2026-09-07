@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { err } from './errors.mjs';
-import { SCHEMA_VERSION } from './manifest.mjs';
+import { MIRRORED_FILES, PROJECT_FILES, SCHEMA_VERSION, productConfigPath } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -225,3 +225,32 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
   }
   return { ok: false };
 }
+
+// ---- the product config, which lives under two names for one major -----------------------------
+//
+// Read through `productConfigPath` (manifest.mjs): the new name when it exists, the old one
+// otherwise. Write through here: BOTH names, every time.
+//
+// The duplicate is not sloppiness. `templates/checks/ledger-guard.sh` sits committed inside the
+// user's own repository and opens `.sdlc/hub.json` by that literal path; it is refreshed by
+// `yad update`, which is a separate act from `yad migrate`. So a migrated-but-not-updated project is
+// a real state, and if only the new name existed its guard would find nothing, read no platform,
+// call the ledger local, and stop rejecting human commits to it. An upgrade that silently disarms a
+// safety gate is worse than a duplicated file.
+//
+// Order matters: the CANONICAL file is written first. If the second write fails, the engine's own
+// reader is already correct and only the older copy is stale — the failure that leaves the least
+// broken. The reverse order would leave the engine reading yesterday's settings.
+export function writeProductConfig(root, obj) {
+  const written = [];
+  writeJSON(path.join(root, PROJECT_FILES.productConfig), obj);
+  written.push(PROJECT_FILES.productConfig);
+  for (const { legacy } of MIRRORED_FILES) {
+    writeJSON(path.join(root, legacy), obj);
+    written.push(legacy);
+  }
+  return written;
+}
+
+// Read it. A thin wrapper so no caller has to remember which name to try first.
+export const readProductConfig = (root, def = null) => readJSON(productConfigPath(root), def);

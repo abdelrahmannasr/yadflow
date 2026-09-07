@@ -1,7 +1,8 @@
 // The single source of truth for what a set-up SDLC project should contain.
 // Drives setup (install from), update (re-sync), and check (diff against).
 // Keep the skill list here in sync with skills/sdlc/install.sh.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 // Read the version from package.json (the one source of truth) so it always
 // tracks the semantic-release-managed version — never a hardcoded constant
@@ -166,17 +167,51 @@ export const LEARNING_PRIMARY = 'deeptutor';
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
-export const SCHEMA_VERSION = 2;
+
+export const SCHEMA_VERSION = 3;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
   reposRegistry: '.sdlc/repos.json',
+  // The product's own settings. `product.json` is the name from shape 3 onward; `hub.json` is what
+  // it was called before, and it is NOT dead — see MIRRORED_FILES below.
+  productConfig: '.sdlc/product.json',
   hubConfig: '.sdlc/hub.json',
   designConfig: '.sdlc/design.json',
   testingConfig: '.sdlc/testing.json',
   learningConfig: '.sdlc/learning.json',
   docsConfig: '.sdlc/docs.json',
   version: '.sdlc/cli-version.json',
+};
+
+// ---- files that changed NAME in shape 3 --------------------------------------------------------
+//
+// `hub` became `Product`, so `.sdlc/hub.json` became `.sdlc/product.json`. A field rename is easy;
+// a FILE rename is not, because a file is opened by name from outside this codebase:
+//
+//   - `templates/checks/ledger-guard.sh` is committed inside the USER's repo and opens
+//     `.sdlc/hub.json` by that literal path. It is refreshed by `yad update`, which is a separate act
+//     from `yad migrate` with no ordering between them.
+//   - So a project WILL exist that has been migrated but not updated. Its guard would open a path
+//     that no longer exists, read no platform, conclude the ledger is local, and stop rejecting human
+//     commits to it — the audit trail disarmed by an upgrade.
+//
+// Hence: for one whole major version BOTH files exist. `product.json` is the real one; `hub.json` is
+// a copy the engine rewrites on every save. Readers prefer the new name and fall back to the old, so
+// a project that has not migrated yet still works. The old name is deleted in the major AFTER the one
+// that introduces the new one — add, then warn, then remove (rule 3), stretched over a file.
+//
+// This costs a duplicated file on disk for a release. That is the price of not silently disarming a
+// safety gate in somebody else's repository, and it is worth paying.
+export const MIRRORED_FILES = [
+  { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.hubConfig },
+];
+
+// The path to read the product's settings from: the new name when it is there, the old one otherwise.
+// Every reader goes through this, so "which name is this project on?" is answered in one place.
+export const productConfigPath = (root) => {
+  const canonical = path.join(root, PROJECT_FILES.productConfig);
+  return existsSync(canonical) ? canonical : path.join(root, PROJECT_FILES.hubConfig);
 };
 
 // Who writes the ledger. Two values, and the switch lives in `.sdlc/hub.json`:

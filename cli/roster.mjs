@@ -6,7 +6,7 @@
 // is actually connected, not against repo names the user has to remember. Granting/revoking a
 // `domain-owner` keeps repos.json `domain_owners` in sync so the gate never drifts from the roster.
 import path from 'node:path';
-import { c, log, ok, info, warn, hand, fail, ask, askYesNo, readJSON, writeJSON } from './lib.mjs';
+import { c, log, ok, info, warn, hand, fail, ask, askYesNo, readJSON, writeProductConfig } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
 import { rolesForScope } from './platform.mjs';
 import { parseRolesSpec, upsertRosterEntry, addRepoRoles, removeRepoRole, setRepoDomainOwners, reconcileRepoRoles } from './setup.mjs';
@@ -140,7 +140,7 @@ function rosterRemove(root, login) {
   const idx = hub.roster.findIndex((e) => e.login === login);
   if (idx < 0) { warn(`no roster member with login '${login}'`); return { removed: 0 }; }
   const [removed] = hub.roster.splice(idx, 1);
-  writeJSON(hubPath, hub);
+  writeProductConfig(root, hub);
   ok(`removed ${removed.name} (@${login})`);
   const refs = loadRepos(root).filter((r) => ownersOf(r).includes(removed.name)).map((r) => r.name);
   if (refs.length) hand(`'${removed.name}' is still a domain owner in repos.json for: ${refs.join(', ')} — revoke with \`yad roster revoke ${removed.name} <repo> domain-owner\``);
