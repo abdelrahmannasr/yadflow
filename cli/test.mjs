@@ -121,6 +121,30 @@ test('update never wires a repo that carries none of its wiring', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A team-owned file that happens to sit on a wired path (their own PR template) is not evidence the
+// repo is yad-wired: update must not take it as a cue to perform the whole one-time setup.
+test('update does not treat a hand-written PR template as a wired repo', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(backend, '.github/pull_request_template.md'), '# ours\n');
+  await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(!fs.existsSync(path.join(backend, 'checks')), 'no gate scripts were installed');
+  assert.ok(!fs.existsSync(path.join(backend, '.github/workflows/yad-checks.yml')), 'no workflow was installed');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// An install from before the provenance ledger existed has no records at all; its gate scripts are
+// the proof it was wired, so a template added since still rides update there.
+test('update installs an added template on a pre-ledger wired repo', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.rmSync(path.join(backend, '.sdlc/managed.json'));
+  fs.rmSync(path.join(backend, 'checks/install-deps.sh'));
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(r.counts.new >= 1, 'the absent template is new on a wired repo');
+  assert.ok(fs.existsSync(path.join(backend, 'checks/install-deps.sh')), 'installed by update');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('issue #134: update repairs .cluade safely, drops corrupt targets, and preserves leftovers', async () => {
   const { T } = scaffold();
   const outside = path.join(path.dirname(T), `${path.basename(T)}-outside`);

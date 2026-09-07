@@ -463,7 +463,13 @@ export function repoActions(root, repo) {
   // someone since removed stays `missing` (the team's deletion is respected, as before), while one
   // yad never wrote is the new template. A repo with none of its wiring stays `missing` throughout:
   // update never does one-time setup.
-  const wired = actions.some((a) => a.status !== 'missing');
+  //
+  // "Wired" means yad wired it: the ledger has records, or (an install from before the ledger) a
+  // gate script under checks/ is present. A team-owned file that merely occupies a wired path — a
+  // hand-written PR template reads as `outdated` — is not evidence, or update would perform the
+  // whole one-time setup on a repo that never asked for it.
+  const wired = Object.keys(ledger).length > 0
+    || actions.some((a) => a.status !== 'missing' && a.item.startsWith('checks/'));
   if (!wired) return actions;
   const neverWritten = (a) => !ledger[rel(a.managed.root, a.managed.dest)];
   return actions.map((a) => (a.status === 'missing' && neverWritten(a) ? { ...a, status: 'new' } : a));
