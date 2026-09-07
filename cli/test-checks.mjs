@@ -764,6 +764,27 @@ test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A PATH of the fixture's bin ONLY — this node binary and the few externals the scripts call are
+// symlinked in — so no corepack of the host (nvm, setup-node, a nodesource /usr/bin/corepack, docker
+// images) can leak in and satisfy the guard, or worse, be run against the host. The helper proves
+// the isolation before the test relies on it.
+const isolatedPath = (bin) => {
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  for (const tool of ['bash', 'dirname']) {
+    const found = execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim();
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  const PATH = bin;
+  const probe = spawnSync(path.join(bin, 'bash'), ['-c', 'command -v corepack'], { env: { PATH }, encoding: 'utf8' });
+  assert.equal(probe.error, undefined, probe.error?.message);
+  assert.notEqual(probe.status, 0, `corepack must not be reachable on the isolated PATH (found ${probe.stdout.trim()})`);
+  return PATH;
+};
+const withoutCorepack = (T, env) => {
+  fs.rmSync(path.join(T, 'bin/corepack'));
+  return { ...env, PATH: isolatedPath(path.join(T, 'bin')) };
+};
+
 // ---------- build-test-lint.sh ----------
 const BTL = path.join(CHECKS, 'build-test-lint.sh');
 const INSTALL_DEPS = path.join(CHECKS, 'install-deps.sh');
@@ -930,14 +951,13 @@ test('build-test-lint gate: a pinned npm without corepack on PATH fails with gui
   const T = scaffoldRepo();
   const bin = path.join(T, 'bin');
   fs.mkdirSync(bin);
-  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
   fs.writeFileSync(path.join(bin, 'npm'), '#!/usr/bin/env bash\ntouch "$YAD_RAN_NPM"\n');
   fs.chmodSync(path.join(bin, 'npm'), 0o755);
   commit(T, 'chore: pin npm', {
     'package.json': JSON.stringify({ name: 'fixture', version: '0.0.0', packageManager: 'npm@10.8.2', scripts: { lint: 'true', build: 'true', test: 'true' } }),
   });
   const ran = path.join(T, 'ran-npm');
-  const r = runGate(BTL, T, [], { PATH: `${bin}:/usr/bin:/bin`, YAD_RAN_NPM: ran });
+  const r = runGate(BTL, T, [], { PATH: isolatedPath(bin), YAD_RAN_NPM: ran });
   assert.notEqual(r.code, 0);
   assert.match(r.out, /corepack is not on PATH/);
   assert.ok(!fs.existsSync(ran), 'the ambient npm did not run in its place');
@@ -1094,14 +1114,6 @@ for (const packageManager of [
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
-
-// A PATH with the fixture's stubs and this node binary only, so the runtime's own corepack (nvm,
-// setup-node, docker images) cannot leak in and satisfy the guard.
-const withoutCorepack = (T, env) => {
-  fs.rmSync(path.join(T, 'bin/corepack'));
-  fs.symlinkSync(process.execPath, path.join(T, 'bin/node'));
-  return { ...env, PATH: `${path.join(T, 'bin')}:/usr/bin:/bin` };
-};
 
 test('install-deps: a declared packageManager without corepack on PATH fails with guidance', () => {
   const { T, commandLog, env } = packageFixture({ packageManager: 'pnpm@9.15.0', lockfile: 'pnpm-lock.yaml' });
