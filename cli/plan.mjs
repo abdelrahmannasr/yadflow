@@ -451,9 +451,22 @@ export function legacyHubActions(root) {
 export function repoActions(root, repo) {
   const repoRoot = path.resolve(root, repo.path);
   const ledger = readManagedLedger(repoRoot);
-  return wiringFor(repo.platform).map((w) =>
+  const actions = wiringFor(repo.platform).map((w) =>
     wiredFileAction(repo.name, w.dest, asset(w.src), path.join(repoRoot, w.dest), { root: repoRoot, exec: !!w.exec, ledger }),
   );
+  // A repo that already carries ANY of its wiring is a wired repo, and a template a later release
+  // ADDED to the wiring is `new` there, not `missing` — the same relabel a new first-party skill
+  // gets, for the same reason: `yad update` (--scope=changed) excludes only the literal 'missing'.
+  // Without it an upgrade rewrites the files that CALL the new template (`outdated`) while skipping
+  // the template itself, and every PR fails the gate with "file not found" until someone runs
+  // `yad check --fix`. The ledger tells the two absences apart: a file yad RECORDED writing and
+  // someone since removed stays `missing` (the team's deletion is respected, as before), while one
+  // yad never wrote is the new template. A repo with none of its wiring stays `missing` throughout:
+  // update never does one-time setup.
+  const wired = actions.some((a) => a.status !== 'missing');
+  if (!wired) return actions;
+  const neverWritten = (a) => !ledger[rel(a.managed.root, a.managed.dest)];
+  return actions.map((a) => (a.status === 'missing' && neverWritten(a) ? { ...a, status: 'new' } : a));
 }
 
 // Hub wiring (gate-sync + verified-commits CI on the product hub itself). Only when the hub has a

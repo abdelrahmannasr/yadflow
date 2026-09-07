@@ -78,6 +78,49 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A template a later release ADDS to the repo wiring is `missing` on every repo wired before it.
+// `yad update` (--scope=changed) skips `missing` so it never does one-time setup — which, for a wired
+// repo, meant the files that CALL the new template were refreshed (`outdated`) while the template
+// itself was not, and every PR failed the gate with "file not found" until `yad check --fix` ran.
+// On a wired repo the addition rides update as `new`; a wired file the team deleted (recorded in
+// the ledger) stays `missing` as before, and an un-wired repo stays `missing` throughout.
+test('update installs a template newly added to the wiring of an already-wired repo', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  const ledgerPath = path.join(backend, '.sdlc/managed.json');
+  const added = ['checks/package-manager.sh', 'checks/install-deps.sh'];
+  // Simulate the install a previous release made: the two templates absent, and no record of them.
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  for (const f of added) { fs.rmSync(path.join(backend, f)); delete ledger.files[f]; }
+  fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.equal(checked.value.counts.new, added.length, 'the added templates are reported as new, not missing');
+  assert.equal(checked.value.counts.missing, 0);
+  assert.match(checked.out, /new\s+checks\/install-deps\.sh/);
+
+  // A wired file the team removed on purpose — its record is still in the ledger — is left alone.
+  fs.rmSync(path.join(backend, '.github/workflows/yad-checks.yml'));
+
+  await reconcile(T, { fix: true, scope: 'changed' });
+  for (const f of added) assert.ok(fs.existsSync(path.join(backend, f)), `update installed ${f}`);
+  assert.ok(!fs.existsSync(path.join(backend, '.github/workflows/yad-checks.yml')), 'a recorded, deleted file is not re-added');
+  assert.ok(fs.statSync(path.join(backend, 'checks/install-deps.sh')).mode & 0o100, 'installed executable');
+  const again = await reconcile(T, { fix: false, scope: 'changed' });
+  assert.equal(again.counts.new, 0);
+  assert.equal(again.counts.missing, 1, 'only the deliberately deleted file remains missing');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('update never wires a repo that carries none of its wiring', async () => {
+  const { T, backend } = scaffold();
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(r.counts.missing > 0, 'un-wired repo files stay missing');
+  assert.ok(!fs.existsSync(path.join(backend, 'checks')), 'update did not wire the repo');
+  assert.ok(!fs.existsSync(path.join(backend, '.github/workflows/yad-checks.yml')));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('issue #134: update repairs .cluade safely, drops corrupt targets, and preserves leftovers', async () => {
   const { T } = scaffold();
   const outside = path.join(path.dirname(T), `${path.basename(T)}-outside`);
