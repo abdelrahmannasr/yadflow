@@ -60,7 +60,7 @@ Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
 hub's default branch. Author and commit `ui-design.md` / `DESIGN.md` on it. This is **distinct** from
-the bridge's `review/…` branch.
+the verified ledger's `review/…` branch.
 
 ### Step 2 — Read inputs
 Read `epic.md` (user-level acceptance signals, scope) and `architecture.md` (flows, components by
@@ -172,9 +172,9 @@ Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. 
 
 ### Step 5 — Advance the authoring step (NOT the gate)
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
-**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+**verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
-**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+**verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
 any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
@@ -183,7 +183,7 @@ is pushed around the gate. Commit the artifact set — **`ui-design.md`, `DESIGN
 design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — then hand off to
 `yad-review-gate`.
 
-**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
 `ui-design.status: "done"`, set `ui-design-review.status: "in_review"`, and set
 `currentStep: "ui-design-review"`. Write `state.json`. Do **not** touch `approvals.json`. On this
 branch `yad gate open` makes the same edit, so it is a no-op once the gate has run.
@@ -194,7 +194,7 @@ tool and what it produced (e.g. "Figma — 4 screens generated", the file URL + 
 or "no design tool — markdown-only"), and that the next action is **review** via `yad-review-gate` (base
 rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate opens a review PR on the
 hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
-the ledger; otherwise the review is recorded file-only.
+the ledger; otherwise the review is recorded local.
 
 ## Reference
 - Impeccable commands and the slash-command-vs-CLI deviation: `RESEARCH-NOTES.md` §4 + Deviation 3.

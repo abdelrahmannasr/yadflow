@@ -365,7 +365,7 @@ merge-not-clobber logic, with a **hub-flavored gate set** appropriate to a "thin
 - **approvals-present** — an epic at `ready-for-build` has the approvals its gate rule requires recorded
   in `.sdlc/approvals.json` (the same predicate `yad-review-gate` enforces).
 
-These are advisory checks on the hub's own PRs (the Shape review PRs the bridge opens); they keep
+These are advisory checks on the hub's own PRs (the Shape review PRs the verified ledger opens); they keep
 the hub's artifacts internally consistent. The hub never runs the code-repo `spec-link`/`build-test-lint`
 gates. Author the hub gate scripts under the hub's `checks/` following the same CI-agnostic-bash pattern.
 
@@ -373,7 +373,7 @@ The hub **does** run the verified-commits gate — `yad check --fix` installs `c
 plus a standalone workflow (`templates/github/yad-verified-commits.yml` →
 `.github/workflows/yad-verified-commits.yml`, or the GitLab fragment
 `templates/gitlab/yad-verified-commits.gitlab-ci.yml` → `.gitlab/ci/yad-verified-commits.yml` +
-its one include line) whenever `.sdlc/hub.json` has a platform with the bridge enabled. So the
+its one include line) whenever `.sdlc/hub.json` has a platform with a verified ledger. So the
 Shape review PRs are held to the same rule as code-repo PRs: signed, known authors only.
 
 The hub **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
@@ -391,7 +391,7 @@ line). Code repos run the same three with `--profile code` inside the main `yad-
 
 Not a CI gate — a **harness hook**, and the only piece of yadflow that runs *inside* an agent's tool
 loop. It exists because of the gap #171 reported: `checks/ledger-guard.sh` is correct and blocking,
-but it speaks at CI time. An agent that hand-edits `epics/*/.sdlc/state.json` in bridge mode learns
+but it speaks at CI time. An agent that hand-edits `epics/*/.sdlc/state.json` in verified mode learns
 twenty minutes later, from a FAIL with nothing connecting cause to effect, and by then the write must
 be reverted before the review PR/MR can go green.
 
@@ -431,7 +431,7 @@ logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
 - **Slugs are case-folded**, as the gate folds them. On a case-insensitive filesystem `epics/ep-x/…`
   and `epics/EP-X/…` are the same file, so a byte-exact compare would let a mutation be laundered as
   a creation.
-- Bridge-gated by the same `isBridgeHub` predicate the CLI and the wiring read (#186): without the
+- Verified-only by the same `isVerifiedLedger` predicate the CLI and the wiring read (#186): without the
   bridge the ledger is locally owned, the hand-edit the authoring skills describe is correct, and
   nothing is wired or blocked.
 
@@ -482,7 +482,7 @@ The settings file is the team's, so the rules around that one entry are delibera
 `.claude` is the only IDE target wired: it is the only one with a defined hook protocol. Other
 targets get the script, and the contract above is what they would wire by hand.
 
-`yad doctor` reports the guard on a bridge hub, and distinguishes the three states that matter — it
+`yad doctor` reports the guard on a verified hub, and distinguishes the three states that matter — it
 reads the same persisted `ideTargets` the wiring reads, so every gap it names is one the command it
 names can actually close:
 

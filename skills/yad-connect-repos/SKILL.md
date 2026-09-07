@@ -148,11 +148,28 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
 - **`detect-hub`** — detect the hub's own platform and upsert `.sdlc/hub.json`. Run
   `git remote get-url origin` **on the hub** and read the host with the SAME logic Step 1 uses for code
   repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
-  `git_url`, `default_branch`, `detectedAt`, and `bridge_enabled` — **`true` only when a platform was
-  detected, `false` alongside `platform: null`** (preserve an existing roster). The two travel
-  together: bridge mode is a platform AND the flag (`isBridge`, `cli/gate.mjs`), and `yad setup`
-  derives both from one value, so writing the flag onto a platform-less hub creates a state no CLI
-  path can produce and the gates read differently (#186).
+  `git_url`, `default_branch`, `detectedAt`, and **all three of** `ledger`, `bridge_enabled` and
+  `bridge`:
+
+  | a platform was detected | no platform (`platform: null`) |
+  |---|---|
+  | `"ledger": "verified"`, `bridge_enabled: true`, `bridge: true` | `"ledger": "local"`, `bridge_enabled: false`, `bridge: false` |
+
+  (Preserve an existing roster.)
+
+  **`ledger` is the one that decides.** `isVerifiedLedger` (`cli/manifest.mjs`) reads it first and
+  falls back to the booleans only when it is absent — so on a project that has already run
+  `yad migrate`, writing `bridge_enabled: true` while leaving `"ledger": "local"` in place turns
+  verified mode ON in the file and OFF in the engine. Nothing would be wired, no guard would arm,
+  and the report would say it worked. Write all three, and keep them saying the same thing.
+
+  The booleans are still written because a check gate committed in the repo may predate
+  `yad update`; see `docs/migrations/shape-2.md`.
+
+  A platform and a verified ledger travel together: verified mode is a platform AND the switch
+  (`isVerifiedLedger`, `cli/manifest.mjs`), and `yad setup` derives both from one value, so marking a
+  platform-less hub verified creates a state no CLI path can produce and the gates read
+  differently (#186).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
 - **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `email` + a per-scope
   `roles` map (`roles: { hub: ["owner","reviewer"], <repo>: ["domain-owner", …] }`). Upsert by `login`;
@@ -166,8 +183,8 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   connected repo's role); `yad roster grant|revoke <name> <repo> <role>`; `yad roster remove <login>`.
   A `domain-owner` grant/revoke keeps `repos.json` `domain_owners` in sync so the gate never drifts.
 
-If the hub has no remote (`platform: null`) or the bridge is disabled, the Shape gate runs
-file-only with no error — the bridge is purely additive.
+If the hub has no remote (`platform: null`) or the verified ledger is disabled, the Shape gate runs
+local with no error — the verified ledger is purely additive.
 
 ## Live on-demand (the third context layer)
 The cached pack + map are the default. When a Shape phase needs an **area** not in the map, it may

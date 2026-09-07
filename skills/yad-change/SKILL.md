@@ -20,7 +20,7 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 
 - `{project-root}` resolves from the product hub.
 - Artifacts live under `{project-root}/epics/EP-<slug>/` — the change-epic gets its OWN `EP-<slug>`
-  (assigned here, never renamed) and its own `stories/EP-<slug>-S0N`, so every existing gate, the bridge,
+  (assigned here, never renamed) and its own `stories/EP-<slug>-S0N`, so every existing gate, the verified ledger,
   `yad next`, and the Build traceability keep working unchanged.
 - The thread is **derived** from `parent:` frontmatter (no registry); `thread:` is a cache that must
   equal the computed root (`yad doctor` flags a mismatch). Thread id = the genesis epic's id.
@@ -121,7 +121,7 @@ by `yad-architecture` downstream.
 
 ### Step 5 — Seed `state.json` (inherited steps pre-done; only the changed steps run)
 Create `.sdlc/state.json` with the **same 10-step chain** as `yad-epic` (so `advanceState`/`nextAction`/
-`gatePredicate`/the bridge run unchanged), but:
+`gatePredicate`/the verified ledger run unchanged), but:
 - **Inherited** authoring steps **and their review gates**: `status: "done"`, `"inherited": true`,
   `"inheritedFrom": "<owning epic from the resolved truth>"`, `"boundHash": "<that artifact's current
   hash>"`.
@@ -136,7 +136,7 @@ Seed `.sdlc/comments.json` = `[]` and create `reviews/`.
 
 Commit the seed on the `change/EP-<slug>` branch. It reaches the hub's default branch through this
 change-epic's **first** review PR/MR — cut the `review/EP-<slug>/<artifact>` branch from `change/…` so
-it carries the seed. In bridge mode `ledger-guard` exempts a new epic's ledger (creation, not mutation,
+it carries the seed. In verified mode `ledger-guard` exempts a new epic's ledger (creation, not mutation,
 #162), so no direct push to a protected default branch is needed; every later change to that ledger is
 CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
 

@@ -92,7 +92,7 @@ Check `{project-root}/epics/` for collisions; if the slug exists, append a disti
 Open the epic authoring branch `epic/EP-<slug>` per the shared procedure
 (`references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
 is not a git work tree), check out the branch if it exists, else create it from the hub's default
-branch. Author and commit `epic.md` on it. This is **distinct** from the bridge's `review/…` branch.
+branch. Author and commit `epic.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 4 — Write the epic (assist: pm)
 Adopt the **pm** lens (`bmad-agent-pm`, John) and write `{project-root}/epics/EP-<slug>/epic.md`
@@ -155,7 +155,7 @@ Notes:
   runs alongside the tester. They never gate `ready-for-build` (see `references/state-schema.md`).
 - Commit the seed on this step's authoring branch. It reaches the hub's default branch through the
   epic's **first** review PR/MR — cut `review/EP-<slug>/epic` from the authoring branch so it carries
-  the seed. In bridge mode `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162);
+  the seed. In verified mode `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162);
   every later change to it is CI's. See `references/state-schema.md`, "Authoring branches".
 - Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
   and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
@@ -171,9 +171,9 @@ Notes:
 ### Step 5b — Advance the authoring step — analysis-ran only
 *(Only when analysis ran — `state.json` already exists from `yad-analysis`.)*
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
-**bridge mode** is `platform` set AND `bridge_enabled` (or legacy `bridge`) `true`.
+**verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
-**Bridge mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
+**verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
 any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
@@ -185,15 +185,15 @@ to `yad-review-gate`.
 > (creation, not mutation, #162). On this path `state.json` already exists from `yad-analysis` and
 > reached the base ref through the analysis review — so the guard is absolute here.
 
-**Otherwise — file-only, or a platform with no gate-sync CI — write it.** In `state.json`: set
+**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
 `epic.status: "done"`, set `epic-review.status: "in_review"`, and set `currentStep: "epic-review"`.
 Write `state.json`. Do **not** re-seed and do **not** touch `approvals.json` — only real reviewers
 approve, through the gate.
 
-> **File-only branch only.** Since 3.11 the CLI closes the authoring step itself whenever its review
+> **local branch only.** Since 3.11 the CLI closes the authoring step itself whenever its review
 > gate opens or advances (`yad gate open` / `sync`), so this edit is a no-op when the gate has already
 > run. It keeps `state.json` truthful before the gate opens, but it is no longer load-bearing: an epic
-> whose author step is left `in_progress` used to strand forever (`YAD-STATE-005`). In bridge mode
+> whose author step is left `in_progress` used to strand forever (`YAD-STATE-005`). In verified mode
 > `gate open` writes nothing and local `gate sync` is advisory — `gate ci` closes the step at merge.
 
 ### Step 6 — Stop at the gate (do NOT advance)
@@ -201,7 +201,7 @@ Report: epic ID, the path to `epic.md`, and that the next action is **review** v
 `yad-review-gate`. **Never mark the epic-review step approved here** — only real reviewers do that
 through the gate. Shape steps do not auto-advance. When the hub has a platform, the gate opens a review
 PR on the hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/
-comments into the ledger; otherwise the review is recorded file-only.
+comments into the ledger; otherwise the review is recorded local.
 
 ## Reference
 - State schema and field meanings: `references/state-schema.md`.

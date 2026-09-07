@@ -147,21 +147,26 @@ export const TESTING_PRIMARY = 'playwright';
 export const LEARNING_TOOLS = ['deeptutor'];
 export const LEARNING_PRIMARY = 'deeptutor';
 
-// The shape (schema version) every file the engine writes declares, as `"schemaVersion": 1`.
+// The shape (schema version) every file the engine writes declares, as `"schemaVersion": <n>`.
 //
 // Rule 1 of the change-safety rules (docs/roadmap-idea-1.md, Part 2): every file states its shape,
 // and a file with no version counts as 1.
 //
-// Today the stamp is written and read back, and nothing yet acts on it: raising this number would move
-// what new files say without upgrading existing ones. The two halves that make it usable are the next
-// tasks on the roadmap — `yad migrate` (E14), which moves a project from one shape to the next, and a
-// `yad doctor` report (E16) for a project whose files disagree with the engine. Do NOT raise this
-// number before both exist.
+// Raising this number is not a one-line change. Three things move together, or a project is left
+// holding files it cannot upgrade:
+//   1. a step appended to MIGRATIONS (cli/migrate.mjs) taking a file from the old shape to the new
+//      one — the chain from 1 upwards must have no gap, which cli/test-migrate.mjs asserts;
+//   2. `docs/migrations/shape-<n>.md`, which scripts/shape-guide-check.sh REFUSES to release without;
+//   3. every writer of the changed file taught to write the new shape's fields.
+// `yad doctor` reports a project whose files disagree with this number, and `yad migrate` is what
+// closes the gap.
+//
+// 2 — `.sdlc/hub.json` records who writes the ledger as `ledger: verified | local` (E104).
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
@@ -174,17 +179,31 @@ export const PROJECT_FILES = {
   version: '.sdlc/cli-version.json',
 };
 
-// Bridge mode: a platform AND the gate-sync CI explicitly enabled (the canonical `bridge_enabled`,
-// or the older `bridge`). ONLY then is CI the sole ledger writer — so `gate open`/`sync` stay
-// hands-off, `hubActions` wires the hub CI, and the ledger guards (the `ledger-guard` check gate and
-// the `yad hook ledger-guard` harness hook) are live. A platform without the bridge keeps the local
-// write path, or reviews could never advance.
+// Who writes the ledger. Two values, and the switch lives in `.sdlc/hub.json`:
 //
-// ONE definition, imported by every JS caller. Copies that drift are how #186 happened — a hub that
-// one reader called bridge and another called file-only had no permitted ledger writer at all.
-// `templates/checks/ledger-guard.sh` re-implements it in bash because the check gates are standalone
-// by design; that copy is the only one, and its header says so.
-export const isBridgeHub = (hub) => !!(hub?.platform && (hub.bridge_enabled === true || hub.bridge === true));
+//   ledger: "verified"  CI only, with a platform-Verified signature. A local `gate open` is
+//                       advisory and writes nothing; `ledger-guard` rejects any non-bot commit.
+//   ledger: "local"     your machine. Works offline, no CI needed, guarded by nothing.
+//
+// `verified` is the old "bridge mode" renamed. The old name described a mechanism; this one
+// describes what you get, and it is the word the platform shows next to the commits.
+//
+// READ ORDER, and it matters (rule 2 — read old, write new):
+//   1. `ledger`, if the file carries it — shape 2 and later.
+//   2. otherwise the old booleans `bridge_enabled` (canonical) or `bridge` (older still).
+// A platform is required either way. Without one there is no Verified badge to read, so CI cannot
+// be the sole writer and the local path has to stay open — otherwise a hub has no permitted writer
+// at all and no gate can ever advance (issue #186).
+//
+// ONE definition, imported by every JS caller. `templates/checks/ledger-guard.sh` re-implements the
+// SAME order in bash because the check gates are standalone by design; that copy is the only one,
+// its header says so, and cli/test-checks.mjs runs a table of hub.json variants through both and
+// asserts they agree on every row. Three keys is three ways for two readers to drift.
+export const isVerifiedLedger = (hub) => {
+  if (!hub?.platform) return false;
+  if (typeof hub.ledger === 'string') return hub.ledger === 'verified';
+  return hub.bridge_enabled === true || hub.bridge === true;
+};
 
 // ---- `yad commit` conventions (mirror skills/sdlc/config.yaml `build`) ----
 // Conventional-commit types (config.yaml commit_subject_style).
@@ -277,7 +296,7 @@ export const wiringFor = (platform) => [
 ];
 
 // Hub wiring: CI installed on the PRODUCT HUB itself (dest is the project root — the hub IS the
-// root). Installed only when hub.json has a platform and the bridge is enabled. Carries the
+// root). Installed only when hub.json has a platform and the ledger is verified. Carries the
 // event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
 // verified-commits gate (no unverified commits from unverified users reach merge on the hub).
 export const HUB_WIRING = {
@@ -307,7 +326,7 @@ export const HUB_WIRING = {
 };
 
 // Harness hooks: the LOCAL half of the ledger rule, installed on the hub beside the CI gates and
-// active under the same bridge predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
+// active under the same verified-ledger predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
 // CI gate — it is advisory, fails open, and its adapter (below) is per-harness, not per-platform.
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },

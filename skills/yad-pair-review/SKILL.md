@@ -125,7 +125,7 @@ addresses them) — nothing advances on a half-finished session.
   or push the records/tutorials, and never write them into a code repo.
 - **You never approve for the human and never merge.** You pair and teach; the human acts.
 
-## File-only mode (no platform)
+## local mode (no platform)
 
 With no hub platform there is no PR to post to: write the session record to
 `reviews/<base>--<date>--pair-session.md` alongside the existing `reviews/*.md`, and the human records

@@ -33,7 +33,7 @@ body:
     id: platform
     attributes:
       label: Platform
-      options: [GitHub, GitLab, file-only (no platform)]
+      options: [GitHub, GitLab, local (no platform)]
     validations:
       required: true
   - type: textarea

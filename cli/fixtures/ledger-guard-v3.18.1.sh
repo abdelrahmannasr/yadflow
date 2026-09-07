@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ledger-guard gate.
-# In verified mode the gate ledger is CI-owned: only the yad gate-sync bot may change the
+# In BRIDGE mode the gate ledger is CI-owned: only the yad gate-sync bot may change the
 # machine-written gate-state files. A commit on a review PR by anyone else that modifies them is
 # rejected — the human keeps the artifact, CI keeps the ledger. This makes "CI is the sole writer of
 # the ledger" a mechanical guarantee instead of a convention.
@@ -20,22 +20,21 @@
 # distinguishes CI-generated commits. A spoofed-author commit that is not Verified is treated as a
 # human edit and rejected.
 #
-# Scope: enforced ONLY when the ledger is verified — hub.json carries BOTH a `platform` and either
-# `ledger: "verified"` or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or the
-# legacy `bridge`) true. That is the same predicate `isVerifiedLedger` (cli/manifest.mjs) and
-# `hubActions` (cli/plan.mjs) apply. With a local ledger — or a platform-less hub — humans
-# legitimately write the ledger themselves, so the gate is a no-op.
+# Scope: enforced ONLY when the bridge is enabled — hub.json carries BOTH a `platform` and
+# `bridge_enabled` (or the legacy `bridge`) true, the same predicate `isBridge` (cli/gate.mjs) and
+# `hubActions` (cli/plan.mjs) apply. Without the bridge (file-only / non-bridge, or a platform-less
+# hub) humans legitimately write the ledger locally, so the gate is a no-op.
 #
 # Degradation: a base ref that cannot be resolved FAILs closed; no platform (cannot read the Verified
 # badge) WARNs and waives the signature half — the same stance verified-commits takes.
 set -euo pipefail
 
 # ---- bridge gate: only CI-owned ledgers are guarded -------------------------------------------
-# The predicate is BOTH a platform and the verified ledger flag, exactly as `isVerifiedLedger` (`cli/manifest.mjs`) and
+# The predicate is BOTH a platform and the bridge flag, exactly as `isBridge` (cli/gate.mjs) and
 # `hubActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
-# other ledger reader (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
+# other bridge detector (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
 # have its human ledger commits rejected here while the CLI, reading the same file, called it
-# local and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate
+# file-only and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate
 # could advance. Reachable through a stale install (platform set, script wired, platform later
 # nulled), not through `yad setup`, which derives both from one value.
 #
@@ -46,7 +45,7 @@ set -euo pipefail
 # Matched at the ROOT LEVEL only. The shared `default_branch` read below is depth-blind, and that is
 # survivable there — a false match yields a bogus branch name and the gate fails loudly. Here it is
 # not: a nested `"bridge": true` (say under `review`) would silently ENABLE this gate on a hub whose
-# `isVerifiedLedger` is false, recreating the exact no-writer deadlock #186 is about, from the other side. So
+# `isBridge` is false, recreating the exact no-writer deadlock #186 is about, from the other side. So
 # the nesting is stripped rather than ignored: peel the outermost braces, then delete innermost
 # objects/arrays until none remain, leaving only root-level pairs to match against. Not a JSON parser
 # — a value containing a literal brace would confuse it — but hub.json is machine-written and the
@@ -68,37 +67,9 @@ done
 # SIGPIPE-under-pipefail problem this avoids).
 hub_str() { sed -nE "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p" <<< "$HUB_ROOT"; }
 hub_true() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*true" <<< "$HUB_ROOT"; }
-# Is the key present with a STRING value at all, empty included? `hub_str` cannot answer this: it
-# returns nothing both for a missing key and for an empty one.
-hub_has_str() { grep -Eq "\"$1\"[[:space:]]*:[[:space:]]*\"" <<< "$HUB_ROOT"; }
 
-# READ ORDER, identical to `isVerifiedLedger` (cli/manifest.mjs) — the two must never disagree:
-#   1. `ledger`, if hub.json carries it — shape 2 and later. "verified" and nothing else.
-#   2. otherwise the old booleans `bridge_enabled` (canonical) or `bridge` (older still).
-# A platform is required either way, for the reason in the header.
-#
-# Step 2 is NOT dead weight. This script is committed inside the user's repo and refreshed by
-# `yad update`, which is a separate act from `yad migrate` — so an un-migrated hub.json (no `ledger`
-# key at all) will be read by this version of the script, and it has to keep saying "verified".
-# cli/test-checks.mjs runs a table of hub.json variants through this script AND through the JS
-# reader and asserts they agree on every row.
-# Written as if/else rather than `cmd; verified=$?`: under the `set -e` above, a bare failing test
-# would EXIT the script instead of recording a false — and exiting mid-guard is indistinguishable
-# from passing, so the gate would silently stop guarding.
-# PRESENCE of the key decides which branch runs, not whether its value is non-empty. `"ledger": ""`
-# is a present key with a string value: the JS reader stops there and answers "local", so this must
-# too. Testing `-n` instead sent an empty value down to the old booleans and the two readers gave
-# OPPOSITE answers — the guard rejecting human writes while the CLI kept the local path open, which
-# is the no-writer deadlock of #186 reached from a third direction.
-verified=no
-if hub_has_str ledger; then
-  if [ "$(hub_str ledger)" = "verified" ]; then verified=yes; fi
-elif hub_true bridge_enabled || hub_true bridge; then
-  verified=yes
-fi
-
-if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || [ "$verified" != yes ]; then
-  echo "PASS [ledger-guard]: the ledger is locally owned (ledger: local) — nothing to guard."
+if [ ! -f "$HUB" ] || [ -z "$(hub_str platform)" ] || { ! hub_true bridge_enabled && ! hub_true bridge; }; then
+  echo "PASS [ledger-guard]: bridge not enabled — the ledger is locally owned, nothing to guard."
   exit 0
 fi
 
@@ -188,7 +159,7 @@ trusted_bot() {
 # A brand-new epic's ledger has no CI author. `gate ci` only ADVANCES an existing chain — it bails on
 # a missing state.json ("the review branch is cut from the default branch, so it should carry it") and
 # writes only at merge, on the default branch — and the engine itself reads a missing state.json as
-# "not seeded yet". `gate open` writes nothing in verified mode, and `checkpoint` stages Build
+# "not seeded yet". `gate open` writes nothing in bridge mode, and `checkpoint` stages back-half
 # ledgers only. So the seed the authoring skills write (yad-epic / yad-change / yad-analysis /
 # yad-discovery / yad-stub) can reach the trunk ONLY through the first review PR/MR — the one place
 # this gate runs. Guarding it there makes the documented flow unshippable on a protected trunk, so an

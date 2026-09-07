@@ -2,7 +2,7 @@
 
 The roster lives in `.sdlc/hub.json` (`roster: [...]`) and is the only thing that turns a platform
 **login** into an SDLC **name + role** for the ledger. Schema and the no-tokens rule are documented once
-in `../../yad-connect-repos/references/hub-config.md`; this file covers how the bridge *uses* it.
+in `../../yad-connect-repos/references/hub-config.md`; this file covers how the verified ledger *uses* it.
 It is populated/edited any time with the `yad roster` CLI command (see that reference).
 
 ## Entry
@@ -34,7 +34,7 @@ It is populated/edited any time with the `yad roster` CLI command (see that refe
 1. **login → name + roles** from the roster. The `hub` roles map straight to records; each touched
    domain `R` contributes the roles in `roles[R]` (a `domain-owner` role carries `domain: R`).
 2. **Legacy domain-owner fallback:** if the resolved `name` equals a repo's `domain_owner` in
-   `repos.json`, and that repo is a **touched domain** for the step under review, the bridge also emits a
+   `repos.json`, and that repo is a **touched domain** for the step under review, the verified ledger also emits a
    `domain-owner` approval scoped to that repo (`domain: <repo>`). One person owning several repos yields
    several `domain-owner` records with different `domain` values — exactly what the gate predicate allows.
 3. **Unmapped login → reviewer (flagged).** A login not in the roster maps to `name: <login>`,
@@ -58,7 +58,7 @@ When a review PR/MR is opened (hub `yad gate open`, or a code-repo `yad open-pr`
 ## Per-repo routing (stories review, and any escalated step)
 
 The stories review needs a `domain-owner` per repo in the **union of every story's `repos`**. On the
-review PR the bridge makes this legible and enforceable:
+review PR the verified ledger makes this legible and enforceable:
 
 - Add a `domain:<repo>` **label** per touched repo.
 - **Request** each touched repo's `domain_owner` login as a reviewer (resolved via the roster).

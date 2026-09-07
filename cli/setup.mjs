@@ -152,7 +152,7 @@ export function buildReconfiguredHub(cur, fields) {
 export function upsertRosterEntry(root, { login, name, email, roles = {}, platform } = {}) {
   if (!login) { warn('roster upsert needs a login — skipped'); return { entry: null, created: false }; }
   const hubPath = path.join(root, PROJECT_FILES.hubConfig);
-  const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
+  const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, ledger: 'local', bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
   if (!Array.isArray(hub.roster)) hub.roster = [];
   let entry = hub.roster.find((e) => e.login === login);
   const created = !entry;
@@ -484,7 +484,7 @@ export async function runSetup(root, opts = {}) {
   S(solo ? 'Hub platform (solo — no roster)' : 'Hub platform & reviewer roster');
   guide(solo
     ? [
-      'Your hub is this repo on GitHub/GitLab (or none for a file-only gate).',
+      'Your hub is this repo on GitHub/GitLab (or none for a local gate).',
       'Solo: no roster needed — you review by merging your own PR (approval waived).',
     ]
     : [
@@ -501,7 +501,7 @@ export async function runSetup(root, opts = {}) {
     let platform = detectPlatform(remote.ok ? remote.stdout : '');
     platform = (await ask('Hub platform (github/gitlab/none)', platform || 'none')).toLowerCase();
     if (!['github', 'gitlab', 'none'].includes(platform)) {
-      warn(`unknown platform '${platform}' — using none (file-only gate)`);
+      warn(`unknown platform '${platform}' — using none (local gate)`);
       platform = 'none';
     }
     const roster = [];
@@ -528,10 +528,13 @@ export async function runSetup(root, opts = {}) {
       }
     }
     const default_branch = platform === 'none' ? 'main' : await ask('Hub default branch', 'main');
-    // `bridge_enabled` is the canonical flag (hub-config schema); keep the legacy `bridge` spelling
-    // for anything that still reads it.
+    // `ledger` is the canonical switch (shape 2): "verified" = CI writes the ledger, "local" = this
+    // machine does. The two booleans below say the same thing in the older spelling and are written
+    // ALONGSIDE it, not instead of it — add before you remove (rule 3). They are what a check gate
+    // that has not been refreshed by `yad update` yet still reads, and what a hub that is rolled back
+    // to a 3.x CLI would fall back to. They go in a later major, once nothing on either side reads them.
     const enabled = platform !== 'none';
-    // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the bridge/PR flow
+    // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the verified ledger/PR flow
     // needs it to open PRs. Derived from the origin remote already resolved above; null when local-only.
     const git_url = enabled ? ((remote.ok && remote.stdout.trim()) || null) : null;
     // Merge into the existing file, never clobber: roster + verified_authors are user-owned identity
@@ -540,8 +543,17 @@ export async function runSetup(root, opts = {}) {
     // Read strict so a corrupt hub aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
     // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
     const cur = readJSONStrict(hubPath, {}) || {};
+    // `ledger` belongs to shape 2. On a project still on shape 1 — one that has not run
+    // `yad migrate` yet — writing it would leave a file DECLARING shape 1 while carrying a shape-2
+    // field, which is rule 1 read backwards and makes `yad doctor`'s drift report a lie about the
+    // one file this shape change is about. The old booleans below say the same thing and are what
+    // the reader falls back to when `ledger` is absent, so nothing is lost by waiting: `yad migrate`
+    // adds the key, and the setting it computes is the one these booleans just recorded.
+    const onNewShape = (cur.schemaVersion ?? 1) >= 2 || !Object.keys(cur).length;
     const next = buildReconfiguredHub(cur, {
-      platform: enabled ? platform : null, git_url, bridge_enabled: enabled, bridge: enabled,
+      platform: enabled ? platform : null, git_url,
+      ...(onNewShape ? { ledger: enabled ? 'verified' : 'local' } : {}),
+      bridge_enabled: enabled, bridge: enabled,
       default_branch, roster, solo, profile: { codebase, repo_layout, team_size },
     });
     if (!roster.length && Array.isArray(cur.roster) && cur.roster.length) {
@@ -735,7 +747,7 @@ export async function runSetup(root, opts = {}) {
   }
   applyActions(legacyHubActions(root), { force: true });
   // the hub, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
-  // the moment it tries it rather than by a failed pipeline later (#171). Bridge-gated like the CI
+  // the moment it tries it rather than by a failed pipeline later (#171). Verified-only like the CI
   // above — with no bridge the ledger is locally owned and the guard would be wrong.
   const hookWiring = hookActions(root, ideTargets);
   if (hookWiring.length) {

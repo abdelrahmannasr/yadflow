@@ -1,6 +1,6 @@
 // `yad hook ledger-guard` — the harness-side half of the ledger rule (#171).
 //
-// In BRIDGE mode the gate ledger is CI-owned: `templates/checks/ledger-guard.sh` rejects any non-bot
+// In verified mode the gate ledger is CI-owned: `templates/checks/ledger-guard.sh` rejects any non-bot
 // commit that changes `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`.
 // That gate is the authority, but it only speaks at CI time — an agent that hand-edits `state.json`
 // learns twenty minutes later, from a failed pipeline with nothing connecting cause to effect. This
@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, isBridgeHub } from './manifest.mjs';
+import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -148,7 +148,7 @@ export function denyMessage({ epic, rel, hubRoot }) {
   return [
     `[yad] Blocked: ${rel} is CI-owned gate state.`,
     '',
-    'This hub runs in bridge mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
+    'This hub runs in verified mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
     'check rejects any non-bot commit that changes it, so this edit cannot reach the default branch —',
     'it would fail the review PR/MR and have to be reverted.',
     '',
@@ -180,7 +180,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
     // Non-strict on purpose: a hub.json that does not parse is a real problem, but refusing every
     // edit in the repo is not this hook's way of reporting it (`yad doctor` says so properly).
     const hub = readJSON(path.join(hubRoot, PROJECT_FILES.hubConfig), null);
-    if (!isBridgeHub(hub)) continue;
+    if (!isVerifiedLedger(hub)) continue;
     const rel = path.relative(hubRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;

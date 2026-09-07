@@ -117,7 +117,7 @@ Also create the empty ledgers `{.sdlc/approvals.json}` and `{.sdlc/comments.json
 `reviews/` directory. **Do NOT** write a `contract-lock.json` — a stub has no locked surface yet.
 
 Commit the seed on this step's authoring branch; it reaches the hub's default branch through the
-epic's **first** review PR/MR (or, for a stub, the PR that carries the stub itself). In bridge mode
+epic's **first** review PR/MR (or, for a stub, the PR that carries the stub itself). In verified mode
 `ledger-guard` exempts a new epic's ledger — creation, not mutation (#162) — while every later change
 to it stays CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
 

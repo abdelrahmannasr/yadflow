@@ -424,7 +424,7 @@ each code repo/
 <section id="gate">
   <h2>3. The review gate — the same loop, everywhere</h2>
   <p>Every review in the workflow is the <em>same</em> loop, run by <code>yad-review-gate</code>.
-  Commenting never advances anything. Only an explicit <code>advance</code> (file-only mode) or the
+  Commenting never advances anything. Only an explicit <code>advance</code> (local mode) or the
   merge of an approved, fully-resolved review PR (platform mode) moves the step forward — and only
   when the approval rule is met.</p>
 
@@ -527,7 +527,7 @@ each code repo/
   <div class="term"><strong>Owner</strong><span class="badge b-role">roles</span><br>The person responsible for an artifact, who addresses comments and can advance its gate. Others are commenters — this avoids the “everyone must approve everything” deadlock.</div>
   <div class="term"><strong>Reviewer</strong><span class="badge b-role">roles</span><br>A team member who reads, challenges and comments on an artifact, and records an approval when satisfied.</div>
   <div class="term"><strong>Domain owner</strong><span class="badge b-role">roles</span><br>The engineer responsible for one code repo (e.g. carol for backend, dave for mobile). Pulled into reviews when their repo is affected, and into PR reviews on high-risk changes.</div>
-  <div class="term"><strong>File-only gate</strong><span class="badge b-gate">gates</span><br>The gate run purely on files (no platform): reviewers comment in <code>reviews/…--comments.md</code>, approvals land in <code>approvals.json</code>, and an explicit <code>advance</code> moves the step. The mode everything degrades to when there is no GitHub/GitLab or no CLI.</div>
+  <div class="term"><strong>local gate</strong><span class="badge b-gate">gates</span><br>The gate run purely on files (no platform): reviewers comment in <code>reviews/…--comments.md</code>, approvals land in <code>approvals.json</code>, and an explicit <code>advance</code> moves the step. The mode everything degrades to when there is no GitHub/GitLab or no CLI.</div>
   <div class="term"><strong>PR-driven gate</strong><span class="badge b-gate">gates</span><br>When the hub is on a platform: each artifact’s review rides a real PR/MR. Reviewers approve/comment there; <code>yad gate sync</code> maps that state into the file ledger, and the step auto-advances <em>on merge</em> once the rule is met and every comment thread is resolved. The merge click is the human approval act.</div>
   <div class="term"><strong>Hub bridge (<code>yad-hub-bridge</code>)</strong><span class="badge b-gate">gates</span><br>The machinery that connects the file ledger to platform PRs/MRs: opens the review PR per artifact, sets required reviewers/labels from the routing rule, and provides the read-only <code>gh</code>/<code>glab</code> recipes for syncing approvals and comments back.</div>
   <div class="term"><strong>Merge-time gate sync</strong><span class="badge b-gate">gates</span><br>A CI workflow on the hub that runs <code>yad gate ci</code> on merge — <strong>CI is the sole writer of the ledger</strong>, and writes only at merge, on the default branch. During review CI writes nothing: the platform PR/MR is the source of truth (native approvals + threads), and CI never touches the review branch — so an in-flight approval is never dismissed and required checks never strand. On the human merge it re-reads approvals, advances the step, and flips the artifact status on the default branch. The sweep that catches a missed merge keeps re-visiting each merged review for a week — that costs a read, not a commit, because the ledgers are written in a canonical order and an unchanged record re-serializes to an identical file (#163). A <code>ledger-guard</code> check keeps humans out of the gate files — with one carve-out: a brand-new epic's <strong>seed</strong>, which no CI path can write, so it rides the epic's first review PR/MR (creation, not mutation). CI never approves and never merges; the human keeps the merge click, then <code>git pull</code>s.</div>
@@ -898,15 +898,15 @@ yad-review-gate … action: comment    # record a reviewer's notes (never advanc
 yad-review-gate … action: approve    # record an approval (name + role)
 yad-review-gate … action: sync       # pull approvals/comments from the hub review PR
 yad-review-gate … action: advance    # move on — only if the rule is met, else it names who's missing</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> After every author step — the artifact is written and waiting. Use <code>open → comment → approve → advance</code> for the file-only gate; add <code>sync</code> when the hub is on a platform and reviewers worked on the PR.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> After every author step — the artifact is written and waiting. Use <code>open → comment → approve → advance</code> for the local gate; add <code>sync</code> when the hub is on a platform and reviewers worked on the PR.</div>
   </div>
 
   <div class="skillcard" id="sk-bridge">
     <h4><code>yad-hub-bridge</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The bridge between the file ledger and real PRs/MRs on the hub: opens a review PR per artifact, sets the required reviewers and labels from the routing rule, and provides the read-only <code>gh</code>/<code>glab</code> recipes that pull platform approvals and comments back into the files. The file ledger always stays the source of truth.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> the verified ledger between the file ledger and real PRs/MRs on the hub: opens a review PR per artifact, sets the required reviewers and labels from the routing rule, and provides the read-only <code>gh</code>/<code>glab</code> recipes that pull platform approvals and comments back into the files. The file ledger always stays the source of truth.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Mostly invoked <em>for</em> you by the gate (its <code>open</code>/<code>sync</code>). You call it directly once, to wire the event-driven sync CI:</div>
 <pre><code>yad-hub-bridge action: wire    # hub CI runs `yad gate ci` on every approve / request-changes / merge</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Once during setup (step “wire the hub”), if you want Shape reviews to ride real PRs/MRs. No platform or no <code>gh</code>/<code>glab</code>? Everything degrades to the file-only gate with no error — you never <em>need</em> this skill.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Once during setup (step “wire the hub”), if you want Shape reviews to ride real PRs/MRs. No platform or no <code>gh</code>/<code>glab</code>? Everything degrades to the local gate with no error — you never <em>need</em> this skill.</div>
   </div>
 
   <h3>Build — turn stories into shipped code (in a code repo)</h3>
@@ -1105,7 +1105,7 @@ npx yadflow migrate --apply  # do it, backing up first</code></pre>
     <div class="row"><span class="lbl lbl-what">What</span> Opens the review PR/MR on the hub for one authored artifact (epic, architecture, UI, stories…), sets the required reviewers and labels from the routing rule, and marks the step <code>in_review</code>.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad gate open EP-checkout epic.md</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Right after an author step finishes, when the hub is on a platform. (No platform? Use the <code>yad-review-gate</code> skill file-only instead.)</div>
+    <div class="row"><span class="lbl lbl-when">When</span> Right after an author step finishes, when the hub is on a platform. (No platform? Use the <code>yad-review-gate</code> skill local instead.)</div>
   </div>
 
   <div class="skillcard">
