@@ -63,15 +63,85 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
     '_bmad/sdlc/config.yaml',
     'demo/backend/.github/workflows/yad-checks.yml',
     'demo/backend/checks/spec-link.sh',
+    'demo/backend/checks/package-manager.sh',
+    'demo/backend/checks/install-deps.sh',
     'demo/backend/.github/pull_request_template.md',
     '.sdlc/cli-version.json',
   ]) assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
 
   assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/spec-link.sh')).mode & 0o100, 'gate script executable');
+  assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/install-deps.sh')).mode & 0o100, 'dependency installer executable');
 
   const r2 = await reconcile(T, { fix: false });
   assert.equal(r2.counts.missing, 0);
   assert.equal(r2.counts.outdated, 0);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A template a later release ADDS to the repo wiring is `missing` on every repo wired before it.
+// `yad update` (--scope=changed) skips `missing` so it never does one-time setup — which, for a wired
+// repo, meant the files that CALL the new template were refreshed (`outdated`) while the template
+// itself was not, and every PR failed the gate with "file not found" until `yad check --fix` ran.
+// On a wired repo the addition rides update as `new`; a wired file the team deleted (recorded in
+// the ledger) stays `missing` as before, and an un-wired repo stays `missing` throughout.
+test('update installs a template newly added to the wiring of an already-wired repo', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  const ledgerPath = path.join(backend, '.sdlc/managed.json');
+  const added = ['checks/package-manager.sh', 'checks/install-deps.sh'];
+  // Simulate the install a previous release made: the two templates absent, and no record of them.
+  const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  for (const f of added) { fs.rmSync(path.join(backend, f)); delete ledger.files[f]; }
+  fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+
+  const checked = await captureConsole(() => reconcile(T, { fix: false, scope: 'changed' }));
+  assert.equal(checked.value.counts.new, added.length, 'the added templates are reported as new, not missing');
+  assert.equal(checked.value.counts.missing, 0);
+  assert.match(checked.out, /new\s+checks\/install-deps\.sh/);
+
+  // A wired file the team removed on purpose — its record is still in the ledger — is left alone.
+  fs.rmSync(path.join(backend, '.github/workflows/yad-checks.yml'));
+
+  await reconcile(T, { fix: true, scope: 'changed' });
+  for (const f of added) assert.ok(fs.existsSync(path.join(backend, f)), `update installed ${f}`);
+  assert.ok(!fs.existsSync(path.join(backend, '.github/workflows/yad-checks.yml')), 'a recorded, deleted file is not re-added');
+  assert.ok(fs.statSync(path.join(backend, 'checks/install-deps.sh')).mode & 0o100, 'installed executable');
+  const again = await reconcile(T, { fix: false, scope: 'changed' });
+  assert.equal(again.counts.new, 0);
+  assert.equal(again.counts.missing, 1, 'only the deliberately deleted file remains missing');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('update never wires a repo that carries none of its wiring', async () => {
+  const { T, backend } = scaffold();
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(r.counts.missing > 0, 'un-wired repo files stay missing');
+  assert.ok(!fs.existsSync(path.join(backend, 'checks')), 'update did not wire the repo');
+  assert.ok(!fs.existsSync(path.join(backend, '.github/workflows/yad-checks.yml')));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A team-owned file that happens to sit on a wired path (their own PR template) is not evidence the
+// repo is yad-wired: update must not take it as a cue to perform the whole one-time setup.
+test('update does not treat a hand-written PR template as a wired repo', async () => {
+  const { T, backend } = scaffold();
+  fs.writeFileSync(path.join(backend, '.github/pull_request_template.md'), '# ours\n');
+  await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(!fs.existsSync(path.join(backend, 'checks')), 'no gate scripts were installed');
+  assert.ok(!fs.existsSync(path.join(backend, '.github/workflows/yad-checks.yml')), 'no workflow was installed');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// An install from before the provenance ledger existed has no records at all; its gate scripts are
+// the proof it was wired, so a template added since still rides update there.
+test('update installs an added template on a pre-ledger wired repo', async () => {
+  const { T, backend } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.rmSync(path.join(backend, '.sdlc/managed.json'));
+  fs.rmSync(path.join(backend, 'checks/install-deps.sh'));
+  const r = await reconcile(T, { fix: true, scope: 'changed' });
+  assert.ok(r.counts.new >= 1, 'the absent template is new on a wired repo');
+  assert.ok(fs.existsSync(path.join(backend, 'checks/install-deps.sh')), 'installed by update');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -193,6 +263,54 @@ test('yad-checks.yml: pull_request trigger includes `edited`; commit-range jobs 
   for (const job of ['spec-link', 'contract-check', 'build-test-lint', 'commit-message', 'verified-commits']) {
     assert.match(jobBlock(job), SKIP_GUARD, `${job} must skip a bare edited event`);
   }
+});
+
+test('yad-checks CI: dependency install follows package.json and Nx receives the exact PR range', () => {
+  const github = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/github/yad-checks.yml'), 'utf8');
+  const gitlab = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml'), 'utf8');
+  const gitlabStandalone = fs.readFileSync(path.join(ROOT, 'skills/yad-checks/templates/gitlab/.gitlab-ci.yml'), 'utf8');
+  assert.match(github, /filter:\s*blob:none/, 'GitHub checkout avoids materializing unrelated history blobs');
+  assert.match(github, /NX_BASE:\s*\$\{\{ github\.event\.pull_request\.base\.sha \}\}/);
+  assert.match(github, /NX_HEAD:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(github, /YAD_NODE_VERSION:\s*\$\{\{ vars\.YAD_NODE_VERSION \|\| '22' \}\}/);
+  assert.match(github, /node-version:\s*\$\{\{ env\.YAD_NODE_VERSION \}\}/);
+  assert.doesNotMatch(github, /node-version:\s*["']?20/, 'GitHub build-test-lint must not hard-pin Node 20');
+  assert.match(github, /bash checks\/install-deps\.sh/);
+  assert.doesNotMatch(github, /run:\s*npm ci/, 'GitHub must not override the consumer package manager');
+  // Dependency caching survived the move off setup-node's npm-only `cache:` and now covers pnpm too.
+  const cacheStep = github.match(/uses: actions\/cache@v4\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
+  assert.match(cacheStep, /~\/\.npm/, 'npm cache dir');
+  assert.match(cacheStep, /pnpm\/store/, 'pnpm store dir');
+  assert.match(cacheStep, /\$\{\{ env\.COREPACK_HOME \}\}/, 'corepack home cached too');
+  assert.match(github, /COREPACK_HOME:\s*\$\{\{ github\.workspace \}\}\/\.corepack-cache/, 'corepack home pinned to a cacheable path');
+  assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml', 'package\.json'\)/, 'keyed on the lockfiles and package.json');
+  assert.ok(github.indexOf('actions/cache@v4') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
+  assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
+  assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
+  assert.match(gitlab, /YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(gitlab, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
+  assert.doesNotMatch(gitlab, /image:\s*node:20/, 'GitLab build-test-lint must not hard-pin Node 20');
+  assert.match(gitlab, /bash checks\/install-deps\.sh/);
+  assert.doesNotMatch(gitlab, /^\s*- npm ci/m, 'GitLab must use the same package-manager-aware installer');
+  assert.match(gitlabStandalone, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
+  assert.match(gitlabStandalone, /NX_HEAD:\s*\$CI_COMMIT_SHA/);
+  assert.match(gitlabStandalone, /YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(gitlabStandalone, /image:\s*node:\$\{YAD_NODE_VERSION\}/);
+  assert.doesNotMatch(gitlabStandalone, /image:\s*node:20/, 'standalone GitLab must not hard-pin Node 20');
+  assert.match(gitlabStandalone, /bash checks\/install-deps\.sh/);
+  assert.doesNotMatch(gitlabStandalone, /^\s*- npm ci/m, 'standalone GitLab must use the package-manager-aware installer');
+  assert.match(gitlabStandalone, /YAD_TEST_MAX_WORKERS:\s*["']2["']/);
+
+  // The includable fragment's top-level `variables:` merges into the HOST pipeline's globals, so the
+  // gate jobs' own variables live on the .sdlc_mr_only anchor, not there. Only GIT_DEPTH is global.
+  const topLevelVars = gitlab.match(/^variables:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
+  assert.match(topLevelVars, /GIT_DEPTH/);
+  for (const name of ['YAD_NODE_VERSION', 'NX_BASE', 'NX_HEAD']) {
+    assert.doesNotMatch(topLevelVars, new RegExp(name), `${name} must not leak into the host pipeline's globals`);
+  }
+  const anchor = gitlab.match(/^\.sdlc_mr_only:\n((?:[ \t]+.*\n)+)/m)?.[1] ?? '';
+  assert.match(anchor, /variables:\n\s+(?:#.*\n\s+)*YAD_NODE_VERSION:\s*["']22["']/);
+  assert.match(anchor, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
 });
 
 // #164 — `yad update` used to rewrite every managed file that merely DIFFERED from the shipped

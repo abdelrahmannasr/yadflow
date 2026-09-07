@@ -14,10 +14,19 @@
 # top-level `default:` merges into the HOST root pipeline; if the host already sets a top-level
 # `image:`, GitLab rejects the whole config ("image is defined in top-level and 'default:' entry").
 # Putting them on the anchor scopes them to the gate jobs (which all `extends: .sdlc_mr_only`) and
-# never touches the host root.
+# never touches the host root. The same goes for the gate jobs' own variables (`YAD_NODE_VERSION`,
+# `NX_BASE`, `NX_HEAD`): an included top-level `variables:` merges into the host's globals, where a
+# generic name like NX_BASE can collide with one the host already computes for its own Nx jobs.
+# Only `GIT_DEPTH` stays global — the gates need the full history and a host that sets its own wins.
 
 .sdlc_mr_only:
-  image: node:20
+  image: node:${YAD_NODE_VERSION}
+  variables:
+    # A project/group CI/CD variable overrides a YAML value, so YAD_NODE_VERSION can be changed in
+    # project settings without editing the managed fragment (a current 20, 22 or 24 line; Node 25+ has no Corepack).
+    YAD_NODE_VERSION: "22"
+    NX_BASE: $CI_MERGE_REQUEST_DIFF_BASE_SHA
+    NX_HEAD: $CI_COMMIT_SHA
   # Runner selection. These jobs need a docker/dind executor; on instances whose runners are all
   # tag-locked (run_untagged: false) an untagged image job never starts. Set the YAD_RUNNER_TAGS
   # CI/CD variable (Settings → CI/CD → Variables, e.g. `dind_runner`) to route them — it lives in
@@ -50,7 +59,7 @@ yad-build-test-lint:
   variables:
     YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
   script:
-    - npm ci
+    - bash checks/install-deps.sh
     - bash checks/build-test-lint.sh
 
 # Phase 6 — feature-thread gates (lineage / seal / hotfix-debt). Build on spec-link's story->epic

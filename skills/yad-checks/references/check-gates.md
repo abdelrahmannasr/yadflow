@@ -10,7 +10,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 |------|-------|-------------|
 | spec-link | the `Task: <story>-<task>` commit trailer; `specs/<story>/link.md` | `yad-implement` (trailer), `yad-spec` (link.md) |
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
-| build/test/lint | the repo's `npm run lint` / `npm run build` / `npm test` | the repo |
+| build/test/lint | the repo's configured package manager running `lint` / `build` / `test` | the repo |
 | lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the hub | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
 | epic-open | the `Task:` trailer → `link.md` → the hub epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
 | reconcile-debt | the `Task:` trailer → `link.md` → the hub epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
@@ -93,13 +93,44 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 
 ## 3. build/test/lint (`templates/checks/build-test-lint.sh`)
 
-- Runs `npm run lint`, `npm run build`, `npm test` in order; any non-zero exit fails the gate.
+- Reads the standard `package.json#packageManager` field and runs `lint`, `build`, and `test` through
+  that manager in order; any non-zero exit fails the gate. `npm` and `pnpm` are supported; another
+  manager (yarn, bun) fails closed unless an npm lockfile is present, in which case the repo stays on
+  the historical npm path with a warning — a yarn-locally, npm-in-CI repo was green before this
+  field was read and must not go red on upgrade. A repo
+  without the field retains npm behavior unless it carries `pnpm-lock.yaml` and no npm lockfile
+  (`package-lock.json` / `npm-shrinkwrap.json`) — a repo with both keeps the npm path rather than
+  silently changing toolchains.
+- CI runs `install-deps.sh` first. A declared npm or pnpm manager must use a full, exact semantic
+  version with either no build metadata or Corepack's integrity suffix,
+  `+<sha1|sha224|sha256|sha384|sha512>.<lowercase hex digest>` at that algorithm's digest length
+  (Corepack hashes the download with the named algorithm and compares the lowercase hex string).
+  Other build metadata, digest algorithms, digest lengths, uppercase digests, or trailing
+  identifiers fail closed. The installer activates the declared version through
+  Corepack. Pinned npm is dispatched through Corepack — `corepack npm ci` here and `corepack npm run`
+  in the gate, since Corepack activates npm but never shims it — so Node's ambient npm cannot
+  override the declaration anywhere; packageManager-absent npm preserves the historical `npm ci` path. pnpm uses
+  `pnpm install --frozen-lockfile`. Partial versions, ranges, and tags also fail closed instead of
+  floating to a different toolchain.
+- The build/test/lint job defaults to Node 22. Set the GitHub repository variable or GitLab
+  project/group CI/CD variable `YAD_NODE_VERSION` when the repo requires another supported Node
+  release; generated files remain managed instead of accumulating consumer-specific edits. The
+  variable is read by the code repo's `yad-checks` workflow only (on GitHub the build/test/lint job;
+  in the GitLab fragment it sets the `node:` image of every `yad-*` gate job, which all share one
+  anchor) — the hub-side workflows run the `yad` CLI, not the repo's toolchain, and keep their own
+  pinned Node. A declared `packageManager` needs
+  Corepack, which ships with Node 18 through 24 (Node 25+ dropped it) and, before 18.20.7 / 20.19 /
+  22.14, carries registry keys too old to verify anything published since 2025 — so the override
+  should stay on a current 20, 22 or 24 line (or install a current Corepack first). The installer
+  checks for the binary and wraps `corepack prepare`, so both an absent and a stale Corepack fail
+  with that guidance instead of a bare "command not found" or "Cannot find matching keyid".
 - Tests must actually exercise behavior (build plan §C) — an empty or trivially-passing suite does not
   satisfy the gate's intent.
 - **Test worker cap.** When the CI job sets `YAD_TEST_MAX_WORKERS` (the templates default it to `2`)
   and the repo's `test` script is jest/vitest, the gate forwards `--maxWorkers=<n>` to bound CI
-  concurrency. For any other runner (`node --test`, mocha, …) it is a no-op — the flag is never
-  passed, so the gate cannot break on an unknown option. Override it per repo via the
+  concurrency (as `-- --maxWorkers=<n>` under npm, which consumes the separator, and bare under pnpm,
+  which would forward a literal `--` to the script). For any other runner (`node --test`, mocha, …)
+  it is a no-op — the flag is never passed, so the gate cannot break on an unknown option. Override it per repo via the
   `YAD_TEST_MAX_WORKERS` CI variable, or unset it to remove the cap.
 
 ### Canonical `package.json` scripts (Node demo)
@@ -296,11 +327,24 @@ The gates run identically under either CI; the config just invokes the scripts w
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
   The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) run as their own jobs with
-  `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base.
+  `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout also
+  uses `filter: blob:none`; its installer follows `package.json#packageManager`, and `NX_BASE` /
+  `NX_HEAD` carry the exact base/head SHAs so Nx affected commands evaluate the PR rather than a
+  stale default. `YAD_NODE_VERSION` is read from GitHub repository variables with `22` as the default.
+  Dependencies are cached with `actions/cache` (npm's `~/.npm`, pnpm's store, and the Corepack home
+  holding the pinned manager, keyed on the lockfiles and package.json) rather than setup-node's
+  npm-only `cache:`, which must name the manager before package.json has been read.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`
-  and `$CI_MERGE_REQUEST_DESCRIPTION`. All `--profile code`.
+  and `$CI_MERGE_REQUEST_DESCRIPTION`. The quality job uses the same package-manager-aware installer;
+  `NX_BASE=$CI_MERGE_REQUEST_DIFF_BASE_SHA` and `NX_HEAD=$CI_COMMIT_SHA` provide the equivalent Nx
+  range. Its `node:${YAD_NODE_VERSION}` image defaults to `22` and a project/group CI/CD variable may
+  override it without editing the managed fragment. Those three variables sit on the `.sdlc_mr_only`
+  anchor, not the fragment's top-level `variables:` — an included top-level block merges into the host
+  pipeline's globals, where `NX_BASE`/`NX_HEAD` could collide with a host's own Nx setup. The retained greenfield standalone template
+  (`templates/gitlab/.gitlab-ci.yml`) carries the same Node default, exact Nx range, and dependency
+  installer and test-worker-cap semantics. All `--profile code`.
 
 ## Sync with existing CI (merge, never clobber)
 

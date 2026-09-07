@@ -764,8 +764,31 @@ test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A PATH of the fixture's bin ONLY — this node binary and the few externals the scripts call are
+// symlinked in — so no corepack of the host (nvm, setup-node, a nodesource /usr/bin/corepack, docker
+// images) can leak in and satisfy the guard, or worse, be run against the host. The helper proves
+// the isolation before the test relies on it.
+const isolatedPath = (bin) => {
+  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
+  for (const tool of ['bash', 'dirname']) {
+    const found = execFileSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' }).trim();
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  const PATH = bin;
+  const probe = spawnSync(path.join(bin, 'bash'), ['-c', 'command -v corepack'], { env: { PATH }, encoding: 'utf8' });
+  assert.equal(probe.error, undefined, probe.error?.message);
+  assert.notEqual(probe.status, 0, `corepack must not be reachable on the isolated PATH (found ${probe.stdout.trim()})`);
+  return PATH;
+};
+const withoutCorepack = (T, env) => {
+  fs.rmSync(path.join(T, 'bin/corepack'));
+  return { ...env, PATH: isolatedPath(path.join(T, 'bin')) };
+};
+
 // ---------- build-test-lint.sh ----------
 const BTL = path.join(CHECKS, 'build-test-lint.sh');
+const INSTALL_DEPS = path.join(CHECKS, 'install-deps.sh');
+const COREPACK_SHA512_HEX_LENGTH = 128;
 const npmStub = (lint, build, test_) => JSON.stringify({
   name: 'fixture', version: '0.0.0',
   scripts: { lint, build, test: test_ },
@@ -829,6 +852,412 @@ test('build-test-lint gate: no cap env means no --maxWorkers even for jest/vites
   });
   const r = runGate(BTL, T, []); // YAD_TEST_MAX_WORKERS unset
   assert.equal(r.code, 0, r.out);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('build-test-lint gate: packageManager selects pnpm for every configured script', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pnpm'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "pnpm $*" >> "$YAD_COMMAND_LOG"\n');
+  fs.chmodSync(path.join(bin, 'pnpm'), 0o755);
+  commit(T, 'chore: wire pnpm scripts', {
+    'package.json': JSON.stringify({
+      name: 'fixture', version: '0.0.0', packageManager: 'pnpm@9.15.0',
+      scripts: { lint: 'eslint .', build: 'nx build', test: 'node --test' },
+    }),
+    'pnpm-lock.yaml': 'lockfileVersion: 9',
+  });
+  const r = runGate(BTL, T, [], {
+    PATH: `${bin}:${GIT_ENV.PATH}`,
+    YAD_COMMAND_LOG: commandLog,
+  });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'pnpm run --silent lint',
+    'pnpm run --silent build',
+    'pnpm run --silent test',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The gate must fail CLOSED on the same inputs install-deps rejects. It once read the spec inside a
+// nested $(...), which swallowed the FAIL, fell back to lockfile detection, and PASSed anyway.
+for (const [label, packageManager, message] of [
+  ['a non-string packageManager', { a: 1 }, /must be a string/],
+  ['shell text in packageManager', 'pnpm@9.15.0; touch owned', /exact semantic version/],
+  ['an unsupported manager with no npm lockfile', 'yarn@4.0.0', /unsupported packageManager/],
+]) {
+  test(`build-test-lint gate: fails closed on ${label}`, () => {
+    const T = scaffoldRepo();
+    commit(T, 'chore: scripts', {
+      'package.json': JSON.stringify({
+        name: 'fixture', version: '0.0.0', packageManager,
+        scripts: { lint: 'true', build: 'true', test: 'true' },
+      }),
+    });
+    const r = runGate(BTL, T);
+    assert.notEqual(r.code, 0, 'the gate must not pass on a rejected package.json');
+    assert.match(r.out, message);
+    assert.doesNotMatch(r.out, /PASS \[build\/test\/lint\]/);
+    assert.ok(!fs.existsSync(path.join(T, 'owned')), 'packageManager content was not evaluated');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('build-test-lint gate: fails closed when package.json is not valid JSON', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: broken manifest', { 'package.json': '{not json' });
+  const r = runGate(BTL, T);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /not valid JSON/);
+  assert.doesNotMatch(r.out, /\[build\/test\/lint\] lint/, 'no script ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A pinned npm is activated by Corepack but never shimmed by it, so the gate dispatches `corepack npm`
+// for every script — otherwise install ran under the declared version and lint/build/test under the
+// image's ambient npm.
+test('build-test-lint gate: a pinned npm runs every script through corepack npm', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  for (const command of ['corepack', 'npm']) {
+    fs.writeFileSync(path.join(bin, command), `#!/usr/bin/env bash\nprintf '%s\\n' '${command} '"$*" >> "$YAD_COMMAND_LOG"\n`);
+    fs.chmodSync(path.join(bin, command), 0o755);
+  }
+  commit(T, 'chore: pin npm', {
+    'package.json': JSON.stringify({
+      name: 'fixture', version: '0.0.0', packageManager: 'npm@10.8.2',
+      scripts: { lint: 'eslint .', build: 'tsc', test: 'node --test' },
+    }),
+    'package-lock.json': 'lock',
+  });
+  const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack npm run --silent lint',
+    'corepack npm run --silent build',
+    'corepack npm run --silent test',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('build-test-lint gate: a pinned npm without corepack on PATH fails with guidance', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), '#!/usr/bin/env bash\ntouch "$YAD_RAN_NPM"\n');
+  fs.chmodSync(path.join(bin, 'npm'), 0o755);
+  commit(T, 'chore: pin npm', {
+    'package.json': JSON.stringify({ name: 'fixture', version: '0.0.0', packageManager: 'npm@10.8.2', scripts: { lint: 'true', build: 'true', test: 'true' } }),
+  });
+  const ran = path.join(T, 'ran-npm');
+  const r = runGate(BTL, T, [], { PATH: isolatedPath(bin), YAD_RAN_NPM: ran });
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /corepack is not on PATH/);
+  assert.ok(!fs.existsSync(ran), 'the ambient npm did not run in its place');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// pnpm forwards a literal `--` to the script (npm consumes it), so the cap is passed bare there.
+test('build-test-lint gate: the worker cap reaches jest under pnpm without the npm-only `--`', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'pnpm'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "pnpm $*" >> "$YAD_COMMAND_LOG"\n');
+  fs.chmodSync(path.join(bin, 'pnpm'), 0o755);
+  commit(T, 'chore: jest under pnpm', {
+    'package.json': JSON.stringify({
+      name: 'fixture', version: '0.0.0', packageManager: 'pnpm@9.15.0',
+      scripts: { lint: 'true', build: 'true', test: 'jest' },
+    }),
+    'pnpm-lock.yaml': 'lockfileVersion: 9',
+  });
+  const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog, YAD_TEST_MAX_WORKERS: '2' });
+  assert.equal(r.code, 0, r.out);
+  const lines = fs.readFileSync(commandLog, 'utf8').trim().split('\n');
+  assert.equal(lines.at(-1), 'pnpm run --silent test --maxWorkers=2');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+const packageFixture = ({ packageManager, lockfile }) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-package-manager-'));
+  const bin = path.join(T, 'bin');
+  fs.mkdirSync(bin);
+  const pkg = { name: 'fixture', version: '0.0.0', scripts: {} };
+  if (packageManager !== undefined) pkg.packageManager = packageManager;
+  fs.writeFileSync(path.join(T, 'package.json'), JSON.stringify(pkg));
+  fs.writeFileSync(path.join(T, lockfile), 'lock');
+  const commandLog = path.join(T, 'commands.log');
+  for (const command of ['corepack', 'pnpm', 'npm']) {
+    const stub = path.join(bin, command);
+    fs.writeFileSync(stub, `#!/usr/bin/env bash\nprintf '%s\\n' '${command} '"$*" >> "$YAD_COMMAND_LOG"\n`);
+    fs.chmodSync(stub, 0o755);
+  }
+  const env = { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog };
+  return { T, commandLog, env };
+};
+
+test('install-deps: packageManager selects and pins pnpm with a frozen lockfile', () => {
+  const { T, commandLog, env } = packageFixture({
+    packageManager: 'pnpm@9.15.0',
+    lockfile: 'pnpm-lock.yaml',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack enable',
+    'corepack prepare pnpm@9.15.0 --activate',
+    'pnpm install --frozen-lockfile',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: accepts an exact pnpm version carrying a Corepack integrity suffix', () => {
+  const integrity = `sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH)}`;
+  const packageManager = `pnpm@9.15.0+${integrity}`;
+  const { T, commandLog, env } = packageFixture({
+    packageManager,
+    lockfile: 'pnpm-lock.yaml',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack enable',
+    `corepack prepare ${packageManager} --activate`,
+    'pnpm install --frozen-lockfile',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+for (const packageManager of [
+  'pnpm@9.15.0-rc.1',
+  'npm@10.8.2-beta.0',
+]) {
+  test(`install-deps: accepts supported exact packageManager ${packageManager}`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.equal(r.code, 0, r.out);
+    assert.ok(fs.existsSync(commandLog), 'the validated package manager ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+// Every algorithm Corepack accepts (it hashes with whatever the suffix names — older releases wrote
+// sha256, yarn's default is sha224), each at its own digest length.
+for (const packageManager of [
+  'npm@10.8.2+sha1.0123456789abcdef0123456789abcdef01234567',
+  `pnpm@9.15.0+sha224.${'b'.repeat(56)}`,
+  `npm@10.8.2+sha256.${'c'.repeat(64)}`,
+  `pnpm@9.15.0+sha384.${'d'.repeat(96)}`,
+]) {
+  test(`install-deps: accepts Corepack integrity suffix ${packageManager.slice(0, 24)}…`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.equal(r.code, 0, r.out);
+    assert.match(fs.readFileSync(commandLog, 'utf8'), new RegExp(`corepack prepare ${packageManager.replace(/[+.]/g, '\\$&')} --activate`));
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+for (const packageManager of [
+  `pnpm@9.15.0+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH - 1)}`,
+  `npm@10.8.2+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH - 1)}g`,
+  `pnpm@9.15.0+sha512.${'a'.repeat(COREPACK_SHA512_HEX_LENGTH)}.extra`,
+  'npm@10.8.2+sha1.0123456789abcdef0123456789abcdef0123456', // sha1 digest one short
+  `npm@10.8.2+sha256.${'c'.repeat(128)}`, // sha512 length under the sha256 name
+  'pnpm@9.15.0+md5.0123456789abcdef0123456789abcdef',
+  'npm@10.8.2+build.1',
+  `npm@10.8.2+sha512.${'A'.repeat(COREPACK_SHA512_HEX_LENGTH)}`, // Corepack compares lowercase hex
+]) {
+  test(`install-deps: rejects unsupported Corepack integrity metadata ${packageManager}`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.notEqual(r.code, 0, `${packageManager} must fail closed`);
+    assert.match(r.out, /integrity suffix \+<sha1\|sha224\|sha256\|sha384\|sha512>\.<lowercase hex digest>/);
+    assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+for (const packageManager of [
+  'pnpm@9',
+  'pnpm@9.15',
+  'pnpm@9.x',
+  'pnpm@latest',
+  'pnpm@^9.15.0',
+  'npm@10',
+  'npm@10.8',
+  'npm@10.x',
+  'npm@latest',
+  'npm@~10.8.2',
+  'pnpm@9.15.0\n',
+]) {
+  test(`install-deps: rejects non-exact packageManager ${JSON.stringify(packageManager)}`, () => {
+    const lockfile = packageManager.startsWith('pnpm@') ? 'pnpm-lock.yaml' : 'package-lock.json';
+    const { T, commandLog, env } = packageFixture({ packageManager, lockfile });
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.notEqual(r.code, 0, `${packageManager} must fail closed`);
+    assert.match(r.out, /exact semantic version/);
+    assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('install-deps: a declared packageManager without corepack on PATH fails with guidance', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'pnpm@9.15.0', lockfile: 'pnpm-lock.yaml' });
+  const r = runGate(INSTALL_DEPS, T, [], withoutCorepack(T, env));
+  assert.notEqual(r.code, 0, 'must fail closed');
+  assert.match(r.out, /corepack is not on PATH/);
+  assert.match(r.out, /YAD_NODE_VERSION/);
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A Corepack that exists but cannot activate the version (stale registry keys, offline, unknown
+// version) must fail with the same guidance, not a raw error from deep inside the job.
+test('install-deps: a corepack that fails to prepare the version fails with guidance', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'pnpm@9.15.0', lockfile: 'pnpm-lock.yaml' });
+  fs.writeFileSync(path.join(T, 'bin/corepack'), '#!/usr/bin/env bash\n[ "$1" = prepare ] && { echo "Internal Error: Cannot find matching keyid" >&2; exit 1; }\nprintf \'%s\\n\' "corepack $*" >> "$YAD_COMMAND_LOG"\n');
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /could not activate pnpm@9\.15\.0/);
+  assert.match(r.out, /YAD_NODE_VERSION/);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'corepack enable\n', 'nothing ran after the failed activation');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: packageManager-absent npm does not need corepack', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  const r = runGate(INSTALL_DEPS, T, [], withoutCorepack(T, env));
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: packageManager selects and pins npm before invoking it through Corepack', () => {
+  const { T, commandLog, env } = packageFixture({
+    packageManager: 'npm@10.8.2',
+    lockfile: 'package-lock.json',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), [
+    'corepack enable',
+    'corepack prepare npm@10.8.2 --activate',
+    'corepack npm ci',
+    '',
+  ].join('\n'));
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: an npm lockfile preserves the packageManager-absent npm contract', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: with no packageManager and BOTH lockfiles the historical npm path wins', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  fs.writeFileSync(path.join(T, 'pnpm-lock.yaml'), 'lock');
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n', 'did not flip to pnpm');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: with no packageManager and only pnpm-lock.yaml, CI still demands an exact pin', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'pnpm-lock.yaml' });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /pnpm CI requires an exact package\.json#packageManager/);
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: a UTF-8 byte-order mark on package.json is stripped, as npm does', () => {
+  const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+  fs.writeFileSync(path.join(T, 'package.json'), '\uFEFF' + fs.readFileSync(path.join(T, 'package.json'), 'utf8'));
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+for (const [label, body] of [['null', 'null'], ['an array', '[]'], ['a string', '"str"']]) {
+  test(`install-deps: a package.json whose top level is ${label} fails with the standard FAIL line`, () => {
+    const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
+    fs.writeFileSync(path.join(T, 'package.json'), body);
+    const r = runGate(INSTALL_DEPS, T, [], env);
+    assert.notEqual(r.code, 0);
+    assert.match(r.out, /FAIL \[package-manager\]: package\.json must be a JSON object/);
+    assert.doesNotMatch(r.out, /TypeError/, 'no raw stack trace');
+    assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
+test('build-test-lint gate: the worker cap survives a byte-order mark on package.json', () => {
+  const T = scaffoldRepo();
+  const bin = path.join(T, 'bin');
+  const commandLog = path.join(T, 'commands.log');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), '#!/usr/bin/env bash\nprintf \'%s\\n\' "npm $*" >> "$YAD_COMMAND_LOG"\n');
+  fs.chmodSync(path.join(bin, 'npm'), 0o755);
+  commit(T, 'chore: bom manifest', {
+    'package.json': '\uFEFF' + npmStub('true', 'true', 'jest'),
+    'package-lock.json': 'lock',
+  });
+  const r = runGate(BTL, T, [], { PATH: `${bin}:${GIT_ENV.PATH}`, YAD_COMMAND_LOG: commandLog, YAD_TEST_MAX_WORKERS: '2' });
+  assert.equal(r.code, 0, r.out);
+  assert.match(fs.readFileSync(commandLog, 'utf8'), /npm run --silent test -- --maxWorkers=2/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A yarn/bun declaration with a committed npm lockfile was green under the old npm-only gate;
+// upgrading must not turn every PR red, so it stays on npm with a warning.
+test('install-deps: an unsupported packageManager with an npm lockfile stays on npm, with a warning', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'yarn@1.22.22', lockfile: 'package-lock.json' });
+  // spawnSync rather than runGate: the warning goes to stderr, which runGate only surfaces on failure.
+  const r = spawnSync('bash', [INSTALL_DEPS], { cwd: T, env: { ...GIT_ENV, ...env }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /WARN \[package-manager\]: packageManager 'yarn@1\.22\.22' is not supported/);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'npm ci\n');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: an unsupported packageManager without an npm lockfile fails closed', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'bun@1.1.0', lockfile: 'bun.lockb' });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /unsupported packageManager 'bun@1\.1\.0'/);
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('install-deps: packageManager text is data, never executable shell', () => {
+  const { T, commandLog, env } = packageFixture({
+    packageManager: 'pnpm@9.15.0; touch owned',
+    lockfile: 'pnpm-lock.yaml',
+  });
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0, 'an invalid package-manager spec must fail closed');
+  assert.match(r.out, /must name an exact semantic version/);
+  assert.ok(!fs.existsSync(path.join(T, 'owned')), 'packageManager content was not evaluated');
+  assert.ok(!fs.existsSync(commandLog), 'no package-manager command ran');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

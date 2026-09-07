@@ -17,6 +17,16 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    never widened from inside a code repo (Phase 2 contract representation: delimited block + SHA-256 lock).
    Every story whose slice the diff touches is checked, not just the first — see `references/check-gates.md`.
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
+   CI installs and runs through the package manager declared by the repo's standard
+   `package.json#packageManager` field (`npm` and `pnpm` are supported; any other manager stays on
+   npm with a warning when an npm lockfile is present, and fails closed otherwise); an npm repo
+   without that field retains the historical npm behavior. A declared manager requires a full, exact semantic
+   version (with Corepack's optional integrity suffix supported), and CI activates that exact version.
+   The code-repo `yad-checks` workflow uses Node 22 by default (the build/test/lint job on GitHub; every
+   `yad-*` gate job's image in the GitLab fragment) and reads `YAD_NODE_VERSION` (a GitHub repository
+   variable or GitLab CI/CD variable) for repos whose declared runtime differs (a declared `packageManager` needs Corepack, so the override must be a line that
+   bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The hub-side workflows (verified-commits, hub-checks, update-guard,
+   gate-sync) only run the `yad` CLI and keep their own pinned Node; the variable does not reach them.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
 4. **verified-commits** — no unverified commits from unverified users: every commit in the range must
@@ -50,7 +60,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   (`config.yaml` `build.code_repos_root`).
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
-  - `templates/checks/{spec-link,contract-check,build-test-lint,verified-commits}.sh`
+  - `templates/checks/{spec-link,contract-check,package-manager,install-deps,build-test-lint,verified-commits}.sh`
   - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in verified mode** — hub.json
     carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
     (or the legacy `bridge`) true. The same predicate
@@ -73,10 +83,17 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     `PreToolUse` entry in `.claude/settings.json`. Fails OPEN; see "Step 2b" below.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
     → the standalone hub-side verified-commits CI (installed by `yad check --fix` with the hub wiring)
-  - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`)
-  - `templates/gitlab/yad-checks.gitlab-ci.yml` → includable fragment, installs to `.gitlab/ci/yad-checks.yml`
+  - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);
+    its quality job uses `install-deps.sh`, reads the optional `YAD_NODE_VERSION` repository variable,
+    exports the PR's exact `NX_BASE`/`NX_HEAD`, and filters unrelated history blobs while preserving
+    the full commit graph.
+  - `templates/gitlab/yad-checks.gitlab-ci.yml` → includable fragment, installs to `.gitlab/ci/yad-checks.yml`;
+    it uses the same installer, honors a project/group `YAD_NODE_VERSION` CI/CD variable, and exports
+    the MR's exact `NX_BASE`/`NX_HEAD`.
   - `templates/gitlab/gitlab-ci.include-root.yml` → minimal root written only when no root `.gitlab-ci.yml` exists
-  - `templates/gitlab/.gitlab-ci.yml` → legacy standalone root (greenfield single-file option)
+  - `templates/gitlab/.gitlab-ci.yml` → legacy standalone root (greenfield single-file option), kept
+    semantically aligned with the includable fragment's Node version, Nx range, dependency install,
+    and test-worker cap
 - The gates depend on the conventions from earlier steps: the `Task:`/`Contract-Change:` commit
   trailers (`yad-implement`), the `specs/<story>/link.md` + `contracts/` slice (`yad-spec`), and the
   locked `contract.md` (`yad-architecture`).
