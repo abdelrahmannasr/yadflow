@@ -1113,6 +1113,19 @@ test('install-deps: a declared packageManager without corepack on PATH fails wit
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// A Corepack that exists but cannot activate the version (stale registry keys, offline, unknown
+// version) must fail with the same guidance, not a raw error from deep inside the job.
+test('install-deps: a corepack that fails to prepare the version fails with guidance', () => {
+  const { T, commandLog, env } = packageFixture({ packageManager: 'pnpm@9.15.0', lockfile: 'pnpm-lock.yaml' });
+  fs.writeFileSync(path.join(T, 'bin/corepack'), '#!/usr/bin/env bash\n[ "$1" = prepare ] && { echo "Internal Error: Cannot find matching keyid" >&2; exit 1; }\nprintf \'%s\\n\' "corepack $*" >> "$YAD_COMMAND_LOG"\n');
+  const r = runGate(INSTALL_DEPS, T, [], env);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /could not activate pnpm@9\.15\.0/);
+  assert.match(r.out, /YAD_NODE_VERSION/);
+  assert.equal(fs.readFileSync(commandLog, 'utf8'), 'corepack enable\n', 'nothing ran after the failed activation');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('install-deps: packageManager-absent npm does not need corepack', () => {
   const { T, commandLog, env } = packageFixture({ lockfile: 'package-lock.json' });
   const r = runGate(INSTALL_DEPS, T, [], withoutCorepack(T, env));

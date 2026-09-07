@@ -9,13 +9,23 @@ readonly YAD_PNPM_LOCKFILE="pnpm-lock.yaml"
 readonly YAD_NPM_LOCKFILE="package-lock.json"
 readonly YAD_NPM_SHRINKWRAP="npm-shrinkwrap.json"
 
-# Corepack is the Node tool that downloads and activates the declared version. It is only bundled
-# with Node 20 through 24 (Node 25+ dropped it), and the copy in early 18/20 images predates the
-# 2025 npm registry key rotation. A declared packageManager without a working Corepack must say so
-# instead of dying with "command not found" in the middle of the job.
+# Corepack is the Node tool that downloads and activates the declared version. It is bundled with
+# Node 18 through 24 (Node 25+ dropped it), and a copy older than 0.31 — before Node 18.20.7 /
+# 20.19 / 22.14 — predates the 2025 npm registry key rotation and rejects anything published since
+# with a raw "Cannot find matching keyid". A declared packageManager without a working Corepack must
+# say so instead of dying with "command not found" or that error in the middle of the job.
+readonly YAD_COREPACK_LINES="set YAD_NODE_VERSION to a current 20, 22 or 24 line, or install a current Corepack first (npm install -g corepack)"
 yad_require_corepack() {
   if command -v corepack >/dev/null 2>&1; then return 0; fi
-  echo "FAIL [package-manager]: package.json#packageManager is set but corepack is not on PATH. Corepack ships with Node 20 (20.19+), 22 and 24 only — set YAD_NODE_VERSION to one of those, or install it first (npm install -g corepack)." >&2
+  echo "FAIL [package-manager]: package.json#packageManager is set but corepack is not on PATH (Node 25+ no longer bundles it) — $YAD_COREPACK_LINES." >&2
+  return 1
+}
+# `corepack prepare` with the guidance attached to every way it can fail: a stale Corepack (the
+# keyid error above), no network, or a version the registry does not have.
+yad_corepack_prepare() {
+  local spec="$1"
+  if corepack prepare "$spec" --activate; then return 0; fi
+  echo "FAIL [package-manager]: corepack could not activate $spec. A Corepack older than 0.31 cannot verify packages signed after the 2025 npm registry key rotation — $YAD_COREPACK_LINES; otherwise check that the version exists and the registry is reachable." >&2
   return 1
 }
 

@@ -114,9 +114,11 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   release; generated files remain managed instead of accumulating consumer-specific edits. The
   variable is read by this job only — the hub-side workflows run the `yad` CLI, not the repo's
   toolchain, and keep their own pinned Node. A declared `packageManager` needs
-  Corepack, which only ships with Node 20 (20.19+), 22 and 24 — Node 25+ dropped it — so the
-  override must stay on one of those lines (or install Corepack first). The installer checks for it
-  and fails with that guidance instead of a bare "command not found".
+  Corepack, which ships with Node 18 through 24 (Node 25+ dropped it) and, before 18.20.7 / 20.19 /
+  22.14, carries registry keys too old to verify anything published since 2025 — so the override
+  should stay on a current 20, 22 or 24 line (or install a current Corepack first). The installer
+  checks for the binary and wraps `corepack prepare`, so both an absent and a stale Corepack fail
+  with that guidance instead of a bare "command not found" or "Cannot find matching keyid".
 - Tests must actually exercise behavior (build plan §C) — an empty or trivially-passing suite does not
   satisfy the gate's intent.
 - **Test worker cap.** When the CI job sets `YAD_TEST_MAX_WORKERS` (the templates default it to `2`)

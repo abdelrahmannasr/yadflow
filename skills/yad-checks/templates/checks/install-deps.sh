@@ -20,7 +20,7 @@ case "$package_manager" in
     if [[ "$package_manager_spec" == npm@* ]]; then
       yad_require_corepack
       corepack enable
-      corepack prepare "$package_manager_spec" --activate
+      yad_corepack_prepare "$package_manager_spec"
       # npm's shim is not enabled by Corepack, so dispatch it explicitly through Corepack — the same
       # `corepack npm` the gate uses for lint/build/test, so package.json#packageManager selects the
       # npm version end to end instead of the Node image's ambient npm binary.
@@ -40,7 +40,7 @@ case "$package_manager" in
     fi
     yad_require_corepack
     corepack enable
-    corepack prepare "$package_manager_spec" --activate
+    yad_corepack_prepare "$package_manager_spec"
     pnpm install --frozen-lockfile
     ;;
 esac

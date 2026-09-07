@@ -34,7 +34,7 @@ jobs:
     if: github.event.action != 'edited'
     env:
       YAD_TEST_MAX_WORKERS: "2" # cap jest/vitest test workers in CI; ignored by other runners
-      YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }} # repo variable; 20.19+, 22 or 24 (lines that bundle Corepack)
+      YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }} # repo variable; a current 20, 22 or 24 line (Node 25+ has no Corepack)
       NX_BASE: ${{ github.event.pull_request.base.sha }}
       NX_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:

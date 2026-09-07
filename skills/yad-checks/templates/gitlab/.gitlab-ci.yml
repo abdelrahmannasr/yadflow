@@ -12,7 +12,7 @@ default:
 
 variables:
   GIT_DEPTH: "0"   # full history so the gates can diff against the target branch
-  YAD_NODE_VERSION: "22" # override with a project/group CI variable (20.19+, 22 or 24 — lines that bundle Corepack)
+  YAD_NODE_VERSION: "22" # override with a project/group CI variable (a current 20, 22 or 24 line; Node 25+ has no Corepack)
   NX_BASE: $CI_MERGE_REQUEST_DIFF_BASE_SHA
   NX_HEAD: $CI_COMMIT_SHA
 

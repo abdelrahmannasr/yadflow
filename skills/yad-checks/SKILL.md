@@ -24,7 +24,7 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    The build/test/lint job of the code-repo `yad-checks` workflow uses Node 22 by default and reads
    `YAD_NODE_VERSION` (a GitHub repository variable or GitLab CI/CD variable) for repos whose declared
    runtime differs (a declared `packageManager` needs Corepack, so the override must be a line that
-   bundles it: 20.19+, 22 or 24). The hub-side workflows (verified-commits, hub-checks, update-guard,
+   bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The hub-side workflows (verified-commits, hub-checks, update-guard,
    gate-sync) only run the `yad` CLI and keep their own pinned Node; the variable does not reach them.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
