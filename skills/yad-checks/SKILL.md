@@ -22,9 +22,9 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    npm with a warning when an npm lockfile is present, and fails closed otherwise); an npm repo
    without that field retains the historical npm behavior. A declared manager requires a full, exact semantic
    version (with Corepack's optional integrity suffix supported), and CI activates that exact version.
-   The build/test/lint job of the code-repo `yad-checks` workflow uses Node 22 by default and reads
-   `YAD_NODE_VERSION` (a GitHub repository variable or GitLab CI/CD variable) for repos whose declared
-   runtime differs (a declared `packageManager` needs Corepack, so the override must be a line that
+   The code-repo `yad-checks` workflow uses Node 22 by default (the build/test/lint job on GitHub; every
+   `yad-*` gate job's image in the GitLab fragment) and reads `YAD_NODE_VERSION` (a GitHub repository
+   variable or GitLab CI/CD variable) for repos whose declared runtime differs (a declared `packageManager` needs Corepack, so the override must be a line that
    bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The hub-side workflows (verified-commits, hub-checks, update-guard,
    gate-sync) only run the `yad` CLI and keep their own pinned Node; the variable does not reach them.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at

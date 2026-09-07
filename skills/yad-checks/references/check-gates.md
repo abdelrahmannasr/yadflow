@@ -115,8 +115,10 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
 - The build/test/lint job defaults to Node 22. Set the GitHub repository variable or GitLab
   project/group CI/CD variable `YAD_NODE_VERSION` when the repo requires another supported Node
   release; generated files remain managed instead of accumulating consumer-specific edits. The
-  variable is read by this job only — the hub-side workflows run the `yad` CLI, not the repo's
-  toolchain, and keep their own pinned Node. A declared `packageManager` needs
+  variable is read by the code repo's `yad-checks` workflow only (on GitHub the build/test/lint job;
+  in the GitLab fragment it sets the `node:` image of every `yad-*` gate job, which all share one
+  anchor) — the hub-side workflows run the `yad` CLI, not the repo's toolchain, and keep their own
+  pinned Node. A declared `packageManager` needs
   Corepack, which ships with Node 18 through 24 (Node 25+ dropped it) and, before 18.20.7 / 20.19 /
   22.14, carries registry keys too old to verify anything published since 2025 — so the override
   should stay on a current 20, 22 or 24 line (or install a current Corepack first). The installer
