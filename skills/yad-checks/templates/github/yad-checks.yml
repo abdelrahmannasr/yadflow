@@ -37,6 +37,7 @@ jobs:
       YAD_NODE_VERSION: ${{ vars.YAD_NODE_VERSION || '22' }} # repo variable; a current 20, 22 or 24 line (Node 25+ has no Corepack)
       NX_BASE: ${{ github.event.pull_request.base.sha }}
       NX_HEAD: ${{ github.event.pull_request.head.sha }}
+      COREPACK_HOME: ${{ github.workspace }}/.corepack-cache # pinned-manager downloads, cached below
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,15 +46,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.YAD_NODE_VERSION }}
-      # Dependency cache for either manager: npm's ~/.npm and pnpm's content-addressable store, keyed
-      # on the lockfile. setup-node's own `cache:` must name the manager up front (and needs pnpm on
-      # PATH before it runs), which package.json only decides later — so cache the directories directly.
+      # Dependency cache for either manager: npm's ~/.npm, pnpm's content-addressable store, and the
+      # Corepack home where `corepack prepare` keeps the pinned manager (otherwise re-downloaded from
+      # the registry on every job, even when the dependency cache hits). Keyed on the lockfiles AND
+      # package.json, since a packageManager bump changes no lockfile. setup-node's own `cache:` must
+      # name the manager up front (and needs pnpm on PATH before it runs), which package.json only
+      # decides later — so cache the directories directly.
       - uses: actions/cache@v4
         with:
           path: |
             ~/.npm
             ~/.local/share/pnpm/store
-          key: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml') }}
+            ${{ env.COREPACK_HOME }}
+          key: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'package.json') }}
           restore-keys: yad-deps-${{ runner.os }}-node${{ env.YAD_NODE_VERSION }}-
       - run: bash checks/install-deps.sh
       - run: bash checks/build-test-lint.sh

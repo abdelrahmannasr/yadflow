@@ -281,7 +281,9 @@ test('yad-checks CI: dependency install follows package.json and Nx receives the
   const cacheStep = github.match(/uses: actions\/cache@v4\n((?:[ \t]+.*\n)+)/)?.[1] ?? '';
   assert.match(cacheStep, /~\/\.npm/, 'npm cache dir');
   assert.match(cacheStep, /pnpm\/store/, 'pnpm store dir');
-  assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml'\)/, 'keyed on the lockfile');
+  assert.match(cacheStep, /\$\{\{ env\.COREPACK_HOME \}\}/, 'corepack home cached too');
+  assert.match(github, /COREPACK_HOME:\s*\$\{\{ github\.workspace \}\}\/\.corepack-cache/, 'corepack home pinned to a cacheable path');
+  assert.match(cacheStep, /hashFiles\('package-lock\.json', 'npm-shrinkwrap\.json', 'pnpm-lock\.yaml', 'package\.json'\)/, 'keyed on the lockfiles and package.json');
   assert.ok(github.indexOf('actions/cache@v4') < github.indexOf('bash checks/install-deps.sh'), 'cache restored before install');
   assert.match(gitlab, /NX_BASE:\s*\$CI_MERGE_REQUEST_DIFF_BASE_SHA/);
   assert.match(gitlab, /NX_HEAD:\s*\$CI_COMMIT_SHA/);

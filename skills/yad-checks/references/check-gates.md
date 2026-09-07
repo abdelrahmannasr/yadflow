@@ -331,9 +331,9 @@ The gates run identically under either CI; the config just invokes the scripts w
   uses `filter: blob:none`; its installer follows `package.json#packageManager`, and `NX_BASE` /
   `NX_HEAD` carry the exact base/head SHAs so Nx affected commands evaluate the PR rather than a
   stale default. `YAD_NODE_VERSION` is read from GitHub repository variables with `22` as the default.
-  Dependencies are cached with `actions/cache` (npm's `~/.npm` and pnpm's store, keyed on the
-  lockfile) rather than setup-node's npm-only `cache:`, which must name the manager before
-  package.json has been read.
+  Dependencies are cached with `actions/cache` (npm's `~/.npm`, pnpm's store, and the Corepack home
+  holding the pinned manager, keyed on the lockfiles and package.json) rather than setup-node's
+  npm-only `cache:`, which must name the manager before package.json has been read.
 - **GitLab CI** — `templates/gitlab/yad-checks.gitlab-ci.yml` → `.gitlab/ci/yad-checks.yml`, pulled in
   by the root `.gitlab-ci.yml`'s `include:`. The jobs run on `merge_request_event` with `GIT_DEPTH: 0`,
   passing `origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`; the pattern jobs read `$CI_MERGE_REQUEST_TITLE`
