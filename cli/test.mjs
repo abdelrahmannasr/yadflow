@@ -8864,6 +8864,27 @@ test('fetchLatest returns null instead of throwing when the runtime has no globa
   }
 });
 
+// `prepublishOnly` runs this whole suite INSIDE `npm publish`, by which point semantic-release has
+// written the version being released into package.json. On the `next` channel that carries a
+// prerelease suffix (`3.19.0-next.1`), so any assertion here that assumes three bare numbers fails
+// the publish itself — which is exactly how the first pre-release was lost. Guard the shape.
+test('yad --version prints a prerelease version as-is (what `npm publish` sees on the next channel)', () => {
+  const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-prerelease-'));
+  try {
+    for (const d of ['bin', 'cli']) fs.cpSync(path.join(ROOT, d), path.join(pkg, d), { recursive: true });
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    manifest.version = '9.9.9-next.7';
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify(manifest));
+    const out = execFileSync(process.execPath, [path.join(pkg, 'bin/yad.mjs'), '--version'], {
+      encoding: 'utf8',
+      env: { ...process.env, CI: '', YAD_NO_UPDATE_NOTIFIER: '', SDLC_NONINTERACTIVE: '', YAD_CACHE_DIR: path.join(pkg, 'cache') },
+    });
+    assert.equal(out.trim(), '9.9.9-next.7', 'the prerelease version is printed unchanged');
+  } finally {
+    fs.rmSync(pkg, { recursive: true, force: true });
+  }
+});
+
 test('yad still succeeds on a runtime with no global fetch (--no-experimental-fetch)', () => {
   // The end-to-end proof of the above: the real binary, fetch removed, must exit 0 and still print.
   // Run from a .git-less copy so the dev-checkout guard does not mask the code path.
@@ -8875,7 +8896,11 @@ test('yad still succeeds on a runtime with no global fetch (--no-experimental-fe
       encoding: 'utf8',
       env: { ...process.env, CI: '', YAD_NO_UPDATE_NOTIFIER: '', SDLC_NONINTERACTIVE: '', YAD_CACHE_DIR: path.join(pkg, 'cache') },
     });
-    assert.match(out.trim(), /^\d+\.\d+\.\d+$/, 'exits 0 and prints a bare version');
+    // A prerelease suffix is part of a valid version: during `npm publish` semantic-release has
+    // already written the version being released into package.json, and on the `next` channel that
+    // reads `3.19.0-next.1`. Anchoring on three numbers alone failed `prepublishOnly` (which runs
+    // this suite) for every pre-release, so no pre-release could ever be published.
+    assert.match(out.trim(), /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 'exits 0 and prints a version');
   } finally {
     fs.rmSync(pkg, { recursive: true, force: true });
   }
