@@ -1,22 +1,22 @@
 # Hub config — schema, detection, and the reviewer roster
 
-The hub config is the product hub's record of **its own** platform (so the Shape review/comment/
-approval cycle can run through a real PR/MR on the hub) and the **reviewer roster** that maps a platform
-login to an SDLC name + role. It is a single object for the hub itself — the sibling of the per-repo
+The Product config is the Product's record of **its own** platform (so the Shape review/comment/
+approval cycle can run through a real PR/MR on the Product) and the **reviewer roster** that maps a platform
+login to an SDLC name + role. It is a single object for the Product itself — the sibling of the per-repo
 `repos.json` registry (see `repos-registry.md`), kept separate so it never pollutes that array.
 
 ## Location
 
 `{project-root}/.sdlc/hub.json`
 
-(`config.yaml` `hub.config`.) Created/updated by `yad-connect-repos action: detect-hub`.
+(`config.yaml` `product.config` (older projects: `hub.config`).) Created/updated by `yad-connect-repos action: detect-hub`.
 
 ## Schema
 
 ```json
 {
   "schemaVersion": 2,                                         // the file's shape. Absent means 1 (rule 1). `yad migrate` moves it; see docs/migrations/shape-2.md
-  "platform": "github",                                       // github | gitlab (from the hub's own remote host); null when local-only
+  "platform": "github",                                       // github | gitlab (from the Product's own remote host); null when local-only
   "git_url": "https://github.com/abdelrahmannasr/yadflow.git", // REQUIRED when platform is non-null (scopes auth + opens PRs); yad doctor warns YAD-CFG-005 if absent
   "default_branch": "main",
   "ledger": "verified",                                       // WHO WRITES THE LEDGER, and the one that decides: "verified" = CI only, signed; "local" = this machine. Travels WITH platform — verified is both (isVerifiedLedger), so never "verified" beside platform: null (#186)
@@ -48,7 +48,7 @@ one's role, and a `domain-owner` grant keeps `repos.json` `domain_owners` in syn
 - **`email`** — the commit email; drives the **committer → login** reverse lookup that auto-assigns PRs.
 - **`roles`** — a **per-scope map**: scope (`hub`, or a connected repo name) → the roles held there. A
   person can be **owner + reviewer + domain-owner at once** and across scopes; a repo gets **several**
-  people per role by appearing in several entries' maps. Validated against the hub during `yad setup` /
+  people per role by appearing in several entries' maps. Validated against the Product during `yad setup` /
   `yad doctor`; a login that does not resolve is flagged `unverified` (warn-only, never blocks).
 
 **Back-compat:** readers also accept a flat array `"roles": ["owner","reviewer"]` (treated as `hub`
@@ -68,13 +68,13 @@ New setups write the grant directly into the person's `roles[<repo>]` map.
 ## Detection
 
 `detect-hub` reuses the same host-detection logic this skill already applies to code repos:
-run `git remote get-url origin` **on the hub itself** and read the host —
+run `git remote get-url origin` **on the Product itself** and read the host —
 `github.com` → `github`, `gitlab.com`/self-hosted GitLab → `gitlab`, no remote → `platform: null`.
 Auth is the **local user's own** `gh`/`glab`/git credentials; **no tokens are ever stored** (same rule
 as the registry). `detect-hub` upserts `hub.json` in place — it is idempotent and safe to re-run.
 
 **`git_url` is required whenever `platform` is non-null.** `yad doctor` uses it to scope the auth
-probe to the hub's own host (an unscoped `glab auth status` fails on any unrelated broken instance),
+probe to the Product's own host (an unscoped `glab auth status` fails on any unrelated broken instance),
 and the verified ledger/PR flow uses it to open PRs. Doctor flags its absence with a warn (`YAD-CFG-005`);
 re-running `yad setup` backfills it from the origin remote (idempotent, non-interactive).
 
@@ -92,10 +92,10 @@ So on a migrated project `ledger` wins, and writing a boolean that contradicts i
 Keep all three in step.
 
 - `ledger: "verified"` **and** a non-null `platform` **and** `gh`/`glab` authenticated → the Shape
-  review opens a PR/MR on the hub and `yad-review-gate action: sync` pulls platform state into the ledger.
+  review opens a PR/MR on the Product and `yad-review-gate action: sync` pulls platform state into the ledger.
 - `ledger: "local"`, `platform: null`, or no/unauthenticated CLI → the gate falls back to the
   existing **local** flow with no error. The file ledger is the source of truth in both modes.
-- The master switch `config.yaml` `hub.bridge: false` disables the verified ledger globally regardless of `hub.json`.
+- The master switch `config.yaml` `product.bridge: false` (older projects: `hub.bridge`) disables the verified ledger globally regardless of `hub.json`.
 
 ## Review Companion engagement (`review.requireEngagement`)
 

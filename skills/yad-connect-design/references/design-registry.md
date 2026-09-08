@@ -1,6 +1,6 @@
 # Design registry — schema + freshness rule
 
-The registry is the product hub's record of which design tool is connected and how to reach it. It is
+The registry is the Product's record of which design tool is connected and how to reach it. It is
 **project-wide** (one design tool per project, shared across every epic), so it lives at the product
 root, not under any `epics/EP-<slug>/.sdlc/`.
 
@@ -51,6 +51,6 @@ only). This mirrors how `repos.json` and `hub.json` are committed.
 
 ## Greenfield
 
-A brand-new product hub has no `design.json`. That is valid — `yad-ui` treats "no design tool connected"
+A brand-new Product has no `design.json`. That is valid — `yad-ui` treats "no design tool connected"
 the same as `tool: "none"` and produces the Markdown artifacts only. The registry appears the first time
 `connect` runs.

@@ -19,7 +19,7 @@ It only reads the pipeline definition and writes a project-level site. When a do
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - The overview site lives at `{project-root}/docs/sdlc-site/`; its `dist/`/`node_modules/` are gitignored,
   the generated **source is committed**. The overview build manifest is `docs/sdlc-site/.docs-build.json`.
 - The shell template is `skills/yad-docs/templates/app/` — copied **verbatim**, themed only in the
@@ -59,7 +59,7 @@ Map the pipeline onto the same data structures `yad-docs` uses (concrete mapping
 - **Flow paths** = the **phases** — `Setup`, `Front-zero` (discovery), `Shape`, `Build`, `Automation`, `Change management` (feature threads).
 - **Flow steps** = the **skills/gates in order** (from `module-help.csv` `preceded-by`/`followed-by`),
   each step's `messages` = the skill's `outputs`, and `sideEffects` = the `.sdlc/` files it writes.
-- **System components** = the **durable state objects** — the product hub, each `.sdlc/*.json`
+- **System components** = the **durable state objects** — the Product, each `.sdlc/*.json`
   (`state.json`, `approvals.json`, `repos.json`, `design.json`, `testing.json`, `learning.json`,
   `docs.json`, `contract-lock.json`, `build-state/*`, `trust-log.json`), the connected code repos, the
   design/testing/learning tools, and the platform.

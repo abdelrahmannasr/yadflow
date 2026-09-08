@@ -22,7 +22,7 @@
 # CLOSED and is what actually protects the ledger.
 set -uo pipefail
 
-# The hub root is this script's grandparent — hooks/ledger-guard.sh — so the resolution below does
+# The Product root is this script's grandparent — hooks/ledger-guard.sh — so the resolution below does
 # not depend on the harness's working directory.
 HOOK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HUB_ROOT="$(dirname -- "$HOOK_DIR")"

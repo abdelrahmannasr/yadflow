@@ -295,17 +295,17 @@ test('migrate: a project in local (non-verified) mode migrates its gate ledger l
   const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
   const res = await runMigrate(T, { apply: true });
   // `migrate`, not `stamp`: the shape genuinely moves (1 -> 2), even though this file's own fields
-  // are untouched by the hub-only step. The shape describes the project's format, not one file's keys.
+  // are untouched by the Product-only step. The shape describes the project's format, not one file's keys.
   assert.equal(rowFor(res.rows, path.join('epics', 'EP-x', '.sdlc', 'state.json')).action, 'migrate');
   assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).schemaVersion, ENGINE_SHAPE);
   cleanup(T);
 });
 
 // ---- shape 2: hub.json gains `ledger` -------------------------------------------------------
-// The value is COMPUTED from what the engine already decided about the hub, never copied from the
+// The value is COMPUTED from what the engine already decided about the Product, never copied from the
 // flag. That distinction is the whole safety argument for this migration: an upgrade must not change
 // what a project does. The table covers every hub.json a real project can be sitting on.
-test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every hub shape', async () => {
+test('migrate 1 -> 2: `ledger` records what the Product was already doing, for every hub shape', async () => {
   const { isVerifiedLedger } = await import('./manifest.mjs');
   const cases = [
     ['platform + bridge_enabled', { platform: 'github', bridge_enabled: true }, 'verified'],
@@ -335,7 +335,7 @@ test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every
 });
 
 // A file must never DECLARE one shape while carrying another's fields. `yad setup` can run on a
-// project that has not migrated yet, and if it wrote `ledger` there the hub would claim shape 1 while
+// project that has not migrated yet, and if it wrote `ledger` there the Product would claim shape 1 while
 // holding a shape-2 key — which makes doctor's drift report a lie about the one file this change is
 // about. The old booleans carry the setting until `yad migrate` adds the key.
 test('migrate 1 -> 2: a shape-1 hub written by an older shape stays coherent, then migrates cleanly', async () => {
@@ -413,7 +413,7 @@ test('migrate 2 -> 3: the PREVIEW names the file the apply will create', async (
   } finally { cleanup(T); }
 });
 
-test('migrate 2 -> 3: a roster role under `hub` moves to `product`, and other domains are untouched', async () => {
+test('migrate 2 -> 3: a roster role under `hub` GAINS a `product` spelling, and other domains are untouched', async () => {
   const roster = [
     { login: 'alice', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] } },
     { login: 'bob', roles: { payments: ['reviewer'] } },

@@ -11,9 +11,9 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | spec-link | the `Task: <story>-<task>` commit trailer; `specs/<story>/link.md` | `yad-implement` (trailer), `yad-spec` (link.md) |
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
 | build/test/lint | the repo's configured package manager running `lint` / `build` / `test` | the repo |
-| lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the hub | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
-| epic-open | the `Task:` trailer → `link.md` → the hub epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
-| reconcile-debt | the `Task:` trailer → `link.md` → the hub epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
+| lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
+| epic-open | the `Task:` trailer → `link.md` → the Product epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
+| reconcile-debt | the `Task:` trailer → `link.md` → the Product epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
 | verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | hub roster `email` fields (`yad check --fix` generates the allowlist) |
 | commit-message | each non-merge commit's subject + trailer block | `yad-commit` / `CONTRIBUTING.md` (`config.yaml build.commit_subject_style`) |
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
@@ -117,7 +117,7 @@ own CI runs, plus an assertion that each one actually *assigns* `BASE` from it.
   release; generated files remain managed instead of accumulating consumer-specific edits. The
   variable is read by the code repo's `yad-checks` workflow only (on GitHub the build/test/lint job;
   in the GitLab fragment it sets the `node:` image of every `yad-*` gate job, which all share one
-  anchor) — the hub-side workflows run the `yad` CLI, not the repo's toolchain, and keep their own
+  anchor) — the Product-side workflows run the `yad` CLI, not the repo's toolchain, and keep their own
   pinned Node. A declared `packageManager` needs
   Corepack, which ships with Node 18 through 24 (Node 25+ dropped it) and, before 18.20.7 / 20.19 /
   22.14, carries registry keys too old to verify anything published since 2025 — so the override
@@ -150,14 +150,14 @@ runner. Real repos substitute their own eslint/tsc/jest — the gate only calls 
 
 ## 4. verified-commits (`templates/checks/verified-commits.sh`)
 
-No unverified commits from unverified users reach merge — on the product hub and on every connected
+No unverified commits from unverified users reach merge — on the Product and on every connected
 repo. For each commit in `<base>..HEAD`, two independent checks:
 
 - **Verified signature** — the platform must mark the commit's signature verified (the GitHub/GitLab
   "Verified" badge: signed with a GPG/SSH key registered to the account owning the author email).
   Read via `gh api repos/{owner}/{repo}/commits/<sha>` (GitHub) or the commits/signature API (GitLab).
 - **Known author** — the commit's **author email** must appear in `.sdlc/verified-authors`, generated
-  by `yad check --fix` from the hub roster's `email`/`emails` fields plus hub.json's
+  by `yad check --fix` from the Product roster's `email`/`emails` fields plus hub.json's
   `verified_authors` list (edit hub.json, never the generated file). Only the author is checked:
   platform-generated squash commits keep the PR author (who is on the roster). Two identities are
   **allowlist-waived but still signature-covered**: the `yad-gate-sync` bot, and any **merge commit**
@@ -193,8 +193,8 @@ non-merge commit in `<base>..HEAD`:
   `COMMIT_TYPES`) and **no trailing period** — mirroring `cli/commit.mjs` `buildCommitMessage`.
 - **Trailers**, when present, appear in the fixed order `Task → Contract-Change → Co-Authored-By`.
 - Merge/squash commits (2+ parents) are skipped — their platform-generated subjects are not authored.
-- **Profiles** (`--profile code|hub`): the subject rule is identical on both; the gate never requires
-  the `Task:` trailer (spec-link owns that on code repos; hub commits are not task-scoped).
+- **Profiles** (`--profile code|hub|product`): the subject rule is identical on both; the gate never requires
+  the `Task:` trailer (spec-link owns that on code repos; Product commits are not task-scoped).
 - **Fails closed** when `<base>` can't be resolved.
   `<base>` is optional — see [Resolving `<base>`](#resolving-base-every-gate-that-takes-one).
 
@@ -209,8 +209,8 @@ from the event payload):
 - `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head` — stays strict) → a Shape artifact-review title
     `review: <artifact> (EP-<slug>)`, the shape `yad gate open` creates.
-  - any other head → a tooling/code change to the hub itself, so it follows the `code` convention (a
-    Conventional-Commits subject). This is what lets a PR that changes the hub's own workflows/checks
+  - any other head → a tooling/code change to the Product itself, so it follows the `code` convention (a
+    Conventional-Commits subject). This is what lets a PR that changes the Product's own workflows/checks
     pass — it has no EP artifact to review.
   - **Anti-bypass guard.** The branch name alone is not trusted: a non-review head that actually
     changes Shape artifacts (any path under `epics/**`) **FAILS** — those changes must go through
@@ -251,11 +251,11 @@ both shipped:
 After the contract locks and code ships, a change must not mutate a locked artifact — it becomes a new
 epic threaded to its parent (`config.yaml` `change:`). These three gates keep that discipline. All three
 resolve the owning epic the same way: `Task:` trailer → `specs/<story>/link.md` (`epic` + `product-repo`)
-→ the hub epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
+→ the Product epic. All **fail closed** on an unresolvable base; all are **per commit**; `ci|chore|build|test`
 commits **with no `Task:` trailer** are exempt — like spec-link, the exemption waives the requirement
 for an owning epic, never the validity of one that is claimed, so a maintenance subject cannot buy a
-pass past the sealed-epic / orphan-thread / frozen-thread checks. When the **product hub is not reachable** from CI (the usual case for a code-repo
-PR), each degrades to a **PASS-with-note** — the hub-side check (`yad doctor` / `yad reconcile`) covers
+pass past the sealed-epic / orphan-thread / frozen-thread checks. When the **Product is not reachable** from CI (the usual case for a code-repo
+PR), each degrades to a **PASS-with-note** — the Product-side check (`yad doctor` / `yad reconcile`) covers
 that path, and spec-link still proves the story link.
 
 **Resolving `product-repo` (shared by all four hub-reading gates, contract-check included).** An
@@ -269,9 +269,9 @@ gate now **prints that note**, so a deferred check is never mistaken for a passe
 duplicated verbatim across the four scripts (they are standalone by design) and a test asserts the
 four copies stay byte-identical.
 
-- **lineage-check** — reads the hub epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
+- **lineage-check** — reads the Product epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
   passes. A `change`/`defect`/`hotfix` epic **FAILS** unless it declares a `parent:` that resolves to a
-  real `epics/<parent>/` in the hub (no orphan threads). This is the "every code change has an owning
+  real `epics/<parent>/` in the Product (no orphan threads). This is the "every code change has an owning
   epic in a thread" enforcement, layered on spec-link.
 - **epic-open** — an epic is **sealed** iff it has ≥1 story and **every** `stories/*.md` `status:` is
   `shipped`. A commit whose owning epic is sealed **FAILS**: new behaviour cannot mutate a shipped epic;
@@ -295,7 +295,7 @@ strictly-good invariant. Normal PR merges sail through — merge commits are pla
 `commit-message` skips merges. The `yad update --push` commit itself carries **no `[skip ci]`** (unlike the
 machine-state `yad checkpoint`/`gate ci` commits) precisely so this guard runs on it.
 
-Wired into **every connected repo and the hub** (`REPO_WIRING`/`HUB_WIRING` in `cli/manifest.mjs`). On
+Wired into **every connected repo and the Product** (`REPO_WIRING`/`PRODUCT_WIRING` in `cli/manifest.mjs`). On
 GitHub it is a self-contained workflow (`.github/workflows/yad-update-guard.yml`, marker `# yad-managed:
 yad-checks`), gated to the default branch by a job-level `if: github.ref_name ==
 github.event.repository.default_branch`. On GitLab it is an includable fragment
@@ -375,9 +375,9 @@ break nor reorder them; job names are `yad-`prefixed to avoid collisions.
 **Idempotent.** The two markers plus the include-entry check make a re-run a no-op. This is how a repo
 that already had its own pipeline keeps it and still gains the gates.
 
-## Wiring the hub (`repo: hub`)
+## Wiring the Product (`repo: hub`)
 
-The product hub is itself a repo on a platform (recorded in `.sdlc/hub.json` by
+The Product is itself a repo on a platform (recorded in `.sdlc/hub.json` by
 `yad-connect-repos action: detect-hub`). `wire repo: hub` targets `{project-root}` and uses the same
 merge-not-clobber logic, with a **hub-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build):
@@ -388,23 +388,23 @@ merge-not-clobber logic, with a **hub-flavored gate set** appropriate to a "thin
 - **approvals-present** — an epic at `ready-for-build` has the approvals its gate rule requires recorded
   in `.sdlc/approvals.json` (the same predicate `yad-review-gate` enforces).
 
-These are advisory checks on the hub's own PRs (the Shape review PRs the verified ledger opens); they keep
-the hub's artifacts internally consistent. The hub never runs the code-repo `spec-link`/`build-test-lint`
-gates. Author the hub gate scripts under the hub's `checks/` following the same CI-agnostic-bash pattern.
+These are advisory checks on the Product's own PRs (the Shape review PRs the verified ledger opens); they keep
+the Product's artifacts internally consistent. The Product never runs the code-repo `spec-link`/`build-test-lint`
+gates. Author the Product gate scripts under the Product's `checks/` following the same CI-agnostic-bash pattern.
 
-The hub **does** run the verified-commits gate — `yad check --fix` installs `checks/verified-commits.sh`
+The Product **does** run the verified-commits gate — `yad check --fix` installs `checks/verified-commits.sh`
 plus a standalone workflow (`templates/github/yad-verified-commits.yml` →
 `.github/workflows/yad-verified-commits.yml`, or the GitLab fragment
 `templates/gitlab/yad-verified-commits.gitlab-ci.yml` → `.gitlab/ci/yad-verified-commits.yml` +
 its one include line) whenever `.sdlc/hub.json` has a platform with a verified ledger. So the
 Shape review PRs are held to the same rule as code-repo PRs: signed, known authors only.
 
-The hub **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
+The Product **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
 `--profile hub`. The pattern gates split by the PR/MR **head branch** (passed via `--head`): a
 `review/EP-*` head is a Shape review PR — Conventional-Commits commit subjects, a
-`review: <artifact> (EP-<slug>)` title, and the hub artifact-review template body; **any other head is
-a tooling/code change to the hub itself** and follows the `code` convention (a Conventional-Commits
-title + the code task template), so a PR that changes the hub's own workflows/checks can pass.
+`review: <artifact> (EP-<slug>)` title, and the Product artifact-review template body; **any other head is
+a tooling/code change to the Product itself** and follows the `code` convention (a Conventional-Commits
+title + the code task template), so a PR that changes the Product's own workflows/checks can pass.
 `yad check --fix` installs the same `checks/*.sh` scripts plus a standalone hub workflow
 (`templates/github/yad-hub-checks.yml` → `.github/workflows/yad-hub-checks.yml`, or the GitLab fragment
 `templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
@@ -430,7 +430,7 @@ Claude Code's `PreToolUse` protocol is exactly that (exit 2 blocks the call and 
 the model), so `.claude/settings.json` wires it with no adapter logic. Any harness that can run a
 command and read those two exit codes can use the same script.
 
-**Layering.** `hooks/ledger-guard.sh` is only the adapter: it locates `yad` (`$YAD_BIN` → the hub's
+**Layering.** `hooks/ledger-guard.sh` is only the adapter: it locates `yad` (`$YAD_BIN` → the Product's
 `node_modules/yadflow` → `PATH` → `npx --no-install`) and passes the payload to `yad hook
 ledger-guard`, which holds the decision. So the wiring never hard-codes an install path, and the
 logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
@@ -468,10 +468,10 @@ protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` 
 
 - A `Bash` tool call (`sed -i epics/…`) is not intercepted; matching it would mean parsing shell for
   write intent.
-- The hook arms sessions **rooted at the hub**. A harness loads hooks from its own project root, so a
-  session opened at the *workspace* (`project/`, with the hub at `project/product/`) never reads the
-  hub's `.claude/settings.json` and the guard does not fire there — even though the decision itself
-  resolves the hub correctly from any path. In that layout, open the session at the hub, or copy the
+- The hook arms sessions **rooted at the Product**. A harness loads hooks from its own project root, so a
+  session opened at the *workspace* (`project/`, with the Product at `project/product/`) never reads the
+  Product's `.claude/settings.json` and the guard does not fire there — even though the decision itself
+  resolves the Product correctly from any path. In that layout, open the session at the Product, or copy the
   entry into the workspace's own settings (the command's `$CLAUDE_PROJECT_DIR` would then need the
   hub-relative path).
 

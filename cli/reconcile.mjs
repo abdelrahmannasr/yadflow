@@ -12,7 +12,7 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, hubActions, hookActions, authorsActions,
+  moduleActions, repoActions, productActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -43,12 +43,12 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     writeJSON(stampPath, { ...record, version: VERSION, ideTargets });
   };
 
-  // --- deterministic file actions (module + hub CI + author allowlists + every registered repo),
+  // --- deterministic file actions (module + Product CI + author allowlists + every registered repo),
   //     plus pre-2.0 sdlc-* -> yad-* migrations ('legacy': old name installed; rename in place)
   //     and purge of skills removed in a later release ('removed': delete the lingering install) ---
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
-    ...hubActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
+    ...productActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
     ...authorsActions(root, registry.repos),
   ];
   if (ideState.needsRepair) {
@@ -71,7 +71,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     if (head && repo.syncedHead && head !== repo.syncedHead) {
       staleRepos.push(repo);
       // packRepo writes the repomix cache under the HUB root (root/repo.contextPack, e.g.
-      // .sdlc/code-context/<name>/pack.md), so the touched path belongs to the hub — and is commonly
+      // .sdlc/code-context/<name>/pack.md), so the touched path belongs to the Product — and is commonly
       // gitignored, in which case the push stage's check-ignore drops it. codeMap is AI-generated
       // later, not here, so only the pack is claimed.
       actions.push({

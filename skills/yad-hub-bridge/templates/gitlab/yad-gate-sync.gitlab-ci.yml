@@ -1,6 +1,6 @@
 # yad-managed-include: yad-hub-bridge
-# Merge-time gate sync for the PRODUCT HUB, as an INCLUDABLE fragment (Path B). Pulled into the
-# hub's root .gitlab-ci.yml via:
+# Merge-time gate sync for the PRODUCT, as an INCLUDABLE fragment (Path B). Pulled into the
+# Product's root .gitlab-ci.yml via:
 #   include:
 #     - local: '.gitlab/ci/yad-gate-sync.yml'
 # so wiring never edits the foreign root pipeline beyond that one include line. The job carries
@@ -40,7 +40,7 @@
 # block in the script below for the precedence. It no longer floats on the major, because floating let a
 # release change what a scheduled job does with nobody deciding to upgrade (issue #163, where 3.13.1
 # took one hub from 20 to 96 churn commits an hour). The trade-off is deliberate and cuts both ways: a
-# hub is no longer carried onto a fix automatically, so if the resolved pin is older than 3.15.3, run
+# Product is no longer carried onto a fix automatically, so if the resolved pin is older than 3.15.3, run
 # `yad update` or disable this schedule.
 #
 # To override it, set a CI/CD variable YAD_VERSION (e.g. `3.15.2`) in project Settings → CI/CD →

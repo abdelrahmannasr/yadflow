@@ -11,7 +11,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 const LOCK_FACTS = [
   'The architect authors contract.md with a delimited CONTRACT-SURFACE:BEGIN … END block — the shared cross-repo surface.',
   'yad-architecture writes the SHA-256 of that block into .sdlc/contract-lock.json — the surface is now hash-locked.',
-  'Each per-repo spec quotes the locked contract and never widens it; the contract stays singular in the product hub.',
+  'Each per-repo spec quotes the locked contract and never widens it; the contract stays singular in the Product.',
   'In CI, contract-check FAILS a diff that changes the surface without a Contract-Change trailer + a re-locked contract — and routes it back to the architecture gate.',
 ];
 

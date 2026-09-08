@@ -24,7 +24,7 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   - **Hub variants** (`repo: hub`) — Shape artifact-review PR/MR bodies:
     `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
     `templates/hub/gitlab/merge_request_templates/Default.md` →
-    `{project-root}/.gitlab/merge_request_templates/Default.md`. The hub body carries no `Task:` trailer
+    `{project-root}/.gitlab/merge_request_templates/Default.md`. The Product body carries no `Task:` trailer
     (hub PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s `hub-route.sh`.
 - **GitLab reads a truncated description.** The `pr-template` gate is fed
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
@@ -50,7 +50,7 @@ touched domain). This step **never auto-advances**; it sets up the template and 
 
 ## Inputs
 
-- `repo`   — the code repo to add the template to (one of an epic's repos), or `hub` for the product hub.
+- `repo`   — the code repo to add the template to (one of an epic's repos), or `hub` for the Product.
 - `action` — `wire` (commit the matching template + helper) | `route` (print required reviewers from a
   PR body). Default `wire`.
 - `body`   — for `route`: a file holding the PR/MR description to evaluate.
@@ -68,7 +68,7 @@ Copy from this skill's `templates/`:
 - GitLab → `templates/gitlab/merge_request_templates/Default.md` to
   `<repo>/.gitlab/merge_request_templates/Default.md`.
 - **`repo: hub`** → use the `templates/hub/<platform>/…` variants, installed into `{project-root}`'s own
-  `.github/`/`.gitlab/`. The hub's routing helper (`hub-route.sh`) is installed by `yad-hub-bridge`.
+  `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) is installed by `yad-hub-bridge`.
 Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also
 install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`). If the target already has a
 non-SDLC PR/MR template, do not clobber it — back it up / ask. Commit the template on the repo's default

@@ -1,4 +1,4 @@
-// Shared machinery for committing the machine-written Build ledgers to the hub — used by both
+// Shared machinery for committing the machine-written Build ledgers to the Product — used by both
 // `yad checkpoint` (sync new state) and `yad tidy up` (fold finished shards). Both must commit ONLY on
 // the default branch, so their `[skip ci]` commit never enters a PR's base..HEAD range (where it would
 // strand required checks and fail verified-commits). This module is the single home of that guard.
@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { warn, fail, hand, run } from './lib.mjs';
 
-export const hubGit = (root) => (...args) => run('git', args, { cwd: root });
+export const productGit = (root) => (...args) => run('git', args, { cwd: root });
 
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
@@ -24,7 +24,7 @@ export function preflightGuardReadiness(root) {
   const allow = readFileSafe(path.join(root, '.sdlc', 'verified-authors'));
   const known = allow.split('\n').map((l) => l.trim().toLowerCase()).filter((l) => l && !l.startsWith('#'));
   if (known.length && email && !known.includes(email)) {
-    warn(`your git email <${email}> is not in .sdlc/verified-authors — the yad-update-guard will reject these commits (add it to the hub roster and re-run \`yad check --fix\`).`);
+    warn(`your git email <${email}> is not in .sdlc/verified-authors — the yad-update-guard will reject these commits (add it to the Product roster and re-run \`yad check --fix\`).`);
   }
 }
 

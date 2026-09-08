@@ -46,7 +46,7 @@ a screen, capture its node id + URL, and map components/tokens into `DESIGN.md`.
 
 Either direction ends by writing `epics/EP-<slug>/.sdlc/design-links.json` — the machine-readable
 screen→frame map — and a `## Design (<tool>)` section in `ui-design.md` linking each screen to its frame
-URL. The design itself lives in the tool; the hub keeps the *links* and the Markdown spec beside the
+URL. The design itself lives in the tool; the Product keeps the *links* and the Markdown spec beside the
 other epic artifacts.
 
 ## Degrade path (no MCP / no tool)

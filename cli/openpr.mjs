@@ -1,7 +1,7 @@
 // `yad open-pr` — open a code-repo task PR/MR from the repo's platform template (Build).
 // Detects the platform, pushes the current branch, and creates the PR/MR with Summary / Story-task /
 // Impact & Risk prefilled. Distinct from `yad gate open`, which opens a Shape artifact-review PR
-// on the product hub.
+// on the Product.
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
@@ -23,13 +23,13 @@ function resolveRepo(root, { repo, dir }) {
   return { repoRoot: path.resolve(root, dir || '.'), meta: null };
 }
 
-// Which SDLC stage is this PR? The hub serves two vehicles; a code repo only one. Mirrors the
-// `--head` split the hub pattern gates (pr-title.sh/pr-template.sh) already apply:
-//   code-repo    — NOT the product hub (a registry repo via --repo, or root is not a hub).
-//   hub-shape    — the hub itself AND head is a review/EP-* branch (artifact-review PR).
-//   hub-tooling  — the hub itself AND head is anything else (a tooling/CI change to the hub).
+// Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the
+// `--head` split the Product pattern gates (pr-title.sh/pr-template.sh) already apply:
+//   code-repo    — NOT the Product (a registry repo via --repo, or root is not a hub).
+//   hub-shape    — the Product itself AND head is a review/EP-* branch (artifact-review PR).
+//   hub-tooling  — the Product itself AND head is anything else (a tooling/CI change to the Product).
 // `meta` (truthy when resolved from the repos registry via --repo) is a connected code repo, so it is
-// never the hub regardless of its path. Otherwise "is the hub" = repoRoot resolves to root AND root
+// never the Product regardless of its path. Otherwise "is the Product" = repoRoot resolves to root AND root
 // carries .sdlc/hub.json. path.resolve normalises `--dir .` / trailing slashes.
 export function detectStage(root, repoRoot, head, meta) {
   if (meta) return 'code-repo';
@@ -65,8 +65,8 @@ function codeTaskTemplate(platform) {
 }
 
 export function templateBody(repoRoot, platform, { task, summary, risk, contract, domains, stage }) {
-  // hub-tooling: the hub's own template is artifact-review — use the bundled code-task template so the
-  // body matches the shape the hub `pr-template` gate demands for a non-review head.
+  // hub-tooling: the Product's own template is artifact-review — use the bundled code-task template so the
+  // body matches the shape the Product `pr-template` gate demands for a non-review head.
   let base;
   if (stage === 'hub-tooling') {
     base = codeTaskTemplate(platform);
@@ -108,9 +108,9 @@ export async function runOpenPr(root, opts = {}) {
   const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoRoot }).stdout;
   const stage = detectStage(root, repoRoot, branch, meta);
 
-  // hub-shape: this is a Shape artifact-review PR (review/EP-*/<artifact> head on the hub). The
+  // hub-shape: this is a Shape artifact-review PR (review/EP-*/<artifact> head on the Product). The
   // artifact-review title, body, and ledger bookkeeping all live in `yad gate open` — delegate to it
-  // rather than emit the code-task shape (which the hub gate would reject). Push first (gateOpen does
+  // rather than emit the code-task shape (which the Product gate would reject). Push first (gateOpen does
   // not push), then hand off; any --title/--message is dropped (gateOpen sets `review: …`).
   if (stage === 'hub-shape') {
     const parsed = parseReviewBranch(branch);
@@ -128,8 +128,8 @@ export async function runOpenPr(root, opts = {}) {
     return res;
   }
 
-  // The hub roster + its default_branch. The latter only applies when the PR targets the hub ITSELF
-  // (a hub-tooling branch) — for a connected code repo the hub's trunk belongs to a different repo and
+  // The Product roster + its default_branch. The latter only applies when the PR targets the Product ITSELF
+  // (a hub-tooling branch) — for a connected code repo the Product's trunk belongs to a different repo and
   // must never leak in. Resolved AFTER the hub-shape hand-off above, which delegates its own base to
   // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
   // delegated path then ignores.
@@ -179,7 +179,7 @@ export async function runOpenPr(root, opts = {}) {
     task, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
   });
 
-  // Auto-assign from the hub roster, scoped to this repo: assignee = the committer (resolved from
+  // Auto-assign from the Product roster, scoped to this repo: assignee = the committer (resolved from
   // local git identity), reviewers = the repo's reviewers + domain-owners, minus the committer.
   // Degrades cleanly when there is no roster / the committer is unmapped (gh self-assigns via @me).
   const roster = hub.roster || [];

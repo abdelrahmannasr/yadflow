@@ -56,10 +56,10 @@ export function envChecks(checks) {
 }
 
 export function projectChecks(checks, root) {
-  const hubPath = productConfigPath(root);
+  const productPath = productConfigPath(root);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const verPath = path.join(root, PROJECT_FILES.version);
-  if (!exists(hubPath) && !exists(regPath) && !exists(verPath)) {
+  if (!exists(productPath) && !exists(regPath) && !exists(verPath)) {
     check(checks, 'project', 'project', 'warn', 'no yad project here (.sdlc/ not initialised)', 'run `yad setup` to start one — environment checks above still apply');
     return null;
   }
@@ -76,12 +76,12 @@ export function projectChecks(checks, root) {
 
   // hub.json: parse + shape
   let hub = null;
-  if (!exists(hubPath)) {
+  if (!exists(productPath)) {
     check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform + roster');
   } else {
     let hubBroken = false;
     try {
-      hub = readJSONStrict(hubPath, null);
+      hub = readJSONStrict(productPath, null);
     } catch (e) {
       hubBroken = true;
       check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
@@ -104,9 +104,9 @@ export function projectChecks(checks, root) {
         if (!hostFromGitUrl(hub.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
             `${PROJECT_FILES.hubConfig} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
-            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the hub host');
+            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the Product host');
         }
-        // Scope the auth probe to the hub's own host (derived from git_url, falling back to the
+        // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
         // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
         // flag a working self-hosted hub — so we SKIP the probe entirely when no host resolves
@@ -118,7 +118,7 @@ export function projectChecks(checks, root) {
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
-          // Re-validate each roster login against the hub (warn-only). Skips when a login is already
+          // Re-validate each roster login against the Product (warn-only). Skips when a login is already
           // flagged unverified by setup; reports any that no longer resolve.
           const bad = [];
           for (const e of hub.roster || []) {
@@ -131,7 +131,7 @@ export function projectChecks(checks, root) {
           // A present+authenticated glab whose token lacks api scope would still break readPrGitLab, so
           // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
           if (hub.platform === 'gitlab') {
-            // Scope the probe to the hub's own host (like the auth check above) so a multi-instance
+            // Scope the probe to the Product's own host (like the auth check above) so a multi-instance
             // setup doesn't hit the wrong GitLab. `host` is guaranteed truthy here (we skip the whole
             // auth branch when it cannot be resolved), so the probe is always host-scoped.
             if (!run('glab', ['api', 'version', '--hostname', host]).ok) {
@@ -159,7 +159,7 @@ export function projectChecks(checks, root) {
   // an agent's hand-edit is always rejected later by `ledger-guard`, so the local hook that refuses it
   // up front should be installed. With a local ledger nothing guards it, and the hand-edit the
   // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
-  const hubForHooks = readJSON(hubPath, null);
+  const hubForHooks = readJSON(productPath, null);
   if (isVerifiedLedger(hubForHooks)) {
     const unwired = [];
     const broken = [];
@@ -287,13 +287,13 @@ export function projectChecks(checks, root) {
       // would read as "healthy") — an entry with no path is malformed.
       if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
       const repoRoot = path.resolve(root, repo.path);
-      // A registered repo may be a SIBLING of the hub (`../backend`, the standard multi-repo layout).
-      // Such a checkout is legitimately absent wherever only the hub is checked out — hub CI, a fresh
+      // A registered repo may be a SIBLING of the Product (`../backend`, the standard multi-repo layout).
+      // Such a checkout is legitimately absent wherever only the Product is checked out — Product CI, a fresh
       // clone — so its absence is a warn, not corruption. A missing path INSIDE the project root is
       // still a hard fail: nothing but damage explains it.
       if (!exists(repoRoot)) {
         if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo');
-        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the hub)`, 'expected when only the hub is checked out; clone it alongside the hub to work on it here');
+        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the Product)`, 'expected when only the Product is checked out; clone it alongside the Product to work on it here');
         continue;
       }
       const head = gitHead(repoRoot);

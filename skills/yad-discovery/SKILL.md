@@ -63,7 +63,7 @@ roadmap extends the real system rather than re-proposing it.
 Open the discovery authoring branch `discovery/EP-discovery` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-hub's default branch. Author and commit the discovery set on it. Distinct from the verified ledger's
+Product's default branch. Author and commit the discovery set on it. Distinct from the verified ledger's
 `review/EP-discovery/discovery` branch.
 
 ### Step 4 — Write the discovery set
@@ -122,8 +122,8 @@ Report: the path to the discovery set, and that the next action is **review** vi
 (base rule: owner + 1 reviewer) on the virtual artifact `discovery/`. **Never mark discovery-review
 approved here** — only real reviewers do that through the gate. When the discovery gate passes, the
 state moves to the `discovery-done` sentinel (not `ready-for-build` — discovery has no Build); the
-roadmap is now the input that each `yad-epic` reads (its "Step 2c — read the roadmap"). When the hub
-has a platform, the gate opens a review PR on the hub (via `yad-hub-bridge`) and
+roadmap is now the input that each `yad-epic` reads (its "Step 2c — read the roadmap"). When the Product
+has a platform, the gate opens a review PR on the Product (via `yad-hub-bridge`) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
 is recorded local.
 

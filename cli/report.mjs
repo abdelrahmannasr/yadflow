@@ -81,7 +81,7 @@ export function sanitizeContext(dir, { error = null, argv = process.argv.slice(2
     os: process.platform,
     git: has('git') ? 'present' : 'not found',
     gh: toolState('gh', 'github'),
-    // The hub CLI's auth is a useful diagnostic for a GitLab user (issues still file to GitHub upstream).
+    // The Product CLI's auth is a useful diagnostic for a GitLab user (issues still file to GitHub upstream).
     ...(platform === 'gitlab' ? { glab: toolState('glab', 'gitlab') } : {}),
     platform,
     command: sanitizeArgv(argv) || '(none)',

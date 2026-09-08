@@ -65,7 +65,7 @@ The read side counts a mentioned reviewer normally: their eventual **approval** 
 `…/approvals → approved_by[]`, and their **note** in `…/discussions` — so the single-reviewer-field cap
 loses only the native "Reviewers" UI chip, not the gate routing.
 
-Required reviewers = the hub's `reviewer`/`domain-owner` roster logins for the touched scopes, PLUS any
+Required reviewers = the Product's `reviewer`/`domain-owner` roster logins for the touched scopes, PLUS any
 repo whose ownership lives only in `repos.json` `domain_owner`/`domain_owners` (those are resolved to a
 login and requested too — otherwise an escalated step is structurally unsatisfiable through routing).
 
@@ -103,7 +103,7 @@ login and requested too — otherwise an escalated step is structurally unsatisf
   --merged` per merged PR/MR, every 15 minutes) walks a rotation:
   `[A,B,C] → sync A → [B,C,A] → sync B → [C,A,B] → sync C → [A,B,C]`. Every hop is a non-empty diff, so
   every hop commits and pushes, and the pass ends where it began — an unbounded commit loop with zero
-  semantic change. That is issue #163: ~1,800 bot commits/day on the hub that reported it. Sorting is
+  semantic change. That is issue #163: ~1,800 bot commits/day on the Product that reported it. Sorting is
   what makes the "nothing staged → nothing to commit" guard in `gate ci` actually hold.
 - Running `sync` twice with no platform change is a no-op on the ledger — byte-identical, including
   `comments.json` and the dated `reviews/*.md` side files.
@@ -153,13 +153,13 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
     CHANGES_REQUESTED is still honored, so a degraded read can only ever *hold* the gate.
   The `artifactHash` stamp still binds architecture approvals to the locked contract surface (see
   "Contract re-lock" above).
-- **Known limitation — protect the hub default branch.** The advance hashes the artifact from the
+- **Known limitation — protect the Product default branch.** The advance hashes the artifact from the
   default branch as it stands when CI runs, while approvals are SHA-bound to the reviewed PR/MR head.
   Those can differ if the artifact changes on the **base** outside this review while the PR/MR is open
   (the merge then integrates a change the reviewers never saw) or if a later out-of-band commit edits
   the merged artifact before a delayed reconcile advances it. In both cases each approval's commit
   still equals the reviewed head, so the SHA check passes, yet the live content was not reviewed. Close
-  it operationally: **require branch protection on the hub default branch so `epics/**` artifacts can
+  it operationally: **require branch protection on the Product default branch so `epics/**` artifacts can
   only change through their own review PR/MR** (one open review per artifact) — then the base copy of an
   artifact cannot move while its review is open, so the merged/live content always equals the reviewed
   content. (The complete in-code fix would hash the artifact at the reviewed PR-head revision before
@@ -167,7 +167,7 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
 
 ## Event-driven sync (hub CI) — Path B
 
-The `wire` action (SKILL.md Step 4) installs CI on the hub so a **merge** drives `yad gate ci` —
+The `wire` action (SKILL.md Step 4) installs CI on the Product so a **merge** drives `yad gate ci` —
 **CI is the SOLE writer of the ledger, and it writes only at merge, only to the default branch.**
 During review CI writes nothing: the platform PR/MR is the source of truth (native approvals +
 threads). The CLI is self-sufficient at merge: it derives the epic + artifact from the
@@ -190,7 +190,7 @@ and fall back to `3`:
 |---|---|---|
 | 1 | `YAD_VERSION` — used **verbatim**, the operator's override | GitHub: Settings → Secrets and variables → Actions → **Variables**. GitLab: Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
 | 2 | `.sdlc/hub.json` → `gate_sync_version` — this hub's committed pin | edit `hub.json`, commit it |
-| 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the hub | `yad update` re-stamps it |
+| 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the Product | `yad update` re-stamps it |
 | 4 | `3` — floating major, only when nothing above resolves | — |
 
 Sources 2 and 3 are **validated** before use: an exact `3.x.y` release token, prereleases included

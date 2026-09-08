@@ -1,6 +1,6 @@
 ---
 name: yad-stub
-description: 'Phase 6 brownfield helper — mint a STUB genesis epic for an already-built feature that has no epic in the hub, so a defect/change can thread off it TODAY. In a brownfield repo not every feature has an epic; yad-change requires a real parent and dead-ends without one. This skill creates the smallest real thread anchor — a tiny epic.md (kind:feature, thread:self, verified:false, stub:backfill-pending) + a seeded state.json + empty ledgers — never inventing behaviour. Defects thread off it immediately (gates pass, the bug list is derived by the thread rollup), and yad-backfill + its promote step later fill/flip it into a real feature epic. Never auto-advances. Use when the user says "there is no epic for this feature", "file a bug on a legacy feature", "anchor a brownfield feature", or when yad-change / yad-reconcile point here because a parent epic is missing.'
+description: 'Phase 6 brownfield helper — mint a STUB genesis epic for an already-built feature that has no epic in the Product, so a defect/change can thread off it TODAY. In a brownfield repo not every feature has an epic; yad-change requires a real parent and dead-ends without one. This skill creates the smallest real thread anchor — a tiny epic.md (kind:feature, thread:self, verified:false, stub:backfill-pending) + a seeded state.json + empty ledgers — never inventing behaviour. Defects thread off it immediately (gates pass, the bug list is derived by the thread rollup), and yad-backfill + its promote step later fill/flip it into a real feature epic. Never auto-advances. Use when the user says "there is no epic for this feature", "file a bug on a legacy feature", "anchor a brownfield feature", or when yad-change / yad-reconcile point here because a parent epic is missing.'
 ---
 
 # SDLC — Stub Genesis Epic (Phase 6, the brownfield thread anchor)
@@ -13,11 +13,11 @@ stub is a **thread anchor, not a spec**: it invents no behaviour. It stays `veri
 
 This is the missing connective tissue in a brownfield adoption: `yad-backfill` produces a *draft spec in
 the code repo*, and `yad-reconcile` *detects* shipped code with no owning epic — but neither mints the
-hub epic a defect must thread from. `yad-stub` does exactly that, and only that.
+Product epic a defect must thread from. `yad-stub` does exactly that, and only that.
 
 ## Conventions
 
-- `{project-root}` resolves from the product hub. Epic artifacts live under
+- `{project-root}` resolves from the Product. Epic artifacts live under
   `{project-root}/epics/EP-<slug>/` (build plan §6), exactly like a normal genesis epic.
 - **A stub is NOT a reserved-empty id.** An epic in yad *is* a directory + `epic.md`; the tooling skips
   any epic dir lacking `epic.md` (`threadEpics`) and `lineage-check` rejects a parent that is not a real
@@ -51,7 +51,7 @@ breaks every downstream link) — so pick from the best-known feature name and a
 ### Step 3 — Open the authoring branch
 Open `epic/EP-<slug>` per the shared "Authoring branches" procedure
 (`../yad-epic/references/state-schema.md`): git-safe (skip with a note if `{project-root}` is not a git
-work tree), check out if it exists, else create from the hub's default branch.
+work tree), check out if it exists, else create from the Product's default branch.
 
 ### Step 4 — Write the stub `epic.md` (thread anchor — never invent behaviour)
 Write `{project-root}/epics/EP-<slug>/epic.md` using EXACTLY this shape:
@@ -116,7 +116,7 @@ into normal authoring with zero re-seeding.
 Also create the empty ledgers `{.sdlc/approvals.json}` and `{.sdlc/comments.json}` (each `[]`) and the
 `reviews/` directory. **Do NOT** write a `contract-lock.json` — a stub has no locked surface yet.
 
-Commit the seed on this step's authoring branch; it reaches the hub's default branch through the
+Commit the seed on this step's authoring branch; it reaches the Product's default branch through the
 epic's **first** review PR/MR (or, for a stub, the PR that carries the stub itself). In verified mode
 `ledger-guard` exempts a new epic's ledger — creation, not mutation (#162) — while every later change
 to it stays CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".

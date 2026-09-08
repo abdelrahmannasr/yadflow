@@ -1,6 +1,6 @@
 import type { SystemComponent } from "./types";
 
-// The durable objects on the yadflow canvas — the product hub, its file ledger,
+// The durable objects on the yadflow canvas — the Product, its file ledger,
 // the connectors + connected tools, the platform, and the trust log. Brand
 // palette mirrors the legacy report public/report.html (accent #2471a3, sentinel #1e8449, gate
 // #ca6f1e, artifact #b7950b, locked #566573).
@@ -10,14 +10,14 @@ import type { SystemComponent } from "./types";
 // loop-back arc (trust-log → product-hub, drawn in FlowCanvas) expressing the
 // repeated-per-epic cycle:
 //   • Col 1 — product-hub (the brain that drives the pipeline)
-//   • Col 2 — the file ledger the hub owns + the code registry: state / approvals / contract-lock / repos-json
+//   • Col 2 — the file ledger the Product owns + the code registry: state / approvals / contract-lock / repos-json
 //   • Col 3 — the connectors + code resource: design / testing / learning json + code-repos
 //   • Col 4 — the connected tools + docs target: design / testing / learning tool + docs-json
-//   • Col 5 — publish / evidence terminal: platform + trust-log (loops back to the hub)
+//   • Col 5 — publish / evidence terminal: platform + trust-log (loops back to the Product)
 export const COMPONENTS: SystemComponent[] = [
   {
     id: "product-hub",
-    label: "Product Hub",
+    label: "Product",
     icon: "🏛️",
     color: "#2471a3",
     position: { x: 9, y: 50 },
@@ -139,7 +139,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#7d3c98",
     position: { x: 88, y: 33 },
     description:
-      "The hub's git platform. The Shape review rides a real review PR/MR here; CI runs the check gates.",
+      "The Product's git platform. The Shape review rides a real review PR/MR here; CI runs the check gates.",
   },
   {
     id: "trust-log",

@@ -7,9 +7,9 @@
 #     requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:` (low|medium|high).
 #   --profile hub — the Shape artifact-review template (templates/hub/<platform>/):
 #     requires `## Artifact under review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
-#     BUT only for review/EP-* head branches. Every other hub PR is a tooling/code change to the hub
+#     BUT only for review/EP-* head branches. Every other hub PR is a tooling/code change to the Product
 #     itself and uses the code task template instead; pass the head ref via --head so the gate knows
-#     which template to require. With no --head, the hub profile stays strict (artifact-review template).
+#     which template to require. With no --head, the Product profile stays strict (artifact-review template).
 #     Branch name is not enough on its own: a non-review head that actually changes Shape
 #     artifacts (epics/**) would otherwise slip past the review workflow with only the code template.
 #     Pass the PR's changed paths via --changed <file> (one path per line); when they touch epics/**
@@ -33,7 +33,21 @@ while [ $# -gt 0 ]; do
     *) ARGS+=("$1"); shift ;;
   esac
 done
-case "$PROFILE" in code|hub) ;; *) echo "FAIL [pr-template]: unknown --profile '$PROFILE' (code|hub)."; exit 1 ;; esac
+case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --profile '$PROFILE' (code|hub|product)."; exit 1 ;; esac
+# `product` is the new name for the `hub` profile and BOTH are accepted.
+#
+# Not because the two sides update separately — they do not: this script and the workflow that passes
+# the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and land together on one `yad update`. It is
+# the plain add-before-remove ladder instead: accept the new spelling now, switch the workflow
+# templates to emit it in a later release, drop the old one after that. Every shipped template still
+# passes `--profile hub` today, so this arm is dead weight until that switch — which is the point.
+#
+# Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
+# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`
+# branch is skipped, taking the whole review-branch arm with it — including the guard that stops a
+# plain code title carrying an artifact change past its review.
+[ "$PROFILE" = product ] && PROFILE=hub
+
 
 # True when the PR changes a Shape artifact (anything under epics/**). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
@@ -98,7 +112,7 @@ check_hub_body() {
   # still what `yad gate open` emits and what the shipped hub template carries; `Shape` is the
   # replacement, accepted here first so that this script is lenient BEFORE anything starts writing
   # the new wording. That ordering is the whole point: this file is refreshed by `yad update`
-  # (HUB_WIRING, cli/manifest.mjs), but the PR template beside it is NOT — it is installed only by
+  # (PRODUCT_WIRING, cli/manifest.mjs), but the PR template beside it is NOT — it is installed only by
   # the `yad-pr-template repo:hub action: wire` skill, which nothing runs automatically. So a hub
   # WILL sit with a refreshed checker next to an old template, and the checker has to accept both.
   # The emitter flips to `(Shape)` in the next major; only after that may `front-half` be dropped.
@@ -115,7 +129,7 @@ if [ "$PROFILE" = hub ]; then
   case "$HEADREF" in
     review/EP-*|"") check_hub_body ;;            # artifact-review PR (or unknown head — stay strict)
     *)
-      # tooling/code change to the hub itself — UNLESS it changes Shape artifacts (epics/**),
+      # tooling/code change to the Product itself — UNLESS it changes Shape artifacts (epics/**),
       # which must go through a review/EP-* PR. Without this guard a non-review head could carry an
       # artifact change past the Shape review with only the code template.
       if artifact_changed; then

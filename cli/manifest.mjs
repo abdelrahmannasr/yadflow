@@ -105,7 +105,7 @@ export const LEGACY_REPO_FILES = {
   github: { '.github/workflows/sdlc-checks.yml': '.github/workflows/yad-checks.yml' },
   gitlab: { '.gitlab/ci/sdlc-checks.yml': '.gitlab/ci/yad-checks.yml' },
 };
-export const LEGACY_HUB_FILES = {
+export const LEGACY_PRODUCT_FILES = {
   github: {
     '.github/workflows/sdlc-gate-sync.yml': '.github/workflows/yad-gate-sync.yml',
     '.github/workflows/sdlc-verified-commits.yml': '.github/workflows/yad-verified-commits.yml',
@@ -362,16 +362,16 @@ export const wiringFor = (platform) => [
   ...(REPO_WIRING[platform] || []),
 ];
 
-// Hub wiring: CI installed on the PRODUCT HUB itself (dest is the project root — the hub IS the
+// Hub wiring: CI installed on the PRODUCT itself (dest is the project root — the Product IS the
 // root). Installed only when hub.json has a platform and the ledger is verified. Carries the
 // event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
-// verified-commits gate (no unverified commits from unverified users reach merge on the hub).
-export const HUB_WIRING = {
+// verified-commits gate (no unverified commits from unverified users reach merge on the Product).
+export const PRODUCT_WIRING = {
   common: [
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
-    // The ledger is CI-owned: block non-bot commits to gate-state files on hub review PRs.
+    // The ledger is CI-owned: block non-bot commits to gate-state files on the Product review PRs.
     { src: 'skills/yad-checks/templates/checks/ledger-guard.sh', dest: 'checks/ledger-guard.sh', exec: true },
-    // Pattern gates run on the hub too (profile: hub) — commit subject + PR title + PR body.
+    // Pattern gates run on the Product too (profile: hub) — commit subject + PR title + PR body.
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },
@@ -380,7 +380,7 @@ export const HUB_WIRING = {
     { src: 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/github/yad-verified-commits.yml', dest: '.github/workflows/yad-verified-commits.yml' },
     { src: 'skills/yad-checks/templates/github/yad-hub-checks.yml', dest: '.github/workflows/yad-hub-checks.yml' },
-    // Integrity gate for the hub's own direct-to-default pushes (`yad update --push`; the machine-
+    // Integrity gate for the Product's own direct-to-default pushes (`yad update --push`; the machine-
     // state `yad checkpoint`/`gate ci` commits carry [skip ci] and are intentionally not re-checked).
     { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
   ],
@@ -392,8 +392,8 @@ export const HUB_WIRING = {
   ],
 };
 
-// Harness hooks: the LOCAL half of the ledger rule, installed on the hub beside the CI gates and
-// active under the same verified-ledger predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
+// Harness hooks: the LOCAL half of the ledger rule, installed on the Product beside the CI gates and
+// active under the same verified-ledger predicate (#171). Kept out of `PRODUCT_WIRING` because a hook is not a
 // CI gate — it is advisory, fails open, and its adapter (below) is per-harness, not per-platform.
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },

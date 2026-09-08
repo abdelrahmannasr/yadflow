@@ -1,13 +1,13 @@
 ---
 name: yad-connect-testing
-description: 'Connects a testing tool (Playwright, or another tool — pluggable) to the product hub so the test-cases step can implement the actual automation tests, not just Markdown test cases. Registers the tool into the project-wide .sdlc/testing.json (local-user / MCP-session auth, no stored tokens), detecting whether a testing-tool MCP is available and degrading to artifacts-only when it is not. Run at setup or any time the testing tool changes. Reusable, idempotent, refreshable. Use when the user says "connect Playwright", "connect a testing tool", "refresh the testing connection", or "list the testing connection".'
+description: 'Connects a testing tool (Playwright, or another tool — pluggable) to the Product so the test-cases step can implement the actual automation tests, not just Markdown test cases. Registers the tool into the project-wide .sdlc/testing.json (local-user / MCP-session auth, no stored tokens), detecting whether a testing-tool MCP is available and degrading to artifacts-only when it is not. Run at setup or any time the testing tool changes. Reusable, idempotent, refreshable. Use when the user says "connect Playwright", "connect a testing tool", "refresh the testing connection", or "list the testing connection".'
 ---
 
 # SDLC — Connect a Testing Tool (make the test-cases step automation-aware)
 
 **Goal:** Let the test-cases step (`yad-test-cases`) produce the **actual automation tests** — the
 runnable specs in a connected code repo — alongside the Markdown artifact (`test-cases.md`). This skill
-**connects** a testing tool such as **Playwright** to the product hub and records *how* to reach it (the
+**connects** a testing tool such as **Playwright** to the Product and records *how* to reach it (the
 tool, the suite references, which MCP runs it) — never a credential.
 
 This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
@@ -18,7 +18,7 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - The integration is **Playwright-first but pluggable** (`config.yaml` `testing.tools`): a testing-tool
   *adapter*, like the GitHub/GitLab platform adapter or the design-tool adapter. Playwright is the
   primary provider; `cypress`, `pytest` and `maestro` are second providers; `none` → artifacts-only.
@@ -101,7 +101,7 @@ automation tests here**. Nothing auto-advances; this is setup.
   **available/unavailable** flag for the MCP (best-effort, the user's own session). No testing tool
   connected ⇒ "artifacts-only".
 - **`disconnect`** — remove the registry file (or set `tool: "none"`). The testing tool's own
-  project/suites are **never touched** — only the hub's record of them.
+  project/suites are **never touched** — only the Product's record of them.
 
 ## Hard rules
 

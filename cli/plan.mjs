@@ -8,9 +8,9 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn,
 } from './lib.mjs';
 import {
-  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES, isVerifiedLedger,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_SETTINGS, HOOK_TOOL_MATCHER, HOOK_COMMAND, HOOK_COMMAND_LEGACY,
-  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
+  LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath,
 } from './manifest.mjs';
 
@@ -20,7 +20,7 @@ import {
 // removed file underneath it, so a dirAction needs only its top-level dest.
 const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
 
-// status: 'ok' | 'missing' | 'outdated'. `root` is the repo the write lands in (the hub for module
+// status: 'ok' | 'missing' | 'outdated'. `root` is the repo the write lands in (the Product for module
 // installs, a connected repo for its wiring); `paths` is the pathspec(s) touched, for the push stage.
 const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
   scope,
@@ -444,8 +444,8 @@ export function legacyRepoActions(root, repo) {
 export function legacyHubActions(root) {
   const hub = readJSON(productConfigPath(root));
   if (!isVerifiedLedger(hub)) return [];
-  const wiring = [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])];
-  return legacyFileActions('hub', root, LEGACY_HUB_FILES[hub.platform], wiring);
+  const wiring = [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[hub.platform] || [])];
+  return legacyFileActions('hub', root, LEGACY_PRODUCT_FILES[hub.platform], wiring);
 }
 
 // Per-repo wiring (gate scripts, CI, PR template).
@@ -476,16 +476,16 @@ export function repoActions(root, repo) {
   return actions.map((a) => (a.status === 'missing' && neverWritten(a) ? { ...a, status: 'new' } : a));
 }
 
-// Hub wiring (gate-sync + verified-commits CI on the product hub itself). Only when the hub has a
+// Hub wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a
 // platform and the verified ledger is explicitly enabled — a local hub stays local, with no error.
-export function hubActions(root) {
+export function productActions(root) {
   const hub = readJSON(productConfigPath(root));
   // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions
   // wrote `bridge` — `isVerifiedLedger` accepts an explicit true in either spelling, and is the one
   // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
   if (!isVerifiedLedger(hub)) return [];
   const ledger = readManagedLedger(root);
-  return [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])].map((w) =>
+  return [...PRODUCT_WIRING.common, ...(PRODUCT_WIRING[hub.platform] || [])].map((w) =>
     wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
 }
@@ -621,8 +621,8 @@ function hookSettingsAction(root, ide, relDest) {
   };
 }
 
-// Harness-hook wiring on the hub: the guard script plus, per IDE target that defines a hook protocol,
-// the entry that invokes it. Verified-only exactly like `hubActions` — with a local ledger it is
+// Harness-hook wiring on the Product: the guard script plus, per IDE target that defines a hook protocol,
+// the entry that invokes it. Verified-only exactly like `productActions` — with a local ledger it is
 // locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
 export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   const hub = readJSON(productConfigPath(root));
@@ -637,13 +637,13 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   }
   // The two halves must land TOGETHER, so `missing` is relabelled `new` — the same relabel a new
   // first-party skill gets, and for the same reason: `yad update` (--scope=changed) excludes only
-  // the literal 'missing'. Without it, an upgrade on a hub that already has a settings.json applies
+  // the literal 'missing'. Without it, an upgrade on a Product that already has a settings.json applies
   // the entry (`outdated`) while skipping the script (`missing`), leaving every file edit firing a
   // PreToolUse command that does not exist — a hook error per edit, and no guarding at all.
   return actions.map(asNewSkill);
 }
 
-// Every email the verified-commits gate should accept as a known author: the hub roster's `email`
+// Every email the verified-commits gate should accept as a known author: the Product roster's `email`
 // (or `emails`) fields plus hub.json's free-form `verified_authors` list. Lower-cased, deduped,
 // sorted — deterministic so the generated file is drift-checkable like any wired file.
 export function verifiedAuthorEmails(hub) {
@@ -657,8 +657,8 @@ export function verifiedAuthorEmails(hub) {
   return [...out].sort();
 }
 
-// Generate .sdlc/verified-authors (one email per line) in the hub AND every registered repo, from
-// the hub config. No emails configured → no actions (the gate then warns instead of blocking —
+// Generate .sdlc/verified-authors (one email per line) in the Product AND every registered repo, from
+// the Product config. No emails configured → no actions (the gate then warns instead of blocking —
 // never enforce an empty allowlist).
 export function authorsActions(root, repos = []) {
   const hub = readJSON(productConfigPath(root));

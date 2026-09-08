@@ -198,13 +198,13 @@ export function ensureBackupsIgnored(root) {
 }
 
 // ---- the file set --------------------------------------------------------------------------
-// Every JSON file this project's engine owns: the product-level files (including the hub's own
+// Every JSON file this project's engine owns: the product-level files (including the Product's own
 // provenance ledger and each epic's docs-build cache, neither of which is in PROJECT_FILES/epicFiles),
 // then each epic's ledger and its three shard folders.
 //
 // A CONNECTED REPO's own `.sdlc/managed.json` is deliberately not here. It belongs to that repo, is
-// rewritten wholesale by that repo's `yad check --fix`, and migrating it from the hub would reach
-// across a boundary the rest of the CLI respects. The hub's copy is a different file and is included.
+// rewritten wholesale by that repo's `yad check --fix`, and migrating it from the Product would reach
+// across a boundary the rest of the CLI respects. The Product's copy is a different file and is included.
 function shardFiles(dir) {
   if (!exists(dir)) return [];
   return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort().map((n) => path.join(dir, n));
@@ -234,7 +234,7 @@ export function projectJsonFiles(root) {
     if (MIRROR_LEGACIES.has(rel)) { files.push(productConfigPath(root)); continue; }
     files.push(path.join(root, rel));
   }
-  // The hub's own provenance record (cli/plan.mjs) — a stamped object under .sdlc/ like any other.
+  // The Product's own provenance record (cli/plan.mjs) — a stamped object under .sdlc/ like any other.
   files.push(path.join(root, MANAGED_LEDGER));
 
   const epicsDir = path.join(root, 'epics');

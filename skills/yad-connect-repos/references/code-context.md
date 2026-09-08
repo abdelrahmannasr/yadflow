@@ -6,7 +6,7 @@ variant; backfill is the one-feature-at-a-time variant).
 
 ## Layer 1 — the cached pack (full context)
 
-Run from the product hub, targeting the connected repo (flags from `config.yaml`
+Run from the Product, targeting the connected repo (flags from `config.yaml`
 `code_context.pack_flags`):
 
 ```
@@ -81,10 +81,10 @@ side-effect:** when a repo is stale (HEAD ≠ `syncedHead`), the phase **flags i
 "`<repo>` is stale; run `yad repo refresh <repo>` to re-pack the cache + `syncedHead`" — rather than
 silently re-packing the whole repo. A phase never refreshes the registry on its own; the human runs
 `yad repo refresh` (or `yad check --fix`). After the AI regenerates the code-map, `yad repo refresh
---push` publishes the refreshed code-maps + registry to the hub's default branch as a `chore(hub): sync
+--push` publishes the refreshed code-maps + registry to the Product's default branch as a `chore(hub): sync
 code-context … [skip ci]` audit commit (never the pack's content; `--allow-branch` overrides the branch
 guard). The `pack.md` is gitignored — `yad repo refresh`/`yad setup` scaffold
-`.sdlc/code-context/*/pack.md` into the hub `.gitignore` (so a regenerated pack never dirties the tree),
+`.sdlc/code-context/*/pack.md` into the Product `.gitignore` (so a regenerated pack never dirties the tree),
 and a hub that tracked the pack *before* that ignore existed is self-healed: `--push` untracks it and
 lands the removal + the managed `.gitignore` line in the same audit commit. The commit is a scoped
 `git commit -- <paths>` — it never sweeps unrelated staged work, and an unrelated hand-edit to

@@ -55,7 +55,7 @@ rather than forking a second one (one task = one branch).
 **On the first implement in a repo, install the commit template** (idempotent): copy this skill's
 `templates/.gitmessage` to `<repo>/.gitmessage` and run `git -C <repo> config commit.template .gitmessage`
 so every commit is pre-scaffolded with the `Task:` trailer and the commented per-commit `Co-Authored-By:`
-choices (`config.yaml` `build.ai_coauthor.allowed`). Do the same at the hub root for hub commits. Skip if
+choices (`config.yaml` `build.ai_coauthor.allowed`). Do the same at the Product root for Product commit. Skip if
 already configured.
 
 ### Step 3 — Read the spec inputs (do NOT re-derive the contract)

@@ -26,7 +26,7 @@ platform.**
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory — the **product hub**.
+- `{project-root}` resolves from the project working directory — the **Product**.
 - Build (code PR/MR): grounded by `yad review walkthrough --repo <r> --pr <n>`.
 - Shape (artifact-review PR/MR): grounded by `yad gate walkthrough <epic> [artifact]`.
 - The transferable review method + scorecard live in `references/review-rubric.md`.
@@ -105,7 +105,7 @@ addresses them) — nothing advances on a half-finished session.
    `engineer-review` (back) / `<artifact>-review` (front), `mode` = `deep` (or `quiz` when you scored
    comprehension), `comprehension` = the scorecard roll-up, `tutorial` = a rendered
    `learning/<member>--review-<pr>.md` capturing the method as applied to this PR + the engineer's gaps.
-   **First ensure the hub `.gitignore` covers the learning paths** (reuse yad-learn's guard), then write —
+   **First ensure the Product `.gitignore` covers the learning paths** (reuse yad-learn's guard), then write —
    these are personal, gitignored, **never committed or pushed**. The growth rolls up under `yad status`
    "My skills".
 

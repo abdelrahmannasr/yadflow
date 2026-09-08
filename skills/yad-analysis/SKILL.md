@@ -70,7 +70,7 @@ never renamed** — renaming breaks every downstream link (build plan §6b). Che
 ### Step 4 — Open the authoring branch
 Open the analysis authoring branch `analysis/EP-<slug>` per the shared procedure
 (`references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
-is not a git work tree), check out the branch if it exists, else create it from the hub's default
+is not a git work tree), check out the branch if it exists, else create it from the Product's default
 branch. Author and commit `analysis.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 5 — Write the analysis (assist: analyst)
@@ -149,7 +149,7 @@ Report: epic ID, the path to `analysis.md`, and that the next action is **review
 `yad-review-gate` (base rule: owner + 1 reviewer). **Never mark the analysis-review step approved
 here** — only real reviewers do that through the gate. Shape steps do not auto-advance. When the
 analysis gate passes, control moves to `yad-epic`, which reads `analysis.md` as input. When the
-hub has a platform, the gate opens a review PR on the hub (via `yad-hub-bridge`) and
+Product has a platform, the gate opens a review PR on the Product (via `yad-hub-bridge`) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
 is recorded local.
 

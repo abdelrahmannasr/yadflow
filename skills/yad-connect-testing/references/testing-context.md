@@ -55,7 +55,7 @@ path/name + URL, and map it to the story it covers.
 
 Either direction ends by writing `epics/EP-<slug>/.sdlc/test-links.json` — the machine-readable
 case→test map — and a `## Automation (<tool>)` section in `test-cases.md` linking each case to its test.
-The tests themselves live in the code repo; the hub keeps the *links* and the Markdown spec beside the
+The tests themselves live in the code repo; the Product keeps the *links* and the Markdown spec beside the
 other epic artifacts.
 
 ## Degrade path (no MCP / no tool)

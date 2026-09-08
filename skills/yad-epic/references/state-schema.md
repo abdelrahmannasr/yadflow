@@ -124,7 +124,7 @@ The shared procedure (run once the `EP-<slug>` is known):
    (`git rev-parse --is-inside-work-tree` fails), skip branching with a note and author on the current
    tree — no error.
 2. Branch name = `<step>/EP-<slug>`. If it already exists, check it out; otherwise create it from the
-   hub's default branch (`git checkout -b <step>/EP-<slug>`).
+   Product's default branch (`git checkout -b <step>/EP-<slug>`).
 3. Author and commit the step's artifact(s) on that branch. The verified ledger's `review/…` branch is created
    separately at review time and is untouched by this step.
 
@@ -179,7 +179,7 @@ Append-only ledger (an array), the machine-readable counterpart to the `reviews/
 
 ## `hub-prs.json`
 Present only when the Shape review runs through the platform bridge. Per review step, the review
-PR/MR opened on the hub (sibling of `approvals.json`, so the locked `state.json` step shape is untouched):
+PR/MR opened on the Product (sibling of `approvals.json`, so the locked `state.json` step shape is untouched):
 
 ```json
 { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab", "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": "<YYYY-MM-DD or null>" }

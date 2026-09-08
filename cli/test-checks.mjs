@@ -224,7 +224,7 @@ test('contract-check gate: surface change with Contract-Change: yes passes (no u
 const linkMd = (fields) =>
   ['---', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '---', ''].join('\n');
 
-// A product hub at <repo>/product carrying one epic's contract lock.
+// A Product at <repo>/product carrying one epic's contract lock.
 function seedProductLock(T, epic, hash, at = 'product') {
   fs.mkdirSync(path.join(T, at, 'epics', epic, '.sdlc'), { recursive: true });
   fs.writeFileSync(
@@ -282,7 +282,7 @@ test('contract-check gate: unresolvable base fails closed', () => {
 // sorted first and left every other quoted slice in the diff unpinned. Each case below is rigged so
 // the story that would be read first is the one that does NOT fail.
 
-// A story that quotes the surface: its slice + a link.md pinning `lock` against the shared product hub.
+// A story that quotes the surface: its slice + a link.md pinning `lock` against the shared Product.
 const storySlice = (story, lock) => ({
   [`specs/${story}/contracts/api.md`]: 'new endpoint\n',
   [`specs/${story}/link.md`]: linkMd({
@@ -489,7 +489,7 @@ test('contract-check gate: with no remote at all the base falls back to origin/m
 
 // ---------- phase-6 thread gates: product-repo resolution (issue #149) ----------
 // All three read the owning epic through link.md's `product-repo`. Both the ABSOLUTE and the RELATIVE
-// form must reach the hub — an unresolvable path degrades each gate to a PASS-with-note, i.e. it stops
+// form must reach the Product — an unresolvable path degrades each gate to a PASS-with-note, i.e. it stops
 // gating without saying so.
 const LINEAGE = path.join(CHECKS, 'lineage-check.sh');
 const EPIC_OPEN = path.join(CHECKS, 'epic-open.sh');
@@ -524,7 +524,7 @@ const linkedCommit = (T, productRepo, epic = 'EP-demo') => commit(
 // gate can reach must be reachable from every gate, or the unreachable ones degrade to a
 // PASS-with-note and silently stop gating (issue #149). So this is a matrix, not four bespoke cases:
 // every gate × every path form a link.md in the wild can carry, each fixture rigged so the gate FAILs
-// iff it actually read the hub.
+// iff it actually read the Product.
 //
 // `link-relative` is the canonical form yad-spec writes; `root-relative` is what contract-check
 // historically resolved, so link.md files authored against it must keep working; `unfenced` is a
@@ -567,7 +567,7 @@ const GATES = [
   },
 ];
 
-// Where the hub lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
+// Where the Product lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
 const FORMS = [
   { name: 'absolute', hub: (T, out) => out, value: (T, out) => out },
   { name: 'link-relative', hub: (T) => path.join(T, 'product'), value: () => '../../product' },
@@ -577,7 +577,7 @@ const FORMS = [
 
 for (const g of GATES) {
   for (const form of FORMS) {
-    test(`${g.name} gate: reaches the hub with a ${form.name} product-repo (issue #149)`, () => {
+    test(`${g.name} gate: reaches the Product with a ${form.name} product-repo (issue #149)`, () => {
       const T = scaffoldRepo();
       const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
       const hub = form.hub(T, outside);
@@ -721,7 +721,7 @@ test('every base-taking gate actually CONSUMES resolve_base (no hardcoded origin
   }
 });
 
-test('epic-open gate: an ABSOLUTE product-repo reaches the hub and refuses a SEALED epic', () => {
+test('epic-open gate: an ABSOLUTE product-repo reaches the Product and refuses a SEALED epic', () => {
   const T = scaffoldRepo();
   const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
   seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } });
@@ -745,7 +745,7 @@ test('epic-open gate: an open epic (an unshipped story) passes', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes the thread', () => {
+test('reconcile-debt gate: an ABSOLUTE product-repo reaches the Product and freezes the thread', () => {
   const T = scaffoldRepo();
   const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
   // EP-demo threads off EP-root; the sibling hotfix EP-fix (same thread) carries OPEN debt.
@@ -1332,6 +1332,20 @@ test('risk-route: missing body file exits 2 (usage error)', () => {
 // ---------- commit-message.sh ----------
 const COMMIT_MSG = path.join(CHECKS, 'commit-message.sh');
 
+// `product` is the new spelling of the `hub` profile, accepted alongside it. Here the normalisation
+// only affects the PASS message, but an unknown value would abort the gate outright — so both
+// spellings have to be accepted, and this is the only place with a git repo to prove it in.
+for (const profile of ['hub', 'product']) {
+  test(`commit-message gate: --profile ${profile} is accepted`, () => {
+    const T = scaffoldRepo();
+    commit(T, 'chore(gate): sync the ledger', { 'a.js': 'x' });
+    const r = runGate(COMMIT_MSG, T, ['--profile', profile, 'main']);
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /unknown --profile/, r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('commit-message gate: conventional subject + ordered trailers passes', () => {
   const T = scaffoldRepo();
   commit(T, 'feat: add the order endpoint\n\nTask: EP-demo-S01-T01\nCo-Authored-By: Claude <noreply@anthropic.com>', { 'a.js': 'x' });
@@ -1419,7 +1433,7 @@ test('pr-title gate: hub splits by --head — review/EP-* wants the review shape
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'review: architecture.md (EP-demo)']).code, 0);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'chore: nope']).code, 1);
   // any other head => a hub tooling PR, follows the code (Conventional-Commits) convention
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the hub gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the Product gates']).code, 0);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'review: nope (EP-x)']).code, 1);
   // no --head stays strict (artifact-review), so existing single-arg callers are unaffected
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'chore: nope']).code, 1);
@@ -1437,7 +1451,7 @@ test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review h
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Shape artifacts/);
   // non-review head touching only tooling paths => still a tooling PR, code title passes
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the hub gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the Product gates']).code, 0);
   // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
   fs.rmSync(T, { recursive: true, force: true });
@@ -1640,7 +1654,7 @@ test('ledger-guard: an un-migrated hub.json still arms the guard (new script, ol
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","bridge_enabled":true}\n');
   const r = runGate(LEDGER_GUARD, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
-  assert.doesNotMatch(r.out, /locally owned/, 'a hub that has not run yad migrate is still verified');
+  assert.doesNotMatch(r.out, /locally owned/, 'a Product that has not run yad migrate is still verified');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1849,7 +1863,7 @@ test('ledger-guard: with a verified ledger OFF it is a no-op (humans own the led
 });
 
 // #186: the gate used to enable itself on the flag ALONE, while `isVerifiedLedger` (`cli/manifest.mjs`) and
-// `hubActions` (cli/plan.mjs) both also require a `platform`. A hub holding one without the other
+// `productActions` (cli/plan.mjs) both also require a `platform`. A hub holding one without the other
 // deadlocked — the shell rejected the human's ledger commit while the CLI, reading the same file,
 // called it local and kept the local write path, so nothing could write the ledger at all.
 test('ledger-guard: the verified ledger flag WITHOUT a platform is not verified mode — no-op (issue #186)', () => {
@@ -1897,7 +1911,7 @@ test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #
 
 // A real hub carries nested objects (`review`, `roster`) AROUND the root-level flags — stripping the
 // nesting must not throw the root pair out with it.
-test('ledger-guard: root-level flags still enforce when the hub carries nested objects', () => {
+test('ledger-guard: root-level flags still enforce when the Product carries nested objects', () => {
   const T = scaffoldRepo();
   const nested = '{"platform":"github","review":{"requireEngagement":false},'
     + '"roster":[{"login":"a","roles":{"hub":["owner"]}}],"bridge_enabled":true}\n';
@@ -2005,7 +2019,7 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
 
   // 4. nothing committed to read → the floating major, exactly today's behaviour
   assert.equal(resolvePin(block), '3');
-  // 3. the version that wired the hub
+  // 3. the version that wired the Product
   assert.equal(resolvePin(block, stamp('3.15.3')), '3.15.3');
   // 2. the explicit hub pin outranks it
   assert.equal(resolvePin(block, { ...stamp('3.15.3'), ...hub('3.14.0') }), '3.14.0');
@@ -2095,7 +2109,7 @@ test('ledger-guard wrapper: resolution order, and fail-open when nothing resolve
     assert.equal(blank.code, 0);
     assert.doesNotMatch(blank.err, /unbound variable/);
 
-    // The hub's own install is preferred over PATH, and is found from the SCRIPT's location — not
+    // The Product's own install is preferred over PATH, and is found from the SCRIPT's location — not
     // the caller's cwd, which a harness sets to anything.
     const nm = path.join(T, 'node_modules/yadflow/bin');
     fs.mkdirSync(nm, { recursive: true });
@@ -2104,11 +2118,11 @@ test('ledger-guard wrapper: resolution order, and fail-open when nothing resolve
     fakeYad(onPath, 'yad', 0);
     const r = spawnSync('bash', [path.join(T, 'hooks/ledger-guard.sh')], {
       input: '{}', encoding: 'utf8', cwd: os.tmpdir(),
-      // node's own directory is on PATH so the hub-install branch is reachable at all; the point of
+      // node's own directory is on PATH so the Product-install branch is reachable at all; the point of
       // the assertion is that it wins over the `yad` sitting earlier on that same PATH.
       env: { ...GIT_ENV, PATH: `${onPath}:${path.dirname(process.execPath)}:/usr/bin:/bin`, CLAUDE_PROJECT_DIR: T },
     });
-    assert.equal(r.status, 2, 'the hub install answered, not the `yad` on PATH');
+    assert.equal(r.status, 2, 'the Product install answered, not the `yad` on PATH');
     assert.ok(!fs.existsSync(path.join(onPath, 'argv.txt')), 'the PATH copy was never invoked');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

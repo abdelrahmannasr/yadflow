@@ -138,7 +138,7 @@ while IFS= read -r sha; do
     continue
   fi
   if [ ! -f "${prod}/epics/${parent}/epic.md" ]; then
-    echo "FAIL [lineage-check]: ${short} ${task} -> ${epic} threads to '${parent}', but epics/${parent}/ does not exist in the hub (orphan thread)."
+    echo "FAIL [lineage-check]: ${short} ${task} -> ${epic} threads to '${parent}', but epics/${parent}/ does not exist in the Product (orphan thread)."
     rc=1
     continue
   fi

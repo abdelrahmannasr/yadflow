@@ -19,7 +19,7 @@ the site is built + deployed; when none is, it is npm-built to a local `dist/` (
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - Artifacts live under `{project-root}/epics/EP-<slug>/`. The generated site lives at
   `epics/EP-<slug>/docs-site/`; its `dist/` and `node_modules/` are gitignored, the generated **source
   is committed**.
@@ -52,7 +52,7 @@ and point the user at the gate (`yad-review-gate`); do not render an unapproved 
 Open the `docs/EP-<slug>` authoring branch per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-hub's default branch. Generate and commit the site source on it.
+Product's default branch. Generate and commit the site source on it.
 
 ### Step 2 — Read the inputs (the data sources)
 Load each artifact and note what it feeds (full table in `references/data-mapping.md`):
@@ -85,7 +85,7 @@ Copy the shell from `templates/app/` **verbatim**, then:
    timestamps inside the data files** — so regenerating an unchanged input yields a byte-identical file
    (the staleness hash depends on it). Data must satisfy `src/data/types.ts`
    (`FlowPath`/`FlowStep`/`AnimatedMessage`/`SystemComponent`/`StakeholderView`, etc.).
-2. **Derive stakeholder roles** (`roles.ts`) from the hub roster roles (`.sdlc/hub.json`) ∩ the yadflow
+2. **Derive stakeholder roles** (`roles.ts`) from the Product roster roles (`.sdlc/hub.json`) ∩ the yadflow
    lens set (analyst / pm / architect / ux / dev / tester / reviewer / engineer) ∩ the stories' `repos:`
    tags — each role → its relevant doc `sectionIds` + `relevantPathIds` (`references/data-mapping.md`).
 3. **Theme the `:root` block of `src/index.css`** from the design tokens, by the 4-tier priority in

@@ -1,13 +1,13 @@
 ---
 name: yad-connect-design
-description: 'Connects a design tool (Figma, or another tool — pluggable) to the product hub so the UI design step can materialize the full feature design (mobile screens / web pages) inside it, not just Markdown. Registers the tool into the project-wide .sdlc/design.json (local-user / MCP-session auth, no stored tokens), detecting whether a design-tool MCP is available and degrading to markdown-only when it is not. Run at setup or any time the design tool changes. Reusable, idempotent, refreshable. Use when the user says "connect Figma", "connect a design tool", "refresh the design connection", or "list the design connection".'
+description: 'Connects a design tool (Figma, or another tool — pluggable) to the Product so the UI design step can materialize the full feature design (mobile screens / web pages) inside it, not just Markdown. Registers the tool into the project-wide .sdlc/design.json (local-user / MCP-session auth, no stored tokens), detecting whether a design-tool MCP is available and degrading to markdown-only when it is not. Run at setup or any time the design tool changes. Reusable, idempotent, refreshable. Use when the user says "connect Figma", "connect a design tool", "refresh the design connection", or "list the design connection".'
 ---
 
 # SDLC — Connect a Design Tool (make the UI step design-tool aware)
 
 **Goal:** Let the UI design step (`yad-ui`) produce the **actual feature design** — the mobile screens
 and/or web pages — inside a design tool such as **Figma**, alongside the Markdown artifacts
-(`ui-design.md` / `DESIGN.md`). This skill **connects** a design tool to the product hub and records
+(`ui-design.md` / `DESIGN.md`). This skill **connects** a design tool to the Product and records
 *how* to reach it (the tool, the project/file references, which MCP renders it) — never a credential.
 
 This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
@@ -18,7 +18,7 @@ markdown-only exactly as before.
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - The integration is **Figma-first but pluggable** (`config.yaml` `design.tools`): a design-tool
   *adapter*, like the GitHub/GitLab platform adapter. Figma is the primary provider; `pencil`
   (the `.pen` web/mobile editor) is a second, write-capable provider; `none` → markdown-only.
@@ -94,7 +94,7 @@ Nothing auto-advances; this is setup.
   **available/unavailable** flag for the MCP (best-effort, the user's own session). No design tool
   connected ⇒ "markdown-only".
 - **`disconnect`** — remove the registry file (or set `tool: "none"`). The design tool's own
-  project/files are **never touched** — only the hub's record of them.
+  project/files are **never touched** — only the Product's record of them.
 
 ## Hard rules
 

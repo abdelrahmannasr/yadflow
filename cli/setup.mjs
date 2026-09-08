@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, hubActions, hookActions, authorsActions,
+  moduleActions, repoActions, productActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -64,21 +64,21 @@ export function detectPlatform(remoteUrl = '') {
 }
 export const gitHead = (cwd) => run('git', ['rev-parse', 'HEAD'], { cwd }).stdout || null;
 
-// Containment: a repo path must live inside the WORKSPACE — the hub root's parent. The standard
-// multi-repo layout puts the code repos BESIDE the hub, not under it (project/{product,backend,frontend}),
-// so `../backend` has to register; containing to the hub root instead forced separate git repos to nest
-// inside the hub's own repo (issue #129). A nested path (demo-repos/api) still works.
+// Containment: a repo path must live inside the WORKSPACE — the Product root's parent. The standard
+// multi-repo layout puts the code repos BESIDE the Product, not under it (project/{product,backend,frontend}),
+// so `../backend` has to register; containing to the Product root instead forced separate git repos to nest
+// inside the Product's own repo (issue #129). A nested path (demo-repos/api) still works.
 //
 // The bound stays real: the registry path is later joined and executed against (repomix cwd,
 // .coderabbit.yaml + CI wiring), and even the read-only remote probe must not run against an arbitrary
 // outside path — so `../../elsewhere` and absolute-outside paths are still rejected. The path.sep-suffixed
 // compare avoids the /project vs /project-evil prefix trap, now one level up at the workspace.
-// A sibling of the hub (../product-evil) is, correctly, indistinguishable from ../backend: both are
-// ordinary workspace members. The workspace DIRECTORY ITSELF (`..`) is not: it contains the hub, so
-// registering it as a code repo would point repomix and the CI writes at the whole tree. Only the hub
+// A sibling of the Product (../product-evil) is, correctly, indistinguishable from ../backend: both are
+// ordinary workspace members. The workspace DIRECTORY ITSELF (`..`) is not: it contains the Product, so
+// registering it as a code repo would point repomix and the CI writes at the whole tree. Only the Product
 // root itself (a monorepo, `.`) and strict descendants of the workspace pass.
 //
-// Place the hub one level below the workspace root (project/product), not directly in $HOME — the
+// Place the Product one level below the workspace root (project/product), not directly in $HOME — the
 // workspace is the trust boundary, and a shallow hub makes every sibling of it registerable.
 export function insideWorkspace(root, rpath) {
   const projectRoot = path.resolve(root);
@@ -95,8 +95,8 @@ export function insideWorkspace(root, rpath) {
 // hub.json. `grants` maps a role -> the yad names that hold it for this repo. A name that is not in
 // the roster is warned about and skipped (the roster is the source of identity). Idempotent.
 export function addRepoRoles(root, repo, grants = {}) {
-  const hubPath = productConfigPath(root);
-  const hub = readJSON(hubPath, null);
+  const productPath = productConfigPath(root);
+  const hub = readJSON(productPath, null);
   if (!hub || !Array.isArray(hub.roster)) return;
   const byName = new Map(hub.roster.map((e) => [e.name, e]));
   let touched = false;
@@ -146,12 +146,12 @@ export function buildReconfiguredHub(cur, fields) {
 
 // Upsert one roster member into hub.json, keyed by `login`. Deep-merges the per-scope `roles` map so
 // scopes the caller did not name are preserved; sets `name`/`email` when given; validates the login
-// against the hub (warn-only — a miss flags `unverified`, `checked:false` skips silently). Creates the
+// against the Product (warn-only — a miss flags `unverified`, `checked:false` skips silently). Creates the
 // hub.json shell if absent. Returns { entry, created }.
 export function upsertRosterEntry(root, { login, name, email, roles = {}, platform } = {}) {
   if (!login) { warn('roster upsert needs a login — skipped'); return { entry: null, created: false }; }
-  const hubPath = productConfigPath(root);
-  const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, ledger: 'local', bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
+  const productPath = productConfigPath(root);
+  const hub = readJSON(productPath, null) || { platform: platform && platform !== 'none' ? platform : null, ledger: 'local', bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
   if (!Array.isArray(hub.roster)) hub.roster = [];
   let entry = hub.roster.find((e) => e.login === login);
   const created = !entry;
@@ -177,8 +177,8 @@ export function upsertRosterEntry(root, { login, name, email, roles = {}, platfo
 // Inverse of addRepoRoles: drop the named role(s) from a member's `roles[<repo>]` scope, removing the
 // scope key when it empties. Member is found by yad `name` (matching addRepoRoles). Idempotent.
 export function removeRepoRole(root, name, repo, roles = []) {
-  const hubPath = productConfigPath(root);
-  const hub = readJSON(hubPath, null);
+  const productPath = productConfigPath(root);
+  const hub = readJSON(productPath, null);
   if (!hub || !Array.isArray(hub.roster)) return;
   const entry = hub.roster.find((e) => e.name === name);
   if (!entry) { warn(`'${name}' is not in the roster — nothing to revoke for ${repo}`); return; }
@@ -262,7 +262,7 @@ export function registerRepo(root, registry, { name, rpath, platform, domain_own
 // Record the project's design-tool connection into .sdlc/design.json (the deterministic half of the
 // connect loop; MCP detection itself is an AI step, handed off to `yad-connect-design`). An unknown tool
 // falls back to the primary adapter rather than being rejected — mirrors registerRepo's platform
-// fallback and the hub step. `none` is the explicit markdown-only choice.
+// fallback and the Product step. `none` is the explicit markdown-only choice.
 export function registerDesign(root, { tool, project_url = null, files = null, today = null } = {}) {
   // Idempotent re-connect: carry the original first-connect date forward (the schema defines
   // connectedAt as "first connect"); only lastSyncedAt moves. Mirrors repo.mjs refresh.
@@ -480,7 +480,7 @@ export async function runSetup(root, opts = {}) {
   }
 
   // Detect hub platform + roster
-  S(solo ? 'Hub platform (solo — no roster)' : 'Hub platform & reviewer roster');
+  S(solo ? 'Product platform (solo — no roster)' : 'Product platform & reviewer roster');
   guide(solo
     ? [
       'Your hub is this repo on GitHub/GitLab (or none for a local gate).',
@@ -491,8 +491,8 @@ export async function runSetup(root, opts = {}) {
       `Add your ${team_size}-person roster: platform login → yad name → hub role (owner/reviewer).`,
       'An owner + 1 reviewer is required to pass a gate; skip now and add later with `yad roster add`.',
     ]);
-  const hubPath = productConfigPath(root);
-  if (exists(hubPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
+  const productPath = productConfigPath(root);
+  if (exists(productPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
     info('keeping existing .sdlc/hub.json');
   } else {
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
@@ -511,11 +511,11 @@ export async function runSetup(root, opts = {}) {
         if (!login) break;
         const name = await ask('    yad name', login);
         const email = await ask('    commit email (committer→login lookup + verified-commits gate; blank to skip)', '');
-        // Per-scope roles: capture the hub roles here; per-repo roles are added in step 7 when the
+        // Per-scope roles: capture the Product roles here; per-repo roles are added in step 7 when the
         // repo is connected. A person can hold several roles (owner reviewer) at once.
         const hubRoles = parseList(await ask('    hub roles (owner/reviewer, space-separated)', 'reviewer'));
         const entry = { login, name, ...(email ? { email } : {}), roles: { hub: hubRoles } };
-        // Validate the login exists on the hub — warn-only (fail-open): a miss is flagged unverified
+        // Validate the login exists on the Product — warn-only (fail-open): a miss is flagged unverified
         // but still saved. `checked:false` (no CLI/auth) skips the check silently.
         if (platform !== 'none') {
           const v = validateLogin(platform, login);
@@ -526,11 +526,11 @@ export async function runSetup(root, opts = {}) {
         roster.push(entry);
       }
     }
-    const default_branch = platform === 'none' ? 'main' : await ask('Hub default branch', 'main');
+    const default_branch = platform === 'none' ? 'main' : await ask('Product default branch', 'main');
     // `ledger` is the canonical switch (shape 2): "verified" = CI writes the ledger, "local" = this
     // machine does. The two booleans below say the same thing in the older spelling and are written
     // ALONGSIDE it, not instead of it — add before you remove (rule 3). They are what a check gate
-    // that has not been refreshed by `yad update` yet still reads, and what a hub that is rolled back
+    // that has not been refreshed by `yad update` yet still reads, and what a Product that is rolled back
     // to a 3.x CLI would fall back to. They go in a later major, once nothing on either side reads them.
     const enabled = platform !== 'none';
     // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the verified ledger/PR flow
@@ -541,7 +541,7 @@ export async function runSetup(root, opts = {}) {
     // reviewers (e.g. solo mode skips the loop) must NOT blank a populated roster or drop verified_authors.
     // Read strict so a corrupt hub aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
     // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
-    const cur = readJSONStrict(hubPath, {}) || {};
+    const cur = readJSONStrict(productPath, {}) || {};
     // `ledger` belongs to shape 2. On a project still on shape 1 — one that has not run
     // `yad migrate` yet — writing it would leave a file DECLARING shape 1 while carrying a shape-2
     // field, which is rule 1 read backwards and makes `yad doctor`'s drift report a lie about the
@@ -565,10 +565,10 @@ export async function runSetup(root, opts = {}) {
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.
   // Also backfill a missing git_url from origin here (idempotent repair for the doctor's YAD-CFG-005).
-  if (exists(hubPath)) {
+  if (exists(productPath)) {
     // Strict read for the same reason as the reconfigure write above: a corrupt hub must abort, never
     // fail-open to `{}` and get rewritten with roster/verified_authors stripped on a plain re-run.
-    const cur = readJSONStrict(hubPath, {}) || {};
+    const cur = readJSONStrict(productPath, {}) || {};
     const backfillUrl = (cur.platform && !cur.git_url)
       ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
       : null;
@@ -663,7 +663,7 @@ export async function runSetup(root, opts = {}) {
   S(repo_layout === 'monorepo' ? 'Connect your code repo (monorepo)' : 'Connect code repos');
   guide(repo_layout === 'monorepo'
     ? [
-      'One repo holds all the code; the contract lives in the hub and stories tag this single repo.',
+      'One repo holds all the code; the contract lives in the Product and stories tag this single repo.',
       codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: the repo is packed so the Shape phases see what already exists.',
     ]
     : [
@@ -681,7 +681,7 @@ export async function runSetup(root, opts = {}) {
       const name = await ask('  repo name (blank to finish)', '');
       if (!name) break;
       if (known.has(name)) { warn(`${name} already registered — skipping`); continue; }
-      // Siblings of the hub are the common layout (project/{product,backend}) — `../backend` is valid.
+      // Siblings of the Product are the common layout (project/{product,backend}) — `../backend` is valid.
       const rpath = await ask('    path (relative to project root, e.g. ../backend)', `demo-repos/${name}`);
       if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
@@ -706,7 +706,7 @@ export async function runSetup(root, opts = {}) {
   // Assign/update roles for ALREADY-connected repos. Skipped in solo mode (no roster). The connect loop
   // above only prompts for repos you add now; this closes the gap so a member's role on a repo connected
   // in an earlier run can be set without reconnecting. Mirrors `yad roster` (repo-driven).
-  const hub7 = readJSON(hubPath, null);
+  const hub7 = readJSON(productPath, null);
   if (!solo && registry.repos.length && hub7 && Array.isArray(hub7.roster) && hub7.roster.length
       && await askYesNo('Assign/update roles for connected repos?', false)) {
     for (const member of hub7.roster) {
@@ -721,8 +721,8 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // Wire each connected repo + the hub itself
-  S('Wire connected repos + the hub (CI gates, PR template, gate-sync)');
+  // Wire each connected repo + the Product itself
+  S('Wire connected repos + the Product (CI gates, PR template, gate-sync)');
   guide(['Installs the CI safety gates, PR/MR template, and gate-sync — automatic, no input needed.']);
   if (registry.repos.length === 0) info('no repos to wire');
   // Every managed file this step writes is recorded (sha per repo root) so a LATER `yad update` can
@@ -737,15 +737,15 @@ export async function runSetup(root, opts = {}) {
     // same-named file is never touched.
     applyActions(legacyRepoActions(root, repo), { force: true });
   }
-  // the hub: event-driven gate-sync CI, so platform approvals/merges drive `yad gate ci`
-  const hubWiring = hubActions(root);
+  // the Product: event-driven gate-sync CI, so platform approvals/merges drive `yad gate ci`
+  const hubWiring = productActions(root);
   if (hubWiring.length) {
     log(`  ${c.bold('hub')} ${c.dim('(gate-sync + verified-commits CI)')}`);
     applyActions(hubWiring, { force: true });
     wired.push(...hubWiring);
   }
   applyActions(legacyHubActions(root), { force: true });
-  // the hub, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
+  // the Product, locally: the harness ledger guard, so an agent is refused the CI-owned ledger write at
   // the moment it tries it rather than by a failed pipeline later (#171). Verified-only like the CI
   // above — with no bridge the ledger is locally owned and the guard would be wrong.
   const hookWiring = hookActions(root, ideTargets);
@@ -785,7 +785,7 @@ export async function runSetup(root, opts = {}) {
     hand('author your first epic: run `yad-epic`');
   }
   hand('your single next action, anytime: `yad next`');
-  if (!solo && !(readJSON(hubPath, null)?.roster || []).length) {
+  if (!solo && !(readJSON(productPath, null)?.roster || []).length) {
     hand('add reviewers when ready: `yad roster add <login>` (an owner + 1 reviewer passes a gate)');
   }
   log('');
@@ -807,7 +807,7 @@ export async function runSetup(root, opts = {}) {
   log(c.dim('Re-run anytime: `yad check` (report) / `yad check --fix` (reconcile).'));
 }
 
-// The repomix pack is a large, regenerable artifact — the hub tracks the AI-authored code-map, not the
+// The repomix pack is a large, regenerable artifact — the Product tracks the AI-authored code-map, not the
 // pack. `yad repo refresh --push` relies on the pack being gitignored (repo-publish.mjs never stages it);
 // this makes that assumption true in every hub, so a regenerated pack never strands as a dirty tree.
 export const PACK_IGNORE_GLOB = '.sdlc/code-context/*/pack.md';
@@ -821,7 +821,7 @@ export const PACK_IGNORE_BLOCK = [
   PACK_IGNORE_GLOB,
 ];
 
-// Idempotently ensure the hub `.gitignore` ignores the repomix pack. No-op (returns false) if the line
+// Idempotently ensure the Product `.gitignore` ignores the repomix pack. No-op (returns false) if the line
 // is already present (as its own entry); otherwise appends the managed block to a fresh or existing file
 // and returns true.
 export function ensurePackIgnored(root) {

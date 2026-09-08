@@ -160,7 +160,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'pr-title',
     queue: 'pattern-gate',
     timing: 'once the PR exists',
-    description: 'The PR/MR title follows the commit-subject style. Profile-aware code | hub; on the hub it splits by head branch (review/EP-* → artifact-review shape, any other branch → code shape).',
+    description: 'The PR/MR title follows the commit-subject style. Profile-aware code | hub; on the Product it splits by head branch (review/EP-* → artifact-review shape, any other branch → code shape).',
     triggeredBy: 'PR/MR opened',
     visibleTo: ALL,
   },
@@ -168,7 +168,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'pr-template',
     queue: 'pattern-gate',
     timing: 'once the PR exists',
-    description: 'The PR/MR body uses the committed template (Impact & Risk block). On the hub it rejects a non-review branch that changes a Shape artifact (epics/**).',
+    description: 'The PR/MR body uses the committed template (Impact & Risk block). On the Product it rejects a non-review branch that changes a Shape artifact (epics/**).',
     triggeredBy: 'PR/MR opened',
     visibleTo: ALL,
   },
@@ -176,7 +176,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'lineage-check',
     queue: 'yad-checks',
     timing: 'per commit',
-    description: 'A change/defect/hotfix epic must thread to a real parent (genesis → change → defect). Layered on spec-link\'s story→epic resolution; fails closed on an unresolvable base; degrades to PASS-with-note when the hub is unreachable from CI.',
+    description: 'A change/defect/hotfix epic must thread to a real parent (genesis → change → defect). Layered on spec-link\'s story→epic resolution; fails closed on an unresolvable base; degrades to PASS-with-note when the Product is unreachable from CI.',
     triggeredBy: 'GitHub Actions / GitLab CI (yad-checks.yml)',
     visibleTo: ALL,
   },
@@ -288,7 +288,7 @@ export interface CliCommand extends Filterable {
 }
 
 export const CLI_COMMANDS: CliCommand[] = [
-  { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: a short profile interview (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps — install, detect the hub, connect tools + repos.', visibleTo: ALL },
+  { constant: 'SETUP', value: 'yad setup', target: 'setup', category: 'setup', description: 'Guided first-run wizard: a short profile interview (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps — install, detect the Product, connect tools + repos.', visibleTo: ALL },
   { constant: 'NEXT', value: 'yad next', target: 'setup', category: 'setup', description: 'Where am I / what next: the one concrete next action — project-wide or per epic (yad next <epic>). In Build it reads each story\'s build-state and prints the next build sub-step per repo (spec → tasks → implement → checks → engineer-review) plus the remaining chain; --check <step> guards step order.', visibleTo: ALL },
   { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed. A managed file you edited (gate script, CI fragment, PR/MR template) is reported as modified and never silently overwritten — .sdlc/managed.json records the sha of every file yad wrote; --overwrite-local replaces them, saving a <file>.yad-orig backup (#164).', visibleTo: ALL },
   { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI). Its shape section reports what schemaVersion this project\'s state files are on against the shape the running release writes — one line for the project and one per epic — warning when files are behind (run yad migrate) and failing when they were written by a NEWER yadflow (upgrade the CLI; migrating would move them backward).', visibleTo: ALL },
@@ -329,7 +329,7 @@ export const ERROR_CODES: ErrorCode[] = [
   {
     code: 'YAD-ENV-002',
     cause: 'Platform CLI (gh/glab) missing or not authenticated.',
-    resolution: 'Install it and authenticate to the hub\'s host (gh auth login / glab auth login --hostname <host>); the check is scoped to the hub host, so an unrelated stale login elsewhere will not trip it. The gate degrades to local without the CLI.',
+    resolution: 'Install it and authenticate to the Product\'s host (gh auth login / glab auth login --hostname <host>); the check is scoped to the Product host, so an unrelated stale login elsewhere will not trip it. The gate degrades to local without the CLI.',
     severity: 'warn',
     visibleTo: ALL,
   },

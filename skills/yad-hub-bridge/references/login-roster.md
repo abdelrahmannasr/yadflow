@@ -52,7 +52,7 @@ When a review PR/MR is opened (hub `yad gate open`, or a code-repo `yad open-pr`
 - **Reviewers = `reviewer` + `domain-owner`** for the touched scope(s) (`hub` plus every touched
   domain for a hub review; the repo itself for a code PR), **minus the committer** — you do not review
   your own PR. The artifact **owner/author is recorded, not requested.**
-- Logins are validated against the hub during `yad setup` / `yad doctor` (`gh api users/<login>`,
+- Logins are validated against the Product during `yad setup` / `yad doctor` (`gh api users/<login>`,
   `glab api users?username=<login>`); a miss is flagged `unverified` but never blocks (fail-open).
 
 ## Per-repo routing (stories review, and any escalated step)

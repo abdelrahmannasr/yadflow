@@ -1,6 +1,6 @@
 # Learning registry — schema + freshness rule
 
-The registry is the product hub's record of which learning tool is connected and how to reach it. It is
+The registry is the Product's record of which learning tool is connected and how to reach it. It is
 **project-wide** (one learning tool per project, shared across every epic), so it lives at the product
 root, not under any `epics/EP-<slug>/.sdlc/`.
 
@@ -55,6 +55,6 @@ only). This mirrors how `repos.json`, `hub.json`, `design.json`, and `testing.js
 
 ## Greenfield
 
-A brand-new product hub has no `learning.json`. That is valid — `yad-learn` treats "no learning tool
+A brand-new Product has no `learning.json`. That is valid — `yad-learn` treats "no learning tool
 connected" the same as `tool: "none"` and tutors harness-native. The registry appears the first time
 `connect` runs.

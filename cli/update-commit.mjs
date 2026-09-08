@@ -1,5 +1,5 @@
 // `yad update --push` / `yad check --fix --push` — after reconcile applies drift into the working
-// trees, commit the applied changes PER REPO (the hub and every connected repo) and push them
+// trees, commit the applied changes PER REPO (the Product and every connected repo) and push them
 // straight to the default branch, so a package update "just lands" everywhere instead of leaving
 // dirty trees for someone to hand-commit across N repos. This is the update-flow analogue of the
 // Build `yad checkpoint` (cli/checkpoint.mjs) and reuses its machine-commit machinery.
@@ -23,24 +23,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, fail, hand, run, pushWithRebase } from './lib.mjs';
 import { VERSION } from './manifest.mjs';
-import { hubGit, resolveDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch } from './hubcommit.mjs';
 
 // Collapse whitespace/newline runs to a single space — keeps a stray path or hostile value from
 // breaking the one-line subject or injecting a fake trailer line.
 const oneLine = (s = '') => String(s).replace(/\s+/g, ' ').trim();
 
-// A short, human label for a repo root relative to the hub: 'hub' for the hub itself, else the
+// A short, human label for a repo root relative to the Product: 'hub' for the Product itself, else the
 // registered path (e.g. demo-repos/backend), else the basename.
-export function repoLabel(hubRoot, root) {
-  if (root === hubRoot) return 'hub';
-  const r = path.relative(hubRoot, root);
+export function repoLabel(productRoot, root) {
+  if (root === productRoot) return 'hub';
+  const r = path.relative(productRoot, root);
   return r && !r.startsWith('..') ? r.split(path.sep).join('/') : path.basename(root);
 }
 
 // PURE — group applied reconcile actions by the repo root they wrote to. Each group carries the
 // deduped pathspecs to stage plus the human-readable item labels for the commit body. Actions with
 // no root/paths (e.g. gaps, or a status:'ok' that was force-reapplied without a root) are ignored.
-// Order follows first-encounter, so the hub (its module/_bmad/hub actions come first in reconcile)
+// Order follows first-encounter, so the Product (its module/_bmad/hub actions come first in reconcile)
 // leads and connected repos follow in registry order.
 export function groupByRoot(actions = []) {
   const groups = new Map();
@@ -94,14 +94,14 @@ function stageAllowlist(git, root, paths) {
 // Commit (and, with push, push) one repo group. `defaultBranch` is the repo's configured default
 // (hub.default_branch / repo.default_branch); falls back to origin/HEAD then 'main'. Returns a small
 // result object; never throws. On any hard error it sets process.exitCode so the CLI reports failure.
-export function commitAndPush(group, { push = false, allowBranch = false, hubRoot, defaultBranch } = {}) {
+export function commitAndPush(group, { push = false, allowBranch = false, productRoot, defaultBranch } = {}) {
   const { root, paths, items } = group;
-  const label = repoLabel(hubRoot ?? root, root);
-  const git = hubGit(root);
+  const label = repoLabel(productRoot ?? root, root);
+  const git = productGit(root);
 
   // `root` must be the TOP of its OWN git repo — not merely "inside a work tree". A registered repo
   // whose clone is missing (reconcile's apply() happily recreates the wiring files) but whose path
-  // sits under the hub would otherwise report inside-work-tree=true against the HUB: git resolves the
+  // sits under the Product would otherwise report inside-work-tree=true against the HUB: git resolves the
   // pathspecs relative to cwd, so we would stage the connected repo's files into the HUB's index and
   // push them to the HUB's remote, mislabeled. Require the worktree top to BE this root.
   const top = git('rev-parse', '--show-toplevel');
@@ -159,10 +159,10 @@ export function commitAndPush(group, { push = false, allowBranch = false, hubRoo
 // Orchestrate the per-repo commit/push over the grouped applied actions, bookended by the announce
 // banners. `defaultBranchFor(root)` yields each repo's configured default branch (undefined ->
 // resolve from the remote). Prints, commits/pushes each group, then the done banner.
-export function commitUpdates(hubRoot, groups, { push = false, allowBranch = false, defaultBranchFor, guardInactiveGitlab } = {}) {
+export function commitUpdates(productRoot, groups, { push = false, allowBranch = false, defaultBranchFor, guardInactiveGitlab } = {}) {
   if (!groups.length) { info('no committable changes were applied'); return []; }
 
-  const labels = groups.map((g) => repoLabel(hubRoot, g.root));
+  const labels = groups.map((g) => repoLabel(productRoot, g.root));
   log('');
   log(c.bold(`yad update — ${push ? 'publishing to default branches' : 'committing locally (no --push)'}`));
   warn(`about to ${push ? 'commit + push directly to the default branch' : 'commit'} on: ${labels.join(', ')}`);
@@ -170,7 +170,7 @@ export function commitUpdates(hubRoot, groups, { push = false, allowBranch = fal
 
   const results = [];
   for (const g of groups) {
-    const r = commitAndPush(g, { push, allowBranch, hubRoot, defaultBranch: defaultBranchFor?.(g.root) });
+    const r = commitAndPush(g, { push, allowBranch, productRoot, defaultBranch: defaultBranchFor?.(g.root) });
     if (push && r.pushed && guardInactiveGitlab?.(g.root)) {
       hand(`${r.label}: GitLab yad-update-guard is not active — add \`- local: '.gitlab/ci/yad-update-guard.yml'\` to the root .gitlab-ci.yml include (re-run the yad-checks wire step) so this direct-to-default push is gated`);
     }

@@ -21,8 +21,8 @@ shell renders whatever these export, as long as it satisfies `src/data/types.ts`
 organized around a central hub into four surrounding zones** so the spokes fan out without crossing,
 rather than scattering nodes:
 
-- **Center** — the product hub (the brain).
-- **Top band** — the file ledger the hub owns (state / approvals / contract-lock), spread across one row.
+- **Center** — the Product (the brain).
+- **Top band** — the file ledger the Product owns (state / approvals / contract-lock), spread across one row.
 - **Left** — the code side: each connector with its external target just beyond it (`repos-json → code-repos`).
 - **Right** — the connected tools as a single aligned column: each connector on the inner edge with its
   external tool on the same row just outside it (`design-json → Design Tool`, etc.).
@@ -52,7 +52,7 @@ contract is rendered exactly as locked — the docs are a *view* of the locked s
 
 ## Role derivation (`roles.ts`)
 
-A stakeholder role is generated for each lens that is **both** present in the hub roster **and** relevant
+A stakeholder role is generated for each lens that is **both** present in the Product roster **and** relevant
 to this epic:
 
 1. Start from the **yadflow lens set**: `analyst`, `pm`, `architect`, `ux`, `dev`, `tester`, `reviewer`,

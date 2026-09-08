@@ -30,7 +30,7 @@ This is the "review **is** the lesson" half. It reuses [`yad-learn`](../../yad-l
 schema and gitignore discipline **verbatim** — see `yad-learn/references/learning-state.md`. Do not
 invent a new store.
 
-**Before writing anything**, ensure the **product hub's** `.gitignore` covers the learning paths
+**Before writing anything**, ensure the **Product's** `.gitignore` covers the learning paths
 (idempotent — append only if absent), the same block yad-learn uses:
 
 ```

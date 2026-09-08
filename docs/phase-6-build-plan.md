@@ -58,7 +58,7 @@ is actually present.)
 - **reconcile-debt** — a thread with open hotfix debt is frozen for new changes until paid.
 
 All three resolve the owning epic via `specs/<story>/link.md`'s `product-repo` path (like contract-check
-— absolute as-is, relative to the `link.md`'s own dir) and degrade to a PASS-with-note when the hub is
+— absolute as-is, relative to the `link.md`'s own dir) and degrade to a PASS-with-note when the Product is
 not reachable from CI.
 
 ### 3. Five skills

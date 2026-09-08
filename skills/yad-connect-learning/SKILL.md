@@ -1,13 +1,13 @@
 ---
 name: yad-connect-learning
-description: 'Connects a learning/tutoring tool (DeepTutor, or another tool — pluggable) to the product hub so the cross-cutting learning layer can tutor any team member, at any SDLC stage, in the context of what is being built. Registers the tool into the project-wide .sdlc/learning.json (local-user auth, no stored tokens), detecting whether the DeepTutor CLI is on PATH and degrading to harness-native tutoring (the harness model reading project artifacts) when it is not. Optionally builds a project knowledge base from the SDLC artifacts + secret-scanned code-maps so tutoring is grounded. Run at setup or any time the learning tool changes. Reusable, idempotent, refreshable. Use when the user says "connect DeepTutor", "connect a learning tool", "refresh the learning connection", or "list the learning connection".'
+description: 'Connects a learning/tutoring tool (DeepTutor, or another tool — pluggable) to the Product so the cross-cutting learning layer can tutor any team member, at any SDLC stage, in the context of what is being built. Registers the tool into the project-wide .sdlc/learning.json (local-user auth, no stored tokens), detecting whether the DeepTutor CLI is on PATH and degrading to harness-native tutoring (the harness model reading project artifacts) when it is not. Optionally builds a project knowledge base from the SDLC artifacts + secret-scanned code-maps so tutoring is grounded. Run at setup or any time the learning tool changes. Reusable, idempotent, refreshable. Use when the user says "connect DeepTutor", "connect a learning tool", "refresh the learning connection", or "list the learning connection".'
 ---
 
 # SDLC — Connect a Learning Tool (the cross-cutting learning layer)
 
 **Goal:** Let any team member pause at **any** SDLC stage and ask to learn a concept — and get tutored
 *in the context of what the team is actually building*. This skill **connects** a learning tool such as
-**DeepTutor** to the product hub and records *how* to reach it (the tool, the CLI, an optional grounded
+**DeepTutor** to the Product and records *how* to reach it (the tool, the CLI, an optional grounded
 knowledge base) — never a credential. The consumer skill **`yad-learn`** does the tutoring per request
 and records the team's skills.
 
@@ -19,7 +19,7 @@ explains the concept. The learning layer is **purely opt-in and never blocks a g
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - The integration is **DeepTutor-first but pluggable** (`config.yaml` `learning.tools`): a learning-tool
   *adapter*, like the design/testing adapters. `none` → harness-native (yad-learn still tutors via the
   harness model).
@@ -113,7 +113,7 @@ auto-advances; this is setup.
   **available/harness-native** flag for the CLI (best-effort). No learning tool connected ⇒
   "harness-native".
 - **`disconnect`** — remove the registry file (or set `tool: "none"`). DeepTutor's own config and
-  knowledge bases are **never touched** — only the hub's record of them.
+  knowledge bases are **never touched** — only the Product's record of them.
 
 ## Hard rules
 

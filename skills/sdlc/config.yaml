@@ -40,7 +40,7 @@ defaults:
   shape_steps_locked: true
   # Each Shape authoring step opens its own branch at the start of the step (the <step> is the step id:
   # discovery | analysis | epic | architecture | ui-design | stories | test-cases). Git/greenfield-safe; distinct
-  # from the verified ledger's review branch (hub.artifact_branch). See yad-epic/references/state-schema.md.
+  # from the verified ledger's review branch (product.artifact_branch). See yad-epic/references/state-schema.md.
   shape_authoring_branch: "<step>/EP-<slug>"
 
 # Team review gate defaults (build plan §3 piece 2, §4).
@@ -122,9 +122,9 @@ build:
   # Shape artifacts can never go stale), and reconcile-debt (a hotfix's ship-first debt blocks the next
   # change on its thread until paid). See the `change:` block below.
   gates: [spec-link, contract-check, build-test-lint, lineage-check, epic-open, reconcile-debt]
-  # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub): code
-  # repos validate the Conventional-Commits / task-PR conventions; the product hub validates its
-  # artifact-review conventions (review/EP-<slug>/<artifact>, the hub PR template). verified-commits is
+  # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub|product): code
+  # repos validate the Conventional-Commits / task-PR conventions; the Product validates its
+  # artifact-review conventions (review/EP-<slug>/<artifact>, the Product PR template). verified-commits is
   # the separate security gate (signature + roster-known author). All blocking in CI; both repos + hub.
   pattern_gates: [commit-message, pr-title, pr-template]
   ci_platforms: [github, gitlab]   # both wired from skills/yad-checks/templates/; GitHub is this product repo's platform
@@ -133,7 +133,7 @@ build:
   pr_templates:
     github: ".github/pull_request_template.md"
     gitlab: ".gitlab/merge_request_templates/Default.md"
-    hub:                                # Shape artifact-review PR/MR on the product hub (yad-pr-template repo:hub)
+    hub:                                # Shape artifact-review PR/MR on the Product (yad-pr-template repo:hub)
       github: ".github/pull_request_template.md"
       gitlab: ".gitlab/merge_request_templates/Default.md"
   risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (yad-review-gate escalation)
@@ -155,15 +155,15 @@ build:
     promote: yad-stub   # `yad-backfill promote EP-<slug>` flips a brownfield stub epic (change.stub) to a real, verified feature epic once its spec is approved
 
 # Code context (yad-connect-repos) — the front/"brain" phases are made code-aware. Code repos are
-# connected to the product hub once (or any time a new repo is added), and an AI-readable picture of
+# connected to the Product once (or any time a new repo is added), and an AI-readable picture of
 # each is cached so epic/architecture/ui/stories consider what already exists in the code. The product
-# repo is the Shape phase TOOLCHAIN HUB: repomix (and Impeccable) are installed/run here and target the
+# repo is the Shape phase TOOLCHAIN: repomix (and Impeccable) are installed/run here and target the
 # connected code repos by path — code repos need no install for this. (The Build CI gates are the
 # exception: they live INSIDE each code repo and run in that repo's CI — see build.gates above.)
 code_context:
   registry: "{project-root}/.sdlc/repos.json"        # project-wide repo registry (NOT per-epic)
   cache_dir: "{project-root}/.sdlc/code-context"      # per-repo pack.md + code-map.md live here
-  tools: [repomix, impeccable]                        # Shape phase toolchain, installed in the product hub
+  tools: [repomix, impeccable]                        # Shape phase toolchain, installed in the Product
   pack_flags: "--compress --include-logs --style markdown"   # reuse backfill flags; Secretlint by default
   staleness: head-sha                                 # stale when a repo's HEAD != registry syncedHead
   refresh: human                                      # a stale repo is a HUMAN decision: Shape phase
@@ -251,17 +251,22 @@ docs:
   # tokens — publishing runs as the LOCAL user's own gh/glab or the platform CI. Idempotent, refreshable.
   auth: user
 
-# Hub platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
-# The product hub is itself a git repo on a platform. With a verified ledger, the Shape review/
-# comment/approval cycle runs through a real PR/MR on the hub: a review PR is opened per artifact, reviewers
+# Product platform + Shape review bridge (yad-connect-repos `detect-hub`; yad-review-gate + yad-hub-bridge).
+# The Product is itself a git repo on a platform. With a verified ledger, the Shape review/
+# comment/approval cycle runs through a real PR/MR on the Product: a review PR is opened per artifact, reviewers
 # approve/comment on the platform (their own gh/glab auth — NO stored tokens), and `yad-review-gate action: sync`
 # pulls that state into the file ledger (approvals.json/reviews/*.md) and runs the UNCHANGED gate predicate.
 # The file ledger stays the source of truth. Degrades to the local gate when there is no platform / no CLI.
-hub:
-  config: "{project-root}/.sdlc/hub.json"             # hub platform + reviewer roster (committed, like repos.json)
-  pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"   # per-step review-PR record (sibling of approvals.json)
+# Renamed from `hub:` (shape 3). Nothing in the engine parses this file — the skills read it — so
+# there is no compatibility shim here: an older project simply still says `hub:`, and the skills name
+# both. The paths below carry both names too, for the same reason the files do.
+product:
+  config: "{project-root}/.sdlc/product.json"          # product platform + reviewer roster (committed, like repos.json)
+  config_legacy: "{project-root}/.sdlc/hub.json"       # the older name, still written and still the one READ this major
+  pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/product-prs.json"       # per-step review-PR record (sibling of approvals.json)
+  pr_ledger_legacy: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"    # the older name — written alongside it AND still the one read, like config_legacy
   bridge: true                                         # master enable; false => local Shape gates everywhere
-  platforms: [github, gitlab]                          # detected from the hub's own `git remote get-url origin`
+  platforms: [github, gitlab]                          # detected from the Product's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
   # roster (in hub.json) maps a platform login -> yad name + role; domain-owners are DERIVED from
   # repos.json (a roster name that equals a repo's domain_owner owns that repo's domain) — never duplicated.

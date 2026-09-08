@@ -28,7 +28,7 @@
 # Scope: enforced ONLY when the ledger is verified — hub.json carries BOTH a `platform` and either
 # `ledger: "verified"` or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or the
 # legacy `bridge`) true. That is the same predicate `isVerifiedLedger` (cli/manifest.mjs) and
-# `hubActions` (cli/plan.mjs) apply. With a local ledger — or a platform-less hub — humans
+# `productActions` (cli/plan.mjs) apply. With a local ledger — or a platform-less hub — humans
 # legitimately write the ledger themselves, so the gate is a no-op.
 #
 # Degradation: a base ref that cannot be resolved FAILs closed; no platform (cannot read the Verified
@@ -37,7 +37,7 @@ set -euo pipefail
 
 # ---- bridge gate: only CI-owned ledgers are guarded -------------------------------------------
 # The predicate is BOTH a platform and the verified ledger flag, exactly as `isVerifiedLedger` (`cli/manifest.mjs`) and
-# `hubActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
+# `productActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
 # other ledger reader (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
 # have its human ledger commits rejected here while the CLI, reading the same file, called it
 # local and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate

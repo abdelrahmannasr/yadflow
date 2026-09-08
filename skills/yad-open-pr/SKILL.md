@@ -1,6 +1,6 @@
 ---
 name: yad-open-pr
-description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Auto-assigns from the hub roster: assignee = the committer, reviewers = the repo''s reviewers + domain-owners. High risk / contract surface routes to domain owners (risk-route.sh). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
+description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Auto-assigns from the Product roster: assignee = the committer, reviewers = the repo''s reviewers + domain-owners. High risk / contract surface routes to domain owners (risk-route.sh). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
 ---
 
 # SDLC — Open Task PR/MR (Build helper)
@@ -9,7 +9,7 @@ description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from t
 (installed by `yad-pr-template`, Step D), with the body prefilled and the right reviewers requested.
 This is the standalone open-PR step; it **never merges** — the engineer review (`yad-engineer-review`,
 Step E) owns the merge. Distinct from `yad gate open`, which opens a Shape artifact-review PR on
-the product hub.
+the Product.
 
 ## Conventions
 
@@ -22,16 +22,16 @@ the product hub.
   `.gitlab/merge_request_templates/Default.md`) with `Task:`, `Risk level:`, `Contract surface
   touched:`, and `Domains` prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate.
-- **Stage-aware on the product hub** — `open-pr` mirrors the `--head` split the hub gates apply:
+- **Stage-aware on the Product** — `open-pr` mirrors the `--head` split the Product gates apply:
   - a **`review/EP-*/<artifact>`** branch is a Shape artifact-review PR → it **delegates to
-    `yad gate open`** (artifact-review title `review: <artifact> (EP-<slug>)`, the hub artifact-review
+    `yad gate open`** (artifact-review title `review: <artifact> (EP-<slug>)`, the Product artifact-review
     body, and the gate ledger bookkeeping all in one place). Any `--title`/`-m` is ignored here.
   - any **other hub branch** is a tooling/CI change → it uses the bundled **code-task** template
-    (`## Summary` / `Risk level:` / `## Checklist`) instead of the hub's artifact-review
-    `pull_request_template.md`, so the hub `pr-template` gate passes.
+    (`## Summary` / `Risk level:` / `## Checklist`) instead of the Product's artifact-review
+    `pull_request_template.md`, so the Product `pr-template` gate passes.
   In a code repo nothing changes — it reads the repo's own committed code-task template.
 - **Base branch** — **resolved, never assumed.** In order: `--base` → the repo's `default_branch` in
-  `.sdlc/repos.json` → (for a PR against the hub itself) `hub.json`'s `default_branch` → what the
+  `.sdlc/repos.json` → (for a PR against the Product itself) `hub.json`'s `default_branch` → what the
   platform reports (`gh repo view --json defaultBranchRef` / `glab api projects/:id`) → local
   `origin/HEAD` → `main`. The same **configuration-outranks-the-remote** order `yad repo sync` and the
   contract-check gate already use (they stop at `origin/HEAD`; only this chain also asks the platform).
@@ -41,7 +41,7 @@ the product hub.
   auto-review eligibility from the base at PR-**open** time, and retargeting afterwards does not undo
   the skip. Hardcoding `main` here is the same bug the check gates already refuse to make (see
   `../yad-checks/references/check-gates.md`).
-- **Auto-assign** — from the hub roster scoped to this repo: assignee = the committer (resolved from
+- **Auto-assign** — from the Product roster scoped to this repo: assignee = the committer (resolved from
   the local git identity), reviewers = the repo's `reviewer`/`domain-owner` logins minus the committer.
   Degrades cleanly when there is no roster.
 - **Routing** — `low`/`medium` → base rule (owner + 1 reviewer); `high` (or a touched

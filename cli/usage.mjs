@@ -139,7 +139,7 @@ function parseGitLog(stdout) {
 
 const GIT_PRETTY = '--pretty=format:\x01%an%x00%ae%x00%ad';
 
-// git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the hub
+// git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the Product
 // is not a git repo (e.g. a test fixture dir), so the command never depends on git being present.
 function gitAuthoredEvents(root, resolver) {
   const r = run('git', ['-C', root, 'log', '--no-merges', '--date=short', GIT_PRETTY, '--name-only', '--', 'epics']);

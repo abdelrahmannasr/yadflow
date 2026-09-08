@@ -1,8 +1,8 @@
 # yad-managed: yad-checks
-# Pattern gates for the PRODUCT HUB. They run with `--profile hub` and split by head branch:
+# Pattern gates for the PRODUCT. They run with `--profile hub` and split by head branch:
 #   review/EP-* PRs are Shape artifact-review vehicles — a `review: <artifact> (EP-<slug>)` title
-#     and the hub artifact-review template body.
-#   every other PR is a tooling/code change to the hub itself — a Conventional-Commits title and the
+#     and the Product artifact-review template body.
+#   every other PR is a tooling/code change to the Product itself — a Conventional-Commits title and the
 #     code task template body (same convention the code repos use).
 # The head ref is passed via --head so the gate can tell the two apart. Commit subjects are always
 # Conventional-Commits. Standalone workflow so it never collides with the code-repo yad-checks workflow.

@@ -112,27 +112,27 @@ export const MODULES: Module[] = [
         title: 'The repos: hub vs code',
         duration: '5 min',
         level: 'beginner',
-        summary: 'The product hub holds the thinking; code repos hold the code.',
+        summary: 'The Product holds the thinking; code repos hold the code.',
         body: [
           { kind: 'p', text: 'A Yadflow project spans separate git repos, each with one job:' },
           { kind: 'list', items: [
             '**yadflow** — the skills source. You install the workflow from here and pull updates. No product work happens inside it.',
-            '**product hub** — the thinking. All epics, contracts, stories, reviews, and state, under `epics/EP-<slug>/`.',
-            '**code repos** (one or more) — the real application code. Each story\'s spec lives here too, and every PR links back to its story in the hub.',
+            '**Product** — the thinking. All epics, contracts, stories, reviews, and state, under `epics/EP-<slug>/`.',
+            '**code repos** (one or more) — the real application code. Each story\'s spec lives here too, and every PR links back to its story in the Product.',
           ] },
-          { kind: 'callout', tone: 'key', text: 'The handoff rule: everything up to and including the locked contract lives in the product hub. Everything from the spec onward (specs, tasks, code) lives in each code repo.' },
+          { kind: 'callout', tone: 'key', text: 'The handoff rule: everything up to and including the locked contract lives in the Product. Everything from the spec onward (specs, tasks, code) lives in each code repo.' },
         ],
         quiz: [
           {
             q: 'Where does the locked contract live?',
             options: [
               'In every code repo',
-              'In the product hub',
+              'In the Product',
               'In the yadflow skills source',
               'In a database',
             ],
             answer: 1,
-            explain: 'The contract is singular and lives in the product hub. Code repos quote it but never own it.',
+            explain: 'The contract is singular and lives in the Product. Code repos quote it but never own it.',
           },
         ],
       },
@@ -143,7 +143,7 @@ export const MODULES: Module[] = [
         level: 'beginner',
         summary: 'Setup → Shape → Build → (earned) automation.',
         body: [
-          { kind: 'p', text: 'Setup is one-time. Then, for each feature (epic), you run Shape in the hub; once stories are approved the epic is `ready-for-build` and Build runs per story per repo.' },
+          { kind: 'p', text: 'Setup is one-time. Then, for each feature (epic), you run Shape in the Product; once stories are approved the epic is `ready-for-build` and Build runs per story per repo.' },
           { kind: 'steps', items: [
             'Setup (once): install skills, connect repos, wire CI gates.',
             'Shape (per epic): epic → architecture → UI → stories → test cases. Every artifact is gated.',
@@ -176,7 +176,7 @@ export const MODULES: Module[] = [
         level: 'beginner',
         summary: 'npx yadflow setup walks a short profile interview, then installs.',
         body: [
-          { kind: 'p', text: 'From your product hub repo (an empty git repo is fine — the first epic creates its own files), run the guided wizard. It opens with a short profile interview — solo or team? greenfield or brownfield? monorepo or separate repos? — and branches the rest so you only answer what your situation needs.' },
+          { kind: 'p', text: 'From your Product repo (an empty git repo is fine — the first epic creates its own files), run the guided wizard. It opens with a short profile interview — solo or team? greenfield or brownfield? monorepo or separate repos? — and branches the rest so you only answer what your situation needs.' },
           { kind: 'p', text: 'It installs the skills into your IDE skill directories, detects your hub platform (GitHub/GitLab) from the remote, and sets up the reviewer roster.' },
           { kind: 'callout', tone: 'info', text: 'Re-run `npx yadflow check --fix` after any workflow update — it reports what is missing / drifted / stale and reconciles only what changed. It never re-asks for what you already answered.' },
         ],
@@ -215,7 +215,7 @@ export const MODULES: Module[] = [
           { cmd: 'yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>' },
           { cmd: 'yad repo list', note: 'show connected repos as fresh / stale' },
           { cmd: 'yad repo refresh <repo>', note: 're-pack a repo whose code has moved' },
-          { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the hub default branch (chore(hub) audit commit)' },
+          { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the Product default branch (chore(hub) audit commit)' },
         ],
         produces: ['.sdlc/repos.json', '.sdlc/code-context/<repo>/pack.md', '.sdlc/code-context/<repo>/code-map.md'],
       },
@@ -267,7 +267,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'Shape the idea, write epic.md, get a stable EP-<slug> ID.',
         body: [
-          { kind: 'p', text: 'Run `yad-epic` in the product hub. With the analyst and pm lenses it shapes the idea and writes `epic.md`. It assigns the stable `EP-<slug>` ID and seeds the epic\'s state (`.sdlc/state.json`, all human-approve, Shape steps locked).' },
+          { kind: 'p', text: 'Run `yad-epic` in the Product. With the analyst and pm lenses it shapes the idea and writes `epic.md`. It assigns the stable `EP-<slug>` ID and seeds the epic\'s state (`.sdlc/state.json`, all human-approve, Shape steps locked).' },
           { kind: 'p', text: 'When the step finishes it sets itself `done`, moves `currentStep` to the epic review, and **stops at the gate**. You clear the gate before moving on (next module).' },
           { kind: 'callout', tone: 'warn', text: 'IDs are immutable once assigned. Renaming an EP-<slug> breaks every downstream link (stories, tasks, branches, PRs).' },
         ],
@@ -419,10 +419,10 @@ export const MODULES: Module[] = [
         title: 'PR-driven vs local',
         duration: '5 min',
         level: 'intermediate',
-        summary: 'The same gate over a real PR/MR when the hub is on a platform.',
+        summary: 'The same gate over a real PR/MR when the Product is on a platform.',
         body: [
           { kind: 'p', text: 'With no hub platform, the gate runs **local**: comments and approvals are recorded as files and you end with an explicit `advance`.' },
-          { kind: 'p', text: 'When the hub is on GitHub/GitLab, the `yad gate` CLI runs the same gate over a real PR/MR. `open` raises the review PR; `sync` pulls approvals and comment threads into the file ledger; the step **auto-advances when the approved, fully-resolved PR is merged** — the merge click is the human approval act.' },
+          { kind: 'p', text: 'When the Product is on GitHub/GitLab, the `yad gate` CLI runs the same gate over a real PR/MR. `open` raises the review PR; `sync` pulls approvals and comment threads into the file ledger; the step **auto-advances when the approved, fully-resolved PR is merged** — the merge click is the human approval act.' },
           { kind: 'callout', tone: 'info', text: 'The file ledger always stays the source of truth. The platform is just a nicer surface for the same predicate.' },
         ],
         commands: [
@@ -480,7 +480,7 @@ export const MODULES: Module[] = [
         summary: 'Run the Spec Kit ceremony once per story per repo.',
         body: [
           { kind: 'p', text: 'From a `ready-for-build` story, inside a code repo it is tagged with, run `yad-spec`. It runs the Spec Kit ceremony once (specify → clarify → plan → analyze → checklist → tasks), writing `specs/<story-id>/` and a `link.md` back to the story.' },
-          { kind: 'callout', tone: 'key', text: 'The spec **quotes** the locked contract — it never widens it. The contract stays singular in the hub.' },
+          { kind: 'callout', tone: 'key', text: 'The spec **quotes** the locked contract — it never widens it. The contract stays singular in the Product.' },
         ],
         commands: [{ cmd: 'yad-spec story:<id> repo:<repo>' }],
         produces: ['specs/<story-id>/ (spec, plan, tasks)', 'specs/<story-id>/link.md'],

@@ -1,6 +1,6 @@
 # Testing registry — schema + freshness rule
 
-The registry is the product hub's record of which testing tool is connected and how to reach it. It is
+The registry is the Product's record of which testing tool is connected and how to reach it. It is
 **project-wide** (one testing tool per project, shared across every epic), so it lives at the product
 root, not under any `epics/EP-<slug>/.sdlc/`.
 
@@ -50,6 +50,6 @@ only). This mirrors how `repos.json`, `hub.json`, and `design.json` are committe
 
 ## Greenfield
 
-A brand-new product hub has no `testing.json`. That is valid — `yad-test-cases` treats "no testing tool
+A brand-new Product has no `testing.json`. That is valid — `yad-test-cases` treats "no testing tool
 connected" the same as `tool: "none"` and produces the Markdown test-case artifact only. The registry
 appears the first time `connect` runs.
