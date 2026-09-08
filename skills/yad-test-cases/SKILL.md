@@ -51,7 +51,7 @@ the stories review has not passed.
 Open the test-cases authoring branch `test-cases/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-hub's default branch. Author and commit `test-cases.md` on it. This is **distinct** from the verified ledger's
+Product's default branch. Author and commit `test-cases.md` on it. This is **distinct** from the verified ledger's
 `review/…` branch.
 
 ### Step 2 — Read inputs
@@ -185,8 +185,8 @@ Report: the path to `test-cases.md`, the connected testing tool and what it prod
 6 tests generated", the suite path + `test-links.json` path, or "no testing tool — artifacts-only"), that
 Build may already be underway in parallel, and that the next action is **review** via
 `yad-review-gate` (base rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not
-auto-advance. When the hub has a platform, the gate opens a review
-PR on the hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
+auto-advance. When the Product has a platform, the gate opens a review
+PR on the Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
 into the ledger; otherwise the review is recorded local.
 
 ## Reference

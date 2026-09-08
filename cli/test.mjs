@@ -471,7 +471,7 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 });
 
 // A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
-// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+hub
+// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+Product
 // wiring stay `missing` and remain excluded from update (no one-time setup on update).
 const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
 test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
@@ -1037,7 +1037,7 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 const { detectStage, templateBody } = await import('./openpr.mjs');
 const { fillHubTemplate } = await import('./gate.mjs');
 
-// A bare dir that IS a hub (carries .sdlc/hub.json) vs one that is not.
+// A bare dir that IS a Product (carries .sdlc/hub.json) vs one that is not.
 function hubDir() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -1049,21 +1049,21 @@ test('detectStage: code-repo when the root is not a hub, or the target repo is a
   const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-')); // no hub.json
   assert.equal(detectStage(plain, plain, 'feat/EP-x-S01-T01'), 'code-repo');
   const T = hubDir();
-  // --repo resolves repoRoot to a sub-dir of the hub => a connected code repo, never the hub
+  // --repo resolves repoRoot to a sub-dir of the Product => a connected code repo, never the Product
   assert.equal(detectStage(T, path.join(T, 'demo/backend'), 'feat/EP-x-S01-T01'), 'code-repo');
-  // a registry entry (meta truthy) is always a code repo — even if its path resolves to the hub root
+  // a registry entry (meta truthy) is always a code repo — even if its path resolves to the Product root
   assert.equal(detectStage(T, T, 'review/EP-demo/architecture', { name: 'oddly-registered' }), 'code-repo');
   fs.rmSync(plain, { recursive: true, force: true });
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('detectStage: on the hub, a review/EP-* head is hub-shape, anything else is hub-tooling', () => {
+test('detectStage: on the Product, a review/EP-* head is hub-shape, anything else is hub-tooling', () => {
   const T = hubDir();
   assert.equal(detectStage(T, T, 'review/EP-demo/architecture'), 'hub-shape');
   assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-shape');
   assert.equal(detectStage(T, T, 'ci/some-fix'), 'hub-tooling');
   assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'hub-tooling'); // must be review/EP-*
-  // path.resolve normalises a trailing-slash / "." repoRoot to the same hub
+  // path.resolve normalises a trailing-slash / "." repoRoot to the same Product
   assert.equal(detectStage(T, T + path.sep, 'ci/x'), 'hub-tooling');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -1074,7 +1074,7 @@ test('templateBody: hub-tooling emits the code-task shape (fixes #80) and fills 
   assert.match(b, /## Summary/);
   assert.match(b, /## Checklist/);
   assert.match(b, /\*\*Risk level:\*\* low/);
-  // it must NOT carry the artifact-review markers the hub's own template has
+  // it must NOT carry the artifact-review markers the Product's own template has
   assert.doesNotMatch(b, /## Artifact under review/);
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -1094,10 +1094,51 @@ test('templateBody: the hub-tooling body passes the real pr-template hub gate on
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// Change-safety rule 3 (add before you remove) for the Shape/Build/Run rename. The hub gate is
+// `--profile hub` is passed by a workflow committed in the USER's repository, and that workflow and
+// the script it calls are refreshed by different commands with no ordering between them. `product` is
+// the new spelling; both must pass, or whichever half of the upgrade lands first breaks their checks
+// until someone re-wires by hand.
+const runProfileGate = (script, args) => {
+  try { execFileSync('bash', [path.join(ROOT, script), ...args], { stdio: 'pipe' }); return { code: 0, out: '' }; }
+  catch (e) { return { code: e.status, out: String(e.stdout || '') + String(e.stderr || '') }; }
+};
+
+for (const profile of ['hub', 'product']) {
+  test(`pr-template: --profile ${profile} is accepted and behaves identically`, () => {
+    const T = hubDir();
+    const bodyFile = path.join(T, 'pr-body.md');
+    fs.writeFileSync(bodyFile, [
+      '## Artifact under review', '', 'architecture.md (EP-demo)', '',
+      '## Impact & Risk (front-half)', '', 'Risk tags: contract', '',
+      '## Checklist', '', '- [x] reviewed', '',
+    ].join('\n'));
+    const r = runProfileGate('skills/yad-pr-template/templates/checks/pr-template.sh',
+      ['--profile', profile, '--head', 'review/EP-demo/architecture', bodyFile]);
+    assert.equal(r.code, 0, `--profile ${profile} was rejected:\n${r.out}`);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+
+  // pr-title is where the normalisation is load-bearing. Without it `$PROFILE` stays `product`, the
+  // `= hub` branch is skipped, and the whole review-branch arm — including the guard that stops a
+  // plain code title carrying an artifact change past the artifact review — never runs. So this
+  // asserts BOTH directions: the right title passes, and the wrong one is still refused.
+  test(`pr-title: --profile ${profile} accepts a review title`, () => {
+    const r = runProfileGate('skills/yad-pr-template/templates/checks/pr-title.sh',
+      ['--profile', profile, '--head', 'review/EP-demo/architecture', 'review: architecture (EP-demo)']);
+    assert.equal(r.code, 0, `--profile ${profile} rejected a valid review title:\n${r.out}`);
+  });
+
+  test(`pr-title: --profile ${profile} still REFUSES a non-review title on a review branch`, () => {
+    const r = runProfileGate('skills/yad-pr-template/templates/checks/pr-title.sh',
+      ['--profile', profile, '--head', 'review/EP-demo/architecture', 'chore: sneak past the review gate']);
+    assert.equal(r.code, 1, `--profile ${profile} let a code title through the review gate:\n${r.out}`);
+  });
+}
+
+// Change-safety rule 3 (add before you remove) for the Shape/Build/Run rename. The Product gate is
 // refreshed by `yad update`; the PR template beside it is NOT (it is wired by a skill nobody runs
-// automatically), so a hub will sit with a new checker and an old template. BOTH spellings of the
-// Impact & Risk heading must pass the real script, or every artifact-review PR on that hub fails.
+// automatically), so a Product will sit with a new checker and an old template. BOTH spellings of the
+// Impact & Risk heading must pass the real script, or every artifact-review PR on that Product fails.
 // A sweep once rewrote the compatibility regex itself into `(Shape|Shape)`; these two cases are
 // what would have caught that.
 for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape)']) {
@@ -1114,12 +1155,12 @@ for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape
       try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-demo/architecture', bodyFile], { stdio: 'pipe' }); return { code: 0, out: '' }; }
       catch (e) { return { code: e.status, out: String(e.stdout || '') + String(e.stderr || '') }; }
     })();
-    assert.equal(r.code, 0, `the hub gate rejected '${heading}':\n${r.out}`);
+    assert.equal(r.code, 0, `the Product gate rejected '${heading}':\n${r.out}`);
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
 
-test('fillHubTemplate: the generated review-PR body carries every section the hub gate requires (#103)', () => {
+test('fillHubTemplate: the generated review-PR body carries every section the Product gate requires (#103)', () => {
   const b = fillHubTemplate({
     epic: 'EP-demo', artifact: 'architecture.md',
     step: { id: 'architecture-review', risk_tags: ['contract'] },
@@ -1218,7 +1259,7 @@ const { gateOpen } = await import('./gate.mjs');
 const { branchExists } = await import('./platform.mjs');
 const { runOpenPr } = await import('./openpr.mjs');
 
-// A hub with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
+// A Product with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
 function hubWithStoriesStep() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
@@ -1248,7 +1289,7 @@ test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain la
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  // bob is a hub reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
+  // bob is a Product reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
     platform: 'github', default_branch: 'main',
     roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
@@ -1275,7 +1316,7 @@ test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit co
   const T = hubWithStoriesStep();
   let bare;
   try {
-    // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
+    // bare remote so the branch push succeeds; Product platform null so the delegated gateOpen reaches its
     // local "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
     // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
     bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
@@ -1288,7 +1329,7 @@ test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit co
     // github nor gitlab) and execution actually reaches the hub-shape delegation, not the early abort.
     let res;
     const out = await grab(() => runOpenPr(T, { platform: 'github' }).then((r) => { res = r; }));
-    assert.match(out, /no hub platform/);                 // proves the delegated gateOpen was reached
+    assert.match(out, /no Product platform/);                 // proves the delegated gateOpen was reached
     assert.doesNotMatch(out, /could not detect platform/); // ...not the early platform-detection abort
     assert.ok(!res?.url, 'no PR opened');
     assert.ok(process.exitCode, 'delegated no-PR result sets a non-zero exit code (P2 line)');
@@ -1339,9 +1380,9 @@ test('runOpenPr bases the PR on the platform default, not a hardcoded main (#168
 test('runOpenPr never lets the HUB default_branch become a code repo\'s base (#168)', async () => {
   const prev = process.exitCode;
   const { T, bare } = codeRepoWithRemote();
-  // A hub that owns this repo via the registry. The hub's own trunk is `trunk` — a DIFFERENT repo's
+  // A Product that owns this repo via the registry. The Product's own trunk is `trunk` — a DIFFERENT repo's
   // branch, which must never leak into a code-repo PR — and the registry entry deliberately declares
-  // no default_branch, so the resolution has to fall past the hub rung to the platform.
+  // no default_branch, so the resolution has to fall past the Product rung to the platform.
   const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-basehub-'));
   try {
     process.exitCode = 0;
@@ -1353,7 +1394,7 @@ test('runOpenPr never lets the HUB default_branch become a code repo\'s base (#1
     const runner = fakeRunner({ 'gh repo view': 'staging' });
     await grab(() => runOpenPr(H, { repo: 'backend', creator, runner }));
     assert.equal(seen.base, 'staging', 'the code repo\'s own default wins');
-    assert.notEqual(seen.base, 'trunk', 'the hub trunk never leaks into a connected repo\'s PR');
+    assert.notEqual(seen.base, 'trunk', 'the Product trunk never leaks into a connected repo\'s PR');
   } finally {
     process.exitCode = prev;
     fs.rmSync(T, { recursive: true, force: true });
@@ -2263,9 +2304,14 @@ function scaffoldEpic() {
       { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'blocked', risk_tags: [] },
     ],
   }));
-  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+  // Seed BOTH names. The PR ledger lives under two names for one major and the engine writes both,
+  // so a fixture that seeds only one is not the state any real project is in. (The OLD name is the
+  // one read, so seeding only it would in fact work — seeding both is what the engine does.)
+  const reopened = JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
-  ]));
+  ]);
+  fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), reopened);
+  fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), reopened);
   return { T, ep };
 }
 
@@ -3175,7 +3221,7 @@ test('gate sync: an approval predating PR provenance is stamped, then re-binds (
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
   // Rewrite the ledger into the pre-upgrade shape: no `pr`, and (like GitLab) no `approvedAt` either,
-  // so NEITHER proof of a newer review is available. This is what is on disk in the hubs issue #156
+  // so NEITHER proof of a newer review is available. This is what is on disk in the Products issue #156
   // was filed from. The pointer still names the PR they were recorded against (#7).
   const legacy = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')))
     .map((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== 'pr' && k !== 'approvedAt')));
@@ -3401,7 +3447,7 @@ test('gate open without an artifact fails cleanly (no throw)', async () => {
 // `yad gate repair` — heal an epic damaged by a pre-fix gate sync (issue #131). A repo already
 // corrupted never self-heals: gate sync skips a step that is already `done`.
 // ---------------------------------------------------------------------------------------------
-// A hub git repo on `main` with an origin, carrying one epic whose `stories` step is stranded.
+// A Product git repo on `main` with an origin, carrying one epic whose `stories` step is stranded.
 function hubWithStrandedEpic() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-repair-'));
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-repair-bare-'));
@@ -3643,13 +3689,13 @@ test('registerRepo rejects a missing path and a non-git directory — nothing wr
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// Containment is to the WORKSPACE (the hub root's parent), not the hub root: the standard layout puts
-// code repos BESIDE the hub (project/{product,backend}), so `../backend` must register (issue #129).
+// Containment is to the WORKSPACE (the Product root's parent), not the Product root: the standard layout puts
+// code repos BESIDE the Product (project/{product,backend}), so `../backend` must register (issue #129).
 // The workspace has to be a real nested dir here — with the root sitting directly in os.tmpdir(), every
 // tmp dir would be a legal sibling and the rejection cases could not be expressed.
 test('registerRepo accepts a sibling repo inside the workspace, and stores the path as typed', () => {
   const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ws-'));
-  const T = path.join(WS, 'product'); // the hub root
+  const T = path.join(WS, 'product'); // the Product root
   fs.mkdirSync(T);
   const backend = path.join(WS, 'backend'); // the sibling code repo
   fs.mkdirSync(backend);
@@ -3688,8 +3734,8 @@ test('registerRepo rejects paths that resolve outside the workspace', () => {
   fs.mkdirSync(evil);
   git(evil, 'init', '-q');
   assert.equal(registerRepo(T, registry, { name: 'evil', rpath: evil }), null);
-  // the workspace DIRECTORY itself contains the hub — registering it would aim repomix and the CI
-  // writes at the whole tree. Strict descendants only (plus the hub root itself, for a monorepo).
+  // the workspace DIRECTORY itself contains the Product — registering it would aim repomix and the CI
+  // writes at the whole tree. Strict descendants only (plus the Product root itself, for a monorepo).
   git(WS, 'init', '-q');
   assert.equal(registerRepo(T, registry, { name: 'ws', rpath: '..' }), null, 'the workspace root itself is not a registrable repo');
   assert.ok(!fs.existsSync(path.join(T, '.sdlc/repos.json')), 'no registry written for rejected repos');
@@ -3774,7 +3820,7 @@ test('addRepoRoles grants per-repo roles into the roster map and warns on unknow
   const alice = hub.roster.find((r) => r.name === 'alice');
   assert.deepEqual(carol.roles.backend, ['domain-owner']);
   assert.deepEqual(carol.roles.hub, ['reviewer'], 'existing hub roles preserved');
-  assert.deepEqual(alice.roles, { hub: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map');
+  assert.deepEqual(alice.roles, { hub: ['owner'], product: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map, under both spellings of the product scope');
   // idempotent: re-granting the same role does not duplicate
   addRepoRoles(T, 'backend', { 'domain-owner': ['carol'] });
   const again = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
@@ -3813,11 +3859,11 @@ test('upsertRosterEntry inserts a new member and upserts by login, merging roles
   let e = readHub(T).roster.find((r) => r.login === 'gl-abd');
   assert.equal(e.name, 'abdulrahman');
   assert.equal(e.email, 'a@b.c');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'] });
   // upsert by login: add a dashboard scope; hub + backend must survive
   upsertRosterEntry(T, { login: 'gl-abd', roles: { dashboard: ['domain-owner'] }, platform: 'none' });
   e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
   assert.equal(readHub(T).roster.length, 1, 'upsert, not duplicate');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -3865,7 +3911,7 @@ test('runRoster add --roles (scripted) upserts and mirrors domain-owner scopes i
   await runRoster(T, { action: 'add', args: ['gl-abd'], name: 'abdulrahman', email: 'a@b.c',
     roles: 'hub=owner,reviewer backend=domain-owner dashboard=domain-owner' });
   const e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
   assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'backend').domain_owners, ['abdulrahman']);
   assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'dashboard').domain_owners, ['abdulrahman']);
   fs.rmSync(T, { recursive: true, force: true });
@@ -4285,7 +4331,7 @@ test('resolveBaseBranch: flag > registry > hub > platform > origin/HEAD > main (
     resolveBaseBranch('github', { meta: { default_branch: 'develop' }, runner: gh() }),
     { base: 'develop', source: 'registry', platformDefault: 'staging' },
   );
-  // 3. hub.json's default_branch, for a PR against the product hub itself
+  // 3. hub.json's default_branch, for a PR against the Product itself
   assert.equal(resolveBaseBranch('github', { hub: { default_branch: 'trunk' }, runner: gh() }).source, 'hub');
   // 4. THE #168 REGRESSION: no registry entry (the run-from-inside-the-code-repo path) must reach the
   //    platform, not fall through to a hardcoded 'main'
@@ -4379,10 +4425,10 @@ test('runCommit dry-run prints without committing', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a hub gate):
-// on the hub it must reassure, not threaten with a gate that does not run there.
+// runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a Product gate):
+// on the Product it must reassure, not threaten with a gate that does not run there.
 test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', async () => {
-  // a hub (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
+  // a Product (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
@@ -4391,7 +4437,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
   fs.writeFileSync(path.join(T, 'a.txt'), '1'); git(T, 'add', '-A');
   const onHub = await grab(() => runCommit(T, { type: 'ci', message: 'wire the gates', dryRun: true }));
-  assert.match(onHub, /fine for a hub PR/);
+  assert.match(onHub, /fine for a Product PR/);
   assert.doesNotMatch(onHub, /spec-link gate will fail on a code repo/);
   fs.rmSync(T, { recursive: true, force: true });
 
@@ -4866,7 +4912,7 @@ test('upsertHubPr replaces by artifact, never duplicates', () => {
   assert.equal(c2.length, 2);
 });
 
-// A hub repo with a bare origin: main carries the epic scaffolding (NO hub-prs.json — Path B never
+// A Product repo with a bare origin: main carries the epic scaffolding (NO hub-prs.json — Path B never
 // seeds it pre-merge), the review branch carries only the owner's artifact edit, and a separate "CI"
 // clone runs `gate ci` the way the workflow does.
 const SEED_CONTRACT = '<!-- CONTRACT-SURFACE:BEGIN -->\nPOST /x\n<!-- CONTRACT-SURFACE:END -->\n';
@@ -4960,7 +5006,7 @@ test('gate ci pre-merge: read-only — never pushes the review branch or the def
 // ledger that `git clean` would delete outright).
 test('gate ci pre-merge: never writes approvals.json for the legacy-PR backfill', async () => {
   const { T, author, ci } = scaffoldCiHub();
-  // A review branch that DOES carry the ledger (an older hub, or the new-epic seed carve-out), holding
+  // A review branch that DOES carry the ledger (an older Product, or the new-epic seed carve-out), holding
   // one approval from before approvals recorded which PR they arrived on.
   git(author, 'checkout', '-q', 'review/EP-test/architecture');
   const sdlc = path.join(author, 'epics/EP-test/.sdlc');
@@ -5035,7 +5081,7 @@ test('gate ci --merged: advances the step + flips artifact status on the default
 // merged review PR/MR inside its 7-day window, every 15 minutes. On the buggy code each of those calls
 // re-appended its own step's approvals at the tail of a shared approvals.json, so every call produced a
 // reorder-only diff, committed it, and pushed it to the default branch — ~1,800 bot commits/day on the
-// reporting hub. This walks that exact rotation and asserts the commit count stops growing.
+// reporting Product. This walks that exact rotation and asserts the commit count stops growing.
 test('gate ci --merged: a repeat sweep over two merged reviews commits nothing (issue #163)', async () => {
   const { T, author, ci } = scaffoldCiHub();
   // Give the epic a SECOND review gate, so approvals.json holds more than one step's records.
@@ -5107,6 +5153,8 @@ test('gate ci --merged: commits the ledger allowlist only, never a dirty worktre
     'epics/EP-test/.sdlc/approvals.json',
     'epics/EP-test/.sdlc/comments.json',
     'epics/EP-test/.sdlc/hub-prs.json',
+    // Written under BOTH names for one major, so CI commits both — see MIRRORED_FILES.
+    'epics/EP-test/.sdlc/product-prs.json',
     'epics/EP-test/.sdlc/state.json',
     'epics/EP-test/architecture.md',
     'epics/EP-test/reviews/architecture--2026-06-09--approved.md',
@@ -5188,12 +5236,12 @@ test('gate ci sweep: one corrupt epic is skipped (exit 1) while the rest still s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('check --fix wires the hub gate-sync CI only when the ledger is verified', async () => {
+test('check --fix wires the Product gate-sync CI only when the ledger is verified', async () => {
   const { T } = scaffold();
-  // no hub.json -> no hub action
+  // no hub.json -> no Product action
   await reconcile(T, { fix: true });
   assert.ok(!fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'no hub.json => not wired');
-  // hub on github with a verified ledger -> wired + idempotent
+  // Product on github with a verified ledger -> wired + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'hub workflow installed');
@@ -5621,6 +5669,102 @@ test('doctor shape: a project this engine wrote is on this engine shape, and say
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// Two names for one file only stay in step because the engine writes both. Anything else touching
+// one of them — a person, a script, a half-finished merge — makes the other silently ignored.
+// The product-level scope has two spellings. Readers and WRITERS must use the same one, or a role
+// can be granted and never revoked — a governance control that stops working because someone ran
+// the upgrade command. These are the cases that were broken.
+test('roster: a role on a MIGRATED entry can actually be revoked', () => {
+  const { T } = scaffold();
+  const productPath = path.join(T, '.sdlc/hub.json');
+  // exactly what `yad migrate` leaves behind: the same list under both spellings
+  fs.writeFileSync(productPath, JSON.stringify({ platform: 'none', roster: [
+    { login: 'alice', name: 'Alice', roles: { product: ['owner', 'reviewer'], hub: ['owner', 'reviewer'] } },
+  ] }, null, 2) + '\n');
+  removeRepoRole(T, 'Alice', 'hub', ['owner', 'reviewer']);
+  const entry = JSON.parse(fs.readFileSync(productPath, 'utf8')).roster[0];
+  assert.deepEqual(rolesForScope(entry, 'hub'), [], 'gone under the old spelling');
+  assert.deepEqual(rolesForScope(entry, 'product'), [], 'and under the new one — otherwise they are still an approver');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('roster: a grant on a MIGRATED entry lands under both spellings', () => {
+  const { T } = scaffold();
+  const productPath = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(productPath, JSON.stringify({ platform: 'none', roster: [
+    { login: 'alice', name: 'Alice', roles: { product: ['reviewer'], hub: ['reviewer'] } },
+  ] }, null, 2) + '\n');
+  upsertRosterEntry(T, { login: 'alice', name: 'Alice', roles: { hub: ['owner'] }, platform: 'none' });
+  const entry = JSON.parse(fs.readFileSync(productPath, 'utf8')).roster[0];
+  assert.deepEqual(rolesForScope(entry, 'hub').sort(), ['owner', 'reviewer']);
+  assert.deepEqual(rolesForScope(entry, 'product').sort(), ['owner', 'reviewer'], 'the two spellings never diverge');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('roster: when the two spellings disagree, the OLD one wins — the one every writer maintains', () => {
+  // Pins the tie-break. Flipping the preference used to leave the whole suite green, which is how a
+  // reader/writer mismatch got in.
+  const entry = { roles: { hub: ['owner'], product: ['reviewer'] } };
+  assert.deepEqual(rolesForScope(entry, 'hub'), ['owner']);
+  assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'asking by either name gives the authoritative answer');
+});
+
+test('doctor mirror: two copies of the settings that disagree are reported, not left silent', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({ platform: 'gitlab' }, null, 2) + '\n');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }, null, 2) + '\n');
+  const r = await doctorOn(T);
+  const m = r.checks.find((c) => c.id.startsWith('mirror:'));
+  assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
+  assert.equal(m.status, 'warn');
+  assert.match(m.message, /do not match/);
+  assert.match(m.message, /hub\.json is the one being read/, 'and it says WHICH one wins, not just that they differ');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Reverting `productConfigPath` to the old literal path made only ONE migrate test fail, which
+// means the ~20 other readers were unguarded. These two cover them.
+test('doctor: a project holding ONLY the new settings name is seen, not treated as absent', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newname-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({
+    schemaVersion: 3, platform: 'github', git_url: 'https://example.com/a/b.git', ledger: 'verified', roster: [],
+  }, null, 2) + '\n');
+  const r = await doctorOn(T);
+  const hub = r.checks.find((c) => c.id === 'hub');
+  assert.ok(hub, 'the settings file must be found under either name');
+  assert.notEqual(hub.status, 'warn', `reported as absent: ${hub.message}`);
+  assert.match(hub.message, /github/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor mirror: a per-epic PR ledger whose two copies disagree is reported', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-epicdrift-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{\n  "platform": "github"\n}\n');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[{"artifact":"architecture.md"}]\n');
+  const r = await doctorOn(T);
+  const m = r.checks.find((c) => c.id.includes('product-prs'));
+  assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
+  assert.equal(m.status, 'warn');
+  assert.match(m.message, /hub-prs\.json is the one being read/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor mirror: two copies that agree say nothing at all', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const same = JSON.stringify({ platform: 'github' }, null, 2) + '\n';
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), same);
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), same);
+  const r = await doctorOn(T);
+  assert.equal(r.checks.filter((c) => c.id.startsWith('mirror:')).length, 0, 'a healthy pair is not a finding');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('doctor shape: outside a project the section is silent, not a finding', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-none-'));
   const checks = [];
@@ -5901,7 +6045,7 @@ test('doctor: registered repo path gone fails with YAD-STATE-003', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// issue #129: a code repo may be a SIBLING of the hub. Wherever only the hub is checked out (hub CI, a
+// issue #129: a code repo may be a SIBLING of the Product. Wherever only the Product is checked out (Product CI, a
 // fresh clone) that path is legitimately absent — a warn, not the YAD-STATE-003 corruption failure.
 test('doctor: an absent repo path OUTSIDE the project root warns instead of failing (#129)', async () => {
   const { T } = scaffold();
@@ -5913,7 +6057,7 @@ test('doctor: an absent repo path OUTSIDE the project root warns instead of fail
   const r = await doctorOn(T);
   const chk = r.checks.find((x) => x.id === 'repo:backend');
   assert.equal(chk.status, 'warn', 'an absent sibling is expected, not corruption');
-  assert.match(chk.message, /sibling repo, outside the hub/);
+  assert.match(chk.message, /sibling repo, outside the Product/);
   assert.ok(!r.checks.some((x) => /YAD-STATE-003/.test(x.message)), 'no YAD-STATE-003 for a sibling');
 
   // …but a hand-edited registry pointing clean out of the workspace is corruption, not a sibling —
@@ -6188,7 +6332,7 @@ test('doctor: absent learning.json is silent (harness-native is the normal defau
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gate loadHub: an existing hub.json holding literal null is rejected (not treated as absent)', async () => {
+test('gate loadProduct: an existing hub.json holding literal null is rejected (not treated as absent)', async () => {
   const { T, ep } = scaffoldEpic();
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), 'null');
   await assert.rejects(
@@ -6590,7 +6734,7 @@ test('report: non-interactive never posts — hands back a prefilled URL', async
 // ---- yad usage (derived team-member behavior report) --------------------------------------------
 const { buildModel, renderHtml, renderMarkdown, deriveEvents } = await import('./usage.mjs');
 
-// Scaffold a hub dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
+// Scaffold a Product dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
 // []). `dormant` is in the roster with no activity so we can assert it surfaces at zero.
 function usageFixture() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-'));
@@ -6694,7 +6838,7 @@ test('usage: same fixture derives a byte-identical JSON model (deterministic)', 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('usage: deriveEvents degrades to [] when the hub is not a git repo', () => {
+test('usage: deriveEvents degrades to [] when the Product is not a git repo', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-nogit-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [] }));
@@ -6768,16 +6912,16 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
 });
 
 // ---------------------------------------------------------------------------------------------
-// yad checkpoint — commit the machine-written Build hub state (trust-log/build-log/build-state)
+// yad checkpoint — commit the machine-written Build Product state (trust-log/build-log/build-state)
 // ---------------------------------------------------------------------------------------------
 const {
   runCheckpoint, buildLedgerPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip, retroShipRepos,
 } = await import('./checkpoint.mjs');
-const { hubGit } = await import('./hubcommit.mjs');
+const { productGit } = await import('./hubcommit.mjs');
 
-// A hub (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
+// A Product (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
 // exists. The roster email matches the git identity so resolveCommitterLogin yields @abdelrahmannasr.
-function hubForCheckpoint() {
+function productForCheckpoint() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-'));
   git(T, 'init', '-q');
   git(T, 'config', 'user.email', 'a.nasr@x.com');
@@ -6831,7 +6975,7 @@ test('buildCheckpointMessage: chore(hub) subject, no trailing period, no AI foot
 });
 
 test('buildLedgerPathspecs lists only the Build ledgers that exist — never the Shape', () => {
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeBuildLedgers(T, 'EP-a', 'EP-a-S03');
   const specs = buildLedgerPathspecs(T);
   assert.ok(specs.includes('epics/EP-a/.sdlc/trust-log.json'));
@@ -6843,7 +6987,7 @@ test('buildLedgerPathspecs lists only the Build ledgers that exist — never the
 
 test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subject', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeBuildLedgers(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
@@ -6858,7 +7002,7 @@ test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subje
 
 test('runCheckpoint commits ONLY the allowlist even when an unrelated file is already staged', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   fs.writeFileSync(path.join(T, 'unrelated.txt'), 'hi'); // stage something outside the allowlist
   git(T, 'add', 'unrelated.txt');
@@ -6873,7 +7017,7 @@ test('runCheckpoint commits ONLY the allowlist even when an unrelated file is al
 
 test('runCheckpoint is a clean no-op when nothing changed', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   await grab(() => runCheckpoint(T, {}));
   const head1 = git(T, 'rev-parse', 'HEAD').toString().trim();
@@ -6887,7 +7031,7 @@ test('runCheckpoint is a clean no-op when nothing changed', async () => {
 
 test('runCheckpoint refuses off the default branch, and --allow-branch overrides', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   git(T, 'checkout', '-q', '-b', 'wip/side');
   writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
@@ -6904,7 +7048,7 @@ test('runCheckpoint refuses off the default branch, and --allow-branch overrides
 
 test('runCheckpoint --dry-run prints the message but commits nothing and leaves the index clean', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const head0 = git(T, 'rev-parse', 'HEAD').toString().trim();
   const out = await grab(() => runCheckpoint(T, { dryRun: true }));
@@ -6917,7 +7061,7 @@ test('runCheckpoint --dry-run prints the message but commits nothing and leaves 
 
 test('runCheckpoint --push lands the commit on the bare remote default branch', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-bare-'));
   git(bare, 'init', '-q', '--bare');
   git(T, 'remote', 'add', 'origin', bare);
@@ -6963,7 +7107,7 @@ function writeStory(T, epic, story, status, { ship = true } = {}) {
 }
 
 test('storyStatusPathspecs lists ONLY ship-backed stories at a Build status', () => {
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'shipped');           // ship + shipped ⇒ carried
   writeStory(T, 'EP-a', 'EP-a-S02', 'in-build');          // ship + in-build ⇒ carried
   writeStory(T, 'EP-a', 'EP-a-S03', 'approved');          // ship but Shape gate status ⇒ excluded
@@ -6984,7 +7128,7 @@ test('summarizeStaged recognizes a carried story file (labels the story, lists i
 
 test('runCheckpoint carries the story status flip (approved → shipped) alongside the ledgers (#112)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // Baseline: the story sits at `approved` on the default branch with its ship already recorded.
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved');
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed story + build-log');
@@ -7002,7 +7146,7 @@ test('runCheckpoint carries the story status flip (approved → shipped) alongsi
 
 test('runCheckpoint does NOT carry a story flip lacking a build-log ship, even while committing ledgers', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // A story flipped to shipped but with NO ship evidence — must never ride along.
   writeStory(T, 'EP-a', 'EP-a-S09', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed unshipped story');
@@ -7021,7 +7165,7 @@ test('runCheckpoint does NOT carry a story flip lacking a build-log ship, even w
 
 test('runCheckpoint --retro-ship records the missing ship AND carries the flip in one commit (#142)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // A pre-tracking story: committed at `approved` with NO build-log ship (implemented before tracking).
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed pre-tracking story');
@@ -7039,7 +7183,7 @@ test('runCheckpoint --retro-ship records the missing ship AND carries the flip i
 
 test('runCheckpoint --retro-ship records a MULTI-REPO pre-tracking story one repo at a time (#166)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // A pre-tracking story that shipped in TWO repos: no ship evidence in either.
   const storyFile = path.join(T, 'epics/EP-a/stories/EP-a-S01.md');
   fs.mkdirSync(path.dirname(storyFile), { recursive: true });
@@ -7070,7 +7214,7 @@ test('runCheckpoint --retro-ship records a MULTI-REPO pre-tracking story one rep
 
 test('runCheckpoint --retro-ship refuses a story that already has a real build-log ship in that repo (#142, #166)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'shipped'); // ship:true ⇒ a real ship already exists, in repo `web`
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed shipped story');
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
@@ -7085,7 +7229,7 @@ test('runCheckpoint --retro-ship refuses a story that already has a real build-l
 
 test('runCheckpoint --retro-ship REFUSES (no shard, no commit) when frontmatter is not Build — evidence + flip stay atomic (#142)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed'); // working tree still at `approved` — human forgot to flip
   const before = git(T, 'rev-parse', 'HEAD').toString().trim();
@@ -7099,7 +7243,7 @@ test('runCheckpoint --retro-ship REFUSES (no shard, no commit) when frontmatter 
 });
 
 test('CLI --retro-ship rejects a path-traversal / malformed / cross-epic story id at the arg boundary (#142)', () => {
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // story is always split('/')[1] — it can never contain a slash — so the pin only has to reject a bare
   // `..`, an encoded traversal, a wrong shape, or a cross-epic id. (A multi-slash value like
   // `EP-a/EP-a-S01/../x` reduces to the clean story `EP-a-S01`, so traversal is structurally impossible.)
@@ -7115,7 +7259,7 @@ test('CLI --retro-ship rejects a path-traversal / malformed / cross-epic story i
 
 test('runCheckpoint --retro-ship --dry-run leaves NO shard on disk and commits nothing (#142)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
@@ -7135,7 +7279,7 @@ test('runCheckpoint --retro-ship --dry-run leaves NO shard on disk and commits n
 
 test('runCheckpoint --retro-ship --dry-run rolls the shard back even when it exits EARLY (#167 review)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
@@ -7156,7 +7300,7 @@ test('runCheckpoint --retro-ship --dry-run rolls the shard back even when it exi
 
 test('runCheckpoint --retro-ship --dry-run counts the previewed repo as still unrecorded (#167 review)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web, api, mobile]\n---\n\n# EP-a-S01\n`);
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
@@ -7170,7 +7314,7 @@ test('runCheckpoint --retro-ship --dry-run counts the previewed repo as still un
 
 test('recordRetroShip: guards on missing epic/story/repo and a nonexistent target (#142)', () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web' }).ok, false, 'a nonexistent epic is rejected');
   fs.mkdirSync(path.join(T, 'epics', 'EP-a', 'stories'), { recursive: true }); // epic exists, story does not
   assert.equal(recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web' }).ok, false, 'a nonexistent story is rejected');
@@ -7183,7 +7327,7 @@ test('recordRetroShip: guards on missing epic/story/repo and a nonexistent targe
 
 test('recordRetroShip REFUSES a repo the story does not declare — a typo must not fabricate a ship (#166)', () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'shipped', { ship: false }); // declares repos: [web]
   const out = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'wbe', today: '2026-07-14' }));
   assert.match(out, /wbe is not a repo EP-a-S01 declares/, 'the typo is named and refused');
@@ -7199,7 +7343,7 @@ test('recordRetroShip REFUSES a repo the story does not declare — a typo must 
 
 test('recordRetroShip REFUSES a repo whose shard name collides with a recorded one — never overwrite evidence (#166)', () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // `api.v2` and `api_v2` both sanitize to `api_v2` in the shard filename.
   fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
@@ -7216,7 +7360,7 @@ test('recordRetroShip REFUSES a repo whose shard name collides with a recorded o
 
 test('runCheckpoint --retro-ship --dry-run never deletes an already-committed shard (#166)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: approved\nrepos: [api.v2, api_v2]\n---\n\n# EP-a-S01\n`);
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
@@ -7235,7 +7379,7 @@ test('runCheckpoint --retro-ship --dry-run never deletes an already-committed sh
 
 test('recordRetroShip reports the still-unrecorded declared repos, and drops the hint when none are left (#166)', () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   fs.mkdirSync(path.join(T, 'epics/EP-a/stories'), { recursive: true });
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web, api]\n---\n\n# EP-a-S01\n`);
   const first = grabSync(() => recordRetroShip(T, { epic: 'EP-a', story: 'EP-a-S01', repo: 'web', today: '2026-07-14' }));
@@ -7251,12 +7395,12 @@ test('recordRetroShip reports the still-unrecorded declared repos, and drops the
 });
 
 test('retroShipRepos: story frontmatter wins, the registry is the fallback, neither blocks a bare legacy story (#166)', () => {
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   const storyFile = path.join(T, 'epics/EP-a/stories/EP-a-S01.md');
   fs.mkdirSync(path.dirname(storyFile), { recursive: true });
   fs.writeFileSync(storyFile, `---\nstatus: shipped\nrepos: [web, api]\n---\n\n# EP-a-S01\n`);
   assert.deepEqual(retroShipRepos(T, storyFile), { names: ['web', 'api'], source: 'story' });
-  // No `repos:` on the story ⇒ the hub's connected repos.
+  // No `repos:` on the story ⇒ the Product's connected repos.
   fs.writeFileSync(storyFile, `---\nstatus: shipped\n---\n\n# EP-a-S01\n`);
   fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'web' }, { name: 'api' }] }));
   assert.deepEqual(retroShipRepos(T, storyFile), { names: ['web', 'api'], source: 'registry' });
@@ -7268,12 +7412,12 @@ test('retroShipRepos: story frontmatter wins, the registry is the fallback, neit
 });
 
 test('stagedStoryIsStatusOnly: true for a lone status flip, false for a prose edit or a new file', () => {
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   const rel = 'epics/EP-a/stories/EP-a-S01.md';
   const abs = path.join(T, rel);
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved');
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
-  const g = hubGit(T); // the production git accessor: returns { ok, stdout, stderr, code }
+  const g = productGit(T); // the production git accessor: returns { ok, stdout, stderr, code }
   // lone status flip
   fs.writeFileSync(abs, `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
   git(T, 'add', '--', rel);
@@ -7294,7 +7438,7 @@ test('stagedStoryIsStatusOnly: true for a lone status flip, false for a prose ed
 
 test('runCheckpoint drops a ship-backed story whose change is MORE than the status line (review-bypass guard)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved');
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
   // The flip AND an unrelated prose edit in the same file — the prose must NOT ride a [skip ci] commit.
@@ -7312,7 +7456,7 @@ test('runCheckpoint drops a ship-backed story whose change is MORE than the stat
 
 test('runCheckpoint: a corrupt build-log in one epic does not block checkpointing another epic', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   // EP-bad has a corrupt folded build-log; EP-ok has a clean ledger change to checkpoint.
   fs.mkdirSync(path.join(T, 'epics/EP-bad/.sdlc'), { recursive: true });
   fs.mkdirSync(path.join(T, 'epics/EP-bad/stories'), { recursive: true });
@@ -7329,7 +7473,7 @@ test('runCheckpoint: a corrupt build-log in one epic does not block checkpointin
 });
 
 test('storyStatusPathspecs: a ship-backed story with NO frontmatter is excluded (no crash)', () => {
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'shipped'); // ship recorded
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), '# EP-a-S01 with no frontmatter\n');
   assert.deepEqual(storyStatusPathspecs(T), [], 'no frontmatter ⇒ no status ⇒ excluded, and no throw');
@@ -7366,7 +7510,7 @@ test('runCheckpoint guard fires even with hub.default_branch UNSET — never tru
 
 test('runCheckpoint --force does NOT bypass the branch guard — only --allow-branch does (MEDIUM-5)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   git(T, 'checkout', '-q', '-b', 'wip/x');
   writeBuildLedgers(T, 'EP-a', 'EP-a-S01');
   const out = await grab(() => runCheckpoint(T, { force: true }));
@@ -7378,7 +7522,7 @@ test('runCheckpoint --force does NOT bypass the branch guard — only --allow-br
 
 test('runCheckpoint --allow-branch --push pushes the CURRENT branch, never the default branch (HIGH-1)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint(); // default_branch main, on main
+  const T = productForCheckpoint(); // default_branch main, on main
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-bare2-'));
   git(bare, 'init', '-q', '--bare');
   git(T, 'remote', 'add', 'origin', bare);
@@ -7401,7 +7545,7 @@ test('runCheckpoint --allow-branch --push pushes the CURRENT branch, never the d
 
 test('runCheckpoint commits cleanly when build-state/ exists but is empty — no pathspec crash (HIGH-3)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   const sdlc = path.join(T, 'epics/EP-a/.sdlc');
   fs.mkdirSync(path.join(sdlc, 'build-state'), { recursive: true }); // empty dir, no story JSON yet
   fs.writeFileSync(path.join(sdlc, 'trust-log.json'), JSON.stringify({ epic: 'EP-a', runs: [] }));
@@ -7415,7 +7559,7 @@ test('runCheckpoint commits cleanly when build-state/ exists but is empty — no
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('buildCheckpointMessage subject matches the hub commit-message gate regex and collapses injection (NIT-8)', () => {
+test('buildCheckpointMessage subject matches the Product commit-message gate regex and collapses injection (NIT-8)', () => {
   const TYPES = 'feat|fix|docs|refactor|test|perf|build|ci|chore|revert';
   const gate = new RegExp(`^(${TYPES})(\\([a-z0-9._-]+\\))?!?: .+`);
   const subj = buildCheckpointMessage({ label: 'EP-a/EP-a-S03', author: '@x', basenames: ['trust-log.json'] }).split('\n')[0];
@@ -7766,9 +7910,9 @@ test('a corrupt folded ledger ABORTS (never silently rebuilt, which would erase 
 // ---------------------------------------------------------------------------------------------
 const { runTidy, shippedStories } = await import('./tidy.mjs');
 
-// A hub on main with a story of the given frontmatter status + a trust shard and a build shard for it.
+// A Product on main with a story of the given frontmatter status + a trust shard and a build shard for it.
 function hubWithShards(statusByStory) {
-  const T = hubForCheckpoint(); // from the checkpoint suite: hub.json (default_branch main) + seed on main
+  const T = productForCheckpoint(); // from the checkpoint suite: hub.json (default_branch main) + seed on main
   const ep = path.join(T, 'epics/EP-demo');
   fs.mkdirSync(path.join(ep, 'stories'), { recursive: true });
   fs.mkdirSync(path.join(ep, '.sdlc/trust-log'), { recursive: true });
@@ -7815,7 +7959,7 @@ test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, co
 // (empty — the "never appended to" observation), then tidy up and watch the ship arrive in the aggregate.
 test('--retro-ship → tidy up: the backfilled ship is readable throughout and lands in build-log.json (#167)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed pre-tracking story');
   fs.writeFileSync(path.join(T, 'epics/EP-a/stories/EP-a-S01.md'), `---\nstatus: shipped\nrepos: [web]\n---\n\n# EP-a-S01\n`);
@@ -7840,7 +7984,7 @@ test('--retro-ship → tidy up: the backfilled ship is readable throughout and l
 
 test('a retro shard on an in-build story is NEVER folded, and is still read (#167)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   writeStory(T, 'EP-a', 'EP-a-S01', 'approved', { ship: false });
   git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed pre-tracking story');
   // `in-build` is a valid --retro-ship target (checkpoint.mjs BACK_HALF_STATUSES), but `tidy up` folds
@@ -7885,7 +8029,7 @@ test('runTidy refuses off the default branch', async () => {
 
 test('runTidy does not crash when a touched epic has only build shards (no trust ledger at all) (Fable HIGH-1)', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   const ep = path.join(T, 'epics/EP-demo');
   fs.mkdirSync(path.join(ep, 'stories'), { recursive: true });
   fs.mkdirSync(path.join(ep, '.sdlc/build-log'), { recursive: true }); // build shard only — NO trust-log file or dir
@@ -7907,7 +8051,7 @@ test('THE POINT: two writers add different shards to the SAME epic and both push
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-conc-bare-'));
   git(bare, 'init', '-q', '--bare');
   // origin seeded from clone A
-  const A = hubForCheckpoint();
+  const A = productForCheckpoint();
   git(A, 'remote', 'add', 'origin', bare); git(A, 'push', '-q', 'origin', 'main');
   // Point the bare's HEAD at main so a clone checks it out. A fresh `git init --bare` defaults HEAD to
   // `master` where init.defaultBranch is unset (CI runners) — without this, clone B lands on an unborn
@@ -7937,7 +8081,7 @@ test('THE POINT: two writers add different shards to the SAME epic and both push
 
 test('runCheckpoint commits trust-log/ + build-log/ shard files (allowlist widened) and labels the story', async () => {
   const prev = process.exitCode;
-  const T = hubForCheckpoint();
+  const T = productForCheckpoint();
   const d = path.join(T, 'epics/EP-demo/.sdlc');
   fs.mkdirSync(path.join(d, 'trust-log'), { recursive: true });
   fs.mkdirSync(path.join(d, 'build-log'), { recursive: true });
@@ -8001,39 +8145,39 @@ test('repoLabel: hub root -> "hub", connected repo -> its relative path', () => 
   assert.equal(repoLabel('/hub', '/hub/demo/backend'), 'demo/backend');
 });
 
-// Scaffold a hub + connected backend, each with a bare origin on `main`, hub.json bridge-enabled.
+// Scaffold a Product + connected backend, each with a bare origin on `main`, hub.json bridge-enabled.
 function scaffoldWithRemotes() {
   const { T, backend } = scaffold();
-  const hubBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbare-')); git(hubBare, 'init', '-q', '--bare');
+  const productBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbare-')); git(productBare, 'init', '-q', '--bare');
   const beBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bebare-')); git(beBare, 'init', '-q', '--bare');
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', bridge_enabled: true, roster: [] }));
-  // hub: seed a commit, name the branch main, wire origin
+  // Product: seed a commit, name the branch main, wire origin
   fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A');
   git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'seed');
-  git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', hubBare);
+  git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', productBare);
   // backend: already has an init commit; name main + wire origin
   git(backend, 'branch', '-q', '-M', 'main'); git(backend, 'remote', 'add', 'origin', beBare);
   git(backend, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'config', 'user.email', 'a@b.c');
   git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   git(backend, 'config', 'user.name', 'x');
-  return { T, backend, hubBare, beBare };
+  return { T, backend, productBare, beBare };
 }
 
-test('reconcile --push: commits chore(yad-update) on hub + connected repo and pushes to origin/main', async () => {
+test('reconcile --push: commits chore(yad-update) on the Product + connected repo and pushes to origin/main', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
     await grab(() => reconcile(T, { fix: true, push: true }));
 
-    // hub commit
+    // Product commit
     const hubSubject = git(T, 'log', '-1', '--format=%s').toString().trim();
     assert.match(hubSubject, new RegExp(`^chore\\(yad-update\\): sync SDLC install to yadflow v${PKG_VERSION.replace(/\./g, '\\.')}$`), 'hub subject');
-    assert.doesNotMatch(git(T, 'log', '-1', '--format=%B').toString(), /\[skip ci\]/i, 'no [skip ci] on hub commit');
-    // the version stamp + new guard workflow rode the hub commit
+    assert.doesNotMatch(git(T, 'log', '-1', '--format=%B').toString(), /\[skip ci\]/i, 'no [skip ci] on the Product commit');
+    // the version stamp + new guard workflow rode the Product commit
     const hubFiles = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
-    assert.match(hubFiles, /\.sdlc\/cli-version\.json/, 'version stamp committed on hub');
-    assert.match(hubFiles, /\.github\/workflows\/yad-update-guard\.yml/, 'new guard workflow committed on hub');
+    assert.match(hubFiles, /\.sdlc\/cli-version\.json/, 'version stamp committed on the Product');
+    assert.match(hubFiles, /\.github\/workflows\/yad-update-guard\.yml/, 'new guard workflow committed on the Product');
 
     // backend commit + new guard workflow installed
     const beSubject = git(backend, 'log', '-1', '--format=%s').toString().trim();
@@ -8041,12 +8185,12 @@ test('reconcile --push: commits chore(yad-update) on hub + connected repo and pu
     assert.ok(fs.existsSync(path.join(backend, '.github/workflows/yad-update-guard.yml')), 'backend guard workflow installed');
 
     // both pushed to their bare origins
-    assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'hub pushed to origin/main');
+    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'hub pushed to origin/main');
     assert.match(git(beBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(yad-update\)/, 'backend pushed to origin/main');
     assert.ok(!process.exitCode, 'clean push -> zero exit code');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
@@ -8058,18 +8202,18 @@ test('commitAndPush: a path that is NOT its own repo top (nested plain dir) is s
     process.exitCode = 0;
     git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
     fs.writeFileSync(path.join(T, 'seed'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed'); git(T, 'branch', '-q', '-M', 'main');
-    // a registered repo whose clone is GONE: just a plain dir inside the hub, with recreated wiring
+    // a registered repo whose clone is GONE: just a plain dir inside the Product, with recreated wiring
     const fake = path.join(T, 'demo/backend'); fs.mkdirSync(path.join(fake, 'checks'), { recursive: true });
     fs.writeFileSync(path.join(fake, 'checks/spec-link.sh'), '# wired\n');
     const out = await grab(() => {
       const r = commitAndPush({ root: fake, paths: ['checks/spec-link.sh'], items: ['backend/x'] },
-        { push: false, hubRoot: T, defaultBranch: 'main' });
+        { push: false, productRoot: T, defaultBranch: 'main' });
       assert.equal(r.committed, false); assert.equal(r.skipped, true);
     });
     assert.match(out, /not its own git repo/, 'nested plain dir is refused');
-    // the enclosing hub must NOT have gained a commit or a staged backend file
+    // the enclosing Product must NOT have gained a commit or a staged backend file
     assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), '1', 'hub still has only the seed commit');
-    assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'nothing staged into the hub index');
+    assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'nothing staged into the Product index');
   } finally {
     process.exitCode = prev;
     fs.rmSync(T, { recursive: true, force: true });
@@ -8078,7 +8222,7 @@ test('commitAndPush: a path that is NOT its own repo top (nested plain dir) is s
 
 test('reconcile --push: a connected repo on a non-default branch is skipped, not disrupted', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
     git(backend, 'checkout', '-q', '-b', 'feature/wip'); // backend off its default branch
@@ -8088,19 +8232,19 @@ test('reconcile --push: a connected repo on a non-default branch is skipped, not
     assert.doesNotMatch(git(backend, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'no commit on the feature branch');
     // and nothing was pushed to the backend remote
     assert.doesNotMatch(git(beBare, 'log', '--oneline', '--all').toString(), /chore\(yad-update\)/, 'backend remote untouched');
-    // the hub itself (on main) still committed + pushed — one repo being skipped doesn't block the rest
+    // the Product itself (on main) still committed + pushed — one repo being skipped doesn't block the rest
     assert.match(git(T, 'log', '-1', '--format=%s').toString(), /chore\(yad-update\)/, 'hub still published');
     // and the summary must NOT claim "merges can resume" when a repo was skipped (CodeRabbit fix)
     assert.match(out, /update incomplete/, 'skipped repo => incomplete summary');
     assert.doesNotMatch(out, /merges can resume/);
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 // ---------------------------------------------------------------------------------------------
-// `yad repo refresh --push` — publish the connected-repo code-context to the hub default branch
+// `yad repo refresh --push` — publish the connected-repo code-context to the Product default branch
 // ---------------------------------------------------------------------------------------------
 const { buildCodeMapMessage, codeMapPathspecs, packPathspecs, summarizeCodeContext, publishCodeContext } = await import('./repo-publish.mjs');
 const { ensurePackIgnored, PACK_IGNORE_GLOB } = await import('./setup.mjs');
@@ -8147,9 +8291,9 @@ test('codeMapPathspecs: only existing code-maps + the registry (never the gitign
   }
 });
 
-// #126 — the pack strand: setup/refresh must gitignore the pack, and publish must self-heal a hub that
+// #126 — the pack strand: setup/refresh must gitignore the pack, and publish must self-heal a Product that
 // tracked it before that ignore existed.
-test('ensurePackIgnored: idempotently adds the pack glob to the hub .gitignore', () => {
+test('ensurePackIgnored: idempotently adds the pack glob to the Product .gitignore', () => {
   const { T } = scaffold();
   try {
     // no .gitignore yet -> the glob is written
@@ -8189,10 +8333,10 @@ test('packPathspecs: on-disk pack paths per repo, scoped by name', () => {
 
 test('publishCodeContext: self-heals a pre-ignore TRACKED pack — commits its removal, tree ends clean', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // A hub created before the ignore existed: pack.md was committed (tracked), no .gitignore for it.
+    // A Product created before the ignore existed: pack.md was committed (tracked), no .gitignore for it.
     fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/pack.md'), '# stale pack\n');
     git(T, 'add', '.sdlc/code-context/backend/pack.md');
@@ -8218,20 +8362,20 @@ test('publishCodeContext: self-heals a pre-ignore TRACKED pack — commits its r
     assert.ok(!process.exitCode, 'clean run -> zero exit code');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 // Invariant 1: the audit commit must never sweep unrelated work — not a pre-staged file, and not an
-// unrelated edit to the hub `.gitignore` (which a naive `git add .gitignore` would combine with the
+// unrelated edit to the Product `.gitignore` (which a naive `git add .gitignore` would combine with the
 // managed pack glob). Invariant: the user's INDEX is left untouched (no whole-index reset), matching
 // runCheckpoint — a pre-staged file stays staged, not silently unstaged.
 test('publishCodeContext: never sweeps unrelated work and leaves the user index staged (checkpoint-consistent)', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // A healthy hub: the pack glob is already committed in .gitignore.
+    // A healthy Product: the pack glob is already committed in .gitignore.
     fs.writeFileSync(path.join(T, '.gitignore'), '.sdlc/code-context/*/pack.md\n');
     git(T, 'add', '.gitignore');
     git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: ignore pack');
@@ -8253,21 +8397,21 @@ test('publishCodeContext: never sweeps unrelated work and leaves the user index 
     assert.match(git(T, 'diff', '--cached', '--name-only').toString(), /scratch\.txt/, 'pre-staged file remains staged');
     assert.match(fs.readFileSync(path.join(T, '.gitignore'), 'utf8'), /\.env\.local/, 'the user\'s .gitignore edit is kept on disk');
     // and the pushed commit on origin carries no .gitignore either
-    assert.doesNotMatch(git(hubBare, 'show', '--name-only', '--format=', 'main').toString(), /\.gitignore/, 'nothing about the user edit reached origin');
+    assert.doesNotMatch(git(productBare, 'show', '--name-only', '--format=', 'main').toString(), /\.gitignore/, 'nothing about the user edit reached origin');
     assert.ok(!process.exitCode, 'clean run -> zero exit code');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 // Concern 2(a): a no-op publish (nothing to publish) must NOT touch the user's staged work either.
 test('publishCodeContext: a nothing-to-publish run leaves unrelated staged work staged', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // A hub already ignoring the pack (so ensurePackIgnored is a no-op) with nothing new to publish.
+    // A Product already ignoring the pack (so ensurePackIgnored is a no-op) with nothing new to publish.
     fs.writeFileSync(path.join(T, '.gitignore'), '.sdlc/code-context/*/pack.md\n');
     git(T, 'add', '.gitignore');
     git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: ignore pack');
@@ -8283,16 +8427,16 @@ test('publishCodeContext: a nothing-to-publish run leaves unrelated staged work 
     assert.ok(!process.exitCode, 'no-op -> zero exit code');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main, then is idempotent', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // a freshly (AI-)regenerated code-map in the hub working tree
+    // a freshly (AI-)regenerated code-map in the Product working tree
     fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# backend code-map\n');
     await grab(() => publishCodeContext(T, { push: true }));
@@ -8302,7 +8446,7 @@ test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main
     const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString();
     assert.match(files, /\.sdlc\/code-context\/backend\/code-map\.md/, 'code-map committed');
     assert.doesNotMatch(files, /pack\.md/, 'the gitignored pack never rides along');
-    assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(hub\): sync code-context/, 'pushed to origin/main');
+    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /chore\(hub\): sync code-context/, 'pushed to origin/main');
     assert.ok(!process.exitCode, 'clean push -> zero exit code');
 
     // idempotent: a re-run with nothing new and already pushed is a clean no-op (no second commit)
@@ -8312,16 +8456,16 @@ test('publishCodeContext: commits chore(hub) code-context, pushes to origin/main
     assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), count, 'no second commit');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 test('publishCodeContext: a named refresh publishes only that repo\'s code-map, not others', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // register a second repo and give both an on-disk (uncommitted) code-map in the hub
+    // register a second repo and give both an on-disk (uncommitted) code-map in the Product
     const reg = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
     reg.repos.push({ name: 'mobile', path: 'demo/mobile', default_branch: 'main', codeMap: '.sdlc/code-context/mobile/code-map.md' });
     fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(reg));
@@ -8338,13 +8482,13 @@ test('publishCodeContext: a named refresh publishes only that repo\'s code-map, 
     assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context — backend by /, 'label scoped to the named repo, not "2 repos"');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 test('publishCodeContext: a re-run pushes a commit that a prior run committed but failed to push', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
     git(T, 'push', '-q', 'origin', 'HEAD:main'); // origin/main exists (tracking ref set)
@@ -8353,12 +8497,12 @@ test('publishCodeContext: a re-run pushes a commit that a prior run committed bu
     // 1st run commits locally but does NOT push (simulates a push that failed and left the commit ahead)
     await grab(() => publishCodeContext(T, { push: false }));
     assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, 'commit landed locally');
-    assert.doesNotMatch(git(hubBare, 'log', '--oneline', '--all').toString(), /sync code-context/, 'not yet on origin');
+    assert.doesNotMatch(git(productBare, 'log', '--oneline', '--all').toString(), /sync code-context/, 'not yet on origin');
 
     // re-run with --push: index is unchanged (already committed) but the unpushed commit must still land
     const out = await grab(() => publishCodeContext(T, { push: true }));
     assert.match(out, /pushing 1 already-committed change/, 'detects the unpushed commit and pushes it');
-    assert.match(git(hubBare, 'log', '-1', '--format=%s', 'main').toString(), /sync code-context/, 'existing commit reaches origin/main on the re-run');
+    assert.match(git(productBare, 'log', '-1', '--format=%s', 'main').toString(), /sync code-context/, 'existing commit reaches origin/main on the re-run');
     assert.ok(!process.exitCode, 'successful retry -> zero exit code');
 
     // a further re-run with nothing unpushed is a clean no-op
@@ -8366,18 +8510,18 @@ test('publishCodeContext: a re-run pushes a commit that a prior run committed bu
     assert.match(out2, /already published — nothing to do/, 'fully-published re-run no-ops');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
 test('publishCodeContext: non-default branch is skipped unless --allow-branch', async () => {
   const prev = process.exitCode;
-  const { T, backend, hubBare, beBare } = scaffoldWithRemotes();
+  const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
     fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# map\n');
-    git(T, 'checkout', '-q', '-b', 'chore/wip'); // hub off its default branch
+    git(T, 'checkout', '-q', '-b', 'chore/wip'); // Product off its default branch
     const out = await grab(() => publishCodeContext(T, { push: false }));
     assert.match(out, /not the default branch 'main'/, 'guard refuses a non-default branch');
     assert.doesNotMatch(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, 'no commit on the wip branch');
@@ -8389,7 +8533,7 @@ test('publishCodeContext: non-default branch is skipped unless --allow-branch', 
     assert.match(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, '--allow-branch commits on the wip branch');
   } finally {
     process.exitCode = prev;
-    for (const d of [T, backend, hubBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
+    for (const d of [T, backend, productBare, beBare]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
 
@@ -8400,7 +8544,7 @@ test('publishCodeContext: outside a hub (no hub.json) fails with a non-zero exit
     process.exitCode = 0;
     git(T, 'init', '-q');
     const out = await grab(() => publishCodeContext(T, { push: false }));
-    assert.match(out, /hub\.json/, 'refuses to publish outside the product hub');
+    assert.match(out, /hub\.json/, 'refuses to publish outside the Product');
     assert.ok(process.exitCode, 'sets a non-zero exit code');
   } finally {
     process.exitCode = prev;
@@ -8914,9 +9058,9 @@ const {
 const { hookActions, mergeHookSettings, hookMatcherFires } = await import('./plan.mjs');
 const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER } = await import('./manifest.mjs');
 
-// A hub with two epics on disk. Which of them the BASE REF carries is the fake git's business, not
+// A Product with two epics on disk. Which of them the BASE REF carries is the fake git's business, not
 // the filesystem's — the whole point of the seeding rule is that it reads the base, never the tree.
-function hookHub({ hub = { platform: 'gitlab', bridge_enabled: true, default_branch: 'main' } } = {}) {
+function hookProduct({ hub = { platform: 'gitlab', bridge_enabled: true, default_branch: 'main' } } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-hook-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   if (hub) fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
@@ -8963,7 +9107,7 @@ const decide = (T, rel, opts = {}) => ledgerGuardDecision([path.join(T, rel)], {
 });
 
 test('ledger hook denies a mutation of a ledger already on the base ref, and names the command', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     const v = decide(T, 'epics/EP-seeded/.sdlc/state.json');
     assert.equal(v.allow, false);
@@ -8979,8 +9123,8 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
   //   * a bare local `main` is whatever the developer last pulled (`git fetch` never moves it), so a
   //     merged epic's ledger reads as absent and a real mutation is waved through;
   //   * a `<rev>:<path>` spec always resolves from the repo TOP LEVEL — `-C` does not re-anchor it —
-  //     so a hub in a subdirectory would miss on every probe and the guard would allow everything.
-  const T = hookHub();
+  //     so a Product in a subdirectory would miss on every probe and the guard would allow everything.
+  const T = hookProduct();
   try {
     const runner = fakeGit(['EP-seeded'], { refs: ['origin/main'] });
     decide(T, 'epics/EP-seeded/.sdlc/state.json', { runner });
@@ -8990,7 +9134,7 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
     assert.ok(!runner.calls.some((c) => c.includes('cat-file')), 'no repo-root-relative rev:path probe');
     assert.ok(!runner.calls.some((c) => / main\^\{commit\}/.test(c)), 'the local branch is never a candidate');
     // The config's default_branch is used as origin/<it>, not as a local ref.
-    const other = hookHub({ hub: { platform: 'gitlab', bridge_enabled: true, default_branch: 'trunk' } });
+    const other = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: true, default_branch: 'trunk' } });
     const r2 = fakeGit(['EP-seeded'], { refs: ['origin/trunk'] });
     assert.equal(decide(other, 'epics/EP-seeded/.sdlc/state.json', { runner: r2 }).allow, false);
     assert.ok(r2.calls.some((c) => c.includes('ls-tree -r --name-only -z origin/trunk')));
@@ -8999,7 +9143,7 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
 });
 
 test('ledger hook falls back through the gate\'s own base order', () => {
-  const T = hookHub({ hub: { platform: 'gitlab', bridge_enabled: true } }); // no default_branch
+  const T = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: true } }); // no default_branch
   try {
     // origin/HEAD when there is no configured default...
     const r1 = fakeGit(['EP-seeded'], { refs: ['origin/develop'] });
@@ -9014,7 +9158,7 @@ test('ledger hook falls back through the gate\'s own base order', () => {
 });
 
 test('ledger hook guards every CI-owned file, and nothing else in the epic', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     for (const rel of [
       'epics/EP-seeded/.sdlc/state.json', 'epics/EP-seeded/.sdlc/approvals.json',
@@ -9032,7 +9176,7 @@ test('ledger hook guards every CI-owned file, and nothing else in the epic', () 
 });
 
 test('ledger hook allows a NEW epic seed — creation is not mutation (#162)', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     assert.equal(decide(T, 'epics/EP-fresh/.sdlc/state.json').allow, true);
     // ...and once that ledger is on the base ref, the guard is absolute again.
@@ -9048,7 +9192,7 @@ test('ledger hook allows a NEW epic seed — creation is not mutation (#162)', (
 test('ledger hook case-folds the epic slug, as the CI gate does', () => {
   // On a case-insensitive filesystem `epics/ep-x/…` and `epics/EP-X/…` are the SAME file, so a
   // byte-exact compare lets a mutation be laundered as a creation — the gate folds for this reason.
-  const T = hookHub();
+  const T = hookProduct();
   try {
     const runner = fakeGit(['EP-Seeded']);
     assert.equal(decide(T, 'epics/ep-seeded/.sdlc/state.json', { runner }).allow, false);
@@ -9058,7 +9202,7 @@ test('ledger hook case-folds the epic slug, as the CI gate does', () => {
 });
 
 test('ledger hook allows when the base cannot be read — unknown never blocks', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     // No origin ref resolves at all...
     assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json', { runner: fakeGit(['EP-seeded'], { refs: [] }) }).allow, true);
@@ -9075,20 +9219,20 @@ test('ledger hook is a no-op with a local ledger — there the hand-edit is corr
     { platform: 'gitlab' },
     null,
   ]) {
-    const T = hookHub({ hub });
+    const T = hookProduct({ hub });
     try {
       assert.equal(decide(T, 'epics/EP-seeded/.sdlc/state.json').allow, true, JSON.stringify(hub));
     } finally { fs.rmSync(T, { recursive: true, force: true }); }
   }
   // ...and the legacy `bridge` spelling still arms it, exactly as isVerifiedLedger reads it.
-  const legacy = hookHub({ hub: { platform: 'github', bridge: true } });
+  const legacy = hookProduct({ hub: { platform: 'github', bridge: true } });
   try {
     assert.equal(decide(legacy, 'epics/EP-seeded/.sdlc/state.json').allow, false);
   } finally { fs.rmSync(legacy, { recursive: true, force: true }); }
 });
 
-test('ledger hook resolves the hub from the edited PATH, not the session root', () => {
-  // The documented layout puts code repos BESIDE the hub, so a session opened at the workspace has
+test('ledger hook resolves the Product from the edited PATH, not the session root', () => {
+  // The documented layout puts code repos BESIDE the Product, so a session opened at the workspace has
   // no hub.json under its root. A session-rooted lookup would find nothing and allow the mutation.
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-ws-'));
   const T = path.join(workspace, 'product');
@@ -9101,13 +9245,13 @@ test('ledger hook resolves the hub from the edited PATH, not the session root', 
     });
     assert.equal(v.allow, false, 'a relative path under the workspace still resolves to its hub');
     assert.equal(hubRootFor(path.join(T, 'epics/EP-seeded/.sdlc/state.json')), T);
-    // A path in no hub at all is simply not ours to judge.
+    // A path in no Product at all is simply not ours to judge.
     assert.equal(hubRootFor(path.join(workspace, 'backend/src/index.ts')), null);
   } finally { fs.rmSync(workspace, { recursive: true, force: true }); }
 });
 
 test('ledger hook fails OPEN — an unusable payload or an explicit override never blocks', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     assert.equal(ledgerGuardDecision([], { env: {}, runner: fakeGit() }).allow, true);
     const v = decide(T, 'epics/EP-seeded/.sdlc/state.json', { env: { YAD_HOOK_DISABLE: '1' } });
@@ -9262,7 +9406,7 @@ test('hookMatcherFires tells an armed entry from an installed-but-dead one', () 
 });
 
 test('hookActions wires the guard on a verified hub, and nothing with a local ledger', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.claude'] }));
@@ -9293,14 +9437,14 @@ test('hookActions wires the guard on a verified hub, and nothing with a local le
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
     assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
-  const fileOnly = hookHub({ hub: { platform: 'gitlab', bridge_enabled: false } });
+  const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
     assert.deepEqual(hookActions(fileOnly, ['.claude']), []);
   } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }
 });
 
 test('hookActions never rewrites a settings file it cannot read — not even with --overwrite-local', () => {
-  const T = hookHub();
+  const T = hookProduct();
   try {
     fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
     const theirs = '{ "permissions": { "allow": ["Bash(ls:*)"] }, }'; // one trailing comma
@@ -9324,7 +9468,7 @@ test('hookActions never rewrites a settings file it cannot read — not even wit
 
 test('doctor reports the ledger guard against what actually arms it', async () => {
   const { collectDoctor } = await import('./doctor.mjs');
-  const T = hookHub();
+  const T = hookProduct();
   const hooksCheck = () => collectDoctor(T).checks.find((c) => c.id === 'hooks');
   try {
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.claude'] }));
@@ -9356,7 +9500,7 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // with a local ledger there is nothing to guard, so the check is silent rather than ok.
-  const fileOnly = hookHub({ hub: { platform: 'gitlab', bridge_enabled: false } });
+  const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
     assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);
   } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }

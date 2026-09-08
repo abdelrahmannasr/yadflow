@@ -18,7 +18,7 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 
 ## Conventions
 
-- `{project-root}` resolves from the product hub.
+- `{project-root}` resolves from the Product.
 - Artifacts live under `{project-root}/epics/EP-<slug>/` — the change-epic gets its OWN `EP-<slug>`
   (assigned here, never renamed) and its own `stories/EP-<slug>-S0N`, so every existing gate, the verified ledger,
   `yad next`, and the Build traceability keep working unchanged.
@@ -134,7 +134,7 @@ Seed `.sdlc/approvals.json` with one **provenance** record per inherited gate (N
 `{ "artifact": "<art>", "step": "<…-review>", "status": "inherited", "from": "<epic>", "boundHash": "<hash>", "date": "<today>" }`.
 Seed `.sdlc/comments.json` = `[]` and create `reviews/`.
 
-Commit the seed on the `change/EP-<slug>` branch. It reaches the hub's default branch through this
+Commit the seed on the `change/EP-<slug>` branch. It reaches the Product's default branch through this
 change-epic's **first** review PR/MR — cut the `review/EP-<slug>/<artifact>` branch from `change/…` so
 it carries the seed. In verified mode `ledger-guard` exempts a new epic's ledger (creation, not mutation,
 #162), so no direct push to a protected default branch is needed; every later change to that ledger is

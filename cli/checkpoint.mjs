@@ -1,4 +1,4 @@
-// `yad checkpoint` — commit the machine-written Build hub state (trust-log / build-log /
+// `yad checkpoint` — commit the machine-written Build state on the Product (trust-log / build-log /
 // build-state) as one audit-trail commit. This is the Build analogue of the Shape gate sync
 // (cli/gate.mjs): the SDLC's Build part (yad-run, yad-engineer-review) WRITES these ledgers into the
 // working tree but never commits them, so teammates/CI/`yad status` on other machines see stale trust
@@ -23,10 +23,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, fail, hand, exists, readJSON, pushWithRebase } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
-import { loadHub } from './gate.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
+import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
-import { hubGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter } from './epic-state.mjs';
 
@@ -138,7 +138,7 @@ export function checkpointAuthor(login, name) {
   return n || 'unknown';
 }
 
-// PURE — the audit-trail commit message. The subject passes the hub commit-message gate (valid type
+// PURE — the audit-trail commit message. The subject passes the Product commit-message gate (valid type
 // `chore`, optional scope `hub`, non-empty description, no trailing period). No Task trailer and no
 // Co-Authored-By footer: this is human-owned machine state, not an authored code change. `label` and
 // `author` are collapsed to one line so nothing can split the subject or forge a trailer.
@@ -151,7 +151,7 @@ export function buildCheckpointMessage({ label, author, basenames = [] }) {
 // True iff a story file's STAGED diff changes ONLY the frontmatter `status:` line — every added or
 // removed content line is a `status:` line. A newly-added file (all lines added) or any prose/other
 // edit fails, so only a clean flip is carried into the `[skip ci]` chore commit; anything broader is
-// left for a reviewed change (#112 review-bypass guard). `git` is a hubGit-style accessor.
+// left for a reviewed change (#112 review-bypass guard). `git` is a productGit-style accessor.
 export function stagedStoryIsStatusOnly(git, file) {
   const d = git('diff', '--cached', '-U0', '--', file);
   if (!d.ok) return false;
@@ -176,7 +176,7 @@ export function stagedStoryIsStatusOnly(git, file) {
 // `--repo`; the second run finds the flip already committed, so it lands only the new ship shard.
 //
 // The repo names a retro ship MAY carry — the story's own `repos:` frontmatter (its statement of where
-// it was implemented), else the hub's connected-repo registry as the project-wide fallback. Used to
+// it was implemented), else the Product's connected-repo registry as the project-wide fallback. Used to
 // reject a typo'd/mis-cased/invented `--repo` (#166 review): once the duplicate guard is per repo, a
 // wrong name no longer collides with anything, so nothing else would stop it from committing a
 // `retroactive: true` ship for a repo that never existed. Returns `{ names: [], source: 'none' }` when
@@ -215,13 +215,13 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   // repo (`source: 'none'`), so a legacy story with no metadata is never blocked.
   const { names, source } = retroShipRepos(root, storyFile);
   if (names.length && !names.includes(repo)) {
-    fail(`${repo} is not a repo ${source === 'story' ? `${story} declares` : 'connected to this hub'} — a retroactive ship must name a real repo, never invent one`);
+    fail(`${repo} is not a repo ${source === 'story' ? `${story} declares` : 'connected to this Product'} — a retroactive ship must name a real repo, never invent one`);
     hand(`known: ${names.join(', ')} (names are case-sensitive)`);
     return { ok: false };
   }
   // Which of the story's OWN declared repos still lack evidence — read BEFORE the write so both the
   // refusal and the success path can report honestly how much of a multi-repo backfill is left. Only
-  // the story's own list is used: the hub registry lists every connected repo, which says nothing
+  // the story's own list is used: the Product registry lists every connected repo, which says nothing
   // about where THIS story shipped.
   const remaining = () => {
     if (source !== 'story') return [];
@@ -289,14 +289,14 @@ function cleanupRetroShard(file) {
 export async function runCheckpoint(root, opts = {}) {
   log(c.bold('\nyad checkpoint'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
-  if (!exists(path.join(root, PROJECT_FILES.hubConfig))) {
-    fail('no .sdlc/hub.json — checkpoint commits the hub Build ledger; run it from the product hub');
+  if (!exists(productConfigPath(root))) {
+    fail('no .sdlc/hub.json — checkpoint commits the Product Build ledger; run it from the Product');
     process.exitCode = 1;
     return;
   }
 
-  const { hub } = loadHub(root);
-  const git = hubGit(root);
+  const { hub } = loadProduct(root);
+  const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, hub);
 

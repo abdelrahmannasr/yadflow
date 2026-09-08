@@ -91,7 +91,7 @@ Check `{project-root}/epics/` for collisions; if the slug exists, append a disti
 ### Step 3b — Open the authoring branch
 Open the epic authoring branch `epic/EP-<slug>` per the shared procedure
 (`references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
-is not a git work tree), check out the branch if it exists, else create it from the hub's default
+is not a git work tree), check out the branch if it exists, else create it from the Product's default
 branch. Author and commit `epic.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 4 — Write the epic (assist: pm)
@@ -153,7 +153,7 @@ Notes:
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
   when `stories-review` passes — at which point the epic is already `ready-for-build`, so Build
   runs alongside the tester. They never gate `ready-for-build` (see `references/state-schema.md`).
-- Commit the seed on this step's authoring branch. It reaches the hub's default branch through the
+- Commit the seed on this step's authoring branch. It reaches the Product's default branch through the
   epic's **first** review PR/MR — cut `review/EP-<slug>/epic` from the authoring branch so it carries
   the seed. In verified mode `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162);
   every later change to it is CI's. See `references/state-schema.md`, "Authoring branches".
@@ -199,8 +199,8 @@ approve, through the gate.
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via
 `yad-review-gate`. **Never mark the epic-review step approved here** — only real reviewers do that
-through the gate. Shape steps do not auto-advance. When the hub has a platform, the gate opens a review
-PR on the hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/
+through the gate. Shape steps do not auto-advance. When the Product has a platform, the gate opens a review
+PR on the Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/
 comments into the ledger; otherwise the review is recorded local.
 
 ## Reference

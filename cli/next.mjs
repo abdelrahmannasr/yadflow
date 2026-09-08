@@ -13,19 +13,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
-import { PROJECT_FILES, VERSION } from './manifest.mjs';
+import { PROJECT_FILES, VERSION , productConfigPath } from './manifest.mjs';
 import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, kindNoun, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
 function isSolo(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+  const hub = readJSON(productConfigPath(root), null);
   return !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 }
 // The setup profile recorded by `yad setup` (codebase / repo_layout / team_size), or null.
-const profileOf = (root) => readJSON(path.join(root, PROJECT_FILES.hubConfig), null)?.profile || null;
-// Has `yad setup` run here? True once the version stamp or hub config exists.
-const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(path.join(root, PROJECT_FILES.hubConfig));
+const profileOf = (root) => readJSON(productConfigPath(root), null)?.profile || null;
+// Has `yad setup` run here? True once the version stamp or Product config exists.
+const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(productConfigPath(root));
 
 // Every epic that has a state ledger, in directory order.
 function listEpics(root) {

@@ -1,6 +1,6 @@
 # Repos registry — schema + freshness rule
 
-The registry is the product hub's record of which code repos are connected and where their cached
+The registry is the Product's record of which code repos are connected and where their cached
 code-context lives. It is **project-wide** (shared across every epic), so it lives at the product root,
 not under any `epics/EP-<slug>/.sdlc/`.
 
@@ -52,14 +52,14 @@ not under any `epics/EP-<slug>/.sdlc/`.
 
 Commit the **registry** (`repos.json`) and each repo's **`code-map.md`** — they are small, reviewable,
 and are what the Shape phases actually read (a diff on a code-map shows when a repo's surface moved).
-`yad repo refresh --push` commits and pushes exactly these (never `pack.md`) to the hub's default
+`yad repo refresh --push` commits and pushes exactly these (never `pack.md`) to the Product's default
 branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
-**Ignore** the full Repomix `pack.md` — it is large and regenerable (`action: refresh`). The product
-hub's `.gitignore` carries `.sdlc/code-context/*/pack.md` for this. This mirrors how the per-epic
+**Ignore** the full Repomix `pack.md` — it is large and regenerable (`action: refresh`). The Product
+'s `.gitignore` carries `.sdlc/code-context/*/pack.md` for this. This mirrors how the per-epic
 `.sdlc/` state (state.json, approvals.json, build-log.json) is committed.
 
 ## Greenfield
 
-A brand-new product hub has no `repos.json` (or an empty `{ "repos": [] }`). That is valid — the Shape
+A brand-new Product has no `repos.json` (or an empty `{ "repos": [] }`). That is valid — the Shape
 phases treat "no repos connected" as "nothing to consider yet" and proceed unchanged. The registry
 appears the first time `connect` runs.

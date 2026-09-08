@@ -59,7 +59,7 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-hub's default branch. Author and commit `ui-design.md` / `DESIGN.md` on it. This is **distinct** from
+Product's default branch. Author and commit `ui-design.md` / `DESIGN.md` on it. This is **distinct** from
 the verified ledger's `review/…` branch.
 
 ### Step 2 — Read inputs
@@ -192,8 +192,8 @@ branch `yad gate open` makes the same edit, so it is a no-op once the gate has r
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, the connected design
 tool and what it produced (e.g. "Figma — 4 screens generated", the file URL + `design-links.json` path,
 or "no design tool — markdown-only"), and that the next action is **review** via `yad-review-gate` (base
-rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate opens a review PR on the
-hub (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
+rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review PR on the
+Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
 the ledger; otherwise the review is recorded local.
 
 ## Reference

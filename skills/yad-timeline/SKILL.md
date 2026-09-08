@@ -14,7 +14,7 @@ It is an **output enrichment**, exactly like `yad-docs` — **never a gate**: it
 
 ## Conventions
 
-- `{project-root}` resolves from the product hub.
+- `{project-root}` resolves from the Product.
 - Reuses the **`yad-docs` shell** verbatim (`../yad-docs/templates/app/`) — generated `src/data/*.ts`,
   themed, deployed via `yad docs deploy`; build-only / markdown-only when no docs target
   (`.sdlc/docs.json`). The resolver part drives the **`yad thread` CLI** (`cli/thread.mjs`).

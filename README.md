@@ -33,7 +33,7 @@ can read, diff, and edit — no database, nothing hidden. The result is a paper 
 and a hard wall between "AI proposed" and "we shipped it."
 
 It installs as a custom [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) module and works across
-one product hub + many code repos, solo or team.
+one Product + many code repos, solo or team.
 
 ## How the workflow looks
 
@@ -46,7 +46,7 @@ pass) · 🟦 **earns automation** (a Build step that can later auto-advance onc
 
 ## Quickstart
 
-From your **product hub** repo (an empty git repo is fine):
+From your **Product** repo (an empty git repo is fine):
 
 ```bash
 npx yadflow setup        # 1. guided wizard: install skills, connect repos, wire CI gates
@@ -82,14 +82,14 @@ In one pass it produces:
   `thread`, `reconcile`, `usage`, `doctor`), run via `npx` or a global install.
 - **38 workflow skills** installed into your AI assistant — **Claude Code** (`.claude/`) first-class,
   plus `.agents`, Zencoder, and OpenCode.
-- **`.sdlc/` config** — the product hub, connected repos, reviewer roster, and tool connections
+- **`.sdlc/` config** — the Product, connected repos, reviewer roster, and tool connections
   (design, testing, learning), all as plain JSON you can read and diff.
-- **CI gates**, wired into every connected repo and the hub as **GitHub Actions or GitLab CI** —
+- **CI gates**, wired into every connected repo and the Product as **GitHub Actions or GitLab CI** —
   spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, and the
   push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
   `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
   under `checks/`.
-- **An agent guardrail** on a verified hub — `hooks/ledger-guard.sh`, a harness hook that refuses an
+- **An agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that refuses an
   agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
   transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
   (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority.
@@ -116,7 +116,7 @@ Every step is the same contract: *AI proposes → a human decides → the trail 
 
 ## How it works (in five points)
 
-- **Shape = decide.** Once per epic, in the product hub: epic, architecture + a locked contract,
+- **Shape = decide.** Once per epic, in the Product: epic, architecture + a locked contract,
   UI, stories, test cases. Always human-gated — nothing auto-advances.
 - **Build = make it real.** Once per story per code repo: spec → implement → checks → ship.
 - **Every step stops at a gate.** A human moves it forward (local, or by merging a review PR/MR).

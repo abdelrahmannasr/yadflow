@@ -1,7 +1,8 @@
 // The single source of truth for what a set-up SDLC project should contain.
 // Drives setup (install from), update (re-sync), and check (diff against).
 // Keep the skill list here in sync with skills/sdlc/install.sh.
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 // Read the version from package.json (the one source of truth) so it always
 // tracks the semantic-release-managed version — never a hardcoded constant
@@ -104,7 +105,7 @@ export const LEGACY_REPO_FILES = {
   github: { '.github/workflows/sdlc-checks.yml': '.github/workflows/yad-checks.yml' },
   gitlab: { '.gitlab/ci/sdlc-checks.yml': '.gitlab/ci/yad-checks.yml' },
 };
-export const LEGACY_HUB_FILES = {
+export const LEGACY_PRODUCT_FILES = {
   github: {
     '.github/workflows/sdlc-gate-sync.yml': '.github/workflows/yad-gate-sync.yml',
     '.github/workflows/sdlc-verified-commits.yml': '.github/workflows/yad-verified-commits.yml',
@@ -127,7 +128,7 @@ export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
 // Supported design-tool adapters (mirrors skills/sdlc/config.yaml `design.tools`); `DESIGN_PRIMARY` is
 // the fallback `registerDesign`/setup use when an unknown tool is named, and `none` is the explicit
 // markdown-only choice. (doctor does NOT fall back — an unknown tool there is a hard YAD-CFG-002 fail,
-// mirroring how registerRepo falls back on platform while doctor fails on an unknown hub platform.)
+// mirroring how registerRepo falls back on platform while doctor fails on an unknown Product platform.)
 export const DESIGN_TOOLS = ['figma', 'pencil'];
 export const DESIGN_PRIMARY = 'figma';
 
@@ -166,11 +167,15 @@ export const LEARNING_PRIMARY = 'deeptutor';
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
-export const SCHEMA_VERSION = 2;
+
+export const SCHEMA_VERSION = 3;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
   reposRegistry: '.sdlc/repos.json',
+  // The product's own settings. `product.json` is the name from shape 3 onward; `hub.json` is what
+  // it was called before, and it is NOT dead — see MIRRORED_FILES below.
+  productConfig: '.sdlc/product.json',
   hubConfig: '.sdlc/hub.json',
   designConfig: '.sdlc/design.json',
   testingConfig: '.sdlc/testing.json',
@@ -178,6 +183,63 @@ export const PROJECT_FILES = {
   docsConfig: '.sdlc/docs.json',
   version: '.sdlc/cli-version.json',
 };
+
+// ---- files that changed NAME in shape 3 --------------------------------------------------------
+//
+// `hub` became `Product`, so `.sdlc/hub.json` became `.sdlc/product.json`. A field rename is easy;
+// a FILE rename is not, because a file is opened by name from outside this codebase:
+//
+//   - `templates/checks/ledger-guard.sh` is committed inside the USER's repo and opens
+//     `.sdlc/hub.json` by that literal path. It is refreshed by `yad update`, which is a separate act
+//     from `yad migrate` with no ordering between them.
+//   - So a project WILL exist that has been migrated but not updated. Its guard would open a path
+//     that no longer exists, read no platform, conclude the ledger is local, and stop rejecting human
+//     commits to it — the audit trail disarmed by an upgrade.
+//
+// Hence: for one whole major version BOTH files exist, and the OLD name is the one that is READ.
+// `product.json` is written on every save so that it is there, correct, and ready — but nothing
+// depends on it yet. `productConfigPath` picks the old name whenever it exists and falls back to the
+// new one, so a project holding either name alone still works.
+//
+// Reading the new name first is the tempting version and it is wrong: the moment two names exist and
+// the new one wins, everything that writes the old one — the guard above, a script someone wrote,
+// a person editing the file they know — is silently ignored.
+//
+// The ladder is add, then switch, then remove:
+//   this major   the new name appears and is maintained; the old one is still read
+//   next major   the new name becomes the one read, and `yad doctor` warns about the old
+//   after that   the old name is deleted
+//
+// This costs a duplicated file on disk for two releases. That is the price of not silently disarming
+// a safety gate in somebody else's repository, and it is worth paying.
+export const MIRRORED_FILES = [
+  { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.hubConfig },
+];
+
+// Which of the two names to READ.
+//
+// The OLD name wins while it exists, and that is deliberate. Renaming a file across an ecosystem
+// takes three releases, not one:
+//
+//   this major   the new name appears and is written on every save. The OLD name is still the one
+//                that counts, so everything that already reads it keeps working — the ledger-guard
+//                committed in the user's repo, a script somebody wrote, a person editing the file
+//                they know. Nothing can be silently ignored, because the file everyone knows is
+//                still authoritative.
+//   next major   the new name becomes authoritative and `yad doctor` warns about the old one.
+//   the one after that   the old name is deleted.
+//
+// Reading the NEW name first this early looks tidier and is a trap: the moment two names exist and
+// the new one wins, anyone who edits the old one — including our own fixtures, which is how this was
+// found — has their change silently ignored. `yad doctor` reports the two copies drifting apart, so
+// a project that gets into that state is told, rather than left to wonder.
+export const productConfigPath = (root) => {
+  const legacy = path.join(root, PROJECT_FILES.hubConfig);
+  return existsSync(legacy) ? legacy : path.join(root, PROJECT_FILES.productConfig);
+};
+
+// Same rule for a renamed file inside an epic's ledger.
+export const preferring = (canonical, legacy) => (existsSync(legacy) ? legacy : canonical);
 
 // Who writes the ledger. Two values, and the switch lives in `.sdlc/hub.json`:
 //
@@ -192,7 +254,7 @@ export const PROJECT_FILES = {
 //   1. `ledger`, if the file carries it — shape 2 and later.
 //   2. otherwise the old booleans `bridge_enabled` (canonical) or `bridge` (older still).
 // A platform is required either way. Without one there is no Verified badge to read, so CI cannot
-// be the sole writer and the local path has to stay open — otherwise a hub has no permitted writer
+// be the sole writer and the local path has to stay open — otherwise a Product has no permitted writer
 // at all and no gate can ever advance (issue #186).
 //
 // ONE definition, imported by every JS caller. `templates/checks/ledger-guard.sh` re-implements the
@@ -233,6 +295,11 @@ export const epicFiles = (epicRoot) => ({
   state: `${epicRoot}/.sdlc/state.json`,
   approvals: `${epicRoot}/.sdlc/approvals.json`,
   comments: `${epicRoot}/.sdlc/comments.json`,
+  // The record of review PR/MRs opened on the product. `product-prs.json` is the name from shape 3
+  // onward; `hub-prs.json` is what it was called before and is written alongside it for one major —
+  // both `templates/checks/ledger-guard.sh` and `cli/hook.mjs` name it literally, and the guard in a
+  // user's repo only learns the new name when they run `yad update`. See MIRRORED_FILES.
+  productPrs: `${epicRoot}/.sdlc/product-prs.json`,
   hubPrs: `${epicRoot}/.sdlc/hub-prs.json`,
   contractLock: `${epicRoot}/.sdlc/contract-lock.json`,
   // The two append-only Build ledgers use shard-then-fold storage (cli/ledger.mjs): writers add
@@ -295,16 +362,16 @@ export const wiringFor = (platform) => [
   ...(REPO_WIRING[platform] || []),
 ];
 
-// Hub wiring: CI installed on the PRODUCT HUB itself (dest is the project root — the hub IS the
+// Product wiring: CI installed on the PRODUCT itself (dest is the project root — the Product IS the
 // root). Installed only when hub.json has a platform and the ledger is verified. Carries the
 // event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
-// verified-commits gate (no unverified commits from unverified users reach merge on the hub).
-export const HUB_WIRING = {
+// verified-commits gate (no unverified commits from unverified users reach merge on the Product).
+export const PRODUCT_WIRING = {
   common: [
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
-    // The ledger is CI-owned: block non-bot commits to gate-state files on hub review PRs.
+    // The ledger is CI-owned: block non-bot commits to gate-state files on the Product review PRs.
     { src: 'skills/yad-checks/templates/checks/ledger-guard.sh', dest: 'checks/ledger-guard.sh', exec: true },
-    // Pattern gates run on the hub too (profile: hub) — commit subject + PR title + PR body.
+    // Pattern gates run on the Product too (profile: hub) — commit subject + PR title + PR body.
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },
@@ -313,7 +380,7 @@ export const HUB_WIRING = {
     { src: 'skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', dest: '.github/workflows/yad-gate-sync.yml' },
     { src: 'skills/yad-checks/templates/github/yad-verified-commits.yml', dest: '.github/workflows/yad-verified-commits.yml' },
     { src: 'skills/yad-checks/templates/github/yad-hub-checks.yml', dest: '.github/workflows/yad-hub-checks.yml' },
-    // Integrity gate for the hub's own direct-to-default pushes (`yad update --push`; the machine-
+    // Integrity gate for the Product's own direct-to-default pushes (`yad update --push`; the machine-
     // state `yad checkpoint`/`gate ci` commits carry [skip ci] and are intentionally not re-checked).
     { src: 'skills/yad-checks/templates/github/yad-update-guard.yml', dest: '.github/workflows/yad-update-guard.yml' },
   ],
@@ -325,8 +392,8 @@ export const HUB_WIRING = {
   ],
 };
 
-// Harness hooks: the LOCAL half of the ledger rule, installed on the hub beside the CI gates and
-// active under the same verified-ledger predicate (#171). Kept out of `HUB_WIRING` because a hook is not a
+// Harness hooks: the LOCAL half of the ledger rule, installed on the Product beside the CI gates and
+// active under the same verified-ledger predicate (#171). Kept out of `PRODUCT_WIRING` because a hook is not a
 // CI gate — it is advisory, fails open, and its adapter (below) is per-harness, not per-platform.
 export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },

@@ -6,15 +6,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run, pushWithRebase,
+  writeMirrored,
 } from './lib.mjs';
-import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
+import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
   canonicalApprovals, canonicalComments, canonicalHubPrs,
 } from './epic-state.mjs';
-import { hubGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
@@ -83,10 +84,10 @@ function warnIncompleteDiscovery(epicDir, artifact) {
   warn(`discovery set incomplete — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
 }
 
-// Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
+// Fail fast on a corrupt or wrong-shape Product config: a silently-defaulted hub.json would degrade
 // every gate to local without anyone noticing, and a typo'd platform would read as a local ledger.
-export function loadHub(root) {
-  const hubFile = path.join(root, PROJECT_FILES.hubConfig);
+export function loadProduct(root) {
+  const hubFile = productConfigPath(root);
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   // Distinguish an ABSENT hub.json (null default → fine, local gate) from one that exists but
   // holds literal `null` (malformed — must not silently downgrade to local).
@@ -296,8 +297,8 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
 }
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
-  const { hub, repos } = loadHub(root);
-  if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
+  const { hub, repos } = loadProduct(root);
+  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
   const roster = hub.roster || [];
   const defaultReviewers = 1;
@@ -454,13 +455,13 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   hubPrs = canonicalHubPrs(hubPrs);
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
-  writeJSON(ledger.files.hubPrs, hubPrs);
+  writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
   writeJSON(ledger.files.state, state);
   refreshRoster(epicDir, open, approvals, today); // the dated side file lists them in the same order
   return { synced, advanced };
 }
 
-// `yad gate ci` — the self-sufficient entry point hub CI calls on platform events. Path B: CI
+// `yad gate ci` — the self-sufficient entry point Product CI calls on platform events. Path B: CI
 // never writes the ledger to the review branch — during review the platform PR/MR is the source of
 // truth, and the ledger is reconciled onto the default branch at merge.
 //
@@ -478,8 +479,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 // commit gate-state files (enforced by the ledger-guard check). Sweep mode (no --branch) advances
 // merged-but-stuck reviews found in the locally checked-out default-branch ledgers.
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
-  const { hub } = loadHub(root);
-  if (!hub?.platform) { warn('no hub platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
+  const { hub } = loadProduct(root);
+  if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
   const git = (...args) => run('git', args, { cwd: root });
   const defaultBranch = hub.default_branch || (() => { const h = git('rev-parse', '--abbrev-ref', 'HEAD').stdout; return h && h !== 'HEAD' ? h : 'main'; })();
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
@@ -564,7 +565,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
         step: step.id, artifact: job.artifact, platform: hub.platform, number,
         url: existing?.url ?? null, branch: job.branch, lastSyncedAt: existing?.lastSyncedAt ?? null,
       });
-      writeJSON(ledger.files.hubPrs, ledger.hubPrs);
+      writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
     }
 
     // No overlay: at merge the artifact is on the default branch CI checked out, so artifactHash
@@ -616,10 +617,16 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // and reviews/*.md may be modified and are deliberately left alone: reverting a sync that genuinely
     // ran would discard platform state the run just recorded. A bare `yad gate ci` that advances
     // nothing therefore leaves those files dirty for the operator to inspect and commit (or discard).
+    // BOTH names of the PR ledger. It is written under its new name and its old one (see
+    // MIRRORED_FILES, cli/manifest.mjs), so restoring only one leaves the other behind as an
+    // untracked file — a read-only run that dirties the checkout, which is exactly what this block
+    // exists to prevent.
     for (const e of touched) {
-      const hp = path.join('epics', e, '.sdlc', 'hub-prs.json');
-      git('checkout', '-q', '--', hp); // restore it if it was tracked
-      git('clean', '-fq', '--', hp);   // remove it if the event first-seeded it (untracked)
+      for (const name of ['product-prs.json', 'hub-prs.json']) {
+        const hp = path.join('epics', e, '.sdlc', name);
+        git('checkout', '-q', '--', hp); // restore it if it was tracked
+        git('clean', '-fq', '--', hp);   // remove it if the event first-seeded it (untracked)
+      }
     }
     info('pre-merge: gate evaluated; the ledger reconciles on the default branch at merge — nothing pushed');
     return { synced };
@@ -661,8 +668,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
 }
 
 export async function gateComments(root, { epic, artifact, today, reader = readPr } = {}) {
-  const { hub } = loadHub(root);
-  if (!hub?.platform) { warn('no hub platform configured — nothing to fetch'); return; }
+  const { hub } = loadProduct(root);
+  if (!hub?.platform) { warn('no Product platform configured — nothing to fetch'); return; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   const targets = (ledger.hubPrs || []).filter((p) => !artifact || p.artifact === artifact);
@@ -688,7 +695,7 @@ export async function gateStatus(root, { epic } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
-  const solo = isSolo(loadHub(root).hub);
+  const solo = isSolo(loadProduct(root).hub);
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const cur = artifactHash(epicDir, s.artifact);
@@ -700,7 +707,7 @@ export async function gateStatus(root, { epic } = {}) {
 }
 
 // PURE — the audit-trail commit message for a state repair (mirrors buildCheckpointMessage). The
-// subject passes the hub commit-message gate (valid type `chore`, scope `gate`, no trailing period)
+// subject passes the Product commit-message gate (valid type `chore`, scope `gate`, no trailing period)
 // and carries [skip ci]: the repair lands on the default branch, where a re-triggered gate workflow
 // would have nothing to do. No Task trailer and no Co-Authored-By footer — this is machine state a
 // human corrected, not an authored code change.
@@ -736,9 +743,9 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 
   // --- publish: narrow, default-branch-only commit of the one repaired file ---
   preflightGuardReadiness(root);
-  const git = hubGit(root);
+  const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
-  const defaultBranch = resolveDefaultBranch(git, loadHub(root).hub);
+  const defaultBranch = resolveDefaultBranch(git, loadProduct(root).hub);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch, cmd: 'yad gate repair' })) return { closed };
 
   const spec = path.relative(root, ledger.files.state);
@@ -768,7 +775,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
 export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists } = {}) {
-  const { hub, repos } = loadHub(root);
+  const { hub, repos } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
@@ -810,7 +817,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     writeJSON(ledger.files.state, ledger.state);
   }
   if (!hub?.platform) {
-    warn('no hub platform — marked in_review locally (no PR opened)');
+    warn('no Product platform — marked in_review locally (no PR opened)');
     ok(`${step.id} → in_review`);
     return;
   }
@@ -819,9 +826,9 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // merge — `yad gate open` never commits gate-state files (the ledger-guard check enforces that), and
   // CI writes nothing pre-merge. With a local ledger the local command records the PR itself (no CI will).
   const body = fillHubTemplate({ epic, artifact, step, owner: ownerOf(epicDir), domains });
-  // Assignee = whoever opens the review PR (the committer); reviewers = the hub's reviewers +
+  // Assignee = whoever opens the review PR (the committer); reviewers = the Product's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
-  // to review their own artifact). Scope is the hub plus every touched domain.
+  // to review their own artifact). Scope is the Product plus every touched domain.
   const committer = resolveCommitterLogin(root, hub.roster || []);
   const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer, repos });
   const assignees = committer ? [committer] : [];
@@ -836,7 +843,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 
   if (!verified) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
-    writeJSON(ledger.files.hubPrs, ledger.hubPrs);
+    writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
   }
   ok(`opened ${r.url}`);
   hand(verified
@@ -853,7 +860,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 // pair walkthrough adds an ordered stop-list on top of the exact same grounding the companion uses.
 // Returns { error } when there is no epic state, else { bundle, epicDir, hub }.
 function reviewBundle(root, { epic, artifact } = {}) {
-  const { hub, repos } = loadHub(root);
+  const { hub, repos } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) return { error: `no epic state at ${epicDir}` };
@@ -918,8 +925,8 @@ export async function gateWalkthrough(root, { epic, artifact, runner = run } = {
 // briefing text and passes it here; this upserts it idempotently into the review PR/MR description as a
 // delimited block, so regenerating on every artifact change never duplicates it. A platform write only.
 export async function gateTrailer(root, { epic, artifact, body, number, getBody = getPrBody, editBody = editPrBody } = {}) {
-  const { hub } = loadHub(root);
-  if (!hub?.platform) { warn('no hub platform configured — the trailer posts to the PR/MR (local has none)'); return; }
+  const { hub } = loadProduct(root);
+  if (!hub?.platform) { warn('no Product platform configured — the trailer posts to the PR/MR (local has none)'); return; }
   if (!body || !String(body).trim()) { fail('trailer body is required: `yad gate trailer <epic> <artifact> --body <text>` (the companion generates it)'); process.exitCode = 1; return; }
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -953,7 +960,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains }) {
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
     '- This step advances when approvals are satisfied, all threads are resolved, and this PR is merged.',
     '',
-    // Required by the hub `pr-template` gate (check_hub_body). Mirrors the Checklist block of the
+    // Required by the Product `pr-template` gate (check_hub_body). Mirrors the Checklist block of the
     // committed static template (yad-pr-template/templates/hub/<platform>/) so the generated body
     // passes on the first CI run.
     '## Checklist',

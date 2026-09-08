@@ -70,7 +70,7 @@ the rule above, and tell reviewers how to comment/approve. Set the step `status`
 
 If `.sdlc/hub.json` has a non-null `platform` and `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true` / legacy `bridge: true` —
 `.sdlc/hub.json` is the only source the CLI reads, see `isVerifiedLedger` in `cli/manifest.mjs`), and `gh`/`glab`
-is authenticated, **also open a review PR/MR on the hub** by invoking `yad-hub-bridge action: open`
+is authenticated, **also open a review PR/MR on the Product** by invoking `yad-hub-bridge action: open`
 (epic + artifact), and report the URL + required reviewers. **CI records the PR** in
 `epics/<epic>/.sdlc/hub-prs.json` (`{step, artifact, platform, number, url, branch, lastSyncedAt}`) —
 write that file yourself only on the local path. Otherwise (no platform / disabled / no CLI)
@@ -133,7 +133,7 @@ Gate status: **<PASSED | BLOCKED>** — <reason>.
 Then **re-evaluate the rule** (Step 3). Recording an approval does NOT itself advance — advancement is
 a separate, explicit check.
 
-**`sync`** — (the platform bridge input path) Pull the hub review PR/MR's review state into the ledger,
+**`sync`** — (the platform bridge input path) Pull the Product review PR/MR's review state into the ledger,
 then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/hub-prs.json` and use
 `yad-hub-bridge`'s read recipes (`../yad-hub-bridge/references/bridge.md`) to fetch reviews + comments
 via the local user's `gh`/`glab`. For each:
@@ -148,7 +148,7 @@ via the local user's `gh`/`glab`. For each:
 passed), and key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
 before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
-roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. Under the PR-driven CLI (`yad
+roster, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never hand-write either PR-ledger file.** It lives under two names while the rename settles — `product-prs.json` and `hub-prs.json` — and the engine writes both together. Writing one leaves the pair disagreeing, and `yad doctor` will report it. Use `yad gate` / `yad review`, which keep them in step.  Under the PR-driven CLI (`yad
 gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
 (the merge is the human act); otherwise it records state and holds the step `in_review`.
 
@@ -182,7 +182,7 @@ If the predicate **passes**:
   now `ready-for-build`, with `test-cases` running in parallel).
 
 ### PR-driven automation (the `yad gate` CLI)
-When the hub has a platform, **CI is the sole writer of the ledger**. `yad gate open` opens the review
+When the Product has a platform, **CI is the sole writer of the ledger**. `yad gate open` opens the review
 PR only — against the `review/<epic>/<artifact>` branch, which must already exist (create it and run
 `yad open-pr` from it, which pushes it first). CI (`yad gate ci`) writes the `.sdlc/` + `reviews/`
 records this skill describes. The skill's
@@ -223,7 +223,7 @@ write path.
 - The gate talks only through `.sdlc/` and `reviews/` files — never hidden state.
 - **The platform is an input path only.** `open`/`sync` use the local user's own `gh`/`glab` (no stored
   tokens), and the **file ledger remains the source of truth** — the Step 3 predicate is unchanged
-  whether approvals arrive manually or via `sync`. With no hub platform / no CLI, the gate runs local
+  whether approvals arrive manually or via `sync`. With no Product platform / no CLI, the gate runs local
   with no error (record approvals manually and `advance`).
 
 ## Reference

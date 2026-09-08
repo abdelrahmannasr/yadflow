@@ -1,5 +1,5 @@
 <!-- SDLC HUB MR template — Shape artifact review (epic / architecture+contract / ui-design / stories). -->
-<!-- This MR is a REVIEW VEHICLE on the product hub, not a code merge. The file gate (yad-review-gate)
+<!-- This MR is a REVIEW VEHICLE on the Product, not a code merge. The file gate (yad-review-gate)
      advances the step; do NOT rely on merging this MR to advance. Reviewers approve/comment here, then a
      `yad-review-gate action: sync` pulls that into the file ledger. -->
 <!-- GITLAB 2700-CHARACTER LIMIT: the yad-pr-template gate reads $CI_MERGE_REQUEST_DESCRIPTION, which

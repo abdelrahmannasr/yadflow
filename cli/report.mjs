@@ -7,12 +7,11 @@
 // no absolute paths, hostnames, git URLs, repo names, roster logins/emails, epic/story IDs, branch
 // names, or flag values ever leave the machine. The user sees the exact payload and confirms before
 // anything is posted. See memory: no-private-data-in-reports.
-import path from 'node:path';
 import { c, log, info, ok, warn, note, ask, askYesNo, has, readJSON, run } from './lib.mjs';
-import { VERSION, UPSTREAM_REPO, PROJECT_FILES } from './manifest.mjs';
+import { VERSION, UPSTREAM_REPO , productConfigPath } from './manifest.mjs';
 import { createIssue, searchIssues, issueUrl, platformAuthed } from './platform.mjs';
 
-// The upstream lives on GitHub — file there regardless of the user's own hub platform.
+// The upstream lives on GitHub — file there regardless of the user's own Product platform.
 const UPSTREAM_PLATFORM = 'github';
 const PLACEHOLDER = '‹redacted›';
 
@@ -72,7 +71,7 @@ export function sanitizeArgv(argv = []) {
 // Build the safe, postable context — the ONLY data that can reach the issue. Reads doctor for tool
 // state but keeps just the booleans, never the raw checks (which carry names + paths).
 export function sanitizeContext(dir, { error = null, argv = process.argv.slice(2) } = {}) {
-  const hub = readJSON(path.join(dir, PROJECT_FILES.hubConfig), null);
+  const hub = readJSON(productConfigPath(dir), null);
   const platform = hub && ['github', 'gitlab'].includes(hub.platform) ? hub.platform : 'local';
   // Derive tool auth from doctor's checks without keeping any check text.
   const toolState = (cli, p) => (has(cli) ? (platformAuthed(p) ? 'present + authenticated' : 'present, not authenticated') : 'not installed');
@@ -82,7 +81,7 @@ export function sanitizeContext(dir, { error = null, argv = process.argv.slice(2
     os: process.platform,
     git: has('git') ? 'present' : 'not found',
     gh: toolState('gh', 'github'),
-    // The hub CLI's auth is a useful diagnostic for a GitLab user (issues still file to GitHub upstream).
+    // The Product CLI's auth is a useful diagnostic for a GitLab user (issues still file to GitHub upstream).
     ...(platform === 'gitlab' ? { glab: toolState('glab', 'gitlab') } : {}),
     platform,
     command: sanitizeArgv(argv) || '(none)',

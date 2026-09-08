@@ -10,7 +10,7 @@ const METRICS = [
 const KEY_POINTS = [
   'Every step does its work, writes its output to a file, and waits at a gate — nothing hidden, no database.',
   'All state lives in files under .sdlc/ (state.json, approvals.json, contract-lock.json, trust-log.json) that you can also edit directly.',
-  'Shape is human-gated and runs once per epic in the product hub; Build runs once per story per code repo.',
+  'Shape is human-gated and runs once per epic in the Product; Build runs once per story per code repo.',
   'Two per-step dials: assistance (none | review | heavy) and automation (human_approve | machine_advance).',
   'Automation is earned with trust-log evidence and reversible in one move; Shape steps and the engineer review are permanently human.',
 ];

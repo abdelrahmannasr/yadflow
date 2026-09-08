@@ -15,7 +15,7 @@ tree (branch + fast-forward). It writes **nothing** back to the registry.
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - Registry: `{project-root}/.sdlc/repos.json` (project-wide; the same file `yad-connect-repos` writes).
   Each repo entry supplies `path` (local path, relative to `{project-root}` or absolute) and
   `default_branch` (the branch to land on).
@@ -64,7 +64,7 @@ Per repo: `switched to <branch>, pulled (ff)` / `already current` / `SKIPPED (..
 so any repo whose `HEAD` now differs from its registry `syncedHead` has a **stale code-context pack** —
 the command ends by pointing the human at `yad repo refresh` to repack (that is a separate human
 decision; this skill never repacks or writes the registry). After the repack + AI code-map
-regeneration, `yad repo refresh --push` publishes the refreshed code-maps + registry to the hub's
+regeneration, `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product's
 default branch as a `chore(hub): sync code-context … [skip ci]` audit commit.
 
 ## Hard rules

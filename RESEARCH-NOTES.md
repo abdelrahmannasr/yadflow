@@ -119,7 +119,7 @@
   detection is the AI step the skill performs.
 - **Figma-first but pluggable** (`config.yaml` `design.tools: [figma, pencil]`, `primary: figma`). It is
   a design-tool *adapter*, like the `github`/`gitlab` platform adapter. An unknown tool falls back to
-  the primary (the `registerRepo`/hub fallback pattern). `pencil` (the `.pen` web/mobile editor MCP) is
+  the primary (the `registerRepo`/Product fallback pattern). `pencil` (the `.pen` web/mobile editor MCP) is
   a real, write-capable second provider; `none` is the explicit markdown-only choice.
 - **Reached through an MCP, not a CLI** — the Impeccable shape (harness server), not the Repomix shape
   (`npx`). The skill detects the MCP and **degrades gracefully**: no tool / no MCP / `source: unavailable`
@@ -132,7 +132,7 @@
   produce.
 - **Linkage lives beside the artifacts.** `yad-ui` writes the machine-readable screen→frame map to
   `epics/EP-<slug>/.sdlc/design-links.json` and a `## Design (<tool>)` section in `ui-design.md`. The
-  design itself lives in the tool; the hub keeps the links + the Markdown spec.
+  design itself lives in the tool; the Product keeps the links + the Markdown spec.
 - **No tokens.** `yad-connect-design` connects through the user's own authenticated MCP session;
   `project_url`/`files` are plain references, never credentials — the same hard rule as
   `yad-connect-repos`. New error code `YAD-CFG-002` (unknown design tool); `yad doctor` reports the

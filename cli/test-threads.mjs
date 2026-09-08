@@ -19,7 +19,7 @@ async function grab(fn) {
   return out.join('\n');
 }
 
-// Minimal hub builder: write an epic with lineage frontmatter (+ optional stories/lock/debt).
+// Minimal Product builder: write an epic with lineage frontmatter (+ optional stories/lock/debt).
 function hub() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-thread-'));
   fs.mkdirSync(path.join(T, 'epics'), { recursive: true });

@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { err } from './errors.mjs';
-import { SCHEMA_VERSION } from './manifest.mjs';
+import { MIRRORED_FILES, SCHEMA_VERSION } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -225,3 +225,61 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
   }
   return { ok: false };
 }
+
+// ---- the product config, which lives under two names for one major -----------------------------
+//
+// Read through `productConfigPath` (manifest.mjs), which every reader in cli/ now does. Write
+// through here: BOTH names, every time.
+//
+// The duplicate is not sloppiness. `templates/checks/ledger-guard.sh` sits committed inside the
+// user's own repository and opens `.sdlc/hub.json` by that literal path; it is refreshed by
+// `yad update`, which is a separate act from `yad migrate`. So a migrated-but-not-updated project is
+// a real state, and if only the new name existed its guard would find nothing, read no platform,
+// call the ledger local, and stop rejecting human commits to it. An upgrade that silently disarms a
+// safety gate is worse than a duplicated file.
+//
+// Order matters, and it follows which file is AUTHORITATIVE — the old name, this major
+// (`productConfigPath`, cli/manifest.mjs). The new name is written first, so if the second write
+// fails the readers are all still on the untouched old copy: nothing has half-changed underneath
+// them. Writing the authoritative file first would leave every reader on new settings while the
+// mirror still says something else, which is the harder failure to notice.
+//
+// `yad doctor` reports the two copies disagreeing either way, so a half-written pair is visible
+// rather than silent.
+// Write a file that lives under two names. Returns the paths it actually wrote — empty when there
+// was nothing to do.
+//
+// The "nothing to do" case is load-bearing, not an optimisation. The ledger writers are
+// UNCONDITIONAL: `yad gate` re-serializes and writes every time, and relies on `writeJSON` doing
+// nothing when the bytes match, which is what keeps a read-only pre-merge run from touching the
+// working tree at all. A naive mirror breaks that on day one — the new name does not exist yet, so
+// every read-only run would create it and leave the tree dirty, and `gate ci` would try to push a
+// file it never meant to write. So the comparison happens FIRST, against whichever name is currently
+// readable; only a genuine change writes, and then it writes both.
+export function writeMirrored(canonicalPath, legacyPath, obj) {
+  // Compare against the AUTHORITATIVE copy — the same one readers use (`preferring`,
+  // cli/manifest.mjs), which is the legacy name while it exists. Comparing against the other file
+  // would let the two rules disagree about whether anything changed.
+  const readable = fs.existsSync(legacyPath) ? legacyPath : canonicalPath;
+  const next = `${JSON.stringify(writeShape(canonicalPath, obj), null, 2)}\n`;
+  // "Unchanged" means BOTH names are already right. A half-made pair — one side missing — is work
+  // to do even when the readable copy matches, or the pair can never be repaired: the comparison
+  // says nothing changed, nothing is written, and `yad doctor` reports the missing file for ever.
+  const bothPresent = fs.existsSync(canonicalPath) && fs.existsSync(legacyPath);
+  try {
+    if (bothPresent && fs.readFileSync(readable, 'utf8') === next) return [];
+  } catch { /* unreadable — treat as a first write and fall through */ }
+  writeJSON(canonicalPath, obj);
+  writeJSON(legacyPath, obj);
+  return [canonicalPath, legacyPath];
+}
+
+export function writeProductConfig(root, obj) {
+  const written = [];
+  for (const { canonical, legacy } of MIRRORED_FILES) {
+    const wrote = writeMirrored(path.join(root, canonical), path.join(root, legacy), obj);
+    if (wrote.length) written.push(canonical, legacy);
+  }
+  return written;
+}
+

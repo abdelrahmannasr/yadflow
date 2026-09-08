@@ -224,7 +224,7 @@ test('contract-check gate: surface change with Contract-Change: yes passes (no u
 const linkMd = (fields) =>
   ['---', ...Object.entries(fields).map(([k, v]) => `${k}: ${v}`), '---', ''].join('\n');
 
-// A product hub at <repo>/product carrying one epic's contract lock.
+// A Product at <repo>/product carrying one epic's contract lock.
 function seedProductLock(T, epic, hash, at = 'product') {
   fs.mkdirSync(path.join(T, at, 'epics', epic, '.sdlc'), { recursive: true });
   fs.writeFileSync(
@@ -282,7 +282,7 @@ test('contract-check gate: unresolvable base fails closed', () => {
 // sorted first and left every other quoted slice in the diff unpinned. Each case below is rigged so
 // the story that would be read first is the one that does NOT fail.
 
-// A story that quotes the surface: its slice + a link.md pinning `lock` against the shared product hub.
+// A story that quotes the surface: its slice + a link.md pinning `lock` against the shared Product.
 const storySlice = (story, lock) => ({
   [`specs/${story}/contracts/api.md`]: 'new endpoint\n',
   [`specs/${story}/link.md`]: linkMd({
@@ -489,13 +489,13 @@ test('contract-check gate: with no remote at all the base falls back to origin/m
 
 // ---------- phase-6 thread gates: product-repo resolution (issue #149) ----------
 // All three read the owning epic through link.md's `product-repo`. Both the ABSOLUTE and the RELATIVE
-// form must reach the hub — an unresolvable path degrades each gate to a PASS-with-note, i.e. it stops
+// form must reach the Product — an unresolvable path degrades each gate to a PASS-with-note, i.e. it stops
 // gating without saying so.
 const LINEAGE = path.join(CHECKS, 'lineage-check.sh');
 const EPIC_OPEN = path.join(CHECKS, 'epic-open.sh');
 const DEBT = path.join(CHECKS, 'reconcile-debt-check.sh');
 
-// A hub with one epic. `fm` goes into epic.md frontmatter; `stories` maps story id -> status.
+// A Product with one epic. `fm` goes into epic.md frontmatter; `stories` maps story id -> status.
 function seedHubEpic(hub, epic, { fm = {}, stories = {}, debt = null } = {}) {
   const dir = path.join(hub, 'epics', epic);
   fs.mkdirSync(dir, { recursive: true });
@@ -520,11 +520,11 @@ const linkedCommit = (T, productRepo, epic = 'EP-demo') => commit(
   },
 );
 
-// The invariant is that all four hub-reading gates resolve `product-repo` IDENTICALLY — a value one
+// The invariant is that all four Product-reading gates resolve `product-repo` IDENTICALLY — a value one
 // gate can reach must be reachable from every gate, or the unreachable ones degrade to a
 // PASS-with-note and silently stop gating (issue #149). So this is a matrix, not four bespoke cases:
 // every gate × every path form a link.md in the wild can carry, each fixture rigged so the gate FAILs
-// iff it actually read the hub.
+// iff it actually read the Product.
 //
 // `link-relative` is the canonical form yad-spec writes; `root-relative` is what contract-check
 // historically resolved, so link.md files authored against it must keep working; `unfenced` is a
@@ -567,7 +567,7 @@ const GATES = [
   },
 ];
 
-// Where the hub lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
+// Where the Product lives on disk, and what `product-repo:` has to say to reach it from specs/<story>/.
 const FORMS = [
   { name: 'absolute', hub: (T, out) => out, value: (T, out) => out },
   { name: 'link-relative', hub: (T) => path.join(T, 'product'), value: () => '../../product' },
@@ -577,7 +577,7 @@ const FORMS = [
 
 for (const g of GATES) {
   for (const form of FORMS) {
-    test(`${g.name} gate: reaches the hub with a ${form.name} product-repo (issue #149)`, () => {
+    test(`${g.name} gate: reaches the Product with a ${form.name} product-repo (issue #149)`, () => {
       const T = scaffoldRepo();
       const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
       const hub = form.hub(T, outside);
@@ -721,7 +721,7 @@ test('every base-taking gate actually CONSUMES resolve_base (no hardcoded origin
   }
 });
 
-test('epic-open gate: an ABSOLUTE product-repo reaches the hub and refuses a SEALED epic', () => {
+test('epic-open gate: an ABSOLUTE product-repo reaches the Product and refuses a SEALED epic', () => {
   const T = scaffoldRepo();
   const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
   seedHubEpic(hub, 'EP-demo', { stories: { 'EP-demo-S01': 'shipped' } });
@@ -745,7 +745,7 @@ test('epic-open gate: an open epic (an unshipped story) passes', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('reconcile-debt gate: an ABSOLUTE product-repo reaches the hub and freezes the thread', () => {
+test('reconcile-debt gate: an ABSOLUTE product-repo reaches the Product and freezes the thread', () => {
   const T = scaffoldRepo();
   const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
   // EP-demo threads off EP-root; the sibling hotfix EP-fix (same thread) carries OPEN debt.
@@ -1332,6 +1332,20 @@ test('risk-route: missing body file exits 2 (usage error)', () => {
 // ---------- commit-message.sh ----------
 const COMMIT_MSG = path.join(CHECKS, 'commit-message.sh');
 
+// `product` is the new spelling of the `hub` profile, accepted alongside it. Here the normalisation
+// only affects the PASS message, but an unknown value would abort the gate outright — so both
+// spellings have to be accepted, and this is the only place with a git repo to prove it in.
+for (const profile of ['hub', 'product']) {
+  test(`commit-message gate: --profile ${profile} is accepted`, () => {
+    const T = scaffoldRepo();
+    commit(T, 'chore(gate): sync the ledger', { 'a.js': 'x' });
+    const r = runGate(COMMIT_MSG, T, ['--profile', profile, 'main']);
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /unknown --profile/, r.out);
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('commit-message gate: conventional subject + ordered trailers passes', () => {
   const T = scaffoldRepo();
   commit(T, 'feat: add the order endpoint\n\nTask: EP-demo-S01-T01\nCo-Authored-By: Claude <noreply@anthropic.com>', { 'a.js': 'x' });
@@ -1418,8 +1432,8 @@ test('pr-title gate: hub splits by --head — review/EP-* wants the review shape
   // review/EP-* head => artifact-review title required
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'review: architecture.md (EP-demo)']).code, 0);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', 'chore: nope']).code, 1);
-  // any other head => a hub tooling PR, follows the code (Conventional-Commits) convention
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the hub gates']).code, 0);
+  // any other head => a Product tooling PR, follows the code (Conventional-Commits) convention
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'chore: rewire the Product gates']).code, 0);
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', 'review: nope (EP-x)']).code, 1);
   // no --head stays strict (artifact-review), so existing single-arg callers are unaffected
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', 'chore: nope']).code, 1);
@@ -1437,7 +1451,7 @@ test('pr-title gate: hub rejects an artifact change (epics/**) on a non-review h
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Shape artifacts/);
   // non-review head touching only tooling paths => still a tooling PR, code title passes
-  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the hub gates']).code, 0);
+  assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', tooling, 'chore: rewire the Product gates']).code, 0);
   // the legitimate path: a review/EP-* head carries the artifact change and wants the review title
   assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-demo', '--changed', artifact, 'review: epic.md (EP-demo)']).code, 0);
   fs.rmSync(T, { recursive: true, force: true });
@@ -1484,7 +1498,7 @@ test('pr-template gate: hub splits by --head — review/EP-* wants the artifact 
   // review/EP-* head => artifact-review template required
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', HUB_TPL]).code, 0);
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'review/EP-demo', CODE_TPL]).code, 1);
-  // any other head => a hub tooling PR, uses the code task template
+  // any other head => a Product tooling PR, uses the code task template
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', CODE_TPL]).code, 0);
   assert.equal(runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/wire-gates', HUB_TPL]).code, 1);
   // no --head stays strict (artifact-review template)
@@ -1611,7 +1625,7 @@ test('ledger-guard: the bash reader and isVerifiedLedger agree on every hub.json
     ['platform null + flag true', { platform: null, bridge_enabled: true }],
     ['ledger: verified', { platform: 'github', ledger: 'verified' }],
     ['ledger: local', { platform: 'github', ledger: 'local' }],
-    // The new key WINS over the old one. A hub that was migrated and then had its ledger switched
+    // The new key WINS over the old one. A Product that was migrated and then had its ledger switched
     // to local must not be dragged back to verified by the flag the migration deliberately kept.
     ['ledger: local beats a stale bridge_enabled', { platform: 'github', ledger: 'local', bridge_enabled: true }],
     ['ledger: verified but no platform', { ledger: 'verified' }],
@@ -1640,13 +1654,13 @@ test('ledger-guard: an un-migrated hub.json still arms the guard (new script, ol
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{"platform":"github","bridge_enabled":true}\n');
   const r = runGate(LEDGER_GUARD, T, ['main'], { SDLC_HUB_CONFIG: '.sdlc/hub.json' });
-  assert.doesNotMatch(r.out, /locally owned/, 'a hub that has not run yad migrate is still verified');
+  assert.doesNotMatch(r.out, /locally owned/, 'a Product that has not run yad migrate is still verified');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('ledger-guard: the PREVIOUS release of this script still arms on a migrated hub.json (old script, new file)', () => {
   // The guard exactly as v3.18.1 shipped it, frozen in cli/fixtures/ and never edited — the same
-  // reasoning as the golden project. A hub that runs `yad migrate` before its next `yad update` is
+  // reasoning as the golden project. A Product that runs `yad migrate` before its next `yad update` is
   // guarded by precisely this copy, so the migration keeping `bridge_enabled` is what holds the
   // audit trail together, and this test is what makes removing that key impossible by accident.
   //
@@ -1679,6 +1693,21 @@ test('ledger-guard: with a verified ledger ON, a non-bot commit MUTATING an exis
 // #162: no CI path can seed a new epic's ledger (gate-sync only ADVANCES an existing chain, at merge,
 // on the default branch), so the seed can only reach the trunk through the first review PR/MR — the
 // one place this gate runs. Creation is exempt; mutation stays guarded by the test above.
+// The PR ledger was renamed `hub-prs.json` -> `product-prs.json`, and both are written for one
+// major. Guarding only one name would leave the other hand-editable on a verified product — so the
+// refusal is asserted for BOTH, not just the one that happens to be authoritative today.
+for (const name of ['product-prs.json', 'hub-prs.json']) {
+  test(`ledger-guard: a non-bot commit mutating ${name} FAILS`, () => {
+    const T = scaffoldRepo();
+    seedLedgerOnBase(T, 'EP-x', { [`epics/EP-x/.sdlc/${name}`]: '[]\n' });
+    commit(T, 'chore: tamper', { [`epics/EP-x/.sdlc/${name}`]: '[{"artifact":"architecture.md"}]\n' });
+    const r = runGate(LEDGER_GUARD, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, new RegExp(name.replace('.', '\\.')));
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
+
 test('ledger-guard: a human seeding a NEW epic PASSES — creation is not mutation', () => {
   const T = scaffoldRepo();
   enableVerified(T);
@@ -1834,7 +1863,7 @@ test('ledger-guard: with a verified ledger OFF it is a no-op (humans own the led
 });
 
 // #186: the gate used to enable itself on the flag ALONE, while `isVerifiedLedger` (`cli/manifest.mjs`) and
-// `hubActions` (cli/plan.mjs) both also require a `platform`. A hub holding one without the other
+// `productActions` (cli/plan.mjs) both also require a `platform`. A Product holding one without the other
 // deadlocked — the shell rejected the human's ledger commit while the CLI, reading the same file,
 // called it local and kept the local write path, so nothing could write the ledger at all.
 test('ledger-guard: the verified ledger flag WITHOUT a platform is not verified mode — no-op (issue #186)', () => {
@@ -1858,7 +1887,7 @@ test('ledger-guard: a platform with a local ledger flag is not verified mode —
 });
 
 // Flattening the JSON to read it must not make the read depth-blind. A `bridge` key NESTED in some
-// other object is not the verified ledger flag, and treating it as one would enable this gate on a hub whose
+// other object is not the verified ledger flag, and treating it as one would enable this gate on a Product whose
 // `isVerifiedLedger` is false — the same no-writer deadlock #186 is about, reached from the other side.
 test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #186)', () => {
   const T = scaffoldRepo();
@@ -1880,9 +1909,9 @@ test('ledger-guard: a nested bridge/platform key cannot enable the gate (issue #
   for (const d of [T, T2]) fs.rmSync(d, { recursive: true, force: true });
 });
 
-// A real hub carries nested objects (`review`, `roster`) AROUND the root-level flags — stripping the
+// A real Product carries nested objects (`review`, `roster`) AROUND the root-level flags — stripping the
 // nesting must not throw the root pair out with it.
-test('ledger-guard: root-level flags still enforce when the hub carries nested objects', () => {
+test('ledger-guard: root-level flags still enforce when the Product carries nested objects', () => {
   const T = scaffoldRepo();
   const nested = '{"platform":"github","review":{"requireEngagement":false},'
     + '"roster":[{"login":"a","roles":{"hub":["owner"]}}],"bridge_enabled":true}\n';
@@ -1895,7 +1924,7 @@ test('ledger-guard: root-level flags still enforce when the hub carries nested o
 });
 
 // The #161 bug class, in its FAIL-OPEN direction: the old per-line grep missed a key whose value sat
-// on the next line, so a fully bridge-enabled hub silently no-opped a security gate. Every other
+// on the next line, so a fully bridge-enabled Product silently no-opped a security gate. Every other
 // hub.json read in these gates already flattens with `tr -d '\n'` first.
 test('ledger-guard: a hub.json with the flag split across lines still enforces (issue #186)', () => {
   const T = scaffoldRepo();
@@ -1928,7 +1957,7 @@ test('ledger-guard: an unresolvable base ref FAILs closed (bridge on)', () => {
 
 // ---------- the gate-sync version pin (issue #163 suggestion 4) ----------
 // The wired fragments used to run `yadflow@3`, floating on the major — so a release could change what
-// a scheduled job does with nobody deciding to upgrade, which is how #163's churn bug reached hubs
+// a scheduled job does with nobody deciding to upgrade, which is how #163's churn bug reached Products
 // that never opted into it. They now resolve an EXACT version at run time. The resolver cannot be
 // stamped into the wired file: `fileAction` (cli/plan.mjs) compares the installed file against the
 // shipped template by sha256, so an edited-in version would report `outdated` forever and be reverted
@@ -1990,9 +2019,9 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
 
   // 4. nothing committed to read → the floating major, exactly today's behaviour
   assert.equal(resolvePin(block), '3');
-  // 3. the version that wired the hub
+  // 3. the version that wired the Product
   assert.equal(resolvePin(block, stamp('3.15.3')), '3.15.3');
-  // 2. the explicit hub pin outranks it
+  // 2. the explicit Product pin outranks it
   assert.equal(resolvePin(block, { ...stamp('3.15.3'), ...hub('3.14.0') }), '3.14.0');
   // 1. the platform variable outranks both, verbatim — the operator's escape hatch, including
   //    downgrading across majors, which the file sources are not allowed to do.
@@ -2017,7 +2046,7 @@ test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot t
 // version too old to know the subcommand — must never read as a refusal. Nothing exercised that.
 const HOOK = path.join(ROOT, 'skills/yad-checks/templates/hooks/ledger-guard.sh');
 
-// A hub laid out the way the wrapper expects, with `hooks/` beside a fake install.
+// A Product laid out the way the wrapper expects, with `hooks/` beside a fake install.
 function scaffoldHookHub() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-wrapper-'));
   fs.mkdirSync(path.join(T, 'hooks'), { recursive: true });
@@ -2080,7 +2109,7 @@ test('ledger-guard wrapper: resolution order, and fail-open when nothing resolve
     assert.equal(blank.code, 0);
     assert.doesNotMatch(blank.err, /unbound variable/);
 
-    // The hub's own install is preferred over PATH, and is found from the SCRIPT's location — not
+    // The Product's own install is preferred over PATH, and is found from the SCRIPT's location — not
     // the caller's cwd, which a harness sets to anything.
     const nm = path.join(T, 'node_modules/yadflow/bin');
     fs.mkdirSync(nm, { recursive: true });
@@ -2089,11 +2118,11 @@ test('ledger-guard wrapper: resolution order, and fail-open when nothing resolve
     fakeYad(onPath, 'yad', 0);
     const r = spawnSync('bash', [path.join(T, 'hooks/ledger-guard.sh')], {
       input: '{}', encoding: 'utf8', cwd: os.tmpdir(),
-      // node's own directory is on PATH so the hub-install branch is reachable at all; the point of
+      // node's own directory is on PATH so the Product-install branch is reachable at all; the point of
       // the assertion is that it wins over the `yad` sitting earlier on that same PATH.
       env: { ...GIT_ENV, PATH: `${onPath}:${path.dirname(process.execPath)}:/usr/bin:/bin`, CLAUDE_PROJECT_DIR: T },
     });
-    assert.equal(r.status, 2, 'the hub install answered, not the `yad` on PATH');
+    assert.equal(r.status, 2, 'the Product install answered, not the `yad` on PATH');
     assert.ok(!fs.existsSync(path.join(onPath, 'argv.txt')), 'the PATH copy was never invoked');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

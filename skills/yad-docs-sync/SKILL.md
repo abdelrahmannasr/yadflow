@@ -16,7 +16,7 @@ silent (the same discipline as `yad repo refresh`).
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - Per-epic baseline: `epics/EP-<slug>/.sdlc/docs-build.json` (written by `yad-docs`). Overview baseline:
   `docs/sdlc-site/.docs-build.json` (written by `yad-docs-overview`).
 - The hashing + build + deploy is the **`yad docs sync` CLI**'s job; the regeneration of a stale site is

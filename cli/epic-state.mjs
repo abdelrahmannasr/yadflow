@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { err } from './errors.mjs';
-import { epicFiles } from './manifest.mjs';
+import { epicFiles, preferring } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 
@@ -210,7 +210,14 @@ export function loadLedger(epicDir) {
     state: validateState(readJSONStrict(f.state, null), f.state),
     approvals: requireArray(readJSONStrict(f.approvals, []), f.approvals),
     comments: requireArray(readJSONStrict(f.comments, []), f.comments),
-    hubPrs: requireArray(readJSONStrict(f.hubPrs, []), f.hubPrs),
+    // Read the OLD name while it exists, the new one otherwise — the same tie-break as the settings
+    // file (`preferring`, cli/manifest.mjs). Both are written on every
+    // save (see gateSync / gateOpen), so they agree unless someone edited one by hand — which
+    // `yad doctor` reports rather than leaving to be discovered.
+    hubPrs: (() => {
+      const f2 = preferring(f.productPrs, f.hubPrs);
+      return requireArray(readJSONStrict(f2, []), f2);
+    })(),
     contractLock: readJSONStrict(f.contractLock, null),
     buildStates: loadBuildStates(f.buildStateDir),
   };

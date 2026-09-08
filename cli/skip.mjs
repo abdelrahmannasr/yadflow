@@ -6,15 +6,15 @@
 // `skipStep`/`unskipStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import { ok, info, hand, fail, run, writeJSON } from './lib.mjs';
 import { epicRoot, loadLedger, skipStep, unskipStep } from './epic-state.mjs';
-import { loadHub } from './gate.mjs';
+import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
 // Best-effort auditable actor for `skippedBy`: the roster login for the local git identity, else the
-// raw git user.name, else null. A malformed/absent hub degrades to the raw name — attribution is a
+// raw git user.name, else null. A malformed/absent Product degrades to the raw name — attribution is a
 // nicety on the audit trail, never a gate, so it must not block the skip.
 function skipActor(root) {
   let roster = [];
-  try { roster = loadHub(root)?.hub?.roster || []; } catch { /* no hub / malformed — attribute by raw git name */ }
+  try { roster = loadProduct(root)?.hub?.roster || []; } catch { /* no Product / malformed — attribute by raw git name */ }
   return resolveCommitterLogin(root, roster)
     || (run('git', ['config', 'user.name'], { cwd: root }).stdout || '').trim()
     || null;

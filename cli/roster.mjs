@@ -6,21 +6,21 @@
 // is actually connected, not against repo names the user has to remember. Granting/revoking a
 // `domain-owner` keeps repos.json `domain_owners` in sync so the gate never drifts from the roster.
 import path from 'node:path';
-import { c, log, ok, info, warn, hand, fail, ask, askYesNo, readJSON, writeJSON } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
-import { rolesForScope } from './platform.mjs';
+import { c, log, ok, info, warn, hand, fail, ask, askYesNo, readJSON, writeProductConfig } from './lib.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
+import { rolesForScope, setScopeRoles, isProductScope } from './platform.mjs';
 import { parseRolesSpec, upsertRosterEntry, addRepoRoles, removeRepoRole, setRepoDomainOwners, reconcileRepoRoles } from './setup.mjs';
 
 const ROLES = ['owner', 'reviewer', 'domain-owner'];
 
-const loadHub = (root) => readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+const loadProduct = (root) => readJSON(productConfigPath(root), null);
 const loadRepos = (root) => readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] }).repos || [];
 const ownersOf = (repo) => (Array.isArray(repo.domain_owners) ? repo.domain_owners : (repo.domain_owner ? [repo.domain_owner] : []));
 
 // `list` — every member with their per-scope roles, plus a drift check between hub.json roles and
 // repos.json domain_owners (the two should agree; the sync on grant/revoke keeps them aligned).
 function rosterList(root) {
-  const hub = loadHub(root);
+  const hub = loadProduct(root);
   if (!hub || !Array.isArray(hub.roster) || !hub.roster.length) {
     warn('no roster yet (.sdlc/hub.json) — add one with `yad roster add <login>` or `yad setup`');
     return { members: 0 };
@@ -74,7 +74,10 @@ async function repoWalk(root, entry) {
 // Mirror any domain-owner scopes from a non-interactive `--roles` upsert into repos.json.
 function syncDomainOwners(root, entry) {
   for (const [scope, list] of Object.entries(entry.roles || {})) {
-    if (scope !== 'hub' && Array.isArray(list) && list.includes('domain-owner')) setRepoDomainOwners(root, scope, entry.name, { add: true });
+    // `isProductScope`, not `!== 'hub'`: the product scope now has two spellings, and treating the
+    // second one as a repo name writes the person into a repo called `product` — or warns that no
+    // such repo exists, on every ordinary product-level grant.
+    if (!isProductScope(scope) && Array.isArray(list) && list.includes('domain-owner')) setRepoDomainOwners(root, scope, entry.name, { add: true });
   }
 }
 
@@ -82,7 +85,7 @@ function syncDomainOwners(root, entry) {
 // `--roles` spec directly (scriptable) or run the repo-driven walk (interactive default).
 async function rosterAdd(root, login, { name, email, roles } = {}) {
   if (!login) { fail('usage: yad roster add <login> [--name N] [--email E] [--roles "hub=owner,reviewer backend=domain-owner"]'); process.exitCode = 1; return {}; }
-  const hub = loadHub(root);
+  const hub = loadProduct(root);
   const platform = hub ? hub.platform : null;
   const existing = hub && Array.isArray(hub.roster) ? hub.roster.find((e) => e.login === login) : null;
   const scripted = !!roles;
@@ -95,8 +98,8 @@ async function rosterAdd(root, login, { name, email, roles } = {}) {
     nm = nm || await ask('  yad name', (existing && existing.name) || login);
     em = em || await ask('  commit email (blank to skip)', (existing && existing.email) || '');
     const def = rolesForScope(existing, 'hub').join(' ') || 'reviewer';
-    const hubRoles = (await ask('  hub roles (owner/reviewer, space-separated)', def)).split(/\s+/).filter(Boolean);
-    rolesMap = hubRoles.length ? { hub: hubRoles } : {};
+    const hubRoles = (await ask('  product roles (owner/reviewer, space-separated)', def)).split(/\s+/).filter(Boolean);
+    rolesMap = hubRoles.length ? setScopeRoles({}, 'hub', hubRoles) : {};
   }
   const { entry, created } = upsertRosterEntry(root, { login, name: nm, email: em || undefined, roles: rolesMap, platform });
   if (!entry) return {};
@@ -111,7 +114,7 @@ function rosterGrant(root, [name, repo, ...roles]) {
   if (!name || !repo || !roles.length) { fail('usage: yad roster grant <name> <repo> <role...>'); process.exitCode = 1; return {}; }
   const invalid = roles.filter((r) => !ROLES.includes(r));
   if (invalid.length) { fail(`unknown role(s): ${invalid.join(', ')} (allowed: ${ROLES.join(', ')})`); process.exitCode = 1; return {}; }
-  const hub = loadHub(root);
+  const hub = loadProduct(root);
   if (!hub || !Array.isArray(hub.roster) || !hub.roster.some((e) => e.name === name)) {
     fail(`'${name}' is not in the roster — add them first with \`yad roster add <login>\``); process.exitCode = 1; return {};
   }
@@ -134,13 +137,13 @@ function rosterRevoke(root, [name, repo, ...roles]) {
 // `remove <login>` — delete a member; warn (do not cascade) if still a domain owner in repos.json.
 function rosterRemove(root, login) {
   if (!login) { fail('usage: yad roster remove <login>'); process.exitCode = 1; return {}; }
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
-  const hub = readJSON(hubPath, null);
+  const productPath = productConfigPath(root);
+  const hub = readJSON(productPath, null);
   if (!hub || !Array.isArray(hub.roster)) { warn('no roster to remove from (.sdlc/hub.json)'); return { removed: 0 }; }
   const idx = hub.roster.findIndex((e) => e.login === login);
   if (idx < 0) { warn(`no roster member with login '${login}'`); return { removed: 0 }; }
   const [removed] = hub.roster.splice(idx, 1);
-  writeJSON(hubPath, hub);
+  writeProductConfig(root, hub);
   ok(`removed ${removed.name} (@${login})`);
   const refs = loadRepos(root).filter((r) => ownersOf(r).includes(removed.name)).map((r) => r.name);
   if (refs.length) hand(`'${removed.name}' is still a domain owner in repos.json for: ${refs.join(', ')} — revoke with \`yad roster revoke ${removed.name} <repo> domain-owner\``);

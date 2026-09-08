@@ -1,7 +1,7 @@
 // `yad hook ledger-guard` — the harness-side half of the ledger rule (#171).
 //
 // In verified mode the gate ledger is CI-owned: `templates/checks/ledger-guard.sh` rejects any non-bot
-// commit that changes `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`.
+// commit that changes `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or `epics/*/reviews/*.md`.
 // That gate is the authority, but it only speaks at CI time — an agent that hand-edits `state.json`
 // learns twenty minutes later, from a failed pipeline with nothing connecting cause to effect. This
 // hook says the same thing at the moment of the edit, and names the command that owns the transition.
@@ -14,22 +14,24 @@
 // the model), so `hooks/ledger-guard.sh` wires it with no adapter logic; another harness needs only
 // the same two exit codes.
 //
-// FAIL-OPEN, deliberately. No hub, unreadable config, an unparseable payload, no git — every one of
+// FAIL-OPEN, deliberately. No Product, unreadable config, an unparseable payload, no git — every one of
 // those ALLOWS, with a note on stderr. This is a local guardrail, and one that failed closed would
 // brick an agent's ability to edit anything the moment a config went sideways. The asymmetry is the
 // design: `ledger-guard` in CI fails closed and is what actually protects the ledger.
 import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
+import { isVerifiedLedger , productConfigPath } from './manifest.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
 // human's to write, and both are exempt in the gate too.
-const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', 'hub-prs.json']);
+// Both names of the PR ledger: it was renamed `hub-prs.json` -> `product-prs.json` and the engine
+// writes both for one major, so refusing only one would leave the other hand-editable.
+const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json']);
 
 // `epics/<epic>/.sdlc/<ledger>.json` or `epics/<epic>/reviews/<name>.md` → { epic, rel }; else null.
-// Takes a hub-relative POSIX path.
+// Takes a Product-relative POSIX path.
 //
 // Depth is matched the way the CI gate matches it, not more strictly. Its arms are bash `case`
 // globs — `epics/*/.sdlc/state.json` — and a bash glob's `*` spans `/`, so the gate ALSO rejects
@@ -62,17 +64,17 @@ export function payloadPaths(payload) {
   return [...new Set(out)];
 }
 
-// The hub a path belongs to: the nearest ancestor holding `.sdlc/hub.json`.
+// The Product a path belongs to: the nearest ancestor holding `.sdlc/hub.json`.
 //
 // Resolved from the PATH, never from the session. The documented layout puts code repos BESIDE the
-// hub (`project/{product,backend,mobile}` — see `insideWorkspace` in setup.mjs), so a session opened
+// Product (`project/{product,backend,mobile}` — see `insideWorkspace` in setup.mjs), so a session opened
 // at the workspace has no `hub.json` under its root, and a session-rooted lookup would find nothing
 // and silently allow a mutation inside `project/product/epics/…` — the multi-repo, parallel-agent
 // setup this hook was reported from.
 export function hubRootFor(abs) {
   let dir = path.dirname(path.resolve(abs));
   for (;;) {
-    if (fs.existsSync(path.join(dir, PROJECT_FILES.hubConfig))) return dir;
+    if (fs.existsSync(productConfigPath(dir))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -80,7 +82,7 @@ export function hubRootFor(abs) {
 }
 
 // Where a RELATIVE path in the payload is anchored. Only used to make such a path absolute, so the
-// hub walk-up above has somewhere to start.
+// Product walk-up above has somewhere to start.
 export function baseDirFor(env = process.env, runner = run) {
   if (env.CLAUDE_PROJECT_DIR) return env.CLAUDE_PROJECT_DIR;
   const top = runner('git', ['rev-parse', '--show-toplevel']);
@@ -97,12 +99,12 @@ const fold = (s) => s.toLowerCase();
 // and `git fetch` never fast-forwards it, so probing `main` would report an epic whose review PR has
 // already merged as absent from the base and wave a real mutation straight through. That is the
 // stale-clone case, and it is the common one, not an edge.
-export function resolveHookBase(hubRoot, hub, runner = run) {
+export function resolveHookBase(productRoot, hub, runner = run) {
   const cfg = hub?.default_branch || '';
-  const head = runner('git', ['-C', hubRoot, 'symbolic-ref', '--short', '--quiet', 'refs/remotes/origin/HEAD']);
+  const head = runner('git', ['-C', productRoot, 'symbolic-ref', '--short', '--quiet', 'refs/remotes/origin/HEAD']);
   for (const base of [cfg ? `origin/${cfg}` : '', head.ok ? head.stdout : '', 'origin/main']) {
     if (!base || base === 'origin/') continue;
-    if (runner('git', ['-C', hubRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) return base;
+    if (runner('git', ['-C', productRoot, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`]).ok) return base;
   }
   return null;
 }
@@ -113,11 +115,11 @@ export function resolveHookBase(hubRoot, hub, runner = run) {
 // rides the first review PR/MR. Mutating a ledger that is already on the base is what only the bot
 // may do.
 //
-// Read with `ls-tree` from the hub, never with a `<rev>:<path>` probe: a rev:path spec is always
-// resolved from the repository TOP LEVEL and `-C` does not re-anchor it, so a hub sitting in a
+// Read with `ls-tree` from the Product, never with a `<rev>:<path>` probe: a rev:path spec is always
+// resolved from the repository TOP LEVEL and `-C` does not re-anchor it, so a Product sitting in a
 // subdirectory of its repo (a monorepo, or a workspace that is itself a repo) would miss on every
-// probe and the guard would allow everything, silently. `ls-tree` run with `-C hubRoot` takes a
-// cwd-relative pathspec and prints cwd-relative paths, so both halves stay hub-relative.
+// probe and the guard would allow everything, silently. `ls-tree` run with `-C productRoot` takes a
+// cwd-relative pathspec and prints cwd-relative paths, so both halves stay Product-relative.
 //
 // Slugs are FOLDED because the gate folds them: on a case-insensitive filesystem `epics/ep-x/…` and
 // `epics/EP-X/…` are the same file, so a byte-exact compare lets a mutation be laundered as a
@@ -126,11 +128,11 @@ export function resolveHookBase(hubRoot, hub, runner = run) {
 // null means the base could not be read at all — "unknown", which ALLOWS. The working tree cannot
 // stand in for the base ref: a seed writes `state.json` first, so using that as proof would deny
 // every remaining file of the same seed.
-export function seededSlugs(hubRoot, hub, runner = run) {
-  const base = resolveHookBase(hubRoot, hub, runner);
+export function seededSlugs(productRoot, hub, runner = run) {
+  const base = resolveHookBase(productRoot, hub, runner);
   if (!base) return null;
   const tree = runner('git', [
-    '-C', hubRoot, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', base, '--', 'epics',
+    '-C', productRoot, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', base, '--', 'epics',
   ]);
   if (!tree.ok) return null;
   const slugs = new Set();
@@ -144,11 +146,11 @@ export function seededSlugs(hubRoot, hub, runner = run) {
 
 // What the agent is told when the edit is refused. Names the command that owns each transition —
 // the whole point of #171 was that the ledger write had no command behind it.
-export function denyMessage({ epic, rel, hubRoot }) {
+export function denyMessage({ epic, rel, productRoot }) {
   return [
     `[yad] Blocked: ${rel} is CI-owned gate state.`,
     '',
-    'This hub runs in verified mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
+    'This Product runs in verified mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
     'check rejects any non-bot commit that changes it, so this edit cannot reach the default branch —',
     'it would fail the review PR/MR and have to be reverted.',
     '',
@@ -160,7 +162,7 @@ export function denyMessage({ epic, rel, hubRoot }) {
     'Commit the ARTIFACT only (the .md you authored) and hand off to `yad-review-gate`; the ledger',
     'follows on merge.',
     '',
-    `hub: ${hubRoot}   ·   override for one command: YAD_HOOK_DISABLE=1`,
+    `hub: ${productRoot}   ·   override for one command: YAD_HOOK_DISABLE=1`,
   ].join('\n');
 }
 
@@ -170,25 +172,25 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
   if (env.YAD_HOOK_DISABLE) return { allow: true, skipped: 'YAD_HOOK_DISABLE' };
   if (!paths.length) return { allow: true };
   const base = baseDirFor(env, runner);
-  // One `ls-tree` per hub, not one per candidate path: a MultiEdit carries many paths and this runs
+  // One `ls-tree` per Product, not one per candidate path: a MultiEdit carries many paths and this runs
   // inside the agent's tool loop.
   const seededByHub = new Map();
   for (const candidate of paths) {
     const abs = path.resolve(base, candidate);
-    const hubRoot = hubRootFor(abs);
-    if (!hubRoot) continue;
+    const productRoot = hubRootFor(abs);
+    if (!productRoot) continue;
     // Non-strict on purpose: a hub.json that does not parse is a real problem, but refusing every
     // edit in the repo is not this hook's way of reporting it (`yad doctor` says so properly).
-    const hub = readJSON(path.join(hubRoot, PROJECT_FILES.hubConfig), null);
+    const hub = readJSON(productConfigPath(productRoot), null);
     if (!isVerifiedLedger(hub)) continue;
-    const rel = path.relative(hubRoot, abs).split(path.sep).join('/');
+    const rel = path.relative(productRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);
     if (!hit) continue;
-    if (!seededByHub.has(hubRoot)) seededByHub.set(hubRoot, seededSlugs(hubRoot, hub, runner));
-    const seeded = seededByHub.get(hubRoot);
+    if (!seededByHub.has(productRoot)) seededByHub.set(productRoot, seededSlugs(productRoot, hub, runner));
+    const seeded = seededByHub.get(productRoot);
     if (seeded === null) continue;                      // base unreadable — unknown allows
     if (!seeded.has(fold(hit.epic))) continue;          // creation, not mutation (#162)
-    return { allow: false, epic: hit.epic, rel, message: denyMessage({ epic: hit.epic, rel, hubRoot }) };
+    return { allow: false, epic: hit.epic, rel, message: denyMessage({ epic: hit.epic, rel, productRoot }) };
   }
   return { allow: true };
 }

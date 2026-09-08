@@ -42,7 +42,7 @@ ${c.bold('Setup & maintenance')}
                        it. Anything else it cannot account for is replaced only after
                        a <file>.yad-orig backup
   yad update --push    Also commit each repo's applied changes and push them straight to the
-                       default branch of the hub + every connected repo (a chore(yad-update)
+                       default branch of the Product + every connected repo (a chore(yad-update)
                        commit; no PR — the push-on-main yad-update-guard runs verified-commits
                        + commit-message). Announce the team & pause merges first. Also works as
                        'yad check --fix --push'; --allow-branch permits a non-default branch
@@ -110,18 +110,18 @@ ${c.bold('Review gate (Shape)')}
   yad gate trailer <epic> [artifact] --body <text> [--pr <n>]
                                        Upsert the companion's 60-sec briefing into the PR/MR description
   yad gate ci [--branch <head>] [--pr <n>] [--merged]
-                        CI entry (hub workflow): pre-merge is read-only (nothing pushed);
+                        CI entry (Product workflow): pre-merge is read-only (nothing pushed);
                         --merged advances the step + flips artifact status on the default branch
 
 ${c.bold('Build helpers')}
   yad commit --type <t> -m <subject>   Commit by convention (trailers, atomic guard)
   yad open-pr [--repo <name>]          Open a task PR/MR against the repo's DEFAULT branch (never a
-                                       hardcoded main; --base overrides) — stage-aware on the hub: a
+                                       hardcoded main; --base overrides) — stage-aware on the Product: a
                                        review/EP-* branch opens the Shape artifact-review PR
-                                       (delegates to gate open), any other hub branch uses the
+                                       (delegates to gate open), any other Product branch uses the
                                        code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
-  yad checkpoint [--push]              Commit the machine-written Build hub state
+  yad checkpoint [--push]              Commit the machine-written Build state on the Product
                                        (trust-log/build-log/build-state) — plus any story
                                        status: flip (→ in-build/shipped) backed by a build-log
                                        ship — as one audit-trail chore(hub) commit; default
@@ -144,7 +144,7 @@ ${c.bold('Build helpers')}
   yad repo list                        Show connected repos (fresh / stale)
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
                        refreshed code-maps + registry as a chore(hub): sync code-context … [skip ci]
-                       audit commit and pushes it to the hub default branch (--allow-branch to override)
+                       audit commit and pushes it to the Product default branch (--allow-branch to override)
 
 ${c.bold('Feature threads (post-lock change management)')}
   yad thread                           List every feature thread (genesis → changes → defects)
@@ -169,7 +169,7 @@ ${c.bold('Options')}
   --repo <name>         open-pr: target a registered repo by name
   --base <branch>       open-pr: override the PR/MR base — default is the repo's own default
                         branch (repos.json default_branch, else hub.json default_branch for a PR
-                        on the hub itself, else the platform, else origin/HEAD, else main); a
+                        on the Product itself, else the platform, else origin/HEAD, else main); a
                         non-default base loses the AI first pass (warns, never blocks)
   --epic <id>           docs: target one epic's site (EP-<slug>)
   --overview            docs: target the project SDLC-overview site

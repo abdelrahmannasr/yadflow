@@ -43,7 +43,7 @@ const setupSteps: FlowStep[] = [
       { id: "cr-1", from: "code-repos", to: "repos-json", label: "register repo", type: "write", color: "#b7950b", delay: 0, duration: 700 },
       { id: "cr-2", from: "code-repos", to: "product-hub", label: "cache pack.md + code-map.md", type: "write", color: "#2471a3", delay: 800, duration: 800 },
     ],
-    sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md · yad repo refresh --push publishes the code-maps to the hub (chore(hub): sync code-context)" },
+    sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md · yad repo refresh --push publishes the code-maps to the Product (chore(hub): sync code-context)" },
   },
   {
     id: "connect-design",
@@ -113,7 +113,7 @@ const setupSteps: FlowStep[] = [
     id: "detect-hub",
     title: "Detect Hub & Roster",
     description:
-      "Put the hub on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With a verified ledger, the Shape review runs through a real PR/MR.",
+      "Put the Product on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With a verified ledger, the Shape review runs through a real PR/MR.",
     actor: "system",
     status: "connected",
     stepState: ".sdlc/hub.json",
@@ -558,7 +558,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: install the 38 skills, then connect code repos, design / testing / learning / docs tools, and detect the hub platform.",
+      "One-time setup: install the 38 skills, then connect code repos, design / testing / learning / docs tools, and detect the Product platform.",
     category: "setup",
     steps: setupSteps,
   },

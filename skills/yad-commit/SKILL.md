@@ -14,7 +14,7 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
 ## Conventions
 
 - Run **inside the repo holding the staged change** — a code repo under
-  `{project-root}/demo-repos/<repo>/`, or the product hub itself. Use absolute paths.
+  `{project-root}/demo-repos/<repo>/`, or the Product itself. Use absolute paths.
 - **Stage first.** Only the staged (`git add`) atomic change is committed. The guard refuses more than
   `ATOMIC_FILE_LIMIT` (3) staged files unless `--force` — split the change instead.
 - **Subject** — `<type>: <lowercase imperative description, no trailing period>`; types are
@@ -22,8 +22,8 @@ and `yad-ship` use. It **never auto-advances**; it just commits.
 - **Task trailer** — required on a code repo (anchors the `spec-link` + `commit-message` gates). Given
   with `--task` (a `<story>-T<NN>` id — an explicit value is validated against the `spec-link`
   contract, so a malformed id like a bare `EP-x-S01` fails locally instead of after a push), else
-  derived from the branch (`feat/<story>-<task>-…`). Hub commits are not
-  task-scoped, so the trailer is optional there — a missing-Task warning is informational on the hub
+  derived from the branch (`feat/<story>-<task>-…`). Product commits are not
+  task-scoped, so the trailer is optional there — a missing-Task warning is informational on the Product
   (`spec-link` is a code-repo gate) and only flags a real gate failure in a code repo.
 - **Contract-Change trailer** — `--contract-change` only when the diff touches the locked contract
   surface; it routes the change back to the architecture gate.

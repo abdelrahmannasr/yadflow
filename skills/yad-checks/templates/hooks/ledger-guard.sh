@@ -2,7 +2,7 @@
 # ledger-guard HARNESS HOOK — the local half of the CI gate of the same name (#171).
 #
 # The gate ledger is CI-owned in verified mode: `checks/ledger-guard.sh` rejects any non-bot commit
-# that changes `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`.
+# that changes `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or `epics/*/reviews/*.md`.
 # This hook says so at the moment an agent tries the edit, instead of twenty minutes later in a
 # failed pipeline, and names the command that owns the transition (`yad gate open`).
 #
@@ -22,13 +22,13 @@
 # CLOSED and is what actually protects the ledger.
 set -uo pipefail
 
-# The hub root is this script's grandparent — hooks/ledger-guard.sh — so the resolution below does
+# The Product root is this script's grandparent — hooks/ledger-guard.sh — so the resolution below does
 # not depend on the harness's working directory.
 HOOK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HUB_ROOT="$(dirname -- "$HOOK_DIR")"
 
 # Resolution order, cheapest and most specific first: an explicit override, then the copy installed
-# in this hub, then whatever is on PATH, then a network-free npx. `--no-install` matters — a hook
+# in this Product, then whatever is on PATH, then a network-free npx. `--no-install` matters — a hook
 # runs on every tool call and must never pause an agent to download a package.
 CMD=()
 _yad_bin="${YAD_BIN:-}"

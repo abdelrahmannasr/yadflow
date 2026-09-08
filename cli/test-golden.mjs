@@ -1,6 +1,6 @@
 // Golden compatibility test — the alarm bell for the engine roadmap.
 //
-// `cli/fixtures/golden-v3/` is a REAL v3 project (this repo's own hub and its two EP-checkout epics)
+// `cli/fixtures/golden-v3/` is a REAL v3 project (this repo's own Product and its two EP-checkout epics)
 // frozen exactly as it stood before Wave 1 began. This test runs the engine's three read-only views
 // over it and compares them to a committed snapshot:
 //
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { runNext } from './next.mjs';
 import { collectDoctor } from './doctor.mjs';
 import { loadLedger, gatePredicate, artifactHash } from './epic-state.mjs';
-import { touchedDomains, loadHub, isSolo, requireEngagement } from './gate.mjs';
+import { touchedDomains, loadProduct, isSolo, requireEngagement } from './gate.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const FIXTURE = path.join(ROOT, 'cli', 'fixtures', 'golden-v3');
@@ -90,7 +90,7 @@ export async function collectGolden(root) {
   // The gate predicate, wired the way gateSync wires it (cli/gate.mjs). `threadsResolved` and
   // `merged` are the platform's answers, which a frozen fixture has no way to know; both are set
   // true so the snapshot isolates the part the predicate actually decides — the approval rule.
-  const { hub } = loadHub(root);
+  const { hub } = loadProduct(root);
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
   const gates = [];

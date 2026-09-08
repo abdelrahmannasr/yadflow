@@ -14,11 +14,11 @@ flowchart LR
       cdes["yad-connect-design<br/>design.json · Figma-first, pluggable"]
       ctest["yad-connect-testing<br/>testing.json · Playwright-first, pluggable"]
       clearn["yad-connect-learning<br/>learning.json · DeepTutor-first, pluggable"]
-      phub["optional: hub on a platform<br/>detect-hub · roster"]
+      phub["optional: Product on a platform<br/>detect-hub · roster"]
       inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> phub
     end
 
-    subgraph FRONT["A · Shape — product hub · human-gated"]
+    subgraph FRONT["A · Shape — Product · human-gated"]
       direction TB
       disc["yad-discovery<br/>optional front-zero · once per project<br/>market · competitor · feasibility · requirements · roadmap.md"]:::artifact
       gDisc{{"gate · discovery · base"}}:::gated

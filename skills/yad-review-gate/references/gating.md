@@ -78,7 +78,7 @@ not "resolve to pass" — it ignores them). A reviewer's *genuine* concern is po
 marker and blocks normally, exactly as a `CHANGES_REQUESTED` or any unresolved human thread does.
 
 ## Platform-backed input (the verified ledger)
-When the hub has a platform (`.sdlc/hub.json`) and the ledger is verified, reviewers can approve/comment
+When the Product has a platform (`.sdlc/hub.json`) and the ledger is verified, reviewers can approve/comment
 on a real PR/MR instead of (or as well as) the skill recording it directly. `action: sync`
 (`yad-hub-bridge`) reads that platform state with the reviewer's own `gh`/`glab` and writes the **same**
 `approvals.json` / `comments.json` / `reviews/*.md` records the manual path writes — bridge approvals

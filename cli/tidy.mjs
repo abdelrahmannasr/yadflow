@@ -9,11 +9,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
-import { loadHub } from './gate.mjs';
+import { productConfigPath } from './manifest.mjs';
+import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
-import { hubGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import { foldTrust, foldBuild } from './ledger.mjs';
 import { epicRoot, isValidEpicId, readFrontmatter } from './epic-state.mjs';
 
@@ -39,14 +39,14 @@ function epicsWithLedgers(root) {
 export async function runTidy(root, opts = {}) {
   log(c.bold('\nyad tidy up'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
-  if (!exists(path.join(root, PROJECT_FILES.hubConfig))) {
-    fail('no .sdlc/hub.json — run `yad tidy up` from the product hub');
+  if (!exists(productConfigPath(root))) {
+    fail('no .sdlc/hub.json — run `yad tidy up` from the Product');
     process.exitCode = 1;
     return;
   }
 
-  const { hub } = loadHub(root);
-  const git = hubGit(root);
+  const { hub } = loadProduct(root);
+  const git = productGit(root);
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, hub);
   if (!guardDefaultBranch(branch, defaultBranch, { allowBranch: opts.allowBranch, cmd: 'yad tidy up' })) return;

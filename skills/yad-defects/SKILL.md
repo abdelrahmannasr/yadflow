@@ -13,7 +13,7 @@ risk), not just the symptom. It is an **output enrichment**, exactly like `yad-d
 
 ## Conventions
 
-- `{project-root}` resolves from the product hub.
+- `{project-root}` resolves from the Product.
 - Reuses the **`yad-docs` shell** verbatim (`../yad-docs/templates/app/`) — generated `src/data/*.ts`,
   themed, deployed via `yad docs deploy`; build-only / markdown-only when no docs target.
 - Per **epic** (one epic's defects) and per **thread** (the whole feature; the thread report lives under

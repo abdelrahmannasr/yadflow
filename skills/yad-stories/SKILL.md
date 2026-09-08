@@ -37,7 +37,7 @@ This passes when `stories` is the next runnable step per the state sequence — 
 Open the stories authoring branch `stories/EP-<slug>` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note
 if `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-hub's default branch. Author and commit the story files under `stories/` on it. This is **distinct**
+Product's default branch. Author and commit the story files under `stories/` on it. This is **distinct**
 from the verified ledger's `review/…` branch.
 
 ### Step 2 — Read inputs
@@ -128,8 +128,8 @@ Report: the story IDs created, the repos each touches, and that the next action 
 each repo appearing in any story's `repos`, a `domain-owner` approval for that repo. When this gate
 passes the epic becomes **`ready-for-build`** — Build can start **and** the parallel
 **`test-cases`** track opens for the tester (`yad-test-cases`); the two run at the same time. **Never record
-approval here.** Shape steps do not auto-advance. When the hub has a platform, the gate opens a review
-PR on the hub (via `yad-hub-bridge`, with a `domain:<repo>` label per touched repo) and
+approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review
+PR on the Product (via `yad-hub-bridge`, with a `domain:<repo>` label per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
 is recorded local.
 

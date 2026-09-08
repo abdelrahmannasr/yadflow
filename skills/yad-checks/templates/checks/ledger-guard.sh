@@ -6,7 +6,12 @@
 # the ledger" a mechanical guarantee instead of a convention.
 #
 # Protected (gate-state, machine-written):
-#   epics/*/.sdlc/state.json, approvals.json, comments.json, hub-prs.json
+#   epics/*/.sdlc/state.json, approvals.json, comments.json, product-prs.json, hub-prs.json
+#
+# BOTH names of the PR ledger are guarded. It was renamed `hub-prs.json` -> `product-prs.json`, and
+# the engine writes both for one major so that a copy of THIS script which predates the rename still
+# finds the file it knows. Guarding only one name would leave the other open to a hand-edit on a
+# verified product — the exact thing this gate exists to refuse.
 #   epics/*/reviews/*.md
 # NOT protected:
 #   epics/*/.sdlc/contract-lock.json — artifact-side: the architect locks the contract surface in
@@ -23,7 +28,7 @@
 # Scope: enforced ONLY when the ledger is verified — hub.json carries BOTH a `platform` and either
 # `ledger: "verified"` or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or the
 # legacy `bridge`) true. That is the same predicate `isVerifiedLedger` (cli/manifest.mjs) and
-# `hubActions` (cli/plan.mjs) apply. With a local ledger — or a platform-less hub — humans
+# `productActions` (cli/plan.mjs) apply. With a local ledger — or a platform-less Product — humans
 # legitimately write the ledger themselves, so the gate is a no-op.
 #
 # Degradation: a base ref that cannot be resolved FAILs closed; no platform (cannot read the Verified
@@ -32,8 +37,8 @@ set -euo pipefail
 
 # ---- bridge gate: only CI-owned ledgers are guarded -------------------------------------------
 # The predicate is BOTH a platform and the verified ledger flag, exactly as `isVerifiedLedger` (`cli/manifest.mjs`) and
-# `hubActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
-# other ledger reader (issue #186): a hub carrying `bridge_enabled: true` with no `platform` would
+# `productActions` (cli/plan.mjs) define it. Requiring the flag alone put this gate out of step with every
+# other ledger reader (issue #186): a Product carrying `bridge_enabled: true` with no `platform` would
 # have its human ledger commits rejected here while the CLI, reading the same file, called it
 # local and kept the LOCAL write path — no CI writer and no permitted human writer, so no gate
 # could advance. Reachable through a stale install (platform set, script wired, platform later
@@ -45,7 +50,7 @@ set -euo pipefail
 #
 # Matched at the ROOT LEVEL only. The shared `default_branch` read below is depth-blind, and that is
 # survivable there — a false match yields a bogus branch name and the gate fails loudly. Here it is
-# not: a nested `"bridge": true` (say under `review`) would silently ENABLE this gate on a hub whose
+# not: a nested `"bridge": true` (say under `review`) would silently ENABLE this gate on a Product whose
 # `isVerifiedLedger` is false, recreating the exact no-writer deadlock #186 is about, from the other side. So
 # the nesting is stripped rather than ignored: peel the outermost braces, then delete innermost
 # objects/arrays until none remain, leaving only root-level pairs to match against. Not a JSON parser
@@ -251,7 +256,7 @@ for sha in $commits; do
     [ -n "$f" ] || continue
     case "$f" in
       epics/*/.sdlc/contract-lock.json) ;; # artifact-side — allowed
-      epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
+      epics/*/.sdlc/state.json|epics/*/.sdlc/approvals.json|epics/*/.sdlc/comments.json|epics/*/.sdlc/product-prs.json|epics/*/.sdlc/hub-prs.json|epics/*/reviews/*.md)
         _slug="${f#epics/}"; _slug="${_slug%%/*}"
         is_seeding "$_slug" && continue      # a new epic's seed — not a mutation of a CI-owned ledger
         touches_ledger=1

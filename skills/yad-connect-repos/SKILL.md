@@ -1,14 +1,13 @@
 ---
 name: yad-connect-repos
-description: 'Connects code repos to the product hub so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the hub default branch as a chore(hub): sync code-context [skip ci] audit commit. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
+description: 'Connects code repos to the Product so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product default branch as a chore(hub): sync code-context [skip ci] audit commit. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
 ---
 
 # SDLC — Connect Code Repos (make the brain code-aware)
 
 **Goal:** Give the front/"brain" phases (`yad-epic` → `-architecture` → `-ui` → `-stories`)
 full context about what **already exists** in the code, so the AI does not author a contract, UI, or
-stories that contradict or duplicate what is built. This skill **connects** code repos to the product
-hub and caches an AI-readable picture of each. It is the product → code half of the 2-way link (the
+stories that contradict or duplicate what is built. This skill **connects** code repos to the Product and caches an AI-readable picture of each. It is the product → code half of the 2-way link (the
 code → product half is the existing `link.md` back-pointer each spec carries).
 
 This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
@@ -16,8 +15,8 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
-- The **product repo is the Shape phase toolchain hub** (`config.yaml` `code_context`): Repomix (and
+- `{project-root}` resolves from the project working directory (the **Product**).
+- The **product repo is where the Shape phase toolchain runs** (`config.yaml` `code_context`): Repomix (and
   Impeccable, later) are installed/run **here** and target the connected code repos **by path**. The
   code repos themselves need no install for this. (The Build CI gates are the exception — they
   live inside each code repo; see `yad-checks`.)
@@ -32,14 +31,14 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
 - `repo` — the repo's short name (the key used in stories' `repos:` tag, e.g. `backend`).
 - `login`, `name`, `email`, `roles` — for `roster` (map login → name + commit email + the per-scope
   `roles` map, e.g. `roles: hub=owner,reviewer backend=domain-owner`). Validate the login against the
-  hub (`gh api users/<login>` / `glab api users?username=`); a miss is flagged `unverified` (warn-only).
+  Product (`gh api users/<login>` / `glab api users?username=`); a miss is flagged `unverified` (warn-only).
 - `path` — local path to the code repo (relative to `{project-root}` or absolute). For local repos.
   It must resolve inside the **workspace** — the project root's parent — so the standard layout, where
-  the code repos sit **beside** the hub rather than under it, registers as `../backend`:
+  the code repos sit **beside** the Product rather than under it, registers as `../backend`:
 
   ```text
   project/          <- the workspace (containment boundary)
-    product/        <- the hub repo; `yad setup` runs here
+    product/        <- the Product repo; `yad setup` runs here
     backend/        <- ../backend
     frontend/       <- ../frontend
   ```
@@ -49,8 +48,8 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
   later used as a working directory (repomix) and written into (`.coderabbit.yaml`, CI wiring).
   It is stored **exactly as typed**; every consumer re-resolves it against the project root.
 
-  The workspace is the trust boundary, so **put the hub one level below it** (`project/product`), not
-  directly in `$HOME` — with the hub at `~/product` the workspace becomes `~` and every home-dir
+  The workspace is the trust boundary, so **put the Product one level below it** (`project/product`), not
+  directly in `$HOME` — with the Product at `~/product` the workspace becomes `~` and every home-dir
   sibling turns into a registrable repo. The workspace directory itself (`..`) is never registrable.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
 - `domain_owners` — the engineer(s) who own this repo's domain (a repo may have several; drives per-repo
@@ -128,10 +127,10 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 
 - **`refresh`** — re-run Steps 2–4 for an already-connected repo (after its code moves). Updates
   `syncedHead` + `lastSyncedAt`. Same machinery as `connect`. Once the AI has regenerated the
-  `code-map.md` (Step 3), publish it to the product hub with **`yad repo refresh <repo> --push`**: it
+  `code-map.md` (Step 3), publish it to the Product with **`yad repo refresh <repo> --push`**: it
   commits the tracked code-maps + `.sdlc/repos.json` (never the gitignored `pack.md`) as one
   audit-trail commit `chore(hub): sync code-context — <repos> by @<login> [skip ci]` and pushes it
-  straight to the hub's **default branch** (add `--allow-branch` to commit on a non-default branch).
+  straight to the Product's **default branch** (add `--allow-branch` to commit on a non-default branch).
   This is the code-context analogue of `yad checkpoint` — human-owned machine state, no Task trailer,
   no Co-Authored-By.
 - **`list`** — print every registry entry with a **fresh/stale** flag: compare each repo's current HEAD
@@ -139,14 +138,14 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo
   itself untouched**.
 
-## Hub detection + reviewer roster (the Shape review bridge)
+## Product detection + reviewer roster (the Shape review bridge)
 
-The hub is itself a git repo on a platform. These actions record that so the Shape review/comment/
-approval cycle can run through a real PR/MR on the hub (`yad-review-gate` + `yad-hub-bridge`). They
-write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — never an epic's state/approvals.
+The Product is itself a git repo on a platform. These actions record that so the Shape review/comment/
+approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-hub-bridge`). They
+write only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
 
-- **`detect-hub`** — detect the hub's own platform and upsert `.sdlc/hub.json`. Run
-  `git remote get-url origin` **on the hub** and read the host with the SAME logic Step 1 uses for code
+- **`detect-hub`** — detect the Product's own platform and upsert `.sdlc/hub.json`. Run
+  `git remote get-url origin` **on the Product** and read the host with the SAME logic Step 1 uses for code
   repos: `github.com` → `github`, GitLab host → `gitlab`, no remote → `platform: null`. Record
   `git_url`, `default_branch`, `detectedAt`, and **all three of** `ledger`, `bridge_enabled` and
   `bridge`:
@@ -168,13 +167,13 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
 
   A platform and a verified ledger travel together: verified mode is a platform AND the switch
   (`isVerifiedLedger`, `cli/manifest.mjs`), and `yad setup` derives both from one value, so marking a
-  platform-less hub verified creates a state no CLI path can produce and the gates read
+  platform-less Product verified creates a state no CLI path can produce and the gates read
   differently (#186).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
 - **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `email` + a per-scope
   `roles` map (`roles: { hub: ["owner","reviewer"], <repo>: ["domain-owner", …] }`). Upsert by `login`;
   a person may hold several roles across several scopes, and a repo several people per role. Validate the
-  `login` against the hub (warn-only; flag `unverified` on a miss). `domain-owner` is written into
+  `login` against the Product (warn-only; flag `unverified` on a miss). `domain-owner` is written into
   `roles[<repo>]` (and still **derived** as a fallback when a roster `name` equals a repo's
   `domain_owner`/`domain_owners` in `repos.json` — see `references/hub-config.md`). An unmapped login
   degrades to a plain `reviewer`, never auto-promoted to owner/domain-owner.
@@ -183,7 +182,7 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `hub.config`) — neve
   connected repo's role); `yad roster grant|revoke <name> <repo> <role>`; `yad roster remove <login>`.
   A `domain-owner` grant/revoke keeps `repos.json` `domain_owners` in sync so the gate never drifts.
 
-If the hub has no remote (`platform: null`) or the verified ledger is disabled, the Shape gate runs
+If the Product has no remote (`platform: null`) or the verified ledger is disabled, the Shape gate runs
 local with no error — the verified ledger is purely additive.
 
 ## Live on-demand (the third context layer)
@@ -208,7 +207,7 @@ it does not silently re-pack. Refreshing the cache is a human decision. Document
 
 ## Reference
 - Registry schema + freshness rule: `references/repos-registry.md`.
-- Hub config + reviewer roster (the review bridge): `references/hub-config.md`.
+- Product config + reviewer roster (the review bridge): `references/hub-config.md`.
 - Repomix command, secret-scan, degrade path, the code-map prompt, and live on-demand:
   `references/code-context.md`.
 - The repomix discipline this reuses (one-feature-at-a-time variant): `../yad-backfill/references/backfill.md`.

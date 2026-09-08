@@ -1,13 +1,13 @@
 ---
 name: yad-connect-docs
-description: 'Connects a docs/Pages publishing target to the product hub so the interactive-docs steps can build and deploy the generated SPA — not just commit its source. Registers the target into the project-wide .sdlc/docs.json (GitHub Pages / GitLab Pages / build-only), auto-detecting the platform from .sdlc/hub.json and resolving the Vite base path, with local-user auth and no stored tokens. Detects whether gh/glab is present and degrades to build-only when absent. Run at setup or any time the publish target changes. Reusable, idempotent, refreshable. Use when the user says "connect docs", "connect Pages", "refresh the docs connection", or "list the docs connection".'
+description: 'Connects a docs/Pages publishing target to the Product so the interactive-docs steps can build and deploy the generated SPA — not just commit its source. Registers the target into the project-wide .sdlc/docs.json (GitHub Pages / GitLab Pages / build-only), auto-detecting the platform from .sdlc/hub.json and resolving the Vite base path, with local-user auth and no stored tokens. Detects whether gh/glab is present and degrades to build-only when absent. Run at setup or any time the publish target changes. Reusable, idempotent, refreshable. Use when the user says "connect docs", "connect Pages", "refresh the docs connection", or "list the docs connection".'
 ---
 
 # SDLC — Connect a Docs/Pages Target (make the docs steps publishable)
 
 **Goal:** Let the interactive-docs steps (`yad-docs` per epic, `yad-docs-overview` project-wide)
 **build and deploy** the generated React/Vite SPA to a real URL — a GitHub Pages or GitLab Pages site —
-instead of only committing its source. This skill **connects** a publishing target to the product hub
+instead of only committing its source. This skill **connects** a publishing target to the Product
 and records *how* to reach it (the platform, the publish scope, the base path) — never a credential.
 
 This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
@@ -18,9 +18,9 @@ at a local `dist/` — build-only, no publish, exactly as before.
 
 ## Conventions
 
-- `{project-root}` resolves from the project working directory (the **product hub**).
+- `{project-root}` resolves from the project working directory (the **Product**).
 - The target is **GitHub-Pages-first but pluggable** — a *publish adapter*, mirroring the GitHub/GitLab
-  platform adapter the hub already uses. `github-pages` and `gitlab-pages` are the providers; `none` →
+  platform adapter the Product already uses. `github-pages` and `gitlab-pages` are the providers; `none` →
   build-only (deliberate, no error).
 - The platform CLI (`gh` / `glab`) is a **subprocess**, used read/deploy-only via the user's own auth —
   never installed by this skill, never given a token. Absent ⇒ degrade to build-only (`source:
@@ -35,9 +35,9 @@ at a local `dist/` — build-only, no publish, exactly as before.
 
 - `action` — `connect` (default) | `refresh` | `list` | `disconnect`.
 - `target` — `github-pages` | `gitlab-pages` | `none`. Default **auto-detected** from `.sdlc/hub.json`
-  `platform` (github → `github-pages`, gitlab → `gitlab-pages`, null/no hub → `none`).
+  `platform` (github → `github-pages`, gitlab → `gitlab-pages`, null/no Product → `none`).
 - `scope` — `hub` (default) | `<repo-name>` | `dedicated`. Where the Pages site is published from (the
-  hub repo, one connected code repo, or a dedicated docs repo).
+  Product repo, one connected code repo, or a dedicated docs repo).
 - `public` — `true` (default) | `false`. Whether the published site is public.
 - `base_path` — optional explicit override of the Vite `base` (otherwise resolved, Step 2).
 
@@ -45,7 +45,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
 
 ### Step 1 — Resolve the target + detect the platform (the publish adapter)
 Determine the `target`. If not given, read `{project-root}/.sdlc/hub.json` `platform` and map it the same
-way the hub bridge maps repos: `github` → `github-pages`, `gitlab` → `gitlab-pages`, `null`/no hub →
+way the Product bridge maps repos: `github` → `github-pages`, `gitlab` → `gitlab-pages`, `null`/no Product →
 `none` (deliberate build-only). Reject a `target` value outside the three providers (fall back to the
 detected default with a warning, the way `registerRepo` falls back on an unknown platform).
 
@@ -61,7 +61,7 @@ tokens**; everything in the registry is a plain reference. Do **not** install a 
 
 ### Step 2 — Decide the publish scope + resolve the base path
 Resolve `scope` → `publishRepo`:
-- `hub` (default) → publish from the hub repo (read its name from `hub.json` `git_url`).
+- `hub` (default) → publish from the Product repo (read its name from `hub.json` `git_url`).
 - `<repo-name>` → publish from that connected code repo (must exist in `.sdlc/repos.json`).
 - `dedicated` → a dedicated docs repo the user names (recorded as `publishRepo`).
 
@@ -109,7 +109,7 @@ the site here — `yad-docs` builds.**
   **available/unavailable** flag for the platform CLI (best-effort, the user's own session). No target
   connected ⇒ "build-only".
 - **`disconnect`** — remove the registry file (or set `target: "none"`). The platform's own Pages site is
-  **never touched** — only the hub's record of it.
+  **never touched** — only the Product's record of it.
 
 ## Hard rules
 
@@ -127,6 +127,6 @@ the site here — `yad-docs` builds.**
 - Registry schema, the base-path resolution table, and the freshness/degrade rules:
   `references/docs-registry.md`.
 - The connect pattern this mirrors (design tool): `../yad-connect-design/SKILL.md`.
-- The connect pattern this mirrors (code repos + hub detection): `../yad-connect-repos/SKILL.md`.
+- The connect pattern this mirrors (code repos + Product detection): `../yad-connect-repos/SKILL.md`.
 - The consumers — how `yad-docs` / `yad-docs-overview` build + deploy: `../yad-docs/SKILL.md`,
   `../yad-docs-overview/SKILL.md`.

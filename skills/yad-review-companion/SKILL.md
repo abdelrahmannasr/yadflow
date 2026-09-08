@@ -83,7 +83,7 @@ Inputs: `epic` + `artifact` (Shape) **or** `repo` + `pr` (Build); and the `actio
 
 ## local mode (no platform)
 
-With no hub platform, there is no PR to post to: write the trailer to
+With no Product platform, there is no PR to post to: write the trailer to
 `reviews/<artifact-base>--<date>--trailer.md` and the card/chat notes alongside the existing
 `reviews/*.md`, and the reviewer records approval the manual way (`yad-review-gate` `approve`). The same
 generation logic applies; only the surface changes.

@@ -46,15 +46,53 @@ export function platformReady(platform) {
 // A roster entry's roles live in a per-scope map: `roles: { hub: ["owner","reviewer"], <repo>: [...] }`.
 // `rolesForScope` normalizes the three shapes a roster entry can take on disk:
 //   1. new object map     — `entry.roles = { hub: [...], backend: [...] }`
-//   2. flat array variant — `entry.roles = ["owner","reviewer"]` (treated as hub roles)
-//   3. legacy single role — `entry.role = "owner"` (a hub role; pre per-scope schema)
+//   2. flat array variant — `entry.roles = ["owner","reviewer"]` (treated as Product roles)
+//   3. legacy single role — `entry.role = "owner"` (a Product role; pre per-scope schema)
 // The legacy `repos.json` `domain_owner` field is handled separately by resolveLogin's fallback.
+// The product-level scope has two spellings. `hub` is what every existing roster on disk says;
+// `product` is what shape 3 renames it to. Asking for either finds either, for one major.
+//
+// Without this the rename is a silent data loss: `yad migrate` moves the key to `product`, every
+// caller here still asks for `hub`, the lookup returns nothing, and every reviewer quietly stops
+// holding a product-level role — so the gate can no longer find its required approvers and no
+// message anywhere says why. The migration and the reader have to move together or not at all.
+// `hub` FIRST, deliberately: it is the authoritative spelling this major, exactly as `hub.json` is
+// the authoritative filename. Preferring `product` looked consistent with the rename and broke
+// revoking a role — the writers below all touch `hub`, so deleting it left `product` behind and the
+// person stayed a required approver. A scope with two names has to be READ from the same one the
+// writers maintain, or the two halves quietly disagree.
+//
+// Known limit, inherited not introduced: a connected repo literally named `hub` already shared a key
+// with the product scope in this flat map, and `product` now joins it. Naming a repo either word
+// gives its members the product-level roles. The scope map wants nesting to fix that properly; it is
+// not something this rename can repair.
+export const PRODUCT_SCOPES = ['hub', 'product'];
+export const isProductScope = (scope) => PRODUCT_SCOPES.includes(scope);
+const scopeKeys = (scope) => (isProductScope(scope) ? PRODUCT_SCOPES : [scope]);
+
+// Write a scope's roles under EVERY spelling it has, so a reader on either name sees the same answer.
+export function setScopeRoles(roles, scope, list) {
+  for (const k of scopeKeys(scope)) roles[k] = [...list];
+  return roles;
+}
+
+// …and remove it from every spelling. Deleting one name only is how a revoke becomes a no-op.
+export function deleteScopeRoles(roles, scope) {
+  for (const k of scopeKeys(scope)) delete roles[k];
+  return roles;
+}
+
 export function rolesForScope(entry, scope) {
   if (!entry) return [];
   const r = entry.roles;
-  if (r && typeof r === 'object' && !Array.isArray(r)) return Array.isArray(r[scope]) ? r[scope] : [];
-  if (Array.isArray(r)) return scope === 'hub' ? r : [];
-  if (typeof entry.role === 'string' && entry.role) return scope === 'hub' ? [entry.role] : [];
+  const keys = scopeKeys(scope);
+  if (r && typeof r === 'object' && !Array.isArray(r)) {
+    for (const k of keys) if (Array.isArray(r[k])) return r[k];
+    return [];
+  }
+  const isProduct = isProductScope(scope);
+  if (Array.isArray(r)) return isProduct ? r : [];
+  if (typeof entry.role === 'string' && entry.role) return isProduct ? [entry.role] : [];
   return [];
 }
 
@@ -106,7 +144,7 @@ export function resolveCommitterLogin(cwd, roster = []) {
   return null;
 }
 
-// Does this platform login exist on the hub? Warn-only (never throws): `checked:false` when the CLI
+// Does this platform login exist on the Product? Warn-only (never throws): `checked:false` when the CLI
 // is absent/unauthenticated so callers can distinguish "not a user" from "couldn't check".
 export function validateLogin(platform, login) {
   const cli = cliFor(platform);
@@ -125,7 +163,7 @@ export function validateLogin(platform, login) {
 
 // ---- login -> yad identity (roster + derived domain-owner) -------------------------------------
 // Returns the records this login's APPROVED review contributes. Roles are read from the per-scope
-// map: hub roles plus, for each touched domain, that repo's scoped roles (domain-owner carries the
+// map: Product roles plus, for each touched domain, that repo's scoped roles (domain-owner carries the
 // `domain` tag). The legacy `repos.json` `domain_owner === name` mapping is kept as a fallback so
 // pre per-scope projects still resolve domain owners.
 export function resolveLogin(login, roster = [], repos = [], touchedDomains = []) {
@@ -418,7 +456,7 @@ export function platformDefaultBranch(platform, { cwd, runner = run } = {}) {
 // though only this chain has a platform rung — they stop at the local `origin/HEAD`:
 //   1 flag        — an explicit --base; the human said so
 //   2 registry    — the repo's `default_branch` in .sdlc/repos.json
-//   3 hub         — hub.json's `default_branch`, for a PR against the product hub itself
+//   3 hub         — hub.json's `default_branch`, for a PR against the Product itself
 //   4 platform    — what the remote says (see platformDefaultBranch)
 //   5 origin-head — local `refs/remotes/origin/HEAD`, the same read repo.mjs/hubcommit.mjs use.
 //                   Deliberately NOT `ls-remote`: see branchExists above for why a network probe on

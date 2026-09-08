@@ -12,7 +12,7 @@ evidence base for the **local skills-log roll-up** in `yad-status`.
 (`config.yaml` `learning.records` and `learning.artifacts`.)
 
 **Local-only.** Every path above is personal output and is **gitignored — never committed or pushed**, to
-the product hub or any code repo. `yad-learn` ensures the hub `.gitignore` lists them before writing. The
+the Product or any code repo. `yad-learn` ensures the Product `.gitignore` lists them before writing. The
 only committed learning file is the connection registry `.sdlc/learning.json`.
 
 ## Record schema
@@ -42,7 +42,7 @@ only committed learning file is the connection registry `.sdlc/learning.json`.
 - **No secrets.** Records hold concept text + references only — never keys or raw tool output beyond the
   rendered tutorial.
 - **Never commit the ledger or tutorials.** They are personal, local-only artifacts: gitignored, never
-  committed or pushed (to the hub or a code repo). Only `.sdlc/learning.json` is committed.
+  committed or pushed (to the Product or a code repo). Only `.sdlc/learning.json` is committed.
 
 ## Mode → DeepTutor capability
 

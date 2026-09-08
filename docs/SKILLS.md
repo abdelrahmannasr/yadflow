@@ -10,7 +10,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 
 ## Setup & code-awareness
 
-- **`yad-connect-repos`** — Connects code repos to the product hub so the front/"brain" phases are
+- **`yad-connect-repos`** — Connects code repos to the Product so the front/"brain" phases are
   code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into
   `.sdlc/repos.json`, then caches an AI-readable picture of each — a compressed Repomix pack and a
   lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Idempotent and
@@ -67,7 +67,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   DeepTutor-first) grounded in the project knowledge base, or degrades to **harness-native** tutoring
   (the harness model reading the artifacts) when nothing is connected — so it always works. Renders a
   tutorial artifact and appends to a per-member **learning ledger** kept **local-only** (gitignored,
-  never committed or pushed — to the hub or any code repo) so it stays a private, personal **skills log**
+  never committed or pushed — to the Product or any code repo) so it stays a private, personal **skills log**
   (`yad-status` rolls up the local records). **Purely opt-in — it never blocks a gate** and
   never touches epic state, approvals, or the contract lock. *AI builds, the hand decides* — and now the
   hand can also learn, on demand, what it is deciding about.
@@ -133,7 +133,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   engineer, and records their review-skill growth in the **local-only** `yad-learn` ledger (`yad status`
   rolls it up). Soft and additive: never blocks, rides the same `engagement: verified` signal, and
   surfaces genuine concerns as normal blocking comments.
-- **`yad-hub-bridge`** — The templated PR/MR bridge for the Shape gate. When the hub has a platform
+- **`yad-hub-bridge`** — The templated PR/MR bridge for the Shape gate. When the Product has a platform
   (`.sdlc/hub.json`), it opens a review PR/MR per artifact, sets the required reviewers/labels, and
   provides the read-only `gh`/`glab` recipes that sync platform comments + approvals back into the file
   ledger. The file ledger stays the source of truth; degrades to a local gate with no platform.
@@ -154,8 +154,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   and **pr-template** (the PR/MR body uses the template). Also wires **yad-update-guard** — a
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
   with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
-  both code repos and the product hub. CI-agnostic bash for GitHub Actions and GitLab CI. Also
-  installs the **agent guardrail** on a verified hub — `hooks/ledger-guard.sh`, a harness hook that
+  both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also
+  installs the **agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting
   `ledger-guard` reject it in CI twenty minutes later (#171).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
@@ -191,7 +191,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   kill-switch state, and a fleet roll-up across epics.
 - **`yad-report`** — Self issue reporter. When a `yad` flow breaks, files a bug in the upstream
   yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool
-  present+authenticated booleans, the hub platform enum, the error code/hint, a path-scrubbed
+  present+authenticated booleans, the Product platform enum, the error code/hint, a path-scrubbed
   message, and the failing command + flag *names*; never paths, hostnames, git URLs, repo names,
   logins, epic/story IDs, branch names, or flag values. Searches open issues first (dedupe), previews
   the exact payload and asks before posting, then files via an authenticated `gh`/`glab` or a

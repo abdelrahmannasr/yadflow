@@ -7,9 +7,9 @@
 #   - any trailers appear in the fixed order Task -> Contract-Change -> Co-Authored-By.
 # Keep the type list in sync with cli/manifest.mjs COMMIT_TYPES and config.yaml build.commit_subject_style.
 #
-# Profiles (--profile code|hub, default code): the subject rule is identical on the product hub and on
+# Profiles (--profile code|hub|product, default code): the subject rule is identical on the Product and on
 # code repos (both follow CONTRIBUTING). The Task trailer is NOT required here (the spec-link gate owns
-# that on code repos; hub commits are not task-scoped) — this gate only checks SHAPE and ORDER.
+# that on code repos; Product commits are not task-scoped) — this gate only checks SHAPE and ORDER.
 #
 # Merge/squash commits (2+ parents) are skipped: their platform-generated subjects are not authored.
 set -euo pipefail
@@ -23,7 +23,21 @@ while [ $# -gt 0 ]; do
     *) ARGS+=("$1"); shift ;;
   esac
 done
-case "$PROFILE" in code|hub) ;; *) echo "FAIL [commit-message]: unknown --profile '$PROFILE' (code|hub)."; exit 1 ;; esac
+case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [commit-message]: unknown --profile '$PROFILE' (code|hub|product)."; exit 1 ;; esac
+# `product` is the new name for the `hub` profile and BOTH are accepted.
+#
+# Not because the two sides update separately — they do not: this script and the workflow that passes
+# the flag are both in PRODUCT_WIRING (cli/manifest.mjs) and land together on one `yad update`. It is
+# the plain add-before-remove ladder instead: accept the new spelling now, switch the workflow
+# templates to emit it in a later release, drop the old one after that. Every shipped template still
+# passes `--profile hub` today, so this arm is dead weight until that switch — which is the point.
+#
+# Normalised to `hub` immediately, so nothing below has to know there are two spellings. That is
+# load-bearing in pr-title.sh and pr-template.sh: leave `$PROFILE` as `product` and the `= hub`
+# branch is skipped, taking the whole review-branch arm with it — including the guard that stops a
+# plain code title carrying an artifact change past its review.
+[ "$PROFILE" = product ] && PROFILE=hub
+
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---

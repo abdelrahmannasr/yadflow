@@ -1,4 +1,4 @@
-# Yadflow Team Guide — how to use the workflow with 1 product hub + 3 code repos
+# Yadflow Team Guide — how to use the workflow with 1 Product + 3 code repos
 
 **Yadflow** (*yahd-flow* — from **يد**, Arabic for "hand"): the AI-driven SDLC where a human hand
 moves every gate. On npm as `yadflow`.
@@ -29,7 +29,7 @@ You will have **four separate git repos**, each with one job:
   code-repo-1     ──►  the CODE
   code-repo-2          Real application code. Each story's spec lives here too,
   code-repo-3          under: specs/<story-id>/  — and every PR links back to its
-                       story in the product hub.
+                       story in the Product.
 ```
 
 ```mermaid
@@ -50,14 +50,14 @@ flowchart LR
     r3 -. specs & PRs link back .-> phub
 ```
 
-**The handoff rule:** everything *up to and including the locked contract* lives in the **product hub**.
+**The handoff rule:** everything *up to and including the locked contract* lives in the **Product**.
 Everything *from the spec onward* (specs, tasks, code) lives in each **code repo**.
 
 ### The whole workflow, end to end
 
-Setup is one-time. The **Shape** part is human-gated and runs once per epic in the hub; **Build**
+Setup is one-time. The **Shape** part is human-gated and runs once per epic in the Product; **Build**
 runs once per story per code repo; **automation** is opt-in and earned. `yad-status` reads it
-all; `yad-hub-bridge` mirrors Shape reviews to real PR/MRs on the hub.
+all; `yad-hub-bridge` mirrors Shape reviews to real PR/MRs on the Product.
 
 ```mermaid
 flowchart TD
@@ -75,7 +75,7 @@ flowchart TD
       inst --> conn --> sync
     end
 
-    subgraph FRONT["A · Shape — product hub · human-gated · once per epic"]
+    subgraph FRONT["A · Shape — Product · human-gated · once per epic"]
       direction TB
       an["yad-analysis<br/>optional → analysis.md"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact
@@ -132,7 +132,7 @@ Shape step, **permanently human**.
 
 ## 2. The workflow has three parts
 
-- **Shape = decide.** Done once per epic, in the **product hub**. Always human-approved — nothing
+- **Shape = decide.** Done once per epic, in the **Product**. Always human-approved — nothing
   auto-advances. This is where you agree on the epic, the architecture, the locked contract, the UI, and
   the stories.
 - **Build = make it real.** Done once per story, per code repo, **inside that code repo**. Spec → implement →
@@ -146,13 +146,13 @@ Each step writes a file and then **stops at a gate**. A human moves it forward. 
 
 ## 3. One-time setup (the team lead does this once)
 
-**a. Create the product hub repo.** Just an empty git repo. You don't need to scaffold anything — the
+**a. Create the Product repo.** Just an empty git repo. You don't need to scaffold anything — the
 first `yad-epic` run creates `epics/EP-<slug>/` and its state files for you.
 
 **b. Make sure your 3 code repos exist.** Each is its own separate git repo (its own `.git`).
 
-**c. Install everything with the CLI.** From the product hub repo, run the guided setup — it installs the
-skills into the IDE dirs, detects the hub platform, connects your code repos, and wires each one (CI gates,
+**c. Install everything with the CLI.** From the Product repo, run the guided setup — it installs the
+skills into the IDE dirs, detects the Product platform, connects your code repos, and wires each one (CI gates,
 PR/MR template):
 
 ```bash
@@ -172,7 +172,7 @@ npx yadflow setup
 > **Landing the upgrade for the whole team:** `npx yadflow update` only writes the changed files into
 > the working trees — someone still has to commit them across every repo. Run `npx yadflow update
 > --push` to have yadflow **commit each repo's changes and push them straight to the default branch**
-> of the hub and every connected repo, as one `chore(yad-update): sync SDLC install to yadflow
+> of the Product and every connected repo, as one `chore(yad-update): sync SDLC install to yadflow
 > vX.Y.Z` commit per repo. It stages only what it wrote (never `git add -A`) and only commits on a
 > repo's default branch — a repo on a feature branch is skipped with a warning, never disturbed.
 > Because it pushes directly to the default branch there is **no PR/MR**, so the normal gate suite is
@@ -204,10 +204,10 @@ Re-run this block after you `git pull` updates into `yadflow`.
 </details>
 >
 > **Alternative:** if you'd rather not have each person install, commit the `yad-*` skill folders into
-> the product hub repo itself (under `.claude/skills/`). Then anyone who clones the hub gets the skills
+> the Product repo itself (under `.claude/skills/`). Then anyone who clones the Product gets the skills
 > automatically. The user-level install above is the recommended default.
 
-**d. Wire each code repo once.** From inside the hub (or with the repo path), run for each of the 3 repos:
+**d. Wire each code repo once.** From inside the Product (or with the repo path), run for each of the 3 repos:
 
 ```text
 yad-checks          repo:<repo> action: wire   # installs the CI gates (merges with existing CI, never clobbers)
@@ -218,23 +218,23 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 > (GitHub: a separate `yad-checks.yml`; GitLab: an `include:` of `.gitlab/ci/yad-checks.yml`) — it
 > never edits a foreign workflow. Re-running any `wire` is a no-op.
 
-**d2. Wire the product hub itself** (so the Shape review can run through real PRs on the hub):
+**d2. Wire the Product itself** (so the Shape review can run through real PRs on the Product):
 
 ```text
-yad-connect-repos action: detect-hub                              # records the hub's platform in .sdlc/hub.json
+yad-connect-repos action: detect-hub                              # records the Product's platform in .sdlc/hub.json
 yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
-yad-pr-template     repo:hub action: wire                         # hub's Shape PR/MR body template
-yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
+yad-pr-template     repo:hub action: wire                         # Product's Shape PR/MR body template
+yad-checks          repo:hub action: wire                         # Product-flavored gates (owner-set / contract-locked / approvals-present)
 yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
 The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
-derived from each repo's `domain_owner` in `repos.json` (not retyped). With the hub on a platform, the
+derived from each repo's `domain_owner` in `repos.json` (not retyped). With the Product on a platform, the
 Shape gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
 comments back. No platform (or `bridge_enabled: false`)? The gate just runs local — skip d2.
 
 With the gate-sync CI wired, you usually don't run `sync` at all: the **merge** of a review PR triggers
-it in the hub's CI, and the ledger update is committed straight to the hub's default branch (`git pull`
+it in the Product's CI, and the ledger update is committed straight to the Product's default branch (`git pull`
 to see it). Nothing fires pre-merge — approvals and change requests live on the platform, which is the
 source of truth while the review is open, and CI never touches the review branch (so an in-flight
 approval is never dismissed by a CI commit). CI never approves or merges — the merge click stays human.
@@ -244,8 +244,8 @@ carrying the #163 fix that costs a read, not a commit — the ledgers are writte
 so an unchanged approval record re-serializes to an identical file. On older versions it committed the
 reorder every 15 minutes; the workaround there is to disable the schedule.
 
-**e. Connect your code repos to the hub (so the brain knows what's already built).** From inside the
-hub, run once per code repo — and again any time you add a new one:
+**e. Connect your code repos to the Product (so the brain knows what's already built).** From inside the
+Product, run once per code repo — and again any time you add a new one:
 
 ```text
 yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>
@@ -269,7 +269,7 @@ You can start without any of them.
 
 ## 4. Onboarding a team member (every developer, copy-paste)
 
-1. Clone the **product hub** and the **code repos** you'll work in.
+1. Clone the **Product** and the **code repos** you'll work in.
 2. Install the skills once (same block as step 3c above):
 
 ```bash
@@ -286,7 +286,7 @@ for s in yad-analysis yad-epic yad-architecture yad-ui yad-stories yad-test-case
 done
 ```
 
-3. That's it. Open Claude Code **in the product hub** to work on epics; open it **in a code repo** to
+3. That's it. Open Claude Code **in the Product** to work on epics; open it **in a code repo** to
    build stories.
 
 To run a skill, just ask your agent by name — e.g. *"run `yad-epic`"*. All state is plain files
@@ -294,7 +294,7 @@ you can also read and edit directly.
 
 ---
 
-## 5. Running an epic — Shape (in the product hub)
+## 5. Running an epic — Shape (in the Product)
 
 Do these in order. After each author step, the matching review opens and **waits** — you clear it with
 `yad-review-gate` (`action: open → comment → approve → advance`).
@@ -335,14 +335,14 @@ flowchart LR
     adv -->|yes| nxt(["next step"])
 ```
 
-- `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the hub
-  is on a platform (step 3d2), this also opens a review **PR/MR on the hub** for the artifact.
+- `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the Product
+  is on a platform (step 3d2), this also opens a review **PR/MR on the Product** for the artifact.
 - `action: approve` (name + role) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
-  the hub PR and you run `action: sync` to pull that platform state into the ledger.
+  the Product PR and you run `action: sync` to pull that platform state into the ledger.
 - `action: advance` — moves forward **only if** the rule is met; otherwise it tells you who's still missing.
   (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
-- With the hub's gate-sync CI wired (step 3d2), `sync` runs **automatically when the review PR/MR is
-  merged** and commits the ledger to the hub's default branch — the same predicate, just triggered by
+- With the Product's gate-sync CI wired (step 3d2), `sync` runs **automatically when the review PR/MR is
+  merged** and commits the ledger to the Product's default branch — the same predicate, just triggered by
   the merge instead of a human command. Nothing runs pre-merge: while the review is open the platform
   holds the state (native approvals + threads), and CI never touches the review branch, so an
   in-flight approval is never dismissed by a CI commit. A scheduled job re-checks recently-merged
@@ -362,12 +362,12 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
 3. **Check** — `yad-checks repo:<repo> action: run` → the gates must pass: spec-link,
    contract-check, build/test/lint, verified-commits (every commit signed with a
-   platform-Verified key and authored by a roster-known email — on the hub and every repo), and the
+   platform-Verified key and authored by a roster-known email — on the Product and every repo), and the
    pattern gates commit-message / pr-title / pr-template.
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
    to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
-   registry `default_branch` → the hub's `default_branch` for a hub PR → the platform → `origin/HEAD` →
+   registry `default_branch` → the Product's `default_branch`, for a PR on the Product itself → the platform → `origin/HEAD` →
    `main`), not a hardcoded `main`. If it warns that your base is not the platform default, that is
    **advisory — nothing is blocked and the PR is already open.** Intended (stacked PR, release branch)?
    Carry on. Not intended? Close it, pick the right base, and re-run — retargeting the open PR does not
@@ -406,7 +406,7 @@ it doesn't change and **re-authors only what it does**. The old artifacts aren't
 **You'll know you need this** when CI fails with `epic-open: targets SEALED epic …` — that means the epic
 is fully shipped and a new change must go in its own threaded epic.
 
-**The runbook (in the product hub):**
+**The runbook (in the Product):**
 
 1. **File it.** Invoke **`yad-change`**: give it the `parent` epic (usually the feature's current tip),
    a `title`, the `kind` (`change` | `defect` | `hotfix`), and for a defect/hotfix the `origin`,
@@ -473,7 +473,7 @@ surfaces (`contract`, `auth`, `payments`):
   no commands and writing no tracked state. Write it anywhere: `yad usage --out report.html --all` (or
   `--since/--until`, `--member <name>`, `--format json|md`). No emails or comment bodies are ever
   included. (To attribute *authored* artifacts to a member, give them an `email` in the roster.)
-- **Keep the install in sync with the CLI** (run from the product hub):
+- **Keep the install in sync with the CLI** (run from the Product):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).
   - `npx yadflow update` — apply drift + install newly-added skills (the upgrade command).
@@ -506,7 +506,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 
 | Skill | When you reach for it |
 |-------|------------------------|
-| `yad-connect-repos` | Register a code repo with the hub + cache its code-map (setup / new repo). |
+| `yad-connect-repos` | Register a code repo with the Product + cache its code-map (setup / new repo). |
 | `yad-connect-design` | Connect a design tool (Figma / pencil) so `yad-ui` can materialize the screens (setup). |
 | `yad-connect-testing` | Connect a testing tool (Playwright / cypress / pytest / maestro) so `yad-test-cases` can implement the automation (setup). |
 | `yad-connect-learning` | Connect a learning tool (DeepTutor) so `yad-learn` can tutor the team in context (setup). |
@@ -519,7 +519,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |
 | `yad-review-companion` | Make review fun & visible: 60-sec trailer, swipe cards, grounded chat, engagement signal + friendly nudge (Shape gate & code PRs). |
-| `yad-hub-bridge` | Open the review PR/MR on the hub and sync platform approvals back. |
+| `yad-hub-bridge` | Open the review PR/MR on the Product and sync platform approvals back. |
 | `yad-spec` | Spec a ready story in one repo (Spec Kit ceremony). |
 | `yad-implement` | Implement one atomic task as a small branch. |
 | `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |

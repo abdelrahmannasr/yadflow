@@ -24,14 +24,14 @@ const GATE_GROUPS = [
       { control: 'commit-message — Conventional-Commits subject + the fixed trailer order' },
       { control: 'pr-title — the PR/MR title follows the commit-subject style' },
       { control: 'pr-template — the PR/MR body uses the committed template (Impact & Risk block)' },
-      { control: 'on the hub, pr-title/pr-template split by head branch (review/EP-* → artifact-review shape, else code shape) and reject an epics/** change on a non-review branch' },
+      { control: 'on the Product, pr-title/pr-template split by head branch (review/EP-* → artifact-review shape, else code shape) and reject an epics/** change on a non-review branch' },
     ],
   },
   {
     layer: 'Where they run',
     items: [
       { control: '.github/workflows/yad-checks.yml (GitHub) and .gitlab-ci.yml (GitLab)' },
-      { control: 'On both code repos AND the product hub (the hub validates its artifact-review conventions)' },
+      { control: 'On both code repos AND the Product (the Product validates its artifact-review conventions)' },
       { control: 'They fail closed on a bad base ref — never silently pass' },
     ],
   },

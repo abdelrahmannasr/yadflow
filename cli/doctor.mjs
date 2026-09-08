@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
+import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
@@ -56,10 +56,10 @@ export function envChecks(checks) {
 }
 
 export function projectChecks(checks, root) {
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const productPath = productConfigPath(root);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const verPath = path.join(root, PROJECT_FILES.version);
-  if (!exists(hubPath) && !exists(regPath) && !exists(verPath)) {
+  if (!exists(productPath) && !exists(regPath) && !exists(verPath)) {
     check(checks, 'project', 'project', 'warn', 'no yad project here (.sdlc/ not initialised)', 'run `yad setup` to start one — environment checks above still apply');
     return null;
   }
@@ -76,12 +76,12 @@ export function projectChecks(checks, root) {
 
   // hub.json: parse + shape
   let hub = null;
-  if (!exists(hubPath)) {
+  if (!exists(productPath)) {
     check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform + roster');
   } else {
     let hubBroken = false;
     try {
-      hub = readJSONStrict(hubPath, null);
+      hub = readJSONStrict(productPath, null);
     } catch (e) {
       hubBroken = true;
       check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} does not parse [${e.code || 'YAD-STATE-001'}]`, e.hint || 'fix the JSON or restore it from git');
@@ -89,7 +89,7 @@ export function projectChecks(checks, root) {
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
-    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a hub the gate would reject.
+    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a Product the gate would reject.
     else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
@@ -104,12 +104,12 @@ export function projectChecks(checks, root) {
         if (!hostFromGitUrl(hub.git_url)) {
           check(checks, 'hub-git-url', 'project', 'warn',
             `${PROJECT_FILES.hubConfig} sets platform '${hub.platform}' but has no git_url [YAD-CFG-005]`,
-            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the hub host');
+            'add git_url to hub.json (or re-run `yad setup`) — auth/PR checks need the Product host');
         }
-        // Scope the auth probe to the hub's own host (derived from git_url, falling back to the
+        // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
         // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
-        // flag a working self-hosted hub — so we SKIP the probe entirely when no host resolves
+        // flag a working self-hosted Product — so we SKIP the probe entirely when no host resolves
         // rather than run the flaky unscoped form.
         const host = hostFromGitUrl(hub.git_url)
           || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
@@ -118,7 +118,7 @@ export function projectChecks(checks, root) {
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
-          // Re-validate each roster login against the hub (warn-only). Skips when a login is already
+          // Re-validate each roster login against the Product (warn-only). Skips when a login is already
           // flagged unverified by setup; reports any that no longer resolve.
           const bad = [];
           for (const e of hub.roster || []) {
@@ -131,7 +131,7 @@ export function projectChecks(checks, root) {
           // A present+authenticated glab whose token lacks api scope would still break readPrGitLab, so
           // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
           if (hub.platform === 'gitlab') {
-            // Scope the probe to the hub's own host (like the auth check above) so a multi-instance
+            // Scope the probe to the Product's own host (like the auth check above) so a multi-instance
             // setup doesn't hit the wrong GitLab. `host` is guaranteed truthy here (we skip the whole
             // auth branch when it cannot be resolved), so the probe is always host-scoped.
             if (!run('glab', ['api', 'version', '--hostname', host]).ok) {
@@ -159,7 +159,7 @@ export function projectChecks(checks, root) {
   // an agent's hand-edit is always rejected later by `ledger-guard`, so the local hook that refuses it
   // up front should be installed. With a local ledger nothing guards it, and the hand-edit the
   // authoring skills describe is correct — nothing to report, so the check is silent rather than `ok`.
-  const hubForHooks = readJSON(hubPath, null);
+  const hubForHooks = readJSON(productPath, null);
   if (isVerifiedLedger(hubForHooks)) {
     const unwired = [];
     const broken = [];
@@ -287,13 +287,13 @@ export function projectChecks(checks, root) {
       // would read as "healthy") — an entry with no path is malformed.
       if (!repo.path) { check(checks, `repo:${repo.name || '(unnamed)'}`, 'project', 'fail', `${repo.name || '(unnamed)'}: no \`path\` in repos.json [YAD-STATE-003]`, 're-connect the repo (`yad setup`)'); continue; }
       const repoRoot = path.resolve(root, repo.path);
-      // A registered repo may be a SIBLING of the hub (`../backend`, the standard multi-repo layout).
-      // Such a checkout is legitimately absent wherever only the hub is checked out — hub CI, a fresh
+      // A registered repo may be a SIBLING of the Product (`../backend`, the standard multi-repo layout).
+      // Such a checkout is legitimately absent wherever only the Product is checked out — Product CI, a fresh
       // clone — so its absence is a warn, not corruption. A missing path INSIDE the project root is
       // still a hard fail: nothing but damage explains it.
       if (!exists(repoRoot)) {
         if (underProjectRoot(root, repoRoot) || !isRegistrableSibling(root, repo.path)) check(checks, `repo:${repo.name}`, 'project', 'fail', `${repo.name}: path ${repo.path} does not exist [YAD-STATE-003]`, 'fix the path in repos.json or re-connect the repo');
-        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the hub)`, 'expected when only the hub is checked out; clone it alongside the hub to work on it here');
+        else check(checks, `repo:${repo.name}`, 'project', 'warn', `${repo.name}: ${repo.path} is not present in this checkout (sibling repo, outside the Product)`, 'expected when only the Product is checked out; clone it alongside the Product to work on it here');
         continue;
       }
       const head = gitHead(repoRoot);
@@ -372,14 +372,14 @@ function contractLockCheck(checks, root, epic, ledger) {
   const short = (h) => `${h.slice(0, 19)}…`;
 
   if (lock.inheritedFrom || lock.ref) {
-    // The ref is repo-controlled text, so keep it inside this hub's epics/ — a lock file must not be
+    // The ref is repo-controlled text, so keep it inside this Product's epics/ — a lock file must not be
     // able to point the check at arbitrary JSON elsewhere on disk.
     const epicsDir = path.join(root, 'epics');
     const refPath = path.resolve(path.join(epicDir, '.sdlc'), lock.ref || `../../${lock.inheritedFrom}/.sdlc/contract-lock.json`);
     if (refPath !== epicsDir && !refPath.startsWith(epicsDir + path.sep)) {
       check(checks, id, 'epics', 'fail',
         `${epic}: pointer-lock ref '${lock.ref}' resolves outside epics/`,
-        'a pointer-lock must reference another epic in this hub — fix `ref` (yad-change writes ../../EP-<parent>/.sdlc/contract-lock.json)');
+        'a pointer-lock must reference another epic in this Product — fix `ref` (yad-change writes ../../EP-<parent>/.sdlc/contract-lock.json)');
       return;
     }
     const parent = readJSON(refPath, null);
@@ -476,7 +476,7 @@ export function epicChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
   // Read once for the whole sweep: whether approval is waived is a project fact, not a per-epic one.
-  const solo = isSolo(readJSON(path.join(root, PROJECT_FILES.hubConfig), null));
+  const solo = isSolo(readJSON(productConfigPath(root), null));
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
     try {
@@ -544,7 +544,7 @@ function shapeCheckFor(checks, id, label, rows, engine) {
   const readable = rows.filter((r) => r.from !== null);
   if (!readable.length) return;
   const ahead = readable.filter((r) => r.action === 'ahead');
-  // A file behind the engine on a VERIFIED hub is real drift, but `yad migrate` deliberately refuses
+  // A file behind the engine on a VERIFIED Product is real drift, but `yad migrate` deliberately refuses
   // to touch it — CI is its only writer. Pointing at migrate there would send someone to a command
   // that changes nothing while the warning never clears, so those are counted and named separately.
   const behind = readable.filter((r) => r.from < engine && r.action !== 'ci-owned');
@@ -588,8 +588,66 @@ function shapeCheckFor(checks, id, label, rows, engine) {
 // engine is on shape 1 nothing can be BEHIND it, so the warn branch — the one this section exists for —
 // is unreachable from a real project until the first real shape change lands. Tests supply a plan that
 // reaches it, which is how the drift report is proven before there is any drift to report.
+// A file that lives under two names must say the same thing under both. The engine writes them
+// together, so they only drift when something outside the engine touched one — a person editing the
+// name they happen to know, a script, a half-finished merge. The older name is the authoritative one
+// this major, so a silent drift means the OTHER copy is being ignored, which is the kind of thing
+// people lose an afternoon to. Say it out loud instead.
+export function mirrorChecks(checks, root) {
+  const pairs = [...MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy }))];
+  // The per-epic PR ledger is renamed the same way, so it drifts the same way. It is not in
+  // MIRRORED_FILES because that list is project-relative and this one exists once per epic.
+  const epicsDir = path.join(root, 'epics');
+  if (exists(epicsDir)) {
+    for (const e of fs.readdirSync(epicsDir).sort()) {
+      // `statSync` follows symlinks and throws on a dangling one, so guard the whole entry rather
+      // than letting one broken link take the entire health check down.
+      try {
+        if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+      } catch { continue; }
+      const f = epicFiles(path.join('epics', e));
+      pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
+    }
+  }
+  for (const { canonical, legacy } of pairs) {
+    const a = path.join(root, canonical);
+    const b = path.join(root, legacy);
+    // Only the settings file reaches this branch in practice: the per-epic PR ledgers are top-level
+    // arrays, which carry no shape at all, so `shape >= 3` is never true for them. They can be
+    // reported as DRIFTED (below) but never as half-made, and that is correct — their new name
+    // appears when a gate command next writes them, not when the project migrates.
+    //
+    // One side missing is NORMAL before `yad migrate` — an un-migrated project has only the old name.
+    // It is not normal once the file says shape 3, because from then on every save writes both. And
+    // `writeMirrored` cannot repair it on its own: when the authoritative copy already matches, it
+    // correctly does nothing, so a half-made pair stays half-made and silent.
+    if (exists(a) !== exists(b)) {
+      const present = exists(a) ? a : b;
+      let shape;
+      try { shape = JSON.parse(fs.readFileSync(present, 'utf8'))?.schemaVersion ?? 1; } catch { continue; }
+      if (typeof shape === 'number' && shape >= 3) {
+        check(
+          checks, `mirror:${canonical}`, 'shape', 'warn',
+          `${exists(a) ? legacy : canonical} is missing — it should exist beside ${path.relative(root, present)} on shape ${shape}`,
+          'run `yad migrate --apply` — a missing partner counts as a change, so it writes the pair back into step',
+        );
+      }
+      continue;
+    }
+    if (!exists(a)) continue;
+    let same;
+    try { same = fs.readFileSync(a, 'utf8') === fs.readFileSync(b, 'utf8'); } catch { continue; }
+    if (same) continue;
+    check(
+      checks, `mirror:${canonical}`, 'shape', 'warn',
+      `${canonical} and ${legacy} do not match — ${legacy} is the one being read`,
+      'they are two names for one file while the rename settles. Copy the one you meant to keep over the other, then re-run the command that writes it',
+    );
+  }
+}
+
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
-  if (!injected && !exists(path.join(root, PROJECT_FILES.hubConfig)) && !exists(path.join(root, PROJECT_FILES.version))) return;
+  if (!injected && !exists(productConfigPath(root)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
   if (!plan) {
     try {
@@ -653,6 +711,7 @@ export function collectDoctor(root) {
   envChecks(checks);
   projectChecks(checks, root);
   shapeChecks(checks, root);
+  mirrorChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

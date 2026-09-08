@@ -14,7 +14,7 @@ is the read-only counterpart that surfaces problems *before* a PR hits those gat
 
 ## Conventions
 
-- `{project-root}` resolves from the product hub.
+- `{project-root}` resolves from the Product.
 - It drives the **`yad reconcile` CLI** (`cli/thread.mjs`): `yad reconcile [check|refresh|wire]
   [--thread EP-<genesis>]`. The CLI is the engine; this skill orchestrates + explains.
 - The thread is **derived** from `parent:` frontmatter (no registry). Repo drift uses the exact

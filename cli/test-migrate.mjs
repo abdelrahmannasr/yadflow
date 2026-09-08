@@ -82,7 +82,11 @@ test('migrate --apply: stamps the files, backs each one up first, and reports wh
   const res = await runMigrate(T, { apply: true });
 
   assert.equal(res.ok, true);
-  assert.deepEqual(res.written.sort(), ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/repos.json']);
+  // `.sdlc/product.json` is in the list because the product config is written under BOTH its new
+  // name and its old one, for one major, so a ledger-guard that has not been refreshed yet still
+  // finds the file it opens by name.
+  assert.deepEqual(res.written.sort(),
+    ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/product.json', '.sdlc/repos.json']);
   assert.equal(read(path.join(T, '.sdlc/repos.json')).schemaVersion, ENGINE_SHAPE);
   assert.equal(Object.keys(read(path.join(T, '.sdlc/repos.json')))[0], 'schemaVersion', 'the stamp leads the file');
   assert.equal(fs.readFileSync(path.join(T, '.sdlc/repos.json.yad-orig'), 'utf8'), original,
@@ -124,7 +128,11 @@ test('migrate: the preview predicts exactly what an apply writes — file for fi
   const A = project({ files });
   const B = project({ files });
   try {
-    const predicted = (await runMigrate(A, {})).rows.filter((r) => r.changes).map((r) => r.file).sort();
+    // A row can also declare a file it CREATES — the product config is written under its new name
+    // and its old one. The preview names both, so the comparison has to count both, or it would
+    // report a mismatch that is really the preview being more complete than the row list.
+    const plan = (await runMigrate(A, {})).rows.filter((r) => r.changes);
+    const predicted = plan.flatMap((r) => [r.file, ...(r.creates ?? [])]).sort();
     const actual = (await runMigrate(B, { apply: true })).written.slice().sort();
     assert.deepEqual(actual, predicted, 'a preview that does not match the apply is worse than no preview');
     // …and the already-stamped file is in neither list, so "unchanged" really means untouched.
@@ -287,17 +295,17 @@ test('migrate: a project in local (non-verified) mode migrates its gate ledger l
   const T = project({ files: { 'epics/EP-x/.sdlc/state.json': '{\n  "currentStep": "epic"\n}\n' } });
   const res = await runMigrate(T, { apply: true });
   // `migrate`, not `stamp`: the shape genuinely moves (1 -> 2), even though this file's own fields
-  // are untouched by the hub-only step. The shape describes the project's format, not one file's keys.
+  // are untouched by the Product-only step. The shape describes the project's format, not one file's keys.
   assert.equal(rowFor(res.rows, path.join('epics', 'EP-x', '.sdlc', 'state.json')).action, 'migrate');
   assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).schemaVersion, ENGINE_SHAPE);
   cleanup(T);
 });
 
 // ---- shape 2: hub.json gains `ledger` -------------------------------------------------------
-// The value is COMPUTED from what the engine already decided about the hub, never copied from the
+// The value is COMPUTED from what the engine already decided about the Product, never copied from the
 // flag. That distinction is the whole safety argument for this migration: an upgrade must not change
 // what a project does. The table covers every hub.json a real project can be sitting on.
-test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every hub shape', async () => {
+test('migrate 1 -> 2: `ledger` records what the Product was already doing, for every hub shape', async () => {
   const { isVerifiedLedger } = await import('./manifest.mjs');
   const cases = [
     ['platform + bridge_enabled', { platform: 'github', bridge_enabled: true }, 'verified'],
@@ -305,7 +313,7 @@ test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every
     ['platform, flag explicitly false', { platform: 'github', bridge_enabled: false }, 'local'],
     ['platform, no flag at all', { platform: 'github' }, 'local'],
     // The one that would be wrong if the migration copied the flag instead of asking the reader:
-    // no platform means no Verified badge to read, so this hub has ALWAYS behaved as local.
+    // no platform means no Verified badge to read, so this Product has ALWAYS behaved as local.
     ['flag true but NO platform', { bridge_enabled: true }, 'local'],
     ['platform null + flag true', { platform: null, bridge_enabled: true }, 'local'],
   ];
@@ -316,7 +324,7 @@ test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every
       await runMigrate(T, { apply: true });
       const after = read(path.join(T, '.sdlc/hub.json'));
       assert.equal(after.ledger, expected, name);
-      assert.equal(after.schemaVersion, 2, `${name}: the file states the new shape`);
+      assert.equal(after.schemaVersion, ENGINE_SHAPE, `${name}: the file states the new shape`);
       assert.equal(isVerifiedLedger(after), before, `${name}: migrating changed what the engine DOES`);
       // Add before you remove (rule 3): the old key survives, because a ledger-guard that has not
       // been refreshed by `yad update` yet is still reading it.
@@ -327,7 +335,7 @@ test('migrate 1 -> 2: `ledger` records what the hub was already doing, for every
 });
 
 // A file must never DECLARE one shape while carrying another's fields. `yad setup` can run on a
-// project that has not migrated yet, and if it wrote `ledger` there the hub would claim shape 1 while
+// project that has not migrated yet, and if it wrote `ledger` there the Product would claim shape 1 while
 // holding a shape-2 key — which makes doctor's drift report a lie about the one file this change is
 // about. The old booleans carry the setting until `yad migrate` adds the key.
 test('migrate 1 -> 2: a shape-1 hub written by an older shape stays coherent, then migrates cleanly', async () => {
@@ -339,7 +347,7 @@ test('migrate 1 -> 2: a shape-1 hub written by an older shape stays coherent, th
     assert.equal(isVerifiedLedger(before), true, 'and the old booleans still answer the question');
     await runMigrate(T, { apply: true });
     const after = read(path.join(T, '.sdlc/hub.json'));
-    assert.equal(after.schemaVersion, 2);
+    assert.equal(after.schemaVersion, ENGINE_SHAPE);
     assert.equal(after.ledger, 'verified', 'the migration records what the booleans were already saying');
   } finally { cleanup(T); }
 });
@@ -354,8 +362,8 @@ test('migrate 1 -> 2: only hub.json gains `ledger`; every other file just record
     await runMigrate(T, { apply: true });
     const repos = read(path.join(T, '.sdlc/repos.json'));
     const lock = read(path.join(T, 'epics/EP-x/.sdlc/contract-lock.json'));
-    assert.deepEqual(repos, { schemaVersion: 2, repos: [] }, 'a non-hub file gains the stamp and nothing else');
-    assert.deepEqual(lock, { schemaVersion: 2, hash: 'sha256:abc' });
+    assert.deepEqual(repos, { schemaVersion: ENGINE_SHAPE, repos: [] }, 'a non-hub file gains the stamp and nothing else');
+    assert.deepEqual(lock, { schemaVersion: ENGINE_SHAPE, hash: 'sha256:abc' });
     assert.equal('ledger' in repos, false, '`ledger` belongs to hub.json alone');
   } finally { cleanup(T); }
 });
@@ -373,6 +381,166 @@ test('migrate 1 -> 2: running it twice is a no-op, and does not overwrite the ba
     // second run quietly destroys the only way back.
     assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json.yad-orig'), 'utf8'), backup);
     assert.equal('ledger' in JSON.parse(backup), false, 'the backup is the pre-migration file');
+  } finally { cleanup(T); }
+});
+
+// ---- shape 3: `hub` becomes `Product` -------------------------------------------------------
+// The settings file changes NAME, which is harder than changing a field, because a file is opened by
+// name from outside this codebase — `templates/checks/ledger-guard.sh` lives in the user's own repo
+// and opens `.sdlc/hub.json` by that literal path. So both names exist for one major.
+test('migrate 2 -> 3: the settings file gains its new name and KEEPS the old one', async () => {
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github",\n  "bridge_enabled": true\n}\n' } });
+  try {
+    const res = await runMigrate(T, { apply: true });
+    const product = path.join(T, '.sdlc/product.json');
+    const hub = path.join(T, '.sdlc/hub.json');
+    assert.ok(fs.existsSync(product), 'the new name exists');
+    assert.ok(fs.existsSync(hub), 'and the old one is still there — removing it would disarm an un-refreshed ledger-guard');
+    assert.equal(fs.readFileSync(product, 'utf8'), fs.readFileSync(hub, 'utf8'), 'byte-identical, not merely similar');
+    assert.equal(read(product).schemaVersion, ENGINE_SHAPE);
+    assert.ok(res.written.includes('.sdlc/product.json'), 'and the report names the file it created');
+  } finally { cleanup(T); }
+});
+
+test('migrate 2 -> 3: the PREVIEW names the file the apply will create', async () => {
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github"\n}\n' } });
+  try {
+    const plan = await runMigrate(T, {});
+    const row = rowFor(plan.rows, '.sdlc/hub.json');
+    assert.deepEqual(row.creates, ['.sdlc/product.json'],
+      'a preview that does not mention a file the apply creates is not a preview');
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc/product.json')), 'and the preview still wrote nothing');
+  } finally { cleanup(T); }
+});
+
+test('migrate 2 -> 3: a roster role under `hub` GAINS a `product` spelling, and other domains are untouched', async () => {
+  const roster = [
+    { login: 'alice', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] } },
+    { login: 'bob', roles: { payments: ['reviewer'] } },
+    { login: 'carol' },
+  ];
+  const T = project({ files: { '.sdlc/hub.json': JSON.stringify({ platform: 'github', roster }, null, 2) + '\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    const after = read(path.join(T, '.sdlc/product.json'));
+    // BOTH spellings. Replacing `hub` would silently strip every product-level role from the point
+    // of view of an older CLI, of `yad setup` (which still writes `hub` when it adds a member), and
+    // of every caller that asks `rolesForScope(entry, 'hub')`.
+    assert.deepEqual(after.roster[0].roles,
+      { product: ['owner', 'reviewer'], hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
+    assert.deepEqual(after.roster[1].roles, { payments: ['reviewer'] }, 'a member with no hub role is unchanged');
+    assert.deepEqual(after.roster[2], { login: 'carol' }, 'and a member with no roles at all is left alone');
+  } finally { cleanup(T); }
+});
+
+test('migrate 2 -> 3: a product-level role survives the rename for BOTH spellings', async () => {
+  const { rolesForScope } = await import('./platform.mjs');
+  const roster = [{ login: 'alice', roles: { hub: ['owner'], backend: ['domain-owner'] } }];
+  const T = project({ files: { '.sdlc/hub.json': JSON.stringify({ platform: 'github', roster }, null, 2) + '\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    const entry = read(path.join(T, '.sdlc/hub.json')).roster[0];
+    // The gate asks for the product scope by whichever name the code it came from knows. Both must
+    // answer, or a reviewer stops being found and no message says why.
+    assert.deepEqual(rolesForScope(entry, 'hub'), ['owner'], 'an older caller still finds the role');
+    assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'and so does a newer one');
+    assert.deepEqual(rolesForScope(entry, 'backend'), ['domain-owner'], 'repo scopes are untouched');
+  } finally { cleanup(T); }
+});
+
+// Each of these is a bug that shipped in an earlier draft of this branch and was found by review.
+test('migrate: the authoritative file and its backup survive a DRIFTED pair', async () => {
+  // hub.json is the one that is read; product.json holds different content. Listing both names as
+  // separate rows made the product.json row write over hub.json before the hub.json row could copy
+  // it to .yad-orig — the content and its only backup, both gone.
+  const T = project({ files: {
+    '.sdlc/hub.json': JSON.stringify({ schemaVersion: 2, platform: 'github', roster: [{ login: 'a' }] }, null, 2) + '\n',
+    '.sdlc/product.json': JSON.stringify({ schemaVersion: 2, platform: 'github', roster: [] }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    assert.deepEqual(read(path.join(T, '.sdlc/hub.json')).roster, [{ login: 'a' }], 'the authoritative content survived');
+    assert.deepEqual(read(path.join(T, '.sdlc/hub.json.yad-orig')).roster, [{ login: 'a' }], 'and its backup is its OWN original');
+    assert.deepEqual(read(path.join(T, '.sdlc/product.json.yad-orig')).roster, [], 'the partner keeps its own original too');
+  } finally { cleanup(T); }
+});
+
+test('migrate: the preview names the partner even when it ALREADY exists', async () => {
+  // The state this release puts every project into. Naming the partner only when it is MISSING left
+  // the preview silent here while the apply rewrote the file — a preview that under-reports, which
+  // is the one thing that makes `--apply` not worth trusting.
+  const both = { schemaVersion: 2, platform: 'github' };
+  const files = {
+    '.sdlc/hub.json': JSON.stringify(both, null, 2) + '\n',
+    '.sdlc/product.json': JSON.stringify(both, null, 2) + '\n',
+  };
+  const A = project({ files });
+  const B = project({ files });
+  try {
+    const rows = (await runMigrate(A, {})).rows.filter((r) => r.changes);
+    const predicted = rows.flatMap((r) => [r.file, ...(r.creates ?? []), ...(r.rewrites ?? [])]).sort();
+    const actual = (await runMigrate(B, { apply: true })).written.slice().sort();
+    assert.ok(predicted.includes('.sdlc/product.json'), `the partner must be named: ${JSON.stringify(predicted)}`);
+    assert.deepEqual(actual, predicted, 'a preview that does not match the apply is worse than no preview');
+  } finally { cleanup(A); cleanup(B); }
+});
+
+test('migrate: a HALF-MADE pair is repaired, not reported forever', async () => {
+  // The row's own bytes are already correct, so without treating a missing partner as a change the
+  // plan says "already current", nothing is written, and `yad doctor` warns about the missing file
+  // for ever while naming a command that does nothing.
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github"\n}\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    fs.rmSync(path.join(T, '.sdlc/product.json'));
+    const plan = await runMigrate(T, {});
+    const row = rowFor(plan.rows, '.sdlc/hub.json');
+    assert.equal(row.changes, true, 'a missing partner counts as work to do');
+    assert.deepEqual(row.creates, ['.sdlc/product.json']);
+    await runMigrate(T, { apply: true });
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/product.json')), 'and the apply actually puts it back');
+  } finally { cleanup(T); }
+});
+
+test('migrate: a project holding ONLY the new name is migrated, not ignored', async () => {
+  const T = project({ files: { '.sdlc/product.json': '{\n  "platform": "github"\n}\n' } });
+  try {
+    fs.rmSync(path.join(T, '.sdlc/hub.json'), { force: true });
+    const plan = await runMigrate(T, {});
+    const row = rowFor(plan.rows, '.sdlc/product.json');
+    assert.ok(row, `the new name must be planned: ${JSON.stringify(plan.rows.map((r) => r.file))}`);
+    assert.deepEqual(row.creates, ['.sdlc/hub.json'], 'and the preview names the partner it will create');
+    await runMigrate(T, { apply: true });
+    const after = read(path.join(T, '.sdlc/product.json'));
+    assert.equal(after.schemaVersion, ENGINE_SHAPE);
+    assert.equal(after.ledger, 'local', 'a shape-1 file under the new name still gains the shape-2 field');
+  } finally { cleanup(T); }
+});
+
+test('migrate: a second run has nothing pending — the plan and the write agree on one comparison', async () => {
+  const T = project({ files: {
+    '.sdlc/hub.json': '{\n  "platform": "github"\n}\n',
+    '.sdlc/product.json': '{\n  "platform": "github"\n}\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const second = await runMigrate(T, {});
+    assert.deepEqual(second.rows.filter((r) => r.changes).map((r) => r.file), [],
+      'a migrated project that still reports pending work never converges');
+  } finally { cleanup(T); }
+});
+
+test('migrate 2 -> 3: running it twice keeps both names in step and does not re-write', async () => {
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github"\n}\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    const again = await runMigrate(T, { apply: true });
+    assert.deepEqual(again.written, [], 'a migrated project is not migrated again');
+    assert.equal(
+      fs.readFileSync(path.join(T, '.sdlc/product.json'), 'utf8'),
+      fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'),
+      'the two copies have not drifted apart',
+    );
   } finally { cleanup(T); }
 });
 

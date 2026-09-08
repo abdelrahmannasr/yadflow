@@ -1,6 +1,6 @@
 ---
 name: yad-checks
-description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the hub and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
+description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the Product and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
 # SDLC — Check Gates (Build Step C)
@@ -25,14 +25,14 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    The code-repo `yad-checks` workflow uses Node 22 by default (the build/test/lint job on GitHub; every
    `yad-*` gate job's image in the GitLab fragment) and reads `YAD_NODE_VERSION` (a GitHub repository
    variable or GitLab CI/CD variable) for repos whose declared runtime differs (a declared `packageManager` needs Corepack, so the override must be a line that
-   bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The hub-side workflows (verified-commits, hub-checks, update-guard,
+   bundles a current one: 20.19+, 22.14+ or 24; Node 25+ dropped it). The Product-side workflows (verified-commits, hub-checks, update-guard,
    gate-sync) only run the `yad` CLI and keep their own pinned Node; the variable does not reach them.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
 4. **verified-commits** — no unverified commits from unverified users: every commit in the range must
    carry a signature the platform marks **Verified** AND be authored by a known identity
-   (`.sdlc/verified-authors`, generated from the hub roster's `email` fields). Enforced on the
-   **product hub and every connected repo**; runs on PRs/MRs only, so the gate-sync bot's direct
+   (`.sdlc/verified-authors`, generated from the Product roster's `email` fields). Enforced on the
+   **Product and every connected repo**; runs on PRs/MRs only, so the gate-sync bot's direct
    ledger pushes are unaffected (never replace it with a default-branch push rule — see
    `references/check-gates.md` §4).
 5. **lineage-check** (Phase 6) — the change's owning epic is a valid node in a **feature thread**: a
@@ -44,8 +44,8 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
 7. **reconcile-debt** (Phase 6) — a hotfix that shipped first opens debt; the **next** change on its
    thread **FAILS** until the debt is paid (artifacts updated + a regression test added).
 
-The Phase 6 gates read the owning epic in the **product hub** via `specs/<story>/link.md`'s
-`product-repo` path (like contract-check), and degrade to a PASS-with-note when the hub is not reachable
+The Phase 6 gates read the owning epic in the **Product** via `specs/<story>/link.md`'s
+`product-repo` path (like contract-check), and degrade to a PASS-with-note when the Product is not reachable
 from CI. See `references/check-gates.md` and `skills/yad-change`.
 
 The gates are **CI-agnostic bash** in `checks/`; thin pipeline configs invoke them on GitHub Actions
@@ -61,7 +61,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
   - `templates/checks/{spec-link,contract-check,package-manager,install-deps,build-test-lint,verified-commits}.sh`
-  - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in verified mode** — hub.json
+  - `templates/checks/ledger-guard.sh` → **Product-only** gate, active **only in verified mode** — hub.json
     carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
     (or the legacy `bridge`) true. The same predicate
     `isVerifiedLedger` (`cli/manifest.mjs`) applies, so the gate and the CLI can never disagree about who owns the
@@ -76,13 +76,13 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     default branch the guard is absolute again. Runs in `yad-hub-checks`
     alongside `verified-commits` (which waives the allowlist for the bot but still requires its
     signature). See `yad-hub-bridge`.
-  - `templates/hooks/ledger-guard.sh` → **hub-only** agent guardrail, active **only in verified mode**
+  - `templates/hooks/ledger-guard.sh` → **Product-only** agent guardrail, active **only in verified mode**
     (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the
-    local half of `checks/ledger-guard.sh` (#171). Installed to `<hub>/hooks/ledger-guard.sh` with the
+    local half of `checks/ledger-guard.sh` (#171). Installed to `<product>/hooks/ledger-guard.sh` with the
     `PreToolUse` entry in `.claude/settings.json`. Fails OPEN; see "Step 2b" below.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
-    → the standalone hub-side verified-commits CI (installed by `yad check --fix` with the hub wiring)
+    → the standalone Product-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);
     its quality job uses `install-deps.sh`, reads the optional `YAD_NODE_VERSION` repository variable,
     exports the PR's exact `NX_BASE`/`NX_HEAD`, and filters unrelated history blobs while preserving
@@ -100,7 +100,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 
 ## Inputs
 
-- `repo`  — the code repo to wire/run gates for (one of an epic's repos), or `hub` to wire the product hub itself.
+- `repo`  — the code repo to wire/run gates for (one of an epic's repos), or `hub` to wire the Product itself.
 - `action` — `wire` (install the gates into the repo) | `run` (run the three gates now). Default `run`.
 - `base`  — for `run`: the base ref to diff against (the PR/MR target; default the repo's default branch).
 
@@ -109,7 +109,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 ### Step 1 — Resolve the code repo
 Map `repo` → `{project-root}/demo-repos/<repo>/` (or the registry `path` in `.sdlc/repos.json`); confirm
 it is its own git repo. Operate inside it with absolute paths. For `repo: hub`, the target is
-`{project-root}` itself and the platform comes from `.sdlc/hub.json` — see "Wiring the hub" in
+`{project-root}` itself and the platform comes from `.sdlc/hub.json` — see "Wiring the Product" in
 `references/check-gates.md`.
 
 ### Step 2 — `wire` (install the gates, syncing with any existing CI)
@@ -162,11 +162,11 @@ Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 `# yad-managed-include: yad-checks`) and the include-entry check make a second run a no-op.
 Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff).
 
-**The hub is wired the same way.** `repo: hub` wires the hub repo itself (platform from `.sdlc/hub.json`)
-with a hub-flavored gate set — see "Wiring the hub" in `references/check-gates.md`.
+**The Product is wired the same way.** `repo: hub` wires the Product repo itself (platform from `.sdlc/hub.json`)
+with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
 
-**The hub also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.sh` →
-`<hub>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
+**The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.sh` →
+`<product>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
 and `yad check --fix` install both; there is nothing to do by hand.
 
 ### Step 2b — the agent guardrail (harness hooks, verified mode only)
@@ -191,15 +191,15 @@ file-editing tool call and refuses the write up front, naming the command that o
   `origin/` ref, case-folded slugs), never by looking at the working tree.
 - **A no-op with a local ledger.** There the ledger is locally owned and the hand-edit the authoring
   skills describe is *correct*, so nothing is wired and nothing is blocked.
-- **It fails OPEN** — no `yad`, no hub, an unreadable config, an unparseable payload all ALLOW, with
+- **It fails OPEN** — no `yad`, no Product, an unreadable config, an unparseable payload all ALLOW, with
   a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
   skips one command.
 - **Known gaps** (both caught by the CI gate instead): a `Bash` tool call (`sed -i epics/…`) is not
   intercepted — matching it would mean parsing shell; and the hook arms sessions **rooted at the
-  hub**, since a harness reads hooks from its own project root — a session opened at the workspace
-  above the hub never loads the hub's `.claude/settings.json`.
+  Product**, since a harness reads hooks from its own project root — a session opened at the workspace
+  above the Product never loads the Product's `.claude/settings.json`.
 
-`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a verified hub.
+`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a verified Product.
 See `references/check-gates.md` §"The agent guardrail".
 
 ### Step 3 — `run` (run the gates now)

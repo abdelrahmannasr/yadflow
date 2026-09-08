@@ -25,8 +25,8 @@ steps stay `human_approve` forever.
 
 ## 0 — One-time setup
 
-> **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, hub
-> detect + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
+> **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, Product
+> detection + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
 > repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
 > long-hand equivalent and still work.
 
@@ -41,7 +41,7 @@ steps stay `human_approve` forever.
 4. **Wire each code repo once:** `yad-checks repo:<repo> action: wire` (installs the CI gates —
    *merges* with any existing CI, never clobbers), `yad-pr-template repo:<repo> action: wire` (PR/MR
    template + risk routing).
-5. **Connect each code repo to the hub** (so the Shape phases see what's already built):
+5. **Connect each code repo to the Product** (so the Shape phases see what's already built):
    `yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>`. It
    registers the repo in `.sdlc/repos.json` and caches a Repomix pack + a lightweight **code-map**
    (existing endpoints/events/data-models/modules, secret-scanned). Clones/fetches as the **local user**
@@ -49,17 +49,17 @@ steps stay `human_approve` forever.
    **human decision**: `yad repo list` shows fresh/stale, `yad repo refresh [name]` re-packs a moved repo
    (skills flag staleness and point here — they never silently re-pack). Greenfield → skip it. Once the
    AI has regenerated the code-map, `yad repo refresh [name] --push` publishes the refreshed code-maps +
-   registry to the hub's default branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
+   registry to the Product's default branch as one `chore(hub): sync code-context … [skip ci]` audit commit.
 6. **(Optional) Connect tools** so the matching steps do real work (each degrades gracefully and is
    recorded if absent): `yad-connect-design action: connect` (Figma-first → `design.json`, lets
    `yad-ui` materialize screens), `yad-connect-testing action: connect` (Playwright-first →
    `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
    (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
-7. **(Optional) Put the hub on a platform** so the Shape review runs through real PRs:
+7. **(Optional) Put the Product on a platform** so the Shape review runs through real PRs:
    `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
    SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
    sets one directly), and `yad-pr-template repo:hub action: wire` /
-   `yad-checks repo:hub action: wire`. With no hub platform the Shape gate runs local.
+   `yad-checks repo:hub action: wire`. With no Product platform the Shape gate runs local.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](../CONTRIBUTING.md).
@@ -67,7 +67,7 @@ steps stay `human_approve` forever.
 ## A — Shape (human-authored, once per epic)
 
 Each author step writes its artifact, sets itself `done`, moves `currentStep` to its review, and
-**stops at the gate**. Run every gate with **`yad-review-gate`** — or, when the hub is on a platform,
+**stops at the gate**. Run every gate with **`yad-review-gate`** — or, when the Product is on a platform,
 drive it deterministically with the **`yad gate`** CLI (`open → sync → … → merge`): the review rides
 the per-step PR/MR and the step **auto-advances on merge** once approvals are satisfied and all comment
 threads are resolved. Details: **"Run all of Shape by hand"** below.
@@ -157,7 +157,7 @@ can also edit the files directly — that's the point.
 
 Each authoring step is the same shape: an author skill produces an artifact, sets its step `done`,
 moves `currentStep` to the matching review, and **stops at the gate**. Then **`yad-review-gate`**
-(one gate, reused for all five reviews) takes `open → comment → approve → advance`. When the hub is on a
+(one gate, reused for all five reviews) takes `open → comment → approve → advance`. When the Product is on a
 platform, the **`yad gate`** CLI runs that gate over a real PR/MR — `open` raises the review PR, `sync`
 pulls approvals + comment threads into the ledger, and the step **auto-advances when the approved,
 fully-resolved PR is merged** (the merge is the human approval act).
@@ -186,7 +186,7 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 
 Every review is the same loop — author writes, reviewers comment (which never advances), approvals
 accumulate, and the step moves forward only when the rule is met. **local** ends in an explicit
-`advance`; **PR-driven** (hub on a platform) ends when the approved, fully-resolved review PR is
+`advance`; **PR-driven** (Product on a platform) ends when the approved, fully-resolved review PR is
 **merged**:
 
 <!-- Source: docs/diagrams/review-loop.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
@@ -196,7 +196,7 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 `reviews/<artifact>--<date>--comments.md`), `approve` (name + role → `.sdlc/approvals.json`), and
 `advance` (moves **only if** the rule is satisfied, else it names the missing approval).
 
-**PR-driven** — when the hub is on a platform, the **`yad gate`** CLI runs the same gate over a PR/MR:
+**PR-driven** — when the Product is on a platform, the **`yad gate`** CLI runs the same gate over a PR/MR:
 - `yad gate open <epic> <artifact>` — raise the review PR/MR; mark the step `in_review`. The
   `review/<epic>/<artifact>` branch must already be pushed (or use `yad open-pr` from it, which pushes first).
 - `yad gate sync <epic> [artifact]` — pull approvals + comment threads into the **same** ledger (your
@@ -271,7 +271,7 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    **spec-link** (links a real story/spec), **contract-check** (a contract-surface change without
    `Contract-Change` + a re-locked contract FAILS, routing back to the architecture gate),
    **build/test/lint**, **verified-commits**, and the **pattern gates** **commit-message** / **pr-title**
-   / **pr-template** (profile-aware `code`|`hub`, so they also run on the product hub). They fail closed
+   / **pr-template** (profile-aware `code`|`hub`, so they also run on the Product). They fail closed
    on a bad base ref.
 4. **PR/MR template + risk routing** — `yad-pr-template` drops the platform-matched template with an
    Impact & Risk block; `high` risk (or a contract/auth/payments surface) routes the review to domain

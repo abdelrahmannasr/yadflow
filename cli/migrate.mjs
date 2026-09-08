@@ -17,8 +17,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON } from './lib.mjs';
-import { BACKUP_SUFFIX, epicFiles, isVerifiedLedger, MANAGED_LEDGER, PROJECT_FILES, SCHEMA_VERSION, VERSION } from './manifest.mjs';
+import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
+import {
+  BACKUP_SUFFIX, epicFiles, isVerifiedLedger, MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES,
+  preferring, productConfigPath, SCHEMA_VERSION, VERSION,
+} from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
 import { isValidEpicId } from './epic-state.mjs';
 
@@ -49,13 +52,13 @@ export const MIGRATIONS = [
     //
     // 1. It does not DELETE `bridge_enabled`. `templates/checks/ledger-guard.sh` is committed inside
     //    the user's own repo and is refreshed only by `yad update` — which is a separate act from
-    //    `yad migrate`. A hub running yesterday's guard against a migrated hub.json would read no
+    //    `yad migrate`. A Product running yesterday's guard against a migrated hub.json would read no
     //    flag, conclude the ledger is local, and stop rejecting human commits to it. That is the one
     //    guarantee verified mode exists to provide, so removing the old key here would silently
     //    disarm the audit trail. Add before you remove (rule 3): both keys are written, the new one
     //    wins, and the old one goes in a later major — once nothing on either side still reads it.
     //
-    // 2. It does not copy the flag. `bridge_enabled: true` on a hub with NO platform is `local`
+    // 2. It does not copy the flag. `bridge_enabled: true` on a Product with NO platform is `local`
     //    today, because the reader has always required a platform — there is no Verified badge to
     //    read without one. Writing `verified` there would change what the engine does to a project
     //    during an upgrade. So the value is computed from the reader's own answer, which means no
@@ -63,9 +66,49 @@ export const MIGRATIONS = [
     // Matched on the exact project-relative path, not the basename. `hub.json` is a name a
     // connected repo or a nested folder could also use, and injecting `ledger` into some other
     // file is precisely the silent rewrite that passing a context was meant to prevent.
-    apply: (obj, ctx) => (ctx?.rel === PROJECT_FILES.hubConfig
+    // EITHER name — a project whose settings live under the new spelling must still gain `ledger`,
+    // or it reaches shape 3 missing a shape-2 field and `yad migrate` never revisits it.
+    apply: (obj, ctx) => (isMirroredPath(ctx?.rel)
       ? { ...obj, ledger: isVerifiedLedger(obj) ? 'verified' : 'local' }
       : obj),
+  },
+  {
+    from: 2,
+    to: 3,
+    title: '`hub` becomes `Product` — the settings file is renamed and the roster key with it',
+    // Two things move, and only one of them is visible in this function.
+    //
+    // The KEY, here: a roster entry's product-level roles gain a `product` spelling ALONGSIDE the
+    // `hub` one. Both are kept, and `rolesForScope` (cli/platform.mjs) answers to either.
+    //
+    // Adding rather than replacing, for the same reason as `ledger` beside `bridge_enabled` and
+    // `product.json` beside `hub.json`. Replacing looked tidier and was a silent data loss: every
+    // caller asks `rolesForScope(entry, 'hub')`, an older CLI knows only `hub`, and `yad setup`
+    // writes `hub` when it adds a member. Move the key out from under them and a reviewer quietly
+    // stops holding a product-level role — the gate can no longer find its required approvers, and
+    // nothing anywhere says why. The old spelling goes in the major that makes `product` the one
+    // that is read.
+    //
+    // The FILE NAME is not renamed here, because a migration step transforms an object and cannot
+    // move a file. It happens on WRITE: `writeProductConfig` (cli/lib.mjs) writes `.sdlc/product.json`
+    // AND `.sdlc/hub.json` every time, so applying this step to hub.json creates product.json as a
+    // side effect, and `planMigration` reports the created file so the preview does not under-promise.
+    // Both names survive for one major on purpose — a `ledger-guard.sh` that has not been refreshed
+    // by `yad update` opens `.sdlc/hub.json` by that literal path, and taking it away would disarm it.
+    apply: (obj, ctx) => {
+      if (!isMirroredPath(ctx?.rel)) return obj;
+      if (!Array.isArray(obj.roster)) return obj;
+      return {
+        ...obj,
+        roster: obj.roster.map((m) => {
+          if (!m || typeof m !== 'object' || !m.roles || typeof m.roles !== 'object' || Array.isArray(m.roles)) return m;
+          if (!('hub' in m.roles) || 'product' in m.roles) return m;
+          // `product` first so it leads the object, `hub` kept exactly as it was.
+          const { hub, ...rest } = m.roles;
+          return { ...m, roles: { product: hub, hub, ...rest } };
+        }),
+      };
+    },
   },
 ];
 
@@ -89,9 +132,9 @@ const shapeOf = (v) => (isPlainObject(v) && Number.isInteger(v.schemaVersion) ? 
 
 // Walk the migration list once. Returns the migrated object, the shape it ended on, and which steps ran.
 // `ctx` is `{ base, rel }` — the file's basename and its project-relative path. A step that only
-// concerns one kind of file (the 1 → 2 hub switch below is the first) needs to know which file it is
+// concerns one kind of file (the 1 → 2 Product switch below is the first) needs to know which file it is
 // holding; every other step ignores the argument. Passing it is what keeps such a step from having
-// to guess from the object's own fields, which would mean a hub-shaped ledger got silently rewritten.
+// to guess from the object's own fields, which would mean a Product-shaped ledger got silently rewritten.
 function applyMigrations(obj, migrations, ctx) {
   let out = obj;
   let version = shapeOf(obj);
@@ -155,22 +198,43 @@ export function ensureBackupsIgnored(root) {
 }
 
 // ---- the file set --------------------------------------------------------------------------
-// Every JSON file this project's engine owns: the product-level files (including the hub's own
+// Every JSON file this project's engine owns: the product-level files (including the Product's own
 // provenance ledger and each epic's docs-build cache, neither of which is in PROJECT_FILES/epicFiles),
 // then each epic's ledger and its three shard folders.
 //
 // A CONNECTED REPO's own `.sdlc/managed.json` is deliberately not here. It belongs to that repo, is
-// rewritten wholesale by that repo's `yad check --fix`, and migrating it from the hub would reach
-// across a boundary the rest of the CLI respects. The hub's copy is a different file and is included.
+// rewritten wholesale by that repo's `yad check --fix`, and migrating it from the Product would reach
+// across a boundary the rest of the CLI respects. The Product's copy is a different file and is included.
 function shardFiles(dir) {
   if (!exists(dir)) return [];
   return fs.readdirSync(dir).filter((n) => n.endsWith('.json')).sort().map((n) => path.join(dir, n));
 }
 
+// The names that are one file under two spellings. A pair contributes exactly ONE row: the
+// authoritative name (`productConfigPath`). Listing both would migrate the same file twice —
+// and worse, the first row's write goes through `writeProductConfig`, which overwrites the second
+// name BEFORE that row gets to copy it to `.yad-orig`. The content and its only backup would both
+// be gone, silently, in exactly the drifted state `yad doctor` exists to report.
+const MIRROR_CANONICALS = new Set(MIRRORED_FILES.map((m) => m.canonical));
+const MIRROR_LEGACIES = new Set(MIRRORED_FILES.map((m) => m.legacy));
+export const isMirroredPath = (rel) => MIRROR_CANONICALS.has(rel) || MIRROR_LEGACIES.has(rel);
+const mirrorPartner = (rel) => {
+  for (const m of MIRRORED_FILES) {
+    if (m.canonical === rel) return m.legacy;
+    if (m.legacy === rel) return m.canonical;
+  }
+  return null;
+};
+
 export function projectJsonFiles(root) {
   const files = [];
-  for (const rel of Object.values(PROJECT_FILES)) files.push(path.join(root, rel));
-  // The hub's own provenance record (cli/plan.mjs) — a stamped object under .sdlc/ like any other.
+  for (const rel of Object.values(PROJECT_FILES)) {
+    // One row per mirrored pair, on whichever name is authoritative here.
+    if (MIRROR_CANONICALS.has(rel)) continue;
+    if (MIRROR_LEGACIES.has(rel)) { files.push(productConfigPath(root)); continue; }
+    files.push(path.join(root, rel));
+  }
+  // The Product's own provenance record (cli/plan.mjs) — a stamped object under .sdlc/ like any other.
   files.push(path.join(root, MANAGED_LEDGER));
 
   const epicsDir = path.join(root, 'epics');
@@ -180,7 +244,7 @@ export function projectJsonFiles(root) {
       const epicDir = path.join(epicsDir, epic);
       if (!fs.statSync(epicDir).isDirectory()) continue;
       const f = epicFiles(epicDir);
-      files.push(f.state, f.approvals, f.comments, f.hubPrs, f.contractLock,
+      files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.hubPrs), f.contractLock,
         f.buildLog, f.trustLog, f.change, f.reconcileDebt);
       files.push(...shardFiles(f.buildLogDir), ...shardFiles(f.trustLogDir), ...shardFiles(f.buildStateDir));
       // The docs-build cache (cli/docs.mjs) lives in the same directory and is written by the engine,
@@ -200,7 +264,7 @@ export function projectJsonFiles(root) {
 //   unchanged         already on the engine's shape, bytes identical
 //   list              a top-level JSON array: shape 1 by rule 1, and it cannot carry a key
 //   ahead             the file's shape is NEWER than this engine — never touched, always reported
-//   ci-owned          a verified hub's ledger file: CI is its only writer
+//   ci-owned          a verified Product's ledger file: CI is its only writer
 //   unreadable        does not parse — reported, never rewritten
 //
 // Each row also carries `stamped`: whether the file literally holds a `schemaVersion` key. That is a
@@ -209,12 +273,12 @@ export function projectJsonFiles(root) {
 // ANY reason (a hand re-indent, say), and `ci-owned`/`ahead`/`list` short-circuit before the byte
 // comparison happens at all.
 export function planMigration(root, { migrations = MIGRATIONS } = {}) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+  const hub = readJSON(productConfigPath(root), null);
   const verified = isVerifiedLedger(hub);
-  // On a verified hub the ledger guard refuses a human commit to these, so rewriting them locally
+  // On a verified Product the ledger guard refuses a human commit to these, so rewriting them locally
   // would produce a change that cannot be committed. Of the four the guard names, only state.json is
   // an object; the rest are arrays and would be skipped anyway.
-  const ciOwned = new Set(['state.json', 'approvals.json', 'comments.json', 'hub-prs.json']);
+  const ciOwned = new Set(['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json']);
 
   const rows = [];
   for (const file of projectJsonFiles(root)) {
@@ -243,11 +307,30 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     const { obj, version, applied } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel });
     const next = serialize(stamped(obj, version));
     const current = fs.readFileSync(file, 'utf8');
-    const changes = next !== current;
+    let changes = next !== current;
     const action = version !== from ? 'migrate' : (changes ? 'stamp' : 'unchanged');
     // `steps` lists the migrations that actually moved the file's shape. The baseline 1 → 1 runs on
     // every file by design and moves nothing, so naming it on every row would be noise reported as work.
-    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(version !== from ? { steps: applied } : {}) });
+    // A preview must name every file an apply would write. The product config is written under both
+    // names, so on a project that does not have the new one yet, say so here — otherwise `--apply`
+    // creates a file the preview never mentioned, and the preview stops being worth trusting.
+    // The row writes BOTH names, so a preview has to name the partner EVERY time it will be
+    // written — not only when it is missing. Naming it only on creation was silent on the state
+    // this release puts every project into (both names present), so the apply rewrote a file the
+    // preview never mentioned. A preview that under-reports is the worst failure this command can
+    // have, because being able to trust it is the whole reason anyone runs `--apply`.
+    //
+    // A missing partner also COUNTS as a change, even when the row's own bytes are already correct.
+    // Otherwise a half-made pair is unrepairable: the row says "already current", nothing is
+    // written, and `yad doctor` reports the missing file forever while the command it names does
+    // nothing.
+    const partner = mirrorPartner(rel);
+    const partnerPath = partner ? path.join(root, partner) : null;
+    const partnerMissing = !!partner && !exists(partnerPath);
+    if (partnerMissing) changes = true;
+    const creates = partnerMissing ? [partner] : undefined;
+    const rewrites = (partner && changes && !partnerMissing) ? [partner] : undefined;
+    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(creates ? { creates } : {}), ...(rewrites ? { rewrites } : {}), ...(version !== from ? { steps: applied } : {}) });
   }
   return { engine: SCHEMA_VERSION, verified, rows };
 }
@@ -270,6 +353,12 @@ function printRows(rows) {
     const line = `  ${r.file.padEnd(width)}  ${shape.padEnd(14)} ${c.dim(ACTION_NOTE[r.action] ?? r.action)}`;
     if (r.action === 'unreadable' || r.action === 'ahead') fail(line.trim());
     else log(line);
+    for (const made of r.creates ?? []) {
+      log(`  ${made.padEnd(width)}  ${''.padEnd(14)} ${c.dim('created — the other name for this file; both are kept')}`);
+    }
+    for (const also of r.rewrites ?? []) {
+      log(`  ${also.padEnd(width)}  ${''.padEnd(14)} ${c.dim('rewritten too — the other name for this file')}`);
+    }
   }
 }
 
@@ -281,7 +370,7 @@ function printRows(rows) {
 // would also be free to overwrite the one file the same run had just declared corrupt or newer than
 // this engine. What shape a file is in is recorded in that file, which is the whole point of rule 1.
 export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS } = {}) {
-  if (!exists(path.join(root, PROJECT_FILES.version)) && !exists(path.join(root, PROJECT_FILES.hubConfig))) {
+  if (!exists(path.join(root, PROJECT_FILES.version)) && !exists(productConfigPath(root))) {
     const message = 'no yad project here (.sdlc/ not initialised)';
     if (json) { log(JSON.stringify({ version: VERSION, ok: false, error: message }, null, 2)); }
     else { fail(message); hand('run `yad setup` to start one'); }
@@ -307,12 +396,30 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       // file's bytes are provably ours — a ledger has no provenance record, so there is nothing to
       // prove and the copy is unconditional.
       fs.copyFileSync(file, backupPathFor(file));
+      // A mirrored row writes its partner too, so the partner needs a backup of its OWN pre-migration
+      // bytes — taken here, before either write. Backing up only the row's file leaves the other name
+      // rewritten with no way back, and on the NEXT shape bump its `.yad-orig` would be overwritten
+      // with already-migrated content: the original gone for good.
+      const partnerRel = isMirroredPath(row.file) ? mirrorPartner(row.file) : null;
+      if (partnerRel) {
+        const partnerFile = path.join(root, partnerRel);
+        if (exists(partnerFile)) fs.copyFileSync(partnerFile, backupPathFor(partnerFile));
+      }
       // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
       // promises one thing and an apply writes another — the single worst failure this command can
       // have, because the preview is the reason anyone trusts it enough to run --apply.
       const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel: row.file });
-      writeJSON(file, stamped(obj, version));
-      written.push(row.file);
+      // The product config is the one file whose NAME changed (shape 3). Writing it through
+      // `writeProductConfig` puts it under both names, which is what actually creates
+      // `.sdlc/product.json` for an upgrading project. Everything else is an ordinary write.
+      if (isMirroredPath(row.file)) {
+        for (const rel of writeProductConfig(root, stamped(obj, version))) {
+          if (!written.includes(rel)) written.push(rel);
+        }
+      } else {
+        writeJSON(file, stamped(obj, version));
+        written.push(row.file);
+      }
     }
   }
 

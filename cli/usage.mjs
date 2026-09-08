@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, epicFiles } from './manifest.mjs';
+import { PROJECT_FILES, epicFiles , productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { rolesForScope } from './platform.mjs';
 
@@ -47,11 +47,11 @@ const ARTIFACT_FILES = new Set([
 // ---- roster / attribution ----------------------------------------------------------------------
 
 function loadRoster(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+  const hub = readJSON(productConfigPath(root), null);
   return hub && Array.isArray(hub.roster) ? hub.roster : [];
 }
 
-// A member's hub-scope role label (supports both the per-scope `roles` map and the legacy flat `role`).
+// A member's Product-scope role label (supports both the per-scope `roles` map and the legacy flat `role`).
 function rosterRole(m) {
   const scoped = rolesForScope(m, 'hub');
   if (scoped.length) return scoped.join(', ');
@@ -139,7 +139,7 @@ function parseGitLog(stdout) {
 
 const GIT_PRETTY = '--pretty=format:\x01%an%x00%ae%x00%ad';
 
-// git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the hub
+// git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the Product
 // is not a git repo (e.g. a test fixture dir), so the command never depends on git being present.
 function gitAuthoredEvents(root, resolver) {
   const r = run('git', ['-C', root, 'log', '--no-merges', '--date=short', GIT_PRETTY, '--name-only', '--', 'epics']);
@@ -223,7 +223,7 @@ export function analyze(events, roster, window = { since: null, until: null }) {
 }
 
 // Is this roster entry a reviewer in ANY scope? Reviewer roles are usually repo-scoped
-// (`roles: { backend: ['reviewer'] }`), not hub-scoped, so a hub-only check would miss most of them.
+// (`roles: { backend: ['reviewer'] }`), not Product-scoped, so a Product-only check would miss most of them.
 export function isReviewerAnywhere(entry) {
   if (!entry) return false;
   if ((entry.role || '') === 'reviewer') return true;                            // legacy flat role

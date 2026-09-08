@@ -1,11 +1,11 @@
 ---
 name: yad-hub-bridge
-description: 'The templated PR/MR bridge for the Shape review gate. When the product hub has a platform (.sdlc/hub.json), it opens a review PR/MR on the hub for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the hub: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the local gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
+description: 'The templated PR/MR bridge for the Shape review gate. When the Product has a platform (.sdlc/hub.json), it opens a review PR/MR on the Product for an authored artifact (the optional analysis / epic / architecture+contract / ui-design / stories / test-cases), sets the required reviewers/labels from the routing rule, and provides the read-only gh/glab recipes that yad-review-gate uses to pull platform comments + approvals back into the file ledger. Can also wire merge-time sync on the Product: a CI workflow that runs `yad gate ci` when a human merges a review PR/MR — CI is the sole ledger writer and writes only at merge, on the default branch (during review the platform PR/MR is the source of truth; CI never touches the review branch). Local-user auth only — no stored tokens. The file ledger stays the source of truth; degrades to the local gate when there is no platform / no CLI. Use when the user says "open the review PR", "route the review", "wire the gate sync", or it is invoked by yad-review-gate open/sync.'
 ---
 
 # SDLC — Hub Review Bridge (the templated PR/MR bridge)
 
-**Goal:** Run the Shape review/comment/approval cycle through a **real PR/MR on the product hub**,
+**Goal:** Run the Shape review/comment/approval cycle through a **real PR/MR on the Product**,
 without changing the gate's predicate or making the file ledger optional. The verified ledger is an **alternate
 input path** into `yad-review-gate`: it opens a review PR for an artifact, reviewers approve/comment on
 the platform with **their own** `gh`/`glab` auth, and the gate's `sync` action (which calls this skill's
@@ -17,12 +17,13 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 ## Conventions
 
-- `{project-root}` is the **product hub**. Hub platform + reviewer roster live in `.sdlc/hub.json`
-  (`config.yaml` `hub.config`; schema in `../yad-connect-repos/references/hub-config.md`).
-- Per-step review-PR record: `epics/EP-<slug>/.sdlc/hub-prs.json` (`config.yaml` `hub.pr_ledger`) — a
+- `{project-root}` is the **Product**. Product platform + reviewer roster live in `.sdlc/hub.json`
+  (`config.yaml` `product.config` (older projects: `hub.config`); schema in `../yad-connect-repos/references/hub-config.md`).
+- Per-step review-PR record: `epics/EP-<slug>/.sdlc/product-prs.json`, written together with its
+  older name `hub-prs.json` (`config.yaml` `product.pr_ledger` (older projects: `hub.pr_ledger`)) — a
   sibling ledger to `approvals.json`, so `state.json`'s locked step shape is untouched.
-- The review-PR body is the hub template from `yad-pr-template` (`templates/hub/<platform>/…`).
-- Branch per artifact: `review/EP-<slug>/<artifact-base>` (`config.yaml` `hub.artifact_branch`).
+- The review-PR body is the Product template from `yad-pr-template` (`templates/hub/<platform>/…`).
+- Branch per artifact: `review/EP-<slug>/<artifact-base>` (`config.yaml` `product.artifact_branch` (older projects: `hub.artifact_branch`)).
 - **Local-user auth only; store no tokens.** Use the user's own `gh`/`glab`. If neither is installed/
   authenticated, STOP this path and tell the gate to fall back to local — never embed a credential.
 
@@ -35,8 +36,8 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 ## Preconditions (the verified ledger runs only when all hold)
 
-`.sdlc/hub.json` exists with a non-null `platform`, `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true`), `config.yaml` `hub.bridge:
-true`, and `gh` (GitHub) / `glab` (GitLab) installed **and authenticated**. If any fails, report that the
+`.sdlc/hub.json` exists with a non-null `platform`, `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true`), `config.yaml` `product.bridge: true`
+(older projects: `hub.bridge: true`), and `gh` (GitHub) / `glab` (GitLab) installed **and authenticated**. If any fails, report that the
 gate proceeds **local** (no error) and stop.
 
 ## On Activation
@@ -50,13 +51,13 @@ each required domain-owner to a platform `login` via the roster (a roster `name`
 `domain_owner` in `repos.json` is that repo's domain-owner).
 
 ### Step 2 — `open` (create the review PR/MR)
-1. From the hub default branch, create `review/EP-<slug>/<artifact-base>` and ensure the artifact file
+1. From the Product default branch, create `review/EP-<slug>/<artifact-base>` and ensure the artifact file
    (and, for architecture, `contract.md` + `.sdlc/contract-lock.json`) is committed on it. Push as the
    local user. **First gate of a new epic:** cut the review branch from the **authoring** branch
    (`epic/…`, `change/…`, `analysis/…`, `discovery/…`) instead, so it carries the `.sdlc/` **seed** —
    that PR/MR is the only way a new epic's ledger reaches the default branch, and `ledger-guard`
    exempts it (see step 4).
-2. Open the PR/MR with `gh`/`glab` using the hub body template (`yad-pr-template` `templates/hub/…`),
+2. Open the PR/MR with `gh`/`glab` using the Product body template (`yad-pr-template` `templates/hub/…`),
    filled with the epic, artifact, gate step, owner, `epic.repos`, and the step's risk tags.
 3. **Request the required reviewers** (their logins) and add a `domain:<repo>` label per touched repo so
    per-repo routing is legible on the PR.
@@ -82,8 +83,8 @@ Compute and print the required reviewers as above. Use `templates/checks/hub-rou
 PR/MR body's Impact & Risk block when given one; otherwise derive from `epic.repos` + the step's
 `risk_tags`. Advisory only — it routes the human review, it does not approve.
 
-### Step 4 — `wire` (merge-time sync on the hub)
-Install the hub CI that turns the human **merge** into a `yad gate ci` run, with CI as the **sole
+### Step 4 — `wire` (merge-time sync on the Product)
+Install the Product CI that turns the human **merge** into a `yad gate ci` run, with CI as the **sole
 writer** of the ledger. There is no pre-merge CI write — during review the platform PR/MR is the
 source of truth (native approvals + threads). On merge, CI re-reads approvals from the platform,
 advances the step, and flips the artifact `status:` on the **default branch** (the only place CI ever
@@ -103,12 +104,12 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
    enabled bridge in `.sdlc/hub.json` it installs
    - GitHub → `.github/workflows/yad-gate-sync.yml` (from `templates/github/yad-gate-sync.yml`)
    - GitLab → `.gitlab/ci/yad-gate-sync.yml` (from `templates/gitlab/yad-gate-sync.gitlab-ci.yml`)
-   - plus the hub-side **verified-commits** gate (`checks/verified-commits.sh` + its workflow/fragment,
+   - plus the Product-side **verified-commits** gate (`checks/verified-commits.sh` + its workflow/fragment,
      owned by `yad-checks`) so review PRs accept only signed commits from roster-known authors
    - the wired job runs an **exact** version, resolved at run time from the repo: the `YAD_VERSION`
      variable, else `hub.json` `gate_sync_version`, else the `.sdlc/cli-version.json` stamp, else the
      floating `3`. It stopped floating on the major because that let a release change a scheduled job's
-     behaviour unattended — how #163's churn reached hubs that never opted in. So upgrading is now a
+     behaviour unattended — how #163's churn reached Products that never opted in. So upgrading is now a
      deliberate act (`yad update`); if the resolved pin predates 3.15.3, upgrade or disable the
      schedule. Never edit a version into the wired file — `yad check --fix` rewrites it byte-for-byte
      from the template. See `references/bridge.md`.
@@ -128,7 +129,7 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      case set the variable to a real tag. The variable lives in project settings, so it survives
      every `yad` sync. Single value only — `tags: [$VAR]` is one tag equal to the whole variable,
      not a comma-split.
-3. Commit the workflow to the hub. GitHub needs nothing else — the ephemeral `github.token` reads the
+3. Commit the workflow to the Product. GitHub needs nothing else — the ephemeral `github.token` reads the
    PR and pushes the merge advance to the default branch, and the workflow's reconcile **schedule**
    runs automatically (no setup) as the safety net that recovers a merge whose run failed transiently.
    If the default branch is protected, see the workflow header for the bypass / PAT options; until then
@@ -154,7 +155,7 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
   ephemeral `github.token` (nothing stored). GitLab requires a stored masked `SDLC_GATE_TOKEN`
   project access token because `CI_JOB_TOKEN` can neither read the approvals API nor push — say so
   when wiring, and scope it to `read_api` + `write_repository` only.
-- **Protect the hub default branch.** Require that `epics/**` artifacts change only through a review
+- **Protect the Product default branch.** Require that `epics/**` artifacts change only through a review
   PR/MR (branch protection). This keeps revoke-on-change sound: it removes the only window where a
   delayed reconcile could advance on an out-of-band post-merge artifact change (see `references/bridge.md`,
   "Known limitation"). Safe to require: a new epic's `.sdlc/` seed rides its first review PR/MR, so
@@ -166,4 +167,4 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
   `references/bridge.md`.
 - Roster schema, login→role resolution, unverified-login fallback, per-repo routing: `references/login-roster.md`.
 - The gate this feeds (open hook + sync action + unchanged predicate): `../yad-review-gate/SKILL.md`, `../yad-review-gate/references/gating.md`.
-- The hub PR/MR body template + the code-repo routing analogue: `../yad-pr-template/`.
+- The Product PR/MR body template + the code-repo routing analogue: `../yad-pr-template/`.

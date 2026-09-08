@@ -1,26 +1,26 @@
 // `yad repo refresh --push` — after a repack + registry stamp, commit the connected-repo code-context
 // (the tracked `code-map.md` per repo + the registry `.sdlc/repos.json`) and push it straight to the
-// hub's default branch, so a code-map refresh "just lands" for teammates / CI / `yad status` on other
+// Product's default branch, so a code-map refresh "just lands" for teammates / CI / `yad status` on other
 // machines instead of leaving a dirty tree for someone to hand-commit. This is the code-context
 // analogue of `yad checkpoint` (cli/checkpoint.mjs) and reuses its default-branch commit machinery.
 //
 // Invariants (shared with checkpoint):
 //   1. Commit an EXPLICIT allowlist via `git commit -- <paths>` (--only) — the tracked code-maps, the
-//      registry, and (only when its change is the managed pack-ignore block alone) the hub `.gitignore`.
+//      registry, and (only when its change is the managed pack-ignore block alone) the Product `.gitignore`.
 //      NEVER `git add -A` and NEVER a whole-index `git reset`: both would mutate unrelated staged work.
 //      The repomix pack.md is gitignored (setup + publish scaffold the ignore via ensurePackIgnored) and
 //      never committed as content. A pack committed BEFORE that ignore existed is self-healed here: its
 //      on-disk file is held aside across the --only commit so the deletion is recorded (the regenerable
 //      cache is restored right after), clearing the stranded working tree — see the commit block below.
-//   2. Commit ONLY on the hub's default branch (unless --allow-branch), so the `[skip ci]` audit
+//   2. Commit ONLY on the Product's default branch (unless --allow-branch), so the `[skip ci]` audit
 //      commit never enters a PR's base..HEAD range where it would strand required checks.
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
-import { loadHub } from './gate.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
+import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
-import { hubGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
+import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 
@@ -51,7 +51,7 @@ export function codeMapPathspecs(root, registry = { repos: [] }, name = null) {
 }
 
 // PURE — each registered repo's on-disk pack path (scoped by `name` like codeMapPathspecs). These are
-// UNTRACK candidates, not content to stage: the pack is gitignored, but a hub that committed it before
+// UNTRACK candidates, not content to stage: the pack is gitignored, but a Product that committed it before
 // the ignore existed would otherwise strand a dirty pack on every refresh. publishCodeContext keeps only
 // the still-tracked ones and records their removal in the audit commit (see the self-heal block there).
 export function packPathspecs(root, registry = { repos: [] }, name = null) {
@@ -65,11 +65,11 @@ export function packPathspecs(root, registry = { repos: [] }, name = null) {
 }
 
 // True iff committing `.gitignore` would carry ONLY the managed pack-ignore block (comments + glob) and
-// nothing else. Guards invariant 1: a hub whose `.gitignore` also has unrelated uncommitted edits must
+// nothing else. Guards invariant 1: a Product whose `.gitignore` also has unrelated uncommitted edits must
 // keep them OUT of the `[skip ci]` audit commit. The publish commit is `git commit -- <paths>` (--only,
 // reads the WORKING TREE), so this compares the working tree — an untracked `.gitignore` must be wholly
 // managed; a tracked one must differ from HEAD by the managed block alone (added, nothing removed).
-// `git` is a hubGit-style accessor; `root` is the hub root. Mirrors checkpoint's stagedStoryIsStatusOnly.
+// `git` is a productGit-style accessor; `root` is the Product root. Mirrors checkpoint's stagedStoryIsStatusOnly.
 export function ignoreChangeIsManagedOnly(git, root) {
   const gi = path.join(root, '.gitignore');
   if (!fs.existsSync(gi)) return false;
@@ -121,7 +121,7 @@ export function summarizeCodeContext(files = []) {
   return { label, basenames };
 }
 
-// PURE — the audit-trail commit message. Subject passes the hub commit-message gate (valid type
+// PURE — the audit-trail commit message. Subject passes the Product commit-message gate (valid type
 // `chore`, scope `hub`, non-empty description, no trailing period). No Task trailer and no
 // Co-Authored-By: this is human-owned machine state, not an authored code change. `[skip ci]` mirrors
 // `yad checkpoint` — it lands on the default branch and needs no PR gate suite. `label`/`author` are
@@ -132,19 +132,19 @@ export function buildCodeMapMessage({ label, author, basenames = [] }) {
   return body ? `${subject}\n\n${body}` : subject;
 }
 
-// Commit the tracked code-context (and, with push, push it) on the hub's default branch. Mirrors
+// Commit the tracked code-context (and, with push, push it) on the Product's default branch. Mirrors
 // `runCheckpoint`. Never throws; sets process.exitCode on a hard error so the CLI reports failure.
 export async function publishCodeContext(root, { push = false, allowBranch = false, name = null } = {}) {
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
-  if (!exists(path.join(root, PROJECT_FILES.hubConfig))) {
-    fail('no .sdlc/hub.json — --push publishes the hub code-context; run it from the product hub');
+  if (!exists(productConfigPath(root))) {
+    fail('no .sdlc/hub.json — --push publishes the Product code-context; run it from the Product');
     process.exitCode = 1;
     return;
   }
 
-  const { hub, repos } = loadHub(root);
+  const { hub, repos } = loadProduct(root);
   const registry = { repos: repos || [] };
-  const git = hubGit(root);
+  const git = productGit(root);
 
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout;
   const defaultBranch = resolveDefaultBranch(git, hub);
@@ -161,8 +161,8 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   }
 
   // Make the "pack is gitignored" assumption true (idempotent; packRepo also does this on refresh) so a
-  // hub whose pack was tracked before the ignore existed stops stranding a dirty tree. Publish `.gitignore`
-  // ONLY when the change is the managed pack-ignore block alone (invariant 1) — a hub whose `.gitignore`
+  // Product whose pack was tracked before the ignore existed stops stranding a dirty tree. Publish `.gitignore`
+  // ONLY when the change is the managed pack-ignore block alone (invariant 1) — a Product whose `.gitignore`
   // also carries unrelated uncommitted edits keeps them OUT of this audit commit; the pack is still ignored
   // on disk and the human commits their own `.gitignore` edits through their own change. When we do carry
   // it, `git add` makes an untracked `.gitignore` known so the --only commit can include it.

@@ -52,7 +52,7 @@ fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && 
 # Same, for a link.md field. yad-spec writes link.md WITH frontmatter, but code repos still carry
 # pre-frontmatter ones that contract-check used to read with a whole-file scan — so fall back to that
 # rather than silently reading an empty value and skipping the check it guards. Deliberately separate
-# from fm_val: hub artifacts (epic.md, stories/*.md) stay bounded to their first block.
+# from fm_val: Product artifacts (epic.md, stories/*.md) stay bounded to their first block.
 link_val() {
   _v="$(fm_val "$1" "$2")"
   [ -n "$_v" ] || _v="$(sed -nE "s/^$1:[[:space:]]*(.*)\$/\1/p" "$2" 2>/dev/null | head -1 | tr -d '\r' | sed -E 's/[[:space:]]+$//')"

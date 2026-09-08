@@ -12,7 +12,7 @@ ordering source of truth is `skills/sdlc/module-help.csv` (`phase`, `preceded-by
 |-----------------|------------------|
 | `FlowPath` (`paths.ts`) | a **phase**: Setup, Front-zero (discovery), Shape, Build, Automation, Change management (feature threads). |
 | `FlowStep` (within a path) | a **skill or gate** in order; `messages` = its `outputs`; `sideEffects` = the `.sdlc/` files it writes; `status`/`bookingStatus` annotate gated vs. enrichment vs. earned. |
-| `SystemComponent` (`components.ts`) | a **durable state object** (the hub, each `.sdlc/*.json`, code repos, the design/testing/learning tools, the platform). |
+| `SystemComponent` (`components.ts`) | a **durable state object** (the Product, each `.sdlc/*.json`, code repos, the design/testing/learning tools, the platform). |
 | `RoleConfig` (`roles.ts`) | a **lens** → its relevant sections + paths. |
 | doc sections (`docSections.ts`/`referenceData.ts`) | the phase narratives + the dial/threshold reference tables (from `config.yaml` + the build-plan docs). |
 
@@ -109,7 +109,7 @@ runs the sweep. The three thread gates ride in the Build `yad-checks` set above.
 
 ## System components = the durable state objects
 
-`components.ts` renders these on the canvas (deterministic positions): the **product hub**; each
+`components.ts` renders these on the canvas (deterministic positions): the **Product**; each
 `.sdlc/*.json` (`state.json`, `approvals.json`, `comments.json`, `hub.json`, `repos.json`, `design.json`,
 `testing.json`, `learning.json`, `docs.json`, `contract-lock.json`, `build-state/*`, `trust-log.json`,
 and the change-thread ledgers `change.json`, `reconcile-debt.json`, `build-log.json`);
@@ -133,7 +133,7 @@ The eight yadflow lenses, each to its relevant phase sections + paths:
 | ux | UI design, design tool connection, the design system |
 | dev | Build: spec → implement, the per-repo loop |
 | tester | test-cases (parallel track), the testing tool, checks |
-| reviewer | the review gate, comments, the hub bridge |
+| reviewer | the review gate, comments, the Product bridge |
 | engineer | engineer review + ship, the merge gate, automation dial/trust |
 
 ## Determinism + theme
