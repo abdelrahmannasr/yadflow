@@ -8521,7 +8521,7 @@ test('publishCodeContext: non-default branch is skipped unless --allow-branch', 
     process.exitCode = 0;
     fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/code-map.md'), '# map\n');
-    git(T, 'checkout', '-q', '-b', 'chore/wip'); // hub off its default branch
+    git(T, 'checkout', '-q', '-b', 'chore/wip'); // Product off its default branch
     const out = await grab(() => publishCodeContext(T, { push: false }));
     assert.match(out, /not the default branch 'main'/, 'guard refuses a non-default branch');
     assert.doesNotMatch(git(T, 'log', '-1', '--format=%s').toString(), /sync code-context/, 'no commit on the wip branch');

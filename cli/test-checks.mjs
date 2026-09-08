@@ -1585,7 +1585,7 @@ test('pr-template gate: both GitLab templates keep their required sections insid
 // tests exercise the verified ledger gate + author half hermetically (the signature half mirrors
 // verified-commits, whose signature path is likewise not unit-mocked).
 const LEDGER_GUARD = path.join(CHECKS, 'ledger-guard.sh');
-// The default Product is the canonical bridge shape: a platform AND the flag. `hub` overrides it so a
+// The default hub is the canonical bridge shape: a platform AND the flag. `hub` overrides it so a
 // test can exercise a divergent config (no platform, legacy key, key/value split across lines).
 const VERIFIED_HUB = '{"platform":"github","bridge_enabled":true}\n';
 const enableVerified = (T, hub = VERIFIED_HUB) => {

@@ -456,7 +456,7 @@ export function platformDefaultBranch(platform, { cwd, runner = run } = {}) {
 // though only this chain has a platform rung — they stop at the local `origin/HEAD`:
 //   1 flag        — an explicit --base; the human said so
 //   2 registry    — the repo's `default_branch` in .sdlc/repos.json
-//   3 Product     — hub.json's `default_branch`, for a PR against the Product itself
+//   3 hub         — hub.json's `default_branch`, for a PR against the Product itself
 //   4 platform    — what the remote says (see platformDefaultBranch)
 //   5 origin-head — local `refs/remotes/origin/HEAD`, the same read repo.mjs/hubcommit.mjs use.
 //                   Deliberately NOT `ls-remote`: see branchExists above for why a network probe on
