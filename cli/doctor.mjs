@@ -612,6 +612,11 @@ export function mirrorChecks(checks, root) {
   for (const { canonical, legacy } of pairs) {
     const a = path.join(root, canonical);
     const b = path.join(root, legacy);
+    // Only the settings file reaches this branch in practice: the per-epic PR ledgers are top-level
+    // arrays, which carry no shape at all, so `shape >= 3` is never true for them. They can be
+    // reported as DRIFTED (below) but never as half-made, and that is correct — their new name
+    // appears when a gate command next writes them, not when the project migrates.
+    //
     // One side missing is NORMAL before `yad migrate` — an un-migrated project has only the old name.
     // It is not normal once the file says shape 3, because from then on every save writes both. And
     // `writeMirrored` cannot repair it on its own: when the authoritative copy already matches, it
@@ -624,7 +629,7 @@ export function mirrorChecks(checks, root) {
         check(
           checks, `mirror:${canonical}`, 'shape', 'warn',
           `${exists(a) ? legacy : canonical} is missing — it should exist beside ${path.relative(root, present)} on shape ${shape}`,
-          'run `yad migrate --apply`, or any command that writes the file, to put both names back in step',
+          'run `yad migrate --apply` — a missing partner counts as a change, so it writes the pair back into step',
         );
       }
       continue;

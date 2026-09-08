@@ -210,7 +210,8 @@ export function loadLedger(epicDir) {
     state: validateState(readJSONStrict(f.state, null), f.state),
     approvals: requireArray(readJSONStrict(f.approvals, []), f.approvals),
     comments: requireArray(readJSONStrict(f.comments, []), f.comments),
-    // Read the new name when the epic has it, the old one otherwise. Both are written on every
+    // Read the OLD name while it exists, the new one otherwise — the same tie-break as the settings
+    // file (`preferring`, cli/manifest.mjs). Both are written on every
     // save (see gateSync / gateOpen), so they agree unless someone edited one by hand — which
     // `yad doctor` reports rather than leaving to be discovered.
     hubPrs: (() => {

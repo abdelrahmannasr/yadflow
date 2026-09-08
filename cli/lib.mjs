@@ -1,7 +1,7 @@
 // Shared helpers for the `yad` CLI. Node >=18 built-ins only — no dependencies.
 import { createHash } from 'node:crypto';
 import { err } from './errors.mjs';
-import { MIRRORED_FILES, SCHEMA_VERSION, productConfigPath } from './manifest.mjs';
+import { MIRRORED_FILES, SCHEMA_VERSION } from './manifest.mjs';
 import { spawnSync } from 'node:child_process';
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -262,9 +262,13 @@ export function writeMirrored(canonicalPath, legacyPath, obj) {
   // would let the two rules disagree about whether anything changed.
   const readable = fs.existsSync(legacyPath) ? legacyPath : canonicalPath;
   const next = `${JSON.stringify(writeShape(canonicalPath, obj), null, 2)}\n`;
+  // "Unchanged" means BOTH names are already right. A half-made pair — one side missing — is work
+  // to do even when the readable copy matches, or the pair can never be repaired: the comparison
+  // says nothing changed, nothing is written, and `yad doctor` reports the missing file for ever.
+  const bothPresent = fs.existsSync(canonicalPath) && fs.existsSync(legacyPath);
   try {
-    if (fs.readFileSync(readable, 'utf8') === next) return [];
-  } catch { /* neither name is readable — this is a first write, fall through */ }
+    if (bothPresent && fs.readFileSync(readable, 'utf8') === next) return [];
+  } catch { /* unreadable — treat as a first write and fall through */ }
   writeJSON(canonicalPath, obj);
   writeJSON(legacyPath, obj);
   return [canonicalPath, legacyPath];
@@ -279,5 +283,3 @@ export function writeProductConfig(root, obj) {
   return written;
 }
 
-// Read it. A thin wrapper so no caller has to remember which name to try first.
-export const readProductConfig = (root, def = null) => readJSON(productConfigPath(root), def);

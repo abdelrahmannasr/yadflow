@@ -307,18 +307,30 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     const { obj, version, applied } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel });
     const next = serialize(stamped(obj, version));
     const current = fs.readFileSync(file, 'utf8');
-    const changes = next !== current;
+    let changes = next !== current;
     const action = version !== from ? 'migrate' : (changes ? 'stamp' : 'unchanged');
     // `steps` lists the migrations that actually moved the file's shape. The baseline 1 → 1 runs on
     // every file by design and moves nothing, so naming it on every row would be noise reported as work.
     // A preview must name every file an apply would write. The product config is written under both
     // names, so on a project that does not have the new one yet, say so here — otherwise `--apply`
     // creates a file the preview never mentioned, and the preview stops being worth trusting.
-    // The row writes BOTH names, so a preview must name the partner when it does not exist yet —
-    // in either direction, since the row sits on whichever name is authoritative here.
+    // The row writes BOTH names, so a preview has to name the partner EVERY time it will be
+    // written — not only when it is missing. Naming it only on creation was silent on the state
+    // this release puts every project into (both names present), so the apply rewrote a file the
+    // preview never mentioned. A preview that under-reports is the worst failure this command can
+    // have, because being able to trust it is the whole reason anyone runs `--apply`.
+    //
+    // A missing partner also COUNTS as a change, even when the row's own bytes are already correct.
+    // Otherwise a half-made pair is unrepairable: the row says "already current", nothing is
+    // written, and `yad doctor` reports the missing file forever while the command it names does
+    // nothing.
     const partner = mirrorPartner(rel);
-    const creates = (partner && changes && !exists(path.join(root, partner))) ? [partner] : undefined;
-    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(creates ? { creates } : {}), ...(version !== from ? { steps: applied } : {}) });
+    const partnerPath = partner ? path.join(root, partner) : null;
+    const partnerMissing = !!partner && !exists(partnerPath);
+    if (partnerMissing) changes = true;
+    const creates = partnerMissing ? [partner] : undefined;
+    const rewrites = (partner && changes && !partnerMissing) ? [partner] : undefined;
+    rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(creates ? { creates } : {}), ...(rewrites ? { rewrites } : {}), ...(version !== from ? { steps: applied } : {}) });
   }
   return { engine: SCHEMA_VERSION, verified, rows };
 }
@@ -342,7 +354,10 @@ function printRows(rows) {
     if (r.action === 'unreadable' || r.action === 'ahead') fail(line.trim());
     else log(line);
     for (const made of r.creates ?? []) {
-      log(`  ${made.padEnd(width)}  ${''.padEnd(14)} ${c.dim('created — the new name for this file; the old one is kept')}`);
+      log(`  ${made.padEnd(width)}  ${''.padEnd(14)} ${c.dim('created — the other name for this file; both are kept')}`);
+    }
+    for (const also of r.rewrites ?? []) {
+      log(`  ${also.padEnd(width)}  ${''.padEnd(14)} ${c.dim('rewritten too — the other name for this file')}`);
     }
   }
 }

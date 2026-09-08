@@ -8,7 +8,7 @@
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, ask, askYesNo, readJSON, writeProductConfig } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
-import { rolesForScope, setScopeRoles } from './platform.mjs';
+import { rolesForScope, setScopeRoles, isProductScope } from './platform.mjs';
 import { parseRolesSpec, upsertRosterEntry, addRepoRoles, removeRepoRole, setRepoDomainOwners, reconcileRepoRoles } from './setup.mjs';
 
 const ROLES = ['owner', 'reviewer', 'domain-owner'];
@@ -74,7 +74,10 @@ async function repoWalk(root, entry) {
 // Mirror any domain-owner scopes from a non-interactive `--roles` upsert into repos.json.
 function syncDomainOwners(root, entry) {
   for (const [scope, list] of Object.entries(entry.roles || {})) {
-    if (scope !== 'hub' && Array.isArray(list) && list.includes('domain-owner')) setRepoDomainOwners(root, scope, entry.name, { add: true });
+    // `isProductScope`, not `!== 'hub'`: the product scope now has two spellings, and treating the
+    // second one as a repo name writes the person into a repo called `product` — or warns that no
+    // such repo exists, on every ordinary product-level grant.
+    if (!isProductScope(scope) && Array.isArray(list) && list.includes('domain-owner')) setRepoDomainOwners(root, scope, entry.name, { add: true });
   }
 }
 

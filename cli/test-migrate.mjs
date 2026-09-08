@@ -465,6 +465,43 @@ test('migrate: the authoritative file and its backup survive a DRIFTED pair', as
   } finally { cleanup(T); }
 });
 
+test('migrate: the preview names the partner even when it ALREADY exists', async () => {
+  // The state this release puts every project into. Naming the partner only when it is MISSING left
+  // the preview silent here while the apply rewrote the file — a preview that under-reports, which
+  // is the one thing that makes `--apply` not worth trusting.
+  const both = { schemaVersion: 2, platform: 'github' };
+  const files = {
+    '.sdlc/hub.json': JSON.stringify(both, null, 2) + '\n',
+    '.sdlc/product.json': JSON.stringify(both, null, 2) + '\n',
+  };
+  const A = project({ files });
+  const B = project({ files });
+  try {
+    const rows = (await runMigrate(A, {})).rows.filter((r) => r.changes);
+    const predicted = rows.flatMap((r) => [r.file, ...(r.creates ?? []), ...(r.rewrites ?? [])]).sort();
+    const actual = (await runMigrate(B, { apply: true })).written.slice().sort();
+    assert.ok(predicted.includes('.sdlc/product.json'), `the partner must be named: ${JSON.stringify(predicted)}`);
+    assert.deepEqual(actual, predicted, 'a preview that does not match the apply is worse than no preview');
+  } finally { cleanup(A); cleanup(B); }
+});
+
+test('migrate: a HALF-MADE pair is repaired, not reported forever', async () => {
+  // The row's own bytes are already correct, so without treating a missing partner as a change the
+  // plan says "already current", nothing is written, and `yad doctor` warns about the missing file
+  // for ever while naming a command that does nothing.
+  const T = project({ files: { '.sdlc/hub.json': '{\n  "platform": "github"\n}\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    fs.rmSync(path.join(T, '.sdlc/product.json'));
+    const plan = await runMigrate(T, {});
+    const row = rowFor(plan.rows, '.sdlc/hub.json');
+    assert.equal(row.changes, true, 'a missing partner counts as work to do');
+    assert.deepEqual(row.creates, ['.sdlc/product.json']);
+    await runMigrate(T, { apply: true });
+    assert.ok(fs.existsSync(path.join(T, '.sdlc/product.json')), 'and the apply actually puts it back');
+  } finally { cleanup(T); }
+});
+
 test('migrate: a project holding ONLY the new name is migrated, not ignored', async () => {
   const T = project({ files: { '.sdlc/product.json': '{\n  "platform": "github"\n}\n' } });
   try {

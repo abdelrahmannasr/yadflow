@@ -51,11 +51,13 @@ That is why this takes three releases rather than one:
 .sdlc/product.json    <- new; the same content, updated at the same time
 ```
 
-**The same for each epic's record of review PRs:**
+**Each epic's record of review PRs gains its second name too — but not during the migration.**
+That file is a plain list, so it carries no shape and `yad migrate` leaves it alone. Its new name
+appears the next time a `yad gate` command actually changes it:
 
 ```
 epics/<id>/.sdlc/hub-prs.json       <- still read
-epics/<id>/.sdlc/product-prs.json   <- new
+epics/<id>/.sdlc/product-prs.json   <- appears on the next gate write, not on migrate
 ```
 
 **And a second spelling for each reviewer's product-level role:**

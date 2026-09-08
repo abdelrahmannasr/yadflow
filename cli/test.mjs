@@ -2263,9 +2263,9 @@ function scaffoldEpic() {
       { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'blocked', risk_tags: [] },
     ],
   }));
-  // Seed BOTH names. The PR ledger lives under its new name and its old one for one major, and the
-  // engine reads the new one first — so a fixture that wrote only the old name would be silently
-  // ignored, which is precisely the hazard `doctor` now reports for real projects.
+  // Seed BOTH names. The PR ledger lives under two names for one major and the engine writes both,
+  // so a fixture that seeds only one is not the state any real project is in. (The OLD name is the
+  // one read, so seeding only it would in fact work — seeding both is what the engine does.)
   const reopened = JSON.stringify([
     { step: 'architecture-review', artifact: 'architecture.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-test/architecture', lastSyncedAt: null },
   ]);
@@ -5679,6 +5679,37 @@ test('doctor mirror: two copies of the settings that disagree are reported, not 
   assert.equal(m.status, 'warn');
   assert.match(m.message, /do not match/);
   assert.match(m.message, /hub\.json is the one being read/, 'and it says WHICH one wins, not just that they differ');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// Reverting `productConfigPath` to the old literal path made only ONE migrate test fail, which
+// means the ~20 other readers were unguarded. These two cover them.
+test('doctor: a project holding ONLY the new settings name is seen, not treated as absent', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newname-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/product.json'), JSON.stringify({
+    schemaVersion: 3, platform: 'github', git_url: 'https://example.com/a/b.git', ledger: 'verified', roster: [],
+  }, null, 2) + '\n');
+  const r = await doctorOn(T);
+  const hub = r.checks.find((c) => c.id === 'hub');
+  assert.ok(hub, 'the settings file must be found under either name');
+  assert.notEqual(hub.status, 'warn', `reported as absent: ${hub.message}`);
+  assert.match(hub.message, /github/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor mirror: a per-epic PR ledger whose two copies disagree is reported', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-epicdrift-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{\n  "platform": "github"\n}\n');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/hub-prs.json'), '[]\n');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/product-prs.json'), '[{"artifact":"architecture.md"}]\n');
+  const r = await doctorOn(T);
+  const m = r.checks.find((c) => c.id.includes('product-prs'));
+  assert.ok(m, JSON.stringify(r.checks.map((c) => c.id)));
+  assert.equal(m.status, 'warn');
+  assert.match(m.message, /hub-prs\.json is the one being read/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
