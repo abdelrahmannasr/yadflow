@@ -6,7 +6,7 @@
 #     the squash-merge subject). Keep <type> in sync with cli/manifest.mjs COMMIT_TYPES.
 #   --profile hub — a Shape artifact-review title "review: <artifact> (EP-<slug>)", the shape
 #     `yad gate open` creates (cli/gate.mjs) — BUT only for review/EP-* head branches. Every other
-#     hub PR is a tooling/code change to the Product itself and follows the code convention; pass the
+#     Product PR is a tooling/code change to the Product itself and follows the code convention; pass the
 #     head ref via --head so the gate can tell the two apart (a tooling PR has no EP artifact to
 #     review). With no --head, the Product profile stays strict (requires the review shape).
 #     Branch name is not enough on its own: a non-review head that actually changes Shape
@@ -61,7 +61,7 @@ fi
 TYPES='feat|fix|docs|refactor|test|perf|build|ci|chore|revert'
 
 # Conventional-Commits subject (optional scope + breaking `!`), no trailing period. Used by the code
-# profile and by hub tooling PRs (any head branch that is not review/EP-*).
+# profile and by Product tooling PRs (any head branch that is not review/EP-*).
 check_code_title() {
   if ! printf '%s' "$TITLE" | grep -qE "^(${TYPES})(\([a-z0-9._-]+\))?!?: .+"; then
     echo "FAIL [pr-title]: '${TITLE}' is not '<type>(<scope>)?!?: <description>' (type one of: ${TYPES//|/, })."
@@ -83,11 +83,11 @@ if [ "$PROFILE" = hub ]; then
         echo "PASS [pr-title]: '${TITLE}' (profile: hub, artifact-review)"
         exit 0
       fi
-      echo "FAIL [pr-title]: '${TITLE}' is not a hub review title 'review: <artifact> (EP-<slug>)'."
+      echo "FAIL [pr-title]: '${TITLE}' is not a Product review title 'review: <artifact> (EP-<slug>)'."
       exit 1
       ;;
     *)
-      # Any other hub PR is a tooling/code change to the Product itself — UNLESS it changes Shape
+      # Any other Product PR is a tooling/code change to the Product itself — UNLESS it changes Shape
       # artifacts (epics/**), which must go through a review/EP-* PR. Without this guard a non-review
       # head could carry an artifact change past the Shape review with only a code title.
       if artifact_changed; then

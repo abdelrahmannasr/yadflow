@@ -165,7 +165,7 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
   content. (The complete in-code fix would hash the artifact at the reviewed PR-head revision before
   advancing; deferred in favor of the branch-protection mitigation.)
 
-## Event-driven sync (hub CI) — Path B
+## Event-driven sync (Product CI) — Path B
 
 The `wire` action (SKILL.md Step 4) installs CI on the Product so a **merge** drives `yad gate ci` —
 **CI is the SOLE writer of the ledger, and it writes only at merge, only to the default branch.**
@@ -189,7 +189,7 @@ and fall back to `3`:
 | # | Source | Set it in |
 |---|---|---|
 | 1 | `YAD_VERSION` — used **verbatim**, the operator's override | GitHub: Settings → Secrets and variables → Actions → **Variables**. GitLab: Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
-| 2 | `.sdlc/hub.json` → `gate_sync_version` — this hub's committed pin | edit `hub.json`, commit it |
+| 2 | `.sdlc/hub.json` → `gate_sync_version` — this Product's committed pin | edit `hub.json`, commit it |
 | 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the Product | `yad update` re-stamps it |
 | 4 | `3` — floating major, only when nothing above resolves | — |
 
@@ -203,9 +203,9 @@ so anything that is not an exact release of this major is skipped, loudly, in fa
 **Why this is no longer a floating major.** It used to be, on the argument that a published fix should
 reach a scheduled job with nobody in the loop — this page's own issue #163 as the example. The same
 mechanism is how #163's churn *arrived*: the CI fragment ran `yadflow@3`, so 3.13.1 rolled onto every
-wired hub automatically and took the reporting one from 20 to 96 churn commits an hour, with nobody
+wired Product automatically and took the reporting one from 20 to 96 churn commits an hour, with nobody
 deciding to upgrade. Issue #163's fourth suggested fix was to stop that. The trade-off is real and cuts
-both ways — a hub is no longer carried onto a fix for free, so **if the resolved pin is older than
+both ways — a Product is no longer carried onto a fix for free, so **if the resolved pin is older than
 3.15.3, run `yad update` or disable the schedule** (`yad doctor` flags a stale stamp).
 
 The pin is **never stamped into the wired file**: `yad` owns that file and `yad check --fix` rewrites it
@@ -224,7 +224,7 @@ commit — the advance plus the `draft → approved` status flip — lands on th
 check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
 .json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). "verified mode" there
 means the same thing it means everywhere else — a `platform` **and** the verified ledger flag, `isVerifiedLedger`'s
-predicate. The gate used to enable itself on the flag alone, which let a platform-less hub reject the
+predicate. The gate used to enable itself on the flag alone, which let a platform-less Product reject the
 human's ledger write while the CLI still expected one (#186). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
 edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
@@ -303,7 +303,7 @@ sweep's recent-MR window overlaps whatever the merge-push pipeline is handling �
 one at a time (`concurrency: yad-gate-mergesync` on GitHub, `resource_group: yad-gate-mergesync` on
 GitLab). Without it both runs produce the same advance, one pushes, and the other rebases onto it and
 lands a duplicate `chore(gate): advance …` commit under a different SHA — unreviewed churn, since
-those commits carry `[skip ci]` and go straight to the default branch. An already-wired GitLab hub
+those commits carry `[skip ci]` and go straight to the default branch. An already-wired GitLab Product
 picks the `resource_group` up on the next `yad update` / `yad check --fix`.
 
 **`yad gate open` does not create or push the review branch.** It opens a PR/MR *against*
@@ -314,7 +314,7 @@ rather than failing inside `gh`/`glab`; an origin that cannot be reached at all 
 
 ### Manual end-to-end verification (GitHub)
 
-1. On a scratch hub: `yad setup` (platform github, roster with a second account) → `yad check --fix`
+1. On a scratch Product: `yad setup` (platform github, roster with a second account) → `yad check --fix`
    installs `.github/workflows/yad-gate-sync.yml`; commit + push it.
 2. Author an epic → `yad gate open EP-x epic.md` → the review PR opens. CI writes nothing yet — review
    state lives on the platform.

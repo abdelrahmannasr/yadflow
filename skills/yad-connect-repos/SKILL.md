@@ -16,7 +16,7 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
 ## Conventions
 
 - `{project-root}` resolves from the project working directory (the **Product**).
-- The **product repo is the Shape phase toolchain hub** (`config.yaml` `code_context`): Repomix (and
+- The **product repo is where the Shape phase toolchain runs** (`config.yaml` `code_context`): Repomix (and
   Impeccable, later) are installed/run **here** and target the connected code repos **by path**. The
   code repos themselves need no install for this. (The Build CI gates are the exception — they
   live inside each code repo; see `yad-checks`.)
@@ -138,7 +138,7 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo
   itself untouched**.
 
-## Hub detection + reviewer roster (the Shape review bridge)
+## Product detection + reviewer roster (the Shape review bridge)
 
 The Product is itself a git repo on a platform. These actions record that so the Shape review/comment/
 approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-hub-bridge`). They
@@ -167,7 +167,7 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (olde
 
   A platform and a verified ledger travel together: verified mode is a platform AND the switch
   (`isVerifiedLedger`, `cli/manifest.mjs`), and `yad setup` derives both from one value, so marking a
-  platform-less hub verified creates a state no CLI path can produce and the gates read
+  platform-less Product verified creates a state no CLI path can produce and the gates read
   differently (#186).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
 - **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `email` + a per-scope
@@ -207,7 +207,7 @@ it does not silently re-pack. Refreshing the cache is a human decision. Document
 
 ## Reference
 - Registry schema + freshness rule: `references/repos-registry.md`.
-- Hub config + reviewer roster (the review bridge): `references/hub-config.md`.
+- Product config + reviewer roster (the review bridge): `references/hub-config.md`.
 - Repomix command, secret-scan, degrade path, the code-map prompt, and live on-demand:
   `references/code-context.md`.
 - The repomix discipline this reuses (one-feature-at-a-time variant): `../yad-backfill/references/backfill.md`.

@@ -28,7 +28,7 @@ HOOK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HUB_ROOT="$(dirname -- "$HOOK_DIR")"
 
 # Resolution order, cheapest and most specific first: an explicit override, then the copy installed
-# in this hub, then whatever is on PATH, then a network-free npx. `--no-install` matters — a hook
+# in this Product, then whatever is on PATH, then a network-free npx. `--no-install` matters — a hook
 # runs on every tool call and must never pause an agent to download a package.
 CMD=()
 _yad_bin="${YAD_BIN:-}"

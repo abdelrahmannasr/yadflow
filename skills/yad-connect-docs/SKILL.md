@@ -35,7 +35,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
 
 - `action` — `connect` (default) | `refresh` | `list` | `disconnect`.
 - `target` — `github-pages` | `gitlab-pages` | `none`. Default **auto-detected** from `.sdlc/hub.json`
-  `platform` (github → `github-pages`, gitlab → `gitlab-pages`, null/no hub → `none`).
+  `platform` (github → `github-pages`, gitlab → `gitlab-pages`, null/no Product → `none`).
 - `scope` — `hub` (default) | `<repo-name>` | `dedicated`. Where the Pages site is published from (the
   Product repo, one connected code repo, or a dedicated docs repo).
 - `public` — `true` (default) | `false`. Whether the published site is public.
@@ -45,7 +45,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
 
 ### Step 1 — Resolve the target + detect the platform (the publish adapter)
 Determine the `target`. If not given, read `{project-root}/.sdlc/hub.json` `platform` and map it the same
-way the Product bridge maps repos: `github` → `github-pages`, `gitlab` → `gitlab-pages`, `null`/no hub →
+way the Product bridge maps repos: `github` → `github-pages`, `gitlab` → `gitlab-pages`, `null`/no Product →
 `none` (deliberate build-only). Reject a `target` value outside the three providers (fall back to the
 detected default with a warning, the way `registerRepo` falls back on an unknown platform).
 
@@ -127,6 +127,6 @@ the site here — `yad-docs` builds.**
 - Registry schema, the base-path resolution table, and the freshness/degrade rules:
   `references/docs-registry.md`.
 - The connect pattern this mirrors (design tool): `../yad-connect-design/SKILL.md`.
-- The connect pattern this mirrors (code repos + hub detection): `../yad-connect-repos/SKILL.md`.
+- The connect pattern this mirrors (code repos + Product detection): `../yad-connect-repos/SKILL.md`.
 - The consumers — how `yad-docs` / `yad-docs-overview` build + deploy: `../yad-docs/SKILL.md`,
   `../yad-docs-overview/SKILL.md`.

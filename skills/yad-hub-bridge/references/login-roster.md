@@ -44,13 +44,13 @@ It is populated/edited any time with the `yad roster` CLI command (see that refe
 
 ## Auto-assignee / auto-reviewer on PR/MR open
 
-When a review PR/MR is opened (hub `yad gate open`, or a code-repo `yad open-pr`):
+When a review PR/MR is opened (Product `yad gate open`, or a code-repo `yad open-pr`):
 
 - **Assignee = the committer/opener** — resolved from local git identity (`user.email`, then
   `user.name`) through the roster (`email`/`name`/`login`). On GitHub an unresolved committer still
   self-assigns via `@me`.
 - **Reviewers = `reviewer` + `domain-owner`** for the touched scope(s) (`hub` plus every touched
-  domain for a hub review; the repo itself for a code PR), **minus the committer** — you do not review
+  domain for a Product review; the repo itself for a code PR), **minus the committer** — you do not review
   your own PR. The artifact **owner/author is recorded, not requested.**
 - Logins are validated against the Product during `yad setup` / `yad doctor` (`gh api users/<login>`,
   `glab api users?username=<login>`); a miss is flagged `unverified` but never blocks (fail-open).

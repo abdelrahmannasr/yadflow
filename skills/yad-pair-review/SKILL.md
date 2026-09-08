@@ -127,7 +127,7 @@ addresses them) — nothing advances on a half-finished session.
 
 ## local mode (no platform)
 
-With no hub platform there is no PR to post to: write the session record to
+With no Product platform there is no PR to post to: write the session record to
 `reviews/<base>--<date>--pair-session.md` alongside the existing `reviews/*.md`, and the human records
 approval the manual way via [`yad-review-gate`](../yad-review-gate/SKILL.md). The learning record is
 written exactly the same (it is local-only regardless of platform). The session logic is unchanged; only

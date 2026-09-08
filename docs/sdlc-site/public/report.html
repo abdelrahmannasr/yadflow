@@ -305,7 +305,7 @@
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Connect a learning tool</strong><small><code>yad-connect-learning</code> → <code>learning.json</code> (DeepTutor-first, pluggable) so the learning layer can tutor in context <em>(optional — degrades to harness-native)</em></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>Optional: hub on a platform</strong><small>detect GitHub/GitLab + reviewer roster, so reviews run on real PRs/MRs</small></div>
+        <div class="node plain"><strong>Optional: Product on a platform</strong><small>detect GitHub/GitLab + reviewer roster, so reviews run on real PRs/MRs</small></div>
       </div>
     </div>
 
@@ -543,7 +543,7 @@ each code repo/
   <div class="term"><strong>Build/test/lint gate</strong><span class="badge b-build">build</span><br>CI gate #3: the ordinary safety net — the project must build, its tests must pass, lint must be clean.</div>
   <div class="term"><strong>Verified-commits gate</strong><span class="badge b-build">build</span><br>CI gate #4: every commit must carry a platform-verified signature and be authored by a roster-known email — rejecting unverified commits from unknown users, on the Product and every repo.</div>
   <div class="term"><strong>Commit-message gate</strong><span class="badge b-build">build</span><br>CI gate #5: every commit subject must follow Conventional Commits (<code>&lt;type&gt;: …</code>, no trailing period) and its trailers must be ordered <code>Task → Contract-Change → Co-Authored-By</code>. Profile-aware (code|hub|product).</div>
-  <div class="term"><strong>PR-title gate</strong><span class="badge b-build">build</span><br>CI gate #6: the PR/MR title must follow the convention — a Conventional-Commits subject on code repos. On the Product it splits by head branch: a <code>review/EP-*</code> branch is a Shape review PR and needs a <code>review: &lt;artifact&gt; (EP-&lt;slug&gt;)</code> title, while any other branch is a hub tooling/code change and uses the Conventional-Commits subject. <em>Anti-bypass:</em> a non-review branch that changes a Shape artifact (<code>epics/**</code>) is rejected — artifact edits must go through a review PR.</div>
+  <div class="term"><strong>PR-title gate</strong><span class="badge b-build">build</span><br>CI gate #6: the PR/MR title must follow the convention — a Conventional-Commits subject on code repos. On the Product it splits by head branch: a <code>review/EP-*</code> branch is a Shape review PR and needs a <code>review: &lt;artifact&gt; (EP-&lt;slug&gt;)</code> title, while any other branch is a Product tooling/code change and uses the Conventional-Commits subject. <em>Anti-bypass:</em> a non-review branch that changes a Shape artifact (<code>epics/**</code>) is rejected — artifact edits must go through a review PR.</div>
   <div class="term"><strong>PR-template gate</strong><span class="badge b-build">build</span><br>CI gate #7: the PR/MR body must actually use the committed template (its required sections present + the risk field filled), so the review and routing have their inputs. Profile-aware (code|hub|product); the Product splits by head branch the same way as the PR-title gate, with the same <code>epics/**</code>-on-a-non-review-branch anti-bypass guard.</div>
   <div class="term"><strong><code>Task:</code> trailer</strong><span class="badge b-build">build</span><br>A line at the end of every commit message naming the story + task it implements (e.g. <code>Task: EP-checkout-S01-T03</code>). What the spec-link check verifies.</div>
   <div class="term"><strong><code>Contract-Change: yes</code> trailer</strong><span class="badge b-build">build</span><br>A commit trailer added <em>only</em> when the diff deliberately touches the locked contract surface — paired with an updated, re-locked contract, or the contract-check fails.</div>
@@ -905,7 +905,7 @@ yad-review-gate … action: advance    # move on — only if the rule is met, el
     <h4><code>yad-hub-bridge</code></h4>
     <div class="row"><span class="lbl lbl-what">What</span> the verified ledger between the file ledger and real PRs/MRs on the Product: opens a review PR per artifact, sets the required reviewers and labels from the routing rule, and provides the read-only <code>gh</code>/<code>glab</code> recipes that pull platform approvals and comments back into the files. The file ledger always stays the source of truth.</div>
     <div class="row"><span class="lbl lbl-how">How</span> Mostly invoked <em>for</em> you by the gate (its <code>open</code>/<code>sync</code>). You call it directly once, to wire the event-driven sync CI:</div>
-<pre><code>yad-hub-bridge action: wire    # hub CI runs `yad gate ci` on every approve / request-changes / merge</code></pre>
+<pre><code>yad-hub-bridge action: wire    # Product CI runs `yad gate ci` on every approve / request-changes / merge</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Once during setup (step “wire the Product”), if you want Shape reviews to ride real PRs/MRs. No platform or no <code>gh</code>/<code>glab</code>? Everything degrades to the local gate with no error — you never <em>need</em> this skill.</div>
   </div>
 
@@ -936,7 +936,7 @@ yad open-pr --repo backend</code></pre>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-checks repo: backend action: wire   # once, during setup
 yad-checks repo: backend action: run    # before opening each PR
-yad-checks repo: hub action: wire       # hub-flavored gates for the Product</code></pre>
+yad-checks repo: hub action: wire       # Product-flavored gates</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> <code>wire</code> once per repo at setup; <code>run</code> after implementing, before the PR — the same gates also run automatically in CI on every PR and must pass before merge.</div>
   </div>
 

@@ -1,4 +1,4 @@
-# Hub config — schema, detection, and the reviewer roster
+# Product config — schema, detection, and the reviewer roster
 
 The Product config is the Product's record of **its own** platform (so the Shape review/comment/
 approval cycle can run through a real PR/MR on the Product) and the **reviewer roster** that maps a platform
@@ -113,6 +113,6 @@ This mirrors how `repos.json` and the per-epic `.sdlc/` state are committed.
 
 ## Greenfield
 
-A brand-new hub has no `hub.json`. That is valid — the Shape gate runs local until `detect-hub`
+A brand-new Product has no `hub.json`. That is valid — the Shape gate runs local until `detect-hub`
 records a platform. The verified ledger is purely additive; nothing about authoring or the gate predicate changes.
 ```

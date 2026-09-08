@@ -17,7 +17,7 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 ## Conventions
 
-- `{project-root}` is the **Product**. Hub platform + reviewer roster live in `.sdlc/hub.json`
+- `{project-root}` is the **Product**. Product platform + reviewer roster live in `.sdlc/hub.json`
   (`config.yaml` `product.config` (older projects: `hub.config`); schema in `../yad-connect-repos/references/hub-config.md`).
 - Per-step review-PR record: `epics/EP-<slug>/.sdlc/product-prs.json`, written together with its
   older name `hub-prs.json` (`config.yaml` `product.pr_ledger` (older projects: `hub.pr_ledger`)) — a
@@ -109,7 +109,7 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
    - the wired job runs an **exact** version, resolved at run time from the repo: the `YAD_VERSION`
      variable, else `hub.json` `gate_sync_version`, else the `.sdlc/cli-version.json` stamp, else the
      floating `3`. It stopped floating on the major because that let a release change a scheduled job's
-     behaviour unattended — how #163's churn reached hubs that never opted in. So upgrading is now a
+     behaviour unattended — how #163's churn reached Products that never opted in. So upgrading is now a
      deliberate act (`yad update`); if the resolved pin predates 3.15.3, upgrade or disable the
      schedule. Never edit a version into the wired file — `yad check --fix` rewrites it byte-for-byte
      from the template. See `references/bridge.md`.

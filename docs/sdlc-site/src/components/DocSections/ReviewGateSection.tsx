@@ -2,7 +2,7 @@ import { Icon } from '../shared/Icon';
 
 // The reusable team review gate — the one gate, reused for all five Shape
 // reviews. open → comment → approve → advance. The file ledger is the source of
-// truth; with a hub platform it rides a real review PR/MR and advances on merge.
+// truth; with a Product platform it rides a real review PR/MR and advances on merge.
 const REVIEWS = [
   {
     method: 'BASE',
@@ -54,7 +54,7 @@ export function ReviewGateSection() {
           Every review is the same loop —{' '}
           <code className="text-[11px] bg-white/5 px-1 rounded text-slate-300">open → comment → approve → advance</code>.
           Reviewers comment and approve as files; the step moves forward only when the gate rule is satisfied.
-          With a hub platform the gate rides a real review PR/MR and{' '}
+          With a Product platform the gate rides a real review PR/MR and{' '}
           <strong className="text-white">auto-advances on merge</strong>, which is the human approval act — so
           Shape steps still never machine_advance. <strong className="text-white">CI is the sole writer of the
           ledger</strong>, and writes only at merge, on the default branch: during review the platform PR/MR is

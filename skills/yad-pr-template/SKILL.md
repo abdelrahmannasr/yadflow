@@ -21,11 +21,11 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   - `templates/gitlab/merge_request_templates/Default.md` → installs to
     `<repo>/.gitlab/merge_request_templates/Default.md`
   - `templates/checks/risk-route.sh` → installs to `<repo>/checks/risk-route.sh` (advisory routing helper)
-  - **Hub variants** (`repo: hub`) — Shape artifact-review PR/MR bodies:
+  - **Product variants** (`repo: hub`) — Shape artifact-review PR/MR bodies:
     `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
     `templates/hub/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The Product body carries no `Task:` trailer
-    (hub PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s `hub-route.sh`.
+    (Product PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s `hub-route.sh`.
 - **GitLab reads a truncated description.** The `pr-template` gate is fed
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
   that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use

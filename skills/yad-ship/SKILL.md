@@ -24,7 +24,7 @@ its own and **never merges**. The engineer review + merge are Step E (`yad-engin
   atomic guard, or `--dry-run` stops the step before anything is pushed.
 - **Stage-aware on the Product** (via `yad-open-pr`): on a `review/EP-*` branch `ship` opens the
   Shape **artifact-review** PR (delegating to `yad gate open` — `--title` is ignored); on any
-  other hub branch it opens the **code-task** PR from the bundled code-task template. In a code repo
+  other Product branch it opens the **code-task** PR from the bundled code-task template. In a code repo
   it is unchanged.
 
 ## Inputs

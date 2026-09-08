@@ -61,7 +61,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
   - `templates/checks/{spec-link,contract-check,package-manager,install-deps,build-test-lint,verified-commits}.sh`
-  - `templates/checks/ledger-guard.sh` → **hub-only** gate, active **only in verified mode** — hub.json
+  - `templates/checks/ledger-guard.sh` → **Product-only** gate, active **only in verified mode** — hub.json
     carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
     (or the legacy `bridge`) true. The same predicate
     `isVerifiedLedger` (`cli/manifest.mjs`) applies, so the gate and the CLI can never disagree about who owns the
@@ -76,13 +76,13 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     default branch the guard is absolute again. Runs in `yad-hub-checks`
     alongside `verified-commits` (which waives the allowlist for the bot but still requires its
     signature). See `yad-hub-bridge`.
-  - `templates/hooks/ledger-guard.sh` → **hub-only** agent guardrail, active **only in verified mode**
+  - `templates/hooks/ledger-guard.sh` → **Product-only** agent guardrail, active **only in verified mode**
     (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the
-    local half of `checks/ledger-guard.sh` (#171). Installed to `<hub>/hooks/ledger-guard.sh` with the
+    local half of `checks/ledger-guard.sh` (#171). Installed to `<product>/hooks/ledger-guard.sh` with the
     `PreToolUse` entry in `.claude/settings.json`. Fails OPEN; see "Step 2b" below.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
-    → the standalone hub-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
+    → the standalone Product-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);
     its quality job uses `install-deps.sh`, reads the optional `YAD_NODE_VERSION` repository variable,
     exports the PR's exact `NX_BASE`/`NX_HEAD`, and filters unrelated history blobs while preserving
@@ -163,10 +163,10 @@ Re-running `wire` is **idempotent** — markers (`# yad-managed: yad-checks`,
 Commit the wiring on the repo's default branch (it is shared infrastructure, not a task diff).
 
 **The Product is wired the same way.** `repo: hub` wires the Product repo itself (platform from `.sdlc/hub.json`)
-with a hub-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
+with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
 
 **The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.sh` →
-`<hub>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
+`<product>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
 and `yad check --fix` install both; there is nothing to do by hand.
 
 ### Step 2b — the agent guardrail (harness hooks, verified mode only)
@@ -191,7 +191,7 @@ file-editing tool call and refuses the write up front, naming the command that o
   `origin/` ref, case-folded slugs), never by looking at the working tree.
 - **A no-op with a local ledger.** There the ledger is locally owned and the hand-edit the authoring
   skills describe is *correct*, so nothing is wired and nothing is blocked.
-- **It fails OPEN** — no `yad`, no hub, an unreadable config, an unparseable payload all ALLOW, with
+- **It fails OPEN** — no `yad`, no Product, an unreadable config, an unparseable payload all ALLOW, with
   a note on stderr. `ledger-guard` in CI fails *closed* and remains the authority. `YAD_HOOK_DISABLE=1`
   skips one command.
 - **Known gaps** (both caught by the CI gate instead): a `Bash` tool call (`sed -i epics/…`) is not
@@ -199,7 +199,7 @@ file-editing tool call and refuses the write up front, naming the command that o
   Product**, since a harness reads hooks from its own project root — a session opened at the workspace
   above the Product never loads the Product's `.claude/settings.json`.
 
-`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a verified hub.
+`yad doctor` reports the guardrail as `agent ledger guard wired` / `not wired` on a verified Product.
 See `references/check-gates.md` §"The agent guardrail".
 
 ### Step 3 — `run` (run the gates now)

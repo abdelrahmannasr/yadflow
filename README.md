@@ -89,7 +89,7 @@ In one pass it produces:
   push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
   `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
   under `checks/`.
-- **An agent guardrail** on a verified hub — `hooks/ledger-guard.sh`, a harness hook that refuses an
+- **An agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that refuses an
   agent the CI-owned gate-ledger write at the moment it tries it and names the command that owns the
   transition, instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic
   (stdin payload, exit 0 allows / 2 denies) and fails open — the CI gate stays the authority.

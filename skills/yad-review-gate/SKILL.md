@@ -223,7 +223,7 @@ write path.
 - The gate talks only through `.sdlc/` and `reviews/` files — never hidden state.
 - **The platform is an input path only.** `open`/`sync` use the local user's own `gh`/`glab` (no stored
   tokens), and the **file ledger remains the source of truth** — the Step 3 predicate is unchanged
-  whether approvals arrive manually or via `sync`. With no hub platform / no CLI, the gate runs local
+  whether approvals arrive manually or via `sync`. With no Product platform / no CLI, the gate runs local
   with no error (record approvals manually and `advance`).
 
 ## Reference

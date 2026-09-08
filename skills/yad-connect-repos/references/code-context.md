@@ -85,7 +85,7 @@ silently re-packing the whole repo. A phase never refreshes the registry on its 
 code-context … [skip ci]` audit commit (never the pack's content; `--allow-branch` overrides the branch
 guard). The `pack.md` is gitignored — `yad repo refresh`/`yad setup` scaffold
 `.sdlc/code-context/*/pack.md` into the Product `.gitignore` (so a regenerated pack never dirties the tree),
-and a hub that tracked the pack *before* that ignore existed is self-healed: `--push` untracks it and
+and a Product that tracked the pack *before* that ignore existed is self-healed: `--push` untracks it and
 lands the removal + the managed `.gitignore` line in the same audit commit. The commit is a scoped
 `git commit -- <paths>` — it never sweeps unrelated staged work, and an unrelated hand-edit to
 `.gitignore` is left for the human to commit rather than riding the `[skip ci]` audit commit.

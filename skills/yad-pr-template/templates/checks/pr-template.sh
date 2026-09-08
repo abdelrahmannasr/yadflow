@@ -7,7 +7,7 @@
 #     requires `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:` (low|medium|high).
 #   --profile hub — the Shape artifact-review template (templates/hub/<platform>/):
 #     requires `## Artifact under review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
-#     BUT only for review/EP-* head branches. Every other hub PR is a tooling/code change to the Product
+#     BUT only for review/EP-* head branches. Every other Product PR is a tooling/code change to the Product
 #     itself and uses the code task template instead; pass the head ref via --head so the gate knows
 #     which template to require. With no --head, the Product profile stays strict (artifact-review template).
 #     Branch name is not enough on its own: a non-review head that actually changes Shape
@@ -89,7 +89,7 @@ require_heading() {
 }
 
 # The code task template: `## Summary`, `## Impact & Risk`, `## Checklist`, and a filled `Risk level:`.
-# Used by the code profile and by hub tooling PRs (any head branch that is not review/EP-*).
+# Used by the code profile and by Product tooling PRs (any head branch that is not review/EP-*).
 check_code_body() {
   require_heading '## Summary' '## Summary'
   require_heading '## Impact & Risk' '## Impact & Risk'
@@ -109,11 +109,11 @@ check_code_body() {
 check_hub_body() {
   require_heading '## Artifact under review' '## Artifact under review'
   # Add before you remove (change-safety rule 3). `front-half` is the ORIGINAL spelling and it is
-  # still what `yad gate open` emits and what the shipped hub template carries; `Shape` is the
+  # still what `yad gate open` emits and what the shipped Product template carries; `Shape` is the
   # replacement, accepted here first so that this script is lenient BEFORE anything starts writing
   # the new wording. That ordering is the whole point: this file is refreshed by `yad update`
   # (PRODUCT_WIRING, cli/manifest.mjs), but the PR template beside it is NOT — it is installed only by
-  # the `yad-pr-template repo:hub action: wire` skill, which nothing runs automatically. So a hub
+  # the `yad-pr-template repo:hub action: wire` skill, which nothing runs automatically. So a Product
   # WILL sit with a refreshed checker next to an old template, and the checker has to accept both.
   # The emitter flips to `(Shape)` in the next major; only after that may `front-half` be dropped.
   require_heading '## Impact & Risk \((front-half|Shape)\)' '## Impact & Risk (front-half)'

@@ -223,8 +223,8 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 ```text
 yad-connect-repos action: detect-hub                              # records the Product's platform in .sdlc/hub.json
 yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
-yad-pr-template     repo:hub action: wire                         # hub's Shape PR/MR body template
-yad-checks          repo:hub action: wire                         # hub-flavored gates (owner-set / contract-locked / approvals-present)
+yad-pr-template     repo:hub action: wire                         # Product's Shape PR/MR body template
+yad-checks          repo:hub action: wire                         # Product-flavored gates (owner-set / contract-locked / approvals-present)
 yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
@@ -367,7 +367,7 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
    to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
-   registry `default_branch` → the Product's `default_branch` for a hub PR → the platform → `origin/HEAD` →
+   registry `default_branch` → the Product's `default_branch` for a PR on the Product → the platform → `origin/HEAD` →
    `main`), not a hardcoded `main`. If it warns that your base is not the platform default, that is
    **advisory — nothing is blocked and the PR is already open.** Intended (stacked PR, release branch)?
    Carry on. Not intended? Close it, pick the right base, and re-run — retargeting the open PR does not

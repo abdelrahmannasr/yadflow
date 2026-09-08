@@ -39,7 +39,7 @@
 # Which yadflow this job runs: an EXACT version resolved from the repo at run time — see the `yad-pin`
 # block in the script below for the precedence. It no longer floats on the major, because floating let a
 # release change what a scheduled job does with nobody deciding to upgrade (issue #163, where 3.13.1
-# took one hub from 20 to 96 churn commits an hour). The trade-off is deliberate and cuts both ways: a
+# took one Product from 20 to 96 churn commits an hour). The trade-off is deliberate and cuts both ways: a
 # Product is no longer carried onto a fix automatically, so if the resolved pin is older than 3.15.3, run
 # `yad update` or disable this schedule.
 #
@@ -90,7 +90,7 @@ yad-gate-sync:
       # >>> yad-pin
       # Which yadflow this job runs, most explicit source first:
       #   1. $YAD_VERSION            — the CI/CD variable, a human's deliberate override, verbatim
-      #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this hub
+      #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this Product
       #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
       #   4. 3                       — floating major, only when nothing above resolves
       # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
@@ -126,7 +126,7 @@ yad-gate-sync:
         # unchanged approval record produces an unchanged file and nothing is committed. That last part
         # is load-bearing — before the #163 fix the re-sync re-appended each step's approvals at the
         # tail, so this loop rotated approvals.json and committed the reorder on every pass, forever
-        # (issue #163). This job runs an exact pin resolved from the repo, so a hub still sitting on a
+        # (issue #163). This job runs an exact pin resolved from the repo, so a Product still sitting on a
         # pre-3.15.3 yadflow keeps that behaviour — upgrade it or disable this schedule.
         # A stuck review MR (a squash merge whose commit dropped the branch name, or a failed merge
         # push) is always RECENT, so sweep a generous recent window and PAGINATE it fully (--paginate)

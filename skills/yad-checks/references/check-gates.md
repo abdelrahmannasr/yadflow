@@ -14,7 +14,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
 | epic-open | the `Task:` trailer → `link.md` → the Product epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
 | reconcile-debt | the `Task:` trailer → `link.md` → the Product epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
-| verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | hub roster `email` fields (`yad check --fix` generates the allowlist) |
+| verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | Product roster `email` fields (`yad check --fix` generates the allowlist) |
 | commit-message | each non-merge commit's subject + trailer block | `yad-commit` / `CONTRIBUTING.md` (`config.yaml build.commit_subject_style`) |
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
 | pr-template | the PR/MR body (from the CI event payload) | `yad-pr-template` (the committed PR/MR template) |
@@ -228,7 +228,7 @@ catches a free-form description that bypassed it:
 - `--profile hub` → splits by the PR/MR **head branch** (passed via `--head`, injected by CI):
   - `review/EP-*` head (or no `--head`) → requires the artifact-review template: `## Artifact under
     review`, `## Impact & Risk (front-half)` (or `(Shape)`), `## Checklist`, and a `Risk tags:` line.
-  - any other head → a hub tooling PR, so it requires the `code` task template (`## Summary`,
+  - any other head → a Product tooling PR, so it requires the `code` task template (`## Summary`,
     `## Impact & Risk`, `## Checklist`, filled `Risk level:`).
   - **Anti-bypass guard** (same as pr-title): a non-review head that changes Shape artifacts
     (`epics/**`, detected from the CI-supplied `--changed <file>` list) **FAILS** — artifact changes
@@ -258,7 +258,7 @@ pass past the sealed-epic / orphan-thread / frozen-thread checks. When the **Pro
 PR), each degrades to a **PASS-with-note** — the Product-side check (`yad doctor` / `yad reconcile`) covers
 that path, and spec-link still proves the story link.
 
-**Resolving `product-repo` (shared by all four hub-reading gates, contract-check included).** An
+**Resolving `product-repo` (shared by all four Product-reading gates, contract-check included).** An
 **absolute** value is used as-is; a **relative** value is joined to the `link.md`'s own directory,
 `specs/<story>/`, falling back to a repo-root reading when only that resolves (what contract-check
 historically did, so `link.md` files written for it keep working). The `link.md` itself is read from
@@ -379,7 +379,7 @@ that already had its own pipeline keeps it and still gains the gates.
 
 The Product is itself a repo on a platform (recorded in `.sdlc/hub.json` by
 `yad-connect-repos action: detect-hub`). `wire repo: hub` targets `{project-root}` and uses the same
-merge-not-clobber logic, with a **hub-flavored gate set** appropriate to a "thinking" repo (it has no
+merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
 `specs/` or `package.json` build):
 - **owner-set** — every `epic.md` (and forward artifact) under `epics/EP-*/` carries an `owner`.
 - **contract-locked** — where an epic has a `contract.md`, its surface hash matches
@@ -405,7 +405,7 @@ The Product **also** runs the three pattern gates (`commit-message`, `pr-title`,
 `review: <artifact> (EP-<slug>)` title, and the Product artifact-review template body; **any other head is
 a tooling/code change to the Product itself** and follows the `code` convention (a Conventional-Commits
 title + the code task template), so a PR that changes the Product's own workflows/checks can pass.
-`yad check --fix` installs the same `checks/*.sh` scripts plus a standalone hub workflow
+`yad check --fix` installs the same `checks/*.sh` scripts plus a standalone Product workflow
 (`templates/github/yad-hub-checks.yml` → `.github/workflows/yad-hub-checks.yml`, or the GitLab fragment
 `templates/gitlab/yad-hub-checks.gitlab-ci.yml` → `.gitlab/ci/yad-hub-checks.yml` + its one include
 line). Code repos run the same three with `--profile code` inside the main `yad-checks` workflow.
@@ -445,7 +445,7 @@ logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
 - **The seed carve-out reads the base ref, not the working tree** (#162): the epics whose
   `state.json` the base carries are listed once with `ls-tree`, and an epic absent from that list is
   a creation. Never a `<rev>:<path>` probe — that spec resolves from the repository top level and
-  `-C` does not re-anchor it, so a hub in a subdirectory of its repo would miss every time and the
+  `-C` does not re-anchor it, so a Product in a subdirectory of its repo would miss every time and the
   guard would allow everything, silently.
 - **The base is an `origin/` ref** — `origin/<default_branch>`, then the remote's published default,
   then `origin/main`, the gate's own order. Never a bare local branch: `git fetch` does not
@@ -458,7 +458,7 @@ logic is unit-tested (`cli/hook.mjs`, `cli/test.mjs`) instead of living in bash.
   bridge the ledger is locally owned, the hand-edit the authoring skills describe is correct, and
   nothing is wired or blocked.
 
-**It fails OPEN, and that asymmetry is the design.** No `yad` on PATH, no hub above the edited path,
+**It fails OPEN, and that asymmetry is the design.** No `yad` on PATH, no Product above the edited path,
 an unreadable `hub.json`, an unparseable payload, a `yad` that errors — every one of them ALLOWS,
 with a note on stderr. A local guardrail that failed closed would brick an agent's ability to edit
 anything the moment an install went sideways. The CI gate fails **closed** and is what actually
@@ -472,15 +472,15 @@ protects the ledger; this only shortens the feedback loop. `YAD_HOOK_DISABLE=1` 
   session opened at the *workspace* (`project/`, with the Product at `project/product/`) never reads the
   Product's `.claude/settings.json` and the guard does not fire there — even though the decision itself
   resolves the Product correctly from any path. In that layout, open the session at the Product, or copy the
-  entry into the workspace's own settings (the command's `$CLAUDE_PROJECT_DIR` would then need the
-  hub-relative path).
+  entry into the workspace's own settings (the command's `$CLAUDE_PROJECT_DIR` would then need
+  the Product-relative path).
 
-**Wiring** (installed by `yad setup` / `yad check --fix`, bridge hubs only):
+**Wiring** (installed by `yad setup` / `yad check --fix`, verified Products only):
 
 | Path | Owner |
 |---|---|
-| `<hub>/hooks/ledger-guard.sh` | fully managed — drift-checked and recorded in `.sdlc/managed.json` like any gate script |
-| `<hub>/.claude/settings.json` | **one entry**, merged additively into `hooks.PreToolUse`. See below. |
+| `<product>/hooks/ledger-guard.sh` | fully managed — drift-checked and recorded in `.sdlc/managed.json` like any gate script |
+| `<product>/.claude/settings.json` | **one entry**, merged additively into `hooks.PreToolUse`. See below. |
 
 The settings file is the team's, so the rules around that one entry are deliberately conservative:
 
@@ -505,7 +505,7 @@ The settings file is the team's, so the rules around that one entry are delibera
 `.claude` is the only IDE target wired: it is the only one with a defined hook protocol. Other
 targets get the script, and the contract above is what they would wire by hand.
 
-`yad doctor` reports the guard on a verified hub, and distinguishes the three states that matter — it
+`yad doctor` reports the guard on a verified Product, and distinguishes the three states that matter — it
 reads the same persisted `ideTargets` the wiring reads, so every gap it names is one the command it
 names can actually close:
 

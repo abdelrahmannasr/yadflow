@@ -25,8 +25,8 @@ steps stay `human_approve` forever.
 
 ## 0 — One-time setup
 
-> **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, hub
-> detect + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
+> **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, Product
+> detection + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
 > repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
 > long-hand equivalent and still work.
 
@@ -59,7 +59,7 @@ steps stay `human_approve` forever.
    `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
    SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
    sets one directly), and `yad-pr-template repo:hub action: wire` /
-   `yad-checks repo:hub action: wire`. With no hub platform the Shape gate runs local.
+   `yad-checks repo:hub action: wire`. With no Product platform the Shape gate runs local.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](../CONTRIBUTING.md).
@@ -186,7 +186,7 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 
 Every review is the same loop — author writes, reviewers comment (which never advances), approvals
 accumulate, and the step moves forward only when the rule is met. **local** ends in an explicit
-`advance`; **PR-driven** (hub on a platform) ends when the approved, fully-resolved review PR is
+`advance`; **PR-driven** (Product on a platform) ends when the approved, fully-resolved review PR is
 **merged**:
 
 <!-- Source: docs/diagrams/review-loop.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->

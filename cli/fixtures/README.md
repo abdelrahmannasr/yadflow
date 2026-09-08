@@ -2,7 +2,7 @@
 
 ## `golden-v3/` — a frozen v3 project
 
-This is a real yadflow project, copied verbatim: this repo's own product hub (`.sdlc/`) and its two
+This is a real yadflow project, copied verbatim: this repo's own Product (`.sdlc/`) and its two
 `EP-checkout` epics, exactly as they stood before the engine roadmap's Wave 1 began.
 
 **Do not edit anything in this folder.** It is an archive, not a working project. `cli/test-golden.mjs`

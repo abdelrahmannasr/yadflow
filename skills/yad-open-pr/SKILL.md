@@ -26,7 +26,7 @@ the Product.
   - a **`review/EP-*/<artifact>`** branch is a Shape artifact-review PR → it **delegates to
     `yad gate open`** (artifact-review title `review: <artifact> (EP-<slug>)`, the Product artifact-review
     body, and the gate ledger bookkeeping all in one place). Any `--title`/`-m` is ignored here.
-  - any **other hub branch** is a tooling/CI change → it uses the bundled **code-task** template
+  - any **other Product branch** is a tooling/CI change → it uses the bundled **code-task** template
     (`## Summary` / `Risk level:` / `## Checklist`) instead of the Product's artifact-review
     `pull_request_template.md`, so the Product `pr-template` gate passes.
   In a code repo nothing changes — it reads the repo's own committed code-task template.

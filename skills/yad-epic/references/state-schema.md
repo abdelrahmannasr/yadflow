@@ -152,7 +152,7 @@ Append-only ledger (an array). Each entry:
 { "artifact": "epic.md", "step": "epic-review", "approver": "<name>", "role": "owner|reviewer|domain-owner", "domain": "<repo-or-area, optional>", "status": "approved", "date": "<YYYY-MM-DD>", "source": "<bridge, optional>" }
 ```
 
-`source: "bridge"` marks an approval synced from a hub review PR/MR by `yad-review-gate action: sync`
+`source: "bridge"` marks an approval synced from a Product review PR/MR by `yad-review-gate action: sync`
 (via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`.
 
 A **bridge** approval carries four more fields, all written by `sync` and all about *what was approved*

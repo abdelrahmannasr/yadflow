@@ -102,7 +102,7 @@ thread off it, `promote` is what makes that anchor real — run it once the feat
 - **verified mode — promote is not wired.** The `state.json` edits above mutate an epic whose ledger is
   already on the base ref, so the `#162` seed exemption does not apply and `ledger-guard` rejects the
   commit; unlike the authoring steps there is no `yad backfill` CLI and no `gate ci` path that performs
-  the promotion instead. On a verified hub, STOP and report this — the promotion needs the gate bot (or a
+  the promotion instead. On a verified Product, STOP and report this — the promotion needs the gate bot (or a
   maintainer landing it out of band). Only the `epic.md` half is safe to commit. Tracked as a gap; do
   **not** push the ledger edit around the guard.
 - Never auto-advances; a human confirms the promotion.

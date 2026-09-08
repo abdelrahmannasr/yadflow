@@ -155,7 +155,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
   with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
   both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also
-  installs the **agent guardrail** on a verified hub — `hooks/ledger-guard.sh`, a harness hook that
+  installs the **agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting
   `ledger-guard` reject it in CI twenty minutes later (#171).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with

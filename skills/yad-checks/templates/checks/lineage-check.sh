@@ -52,7 +52,7 @@ fm_val() { awk -v k="$1" 'NR==1 && /^---$/ {f=1; next} f && /^---$/ {exit} f && 
 # Same, for a link.md field. yad-spec writes link.md WITH frontmatter, but code repos still carry
 # pre-frontmatter ones that contract-check used to read with a whole-file scan — so fall back to that
 # rather than silently reading an empty value and skipping the check it guards. Deliberately separate
-# from fm_val: hub artifacts (epic.md, stories/*.md) stay bounded to their first block.
+# from fm_val: Product artifacts (epic.md, stories/*.md) stay bounded to their first block.
 link_val() {
   _v="$(fm_val "$1" "$2")"
   [ -n "$_v" ] || _v="$(sed -nE "s/^$1:[[:space:]]*(.*)\$/\1/p" "$2" 2>/dev/null | head -1 | tr -d '\r' | sed -E 's/[[:space:]]+$//')"
@@ -113,7 +113,7 @@ while IFS= read -r sha; do
   fi
   prod="$(resolve_product "$product_rel" "$story")"
   epicmd="${prod}/epics/${epic}/epic.md"
-  # Defer ONLY when the product checkout itself is unreachable. A reachable hub whose epic is missing is
+  # Defer ONLY when the product checkout itself is unreachable. A reachable Product whose epic is missing is
   # an orphaned story link — FAIL, do not pass it off as "not reachable".
   if [ -z "$product_rel" ] || [ ! -d "$prod" ]; then
     echo "PASS [lineage-check]: ${short} ${task} -> epic ${epic} (product repo not reachable — lineage check deferred)."

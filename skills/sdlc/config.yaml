@@ -55,7 +55,7 @@ review_gate:
   # `yad doctor` warns when it does.)
   solo: false
   escalate_when: [contract, auth, payments]   # escalate to domain owners
-  # PR-driven automation (the `yad gate` CLI). With a hub platform, the review rides the per-step
+  # PR-driven automation (the `yad gate` CLI). With a Product platform, the review rides the per-step
   # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
   # AUTO-ADVANCES on merge, once (a) the reviewer rule is met, (b) every comment thread is resolved,
   # and (c) the review PR/MR is merged. The merge is the human approval act, so Shape steps still never
@@ -125,7 +125,7 @@ build:
   # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub|product): code
   # repos validate the Conventional-Commits / task-PR conventions; the Product validates its
   # artifact-review conventions (review/EP-<slug>/<artifact>, the Product PR template). verified-commits is
-  # the separate security gate (signature + roster-known author). All blocking in CI; both repos + hub.
+  # the separate security gate (signature + roster-known author). All blocking in CI; both repos + Product.
   pattern_gates: [commit-message, pr-title, pr-template]
   ci_platforms: [github, gitlab]   # both wired from skills/yad-checks/templates/; GitHub is this product repo's platform
   contract_surface_glob: "specs/*/contracts/**"   # the repo's quoted contract slice; a diff here needs Contract-Change + a re-locked contract

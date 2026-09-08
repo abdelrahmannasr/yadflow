@@ -109,7 +109,7 @@ export const MODULES: Module[] = [
     lessons: [
       {
         id: 'map-repos',
-        title: 'The repos: hub vs code',
+        title: 'The repos: Product vs code',
         duration: '5 min',
         level: 'beginner',
         summary: 'The Product holds the thinking; code repos hold the code.',
@@ -177,7 +177,7 @@ export const MODULES: Module[] = [
         summary: 'npx yadflow setup walks a short profile interview, then installs.',
         body: [
           { kind: 'p', text: 'From your Product repo (an empty git repo is fine — the first epic creates its own files), run the guided wizard. It opens with a short profile interview — solo or team? greenfield or brownfield? monorepo or separate repos? — and branches the rest so you only answer what your situation needs.' },
-          { kind: 'p', text: 'It installs the skills into your IDE skill directories, detects your hub platform (GitHub/GitLab) from the remote, and sets up the reviewer roster.' },
+          { kind: 'p', text: 'It installs the skills into your IDE skill directories, detects your Product platform (GitHub/GitLab) from the remote, and sets up the reviewer roster.' },
           { kind: 'callout', tone: 'info', text: 'Re-run `npx yadflow check --fix` after any workflow update — it reports what is missing / drifted / stale and reconciles only what changed. It never re-asks for what you already answered.' },
         ],
         commands: [
@@ -421,7 +421,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'The same gate over a real PR/MR when the Product is on a platform.',
         body: [
-          { kind: 'p', text: 'With no hub platform, the gate runs **local**: comments and approvals are recorded as files and you end with an explicit `advance`.' },
+          { kind: 'p', text: 'With no Product platform, the gate runs **local**: comments and approvals are recorded as files and you end with an explicit `advance`.' },
           { kind: 'p', text: 'When the Product is on GitHub/GitLab, the `yad gate` CLI runs the same gate over a real PR/MR. `open` raises the review PR; `sync` pulls approvals and comment threads into the file ledger; the step **auto-advances when the approved, fully-resolved PR is merged** — the merge click is the human approval act.' },
           { kind: 'callout', tone: 'info', text: 'The file ledger always stays the source of truth. The platform is just a nicer surface for the same predicate.' },
         ],
