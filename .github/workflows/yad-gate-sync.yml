@@ -54,7 +54,7 @@ env:
   #
   # Left EMPTY the jobs resolve an exact pin from the repo itself instead of floating on the major (see
   # the resolver step in each job). Floating meant a release could change what a scheduled job does with
-  # nobody deciding to upgrade — the amplification path in issue #163, where 3.13.1 took one hub from 20
+  # nobody deciding to upgrade — the amplification path in issue #163, where 3.13.1 took one Product from 20
   # to 96 churn commits an hour.
   YAD_VERSION: ${{ vars.YAD_VERSION || '' }}
 
@@ -87,7 +87,7 @@ jobs:
           # >>> yad-pin
           # Which yadflow this job runs, most explicit source first:
           #   1. $YAD_VERSION            — the platform variable, a human's deliberate override, verbatim
-          #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this hub
+          #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this Product
           #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
           #   4. 3                       — floating major, only when nothing above resolves
           # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
@@ -155,7 +155,7 @@ jobs:
           # >>> yad-pin
           # Which yadflow this job runs, most explicit source first:
           #   1. $YAD_VERSION            — the platform variable, a human's deliberate override, verbatim
-          #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this hub
+          #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this Product
           #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
           #   4. 3                       — floating major, only when nothing above resolves
           # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so

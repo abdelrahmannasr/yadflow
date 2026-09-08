@@ -471,7 +471,7 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 });
 
 // A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
-// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+hub
+// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+Product
 // wiring stay `missing` and remain excluded from update (no one-time setup on update).
 const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
 test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
@@ -1037,7 +1037,7 @@ test('runShip aborts the PR step when the commit does not land (nothing staged)'
 const { detectStage, templateBody } = await import('./openpr.mjs');
 const { fillHubTemplate } = await import('./gate.mjs');
 
-// A bare dir that IS a hub (carries .sdlc/hub.json) vs one that is not.
+// A bare dir that IS a Product (carries .sdlc/hub.json) vs one that is not.
 function hubDir() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -1063,7 +1063,7 @@ test('detectStage: on the Product, a review/EP-* head is hub-shape, anything els
   assert.equal(detectStage(T, T, 'review/EP-demo/stories-S01'), 'hub-shape');
   assert.equal(detectStage(T, T, 'ci/some-fix'), 'hub-tooling');
   assert.equal(detectStage(T, T, 'review/not-an-epic/x'), 'hub-tooling'); // must be review/EP-*
-  // path.resolve normalises a trailing-slash / "." repoRoot to the same hub
+  // path.resolve normalises a trailing-slash / "." repoRoot to the same Product
   assert.equal(detectStage(T, T + path.sep, 'ci/x'), 'hub-tooling');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -1137,8 +1137,8 @@ for (const profile of ['hub', 'product']) {
 
 // Change-safety rule 3 (add before you remove) for the Shape/Build/Run rename. The Product gate is
 // refreshed by `yad update`; the PR template beside it is NOT (it is wired by a skill nobody runs
-// automatically), so a hub will sit with a new checker and an old template. BOTH spellings of the
-// Impact & Risk heading must pass the real script, or every artifact-review PR on that hub fails.
+// automatically), so a Product will sit with a new checker and an old template. BOTH spellings of the
+// Impact & Risk heading must pass the real script, or every artifact-review PR on that Product fails.
 // A sweep once rewrote the compatibility regex itself into `(Shape|Shape)`; these two cases are
 // what would have caught that.
 for (const heading of ['## Impact & Risk (front-half)', '## Impact & Risk (Shape)']) {
@@ -1259,7 +1259,7 @@ const { gateOpen } = await import('./gate.mjs');
 const { branchExists } = await import('./platform.mjs');
 const { runOpenPr } = await import('./openpr.mjs');
 
-// A hub with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
+// A Product with a platform + an epic whose ledger has a stories review step, on a bare-remote git repo.
 function hubWithStoriesStep() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
@@ -1289,7 +1289,7 @@ test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain la
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  // bob is a hub reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
+  // bob is a Product reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
     platform: 'github', default_branch: 'main',
     roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
@@ -1316,7 +1316,7 @@ test('runOpenPr: a hub-shape delegation that opens no PR sets a non-zero exit co
   const T = hubWithStoriesStep();
   let bare;
   try {
-    // bare remote so the branch push succeeds; hub platform null so the delegated gateOpen reaches its
+    // bare remote so the branch push succeeds; Product platform null so the delegated gateOpen reaches its
     // local "no PR opened" path and returns no url (that path does NOT set exitCode itself, so the
     // exit code can only come from runOpenPr's P2 line — i.e. the test is mutation-proof for the fix).
     bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bare-')); git(bare, 'init', '-q', '--bare');
@@ -1380,7 +1380,7 @@ test('runOpenPr bases the PR on the platform default, not a hardcoded main (#168
 test('runOpenPr never lets the HUB default_branch become a code repo\'s base (#168)', async () => {
   const prev = process.exitCode;
   const { T, bare } = codeRepoWithRemote();
-  // A hub that owns this repo via the registry. The Product's own trunk is `trunk` — a DIFFERENT repo's
+  // A Product that owns this repo via the registry. The Product's own trunk is `trunk` — a DIFFERENT repo's
   // branch, which must never leak into a code-repo PR — and the registry entry deliberately declares
   // no default_branch, so the resolution has to fall past the Product rung to the platform.
   const H = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-basehub-'));
@@ -3221,7 +3221,7 @@ test('gate sync: an approval predating PR provenance is stamped, then re-binds (
   const { T, ep } = scaffoldEpic();
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
   // Rewrite the ledger into the pre-upgrade shape: no `pr`, and (like GitLab) no `approvedAt` either,
-  // so NEITHER proof of a newer review is available. This is what is on disk in the hubs issue #156
+  // so NEITHER proof of a newer review is available. This is what is on disk in the Products issue #156
   // was filed from. The pointer still names the PR they were recorded against (#7).
   const legacy = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')))
     .map((a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== 'pr' && k !== 'approvedAt')));
@@ -3447,7 +3447,7 @@ test('gate open without an artifact fails cleanly (no throw)', async () => {
 // `yad gate repair` — heal an epic damaged by a pre-fix gate sync (issue #131). A repo already
 // corrupted never self-heals: gate sync skips a step that is already `done`.
 // ---------------------------------------------------------------------------------------------
-// A hub git repo on `main` with an origin, carrying one epic whose `stories` step is stranded.
+// A Product git repo on `main` with an origin, carrying one epic whose `stories` step is stranded.
 function hubWithStrandedEpic() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-repair-'));
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-repair-bare-'));
@@ -4425,10 +4425,10 @@ test('runCommit dry-run prints without committing', async () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a hub gate):
+// runCommit's missing-Task warning is code-repo specific (spec-link is a repo gate, not a Product gate):
 // on the Product it must reassure, not threaten with a gate that does not run there.
 test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', async () => {
-  // a hub (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
+  // a Product (carries .sdlc/hub.json), staged change on a branch with no -S0N-T0N id
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-commit-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'seed');
@@ -4437,7 +4437,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github' }));
   fs.writeFileSync(path.join(T, 'a.txt'), '1'); git(T, 'add', '-A');
   const onHub = await grab(() => runCommit(T, { type: 'ci', message: 'wire the gates', dryRun: true }));
-  assert.match(onHub, /fine for a hub PR/);
+  assert.match(onHub, /fine for a Product PR/);
   assert.doesNotMatch(onHub, /spec-link gate will fail on a code repo/);
   fs.rmSync(T, { recursive: true, force: true });
 
@@ -5006,7 +5006,7 @@ test('gate ci pre-merge: read-only — never pushes the review branch or the def
 // ledger that `git clean` would delete outright).
 test('gate ci pre-merge: never writes approvals.json for the legacy-PR backfill', async () => {
   const { T, author, ci } = scaffoldCiHub();
-  // A review branch that DOES carry the ledger (an older hub, or the new-epic seed carve-out), holding
+  // A review branch that DOES carry the ledger (an older Product, or the new-epic seed carve-out), holding
   // one approval from before approvals recorded which PR they arrived on.
   git(author, 'checkout', '-q', 'review/EP-test/architecture');
   const sdlc = path.join(author, 'epics/EP-test/.sdlc');
@@ -5081,7 +5081,7 @@ test('gate ci --merged: advances the step + flips artifact status on the default
 // merged review PR/MR inside its 7-day window, every 15 minutes. On the buggy code each of those calls
 // re-appended its own step's approvals at the tail of a shared approvals.json, so every call produced a
 // reorder-only diff, committed it, and pushed it to the default branch — ~1,800 bot commits/day on the
-// reporting hub. This walks that exact rotation and asserts the commit count stops growing.
+// reporting Product. This walks that exact rotation and asserts the commit count stops growing.
 test('gate ci --merged: a repeat sweep over two merged reviews commits nothing (issue #163)', async () => {
   const { T, author, ci } = scaffoldCiHub();
   // Give the epic a SECOND review gate, so approvals.json holds more than one step's records.
@@ -5238,10 +5238,10 @@ test('gate ci sweep: one corrupt epic is skipped (exit 1) while the rest still s
 
 test('check --fix wires the Product gate-sync CI only when the ledger is verified', async () => {
   const { T } = scaffold();
-  // no hub.json -> no hub action
+  // no hub.json -> no Product action
   await reconcile(T, { fix: true });
   assert.ok(!fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'no hub.json => not wired');
-  // hub on github with a verified ledger -> wired + idempotent
+  // Product on github with a verified ledger -> wired + idempotent
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true, roster: [] }));
   await reconcile(T, { fix: true });
   assert.ok(fs.existsSync(path.join(T, '.github/workflows/yad-gate-sync.yml')), 'hub workflow installed');
@@ -6734,7 +6734,7 @@ test('report: non-interactive never posts — hands back a prefilled URL', async
 // ---- yad usage (derived team-member behavior report) --------------------------------------------
 const { buildModel, renderHtml, renderMarkdown, deriveEvents } = await import('./usage.mjs');
 
-// Scaffold a hub dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
+// Scaffold a Product dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
 // []). `dormant` is in the roster with no activity so we can assert it surfaces at zero.
 function usageFixture() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-'));
@@ -6912,14 +6912,14 @@ test('usage: renderMarkdown escapes pipes/newlines so table structure survives h
 });
 
 // ---------------------------------------------------------------------------------------------
-// yad checkpoint — commit the machine-written Build hub state (trust-log/build-log/build-state)
+// yad checkpoint — commit the machine-written Build Product state (trust-log/build-log/build-state)
 // ---------------------------------------------------------------------------------------------
 const {
   runCheckpoint, buildLedgerPathspecs, storyStatusPathspecs, stagedStoryIsStatusOnly, summarizeStaged, checkpointAuthor, buildCheckpointMessage, recordRetroShip, retroShipRepos,
 } = await import('./checkpoint.mjs');
 const { productGit } = await import('./hubcommit.mjs');
 
-// A hub (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
+// A Product (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
 // exists. The roster email matches the git identity so resolveCommitterLogin yields @abdelrahmannasr.
 function productForCheckpoint() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-'));
@@ -7910,7 +7910,7 @@ test('a corrupt folded ledger ABORTS (never silently rebuilt, which would erase 
 // ---------------------------------------------------------------------------------------------
 const { runTidy, shippedStories } = await import('./tidy.mjs');
 
-// A hub on main with a story of the given frontmatter status + a trust shard and a build shard for it.
+// A Product on main with a story of the given frontmatter status + a trust shard and a build shard for it.
 function hubWithShards(statusByStory) {
   const T = productForCheckpoint(); // from the checkpoint suite: hub.json (default_branch main) + seed on main
   const ep = path.join(T, 'epics/EP-demo');
@@ -8145,13 +8145,13 @@ test('repoLabel: hub root -> "hub", connected repo -> its relative path', () => 
   assert.equal(repoLabel('/hub', '/hub/demo/backend'), 'demo/backend');
 });
 
-// Scaffold a hub + connected backend, each with a bare origin on `main`, hub.json bridge-enabled.
+// Scaffold a Product + connected backend, each with a bare origin on `main`, hub.json bridge-enabled.
 function scaffoldWithRemotes() {
   const { T, backend } = scaffold();
   const productBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubbare-')); git(productBare, 'init', '-q', '--bare');
   const beBare = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bebare-')); git(beBare, 'init', '-q', '--bare');
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', bridge_enabled: true, roster: [] }));
-  // hub: seed a commit, name the branch main, wire origin
+  // Product: seed a commit, name the branch main, wire origin
   fs.writeFileSync(path.join(T, 'seed.txt'), '0'); git(T, 'add', '-A');
   git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'seed');
   git(T, 'branch', '-q', '-M', 'main'); git(T, 'remote', 'add', 'origin', productBare);
@@ -8211,7 +8211,7 @@ test('commitAndPush: a path that is NOT its own repo top (nested plain dir) is s
       assert.equal(r.committed, false); assert.equal(r.skipped, true);
     });
     assert.match(out, /not its own git repo/, 'nested plain dir is refused');
-    // the enclosing hub must NOT have gained a commit or a staged backend file
+    // the enclosing Product must NOT have gained a commit or a staged backend file
     assert.equal(git(T, 'rev-list', '--count', 'HEAD').toString().trim(), '1', 'hub still has only the seed commit');
     assert.equal(git(T, 'diff', '--cached', '--name-only').toString().trim(), '', 'nothing staged into the Product index');
   } finally {
@@ -8336,7 +8336,7 @@ test('publishCodeContext: self-heals a pre-ignore TRACKED pack — commits its r
   const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // A hub created before the ignore existed: pack.md was committed (tracked), no .gitignore for it.
+    // A Product created before the ignore existed: pack.md was committed (tracked), no .gitignore for it.
     fs.mkdirSync(path.join(T, '.sdlc/code-context/backend'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/code-context/backend/pack.md'), '# stale pack\n');
     git(T, 'add', '.sdlc/code-context/backend/pack.md');
@@ -8375,7 +8375,7 @@ test('publishCodeContext: never sweeps unrelated work and leaves the user index 
   const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // A healthy hub: the pack glob is already committed in .gitignore.
+    // A healthy Product: the pack glob is already committed in .gitignore.
     fs.writeFileSync(path.join(T, '.gitignore'), '.sdlc/code-context/*/pack.md\n');
     git(T, 'add', '.gitignore');
     git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: ignore pack');
@@ -8411,7 +8411,7 @@ test('publishCodeContext: a nothing-to-publish run leaves unrelated staged work 
   const { T, backend, productBare, beBare } = scaffoldWithRemotes();
   try {
     process.exitCode = 0;
-    // A hub already ignoring the pack (so ensurePackIgnored is a no-op) with nothing new to publish.
+    // A Product already ignoring the pack (so ensurePackIgnored is a no-op) with nothing new to publish.
     fs.writeFileSync(path.join(T, '.gitignore'), '.sdlc/code-context/*/pack.md\n');
     git(T, 'add', '.gitignore');
     git(T, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'chore: ignore pack');
@@ -9058,7 +9058,7 @@ const {
 const { hookActions, mergeHookSettings, hookMatcherFires } = await import('./plan.mjs');
 const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER } = await import('./manifest.mjs');
 
-// A hub with two epics on disk. Which of them the BASE REF carries is the fake git's business, not
+// A Product with two epics on disk. Which of them the BASE REF carries is the fake git's business, not
 // the filesystem's — the whole point of the seeding rule is that it reads the base, never the tree.
 function hookProduct({ hub = { platform: 'gitlab', bridge_enabled: true, default_branch: 'main' } } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-hook-'));
@@ -9123,7 +9123,7 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
   //   * a bare local `main` is whatever the developer last pulled (`git fetch` never moves it), so a
   //     merged epic's ledger reads as absent and a real mutation is waved through;
   //   * a `<rev>:<path>` spec always resolves from the repo TOP LEVEL — `-C` does not re-anchor it —
-  //     so a hub in a subdirectory would miss on every probe and the guard would allow everything.
+  //     so a Product in a subdirectory would miss on every probe and the guard would allow everything.
   const T = hookProduct();
   try {
     const runner = fakeGit(['EP-seeded'], { refs: ['origin/main'] });
@@ -9245,7 +9245,7 @@ test('ledger hook resolves the Product from the edited PATH, not the session roo
     });
     assert.equal(v.allow, false, 'a relative path under the workspace still resolves to its hub');
     assert.equal(hubRootFor(path.join(T, 'epics/EP-seeded/.sdlc/state.json')), T);
-    // A path in no hub at all is simply not ours to judge.
+    // A path in no Product at all is simply not ours to judge.
     assert.equal(hubRootFor(path.join(workspace, 'backend/src/index.ts')), null);
   } finally { fs.rmSync(workspace, { recursive: true, force: true }); }
 });

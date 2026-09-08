@@ -40,7 +40,7 @@ export function repoLabel(productRoot, root) {
 // PURE — group applied reconcile actions by the repo root they wrote to. Each group carries the
 // deduped pathspecs to stage plus the human-readable item labels for the commit body. Actions with
 // no root/paths (e.g. gaps, or a status:'ok' that was force-reapplied without a root) are ignored.
-// Order follows first-encounter, so the Product (its module/_bmad/hub actions come first in reconcile)
+// Order follows first-encounter, so the Product (its module/_bmad/Product actions come first in reconcile)
 // leads and connected repos follow in registry order.
 export function groupByRoot(actions = []) {
   const groups = new Map();

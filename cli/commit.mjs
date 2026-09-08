@@ -62,11 +62,11 @@ export async function runCommit(root, opts = {}) {
   const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root }).stdout;
   const task = opts.task || taskFromBranch(branch);
   if (!task) {
-    // spec-link is a code-repo gate (REPO_WIRING.common), not a hub gate — so a missing Task trailer
-    // is expected on a hub PR (Shape artifact review or hub tooling) and only matters on a repo.
+    // spec-link is a code-repo gate (REPO_WIRING.common), not a Product gate — so a missing Task trailer
+    // is expected on a Product PR (Shape artifact review or Product tooling) and only matters on a repo.
     const onHub = exists(productConfigPath(root));
     warn(onHub
-      ? 'no Task trailer (none given and branch has no -S0N-T0N) — fine for a hub PR; required on code-repo tasks (spec-link gate)'
+      ? 'no Task trailer (none given and branch has no -S0N-T0N) — fine for a Product PR; required on code-repo tasks (spec-link gate)'
       : 'no Task trailer (none given and branch has no -S0N-T0N) — spec-link gate will fail on a code repo');
   }
 

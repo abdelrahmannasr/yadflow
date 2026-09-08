@@ -1,4 +1,4 @@
-// `yad checkpoint` — commit the machine-written Build hub state (trust-log / build-log /
+// `yad checkpoint` — commit the machine-written Build state on the Product (trust-log / build-log /
 // build-state) as one audit-trail commit. This is the Build analogue of the Shape gate sync
 // (cli/gate.mjs): the SDLC's Build part (yad-run, yad-engineer-review) WRITES these ledgers into the
 // working tree but never commits them, so teammates/CI/`yad status` on other machines see stale trust
@@ -215,7 +215,7 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   // repo (`source: 'none'`), so a legacy story with no metadata is never blocked.
   const { names, source } = retroShipRepos(root, storyFile);
   if (names.length && !names.includes(repo)) {
-    fail(`${repo} is not a repo ${source === 'story' ? `${story} declares` : 'connected to this hub'} — a retroactive ship must name a real repo, never invent one`);
+    fail(`${repo} is not a repo ${source === 'story' ? `${story} declares` : 'connected to this Product'} — a retroactive ship must name a real repo, never invent one`);
     hand(`known: ${names.join(', ')} (names are case-sensitive)`);
     return { ok: false };
   }

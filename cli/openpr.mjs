@@ -25,7 +25,7 @@ function resolveRepo(root, { repo, dir }) {
 
 // Which SDLC stage is this PR? The Product serves two vehicles; a code repo only one. Mirrors the
 // `--head` split the Product pattern gates (pr-title.sh/pr-template.sh) already apply:
-//   code-repo    — NOT the Product (a registry repo via --repo, or root is not a hub).
+//   code-repo    — NOT the Product (a registry repo via --repo, or root is not a Product).
 //   hub-shape    — the Product itself AND head is a review/EP-* branch (artifact-review PR).
 //   hub-tooling  — the Product itself AND head is anything else (a tooling/CI change to the Product).
 // `meta` (truthy when resolved from the repos registry via --repo) is a connected code repo, so it is
@@ -42,7 +42,7 @@ export function detectStage(root, repoRoot, head, meta) {
 // The bundled code-task template — the same file `REPO_WIRING` installs into code repos, resolved
 // from the package (mirrors how manifest.mjs reads ../package.json). Used for a hub-tooling PR, whose
 // `.github/pull_request_template.md` is the ARTIFACT-REVIEW template (wrong shape for the code-task
-// hub gate). Falls back to a minimal body that still carries every section the gate requires.
+// Product gate). Falls back to a minimal body that still carries every section the gate requires.
 function codeTaskTemplate(platform) {
   const rel = platform === 'gitlab'
     ? '../skills/yad-pr-template/templates/gitlab/merge_request_templates/Default.md'
@@ -121,7 +121,7 @@ export async function runOpenPr(root, opts = {}) {
     // Pass the branch we just pushed as the head so gateOpen opens the PR against it (its own
     // recompute would collapse a per-story base). gateOpen signals failure by returning no url —
     // mirror open-pr's own error contract so `ship` sees the non-zero exit and never reports success.
-    // (On a platform-less hub gateOpen marks the step in_review locally and returns no url; open-pr's
+    // (On a platform-less Product gateOpen marks the step in_review locally and returns no url; open-pr's
     // job is to open a PR, so "no PR opened" is a non-zero outcome here, unlike `yad gate open`.)
     const res = await gateOpen(root, { epic: parsed.epic, artifact: artifactFromBase(parsed.base), head: branch });
     if (!res?.url) process.exitCode = 1;

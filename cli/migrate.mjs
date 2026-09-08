@@ -52,13 +52,13 @@ export const MIGRATIONS = [
     //
     // 1. It does not DELETE `bridge_enabled`. `templates/checks/ledger-guard.sh` is committed inside
     //    the user's own repo and is refreshed only by `yad update` — which is a separate act from
-    //    `yad migrate`. A hub running yesterday's guard against a migrated hub.json would read no
+    //    `yad migrate`. A Product running yesterday's guard against a migrated hub.json would read no
     //    flag, conclude the ledger is local, and stop rejecting human commits to it. That is the one
     //    guarantee verified mode exists to provide, so removing the old key here would silently
     //    disarm the audit trail. Add before you remove (rule 3): both keys are written, the new one
     //    wins, and the old one goes in a later major — once nothing on either side still reads it.
     //
-    // 2. It does not copy the flag. `bridge_enabled: true` on a hub with NO platform is `local`
+    // 2. It does not copy the flag. `bridge_enabled: true` on a Product with NO platform is `local`
     //    today, because the reader has always required a platform — there is no Verified badge to
     //    read without one. Writing `verified` there would change what the engine does to a project
     //    during an upgrade. So the value is computed from the reader's own answer, which means no
@@ -132,9 +132,9 @@ const shapeOf = (v) => (isPlainObject(v) && Number.isInteger(v.schemaVersion) ? 
 
 // Walk the migration list once. Returns the migrated object, the shape it ended on, and which steps ran.
 // `ctx` is `{ base, rel }` — the file's basename and its project-relative path. A step that only
-// concerns one kind of file (the 1 → 2 hub switch below is the first) needs to know which file it is
+// concerns one kind of file (the 1 → 2 Product switch below is the first) needs to know which file it is
 // holding; every other step ignores the argument. Passing it is what keeps such a step from having
-// to guess from the object's own fields, which would mean a hub-shaped ledger got silently rewritten.
+// to guess from the object's own fields, which would mean a Product-shaped ledger got silently rewritten.
 function applyMigrations(obj, migrations, ctx) {
   let out = obj;
   let version = shapeOf(obj);
@@ -264,7 +264,7 @@ export function projectJsonFiles(root) {
 //   unchanged         already on the engine's shape, bytes identical
 //   list              a top-level JSON array: shape 1 by rule 1, and it cannot carry a key
 //   ahead             the file's shape is NEWER than this engine — never touched, always reported
-//   ci-owned          a verified hub's ledger file: CI is its only writer
+//   ci-owned          a verified Product's ledger file: CI is its only writer
 //   unreadable        does not parse — reported, never rewritten
 //
 // Each row also carries `stamped`: whether the file literally holds a `schemaVersion` key. That is a
@@ -275,7 +275,7 @@ export function projectJsonFiles(root) {
 export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   const hub = readJSON(productConfigPath(root), null);
   const verified = isVerifiedLedger(hub);
-  // On a verified hub the ledger guard refuses a human commit to these, so rewriting them locally
+  // On a verified Product the ledger guard refuses a human commit to these, so rewriting them locally
   // would produce a change that cannot be committed. Of the four the guard names, only state.json is
   // an object; the rest are arrays and would be skipped anyway.
   const ciOwned = new Set(['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json']);

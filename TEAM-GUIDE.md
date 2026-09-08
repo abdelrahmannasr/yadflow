@@ -367,7 +367,7 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
    to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
-   registry `default_branch` → the Product's `default_branch` for a PR on the Product → the platform → `origin/HEAD` →
+   registry `default_branch` → the Product's own `default_branch` → the platform → `origin/HEAD` →
    `main`), not a hardcoded `main`. If it warns that your base is not the platform default, that is
    **advisory — nothing is blocked and the PR is already open.** Intended (stacked PR, release branch)?
    Carry on. Not intended? Close it, pick the right base, and re-run — retargeting the open PR does not

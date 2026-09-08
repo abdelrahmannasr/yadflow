@@ -79,7 +79,7 @@ export const gitHead = (cwd) => run('git', ['rev-parse', 'HEAD'], { cwd }).stdou
 // root itself (a monorepo, `.`) and strict descendants of the workspace pass.
 //
 // Place the Product one level below the workspace root (project/product), not directly in $HOME — the
-// workspace is the trust boundary, and a shallow hub makes every sibling of it registerable.
+// workspace is the trust boundary, and a shallow Product makes every sibling of it registerable.
 export function insideWorkspace(root, rpath) {
   const projectRoot = path.resolve(root);
   const parent = path.dirname(projectRoot);
@@ -105,7 +105,7 @@ export function addRepoRoles(root, repo, grants = {}) {
       const entry = byName.get(nm);
       if (!entry) { warn(`'${nm}' is not in the roster — skipped ${role} for ${repo}`); continue; }
       // Normalize to the per-scope map, migrating the legacy shapes: a flat array or a single
-      // `role` string both become hub roles so nothing is lost.
+      // `role` string both become Product roles so nothing is lost.
       // One normaliser, shared — a second copy of this logic is how one writer ends up maintaining
       // a different set of scope spellings than the others.
       normalizeRoles(entry);
@@ -376,7 +376,7 @@ export async function resolveProfile(root, opts = {}) {
   else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
   else if (typeof hub?.solo === 'boolean') { solo = hub.solo; team_size = prev.team_size ?? (solo ? 1 : 2); }
   else {
-    // Default from any existing roster: a hub already carrying reviewers is a team; otherwise solo.
+    // Default from any existing roster: a Product already carrying reviewers is a team; otherwise solo.
     const rosterN = Array.isArray(hub?.roster) ? hub.roster.length : 0;
     solo = !(await ask('Solo or team?', rosterN > 1 ? 'team' : 'solo')).toLowerCase().startsWith('t');
     team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', String(rosterN || 2)), 10) || 2);
@@ -405,14 +405,14 @@ export async function resolveProfile(root, opts = {}) {
 }
 
 // The guided, idempotent first-run wizard: a Step 0 profile interview (resolveProfile) that branches
-// the remaining steps — install, hub + roster, optional tools, repos, wiring — and persists the profile.
+// the remaining steps — install, Product + roster, optional tools, repos, wiring — and persists the profile.
 export async function runSetup(root, opts = {}) {
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));
 
   // 0. Profile interview — branch the wizard to the user's situation (solo/team, code, repo layout).
   const { solo, team_size, codebase, repo_layout, configureTools } = await resolveProfile(root, opts);
-  // Steps: interview, preflight, install, hub, tools (1 if deferred else 3), repos, wire, coderabbit, done.
+  // Steps: interview, preflight, install, Product, tools (1 if deferred else 3), repos, wire, coderabbit, done.
   const total = 8 + (configureTools ? 3 : 1);
   let _n = 0;
   const S = (title) => step(++_n, total, title);
@@ -479,7 +479,7 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // Detect hub platform + roster
+  // Detect Product platform + roster
   S(solo ? 'Product platform (solo — no roster)' : 'Product platform & reviewer roster');
   guide(solo
     ? [
@@ -498,7 +498,7 @@ export async function runSetup(root, opts = {}) {
     const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: root });
     if (!remote.ok && exists(path.join(root, '.git'))) info('no origin remote — platform detection skipped');
     let platform = detectPlatform(remote.ok ? remote.stdout : '');
-    platform = (await ask('Hub platform (github/gitlab/none)', platform || 'none')).toLowerCase();
+    platform = (await ask('Product platform (github/gitlab/none)', platform || 'none')).toLowerCase();
     if (!['github', 'gitlab', 'none'].includes(platform)) {
       warn(`unknown platform '${platform}' — using none (local gate)`);
       platform = 'none';
@@ -539,7 +539,7 @@ export async function runSetup(root, opts = {}) {
     // Merge into the existing file, never clobber: roster + verified_authors are user-owned identity
     // data (the verified-commits gate's allowlist derives from them). A reconfigure that collects no
     // reviewers (e.g. solo mode skips the loop) must NOT blank a populated roster or drop verified_authors.
-    // Read strict so a corrupt hub aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
+    // Read strict so a corrupt Product aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
     // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
     const cur = readJSONStrict(productPath, {}) || {};
     // `ledger` belongs to shape 2. On a project still on shape 1 — one that has not run
@@ -566,7 +566,7 @@ export async function runSetup(root, opts = {}) {
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.
   // Also backfill a missing git_url from origin here (idempotent repair for the doctor's YAD-CFG-005).
   if (exists(productPath)) {
-    // Strict read for the same reason as the reconfigure write above: a corrupt hub must abort, never
+    // Strict read for the same reason as the reconfigure write above: a corrupt Product must abort, never
     // fail-open to `{}` and get rewritten with roster/verified_authors stripped on a plain re-run.
     const cur = readJSONStrict(productPath, {}) || {};
     const backfillUrl = (cur.platform && !cur.git_url)
@@ -757,7 +757,7 @@ export async function runSetup(root, opts = {}) {
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.
   recordManagedWrites(wired);
-  // author allowlists for the verified-commits gate (hub + every repo), from the roster emails
+  // author allowlists for the verified-commits gate (Product + every repo), from the roster emails
   applyActions(authorsActions(root, registry.repos), { force: true });
 
   // Optional CodeRabbit
@@ -809,7 +809,7 @@ export async function runSetup(root, opts = {}) {
 
 // The repomix pack is a large, regenerable artifact — the Product tracks the AI-authored code-map, not the
 // pack. `yad repo refresh --push` relies on the pack being gitignored (repo-publish.mjs never stages it);
-// this makes that assumption true in every hub, so a regenerated pack never strands as a dirty tree.
+// this makes that assumption true in every Product, so a regenerated pack never strands as a dirty tree.
 export const PACK_IGNORE_GLOB = '.sdlc/code-context/*/pack.md';
 
 // The exact lines ensurePackIgnored appends — a comment pair + the glob. Kept as data (not inline

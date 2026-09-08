@@ -313,7 +313,7 @@ test('migrate 1 -> 2: `ledger` records what the Product was already doing, for e
     ['platform, flag explicitly false', { platform: 'github', bridge_enabled: false }, 'local'],
     ['platform, no flag at all', { platform: 'github' }, 'local'],
     // The one that would be wrong if the migration copied the flag instead of asking the reader:
-    // no platform means no Verified badge to read, so this hub has ALWAYS behaved as local.
+    // no platform means no Verified badge to read, so this Product has ALWAYS behaved as local.
     ['flag true but NO platform', { bridge_enabled: true }, 'local'],
     ['platform null + flag true', { platform: null, bridge_enabled: true }, 'local'],
   ];

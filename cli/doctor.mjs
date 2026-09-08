@@ -89,7 +89,7 @@ export function projectChecks(checks, root) {
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
-    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a hub the gate would reject.
+    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a Product the gate would reject.
     else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
@@ -109,7 +109,7 @@ export function projectChecks(checks, root) {
         // Scope the auth probe to the Product's own host (derived from git_url, falling back to the
         // origin remote). `${cli} auth status` without --hostname exits non-zero when ANY configured
         // instance fails, so an unrelated stale login (e.g. a dead gitlab.com token) would falsely
-        // flag a working self-hosted hub — so we SKIP the probe entirely when no host resolves
+        // flag a working self-hosted Product — so we SKIP the probe entirely when no host resolves
         // rather than run the flaky unscoped form.
         const host = hostFromGitUrl(hub.git_url)
           || hostFromGitUrl(run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout);
@@ -372,14 +372,14 @@ function contractLockCheck(checks, root, epic, ledger) {
   const short = (h) => `${h.slice(0, 19)}…`;
 
   if (lock.inheritedFrom || lock.ref) {
-    // The ref is repo-controlled text, so keep it inside this hub's epics/ — a lock file must not be
+    // The ref is repo-controlled text, so keep it inside this Product's epics/ — a lock file must not be
     // able to point the check at arbitrary JSON elsewhere on disk.
     const epicsDir = path.join(root, 'epics');
     const refPath = path.resolve(path.join(epicDir, '.sdlc'), lock.ref || `../../${lock.inheritedFrom}/.sdlc/contract-lock.json`);
     if (refPath !== epicsDir && !refPath.startsWith(epicsDir + path.sep)) {
       check(checks, id, 'epics', 'fail',
         `${epic}: pointer-lock ref '${lock.ref}' resolves outside epics/`,
-        'a pointer-lock must reference another epic in this hub — fix `ref` (yad-change writes ../../EP-<parent>/.sdlc/contract-lock.json)');
+        'a pointer-lock must reference another epic in this Product — fix `ref` (yad-change writes ../../EP-<parent>/.sdlc/contract-lock.json)');
       return;
     }
     const parent = readJSON(refPath, null);
@@ -544,7 +544,7 @@ function shapeCheckFor(checks, id, label, rows, engine) {
   const readable = rows.filter((r) => r.from !== null);
   if (!readable.length) return;
   const ahead = readable.filter((r) => r.action === 'ahead');
-  // A file behind the engine on a VERIFIED hub is real drift, but `yad migrate` deliberately refuses
+  // A file behind the engine on a VERIFIED Product is real drift, but `yad migrate` deliberately refuses
   // to touch it — CI is its only writer. Pointing at migrate there would send someone to a command
   // that changes nothing while the warning never clears, so those are counted and named separately.
   const behind = readable.filter((r) => r.from < engine && r.action !== 'ci-owned');

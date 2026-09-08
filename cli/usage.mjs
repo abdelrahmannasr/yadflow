@@ -51,7 +51,7 @@ function loadRoster(root) {
   return hub && Array.isArray(hub.roster) ? hub.roster : [];
 }
 
-// A member's hub-scope role label (supports both the per-scope `roles` map and the legacy flat `role`).
+// A member's Product-scope role label (supports both the per-scope `roles` map and the legacy flat `role`).
 function rosterRole(m) {
   const scoped = rolesForScope(m, 'hub');
   if (scoped.length) return scoped.join(', ');
@@ -223,7 +223,7 @@ export function analyze(events, roster, window = { since: null, until: null }) {
 }
 
 // Is this roster entry a reviewer in ANY scope? Reviewer roles are usually repo-scoped
-// (`roles: { backend: ['reviewer'] }`), not hub-scoped, so a hub-only check would miss most of them.
+// (`roles: { backend: ['reviewer'] }`), not Product-scoped, so a Product-only check would miss most of them.
 export function isReviewerAnywhere(entry) {
   if (!entry) return false;
   if ((entry.role || '') === 'reviewer') return true;                            // legacy flat role

@@ -1,6 +1,6 @@
 // Golden compatibility test — the alarm bell for the engine roadmap.
 //
-// `cli/fixtures/golden-v3/` is a REAL v3 project (this repo's own hub and its two EP-checkout epics)
+// `cli/fixtures/golden-v3/` is a REAL v3 project (this repo's own Product and its two EP-checkout epics)
 // frozen exactly as it stood before Wave 1 began. This test runs the engine's three read-only views
 // over it and compares them to a committed snapshot:
 //

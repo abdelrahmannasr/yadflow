@@ -263,7 +263,7 @@ export function ideTargetsFor(root) {
 
 // A brand-new first-party skill is `missing` on every existing install. Relabel that to status `'new'`
 // so it rides `yad update` (--scope=changed) — like 'legacy'/'removed', the `changed` filter only
-// excludes literal 'missing', so 'new' survives. Scoped to SKILL installs ONLY: repo/hub wiring and
+// excludes literal 'missing', so 'new' survives. Scoped to SKILL installs ONLY: repo/Product wiring and
 // _bmad files stay 'missing' (excluded from update), so `update` never does one-time setup.
 const asNewSkill = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a);
 
@@ -476,8 +476,8 @@ export function repoActions(root, repo) {
   return actions.map((a) => (a.status === 'missing' && neverWritten(a) ? { ...a, status: 'new' } : a));
 }
 
-// Hub wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a
-// platform and the verified ledger is explicitly enabled — a local hub stays local, with no error.
+// Product wiring (gate-sync + verified-commits CI on the Product itself). Only when the Product has a
+// platform and the verified ledger is explicitly enabled — a local Product stays local, with no error.
 export function productActions(root) {
   const hub = readJSON(productConfigPath(root));
   // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions

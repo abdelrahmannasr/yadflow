@@ -128,7 +128,7 @@ export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
 // Supported design-tool adapters (mirrors skills/sdlc/config.yaml `design.tools`); `DESIGN_PRIMARY` is
 // the fallback `registerDesign`/setup use when an unknown tool is named, and `none` is the explicit
 // markdown-only choice. (doctor does NOT fall back — an unknown tool there is a hard YAD-CFG-002 fail,
-// mirroring how registerRepo falls back on platform while doctor fails on an unknown hub platform.)
+// mirroring how registerRepo falls back on platform while doctor fails on an unknown Product platform.)
 export const DESIGN_TOOLS = ['figma', 'pencil'];
 export const DESIGN_PRIMARY = 'figma';
 
@@ -254,7 +254,7 @@ export const preferring = (canonical, legacy) => (existsSync(legacy) ? legacy : 
 //   1. `ledger`, if the file carries it — shape 2 and later.
 //   2. otherwise the old booleans `bridge_enabled` (canonical) or `bridge` (older still).
 // A platform is required either way. Without one there is no Verified badge to read, so CI cannot
-// be the sole writer and the local path has to stay open — otherwise a hub has no permitted writer
+// be the sole writer and the local path has to stay open — otherwise a Product has no permitted writer
 // at all and no gate can ever advance (issue #186).
 //
 // ONE definition, imported by every JS caller. `templates/checks/ledger-guard.sh` re-implements the
@@ -362,7 +362,7 @@ export const wiringFor = (platform) => [
   ...(REPO_WIRING[platform] || []),
 ];
 
-// Hub wiring: CI installed on the PRODUCT itself (dest is the project root — the Product IS the
+// Product wiring: CI installed on the PRODUCT itself (dest is the project root — the Product IS the
 // root). Installed only when hub.json has a platform and the ledger is verified. Carries the
 // event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
 // verified-commits gate (no unverified commits from unverified users reach merge on the Product).

@@ -11,7 +11,7 @@ import { c, log, info, ok, warn, note, ask, askYesNo, has, readJSON, run } from 
 import { VERSION, UPSTREAM_REPO , productConfigPath } from './manifest.mjs';
 import { createIssue, searchIssues, issueUrl, platformAuthed } from './platform.mjs';
 
-// The upstream lives on GitHub — file there regardless of the user's own hub platform.
+// The upstream lives on GitHub — file there regardless of the user's own Product platform.
 const UPSTREAM_PLATFORM = 'github';
 const PLACEHOLDER = '‹redacted›';
 

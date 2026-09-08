@@ -24,7 +24,7 @@ function isSolo(root) {
 }
 // The setup profile recorded by `yad setup` (codebase / repo_layout / team_size), or null.
 const profileOf = (root) => readJSON(productConfigPath(root), null)?.profile || null;
-// Has `yad setup` run here? True once the version stamp or hub config exists.
+// Has `yad setup` run here? True once the version stamp or Product config exists.
 const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(productConfigPath(root));
 
 // Every epic that has a state ledger, in directory order.

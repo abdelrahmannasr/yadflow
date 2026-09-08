@@ -14,7 +14,7 @@
 // the model), so `hooks/ledger-guard.sh` wires it with no adapter logic; another harness needs only
 // the same two exit codes.
 //
-// FAIL-OPEN, deliberately. No hub, unreadable config, an unparseable payload, no git — every one of
+// FAIL-OPEN, deliberately. No Product, unreadable config, an unparseable payload, no git — every one of
 // those ALLOWS, with a note on stderr. This is a local guardrail, and one that failed closed would
 // brick an agent's ability to edit anything the moment a config went sideways. The asymmetry is the
 // design: `ledger-guard` in CI fails closed and is what actually protects the ledger.
@@ -31,7 +31,7 @@ import { isVerifiedLedger , productConfigPath } from './manifest.mjs';
 const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json']);
 
 // `epics/<epic>/.sdlc/<ledger>.json` or `epics/<epic>/reviews/<name>.md` → { epic, rel }; else null.
-// Takes a hub-relative POSIX path.
+// Takes a Product-relative POSIX path.
 //
 // Depth is matched the way the CI gate matches it, not more strictly. Its arms are bash `case`
 // globs — `epics/*/.sdlc/state.json` — and a bash glob's `*` spans `/`, so the gate ALSO rejects
@@ -116,10 +116,10 @@ export function resolveHookBase(productRoot, hub, runner = run) {
 // may do.
 //
 // Read with `ls-tree` from the Product, never with a `<rev>:<path>` probe: a rev:path spec is always
-// resolved from the repository TOP LEVEL and `-C` does not re-anchor it, so a hub sitting in a
+// resolved from the repository TOP LEVEL and `-C` does not re-anchor it, so a Product sitting in a
 // subdirectory of its repo (a monorepo, or a workspace that is itself a repo) would miss on every
 // probe and the guard would allow everything, silently. `ls-tree` run with `-C productRoot` takes a
-// cwd-relative pathspec and prints cwd-relative paths, so both halves stay hub-relative.
+// cwd-relative pathspec and prints cwd-relative paths, so both halves stay Product-relative.
 //
 // Slugs are FOLDED because the gate folds them: on a case-insensitive filesystem `epics/ep-x/…` and
 // `epics/EP-X/…` are the same file, so a byte-exact compare lets a mutation be laundered as a
@@ -150,7 +150,7 @@ export function denyMessage({ epic, rel, productRoot }) {
   return [
     `[yad] Blocked: ${rel} is CI-owned gate state.`,
     '',
-    'This hub runs in verified mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
+    'This Product runs in verified mode, where CI is the sole writer of the gate ledger. The `ledger-guard`',
     'check rejects any non-bot commit that changes it, so this edit cannot reach the default branch —',
     'it would fail the review PR/MR and have to be reverted.',
     '',
@@ -172,7 +172,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
   if (env.YAD_HOOK_DISABLE) return { allow: true, skipped: 'YAD_HOOK_DISABLE' };
   if (!paths.length) return { allow: true };
   const base = baseDirFor(env, runner);
-  // One `ls-tree` per hub, not one per candidate path: a MultiEdit carries many paths and this runs
+  // One `ls-tree` per Product, not one per candidate path: a MultiEdit carries many paths and this runs
   // inside the agent's tool loop.
   const seededByHub = new Map();
   for (const candidate of paths) {

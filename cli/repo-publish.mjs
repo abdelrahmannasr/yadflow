@@ -65,7 +65,7 @@ export function packPathspecs(root, registry = { repos: [] }, name = null) {
 }
 
 // True iff committing `.gitignore` would carry ONLY the managed pack-ignore block (comments + glob) and
-// nothing else. Guards invariant 1: a hub whose `.gitignore` also has unrelated uncommitted edits must
+// nothing else. Guards invariant 1: a Product whose `.gitignore` also has unrelated uncommitted edits must
 // keep them OUT of the `[skip ci]` audit commit. The publish commit is `git commit -- <paths>` (--only,
 // reads the WORKING TREE), so this compares the working tree — an untracked `.gitignore` must be wholly
 // managed; a tracked one must differ from HEAD by the managed block alone (added, nothing removed).
@@ -162,7 +162,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
 
   // Make the "pack is gitignored" assumption true (idempotent; packRepo also does this on refresh) so a
   // Product whose pack was tracked before the ignore existed stops stranding a dirty tree. Publish `.gitignore`
-  // ONLY when the change is the managed pack-ignore block alone (invariant 1) — a hub whose `.gitignore`
+  // ONLY when the change is the managed pack-ignore block alone (invariant 1) — a Product whose `.gitignore`
   // also carries unrelated uncommitted edits keeps them OUT of this audit commit; the pack is still ignored
   // on disk and the human commits their own `.gitignore` edits through their own change. When we do carry
   // it, `git add` makes an untracked `.gitignore` known so the --only commit can include it.

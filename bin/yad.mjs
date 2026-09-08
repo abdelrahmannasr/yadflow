@@ -110,7 +110,7 @@ ${c.bold('Review gate (Shape)')}
   yad gate trailer <epic> [artifact] --body <text> [--pr <n>]
                                        Upsert the companion's 60-sec briefing into the PR/MR description
   yad gate ci [--branch <head>] [--pr <n>] [--merged]
-                        CI entry (hub workflow): pre-merge is read-only (nothing pushed);
+                        CI entry (Product workflow): pre-merge is read-only (nothing pushed);
                         --merged advances the step + flips artifact status on the default branch
 
 ${c.bold('Build helpers')}
@@ -118,10 +118,10 @@ ${c.bold('Build helpers')}
   yad open-pr [--repo <name>]          Open a task PR/MR against the repo's DEFAULT branch (never a
                                        hardcoded main; --base overrides) — stage-aware on the Product: a
                                        review/EP-* branch opens the Shape artifact-review PR
-                                       (delegates to gate open), any other hub branch uses the
+                                       (delegates to gate open), any other Product branch uses the
                                        code-task template
   yad ship --type <t> -m <subject>     Commit AND open the task PR/MR in one step (stage-aware)
-  yad checkpoint [--push]              Commit the machine-written Build hub state
+  yad checkpoint [--push]              Commit the machine-written Build state on the Product
                                        (trust-log/build-log/build-state) — plus any story
                                        status: flip (→ in-build/shipped) backed by a build-log
                                        ship — as one audit-trail chore(hub) commit; default

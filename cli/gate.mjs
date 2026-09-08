@@ -84,7 +84,7 @@ function warnIncompleteDiscovery(epicDir, artifact) {
   warn(`discovery set incomplete — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
 }
 
-// Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
+// Fail fast on a corrupt or wrong-shape Product config: a silently-defaulted hub.json would degrade
 // every gate to local without anyone noticing, and a typo'd platform would read as a local ledger.
 export function loadProduct(root) {
   const hubFile = productConfigPath(root);

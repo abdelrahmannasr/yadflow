@@ -70,7 +70,7 @@ git init -q "$BACKEND" && git_id "$BACKEND"
 ( cd "$BACKEND" && echo '{}' > package.json && git add -A && git commit -qm "init backend" && git branch -qM main )
 HEAD_BACKEND="$(git -C "$BACKEND" rev-parse HEAD)"
 
-# Pre-seed hub config + registry so the non-interactive setup keeps them (roster drives the gate).
+# Pre-seed Product config + registry so the non-interactive setup keeps them (roster drives the gate).
 mkdir -p "$HUB/.sdlc"
 cat > "$HUB/.sdlc/hub.json" <<EOF
 {"platform":"github","bridge_enabled":true,"bridge":true,"default_branch":"main","roster":[

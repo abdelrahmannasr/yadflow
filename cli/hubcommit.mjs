@@ -12,7 +12,7 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 
 // A direct-to-default push (`yad update --push`, `yad repo refresh --push`) will be rejected by the
 // yad-update-guard unless the commits are signed AND their author email is allowlisted. Warn up front
-// (never block) so the operator isn't surprised by a reddened default branch. Best-effort, hub-identity
+// (never block) so the operator isn't surprised by a reddened default branch. Best-effort, Product-identity
 // based.
 export function preflightGuardReadiness(root) {
   const gitcfg = (k) => run('git', ['config', '--get', k], { cwd: root }).stdout;
@@ -28,7 +28,7 @@ export function preflightGuardReadiness(root) {
   }
 }
 
-// The default branch: hub config, else the remote's published default (origin/HEAD), else 'main'.
+// The default branch: Product config, else the remote's published default (origin/HEAD), else 'main'.
 // NEVER the current branch — falling back to it (as gate.mjs does, safe there because CI checks out the
 // default branch) would make the guard below a no-op on a WIP branch and let an unsigned commit land in
 // a future PR's range.
