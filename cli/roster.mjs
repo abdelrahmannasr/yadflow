@@ -7,13 +7,13 @@
 // `domain-owner` keeps repos.json `domain_owners` in sync so the gate never drifts from the roster.
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, ask, askYesNo, readJSON, writeProductConfig } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
-import { rolesForScope } from './platform.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
+import { rolesForScope, setScopeRoles } from './platform.mjs';
 import { parseRolesSpec, upsertRosterEntry, addRepoRoles, removeRepoRole, setRepoDomainOwners, reconcileRepoRoles } from './setup.mjs';
 
 const ROLES = ['owner', 'reviewer', 'domain-owner'];
 
-const loadHub = (root) => readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+const loadHub = (root) => readJSON(productConfigPath(root), null);
 const loadRepos = (root) => readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] }).repos || [];
 const ownersOf = (repo) => (Array.isArray(repo.domain_owners) ? repo.domain_owners : (repo.domain_owner ? [repo.domain_owner] : []));
 
@@ -96,7 +96,7 @@ async function rosterAdd(root, login, { name, email, roles } = {}) {
     em = em || await ask('  commit email (blank to skip)', (existing && existing.email) || '');
     const def = rolesForScope(existing, 'hub').join(' ') || 'reviewer';
     const hubRoles = (await ask('  hub roles (owner/reviewer, space-separated)', def)).split(/\s+/).filter(Boolean);
-    rolesMap = hubRoles.length ? { hub: hubRoles } : {};
+    rolesMap = hubRoles.length ? setScopeRoles({}, 'hub', hubRoles) : {};
   }
   const { entry, created } = upsertRosterEntry(root, { login, name: nm, email: em || undefined, roles: rolesMap, platform });
   if (!entry) return {};
@@ -134,7 +134,7 @@ function rosterRevoke(root, [name, repo, ...roles]) {
 // `remove <login>` — delete a member; warn (do not cascade) if still a domain owner in repos.json.
 function rosterRemove(root, login) {
   if (!login) { fail('usage: yad roster remove <login>'); process.exitCode = 1; return {}; }
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hubPath = productConfigPath(root);
   const hub = readJSON(hubPath, null);
   if (!hub || !Array.isArray(hub.roster)) { warn('no roster to remove from (.sdlc/hub.json)'); return { removed: 0 }; }
   const idx = hub.roster.findIndex((e) => e.login === login);

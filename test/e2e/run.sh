@@ -117,12 +117,12 @@ EOF
 
 say "yad gate open opens the PR but writes NO ledger (CI is the sole writer)"
 yad gate open EP-e2e epic.md --dir "$HUB" || die "gate open failed"
-[ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "gate open must not write the ledger in verified mode"
+[ ! -f "$EPIC/.sdlc/hub-prs.json" ] && [ ! -f "$EPIC/.sdlc/product-prs.json" ] || die "gate open must not write the ledger in verified mode"
 
 say "CI pre-merge is read-only in verified mode (Path B): no ledger, the platform is the source of truth"
 echo pending > "$E2E_GH_PHASE_FILE"
 yad gate ci --branch review/EP-e2e/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
-[ ! -f "$EPIC/.sdlc/hub-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
+[ ! -f "$EPIC/.sdlc/hub-prs.json" ] && [ ! -f "$EPIC/.sdlc/product-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
 [ ! -f "$EPIC/.sdlc/approvals.json" ] || die "pre-merge must not write approvals (Path B)"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 fa_status "$EPIC/epic.md" draft   # CI never touches the artifact pre-merge
@@ -159,7 +159,7 @@ HEAD_BEFORE="$(git -C "$HUB" rev-parse HEAD)"
 yad gate ci --branch review/EP-cici/epic --pr 7 --no-push --dir "$HUB" || die "gate ci (pre-merge) failed"
 # Path B: pre-merge writes/commits nothing — the platform PR holds the review state until merge.
 [ "$HEAD_BEFORE" = "$(git -C "$HUB" rev-parse HEAD)" ] || die "pre-merge must not commit (Path B)"
-[ ! -f "$CIE/.sdlc/hub-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
+[ ! -f "$CIE/.sdlc/hub-prs.json" ] && [ ! -f "$CIE/.sdlc/product-prs.json" ] || die "pre-merge must not write the ledger (Path B)"
 jassert "$CIE/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "in_review"'
 fa_status "$CIE/epic.md" draft   # CI never touches the artifact pre-merge
 

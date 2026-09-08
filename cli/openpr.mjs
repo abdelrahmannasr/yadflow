@@ -5,7 +5,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import {
   detectPlatform, createPr, reviewersForScopes, resolveCommitterLogin, resolveBaseBranch,
 } from './platform.mjs';
@@ -34,7 +34,7 @@ function resolveRepo(root, { repo, dir }) {
 export function detectStage(root, repoRoot, head, meta) {
   if (meta) return 'code-repo';
   const isHub = path.resolve(repoRoot) === path.resolve(root)
-    && exists(path.join(root, PROJECT_FILES.hubConfig));
+    && exists(productConfigPath(root));
   if (!isHub) return 'code-repo';
   return /^review\/EP-[a-z0-9-]+\//.test(head || '') ? 'hub-shape' : 'hub-tooling';
 }
@@ -133,7 +133,7 @@ export async function runOpenPr(root, opts = {}) {
   // must never leak in. Resolved AFTER the hub-shape hand-off above, which delegates its own base to
   // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
   // delegated path then ignores.
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });
+  const hub = readJSON(productConfigPath(root), { roster: [] });
 
   // Resolve the base rather than assume it (#168). Hardcoding 'main' mis-based every PR on a repo
   // whose trunk is something else — and CodeRabbit decides auto-review eligibility from the base at

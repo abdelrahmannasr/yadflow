@@ -10,7 +10,7 @@ import {
 const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
 
 import { preflightGuardReadiness } from './hubcommit.mjs';
-import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX } from './manifest.mjs';
+import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
@@ -28,7 +28,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // --- missing one-time setup (needs the interactive wizard) ---
   const gaps = [];
   if (!exists(path.join(root, PROJECT_FILES.version))) gaps.push('module not installed (.sdlc/cli-version.json absent)');
-  if (!exists(path.join(root, PROJECT_FILES.hubConfig))) gaps.push('hub not configured (.sdlc/hub.json absent)');
+  if (!exists(productConfigPath(root))) gaps.push('hub not configured (.sdlc/hub.json absent)');
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   if (!exists(path.join(root, PROJECT_FILES.reposRegistry))) gaps.push('no repos registered (.sdlc/repos.json absent)');
 
@@ -189,7 +189,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   // --- publish: commit each repo's applied changes and push directly to its default branch ---
   if (push) {
     preflightGuardReadiness(root);
-    const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), {});
+    const hub = readJSON(productConfigPath(root), {});
     const defByRoot = new Map([[root, hub?.default_branch]]);
     const platformByRoot = new Map([[root, hub?.platform]]);
     for (const repo of registry.repos) {

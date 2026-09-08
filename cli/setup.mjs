@@ -7,13 +7,13 @@ import {
   exists, readJSON, readJSONStrict, writeJSON,
   writeProductConfig,
 } from './lib.mjs';
-import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY } from './manifest.mjs';
+import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, hubActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
-import { validateLogin, rolesForScope } from './platform.mjs';
+import { validateLogin, rolesForScope, setScopeRoles, deleteScopeRoles } from './platform.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -95,7 +95,7 @@ export function insideWorkspace(root, rpath) {
 // hub.json. `grants` maps a role -> the yad names that hold it for this repo. A name that is not in
 // the roster is warned about and skipped (the roster is the source of identity). Idempotent.
 export function addRepoRoles(root, repo, grants = {}) {
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hubPath = productConfigPath(root);
   const hub = readJSON(hubPath, null);
   if (!hub || !Array.isArray(hub.roster)) return;
   const byName = new Map(hub.roster.map((e) => [e.name, e]));
@@ -106,14 +106,12 @@ export function addRepoRoles(root, repo, grants = {}) {
       if (!entry) { warn(`'${nm}' is not in the roster — skipped ${role} for ${repo}`); continue; }
       // Normalize to the per-scope map, migrating the legacy shapes: a flat array or a single
       // `role` string both become hub roles so nothing is lost.
-      if (!entry.roles || typeof entry.roles !== 'object' || Array.isArray(entry.roles)) {
-        const hub = Array.isArray(entry.roles) ? entry.roles : (entry.role ? [entry.role] : []);
-        entry.roles = hub.length ? { hub } : {};
-        delete entry.role;
-      }
-      const list = Array.isArray(entry.roles[repo]) ? entry.roles[repo] : [];
+      // One normaliser, shared — a second copy of this logic is how one writer ends up maintaining
+      // a different set of scope spellings than the others.
+      normalizeRoles(entry);
+      const list = [...rolesForScope(entry, repo)];
       if (!list.includes(role)) { list.push(role); touched = true; }
-      entry.roles[repo] = list;
+      setScopeRoles(entry.roles, repo, list);
     }
   }
   if (touched) writeProductConfig(root, hub);
@@ -124,8 +122,8 @@ export function addRepoRoles(root, repo, grants = {}) {
 // migration addRepoRoles does; pulled out so upsert/remove share it.
 function normalizeRoles(entry) {
   if (!entry.roles || typeof entry.roles !== 'object' || Array.isArray(entry.roles)) {
-    const hub = Array.isArray(entry.roles) ? entry.roles : (entry.role ? [entry.role] : []);
-    entry.roles = hub.length ? { hub } : {};
+    const productRoles = Array.isArray(entry.roles) ? entry.roles : (entry.role ? [entry.role] : []);
+    entry.roles = productRoles.length ? setScopeRoles({}, 'hub', productRoles) : {};
     delete entry.role;
   }
   return entry.roles;
@@ -152,7 +150,7 @@ export function buildReconfiguredHub(cur, fields) {
 // hub.json shell if absent. Returns { entry, created }.
 export function upsertRosterEntry(root, { login, name, email, roles = {}, platform } = {}) {
   if (!login) { warn('roster upsert needs a login — skipped'); return { entry: null, created: false }; }
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hubPath = productConfigPath(root);
   const hub = readJSON(hubPath, null) || { platform: platform && platform !== 'none' ? platform : null, ledger: 'local', bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
   if (!Array.isArray(hub.roster)) hub.roster = [];
   let entry = hub.roster.find((e) => e.login === login);
@@ -162,8 +160,8 @@ export function upsertRosterEntry(root, { login, name, email, roles = {}, platfo
   if (email) entry.email = email;
   normalizeRoles(entry);
   for (const [scope, list] of Object.entries(roles || {})) {
-    const cur = Array.isArray(entry.roles[scope]) ? entry.roles[scope] : [];
-    entry.roles[scope] = [...new Set([...cur, ...list])];
+    const cur = rolesForScope(entry, scope);
+    setScopeRoles(entry.roles, scope, [...new Set([...cur, ...list])]);
   }
   if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warn(`'${email}' does not look like an email address`);
   const plat = platform || hub.platform;
@@ -179,16 +177,16 @@ export function upsertRosterEntry(root, { login, name, email, roles = {}, platfo
 // Inverse of addRepoRoles: drop the named role(s) from a member's `roles[<repo>]` scope, removing the
 // scope key when it empties. Member is found by yad `name` (matching addRepoRoles). Idempotent.
 export function removeRepoRole(root, name, repo, roles = []) {
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hubPath = productConfigPath(root);
   const hub = readJSON(hubPath, null);
   if (!hub || !Array.isArray(hub.roster)) return;
   const entry = hub.roster.find((e) => e.name === name);
   if (!entry) { warn(`'${name}' is not in the roster — nothing to revoke for ${repo}`); return; }
   normalizeRoles(entry);
-  const cur = Array.isArray(entry.roles[repo]) ? entry.roles[repo] : [];
+  const cur = rolesForScope(entry, repo);
   const next = cur.filter((r) => !roles.includes(r));
   if (next.length === cur.length) return; // nothing removed
-  if (next.length) entry.roles[repo] = next; else delete entry.roles[repo];
+  if (next.length) setScopeRoles(entry.roles, repo, next); else deleteScopeRoles(entry.roles, repo);
   writeProductConfig(root, hub);
 }
 
@@ -369,7 +367,7 @@ function applyActions(actions, { force = false } = {}) {
 // otherwise we prompt with a default. Pure of side effects — it only reads. Returns
 // { solo, team_size, codebase, repo_layout, configureTools }.
 export async function resolveProfile(root, opts = {}) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+  const hub = readJSON(productConfigPath(root), null);
   const prev = (hub && hub.profile) || {};
 
   // 1. Solo or team (+ size). --solo / --team <n> win; else carry hub.solo forward; else ask.
@@ -493,7 +491,7 @@ export async function runSetup(root, opts = {}) {
       `Add your ${team_size}-person roster: platform login → yad name → hub role (owner/reviewer).`,
       'An owner + 1 reviewer is required to pass a gate; skip now and add later with `yad roster add`.',
     ]);
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hubPath = productConfigPath(root);
   if (exists(hubPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
     info('keeping existing .sdlc/hub.json');
   } else {
@@ -562,7 +560,7 @@ export async function runSetup(root, opts = {}) {
     }
     if (cur.verified_authors?.length) info(`preserved ${cur.verified_authors.length} verified_authors entry(ies)`);
     writeProductConfig(root, next);
-    ok(`wrote ${PROJECT_FILES.hubConfig} (${next.roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
+    ok(`wrote ${PROJECT_FILES.productConfig} + ${PROJECT_FILES.hubConfig} (${next.roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
   }
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.

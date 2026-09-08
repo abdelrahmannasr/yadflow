@@ -397,7 +397,7 @@ test('migrate 2 -> 3: the settings file gains its new name and KEEPS the old one
     assert.ok(fs.existsSync(product), 'the new name exists');
     assert.ok(fs.existsSync(hub), 'and the old one is still there — removing it would disarm an un-refreshed ledger-guard');
     assert.equal(fs.readFileSync(product, 'utf8'), fs.readFileSync(hub, 'utf8'), 'byte-identical, not merely similar');
-    assert.equal(read(product).schemaVersion, 3);
+    assert.equal(read(product).schemaVersion, ENGINE_SHAPE);
     assert.ok(res.written.includes('.sdlc/product.json'), 'and the report names the file it created');
   } finally { cleanup(T); }
 });
@@ -445,6 +445,51 @@ test('migrate 2 -> 3: a product-level role survives the rename for BOTH spelling
     assert.deepEqual(rolesForScope(entry, 'hub'), ['owner'], 'an older caller still finds the role');
     assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'and so does a newer one');
     assert.deepEqual(rolesForScope(entry, 'backend'), ['domain-owner'], 'repo scopes are untouched');
+  } finally { cleanup(T); }
+});
+
+// Each of these is a bug that shipped in an earlier draft of this branch and was found by review.
+test('migrate: the authoritative file and its backup survive a DRIFTED pair', async () => {
+  // hub.json is the one that is read; product.json holds different content. Listing both names as
+  // separate rows made the product.json row write over hub.json before the hub.json row could copy
+  // it to .yad-orig — the content and its only backup, both gone.
+  const T = project({ files: {
+    '.sdlc/hub.json': JSON.stringify({ schemaVersion: 2, platform: 'github', roster: [{ login: 'a' }] }, null, 2) + '\n',
+    '.sdlc/product.json': JSON.stringify({ schemaVersion: 2, platform: 'github', roster: [] }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    assert.deepEqual(read(path.join(T, '.sdlc/hub.json')).roster, [{ login: 'a' }], 'the authoritative content survived');
+    assert.deepEqual(read(path.join(T, '.sdlc/hub.json.yad-orig')).roster, [{ login: 'a' }], 'and its backup is its OWN original');
+    assert.deepEqual(read(path.join(T, '.sdlc/product.json.yad-orig')).roster, [], 'the partner keeps its own original too');
+  } finally { cleanup(T); }
+});
+
+test('migrate: a project holding ONLY the new name is migrated, not ignored', async () => {
+  const T = project({ files: { '.sdlc/product.json': '{\n  "platform": "github"\n}\n' } });
+  try {
+    fs.rmSync(path.join(T, '.sdlc/hub.json'), { force: true });
+    const plan = await runMigrate(T, {});
+    const row = rowFor(plan.rows, '.sdlc/product.json');
+    assert.ok(row, `the new name must be planned: ${JSON.stringify(plan.rows.map((r) => r.file))}`);
+    assert.deepEqual(row.creates, ['.sdlc/hub.json'], 'and the preview names the partner it will create');
+    await runMigrate(T, { apply: true });
+    const after = read(path.join(T, '.sdlc/product.json'));
+    assert.equal(after.schemaVersion, ENGINE_SHAPE);
+    assert.equal(after.ledger, 'local', 'a shape-1 file under the new name still gains the shape-2 field');
+  } finally { cleanup(T); }
+});
+
+test('migrate: a second run has nothing pending — the plan and the write agree on one comparison', async () => {
+  const T = project({ files: {
+    '.sdlc/hub.json': '{\n  "platform": "github"\n}\n',
+    '.sdlc/product.json': '{\n  "platform": "github"\n}\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const second = await runMigrate(T, {});
+    assert.deepEqual(second.rows.filter((r) => r.changes).map((r) => r.file), [],
+      'a migrated project that still reports pending work never converges');
   } finally { cleanup(T); }
 });
 

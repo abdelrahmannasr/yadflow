@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, epicFiles } from './manifest.mjs';
+import { PROJECT_FILES, epicFiles , productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { rolesForScope } from './platform.mjs';
 
@@ -47,7 +47,7 @@ const ARTIFACT_FILES = new Set([
 // ---- roster / attribution ----------------------------------------------------------------------
 
 function loadRoster(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), null);
+  const hub = readJSON(productConfigPath(root), null);
   return hub && Array.isArray(hub.roster) ? hub.roster : [];
 }
 

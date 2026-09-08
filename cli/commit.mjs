@@ -9,7 +9,8 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, run, exists } from './lib.mjs';
 import {
   COMMIT_TYPES, AI_COAUTHORS, ATOMIC_FILE_LIMIT,
-  TASK_TRAILER, CONTRACT_CHANGE_TRAILER, COAUTHOR_TRAILER, PROJECT_FILES, TASK_ID_RE,
+  TASK_TRAILER, CONTRACT_CHANGE_TRAILER, COAUTHOR_TRAILER, TASK_ID_RE,
+  productConfigPath,
 } from './manifest.mjs';
 
 // PURE — unit tested directly. Build the full commit message text.
@@ -63,7 +64,7 @@ export async function runCommit(root, opts = {}) {
   if (!task) {
     // spec-link is a code-repo gate (REPO_WIRING.common), not a hub gate — so a missing Task trailer
     // is expected on a hub PR (Shape artifact review or hub tooling) and only matters on a repo.
-    const onHub = exists(path.join(root, PROJECT_FILES.hubConfig));
+    const onHub = exists(productConfigPath(root));
     warn(onHub
       ? 'no Task trailer (none given and branch has no -S0N-T0N) — fine for a hub PR; required on code-repo tasks (spec-link gate)'
       : 'no Task trailer (none given and branch has no -S0N-T0N) — spec-link gate will fail on a code repo');

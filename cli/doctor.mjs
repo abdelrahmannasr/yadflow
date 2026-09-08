@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
+import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
@@ -56,7 +56,7 @@ export function envChecks(checks) {
 }
 
 export function projectChecks(checks, root) {
-  const hubPath = path.join(root, PROJECT_FILES.hubConfig);
+  const hubPath = productConfigPath(root);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
   const verPath = path.join(root, PROJECT_FILES.version);
   if (!exists(hubPath) && !exists(regPath) && !exists(verPath)) {
@@ -476,7 +476,7 @@ export function epicChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
   // Read once for the whole sweep: whether approval is waived is a project fact, not a per-epic one.
-  const solo = isSolo(readJSON(path.join(root, PROJECT_FILES.hubConfig), null));
+  const solo = isSolo(readJSON(productConfigPath(root), null));
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
     try {
@@ -600,7 +600,11 @@ export function mirrorChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (exists(epicsDir)) {
     for (const e of fs.readdirSync(epicsDir).sort()) {
-      if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+      // `statSync` follows symlinks and throws on a dangling one, so guard the whole entry rather
+      // than letting one broken link take the entire health check down.
+      try {
+        if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+      } catch { continue; }
       const f = epicFiles(path.join('epics', e));
       pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
     }
@@ -608,7 +612,24 @@ export function mirrorChecks(checks, root) {
   for (const { canonical, legacy } of pairs) {
     const a = path.join(root, canonical);
     const b = path.join(root, legacy);
-    if (!exists(a) || !exists(b)) continue;
+    // One side missing is NORMAL before `yad migrate` — an un-migrated project has only the old name.
+    // It is not normal once the file says shape 3, because from then on every save writes both. And
+    // `writeMirrored` cannot repair it on its own: when the authoritative copy already matches, it
+    // correctly does nothing, so a half-made pair stays half-made and silent.
+    if (exists(a) !== exists(b)) {
+      const present = exists(a) ? a : b;
+      let shape;
+      try { shape = JSON.parse(fs.readFileSync(present, 'utf8'))?.schemaVersion ?? 1; } catch { continue; }
+      if (typeof shape === 'number' && shape >= 3) {
+        check(
+          checks, `mirror:${canonical}`, 'shape', 'warn',
+          `${exists(a) ? legacy : canonical} is missing — it should exist beside ${path.relative(root, present)} on shape ${shape}`,
+          'run `yad migrate --apply`, or any command that writes the file, to put both names back in step',
+        );
+      }
+      continue;
+    }
+    if (!exists(a)) continue;
     let same;
     try { same = fs.readFileSync(a, 'utf8') === fs.readFileSync(b, 'utf8'); } catch { continue; }
     if (same) continue;
@@ -621,7 +642,7 @@ export function mirrorChecks(checks, root) {
 }
 
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
-  if (!injected && !exists(path.join(root, PROJECT_FILES.hubConfig)) && !exists(path.join(root, PROJECT_FILES.version))) return;
+  if (!injected && !exists(productConfigPath(root)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
   if (!plan) {
     try {

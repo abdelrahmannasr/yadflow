@@ -95,7 +95,8 @@ login and requested too — otherwise an escalated step is structurally unsatisf
 - Update the step's `hub-prs.json` `lastSyncedAt` when the sync **learned something** — every sync on
   an open step, and on a closed one only when the approval record actually changed (a re-opened review
   that was re-approved). An identical re-sync leaves it alone, so the ledger does not churn.
-- **Write the ledgers in a canonical order.** `approvals.json`, `comments.json` and `hub-prs.json` are
+- **Write the ledgers in a canonical order.** `approvals.json`, `comments.json` and the PR ledger
+  (`product-prs.json` + `hub-prs.json`, written together) are
   sorted on write, so the bytes are a function of the record *set* and never of which step was synced
   last. Without this the upsert above — which drops the records it refreshes and re-appends them at the
   tail — makes the file depend on sync order, and the wired sweep (one `gate ci --branch <ref>
@@ -171,7 +172,7 @@ The `wire` action (SKILL.md Step 4) installs CI on the hub so a **merge** drives
 During review CI writes nothing: the platform PR/MR is the source of truth (native approvals +
 threads). The CLI is self-sufficient at merge: it derives the epic + artifact from the
 `review/EP-<slug>/<artifact-base>` head branch, takes the PR/MR number from the event (GitHub) or
-resolves it from the platform (GitLab), upserts the `hub-prs.json` entry itself, and **re-reads
+resolves it from the platform (GitLab), upserts the PR-ledger entry itself (under both names), and **re-reads
 approvals fresh from the platform** — so no ledger needs to be pre-seeded on the branch. (It only
 *advances* a chain, though: it cannot **create** one. A brand-new epic's seed therefore travels the
 other way — up through its first review PR/MR; see "the seed of a new epic" below.)

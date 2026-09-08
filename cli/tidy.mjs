@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { productConfigPath } from './manifest.mjs';
 import { loadHub } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
@@ -39,7 +39,7 @@ function epicsWithLedgers(root) {
 export async function runTidy(root, opts = {}) {
   log(c.bold('\nyad tidy up'));
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
-  if (!exists(path.join(root, PROJECT_FILES.hubConfig))) {
+  if (!exists(productConfigPath(root))) {
     fail('no .sdlc/hub.json — run `yad tidy up` from the product hub');
     process.exitCode = 1;
     return;

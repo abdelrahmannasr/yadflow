@@ -228,8 +228,8 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
 
 // ---- the product config, which lives under two names for one major -----------------------------
 //
-// Read through `productConfigPath` (manifest.mjs): the new name when it exists, the old one
-// otherwise. Write through here: BOTH names, every time.
+// Read through `productConfigPath` (manifest.mjs), which every reader in cli/ now does. Write
+// through here: BOTH names, every time.
 //
 // The duplicate is not sloppiness. `templates/checks/ledger-guard.sh` sits committed inside the
 // user's own repository and opens `.sdlc/hub.json` by that literal path; it is refreshed by
@@ -238,9 +238,14 @@ export function pushWithRebase(cwd, target, { attempts = 3 } = {}) {
 // call the ledger local, and stop rejecting human commits to it. An upgrade that silently disarms a
 // safety gate is worse than a duplicated file.
 //
-// Order matters: the CANONICAL file is written first. If the second write fails, the engine's own
-// reader is already correct and only the older copy is stale — the failure that leaves the least
-// broken. The reverse order would leave the engine reading yesterday's settings.
+// Order matters, and it follows which file is AUTHORITATIVE — the old name, this major
+// (`productConfigPath`, cli/manifest.mjs). The new name is written first, so if the second write
+// fails the readers are all still on the untouched old copy: nothing has half-changed underneath
+// them. Writing the authoritative file first would leave every reader on new settings while the
+// mirror still says something else, which is the harder failure to notice.
+//
+// `yad doctor` reports the two copies disagreeing either way, so a half-written pair is visible
+// rather than silent.
 // Write a file that lives under two names. Returns the paths it actually wrote — empty when there
 // was nothing to do.
 //

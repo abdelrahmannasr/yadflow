@@ -196,13 +196,22 @@ export const PROJECT_FILES = {
 //     that no longer exists, read no platform, conclude the ledger is local, and stop rejecting human
 //     commits to it — the audit trail disarmed by an upgrade.
 //
-// Hence: for one whole major version BOTH files exist. `product.json` is the real one; `hub.json` is
-// a copy the engine rewrites on every save. Readers prefer the new name and fall back to the old, so
-// a project that has not migrated yet still works. The old name is deleted in the major AFTER the one
-// that introduces the new one — add, then warn, then remove (rule 3), stretched over a file.
+// Hence: for one whole major version BOTH files exist, and the OLD name is the one that is READ.
+// `product.json` is written on every save so that it is there, correct, and ready — but nothing
+// depends on it yet. `productConfigPath` picks the old name whenever it exists and falls back to the
+// new one, so a project holding either name alone still works.
 //
-// This costs a duplicated file on disk for a release. That is the price of not silently disarming a
-// safety gate in somebody else's repository, and it is worth paying.
+// Reading the new name first is the tempting version and it is wrong: the moment two names exist and
+// the new one wins, everything that writes the old one — the guard above, a script someone wrote,
+// a person editing the file they know — is silently ignored.
+//
+// The ladder is add, then switch, then remove:
+//   this major   the new name appears and is maintained; the old one is still read
+//   next major   the new name becomes the one read, and `yad doctor` warns about the old
+//   after that   the old name is deleted
+//
+// This costs a duplicated file on disk for two releases. That is the price of not silently disarming
+// a safety gate in somebody else's repository, and it is worth paying.
 export const MIRRORED_FILES = [
   { canonical: PROJECT_FILES.productConfig, legacy: PROJECT_FILES.hubConfig },
 ];

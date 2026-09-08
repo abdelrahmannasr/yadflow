@@ -148,7 +148,7 @@ via the local user's `gh`/`glab`. For each:
 passed), and key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
 before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
-roster, set `hub-prs.json` `lastSyncedAt`, and **re-evaluate Step 3**. Under the PR-driven CLI (`yad
+roster, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never hand-write either PR-ledger file.** It lives under two names while the rename settles — `product-prs.json` and `hub-prs.json` — and the engine writes both together. Writing one leaves the pair disagreeing, and `yad doctor` will report it. Use `yad gate` / `yad review`, which keep them in step.  Under the PR-driven CLI (`yad
 gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
 (the merge is the human act); otherwise it records state and holds the step `in_review`.
 

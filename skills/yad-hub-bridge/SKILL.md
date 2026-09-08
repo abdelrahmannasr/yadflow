@@ -19,7 +19,8 @@ keeps platform mechanics out of the gate). `yad-review-gate` *calls* it; it neve
 
 - `{project-root}` is the **product hub**. Hub platform + reviewer roster live in `.sdlc/hub.json`
   (`config.yaml` `hub.config`; schema in `../yad-connect-repos/references/hub-config.md`).
-- Per-step review-PR record: `epics/EP-<slug>/.sdlc/hub-prs.json` (`config.yaml` `hub.pr_ledger`) — a
+- Per-step review-PR record: `epics/EP-<slug>/.sdlc/product-prs.json`, written together with its
+  older name `hub-prs.json` (`config.yaml` `hub.pr_ledger`) — a
   sibling ledger to `approvals.json`, so `state.json`'s locked step shape is untouched.
 - The review-PR body is the hub template from `yad-pr-template` (`templates/hub/<platform>/…`).
 - Branch per artifact: `review/EP-<slug>/<artifact-base>` (`config.yaml` `hub.artifact_branch`).

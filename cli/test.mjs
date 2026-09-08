@@ -3779,7 +3779,7 @@ test('addRepoRoles grants per-repo roles into the roster map and warns on unknow
   const alice = hub.roster.find((r) => r.name === 'alice');
   assert.deepEqual(carol.roles.backend, ['domain-owner']);
   assert.deepEqual(carol.roles.hub, ['reviewer'], 'existing hub roles preserved');
-  assert.deepEqual(alice.roles, { hub: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map');
+  assert.deepEqual(alice.roles, { hub: ['owner'], product: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map, under both spellings of the product scope');
   // idempotent: re-granting the same role does not duplicate
   addRepoRoles(T, 'backend', { 'domain-owner': ['carol'] });
   const again = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
@@ -3818,11 +3818,11 @@ test('upsertRosterEntry inserts a new member and upserts by login, merging roles
   let e = readHub(T).roster.find((r) => r.login === 'gl-abd');
   assert.equal(e.name, 'abdulrahman');
   assert.equal(e.email, 'a@b.c');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'] });
   // upsert by login: add a dashboard scope; hub + backend must survive
   upsertRosterEntry(T, { login: 'gl-abd', roles: { dashboard: ['domain-owner'] }, platform: 'none' });
   e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
   assert.equal(readHub(T).roster.length, 1, 'upsert, not duplicate');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -3870,7 +3870,7 @@ test('runRoster add --roles (scripted) upserts and mirrors domain-owner scopes i
   await runRoster(T, { action: 'add', args: ['gl-abd'], name: 'abdulrahman', email: 'a@b.c',
     roles: 'hub=owner,reviewer backend=domain-owner dashboard=domain-owner' });
   const e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
+  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
   assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'backend').domain_owners, ['abdulrahman']);
   assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'dashboard').domain_owners, ['abdulrahman']);
   fs.rmSync(T, { recursive: true, force: true });
@@ -5630,6 +5630,44 @@ test('doctor shape: a project this engine wrote is on this engine shape, and say
 
 // Two names for one file only stay in step because the engine writes both. Anything else touching
 // one of them — a person, a script, a half-finished merge — makes the other silently ignored.
+// The product-level scope has two spellings. Readers and WRITERS must use the same one, or a role
+// can be granted and never revoked — a governance control that stops working because someone ran
+// the upgrade command. These are the cases that were broken.
+test('roster: a role on a MIGRATED entry can actually be revoked', () => {
+  const { T } = scaffold();
+  const hubPath = path.join(T, '.sdlc/hub.json');
+  // exactly what `yad migrate` leaves behind: the same list under both spellings
+  fs.writeFileSync(hubPath, JSON.stringify({ platform: 'none', roster: [
+    { login: 'alice', name: 'Alice', roles: { product: ['owner', 'reviewer'], hub: ['owner', 'reviewer'] } },
+  ] }, null, 2) + '\n');
+  removeRepoRole(T, 'Alice', 'hub', ['owner', 'reviewer']);
+  const entry = JSON.parse(fs.readFileSync(hubPath, 'utf8')).roster[0];
+  assert.deepEqual(rolesForScope(entry, 'hub'), [], 'gone under the old spelling');
+  assert.deepEqual(rolesForScope(entry, 'product'), [], 'and under the new one — otherwise they are still an approver');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('roster: a grant on a MIGRATED entry lands under both spellings', () => {
+  const { T } = scaffold();
+  const hubPath = path.join(T, '.sdlc/hub.json');
+  fs.writeFileSync(hubPath, JSON.stringify({ platform: 'none', roster: [
+    { login: 'alice', name: 'Alice', roles: { product: ['reviewer'], hub: ['reviewer'] } },
+  ] }, null, 2) + '\n');
+  upsertRosterEntry(T, { login: 'alice', name: 'Alice', roles: { hub: ['owner'] }, platform: 'none' });
+  const entry = JSON.parse(fs.readFileSync(hubPath, 'utf8')).roster[0];
+  assert.deepEqual(rolesForScope(entry, 'hub').sort(), ['owner', 'reviewer']);
+  assert.deepEqual(rolesForScope(entry, 'product').sort(), ['owner', 'reviewer'], 'the two spellings never diverge');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('roster: when the two spellings disagree, the OLD one wins — the one every writer maintains', () => {
+  // Pins the tie-break. Flipping the preference used to leave the whole suite green, which is how a
+  // reader/writer mismatch got in.
+  const entry = { roles: { hub: ['owner'], product: ['reviewer'] } };
+  assert.deepEqual(rolesForScope(entry, 'hub'), ['owner']);
+  assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'asking by either name gives the authoritative answer');
+});
+
 test('doctor mirror: two copies of the settings that disagree are reported, not left silent', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });

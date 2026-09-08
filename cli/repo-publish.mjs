@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadHub } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 import { hubGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
@@ -136,7 +136,7 @@ export function buildCodeMapMessage({ label, author, basenames = [] }) {
 // `runCheckpoint`. Never throws; sets process.exitCode on a hard error so the CLI reports failure.
 export async function publishCodeContext(root, { push = false, allowBranch = false, name = null } = {}) {
   if (!exists(path.join(root, '.git'))) { fail('not a git repo'); process.exitCode = 1; return; }
-  if (!exists(path.join(root, PROJECT_FILES.hubConfig))) {
+  if (!exists(productConfigPath(root))) {
     fail('no .sdlc/hub.json — --push publishes the hub code-context; run it from the product hub');
     process.exitCode = 1;
     return;

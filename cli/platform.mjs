@@ -56,8 +56,31 @@ export function platformReady(platform) {
 // caller here still asks for `hub`, the lookup returns nothing, and every reviewer quietly stops
 // holding a product-level role — so the gate can no longer find its required approvers and no
 // message anywhere says why. The migration and the reader have to move together or not at all.
-const PRODUCT_SCOPES = ['product', 'hub'];
-const scopeKeys = (scope) => (PRODUCT_SCOPES.includes(scope) ? PRODUCT_SCOPES : [scope]);
+// `hub` FIRST, deliberately: it is the authoritative spelling this major, exactly as `hub.json` is
+// the authoritative filename. Preferring `product` looked consistent with the rename and broke
+// revoking a role — the writers below all touch `hub`, so deleting it left `product` behind and the
+// person stayed a required approver. A scope with two names has to be READ from the same one the
+// writers maintain, or the two halves quietly disagree.
+//
+// Known limit, inherited not introduced: a connected repo literally named `hub` already shared a key
+// with the product scope in this flat map, and `product` now joins it. Naming a repo either word
+// gives its members the product-level roles. The scope map wants nesting to fix that properly; it is
+// not something this rename can repair.
+export const PRODUCT_SCOPES = ['hub', 'product'];
+export const isProductScope = (scope) => PRODUCT_SCOPES.includes(scope);
+const scopeKeys = (scope) => (isProductScope(scope) ? PRODUCT_SCOPES : [scope]);
+
+// Write a scope's roles under EVERY spelling it has, so a reader on either name sees the same answer.
+export function setScopeRoles(roles, scope, list) {
+  for (const k of scopeKeys(scope)) roles[k] = [...list];
+  return roles;
+}
+
+// …and remove it from every spelling. Deleting one name only is how a revoke becomes a no-op.
+export function deleteScopeRoles(roles, scope) {
+  for (const k of scopeKeys(scope)) delete roles[k];
+  return roles;
+}
 
 export function rolesForScope(entry, scope) {
   if (!entry) return [];
@@ -67,7 +90,7 @@ export function rolesForScope(entry, scope) {
     for (const k of keys) if (Array.isArray(r[k])) return r[k];
     return [];
   }
-  const isProduct = PRODUCT_SCOPES.includes(scope);
+  const isProduct = isProductScope(scope);
   if (Array.isArray(r)) return isProduct ? r : [];
   if (typeof entry.role === 'string' && entry.role) return isProduct ? [entry.role] : [];
   return [];

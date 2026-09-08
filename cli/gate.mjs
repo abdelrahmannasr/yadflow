@@ -8,7 +8,7 @@ import {
   c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run, pushWithRebase,
   writeMirrored,
 } from './lib.mjs';
-import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
+import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
@@ -87,7 +87,7 @@ function warnIncompleteDiscovery(epicDir, artifact) {
 // Fail fast on a corrupt or wrong-shape hub config: a silently-defaulted hub.json would degrade
 // every gate to local without anyone noticing, and a typo'd platform would read as a local ledger.
 export function loadHub(root) {
-  const hubFile = path.join(root, PROJECT_FILES.hubConfig);
+  const hubFile = productConfigPath(root);
   const regFile = path.join(root, PROJECT_FILES.reposRegistry);
   // Distinguish an ABSENT hub.json (null default → fine, local gate) from one that exists but
   // holds literal `null` (malformed — must not silently downgrade to local).

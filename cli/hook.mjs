@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, isVerifiedLedger } from './manifest.mjs';
+import { isVerifiedLedger , productConfigPath } from './manifest.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -74,7 +74,7 @@ export function payloadPaths(payload) {
 export function hubRootFor(abs) {
   let dir = path.dirname(path.resolve(abs));
   for (;;) {
-    if (fs.existsSync(path.join(dir, PROJECT_FILES.hubConfig))) return dir;
+    if (fs.existsSync(productConfigPath(dir))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -181,7 +181,7 @@ export function ledgerGuardDecision(paths, { env = process.env, runner = run } =
     if (!hubRoot) continue;
     // Non-strict on purpose: a hub.json that does not parse is a real problem, but refusing every
     // edit in the repo is not this hook's way of reporting it (`yad doctor` says so properly).
-    const hub = readJSON(path.join(hubRoot, PROJECT_FILES.hubConfig), null);
+    const hub = readJSON(productConfigPath(hubRoot), null);
     if (!isVerifiedLedger(hub)) continue;
     const rel = path.relative(hubRoot, abs).split(path.sep).join('/');
     const hit = protectedLedgerPath(rel);

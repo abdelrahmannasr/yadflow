@@ -7,7 +7,7 @@
 // trailer/cards/chat text and posts it via these primitives, all to the PLATFORM (never a ledger file).
 import path from 'node:path';
 import { log, ok, info, warn, fail, note, run, readJSON } from './lib.mjs';
-import { PROJECT_FILES } from './manifest.mjs';
+import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { updateShip } from './ledger.mjs';
 import { epicRoot } from './epic-state.mjs';
 import {
@@ -35,7 +35,7 @@ function resolveRepo(root, { repo, dir }) {
 function platformOf(root, repoRoot, meta) {
   if (meta?.platform) return meta.platform;
   const remote = run('git', ['remote', 'get-url', 'origin'], { cwd: repoRoot }).stdout;
-  return detectPlatform(remote) || readJSON(path.join(root, PROJECT_FILES.hubConfig), {}).platform || null;
+  return detectPlatform(remote) || readJSON(productConfigPath(root), {}).platform || null;
 }
 
 // Assemble (but don't print) the Build grounding bundle. Shared by `context` and `walkthrough` so the
@@ -149,7 +149,7 @@ export async function reviewReconcile(root, { epic, repo, dir, pr, reader = read
   const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig), { roster: [] });
+  const hub = readJSON(productConfigPath(root), { roster: [] });
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const domain = meta?.name ? [meta.name] : [];
   const pull = reader(platform, pr, { cwd: repoRoot });

@@ -11,6 +11,7 @@ import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, HUB_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_SETTINGS, HOOK_TOOL_MATCHER, HOOK_COMMAND, HOOK_COMMAND_LEGACY,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_HUB_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
+  productConfigPath,
 } from './manifest.mjs';
 
 // A git pathspec (forward slashes, relative to a repo root) for `dest` under `root`. Actions carry
@@ -441,7 +442,7 @@ export function legacyRepoActions(root, repo) {
 }
 
 export function legacyHubActions(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  const hub = readJSON(productConfigPath(root));
   if (!isVerifiedLedger(hub)) return [];
   const wiring = [...HUB_WIRING.common, ...(HUB_WIRING[hub.platform] || [])];
   return legacyFileActions('hub', root, LEGACY_HUB_FILES[hub.platform], wiring);
@@ -478,7 +479,7 @@ export function repoActions(root, repo) {
 // Hub wiring (gate-sync + verified-commits CI on the product hub itself). Only when the hub has a
 // platform and the verified ledger is explicitly enabled — a local hub stays local, with no error.
 export function hubActions(root) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  const hub = readJSON(productConfigPath(root));
   // `ledger` is the canonical switch and `bridge_enabled` its older spelling (the documented hub-config schema); older setup versions
   // wrote `bridge` — `isVerifiedLedger` accepts an explicit true in either spelling, and is the one
   // predicate the CLI, the wiring, and the ledger hook all read (#186). Wire nothing otherwise.
@@ -624,7 +625,7 @@ function hookSettingsAction(root, ide, relDest) {
 // the entry that invokes it. Verified-only exactly like `hubActions` — with a local ledger it is
 // locally owned, the hand-edit the authoring skills describe is CORRECT, and a guard would be wrong.
 export function hookActions(root, ideTargets = ideTargetsFor(root)) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  const hub = readJSON(productConfigPath(root));
   if (!isVerifiedLedger(hub)) return [];
   const ledger = readManagedLedger(root);
   const actions = HOOK_WIRING.map((w) =>
@@ -660,7 +661,7 @@ export function verifiedAuthorEmails(hub) {
 // the hub config. No emails configured → no actions (the gate then warns instead of blocking —
 // never enforce an empty allowlist).
 export function authorsActions(root, repos = []) {
-  const hub = readJSON(path.join(root, PROJECT_FILES.hubConfig));
+  const hub = readJSON(productConfigPath(root));
   const emails = verifiedAuthorEmails(hub);
   if (!emails.length) return [];
   const desired = [
