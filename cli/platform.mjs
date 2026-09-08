@@ -49,12 +49,27 @@ export function platformReady(platform) {
 //   2. flat array variant — `entry.roles = ["owner","reviewer"]` (treated as hub roles)
 //   3. legacy single role — `entry.role = "owner"` (a hub role; pre per-scope schema)
 // The legacy `repos.json` `domain_owner` field is handled separately by resolveLogin's fallback.
+// The product-level scope has two spellings. `hub` is what every existing roster on disk says;
+// `product` is what shape 3 renames it to. Asking for either finds either, for one major.
+//
+// Without this the rename is a silent data loss: `yad migrate` moves the key to `product`, every
+// caller here still asks for `hub`, the lookup returns nothing, and every reviewer quietly stops
+// holding a product-level role — so the gate can no longer find its required approvers and no
+// message anywhere says why. The migration and the reader have to move together or not at all.
+const PRODUCT_SCOPES = ['product', 'hub'];
+const scopeKeys = (scope) => (PRODUCT_SCOPES.includes(scope) ? PRODUCT_SCOPES : [scope]);
+
 export function rolesForScope(entry, scope) {
   if (!entry) return [];
   const r = entry.roles;
-  if (r && typeof r === 'object' && !Array.isArray(r)) return Array.isArray(r[scope]) ? r[scope] : [];
-  if (Array.isArray(r)) return scope === 'hub' ? r : [];
-  if (typeof entry.role === 'string' && entry.role) return scope === 'hub' ? [entry.role] : [];
+  const keys = scopeKeys(scope);
+  if (r && typeof r === 'object' && !Array.isArray(r)) {
+    for (const k of keys) if (Array.isArray(r[k])) return r[k];
+    return [];
+  }
+  const isProduct = PRODUCT_SCOPES.includes(scope);
+  if (Array.isArray(r)) return isProduct ? r : [];
+  if (typeof entry.role === 'string' && entry.role) return isProduct ? [entry.role] : [];
   return [];
 }
 

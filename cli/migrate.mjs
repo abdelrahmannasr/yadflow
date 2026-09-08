@@ -73,9 +73,16 @@ export const MIGRATIONS = [
     title: '`hub` becomes `Product` — the settings file is renamed and the roster key with it',
     // Two things move, and only one of them is visible in this function.
     //
-    // The KEY, here: a roster entry's `roles: { hub: [...] }` becomes `roles: { product: [...] }`.
-    // Both are read for one major (see `rolesFor`, cli/roster.mjs), so a project part-way through
-    // the upgrade still resolves its reviewers.
+    // The KEY, here: a roster entry's product-level roles gain a `product` spelling ALONGSIDE the
+    // `hub` one. Both are kept, and `rolesForScope` (cli/platform.mjs) answers to either.
+    //
+    // Adding rather than replacing, for the same reason as `ledger` beside `bridge_enabled` and
+    // `product.json` beside `hub.json`. Replacing looked tidier and was a silent data loss: every
+    // caller asks `rolesForScope(entry, 'hub')`, an older CLI knows only `hub`, and `yad setup`
+    // writes `hub` when it adds a member. Move the key out from under them and a reviewer quietly
+    // stops holding a product-level role — the gate can no longer find its required approvers, and
+    // nothing anywhere says why. The old spelling goes in the major that makes `product` the one
+    // that is read.
     //
     // The FILE NAME is not renamed here, because a migration step transforms an object and cannot
     // move a file. It happens on WRITE: `writeProductConfig` (cli/lib.mjs) writes `.sdlc/product.json`
@@ -89,11 +96,11 @@ export const MIGRATIONS = [
       return {
         ...obj,
         roster: obj.roster.map((m) => {
-          if (!m || typeof m !== 'object' || !m.roles || typeof m.roles !== 'object') return m;
-          if (!('hub' in m.roles)) return m;
+          if (!m || typeof m !== 'object' || !m.roles || typeof m.roles !== 'object' || Array.isArray(m.roles)) return m;
+          if (!('hub' in m.roles) || 'product' in m.roles) return m;
+          // `product` first so it leads the object, `hub` kept exactly as it was.
           const { hub, ...rest } = m.roles;
-          // The new key wins if somebody has already written both; never silently drop a role list.
-          return { ...m, roles: { product: hub, ...rest } };
+          return { ...m, roles: { product: hub, hub, ...rest } };
         }),
       };
     },

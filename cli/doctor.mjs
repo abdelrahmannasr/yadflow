@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, MIRRORED_FILES, PROJECT_FILES, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
+import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
@@ -594,7 +594,18 @@ function shapeCheckFor(checks, id, label, rows, engine) {
 // this major, so a silent drift means the OTHER copy is being ignored, which is the kind of thing
 // people lose an afternoon to. Say it out loud instead.
 export function mirrorChecks(checks, root) {
-  for (const { canonical, legacy } of MIRRORED_FILES) {
+  const pairs = [...MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy }))];
+  // The per-epic PR ledger is renamed the same way, so it drifts the same way. It is not in
+  // MIRRORED_FILES because that list is project-relative and this one exists once per epic.
+  const epicsDir = path.join(root, 'epics');
+  if (exists(epicsDir)) {
+    for (const e of fs.readdirSync(epicsDir).sort()) {
+      if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+      const f = epicFiles(path.join('epics', e));
+      pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
+    }
+  }
+  for (const { canonical, legacy } of pairs) {
     const a = path.join(root, canonical);
     const b = path.join(root, legacy);
     if (!exists(a) || !exists(b)) continue;
@@ -602,9 +613,9 @@ export function mirrorChecks(checks, root) {
     try { same = fs.readFileSync(a, 'utf8') === fs.readFileSync(b, 'utf8'); } catch { continue; }
     if (same) continue;
     check(
-      checks, `mirror:${path.basename(canonical)}`, 'shape', 'warn',
+      checks, `mirror:${canonical}`, 'shape', 'warn',
       `${canonical} and ${legacy} do not match — ${legacy} is the one being read`,
-      `they are two names for one file while the rename settles. Copy the one you meant to keep over the other, or re-run \`yad setup\` to rewrite both`,
+      'they are two names for one file while the rename settles. Copy the one you meant to keep over the other, then re-run the command that writes it',
     );
   }
 }
