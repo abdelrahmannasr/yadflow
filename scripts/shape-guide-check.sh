@@ -72,4 +72,25 @@ if [ ${#MISSING[@]} -gt 0 ]; then
   die "missing migration guide for shape $CURRENT"
 fi
 
-printf '   file shape moved %s -> %s since %s; migration guide(s) present\n' "$FROM" "$CURRENT" "$LAST_TAG"
+# A file-shape change IS a breaking change, and the version number has to say so.
+#
+# This is not bookkeeping. `crossesMajor` (cli/update-notice.mjs) shows the "preview it with
+# yad migrate first" banner ONLY when an upgrade crosses a MAJOR. A shape change that is not declared
+# breaking ships as a minor, the banner never fires, and every upgrading user is told a new version
+# exists and never told their project files need migrating.
+#
+# semantic-release decides the bump from the commit messages, so that is what is checked: a
+# `<type>!:` subject or a `BREAKING CHANGE:` / `BREAKING-CHANGE:` footer since the last release.
+BREAKING_SUBJECTS="$(git log "$LAST_TAG"..HEAD --format='%s' | grep -cE '^[a-z]+(\([^)]*\))?!:' || true)"
+BREAKING_FOOTERS="$(git log "$LAST_TAG"..HEAD --format='%b' | grep -cE '^BREAKING[ -]CHANGE:' || true)"
+if [ "$((BREAKING_SUBJECTS + BREAKING_FOOTERS))" -eq 0 ]; then
+  printf '\n   the file shape moved %s -> %s, but no commit since %s declares a breaking change.\n' "$FROM" "$CURRENT" "$LAST_TAG" >&2
+  printf '   semantic-release would cut a MINOR, and the update banner only tells people to run\n' >&2
+  printf '   `yad migrate` on a MAJOR — so they would be told a new version exists and never told\n' >&2
+  printf '   their files need migrating.\n\n' >&2
+  printf '   Add a footer to the commit that moved the shape:\n' >&2
+  printf '     BREAKING CHANGE: <what changed about the files, and that `yad migrate` handles it>\n' >&2
+  die "a file-shape change must ship as a major"
+fi
+
+printf '   file shape moved %s -> %s since %s; migration guide(s) present, breaking change declared\n' "$FROM" "$CURRENT" "$LAST_TAG"
