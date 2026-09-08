@@ -2137,7 +2137,10 @@ const SHAPE_GUIDE = path.join(ROOT, 'scripts/shape-guide-check.sh');
 
 // A repo shaped like this one as far as the script is concerned: a manifest that exports
 // SCHEMA_VERSION, and a `v*` tag holding an earlier copy of it.
-function shapeRepo({ tagged, current, guides = [] }) {
+// `breaking` says how the change after the tag is committed, because that is what semantic-release
+// reads to decide major vs minor: 'footer' = a BREAKING CHANGE: trailer, 'subject' = a `feat!:`
+// subject, false = an ordinary commit that would cut a minor.
+function shapeRepo({ tagged, current, guides = [], breaking = 'footer' }) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-guide-'));
   fs.mkdirSync(path.join(T, 'cli'), { recursive: true });
   fs.mkdirSync(path.join(T, 'scripts'), { recursive: true });
@@ -2157,6 +2160,14 @@ function shapeRepo({ tagged, current, guides = [] }) {
     fs.mkdirSync(path.join(T, 'docs/migrations'), { recursive: true });
     fs.writeFileSync(path.join(T, 'docs/migrations', g), '# guide\n');
   }
+  // Commit it, so `git log <tag>..HEAD` has something to read. Leaving it in the working tree would
+  // make every repo look like "no commits since the release", which is not a state a release is cut from.
+  git(T, 'add', '-A');
+  // --allow-empty: several of these repos deliberately change nothing after the tag, and a commit
+  // that refuses to exist would make the harness, not the script, decide the outcome.
+  if (breaking === 'footer') git(T, 'commit', '-q', '--allow-empty', '-m', 'feat: move the shape', '-m', 'BREAKING CHANGE: files change shape; yad migrate handles it');
+  else if (breaking === 'subject') git(T, 'commit', '-q', '--allow-empty', '-m', 'feat!: move the shape');
+  else git(T, 'commit', '-q', '--allow-empty', '-m', 'feat: move the shape');
   return T;
 }
 const runShapeGuide = (T) => spawnSync('bash', [path.join(T, 'scripts/shape-guide-check.sh')], { cwd: T, encoding: 'utf8', env: GIT_ENV });
@@ -2183,6 +2194,33 @@ test('shape guide: a shape that moved WITH its guide passes', () => {
   const r = runShapeGuide(T);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /file shape moved 1 -> 2/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// A shape change is a breaking change, and the version has to say so — `crossesMajor`
+// (cli/update-notice.mjs) shows the "run yad migrate first" banner ONLY on a major. Shape 2 shipped
+// as 3.19.0-next because no commit declared a break and nothing checked; these are that check.
+test('shape guide: a moved shape with NO declared breaking change blocks the release', () => {
+  const T = shapeRepo({ tagged: 1, current: 2, guides: ['shape-2.md'], breaking: false });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /must ship as a major/);
+  assert.match(r.stderr, /never told\s+their files need migrating|files need migrating/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: a `feat!:` subject declares the break just as well as a footer', () => {
+  const T = shapeRepo({ tagged: 1, current: 2, guides: ['shape-2.md'], breaking: 'subject' });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /breaking change declared/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('shape guide: an UNCHANGED shape needs no breaking change — only a moved one does', () => {
+  const T = shapeRepo({ tagged: 2, current: 2, breaking: false });
+  const r = runShapeGuide(T);
+  assert.equal(r.status, 0, r.stderr);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
