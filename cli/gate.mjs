@@ -13,7 +13,7 @@ import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
-  canonicalApprovals, canonicalComments, canonicalHubPrs,
+  canonicalApprovals, canonicalComments, canonicalHubPrs, writeState,
 } from './epic-state.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -456,7 +456,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
   writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
-  writeJSON(ledger.files.state, state);
+  writeState(ledger.files.state, state);
   refreshRoster(epicDir, open, approvals, today); // the dated side file lists them in the same order
   return { synced, advanced };
 }
@@ -737,7 +737,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 
   const closed = repairState(ledger.state);
   if (dryRun) { info('dry run — nothing written'); return { closed }; }
-  writeJSON(ledger.files.state, ledger.state);
+  writeState(ledger.files.state, ledger.state);
   ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
   if (!push) { hand('re-run `yad doctor` to confirm, then commit epics/*/.sdlc/state.json (or re-run with --push)'); return { closed }; }
 
@@ -814,7 +814,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // ledger, so the local command marks the step in_review. In verified mode CI is the sole writer.
   if (!verified) {
     ledger.state = markInReview(ledger.state, step);
-    writeJSON(ledger.files.state, ledger.state);
+    writeState(ledger.files.state, ledger.state);
   }
   if (!hub?.platform) {
     warn('no Product platform — marked in_review locally (no PR opened)');

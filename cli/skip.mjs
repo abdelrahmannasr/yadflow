@@ -4,8 +4,8 @@
 // step is pre-marked `done` with a recorded reason (and actor/date), short-circuited at the gate — and
 // is reversible with `--undo` until the stories review opens. All state logic is the pure
 // `skipStep`/`unskipStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
-import { ok, info, hand, fail, run, writeJSON } from './lib.mjs';
-import { epicRoot, loadLedger, skipStep, unskipStep } from './epic-state.mjs';
+import { ok, info, hand, fail, run } from './lib.mjs';
+import { epicRoot, loadLedger, skipStep, unskipStep, writeState } from './epic-state.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
@@ -30,7 +30,7 @@ export async function runSkip(root, { epic, step, reason, undo = false, today } 
   // renders those. Here we only handle the happy path + the two plain-arg checks above.
   if (undo) {
     unskipStep(ledger.state, step);
-    writeJSON(ledger.files.state, ledger.state);
+    writeState(ledger.files.state, ledger.state);
     ok(`${step} un-skipped — back in the chain`);
     hand(`currentStep is now ${ledger.state.currentStep}`);
     return;
@@ -38,7 +38,7 @@ export async function runSkip(root, { epic, step, reason, undo = false, today } 
 
   const by = skipActor(root);
   skipStep(ledger.state, step, { reason, by, at: today });
-  writeJSON(ledger.files.state, ledger.state);
+  writeState(ledger.files.state, ledger.state);
   ok(`${step} marked N/A${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`its review gate is short-circuited; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad skip ${epic} ${step} --undo\`)`);

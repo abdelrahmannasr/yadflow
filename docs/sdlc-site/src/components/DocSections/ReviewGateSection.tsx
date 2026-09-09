@@ -56,7 +56,7 @@ export function ReviewGateSection() {
           Reviewers comment and approve as files; the step moves forward only when the gate rule is satisfied.
           With a Product platform the gate rides a real review PR/MR and{' '}
           <strong className="text-white">auto-advances on merge</strong>, which is the human approval act — so
-          Shape steps still never machine_advance. <strong className="text-white">CI is the sole writer of the
+          Shape steps still never advance on their own. <strong className="text-white">CI is the sole writer of the
           ledger</strong>, and writes only at merge, on the default branch: during review the platform PR/MR is
           the source of truth and CI never touches the review branch; humans never commit the gate files.
           Approvals are revoked when the artifact changes (re-hash), re-checked when CI reads the platform at merge.

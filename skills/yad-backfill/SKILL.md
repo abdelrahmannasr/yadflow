@@ -66,7 +66,7 @@ Mark every uncertain item explicitly (`<!-- unverified: ... -->`); do not fill g
 behaviour.
 
 ### Step 4 — `approve` (human approval — reuse the gate)
-A human reads the draft against the real code and approves it with the same `human_approve` discipline
+A human reads the draft against the real code and approves it with the same `advance: human` discipline
 as `yad-review-gate` (owner + 1 reviewer). On approval set the frontmatter `verified: true` and record
 the approver(s) + date. Only a `verified: true` backfill spec counts as real.
 

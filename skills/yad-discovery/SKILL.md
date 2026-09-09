@@ -15,7 +15,7 @@ per project** and is **optional** — a team that already knows what to build ca
 `yad-epic`. It supports **both greenfield and brownfield**, and produces a **competitor study in both**.
 
 This skill enforces the build plan's core rules: all state lives in files; IDs are engine-assigned
-(the reserved `EP-discovery`, never a typed feature slug); Shape steps are locked to `human_approve`.
+(the reserved `EP-discovery`, never a typed feature slug); Shape steps are locked to `advance: human`.
 
 ## Conventions
 
@@ -86,7 +86,7 @@ Leave `owner` for the user to set in each frontmatter. Fill the bodies with the 
 
 ### Step 5 — Seed the state machine
 Create `{project-root}/epics/EP-discovery/.sdlc/state.json` describing the **2-step** front-zero
-sequence, both steps `automation: human_approve` and `locked`, with the `kind: "discovery"` marker the
+sequence, both steps `automation: human_approve` / `advance: human` and `locked`, with the `kind: "discovery"` marker the
 engine keys off. Use this exact shape (see `references/discovery-schema.md`):
 
 ```json
@@ -96,8 +96,8 @@ engine keys off. Use this exact shape (see `references/discovery-schema.md`):
   "createdAt": "<YYYY-MM-DD>",
   "currentStep": "discovery-review",
   "steps": [
-    { "id": "discovery",        "type": "author",         "artifact": "discovery/", "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",      "risk_tags": [] },
-    { "id": "discovery-review", "type": "review+approve", "artifact": "discovery/", "assistance": "review", "automation": "human_approve", "locked": true, "status": "in_review", "risk_tags": [] }
+    { "id": "discovery",        "type": "author",         "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done",      "risk_tags": [] },
+    { "id": "discovery-review", "type": "review+approve", "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "in_review", "risk_tags": [] }
   ]
 }
 ```

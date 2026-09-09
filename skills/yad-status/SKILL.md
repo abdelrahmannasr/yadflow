@@ -1,6 +1,6 @@
 ---
 name: yad-status
-description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (assistance/automation) and status, and which approvals are still required at the active gate. For stories in Build it also prints each Build step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Also prints the cross-cutting personal skills-log roll-up from the LOCAL-ONLY learning ledger (gitignored, never committed/pushed — the local learner''s own learning, by stage). Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
+description: 'Read-only view of an SDLC epic: prints the current step, each step''s dials (driver/advance, under either spelling) and status, and which approvals are still required at the active gate. For stories in Build it also prints each Build step''s automation dial, status, and trust record (runs / % approved-unchanged / whether it clears the threshold to be earned), plus the system-wide kill-switch state — so the team can see WHY a step is automated and reverse it with evidence. Also prints the cross-cutting personal skills-log roll-up from the LOCAL-ONLY learning ledger (gitignored, never committed/pushed — the local learner''s own learning, by stage). Surfaces the Phase 5 instrumentation signals: per-step "earned but manual" (nudge cost) and, across multiple epics, a fleet roll-up (scale of read). Use when the user says "yad status", "where is epic EP-...", "what is blocking the gate", "show the trust record", "team skills", or "fleet status".'
 ---
 
 # SDLC — Status (read-only)
@@ -41,7 +41,7 @@ Print, in this order:
    (the touched domains). Example: `Defect EP-checkout-queue-filter — draft @ stories`. A bug is a defect
    (`kind: defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
 2. **Steps table** — for every Shape step in `steps[]` order (10, or 12 when the optional analysis step
-   was run): `id`, `type`, `status`, `assistance`, `automation`, `locked`, and `risk_tags`. Mark the
+   was run): `id`, `type`, `status`, the two dials (`driver`/`assistance` and `advance`/`automation` — read whichever the step carries, the OLD name wins), `locked`, and `risk_tags`. Mark the
    `currentStep` with `→`. The gating chain is `[analysis → analysis-review →] epic → epic-review →
    architecture → architecture-review → ui-design → ui-design-review → stories → stories-review` →
    **`ready-for-build`** (the bracketed `analysis` prefix is present only when `yad-analysis` seeded it).
@@ -81,23 +81,23 @@ Print, in this order:
 7. **Build (per story, per repo)** — if any `.sdlc/build-state/<story-id>.json` exists, then for
    each such story and each of its repos print the Build chain
    `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
-   `automation` dial, and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
+   `advance` dial (or `automation`, whichever the step carries), and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
    which Build steps are automated and where a run is waiting. (For the single *next* build sub-step to
    take per story/repo — rather than this full status view — point the user at `yad next <epic>`, which
    reads the same `build-state` files.)
 8. **Automation & trust** — print the system-wide **kill switch** state from `config.yaml`
-   `automation.kill_switch` (when `on`, note that every step is forced to `human_approve`). Then, for
+   `automation.kill_switch` (when `on`, note that every step is forced to `advance: human`). Then, for
    each Build step that has entries in the trust ledger — the **union** of the folded
    `.sdlc/trust-log.json` `runs` plus every loose `.sdlc/trust-log/` shard — print its **trust record**:
    number of runs, the fraction with `verdict == "approved-unchanged"`, and whether that clears
    `automation.trust_threshold` (`min_runs`, `min_approved_unchanged`) — i.e. whether the step is
-   **earned** (eligible to be flipped to `machine_advance`) or still **gathering evidence**. Restate
+   **earned** (eligible to be flipped to `advance: auto`) or still **gathering evidence**. Restate
    the predicate (self-contained): `earned = runs >= min_runs AND unchanged/runs >= min_approved_unchanged`.
-   Never recommend flipping a locked step or a Shape step — those can never be `machine_advance`.
+   Never recommend flipping a locked step or a Shape step — those can never be `advance: auto`.
 
    **Nudge-cost signal (Phase 5 instrumentation).** For each Build step that is **earned but its dial
-   is still `human_approve`** (and it is not locked / not a Shape step), flag it:
-   `⚠ earned but manual — could be machine_advance`. This is the *nudge cost* the Phase 5 trigger
+   is still `advance: human`** (and it is not locked / not a Shape step), flag it:
+   `⚠ earned but manual — could be advance: auto`. This is the *nudge cost* the Phase 5 trigger
    watches: automation that is proven safe but still hand-started. It is a read-only observation, not a
    recommendation to flip — earning the evidence and flipping the dial stay deliberate human acts
    (`yad-run action: set-dial`). See `docs/phase-5-build-plan.md` §"What to instrument now".

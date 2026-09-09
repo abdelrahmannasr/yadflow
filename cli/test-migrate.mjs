@@ -584,3 +584,143 @@ test('migrate: outside a yad project it refuses rather than inventing one', asyn
   } finally { process.exitCode = exit ?? 0; }
   cleanup(T);
 });
+
+// ---- shape 3 -> 4: the two dials (E28) -----------------------------------------------------------
+// The rename is `assistance` -> `driver` and `automation` -> `advance`, added beside the old names.
+// Each of these pins a way the rename could quietly lose a setting or grant one nobody asked for.
+
+const stateWith = (steps) => JSON.stringify({ schemaVersion: 3, currentStep: steps[0]?.id, steps }, null, 2) + '\n';
+
+test('migrate 3 -> 4: a step gains `driver` and `advance` and KEEPS the old names', async () => {
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': stateWith([
+    { id: 'epic', type: 'author', assistance: 'review', automation: 'human_approve', status: 'done' },
+    { id: 'implement', assistance: 'heavy', automation: 'machine_advance', status: 'in_progress' },
+  ]) } });
+  try {
+    await runMigrate(T, { apply: true });
+    const [author, build] = read(path.join(T, 'epics/EP-x/.sdlc/state.json')).steps;
+    assert.equal(author.driver, 'pair', 'review -> pair');
+    assert.equal(author.advance, 'human', 'human_approve -> human');
+    assert.equal(build.driver, 'agent', 'heavy -> agent');
+    assert.equal(build.advance, 'auto', 'machine_advance -> auto');
+    // The old names are what 29 skills still write and an older CLI still reads. Losing them here
+    // would strand a step with no dial the running code can find.
+    assert.equal(author.assistance, 'review', 'the old name is kept, not replaced');
+    assert.equal(build.automation, 'machine_advance', 'and so is the old dial');
+  } finally { cleanup(T); }
+});
+
+test('migrate 3 -> 4: a REVIEW step is never told it may advance on its own', async () => {
+  // The one rule that never bends. A review step carrying `machine_advance` is already wrong; the
+  // migration must not turn that into a NEW field granting the permission, during an upgrade nobody
+  // asked to change behaviour. Both ways a review step is marked are covered: `type` on the Shape
+  // chain, `locked` on a Build step.
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': stateWith([
+    { id: 'epic-review', type: 'review+approve', automation: 'machine_advance', status: 'in_review' },
+    { id: 'engineer-review', locked: true, automation: 'machine_advance', status: 'in_progress' },
+    { id: 'implement', automation: 'machine_advance', status: 'in_progress' },
+  ]) } });
+  try {
+    await runMigrate(T, { apply: true });
+    const [shapeReview, buildReview, plain] = read(path.join(T, 'epics/EP-x/.sdlc/state.json')).steps;
+    assert.equal(shapeReview.advance, 'human', 'a review+approve step is pinned to human');
+    assert.equal(buildReview.advance, 'human', 'and so is a locked one');
+    assert.equal(plain.advance, 'auto', 'a step that is not a review keeps what it had');
+    // The old value is left visible on purpose: papering over it would hide that somebody set it.
+    assert.equal(shapeReview.automation, 'machine_advance', 'the mismatch stays visible for doctor');
+  } finally { cleanup(T); }
+});
+
+test('migrate 3 -> 4: build-state dials migrate too, per repo', async () => {
+  const bs = { schemaVersion: 3, story: 'EP-x-S01', repos: {
+    backend: { currentStep: 'checks', steps: [{ id: 'checks', automation: 'machine_advance' }] },
+    mobile: { currentStep: 'spec', steps: [{ id: 'engineer-review', locked: true, automation: 'human_approve' }] },
+  } };
+  const T = project({ files: { 'epics/EP-x/.sdlc/build-state/EP-x-S01.json': JSON.stringify(bs, null, 2) + '\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    const out = read(path.join(T, 'epics/EP-x/.sdlc/build-state/EP-x-S01.json'));
+    assert.equal(out.repos.backend.steps[0].advance, 'auto');
+    assert.equal(out.repos.mobile.steps[0].advance, 'human');
+    assert.equal(out.repos.backend.currentStep, 'checks', 'the rest of the repo entry is untouched');
+  } finally { cleanup(T); }
+});
+
+test('migrate 3 -> 4: trust-log is HISTORY and is not rewritten', async () => {
+  // Its `automation` records what the dial WAS when a run happened. Migrating it would rewrite the
+  // evidence the trust ledger exists to hold.
+  const runs = [{ story: 'EP-x-S01', step: 'checks', automation: 'machine_advance', verdict: 'approved-unchanged' }];
+  const T = project({ files: { 'epics/EP-x/.sdlc/trust-log.json': JSON.stringify({ schemaVersion: 3, epic: 'EP-x', runs }, null, 2) + '\n' } });
+  try {
+    await runMigrate(T, { apply: true });
+    const out = read(path.join(T, 'epics/EP-x/.sdlc/trust-log.json'));
+    assert.equal(out.runs[0].automation, 'machine_advance', 'the record still says what happened');
+    assert.equal('advance' in out.runs[0], false, 'and gains no live-looking dial');
+  } finally { cleanup(T); }
+});
+
+test('migrate 3 -> 4: an unrecognised dial value is left alone, never guessed at', async () => {
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': stateWith([
+    { id: 'odd', assistance: 'sideways', automation: 'whenever', status: 'in_progress' },
+  ]) } });
+  try {
+    await runMigrate(T, { apply: true });
+    const s = read(path.join(T, 'epics/EP-x/.sdlc/state.json')).steps[0];
+    assert.equal('driver' in s, false, 'no invented driver');
+    assert.equal('advance' in s, false, 'no invented advance');
+    assert.equal(s.assistance, 'sideways', 'what was there is still there');
+  } finally { cleanup(T); }
+});
+
+test('migrate 3 -> 4: a step that already has the new dial is not re-decided', async () => {
+  // Idempotence, and the reason doctor has to report a disagreement rather than migrate fixing it:
+  // once the new key exists, this step is done with that step and cannot tell which value was meant.
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': stateWith([
+    { id: 'implement', assistance: 'heavy', driver: 'human', automation: 'machine_advance', advance: 'human' },
+  ]) } });
+  try {
+    await runMigrate(T, { apply: true });
+    const s = read(path.join(T, 'epics/EP-x/.sdlc/state.json')).steps[0];
+    assert.equal(s.driver, 'human', 'the value already on the step wins');
+    assert.equal(s.advance, 'human');
+  } finally { cleanup(T); }
+});
+
+test('migrate 3 -> 4: on a VERIFIED project state.json is skipped, and the gate write carries it', async () => {
+  // The half-applied case. `state.json` is CI-owned there, so migrate never touches it — but
+  // build-state is not, so without a second writer the two halves of one rename would sit in
+  // different vocabularies forever, with no command a user could run to close the gap.
+  const { stampStepDials } = await import('./epic-state.mjs');
+  const T = project({ bridge: true, files: {
+    'epics/EP-x/.sdlc/state.json': stateWith([{ id: 'implement', automation: 'machine_advance' }]),
+    'epics/EP-x/.sdlc/build-state/EP-x-S01.json': JSON.stringify(
+      { schemaVersion: 3, story: 'EP-x-S01', repos: { backend: { steps: [{ id: 'checks', automation: 'machine_advance' }] } } }, null, 2) + '\n',
+  } });
+  try {
+    const { rows } = planMigration(T);
+    assert.equal(rowFor(rows, 'epics/EP-x/.sdlc/state.json').action, 'ci-owned', 'migrate will not write it');
+    await runMigrate(T, { apply: true });
+    const state = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+    assert.equal('advance' in state.steps[0], false, 'and indeed it did not');
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/build-state/EP-x-S01.json')).repos.backend.steps[0].advance, 'auto',
+      'while the file CI does not own did migrate — this is the gap');
+    // What closes it: every writer of state.json goes through one function that stamps the dials.
+    assert.equal(stampStepDials(state).steps[0].advance, 'auto', 'the gate write closes the gap');
+  } finally { cleanup(T); }
+});
+
+test('stampStepDials: returns the SAME object when nothing changed', async () => {
+  // writeJSON short-circuits on identical bytes. If this handed back a fresh object every time, that
+  // comparison would be the only thing standing between a read-only gate path and a spurious write.
+  const { stampStepDials } = await import('./epic-state.mjs');
+  const done = { steps: [{ id: 'a', automation: 'human_approve', advance: 'human' }] };
+  assert.equal(stampStepDials(done), done, 'an already-stamped state is passed straight through');
+  const empty = { steps: [] };
+  assert.equal(stampStepDials(empty), empty, 'no steps, no work');
+  const noDials = { steps: [{ id: 'a', status: 'done' }] };
+  assert.equal(stampStepDials(noDials), noDials, 'a step with no dial at all is not given one');
+  // And it DOES return a new object when there is something to add, or nothing would ever be written.
+  const pending = { steps: [{ id: 'a', automation: 'human_approve' }] };
+  assert.notEqual(stampStepDials(pending), pending, 'a state that needs stamping is a new object');
+  assert.equal(stampStepDials(pending).steps[0].advance, 'human');
+});

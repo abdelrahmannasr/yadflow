@@ -13,22 +13,22 @@ const TYPE_COLORS = {
 
 const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[] }[] = [
   {
-    title: 'Dial 1 — assistance (how much AI helps)',
+    title: 'Dial 1 — driver (who does the work)',
     endpoint: 'state.json · per step',
     color: '#2471a3',
     steps: [
-      { name: 'none', description: 'No AI help — the human authors the step entirely.', type: 'validate' },
-      { name: 'review', description: 'Default. AI drafts; the human reviews and edits.', type: 'validate' },
-      { name: 'heavy', description: 'AI does most of the work; the human still owns the gate.', type: 'validate' },
+      { name: 'human', description: 'No AI help — the human authors the step entirely.', type: 'validate' },
+      { name: 'pair', description: 'Default. A person and an agent together — AI drafts; the human reviews and edits.', type: 'validate' },
+      { name: 'agent', description: 'AI does most of the work; the human still owns the gate.', type: 'validate' },
     ],
   },
   {
-    title: 'Dial 2 — automation (who advances the step)',
+    title: 'Dial 2 — advance (who moves it forward)',
     endpoint: 'state.json · per step',
     color: '#1e8449',
     steps: [
-      { name: 'human_approve', description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.', type: 'notify' },
-      { name: 'machine_advance', description: 'Earned per Build step; yad-run advances it on its own once trust is proven.', type: 'persist' },
+      { name: 'human', description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.', type: 'notify' },
+      { name: 'auto', description: 'Earned per Build step; yad-run advances it on its own once trust is proven.', type: 'persist' },
     ],
   },
   {
@@ -38,8 +38,8 @@ const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[
     steps: [
       { name: 'back_steps only', description: 'spec · tasks · implement · checks — the only steps that MAY be automated, safest-end first.', type: 'sideEffect' },
       { name: '≥5 runs · ≥80% approved-unchanged', description: 'A step becomes a candidate only once its trust slice clears the threshold. "It seems fine" is not evidence.', type: 'sideEffect' },
-      { name: 'set-dial → machine_advance', description: 'Flips the dial; refused if evidence is short, or for any Shape step / the engineer review.', type: 'persist' },
-      { name: 'kill switch', description: 'yad-run action: kill forces every step back to human_approve system-wide — reversible in one move.', type: 'notify' },
+      { name: 'set-dial → auto', description: 'Flips the dial; refused if evidence is short, or for any Shape step / the engineer review.', type: 'persist' },
+      { name: 'kill switch', description: 'yad-run action: kill forces every step back to `advance: human` system-wide — reversible in one move.', type: 'notify' },
     ],
   },
 ];

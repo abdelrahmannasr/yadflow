@@ -124,7 +124,10 @@ export function dirMatches(src, dest) {
 // file in a project that merely happened to live somewhere under a directory called `.sdlc` — the
 // user's own .claude/settings.json included, which is exactly what this must never touch. A new kind
 // nested deeper than that has to be added here on purpose.
-const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+// Exported so the dial stampers (migrate.mjs, epic-state.mjs) and doctor all decide "is this a step
+// object" the same way. Three private copies drifted once already: one guarded arrays, one did not,
+// so an array-valued step came out as `["x"]` from one and `{"0":"x"}` from the other.
+export const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const underSdlcDir = (p) => {
   const dir = path.dirname(path.resolve(p));
   return path.basename(dir) === '.sdlc' || path.basename(path.dirname(dir)) === '.sdlc';

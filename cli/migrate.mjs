@@ -17,10 +17,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
+import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
 import {
-  BACKUP_SUFFIX, epicFiles, isVerifiedLedger, MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES,
-  preferring, productConfigPath, SCHEMA_VERSION, VERSION,
+  ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
+  MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, SCHEMA_VERSION,
+  VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
 import { isValidEpicId } from './epic-state.mjs';
@@ -110,7 +111,70 @@ export const MIGRATIONS = [
       };
     },
   },
+  {
+    from: 3,
+    to: 4,
+    title: 'every step declares `driver` beside `assistance` and `advance` beside `automation`',
+    // The two dials are renamed:
+    //
+    //   assistance: none | review | heavy            ->  driver:  human | pair  | agent
+    //   automation: human_approve | machine_advance  ->  advance: human | auto
+    //
+    // ADDED beside, never replacing — the third time this file makes that choice, and for the same
+    // reason each time. Twenty-nine skills hand-write `state.json` from instructions that say
+    // `assistance`/`automation`, and an older CLI reads only those names. Move the key out from
+    // under them and a step silently loses its dial: `buildNextForRepo` would fall back to
+    // `human_approve` on a lane that was earned to auto, and nothing would say why.
+    //
+    // The value is TRANSLATED, not copied, because the vocabularies differ. An unrecognised value is
+    // left alone rather than guessed at — a step carrying something we do not understand keeps
+    // exactly what it had, and `doctor` reports the pair as disagreeing.
+    //
+    // ONE RULE IS ENFORCED HERE, and it is the only place in the engine that enforces it:
+    // a review step never becomes `advance: auto`. The roadmap states it as the rule that never
+    // bends. Today it is held by prose in the skills plus the separate `locked` flag, so a
+    // `state.json` that somehow carries `machine_advance` on a `review+approve` step would, on a
+    // naive translation, gain a NEW field saying a review may auto-advance. Writing that would be
+    // creating the very permission the rule forbids, during an upgrade nobody asked to change
+    // behaviour. So a review step is pinned to `advance: 'human'` whatever its old value said, and
+    // the old field is left untouched so the mismatch stays visible rather than being papered over.
+    apply: (obj, ctx) => {
+      if (isEpicStatePath(ctx?.rel)) return { ...obj, steps: withDials(obj.steps) };
+      if (!isBuildStatePath(ctx?.rel)) return obj;
+      // build-state is `{ story, note, repos: { <repo>: { currentStep, steps: [...] } } }` — the
+      // steps live one level down, keyed by repo name.
+      if (!isPlainObject(obj.repos)) return obj;
+      const repos = {};
+      for (const [name, r] of Object.entries(obj.repos)) {
+        repos[name] = isPlainObject(r) && Array.isArray(r.steps) ? { ...r, steps: withDials(r.steps) } : r;
+      }
+      return { ...obj, repos };
+    },
+  },
 ];
+
+// A review step must never be told it may advance on its own. `type` is what the Shape chain uses;
+// a Build step has no `type`, and `locked: true` is how those are pinned today.
+const isReviewStep = (s) => s?.type === 'review+approve' || s?.locked === true;
+
+// Add the new dial beside the old one on every step that carries one. Idempotent: a step that
+// already has the new name is returned untouched, so a second `yad migrate` is a no-op.
+function withDials(steps) {
+  if (!Array.isArray(steps)) return steps;
+  return steps.map((s) => {
+    if (!isPlainObject(s)) return s;
+    const out = { ...s };
+    if (typeof s.assistance === 'string' && !('driver' in s)) {
+      // Own-property lookup: a value like "toString" would otherwise resolve through the prototype.
+      if (Object.hasOwn(DRIVER_FROM_ASSISTANCE, s.assistance)) out.driver = DRIVER_FROM_ASSISTANCE[s.assistance];
+    }
+    if (typeof s.automation === 'string' && !('advance' in s) && Object.hasOwn(ADVANCE_FROM_AUTOMATION, s.automation)) {
+      // The review pin: never write `auto` onto a step a human has to sign off.
+      out.advance = isReviewStep(s) ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
+    }
+    return out;
+  });
+}
 
 // ---- reading a file's shape ---------------------------------------------------------------
 // Deliberately NOT readJSON: that reports an unstamped file as shape 1 (rule 2, "read old"), which is
@@ -124,7 +188,6 @@ function readRaw(file) {
   }
 }
 
-const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 // A file's shape as recorded ON DISK. An object with no key is shape 1 by rule 1; so is an array,
 // which cannot carry a key at all.
@@ -218,6 +281,16 @@ function shardFiles(dir) {
 const MIRROR_CANONICALS = new Set(MIRRORED_FILES.map((m) => m.canonical));
 const MIRROR_LEGACIES = new Set(MIRRORED_FILES.map((m) => m.legacy));
 export const isMirroredPath = (rel) => MIRROR_CANONICALS.has(rel) || MIRROR_LEGACIES.has(rel);
+
+// The two files that carry per-step dials, matched on the project-relative PATH for the same reason
+// the mirrored pair is: `state.json` is a name any folder could use, and injecting dials into some
+// other object is exactly the silent rewrite passing a context was meant to prevent.
+//
+// `trust-log.json` is deliberately NOT here. Its `automation` field records what the dial WAS when a
+// run happened — history, not a setting. Migrating it would rewrite the evidence the trust ledger
+// exists to hold, and nothing reads those records as a live declaration.
+export const isEpicStatePath = (rel) => /^epics\/[^/]+\/\.sdlc\/state\.json$/.test(rel || '');
+export const isBuildStatePath = (rel) => /^epics\/[^/]+\/\.sdlc\/build-state\/[^/]+\.json$/.test(rel || '');
 const mirrorPartner = (rel) => {
   for (const m of MIRRORED_FILES) {
     if (m.canonical === rel) return m.legacy;

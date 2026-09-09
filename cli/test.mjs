@@ -1848,7 +1848,8 @@ test('runNext: a ready-for-build epic with build-state prints each repo\'s next 
   assert.match(s, /yad-checks/);
   assert.match(s, /yad-engineer-review/);      // backend's remaining chain
   assert.match(s, /yad-implement/);            // mobile's next sub-step
-  assert.match(s, /machine_advance/);          // backend's dial note
+  assert.match(s, /advance: auto/);            // backend's dial note, in shape-4 words
+  assert.doesNotMatch(s, /machine_advance/, 'the note a person reads says the new dial, not the old field');
 });
 
 test('runNext: set up greenfield with no epics suggests the yad-discovery front-zero, then yad-epic', async () => {
@@ -5513,7 +5514,7 @@ async function doctorOn(T) {
 // ---------------------------------------------------------------------------------------------
 // doctor — the `shape` section (schemaVersion drift, E16)
 // ---------------------------------------------------------------------------------------------
-const { shapeChecks } = await import('./doctor.mjs');
+const { shapeChecks, dialChecks } = await import('./doctor.mjs');
 
 // The warn branch is the one this section exists for, and it is unreachable from a real project until
 // the engine's shape moves past 1 — nothing can be BEHIND shape 1. So the plan is injected, exactly as
@@ -9504,4 +9505,108 @@ test('doctor reports the ledger guard against what actually arms it', async () =
   try {
     assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);
   } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }
+});
+
+// ---- doctor: the two dials disagreeing (E28) ------------------------------------------------------
+const dialProject = (steps, buildState = null) => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-dials-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{\n  "platform": "github"\n}\n');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({ steps }, null, 2) + '\n');
+  if (buildState) {
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc/build-state'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/build-state/EP-x-S01.json'), JSON.stringify(buildState, null, 2) + '\n');
+  }
+  return T;
+};
+
+test('doctor dials: two spellings that disagree are reported, naming the one being read', () => {
+  const checks = [];
+  const T = dialProject([{ id: 'implement', assistance: 'heavy', driver: 'human', status: 'in_progress' }]);
+  dialChecks(checks, T);
+  const d = checks.find((c) => c.id === 'dials:disagree');
+  assert.ok(d, JSON.stringify(checks.map((c) => c.id)));
+  assert.equal(d.status, 'warn');
+  assert.match(d.message, /assistance: heavy/);
+  assert.match(d.message, /driver: human/);
+  // `yad migrate` skips a step that already has the new key, so it cannot decide this. Say so.
+  assert.match(d.hint, /OLD name/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: a review step claiming `auto` FAILS, not warns', () => {
+  // The one rule that never bends, and the only dial value that can let work past a person.
+  const checks = [];
+  const T = dialProject([{ id: 'epic-review', type: 'review+approve', advance: 'auto', status: 'in_review' }]);
+  dialChecks(checks, T);
+  const d = checks.find((c) => c.id === 'dials:review-auto');
+  assert.ok(d, JSON.stringify(checks.map((c) => c.id)));
+  assert.equal(d.status, 'fail', 'a review gate that can advance itself is not a warning');
+  assert.match(d.message, /epic-review/);
+  assert.match(d.hint, /never be `auto`/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: a LOCKED build step claiming machine_advance is caught too', () => {
+  const checks = [];
+  const T = dialProject([{ id: 'a', status: 'done' }], {
+    story: 'EP-x-S01', repos: { backend: { steps: [{ id: 'engineer-review', locked: true, automation: 'machine_advance' }] } },
+  });
+  dialChecks(checks, T);
+  const d = checks.find((c) => c.id === 'dials:review-auto');
+  assert.ok(d, 'build-state is inspected too, not just state.json');
+  assert.match(d.message, /backend/, 'and the repo is named, so the step can be found');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: a project that agrees, or carries only the old names, says nothing', () => {
+  const checks = [];
+  const T = dialProject([
+    { id: 'epic', type: 'author', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human' },
+    { id: 'implement', assistance: 'heavy', automation: 'machine_advance' },
+  ]);
+  dialChecks(checks, T);
+  assert.equal(checks.filter((c) => c.id.startsWith('dials:')).length, 0,
+    'an un-migrated project is not broken, and a migrated one that agrees is not a finding');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: a step carrying ONLY the new name is reported', () => {
+  // The half-made pair, and it is silent from every other direction: this CLI reads it fine,
+  // `yad migrate` only ever adds new-from-old so it can never repair it, and an OLDER yadflow finds
+  // no dial at all and falls back to human_approve — turning an earned lane back into a manual one.
+  const checks = [];
+  const T = dialProject([{ id: 'implement', driver: 'agent', advance: 'auto', status: 'in_progress' }]);
+  dialChecks(checks, T);
+  const d = checks.find((c) => c.id === 'dials:new-only');
+  assert.ok(d, JSON.stringify(checks.map((c) => c.id)));
+  assert.equal(d.status, 'warn');
+  assert.match(d.message, /driver` with no `assistance/);
+  assert.match(d.message, /advance` with no `automation/);
+  assert.match(d.hint, /cannot repair this/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: an array-valued step does not crash the check', () => {
+  const checks = [];
+  const T = dialProject([['weird'], null, 42, { id: 'ok', assistance: 'heavy', driver: 'agent' }]);
+  assert.doesNotThrow(() => dialChecks(checks, T));
+  assert.equal(checks.filter((c) => c.id.startsWith('dials:')).length, 0, 'and reports nothing about the junk');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('state.json has exactly ONE writer, and it is writeState', async () => {
+  // The whole argument for `writeState` is that a single writer cannot be half-updated. That argument
+  // lived only in a comment, so nothing stopped the NEXT writer being added as a raw writeJSON.
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const offenders = [];
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.mjs') && !n.startsWith('test'))) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(/writeJSON\(\s*([^,]+),/g)) {
+      if (/\bfiles\.state\b/.test(m[1])) offenders.push(`${f}: ${m[0]}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'every state.json write must go through writeState (cli/epic-state.mjs) so the dials are always stamped');
 });

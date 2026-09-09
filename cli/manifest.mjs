@@ -163,12 +163,15 @@ export const LEARNING_PRIMARY = 'deeptutor';
 // closes the gap.
 //
 // 2 — `.sdlc/hub.json` records who writes the ledger as `ledger: verified | local` (E104).
+// 3 — the Product's settings gain `.sdlc/product.json` beside `.sdlc/hub.json`, and a roster entry's
+//     product-level roles gain a `product` spelling beside `hub` (E30).
+// 4 — every step declares `driver` beside `assistance` and `advance` beside `automation` (E28).
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
@@ -265,6 +268,34 @@ export const isVerifiedLedger = (hub) => {
   if (!hub?.platform) return false;
   if (typeof hub.ledger === 'string') return hub.ledger === 'verified';
   return hub.bridge_enabled === true || hub.bridge === true;
+};
+
+// ---- the two dials (E28) ------------------------------------------------------------------------
+// Every step declares who does the work and who moves it forward. Shape 4 renames both, and the old
+// names stay readable for a major (rule 3):
+//
+//   assistance: none | review | heavy         ->  driver:  human | pair  | agent
+//   automation: human_approve | machine_advance  ->  advance: human | auto
+//
+// Same rule as `.sdlc/hub.json` above: BOTH are written, and the OLD one wins while it exists.
+// The old name is what the 29 skills that hand-write `state.json` still emit, and what an older CLI
+// still reads. A step whose dials disagree is a project mid-upgrade, not a decision — `yad doctor`
+// reports it and `yad migrate` closes it.
+export const DRIVER_FROM_ASSISTANCE = { none: 'human', review: 'pair', heavy: 'agent' };
+export const ADVANCE_FROM_AUTOMATION = { human_approve: 'human', machine_advance: 'auto' };
+// Back the other way, for the one place that still has to SAY the old word: `yad next --json` keeps
+// emitting `automation`, because cli/test-golden.mjs deep-equals that output against a frozen v3
+// snapshot and rule 6 says a frozen project's answers never change. The output key follows in the
+// major that removes the old field.
+export const AUTOMATION_FROM_ADVANCE = { human: 'human_approve', auto: 'machine_advance' };
+
+// The dial a step is actually running under, from whichever spelling it carries. Old wins.
+// `null` when the step declares nothing, so a caller can tell "not set" from "set to human".
+export const stepAdvance = (step) => {
+  if (!step || typeof step !== 'object') return null;
+  if (typeof step.automation === 'string') return ADVANCE_FROM_AUTOMATION[step.automation] ?? null;
+  if (typeof step.advance === 'string') return step.advance;
+  return null;
 };
 
 // ---- `yad commit` conventions (mirror skills/sdlc/config.yaml `build`) ----

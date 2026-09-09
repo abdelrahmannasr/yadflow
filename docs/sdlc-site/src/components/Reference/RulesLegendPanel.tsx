@@ -6,8 +6,8 @@ import { MESSAGE_COLORS } from '../../data/types';
 import { MESSAGE_TYPE_ICONS } from '../../utils/iconMap';
 import { StakeholderToggle } from './StakeholderToggle';
 import { DecisionTreeView } from './DecisionTreeView';
-import { AssistanceDialTable } from './AssistanceDialTable';
-import { AutomationDialTable } from './AutomationDialTable';
+import { DriverDialTable } from './DriverDialTable';
+import { AdvanceDialTable } from './AdvanceDialTable';
 import { CheckGatesList } from './CheckGatesList';
 import { FeatureFlagMatrix } from './FeatureFlagMatrix';
 import { CliCommandChips } from './CliCommandChips';
@@ -174,10 +174,10 @@ export function RulesLegendPanel() {
               <DecisionTreeView />
 
               {/* Assistance Dial */}
-              <AssistanceDialTable />
+              <DriverDialTable />
 
               {/* Automation Dial */}
-              <AutomationDialTable />
+              <AdvanceDialTable />
 
               {/* Check Gates */}
               <CheckGatesList />

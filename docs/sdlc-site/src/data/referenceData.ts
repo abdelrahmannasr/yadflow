@@ -57,47 +57,49 @@ export interface DialState extends Filterable {
 }
 
 // Assistance dial values.
-export const ASSISTANCE_DIAL_STATES: DialState[] = [
+// Driver dial values. `state` is the shape-4 name; `schemaValue` shows BOTH keys, because a step
+// carries each dial under two spellings and the OLD one is still what the engine reads.
+export const DRIVER_DIAL_STATES: DialState[] = [
   {
-    state: 'none',
+    state: 'human',
     endpoint: 'state.json · per step',
-    schemaValue: 'assistance: none',
+    schemaValue: 'driver: human  (assistance: none)',
     isTerminal: false,
     description: 'No AI help — the human authors the step entirely.',
     visibleTo: ALL,
   },
   {
-    state: 'review',
+    state: 'pair',
     endpoint: 'state.json · per step',
-    schemaValue: 'assistance: review',
+    schemaValue: 'driver: pair  (assistance: review)',
     isTerminal: false,
     description: 'Default. AI drafts; the human reviews and edits.',
     visibleTo: ALL,
   },
   {
-    state: 'heavy',
+    state: 'agent',
     endpoint: 'state.json · per step',
-    schemaValue: 'assistance: heavy',
+    schemaValue: 'driver: agent  (assistance: heavy)',
     isTerminal: false,
     description: 'AI does most of the work; the human still owns the gate.',
     visibleTo: ALL,
   },
 ];
 
-// Automation dial values.
-export const AUTOMATION_DIAL_STATES: DialState[] = [
+// Advance dial values (same two-spelling rule as the driver dial above).
+export const ADVANCE_DIAL_STATES: DialState[] = [
   {
-    state: 'human_approve',
+    state: 'human',
     endpoint: 'state.json · per step',
-    schemaValue: 'automation: human_approve',
+    schemaValue: 'advance: human  (automation: human_approve)',
     isTerminal: false,
     description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.',
     visibleTo: ALL,
   },
   {
-    state: 'machine_advance',
+    state: 'auto',
     endpoint: 'state.json · per step',
-    schemaValue: 'automation: machine_advance',
+    schemaValue: 'advance: auto  (automation: machine_advance)',
     isTerminal: true,
     description: 'Earned per Build step once its trust slice clears the threshold; the orchestrator advances it on its own.',
     visibleTo: ALL,

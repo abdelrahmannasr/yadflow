@@ -183,11 +183,10 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 ## Automation & status
 
 - **`yad-run`** — The Phase 4 orchestrator. Drives a story's Build loop (spec → tasks → implement →
-  checks) on each step's automation dial, recording every run in the trust log. A clean `checks` pass
+  checks) on each step's advance dial, recording every run in the trust log. A clean `checks` pass
   auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS for a
   human. Also sets a step's dial (gated by trust evidence) and flips the system-wide kill switch.
-- **`yad-status`** — Read-only view of an epic: the current step, each step's dials (assistance/
-  automation) and status, which approvals are still required, per-story Build trust records, the
+- **`yad-status`** — Read-only view of an epic: the current step, each step's dials (driver/advance) and status, which approvals are still required, per-story Build trust records, the
   kill-switch state, and a fleet roll-up across epics.
 - **`yad-report`** — Self issue reporter. When a `yad` flow breaks, files a bug in the upstream
   yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool
