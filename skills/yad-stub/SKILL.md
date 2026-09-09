@@ -1,6 +1,6 @@
 ---
 name: yad-stub
-description: 'Phase 6 brownfield helper — mint a STUB genesis epic for an already-built feature that has no epic in the Product, so a defect/change can thread off it TODAY. In a brownfield repo not every feature has an epic; yad-change requires a real parent and dead-ends without one. This skill creates the smallest real thread anchor — a tiny epic.md (kind:feature, thread:self, verified:false, stub:backfill-pending) + a seeded state.json + empty ledgers — never inventing behaviour. Defects thread off it immediately (gates pass, the bug list is derived by the thread rollup), and yad-backfill + its promote step later fill/flip it into a real feature epic. Never auto-advances. Use when the user says "there is no epic for this feature", "file a bug on a legacy feature", "anchor a brownfield feature", or when yad-change / yad-reconcile point here because a parent epic is missing.'
+description: 'Phase 6 brownfield helper — mint a STUB genesis epic for an already-built feature that has no epic in the Product, so a defect/change can thread off it TODAY. In a brownfield repo not every feature has an epic; yad-change requires a real parent and dead-ends without one. This skill creates the smallest real thread anchor — a tiny epic.md (type feature under both names, thread:self, verified:false, stub:backfill-pending) + a seeded state.json + empty ledgers — never inventing behaviour. Defects thread off it immediately (gates pass, the bug list is derived by the thread rollup), and yad-backfill + its promote step later fill/flip it into a real feature epic. Never auto-advances. Use when the user says "there is no epic for this feature", "file a bug on a legacy feature", "anchor a brownfield feature", or when yad-change / yad-reconcile point here because a parent epic is missing.'
 ---
 
 # SDLC — Stub Genesis Epic (Phase 6, the brownfield thread anchor)
@@ -22,7 +22,7 @@ Product epic a defect must thread from. `yad-stub` does exactly that, and only t
 - **A stub is NOT a reserved-empty id.** An epic in yad *is* a directory + `epic.md`; the tooling skips
   any epic dir lacking `epic.md` (`threadEpics`) and `lineage-check` rejects a parent that is not a real
   `epic.md`. So the stub is a real (if minimal) genesis — that is what makes it a valid parent.
-- The stub is a **genesis** (`kind: feature`, `thread == id`, no `parent`) — the root of a new thread.
+- The stub is a **genesis** (type `feature` under both names, `thread == id`, no `parent`) — the root of a new thread.
   Lineage frontmatter, the sentinel state, and the `stub`/`verified` fields are defined in
   `../yad-epic/references/state-schema.md` (Phase 6 section).
 - Speak in the configured `communication_language`; write documents in `document_output_language`.
@@ -60,7 +60,8 @@ Write `{project-root}/epics/EP-<slug>/epic.md` using EXACTLY this shape:
 ---
 id: EP-<slug>
 status: draft
-kind: feature            # genesis / thread root — a valid parent for lineage-check + threads
+kind: feature            # the work-item type: genesis / thread root, a valid parent for lineage-check
+type: feature            # the same value under the name from shape 5 on. Write BOTH names.
 thread: EP-<slug>        # thread == id for a genesis
 verified: false          # not a real, human-authored epic yet — a stub awaiting backfill
 stub: backfill-pending   # the honest marker; cleared on promote
@@ -86,16 +87,19 @@ Leave `owner` for the human to set. Set `repos` to the code repo(s) the feature 
 
 ### Step 5 — Seed the stub `state.json` (a `backfill-pending` sentinel)
 Create `{project-root}/epics/EP-<slug>/.sdlc/state.json`. It carries the top-level marker
-`kind: "stub"` and the sentinel `currentStep: "backfill-pending"`, and the **same 10-step Shape chain**
+`kind: "stub"` and the sentinel `currentStep: "backfill-pending"`. **`kind` and `type` here are two
+different things and a stub carries both:** `kind: "stub"` is the lifecycle marker, and
+`type: "feature"` is the work-item type copied from `epic.md`. It also carries the **same 10-step Shape chain**
 as a normal epic (`yad-epic` Step 5) but with **every step `status: "blocked"`** — so the state is valid
 (`validateState` needs a non-empty `steps` + a string `currentStep`) and `promote` can later "wake" it
 into normal authoring with zero re-seeding.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 5,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
+  "type": "feature",
   "kind": "stub",
   "currentStep": "backfill-pending",
   "steps": [
@@ -123,7 +127,7 @@ to it stays CI's. See `../yad-epic/references/state-schema.md`, "Authoring branc
 
 ### Step 6 — Stop; hand off (NO auto-advance)
 Report the new `EP-<slug>`, that it is a **stub (backfill pending)**, and the two next moves:
-- **File bugs now:** `yad-change` (`--parent EP-<slug>`, `kind: defect|change`) — the defect threads off
+- **File bugs now:** `yad-change` (`--parent EP-<slug>`, type `defect|change`) — the defect threads off
   the stub, its gates pass, and `yad thread EP-<slug>` lists it. A defect off a stub inherits only what
   exists (the stub `epic.md`), re-authors its own stories/test-cases, and locks no contract (there is no
   surface yet — see `../yad-change/SKILL.md`).
@@ -143,7 +147,7 @@ Shape steps do not auto-advance. Suggest `yad next EP-<slug>` (prints the backfi
 - **You never implement directly against a stub.** It owns no `stories/`, so there is nothing to
   implement against directly — real work threads off it as a change/defect epic (which has its own
   stories). (This is a convention of the empty stub, not a hard gate: `lineage-check` passes a
-  `kind: feature` genesis and `epic-open` treats a story-less epic as un-sealed, so neither blocks a
+  `feature`-type genesis and `epic-open` treats a story-less epic as un-sealed, so neither blocks a
   story mistakenly linked to the stub — keep the stub story-less.)
 - **Never auto-advances.** This skill seeds the anchor and stops; humans thread changes and run backfill.
 

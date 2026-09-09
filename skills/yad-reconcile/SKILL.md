@@ -52,14 +52,14 @@ Writes nothing. This is the read-only sweep a human (or CI) runs to see the pict
 
 ### Step 2 — `refresh` (advisory, never silent)
 For each flagged thread, **point the human at the fix** — open a reconcile change-epic with `yad-change`
-(`kind: change`, threaded to the affected feature) to bring the Shape artifacts back in step with what
+(type `change`, threaded to the affected feature) to bring the Shape artifacts back in step with what
 shipped, and pay any open debt (update the artifacts + add a regression test, then set the
 `reconcile-debt.json` entry `status: paid`). It never seeds the epic itself — opening a change-epic is a
 human, triaged act (`yad-change` Step 2).
 
 **Orphan code with no epic at all (brownfield):** when the drift is shipped code that belongs to a
 feature with **no owning epic in any thread**, there is nothing to thread a change off yet. Point the
-human at **`yad-stub`** first — mint a stub genesis epic (a minimal `kind: feature` thread anchor) for
+human at **`yad-stub`** first — mint a stub genesis epic (a minimal `feature`-type thread anchor) for
 that feature — then thread the reconcile change off that stub (and run `yad-backfill` +
 `yad-backfill promote` to make the anchor real). The reconciler never mints the stub itself.
 

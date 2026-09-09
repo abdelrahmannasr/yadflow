@@ -956,7 +956,7 @@ export function epicLineage(root, epic) {
   };
 }
 
-// Is this a STUB genesis epic (minted by yad-stub as a brownfield thread anchor)? A stub is kind:feature
+// Is this a STUB genesis epic (minted by yad-stub as a brownfield thread anchor)? A stub is type feature
 // but carries `stub: backfill-pending` in epic.md frontmatter until `yad-backfill promote` flips it to a
 // real, verified epic (which clears the marker). Missing/greenfield-safe. Read by yad thread / yad-status
 // / the reconciler to render "stub (backfill pending)" and never treat it as a fully-specced feature.

@@ -5,9 +5,9 @@ in files on disk. Nothing hidden."). No database, no browser storage.
 
 ## Every file states its shape — `schemaVersion`
 
-Each JSON **object** the CLI writes under a `.sdlc/` directory carries `"schemaVersion": 1` as its
-first key. It says what shape the file is in, so a future release can recognise an older file and
-upgrade it instead of guessing.
+Each JSON **object** the CLI writes under a `.sdlc/` directory carries a `"schemaVersion"` as its
+first key, holding the shape this release writes — **5** today. It says what shape the file is in, so
+a future release can recognise an older file and upgrade it instead of guessing.
 
 **When you author one of these files by hand, include the key**, exactly as the examples below show.
 Several kinds here — `state.json` on the seeding path, `change.json`, `contract-lock.json`,
@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 5,
   "epicId": "EP-checkout"
 }
 ```
@@ -43,6 +43,7 @@ The per-epic state machine.
 |-------|---------|
 | `epicId` | The stable `EP-<slug>` ID. Never renamed. |
 | `createdAt` | ISO date the epic was created. |
+| `type` | The work-item type — `feature` \| `change` \| `defect` \| `hotfix` \| `chore` — copied from `epic.md`. Shape 5 on. **Not the same field as `steps[].type`**, which is `author` \| `review+approve`, and not the same as the top-level `kind` a stub or the discovery front-zero carries. |
 | `currentStep` | `id` of the step the workflow is waiting on right now. |
 | `steps[]` | Ordered list of every Shape step step. |
 
@@ -387,13 +388,21 @@ head of the thread, composed by the resolver (`yad-timeline`). `yad-change` seed
 ## Lineage frontmatter (added to `epic.md`)
 
 An enrichment block on `epic.md` — like the `design:` / `testing:` blocks, it does **not** change the
-locked `state.json` step shape. Genesis epics are backfilled once with `kind: feature`, `thread: <self>`.
+locked `state.json` step shape. Genesis epics are backfilled once with `kind: feature`, `type: feature`
+and `thread: <self>`.
+
+**The work-item type has two names.** `kind:` is the original and is still the one that is READ;
+`type:` is the same value under the name from shape 5 on. **Write both, with the same value.** Writing
+`type:` alone on a `change`/`defect`/`hotfix` is the one mistake that breaks something:
+`lineage-check.sh` runs inside the code repo, reads `kind:`, finds none, defaults to `feature`, and
+stops requiring the `parent:` those three must have. `yad doctor` fails on it (`type:gate-blind`).
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `kind` | `feature` \| `change` \| `defect` \| `hotfix` | Genesis is `feature` (default when absent). |
+| `kind` | `feature` \| `change` \| `defect` \| `hotfix` \| `chore` | The work-item type, under the name that is still read. Genesis is `feature` (default when absent). |
+| `type` | the same five values | The same value under the name from shape 5 on. Write it beside `kind`, never instead of it. |
 | `thread` | `EP-<genesis>` | Stable thread id = the genesis epic's id (never renamed → stablest anchor). A **derived cache** — the authoritative thread is `parent` walked to the root; a mismatch is detectable corruption (`yad doctor`). Genesis: `thread == id`. |
-| `parent` | `EP-<slug>` | The immediate predecessor epic. **Absent ⇔ `kind: feature`.** |
+| `parent` | `EP-<slug>` | The immediate predecessor epic. **Absent for the genesis types (`feature`, `chore`); required for `change`, `defect` and `hotfix`.** A chore — a dependency bump, a CI move — usually has no feature to hang off, and an invented parent would file it under a feature it has nothing to do with. |
 | `inherits` | subset of `[epic, architecture, contract, ui-design, stories, test-cases]` | Artifact bases carried **by reference**, not re-authored. The rest are re-authored in this epic. |
 | `supersedes` | `[EP-<slug>-S0N, …]` | Optional — specific parent story IDs this epic replaces in the head. |
 | `origin` | `production` \| `staging` \| `qa` \| `review` | **defect/hotfix only.** Where the defect was found. |
@@ -409,7 +418,7 @@ In a brownfield repo not every already-built feature has an epic, so a defect/ch
 thread from (`yad-change` requires one; `lineage-check` rejects a missing parent). `yad-stub` mints the
 smallest **real** node — a **stub genesis epic** — so the bug can be captured now and formalized later.
 
-A stub is a normal genesis (`kind: feature`, `thread == id`, no `parent`) whose `epic.md` carries
+A stub is a normal genesis (type `feature` under both names, `thread == id`, no `parent`) whose `epic.md` carries
 `stub: backfill-pending` + `verified: false` and whose `state.json` uses a **sentinel**, mirroring
 `EP-discovery` / `discovery-done`:
 - top-level `kind: "stub"` and `currentStep: "backfill-pending"`;
@@ -491,7 +500,7 @@ Intake + triage record, one per change/defect/hotfix epic (sibling of `approvals
 
 ```json
 { "epicId": "EP-checkout-queue-filter", "thread": "EP-checkout", "parent": "EP-checkout",
-  "kind": "defect", "depth": "defect-fix", "intakeBy": "alice", "intakeDate": "<YYYY-MM-DD>",
+  "kind": "defect", "type": "defect", "depth": "defect-fix", "intakeBy": "alice", "intakeDate": "<YYYY-MM-DD>",
   "title": "Pending queue returns fulfilled orders", "description": "…",
   "affectedArtifacts": ["stories", "test-cases"],
   "reauthors": ["stories", "test-cases"], "inherits": ["epic", "architecture", "contract", "ui-design"],

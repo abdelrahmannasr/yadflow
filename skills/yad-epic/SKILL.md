@@ -102,6 +102,9 @@ using EXACTLY this template (build plan §6b):
 ---
 id: EP-<slug>
 status: draft
+kind: feature            # the work-item type. `kind:` is the name every reader still uses…
+type: feature            # …and `type:` is the same value under the name from shape 5 on. Write BOTH.
+thread: EP-<slug>        # a genesis epic is the root of its own thread — thread == id, no parent
 owner:
 technical_product_owner:
 repos: [backend, mobile, dashboard]
@@ -128,9 +131,10 @@ steps **locked**. Use this exact shape (see `references/state-schema.md`):
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 5,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
+  "type": "feature",
   "currentStep": "epic-review",
   "steps": [
     { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },

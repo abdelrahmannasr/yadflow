@@ -409,7 +409,7 @@ is fully shipped and a new change must go in its own threaded epic.
 **The runbook (in the Product):**
 
 1. **File it.** Invoke **`yad-change`**: give it the `parent` epic (usually the feature's current tip),
-   a `title`, the `kind` (`change` | `defect` | `hotfix`), and for a defect/hotfix the `origin`,
+   a `title`, the work-item type (`change` | `defect` | `hotfix`), and for a defect/hotfix the `origin`,
    `severity`, **`escape_stage`** (which gate *should* have caught it) and `root_cause`. It triages the
    **depth** and tells you what gets re-authored vs inherited:
    - **defect-fix** — re-author `stories` (a regression story) + `test-cases` (the missing case); inherit
@@ -424,14 +424,14 @@ is fully shipped and a new change must go in its own threaded epic.
    artifacts. The inherited ones are not re-reviewed.
 3. **Build + ship** the change-epic's story the normal way (`yad-spec` → … → `yad-engineer-review`). A
    defect's regression test is the durable memory of the bug.
-4. **A genesis epic from before this existed?** Add `kind: feature` and `thread: <its own id>` to its
+4. **A genesis epic from before this existed?** Add `kind: feature`, `type: feature` and `thread: <its own id>` to its
    `epic.md` once (a one-line frontmatter add) before threading a change off it.
 5. **A brownfield feature with no epic at all?** `yad-change` will point you at **`yad-stub`** — mint a
-   stub genesis epic first (`kind: feature`, `stub: backfill-pending`), then thread the defect off it.
+   stub genesis epic first (type `feature`, `stub: backfill-pending`), then thread the defect off it.
    The bug is captured now; `yad-backfill promote` turns the stub into a real, verified epic later. The
    list of bugs threaded off the stub is derived by `yad thread` — you never hand-maintain it.
 
-**Hotfixes** (`kind: hotfix`) may ship the fix **first** (an outage can't wait for the Shape gates), but
+**Hotfixes** (type `hotfix`) may ship the fix **first** (an outage can't wait for the Shape gates), but
 `yad-change` opens **reconcile debt**: the thread's *next* change is blocked until you pay it — update the
 Shape artifacts + add a regression test. `yad reconcile` and `yad doctor` show open debt.
 
@@ -484,6 +484,27 @@ surfaces (`contract`, `auth`, `payments`):
 ---
 
 ## 10. Naming cheat sheet
+
+Work sits on four rungs. There is nothing above the Product, and nothing between Story and Task:
+
+```
+Product  →  Epic  →  Story  →  Task
+```
+
+Grouping several epics under one heading is a free `theme` tag on the epic, not a rung of its own.
+
+Every work item also carries a **type**, which is what stops everything being called an epic:
+
+| Type | Meaning | May stand alone (no `parent:`) |
+|---|---|---|
+| `feature` | new value | yes |
+| `change` | a change to something already shipped | no |
+| `defect` | something is broken | no |
+| `hotfix` | broken and urgent | no |
+| `chore` | upkeep, no user-visible change | yes |
+
+Two names carry it in `epic.md`: `kind:` is the original and is still the one being read, and `type:`
+is the same value under the newer name. **Write both.** See `docs/migrations/shape-5.md`.
 
 IDs are **immutable once assigned** — renaming them breaks every downstream link.
 

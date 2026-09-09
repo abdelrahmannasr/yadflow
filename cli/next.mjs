@@ -220,7 +220,7 @@ function jsonNext(root, { epic, check }) {
     return emitJSON({ ok: true, actions: [actionFor(root, epic)] });
   }
   if (!isSetUp(root)) return emitJSON({ ok: true, setUp: false, actions: [] });
-  // Every epic that HAS a ledger, discovery included — its `kind` already says whether it is open
+  // Every epic that HAS a ledger, discovery included — its ACTION kind already says whether it is open
   // (`discovery-*`) or finished, so filtering it out would hide a fact rather than clarify one.
   // `--all` is implied: an array always carries everything, so there is nothing left to expand.
   return emitJSON({ ok: true, actions: listEpics(root).map((id) => actionFor(root, id)) });

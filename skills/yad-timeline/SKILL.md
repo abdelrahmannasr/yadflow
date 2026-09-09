@@ -1,6 +1,6 @@
 ---
 name: yad-timeline
-description: 'Phase 6 output enrichment (never a gate) — render a feature THREAD as an evolution view AND resolve its current truth. Walks the thread (genesis -> changes -> defects, linked by parent: frontmatter), renders the evolution as the vendored React/Vite/Tailwind shell HTML + a TIMELINE.md summary (each node: kind, what it re-authored vs inherited, ship events, contract re-lock history, open debt), and emits thread-resolved.md — the composed CURRENT-TRUTH map (the latest epic that owns each artifact + the resolved contract-lock hash). That resolved map is the source-of-truth AI/humans read to plan the next change, instead of a stale genesis epic. Degrades to markdown-only when no docs target is connected. Use when the user says "show the feature timeline", "how did this feature evolve", "resolve the current truth", or "render the thread".'
+description: 'Phase 6 output enrichment (never a gate) — render a feature THREAD as an evolution view AND resolve its current truth. Walks the thread (genesis -> changes -> defects, linked by parent: frontmatter), renders the evolution as the vendored React/Vite/Tailwind shell HTML + a TIMELINE.md summary (each node: type, what it re-authored vs inherited, ship events, contract re-lock history, open debt), and emits thread-resolved.md — the composed CURRENT-TRUTH map (the latest epic that owns each artifact + the resolved contract-lock hash). That resolved map is the source-of-truth AI/humans read to plan the next change, instead of a stale genesis epic. Degrades to markdown-only when no docs target is connected. Use when the user says "show the feature timeline", "how did this feature evolve", "resolve the current truth", or "render the thread".'
 ---
 
 # SDLC — Feature Timeline + Current-Truth Resolver (Phase 6, output enrichment)
@@ -32,7 +32,8 @@ It is an **output enrichment**, exactly like `yad-docs` — **never a gate**: it
 
 ### Step 1 — Resolve the thread
 Run `yad thread <thread> --json` (`resolveThread` + `threadEpics` + `resolveCurrentArtifacts`). This
-gives the genesis-first chain, each epic's lineage (`kind`, `parent`, `inherits`), the resolved
+gives the genesis-first chain, each epic's lineage (`type`, and `kind` holding the same value under
+the older name, plus `parent` and `inherits`), the resolved
 current-truth map, and any open reconcile debt. **STOP** and report if the lineage is broken (point at
 `yad doctor` / `yad-reconcile`).
 
@@ -54,9 +55,9 @@ deterministically; theme from the design system). The thread maps onto the shell
   = what it re-authored, its side-effects = the ships it produced + any contract re-lock.
 - **System components** = the artifacts (epic/architecture/contract/ui/stories/test-cases), each labelled
   with the epic that currently **owns** it (from the resolved map).
-- Label and colour nodes by `kind` — render each node's kind noun (**Change request** / **Defect** /
+- Label and colour nodes by `type` — render each node's type noun (**Change request** / **Defect** /
   **Hotfix** / **Epic** for feature) alongside its id, not the generic word "epic"; mark sealed epics and
-  open debt. (A bug is a defect — `kind: defect`. Presentation only; every node is still an epic.)
+  open debt. (A bug is a defect — type `defect`. Presentation only; every node is still an epic.)
 
 ### Step 4 — Emit `thread-resolved.md` (the current-truth map — derived, non-authoritative)
 Write `epics/<thread>/thread-resolved.md`: for each artifact base, the **owning epic** (the latest in the
@@ -66,7 +67,7 @@ is the file the next `yad-change` / `yad-epic` reads as "the feature's current t
 
 ### Step 5 — Emit `TIMELINE.md` + (optional) deploy
 Write a short `epics/<thread>/TIMELINE.md` (the chain, what each node changed, ships, open debt) for a
-plain-text read — head each node with its kind noun (Change request / Defect / Hotfix / Epic) + id. On `action: deploy`, `yad docs deploy` the site (build-only when no target).
+plain-text read — head each node with its type noun (Change request / Defect / Hotfix / Chore / Epic) + id. On `action: deploy`, `yad docs deploy` the site (build-only when no target).
 
 ## Hard rules
 

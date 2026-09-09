@@ -142,7 +142,7 @@ while IFS= read -r sha; do
   if epic_sealed "$ep_dir"; then
     echo "FAIL [epic-open]: ${short} ${task} targets SEALED epic ${epic} (all stories shipped)."
     echo "  -> New behaviour cannot mutate a shipped epic. Open a threaded change-epic with yad-change"
-    echo "     (kind: change|defect|hotfix, parent: ${epic}) and implement against ITS stories instead."
+    echo "     (type change|defect|hotfix, parent: ${epic}) and implement against ITS stories instead."
     rc=1
     continue
   fi

@@ -172,7 +172,7 @@ export async function runReconcile(root, { action = 'check', thread = null } = {
 
   if (action === 'refresh') {
     log('');
-    info('refresh is advisory: open a reconcile change-epic with `yad-change` (kind: change) threaded to');
+    info('refresh is advisory: open a reconcile change-epic with `yad-change` (type change) threaded to');
     info('the affected feature, then pay any open debt (update artifacts + add a regression test).');
     info('for shipped brownfield code with NO epic at all, anchor it first with `yad-stub`, then thread');
     info('the change/defect off that stub (and run `yad-backfill` to make the anchor real).');

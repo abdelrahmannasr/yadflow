@@ -35,11 +35,12 @@ Do not modify any of them.
 ### Step 3 — Report
 Print, in this order:
 
-1. **Header:** render the kind noun from `epic.md` frontmatter `kind` — **Change request** (`change`),
-   **Defect** (`defect`), **Hotfix** (`hotfix`), or **Epic** (`feature`, and the default when `kind` is
+1. **Header:** render the type noun from the `epic.md` frontmatter work-item type. Two names carry it,
+   `kind:` and `type:`; read `kind:` first, then `type:`. **Change request** (`change`),
+   **Defect** (`defect`), **Hotfix** (`hotfix`), **Chore** (`chore`), or **Epic** (`feature`, and the default when neither is
    absent) — followed by `epicId`, then `status` from `epic.md` frontmatter, `currentStep`, and `repos`
    (the touched domains). Example: `Defect EP-checkout-queue-filter — draft @ stories`. A bug is a defect
-   (`kind: defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
+   (type `defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
 2. **Steps table** — for every Shape step in `steps[]` order (10, or 12 when the optional analysis step
    was run): `id`, `type`, `status`, the two dials (`driver`/`assistance` and `advance`/`automation` — read whichever the step carries, the OLD name wins), `locked`, and `risk_tags`. Mark the
    `currentStep` with `→`. The gating chain is `[analysis → analysis-review →] epic → epic-review →

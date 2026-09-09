@@ -196,7 +196,7 @@ its parent** (`yad-change`): it inherits the unchanged Shape artifacts by refere
 what it changes, so the locked artifacts are never mutated and never go stale. Three CI gates enforce the
 thread: **lineage-check** (a `change`/`defect`/`hotfix` epic must declare a real `parent:`), **epic-open**
 (the seal above), and **reconcile-debt** (a thread with an open hotfix debt is frozen until paid). A
-genesis epic carries `kind: feature` + `thread: <self>` frontmatter; a change-epic adds `parent:` +
+genesis epic carries `kind: feature` + `type: feature` + `thread: <self>` frontmatter; a change-epic adds `parent:` +
 `thread:` + `inherits:`. See `docs/phase-6-build-plan.md` and `skills/yad-change/`.
 
 ---
