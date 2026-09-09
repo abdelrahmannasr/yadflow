@@ -857,3 +857,23 @@ test('migrate 4 -> 5: on a VERIFIED project state.json is skipped, and the gate 
     assert.equal(stampWorkItemType(st, path.join(T, 'epics/EP-x')).type, 'defect', 'the gate write closes the gap');
   } finally { cleanup(T); }
 });
+
+test('migrate 4 -> 5: a `type` key that is already there is never overwritten, whatever it holds', async () => {
+  // The guard is "is the key present", not "is it a string". Overwriting a value somebody wrote —
+  // even `null` — would be the migration deciding what their file meant, during an upgrade they ran
+  // to be safe. Doctor is what reports a value nobody defined; correcting one here is not this
+  // command's job, and a migration that silently rewrites hand-written values is the reason people
+  // stop trusting one.
+  const { stampWorkItemType } = await import('./epic-state.mjs');
+  const T = project({ files: { 'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root') } });
+  try {
+    const dir = path.join(T, 'epics/EP-x');
+    for (const held of [null, 42, '', 'nonsense', 'feature']) {
+      const before = { schemaVersion: 5, type: held, currentStep: 'epic', steps: [] };
+      const after = stampWorkItemType(before, dir);
+      assert.equal(after, before, `a state holding ${JSON.stringify(held)} came back as a new object`);
+    }
+    // …and with no key at all, it is stamped from epic.md as usual.
+    assert.equal(stampWorkItemType({ schemaVersion: 5, currentStep: 'epic', steps: [] }, dir).type, 'defect');
+  } finally { cleanup(T); }
+});

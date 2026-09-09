@@ -269,7 +269,11 @@ export function stampStepDials(state) {
 // ONE of these, called from `writeState` below and from the 4 -> 5 step in cli/migrate.mjs. E28
 // shipped two dial stampers and they drifted — one guarded array-valued steps, the other did not.
 export function stampWorkItemType(state, epicDir) {
-  if (!isPlainObject(state) || typeof state.type === 'string') return state;
+  // ANY `type` key already present is left alone, not just a string one. Overwriting a value
+  // somebody wrote — even `null`, even a number — would be this function deciding what their file
+  // meant, during an upgrade they ran to be safe. `yad doctor` is what reports a value it does not
+  // understand; silently correcting one is the behaviour the whole shape-5 design refuses.
+  if (!isPlainObject(state) || 'type' in state) return state;
   const md = path.join(epicDir, 'epic.md');
   if (!fs.existsSync(md)) return state;
   const type = workItemType(readFrontmatter(md));
@@ -961,8 +965,13 @@ export const typeNoun = (t) => TYPE_NOUN[t] || 'Epic';
 // absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {
   const fm = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md'));
+  const type = workItemType(fm);
   return {
-    type: workItemType(fm),
+    type,
+    // The older name for the same value, kept for one major — the same choice `yad thread --json`
+    // makes. An out-of-tree caller reading `.kind` would otherwise get `undefined`, which reads as a
+    // NON-genesis type: their parent-free feature epic starts being asked for a parent it has not got.
+    kind: type,
     parent: fm.parent || null,
     thread: fm.thread || null,
     inherits: asList(fm.inherits),

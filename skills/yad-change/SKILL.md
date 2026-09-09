@@ -35,7 +35,9 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 - `parent` — **required.** The `EP-<slug>` this change evolves (the thread predecessor; usually the
   feature's current tip).
 - `title` — **required.** One line describing the change.
-- `kind` — the work-item **type**: `change` | `defect` | `hotfix` (default `change`). `feature` and
+- `kind` (also accepted as `type`) — the work-item **type**: `change` | `defect` | `hotfix`
+  (default `change`). Both input names mean the same thing, the same way both frontmatter keys do.
+  `feature` and
   `chore` are the genesis types and are reserved for a work item with no parent (use `yad-epic`,
   not this skill). Two names carry this value — see Step 4.
 - `origin` — defect/hotfix only: `production` | `staging` | `qa` | `review`.

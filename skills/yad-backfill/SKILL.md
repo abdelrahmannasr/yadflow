@@ -93,8 +93,8 @@ thread off it, `promote` is what makes that anchor real — run it once the feat
     `backfill-pending` sentinel (per the promote flavour below). **Leave the top-level `type` exactly
     as it is.** `kind` and `type` are two different things in this file: `kind: "stub"` is the
     lifecycle marker you are clearing, and `type: "feature"` is the work-item type, which a promoted
-    stub still has. Removing it would make `yad doctor` report the ledger as disagreeing with
-    `epic.md`.
+    stub still has. Nothing would report its loss — `yad doctor` only compares a `type` that is
+    there — so the ledger would quietly stop saying what kind of work it holds.
 - **Light promote (default):** the feature's documentation lives in the approved backfill spec — do NOT
   wake the Shape chain. Set `state.json` `currentStep: "backfill-done"` (a terminal sentinel, like
   `discovery-done`): the epic is now a real, verified anchor and its later evolution threads normally with

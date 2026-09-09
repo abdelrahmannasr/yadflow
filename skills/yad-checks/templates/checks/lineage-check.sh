@@ -135,6 +135,11 @@ while IFS= read -r sha; do
   # `feature` and `chore` may stand alone. Upkeep — a dependency bump, a CI move — usually has no
   # feature to hang off, and an invented parent is worse than none: every thread rollup walks
   # `parent:` and would file the upkeep under a feature it has nothing to do with.
+  #
+  # NOTE the asymmetry, which `feature` has always had: this PASSES before it looks at `parent:` at
+  # all, so a genesis type that DOES declare a dangling parent is not checked here. `yad doctor`
+  # catches that one (threadChecks skips only the parent-LESS case), so it is covered — just not by
+  # this gate.
   if [ "$wtype" = "feature" ] || [ "$wtype" = "chore" ]; then
     echo "PASS [lineage-check]: ${short} ${task} -> ${epic} (genesis ${wtype} epic)."
     continue

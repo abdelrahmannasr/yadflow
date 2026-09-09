@@ -56,15 +56,27 @@ work tree), check out if it exists, else create from the Product's default branc
 ### Step 4 — Write the stub `epic.md` (thread anchor — never invent behaviour)
 Write `{project-root}/epics/EP-<slug>/epic.md` using EXACTLY this shape:
 
+**Every key below is read by a machine, so write them BARE — no trailing `#` comment.** The
+frontmatter readers keep the whole rest of the line, so a comment becomes part of the value: a
+commented `stub:` stops `yad thread` and `yad-status` seeing the stub at all, and a commented `kind:`
+makes `lineage-check` refuse every commit that links a story to this epic. What they mean:
+
+| Key | Why it is here |
+|---|---|
+| `kind` + `type` | the work-item type, the same value under both names — `feature`, because a stub is a genesis / thread root and a valid parent for `lineage-check` |
+| `thread` | `thread == id` for a genesis |
+| `verified` | `false` — not a real, human-authored epic yet, a stub awaiting backfill |
+| `stub` | `backfill-pending` — the honest marker; cleared on promote |
+
 ```markdown
 ---
 id: EP-<slug>
 status: draft
-kind: feature            # the work-item type: genesis / thread root, a valid parent for lineage-check
-type: feature            # the same value under the name from shape 5 on. Write BOTH names.
-thread: EP-<slug>        # thread == id for a genesis
-verified: false          # not a real, human-authored epic yet — a stub awaiting backfill
-stub: backfill-pending   # the honest marker; cleared on promote
+kind: feature
+type: feature
+thread: EP-<slug>
+verified: false
+stub: backfill-pending
 origin: brownfield
 owner:
 repos: [<the code repos this feature lives in>]

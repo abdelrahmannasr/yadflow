@@ -806,7 +806,7 @@ export function typeChecks(checks, root) {
     check(
       checks, 'type:new-only', 'shape', 'warn',
       `${newOnly.length} epic(s) carry only the new name: ${some(newOnly, 2)}`,
-      'add `kind:` beside `type:` — it is still the name every other reader uses, and `yad migrate` cannot repair this: it only ever adds the new name from the old',
+      'add `kind:` beside `type:` — it is still the name every other reader uses. Nothing can do it for you: `yad migrate` never writes `epic.md` at all',
     );
   }
   if (disagree.length) {

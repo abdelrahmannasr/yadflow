@@ -73,12 +73,22 @@ yad migrate --apply    # make the change; every file is copied to <name>.yad-ori
 
 Safe to run twice. An epic whose `state.json` already records a type is left exactly as it is.
 
+**Before you author your first `chore`, run `yad update` in each code repo.** `chore` is a new type,
+and the check gate that enforces lineage lives inside those repos. A copy that has not been refreshed
+does not know `chore` may stand alone, so it will demand a `parent:` and fail every commit on a
+legitimate chore epic. Nothing unsafe happens — the gate is stricter than it should be, not looser —
+but the failure message will not tell you this is why.
+
 ## Four things worth knowing
 
 **The type is read from your `epic.md`, never guessed.** The migration opens each epic's own
 `epic.md` and copies what it says. If it defaulted to `feature` instead, every defect and change-epic
 in your project would be recorded as a parent-free genesis, and the lineage gate would stop asking
 them for a parent — again, a safety check quietly dropped during an upgrade.
+
+**Write the frontmatter values bare, with no trailing `# comment`.** The readers keep the whole rest
+of the line, so a comment becomes part of the value — a commented `kind:` reads as a type nobody
+defined, and the lineage gate stops recognising the epic.
 
 **`epic.md` itself is not rewritten.** It is a markdown file you and the skills author by hand, and
 `kind:` in it is still the name that counts, so nothing has to change for your project to keep working.
@@ -101,7 +111,7 @@ nothing is broken in between — `epic.md` is what the engine reads either way.
 |---|---|---|
 | `N epic(s) record a type only the newest yadflow can see` **(fails)** | an epic says `type: defect` (or `change`/`hotfix`) with no `kind:` beside it | add `kind:` with the same value. Until you do, a `lineage-check.sh` that has not been refreshed reads no type and stops requiring that epic's `parent:`. Run `yad update` to refresh the check gates too |
 | `N epic(s) carry only the new name` | the same half-made pair, but on a `feature` or `chore` | add `kind:` beside `type:`. Nothing is at stake here — `feature` is what an older reader assumes anyway |
-| `N epic(s) name two different types` | `kind:` says one thing and `type:` says another | the old name is the one being read. Set both to the type you meant. `yad migrate` skips an epic that already has the new name, so it cannot decide this for you |
+| `N epic(s) name two different types` | `kind:` says one thing and `type:` says another | the old name is the one being read, and it is what the migration copies into the ledger. Set both in `epic.md` to the type you meant; only you know which was intended |
 | `N epic ledger(s) disagree with their epic.md` | `state.json` records a type that `epic.md` does not | `epic.md` is where the type is authored and what the engine reads. Correct `type` in `.sdlc/state.json`, or fix `epic.md` if the ledger was right |
 | `N epic(s) use a type nobody defined` | a value outside the five | use one of the five. An unrecognised value is treated as a non-genesis type, so the lineage gate will demand a `parent:` for it |
 

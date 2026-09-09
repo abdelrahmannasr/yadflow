@@ -96,15 +96,26 @@ branch. Author and commit `epic.md` on it. This is **distinct** from the verifie
 
 ### Step 4 — Write the epic (assist: pm)
 Adopt the **pm** lens (`bmad-agent-pm`, John) and write `{project-root}/epics/EP-<slug>/epic.md`
-using EXACTLY this template (build plan §6b):
+using EXACTLY this template (build plan §6b).
+
+**Three of these keys are read by machines, so write them BARE — no trailing `#` comment.** The
+frontmatter readers (`readFrontmatter` in the CLI, `fm_val` in the check gates) keep the whole rest of
+the line, so a comment becomes part of the value and the gates stop recognising it:
+
+- `kind` and `type` are the **work-item type**, and both carry the same value. `kind:` is the name
+  every reader still uses; `type:` is the name from shape 5 on. Write both. Use `feature` for new
+  value, or `chore` for upkeep with no user-visible change — those are the two types allowed to stand
+  alone with no `parent:`. Everything else (`change`, `defect`, `hotfix`) is authored by `yad-change`.
+- `thread` is the thread id. A genesis epic is the root of its own thread, so `thread == id` and there
+  is no `parent:`.
 
 ```markdown
 ---
 id: EP-<slug>
 status: draft
-kind: feature            # the work-item type. `kind:` is the name every reader still uses…
-type: feature            # …and `type:` is the same value under the name from shape 5 on. Write BOTH.
-thread: EP-<slug>        # a genesis epic is the root of its own thread — thread == id, no parent
+kind: feature
+type: feature
+thread: EP-<slug>
 owner:
 technical_product_owner:
 repos: [backend, mobile, dashboard]
@@ -134,7 +145,7 @@ steps **locked**. Use this exact shape (see `references/state-schema.md`):
   "schemaVersion": 5,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
-  "type": "feature",
+  "type": "<the same value as epic.md — feature, or chore>",
   "currentStep": "epic-review",
   "steps": [
     { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },

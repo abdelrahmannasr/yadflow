@@ -2283,8 +2283,12 @@ test('shape guide: with no release tag at all, this shape is the baseline', () =
 // not loud: a bash copy that disagreed would either demand a parent for work that has none, or —
 // far worse — stop demanding one for a defect, which is the whole point of the gate.
 //
-// The table covers every frontmatter a real epic.md can carry mid-rename: old name only, new name
-// only, both agreeing, both disagreeing, neither, and a value nobody defined.
+// The table covers the six frontmatter shapes a real epic.md can be in mid-rename: old name only,
+// new name only, both agreeing, both disagreeing, neither, and a value nobody defined. It does NOT
+// cover quoted scalars (`kind: "feature"`) or a trailing `# comment` — both readers keep those
+// verbatim, so the two still agree, and neither is a shape the skills tell anyone to write. The
+// comment case is pinned from the other side, in cli/test-threads.mjs, which reads the templates
+// themselves back and refuses one carrying a comment.
 test('lineage-check: the bash type reader and workItemType agree on every epic.md shape', async () => {
   const { workItemType, isGenesisType } = await import('./epic-state.mjs');
   const T = scaffoldRepo();

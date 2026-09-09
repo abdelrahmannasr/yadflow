@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
   isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
-  workItemType, isGenesisType, WORK_ITEM_TYPES,
+  workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -374,3 +374,52 @@ test('epicLineage reads `type:` when an epic.md carries only the new name', () =
   assert.equal(epicLineage(T, 'EP-new').type, 'defect');
   assert.equal(resolveThread(T, 'EP-new').rootId, 'EP-old');
 });
+
+// ---- the skill templates are read back by the engine that reads real epics -----------------------
+
+// Both skills say "use EXACTLY this template", and the block they show goes into a real `epic.md`.
+// Nothing checked that the engine could read it back, and it could not: a trailing `# comment` in
+// frontmatter is NOT stripped by `readFrontmatter`, nor by `fm_val` in the bash check gates — the
+// whole rest of the line becomes the value. A commented `kind:` reads as a type nobody defined, so
+// the epic stops being a genesis and `lineage-check` refuses every commit that links a story to it.
+// A commented `thread:` reads as a cache that disagrees with the computed root, so `yad doctor` fails.
+// Every epic the tool creates went through one of these two templates.
+const TEMPLATE_KEYS = ['id', 'status', 'kind', 'type', 'thread', 'verified', 'stub', 'owner', 'repos'];
+
+// Pull the first fenced ```markdown block that opens with a `---` frontmatter fence.
+function templateFrontmatter(skillFile) {
+  const src = fs.readFileSync(new URL(`../skills/${skillFile}`, import.meta.url), 'utf8');
+  const m = src.match(/```markdown\n(---\n[\s\S]*?\n---\n)/);
+  assert.ok(m, `${skillFile}: no markdown frontmatter template found`);
+  return m[1];
+}
+
+for (const [skillFile, expected] of [
+  ['yad-epic/SKILL.md', { kind: 'feature', type: 'feature', genesis: true }],
+  ['yad-stub/SKILL.md', { kind: 'feature', type: 'feature', genesis: true, stub: 'backfill-pending' }],
+]) {
+  test(`${skillFile}: the epic.md template it tells people to copy reads back correctly`, () => {
+    const T = hub();
+    const dir = path.join(T, 'epics', 'EP-demo');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'epic.md'),
+      templateFrontmatter(skillFile).replace(/EP-<slug>/g, 'EP-demo') + '\n## Goal\nx\n');
+
+    const fm = readFrontmatter(path.join(dir, 'epic.md'));
+    // No value the engine reads may carry a trailing comment — that is the whole failure.
+    for (const k of TEMPLATE_KEYS) {
+      if (typeof fm[k] === 'string') {
+        assert.equal(fm[k].includes('#'), false, `${k} carries a comment: ${JSON.stringify(fm[k])}`);
+      }
+    }
+    assert.equal(fm.kind, expected.kind);
+    assert.equal(fm.type, expected.type, 'the template writes BOTH names');
+    assert.equal(workItemType(fm), expected.kind);
+    assert.equal(isGenesisType(workItemType(fm)), expected.genesis);
+    if (expected.stub) assert.equal(isStubEpic(T, 'EP-demo'), true, 'the stub marker is readable');
+    // …and the thread cache resolves, which is what `yad doctor` checks.
+    assert.equal(resolveThread(T, 'EP-demo').broken, null);
+    assert.equal(resolveThread(T, 'EP-demo').rootId, 'EP-demo');
+    fs.rmSync(T, { recursive: true, force: true });
+  });
+}
