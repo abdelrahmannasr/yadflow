@@ -31,8 +31,13 @@ output_folder: "{project-root}/_bmad-output"
 
 # Default dials applied to every new step (build plan §2).
 defaults:
-  assistance: review          # none | review | heavy
-  automation: human_approve   # human_approve | machine_advance
+  # The two dials: who does the work, and who moves it forward. Renamed in shape 4; BOTH names are
+  # written on every step and the OLD one is still the one read, so an older CLI and the skills that
+  # hand-write state.json keep working. See docs/migrations/shape-4.md.
+  assistance: review          # none | review | heavy         (old name — still authoritative)
+  driver: pair                # human | pair | agent          (new name, shape 4)
+  automation: human_approve   # human_approve | machine_advance  (old name — still authoritative)
+  advance: human              # human | auto                  (new name, shape 4)
   # Shape steps (discovery [optional front-zero], analysis [optional], epic, architecture,
   # ui-design [optional — skippable N/A for UI-less epics via `yad skip <epic> ui-design --reason "<why>"`],
   # stories, test-cases) are locked to human_approve and may NOT be set to machine_advance in this

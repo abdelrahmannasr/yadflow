@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
-import { PROJECT_FILES, VERSION , productConfigPath } from './manifest.mjs';
+import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
 import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, kindNoun, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
@@ -52,13 +52,17 @@ const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
 // Every per-repo lane across the build, flattened with its story id attached.
 const buildLanes = (builds = []) => builds.flatMap((b) => b.repos.map((r) => ({ ...r, story: b.story })));
 
-// The dial note for a build lane: a machine_advance lane is driven by yad-run; everything else stops
+// The dial note for a build lane: an `advance: auto` lane is driven by yad-run; everything else stops
 // for a human (the locked engineer-review always does).
+//
+// This is the sentence a person LEARNS the vocabulary from, so it says the new words even though the
+// `--json` key beside it still says `automation` (see buildNextForRepo). Different audiences: the key
+// is read by scripts and is frozen by the golden test; this line is read by people.
 function dialNote(r) {
   if (r.locked) return c.dim('human merge gate');
-  return r.automation === 'machine_advance'
-    ? c.dim('machine_advance — yad-run auto-drives')
-    : c.dim('human_approve');
+  return stepAdvance(r) === 'auto'
+    ? c.dim('advance: auto — yad-run auto-drives')
+    : c.dim('advance: human');
 }
 
 // The detailed per-story/per-repo build lanes for `printAction`. Each open lane is a 2-line block:

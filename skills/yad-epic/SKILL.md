@@ -133,16 +133,16 @@ steps **locked**. Use this exact shape (see `references/state-schema.md`):
   "createdAt": "<YYYY-MM-DD>",
   "currentStep": "epic-review",
   "steps": [
-    { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "automation": "human_approve", "locked": true,  "status": "done",        "risk_tags": [] },
-    { "id": "epic-review",        "type": "review+approve", "artifact": "epic.md",          "assistance": "review", "automation": "human_approve", "locked": true,  "status": "in_review",   "risk_tags": [] },
-    { "id": "architecture",       "type": "author",         "artifact": "architecture.md",  "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "architecture-review","type": "review+approve", "artifact": "architecture.md",  "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": ["contract"] },
-    { "id": "ui-design",          "type": "author",         "artifact": "ui-design.md",     "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "ui-design-review",   "type": "review+approve", "artifact": "ui-design.md",     "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "stories",            "type": "author",         "artifact": "stories/",         "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "stories-review",     "type": "review+approve", "artifact": "stories/",         "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "test-cases",         "type": "author",         "artifact": "test-cases.md",    "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "test-cases-review",  "type": "review+approve", "artifact": "test-cases.md",    "assistance": "review", "automation": "human_approve", "locked": true,  "status": "blocked",     "risk_tags": [] }
+    { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },
+    { "id": "epic-review",        "type": "review+approve", "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "in_review",   "risk_tags": [] },
+    { "id": "architecture",       "type": "author",         "artifact": "architecture.md",  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
+    { "id": "architecture-review","type": "review+approve", "artifact": "architecture.md",  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": ["contract"] },
+    { "id": "ui-design",          "type": "author",         "artifact": "ui-design.md",     "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
+    { "id": "ui-design-review",   "type": "review+approve", "artifact": "ui-design.md",     "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
+    { "id": "stories",            "type": "author",         "artifact": "stories/",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
+    { "id": "stories-review",     "type": "review+approve", "artifact": "stories/",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
+    { "id": "test-cases",         "type": "author",         "artifact": "test-cases.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
+    { "id": "test-cases-review",  "type": "review+approve", "artifact": "test-cases.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] }
   ]
 }
 ```

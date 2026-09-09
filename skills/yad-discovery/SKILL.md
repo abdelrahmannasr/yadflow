@@ -96,8 +96,8 @@ engine keys off. Use this exact shape (see `references/discovery-schema.md`):
   "createdAt": "<YYYY-MM-DD>",
   "currentStep": "discovery-review",
   "steps": [
-    { "id": "discovery",        "type": "author",         "artifact": "discovery/", "assistance": "review", "automation": "human_approve", "locked": true, "status": "done",      "risk_tags": [] },
-    { "id": "discovery-review", "type": "review+approve", "artifact": "discovery/", "assistance": "review", "automation": "human_approve", "locked": true, "status": "in_review", "risk_tags": [] }
+    { "id": "discovery",        "type": "author",         "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done",      "risk_tags": [] },
+    { "id": "discovery-review", "type": "review+approve", "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "in_review", "risk_tags": [] }
   ]
 }
 ```

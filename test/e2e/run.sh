@@ -110,8 +110,8 @@ mkdir -p "$EPIC/.sdlc"
 printf -- '---\nowner: Alice\nrepos: [backend]\nstatus: draft\n---\n# EP-e2e\n' > "$EPIC/epic.md"
 cat > "$EPIC/.sdlc/state.json" <<'EOF'
 {"epicId":"EP-e2e","createdAt":"2026-06-13","currentStep":"epic-review","steps":[
- {"id":"epic","type":"author","artifact":"epic.md","assistance":"review","automation":"human_approve","locked":true,"status":"done","risk_tags":[]},
- {"id":"epic-review","type":"review+approve","artifact":"epic.md","assistance":"review","automation":"human_approve","locked":true,"status":"in_review","risk_tags":[]}
+ {"id":"epic","type":"author","artifact":"epic.md","assistance":"review","driver":"pair","automation":"human_approve","advance":"human","locked":true,"status":"done","risk_tags":[]},
+ {"id":"epic-review","type":"review+approve","artifact":"epic.md","assistance":"review","driver":"pair","automation":"human_approve","advance":"human","locked":true,"status":"in_review","risk_tags":[]}
 ]}
 EOF
 

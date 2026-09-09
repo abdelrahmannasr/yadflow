@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath } from './manifest.mjs';
+import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
@@ -646,6 +646,80 @@ export function mirrorChecks(checks, root) {
   }
 }
 
+// The two dials are one setting under two spellings, exactly like the mirrored file names, so they
+// drift the same way and are reported the same way. Two things can go wrong, and they need different
+// answers:
+//
+//   DISAGREE  a step says `assistance: heavy` and `driver: human`. Somebody edited one spelling, or a
+//             tool wrote one and a person wrote the other. The OLD name is the one that counts, and
+//             `yad migrate` will not fix it — the step already has the new key, so the step is
+//             skipped as done. Only a person can say which was meant.
+//   A REVIEW STEP CLAIMING AUTO  `advance: auto` on a step a human must sign off. The rule that never
+//             bends, and worth failing over rather than warning: it is the one dial value that can
+//             let work past a person.
+//
+// Scoped to the per-step dials only. `trust-log.json` records what a dial WAS on a past run and is
+// not a live setting, so a mismatch there is history, not drift.
+export function dialChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const disagree = [];
+  const reviewAuto = [];
+
+  const inspect = (rel, where, steps) => {
+    if (!Array.isArray(steps)) return;
+    for (const s of steps) {
+      if (!s || typeof s !== 'object') continue;
+      const at = `${rel}${where ? ` (${where})` : ''} step \`${s.id || '?'}\``;
+      if (typeof s.assistance === 'string' && typeof s.driver === 'string'
+          && DRIVER_FROM_ASSISTANCE[s.assistance] !== s.driver) {
+        disagree.push(`${at}: \`assistance: ${s.assistance}\` but \`driver: ${s.driver}\``);
+      }
+      if (typeof s.automation === 'string' && typeof s.advance === 'string'
+          && ADVANCE_FROM_AUTOMATION[s.automation] !== s.advance) {
+        disagree.push(`${at}: \`automation: ${s.automation}\` but \`advance: ${s.advance}\``);
+      }
+      const isReview = s.type === 'review+approve' || s.locked === true;
+      if (isReview && (s.advance === 'auto' || s.automation === 'machine_advance')) {
+        reviewAuto.push(at);
+      }
+    }
+  };
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    try {
+      if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+    } catch { continue; }
+    const f = epicFiles(path.join('epics', e));
+    const state = readJSON(path.join(root, f.state), null);
+    if (state) inspect(f.state, '', state.steps);
+    const bsDir = path.join(root, f.buildStateDir);
+    if (!exists(bsDir)) continue;
+    let names;
+    try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
+    for (const n of names) {
+      const bs = readJSON(path.join(bsDir, n), null);
+      if (!bs || typeof bs.repos !== 'object' || bs.repos === null) continue;
+      for (const [repo, r] of Object.entries(bs.repos)) inspect(`${f.buildStateDir}/${n}`, repo, r?.steps);
+    }
+  }
+
+  if (reviewAuto.length) {
+    check(
+      checks, 'dials:review-auto', 'shape', 'fail',
+      `a review step is set to advance on its own: ${reviewAuto.slice(0, 3).join('; ')}${reviewAuto.length > 3 ? ` (+${reviewAuto.length - 3} more)` : ''}`,
+      'a review gate can never be `auto` — set it back to `advance: human` (`automation: human_approve`). `yad migrate` never writes this value; something else did',
+    );
+  }
+  if (disagree.length) {
+    check(
+      checks, 'dials:disagree', 'shape', 'warn',
+      `${disagree.length} step(s) carry two different dial values: ${disagree.slice(0, 2).join('; ')}${disagree.length > 2 ? ` (+${disagree.length - 2} more)` : ''}`,
+      'the OLD name (`assistance`/`automation`) is the one being read. Set both to the value you meant — `yad migrate` skips a step that already has the new key, so it cannot decide this for you',
+    );
+  }
+}
+
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
   if (!injected && !exists(productConfigPath(root)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
@@ -712,6 +786,7 @@ export function collectDoctor(root) {
   projectChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
+  dialChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

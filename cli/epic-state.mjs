@@ -6,7 +6,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { err } from './errors.mjs';
-import { epicFiles, preferring } from './manifest.mjs';
+import {
+  ADVANCE_FROM_AUTOMATION, AUTOMATION_FROM_ADVANCE, DRIVER_FROM_ASSISTANCE, epicFiles, preferring,
+  stepAdvance,
+} from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 
@@ -201,6 +204,49 @@ function loadBuildStates(dir) {
   return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort()
     .map((f) => readJSON(path.join(dir, f), null))
     .filter((bs) => bs && typeof bs === 'object' && !Array.isArray(bs));
+}
+
+// ---- the one writer of `state.json` --------------------------------------------------------------
+// Every save of an epic's step state goes through here, and there is exactly one of these on purpose.
+//
+// On a VERIFIED project `yad migrate` never rewrites `state.json` — CI is its only writer, so the
+// command reports the file as `ci-owned` and skips it (cli/migrate.mjs). That is correct, and it
+// means the shape-4 dials would otherwise never reach `state.json` on precisely the projects that
+// most need their records consistent: the Build state would gain `driver`/`advance` while the Shape
+// state kept only the old names, forever, with no command a user could run to close it.
+//
+// So the gate's own write carries the migration. Same rule as everywhere else in shape 4: ADD the new
+// name beside the old, translate rather than copy, and never write `advance: auto` onto a step a
+// human must sign off.
+//
+// Routing every writer through one function is the point. E30 shipped a reviewer who could be added
+// and never removed because one writer out of several was left on the old key, and the test suite was
+// green. A single writer cannot be half-updated.
+export function stampStepDials(state) {
+  if (!state || typeof state !== 'object' || !Array.isArray(state.steps)) return state;
+  let moved = false;
+  const steps = state.steps.map((s) => {
+    if (!s || typeof s !== 'object') return s;
+    const out = { ...s };
+    if (typeof s.assistance === 'string' && !('driver' in s) && DRIVER_FROM_ASSISTANCE[s.assistance]) {
+      out.driver = DRIVER_FROM_ASSISTANCE[s.assistance];
+      moved = true;
+    }
+    if (typeof s.automation === 'string' && !('advance' in s) && ADVANCE_FROM_AUTOMATION[s.automation]) {
+      const isReview = s.type === 'review+approve' || s.locked === true;
+      out.advance = isReview ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
+      moved = true;
+    }
+    return out;
+  });
+  // Return the SAME object when nothing changed. `writeJSON` short-circuits on identical bytes, and
+  // handing back a fresh object either way would make that comparison the only thing standing between
+  // a read-only gate path and a spurious write.
+  return moved ? { ...state, steps } : state;
+}
+
+export function writeState(file, state) {
+  return writeJSON(file, stampStepDials(state));
 }
 
 export function loadLedger(epicDir) {
@@ -589,7 +635,11 @@ export function buildNextForRepo(repoState = {}) {
   return {
     step: active.id,
     status: active.status || 'blocked',
-    automation: active.automation || 'human_approve',
+    // Read either spelling (old wins), then say it the OLD way. `cli/test-golden.mjs` deep-equals
+    // this output against a frozen v3 snapshot, and rule 6 says a frozen project's answers never
+    // change — so even ADDING a key here would break it. The output follows the field in the major
+    // that removes `automation`; until then a step carrying only `advance` still reports correctly.
+    automation: AUTOMATION_FROM_ADVANCE[stepAdvance(active)] || 'human_approve',
     locked: !!active.locked,
     skill: BUILD_STEP_SKILL[active.id] || null,
     shipped: false,

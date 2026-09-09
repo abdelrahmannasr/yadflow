@@ -251,11 +251,11 @@ steps live under each repo (mirrors the per-repo shape of `build-log.json`).
     "backend": {
       "currentStep": "checks",
       "steps": [
-        { "id": "spec",            "automation": "human_approve",  "locked": false, "status": "done" },
-        { "id": "tasks",           "automation": "human_approve",  "locked": false, "status": "done" },
-        { "id": "implement",       "automation": "human_approve",  "locked": false, "status": "done" },
-        { "id": "checks",          "automation": "machine_advance","locked": false, "status": "in_progress" },
-        { "id": "engineer-review", "automation": "human_approve",  "locked": true,  "status": "blocked" }
+        { "id": "spec",            "automation": "human_approve", "advance": "human",  "locked": false, "status": "done" },
+        { "id": "tasks",           "automation": "human_approve", "advance": "human",  "locked": false, "status": "done" },
+        { "id": "implement",       "automation": "human_approve", "advance": "human",  "locked": false, "status": "done" },
+        { "id": "checks",          "automation": "machine_advance", "advance": "auto","locked": false, "status": "in_progress" },
+        { "id": "engineer-review", "automation": "human_approve", "advance": "human",  "locked": true,  "status": "blocked" }
       ]
     }
   }
@@ -311,7 +311,7 @@ back:
   "repo": "backend",
   "step": "checks",
   "uid": "<short-unique-token>",
-  "automation": "human_approve",
+  "automation": "human_approve", "advance": "human",
   "verdict": "approved-unchanged",
   "signals": { "checks": "pass", "human_edited_diff": false, "scope_overrun": false, "contract_touch": false },
   "ranBy": "machine",
@@ -448,7 +448,7 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
 
 ```json
 { "id": "architecture", "type": "author", "artifact": "architecture.md",
-  "assistance": "review", "automation": "human_approve", "locked": true,
+  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,
   "status": "done", "inherited": true, "inheritedFrom": "EP-checkout",
   "boundHash": "sha256:…", "risk_tags": [] }
 ```
