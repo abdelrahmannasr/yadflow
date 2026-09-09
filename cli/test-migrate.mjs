@@ -877,3 +877,87 @@ test('migrate 4 -> 5: a `type` key that is already there is never overwritten, w
     assert.equal(stampWorkItemType({ schemaVersion: 5, currentStep: 'epic', steps: [] }, dir).type, 'defect');
   } finally { cleanup(T); }
 });
+
+// ---- the gate write IS the migration, for the one file no migration reaches --------------------
+
+// A shape-1 `state.json` in the vocabulary a real 3.18.1 project holds: old dial names, no work-item
+// type, and — the part that mattered — a `schemaVersion` already written, so `writeShape` had
+// something to preserve.
+const LEGACY_STATE = JSON.stringify({
+  schemaVersion: 1,
+  epicId: 'EP-x',
+  createdAt: '2026-01-01',
+  currentStep: 'implement',
+  steps: [
+    { id: 'epic', type: 'author', assistance: 'review', automation: 'human_approve', locked: true, status: 'done' },
+    { id: 'implement', assistance: 'heavy', automation: 'machine_advance', status: 'in_progress' },
+  ],
+}, null, 2) + '\n';
+const LEGACY_FILES = {
+  'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root\nthread: EP-root'),
+  'epics/EP-x/.sdlc/state.json': LEGACY_STATE,
+};
+const STATE_REL = 'epics/EP-x/.sdlc/state.json';
+
+test('the gate write on a VERIFIED project equals the migration on a local one, byte for byte', async () => {
+  // The invariant the whole verified path rests on. `yad migrate` refuses to write `state.json` on a
+  // verified Product — CI owns it — so `writeState` is the only thing that will ever move that file.
+  // If the two ever produce different bytes, a verified project is on a shape nobody defined, and
+  // nothing would say so. Comparing them directly is the only way to keep that from happening
+  // quietly: a future shape 6 that changes `state.json` without teaching `writeState` fails HERE.
+  const { writeState } = await import('./epic-state.mjs');
+  const local = project({ files: LEGACY_FILES });
+  const verified = project({ bridge: true, files: LEGACY_FILES });
+  try {
+    await runMigrate(local, { apply: true });
+
+    const vf = path.join(verified, STATE_REL);
+    await runMigrate(verified, { apply: true });
+    assert.equal(fs.readFileSync(vf, 'utf8'), LEGACY_STATE, 'migrate really did refuse to touch it');
+    writeState(vf, read(vf));
+
+    assert.equal(fs.readFileSync(vf, 'utf8'), fs.readFileSync(path.join(local, STATE_REL), 'utf8'));
+  } finally { cleanup(local); cleanup(verified); }
+});
+
+test('a gate write moves a STALE schemaVersion up to this engine, and never down', async () => {
+  // 3.18.1 stamps shape 1, so every verified project on disk holds a state.json recording 1. Before
+  // this, the gate write brought its FIELDS up to date and left the NUMBER at 1 for ever — `yad
+  // doctor` warned "CI-owned and behind" with a hint promising CI would fix it, which it never could.
+  const { writeState } = await import('./epic-state.mjs');
+  const T = project({ files: LEGACY_FILES });
+  try {
+    const f = path.join(T, STATE_REL);
+    writeState(f, read(f));
+    const now = read(f);
+    assert.equal(now.schemaVersion, ENGINE_SHAPE, 'the number moves with the fields');
+    assert.equal(now.steps[1].advance, 'auto', 'and the fields really did move');
+    assert.equal(now.type, 'defect');
+    assert.equal(Object.keys(now)[0], 'schemaVersion', 'still the first key');
+
+    // Writing it again changes nothing at all.
+    const bytes = fs.readFileSync(f, 'utf8');
+    writeState(f, read(f));
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'no byte churn on an unchanged re-write');
+
+    // A file AHEAD of this engine is left exactly as it is — the same refusal `yad migrate` makes.
+    // Lowering it would have this release claim it wrote a shape it cannot read.
+    const ahead = { ...read(f), schemaVersion: ENGINE_SHAPE + 1 };
+    fs.writeFileSync(f, JSON.stringify(ahead, null, 2) + '\n');
+    writeState(f, read(f));
+    assert.equal(read(f).schemaVersion, ENGINE_SHAPE + 1, 'never moved backwards');
+  } finally { cleanup(T); }
+});
+
+test('an UNSTAMPED state.json is unaffected — writeShape already stamped those correctly', async () => {
+  const { writeState } = await import('./epic-state.mjs');
+  const T = project({ files: {
+    ...LEGACY_FILES,
+    [STATE_REL]: JSON.stringify({ epicId: 'EP-x', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'done' }] }, null, 2) + '\n',
+  } });
+  try {
+    const f = path.join(T, STATE_REL);
+    writeState(f, read(f));
+    assert.equal(read(f).schemaVersion, ENGINE_SHAPE);
+  } finally { cleanup(T); }
+});

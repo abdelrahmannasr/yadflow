@@ -8,7 +8,7 @@ import { isPlainObject, readJSON, readJSONStrict, writeJSON, fileSha } from './l
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, AUTOMATION_FROM_ADVANCE, DRIVER_FROM_ASSISTANCE, epicFiles, preferring,
-  stepAdvance,
+  SCHEMA_VERSION, stepAdvance,
 } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
@@ -294,11 +294,41 @@ export function stampWorkItemType(state, epicDir) {
   return out;
 }
 
+// Move a `state.json`'s recorded shape up to this engine's, AFTER both stampers above have run.
+//
+// This is the other half of the verified-mode gap, and without it the first half is a half-truth.
+// On a verified Product `yad migrate` reports `state.json` as `ci-owned` and never writes it, so the
+// stampers are what carry a shape change into that file. They carried the FIELDS. They did not carry
+// the NUMBER, because `writeShape` (cli/lib.mjs) preserves a stamp that is already there — the right
+// rule for every other caller, and the wrong one for the one file no migration will ever reach.
+//
+// The effect was permanent and silent. yadflow 3.18.1 stamps `schemaVersion: 1`, so every verified
+// project on disk today holds a `state.json` recording shape 1. Its fields would be brought fully up
+// to date by the next gate write while the number stayed at 1 for ever, and `yad doctor` would keep
+// reporting "N are CI-owned and behind" with the hint "CI owns these files and moves them on its next
+// gate sync" — a warning that could never clear, attached to a sentence that was not true.
+//
+// WHAT MAKES THIS CORRECT is an invariant, not an assumption: for `state.json`, running the whole
+// migration chain must produce exactly what these stampers produce. It holds today — shapes 2 and 3
+// change `hub.json` and the roster, shape 4 is the dials (`stampStepDials`), shape 5 is the work-item
+// type (`stampWorkItemType`). cli/test-migrate.mjs pins it by migrating one project, gate-writing
+// another, and comparing the two files byte for byte. A future shape that changes `state.json`
+// without adding a stamper here fails that test loudly rather than mis-stamping a file quietly.
+//
+// Never DOWN. A file recording a shape newer than this engine understands is left exactly as it is:
+// `yad migrate` reports that one `ahead` and refuses it for the same reason, and lowering the number
+// would have this release claim it wrote something it cannot read.
+const atEngineShape = (state) => (
+  isPlainObject(state) && Number.isInteger(state.schemaVersion) && state.schemaVersion < SCHEMA_VERSION
+    ? { ...state, schemaVersion: SCHEMA_VERSION }
+    : state
+);
+
 export function writeState(file, state) {
   // `file` is <epicDir>/.sdlc/state.json, so the epic's own directory is two levels up — that is
   // where `epic.md` lives, and the stamper needs it to read the type the author wrote.
   const epicDir = path.dirname(path.dirname(file));
-  return writeJSON(file, stampWorkItemType(stampStepDials(state), epicDir));
+  return writeJSON(file, atEngineShape(stampWorkItemType(stampStepDials(state), epicDir)));
 }
 
 export function loadLedger(epicDir) {

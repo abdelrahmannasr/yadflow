@@ -102,8 +102,9 @@ top-level `kind` is the lifecycle marker `"stub"` or `"discovery"` — a stub le
 **If your project is in verified mode, `state.json` is skipped — and that is expected.** In verified
 mode CI is the only thing allowed to write the gate ledger, so `yad migrate` reports those files as
 `CI writes it` and does not touch them. `state.json` gains its type the next time the gate writes it
-(any `yad gate` command, or the CI gate sync on your next review). You do not need to do anything, and
-nothing is broken in between — `epic.md` is what the engine reads either way.
+(any `yad gate` command, or the CI gate sync on your next review), and the shape number it records
+moves at the same time — so `yad doctor`'s "CI-owned and behind" warning clears on its own. You do not
+need to do anything, and nothing is broken in between: `epic.md` is what the engine reads either way.
 
 ## If `yad doctor` says something
 
