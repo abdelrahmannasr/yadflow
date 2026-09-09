@@ -31,7 +31,9 @@ while step is a Build step (not engineer-review):
     uid = fresh_short_token()                          # e.g. `openssl rand -hex 4` — unique per run,
                                                        #   never reuse; a collision would fuse two runs
     write trust-log/<story>-<repo>-<step>-<uid>.json   # ONE shard file = ONE entry (never append to a shared file)
-      = { story, repo, step, uid, automation: bs.step.automation, verdict, signals, ranBy, date }
+      # `automation` is recorded in the OLD vocabulary (this is a history record, and `yad migrate`
+      #  deliberately leaves it alone). Read the step's dial from EITHER spelling.
+      = { story, repo, step, uid, automation: bs.step.automation ?? old_name_for(bs.step.advance), verdict, signals, ranBy, date }
 
     eff = effective_dial(step, bs, cfg)               # see "Effective dial"
 

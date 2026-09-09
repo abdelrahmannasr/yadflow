@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, exists, fail, hand, info, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
+import { c, exists, fail, hand, info, isPlainObject, log, ok, readJSON, warn, writeJSON, writeProductConfig } from './lib.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, BACKUP_SUFFIX, DRIVER_FROM_ASSISTANCE, epicFiles, isVerifiedLedger,
   MANAGED_LEDGER, MIRRORED_FILES, PROJECT_FILES, preferring, productConfigPath, SCHEMA_VERSION,
@@ -165,13 +165,12 @@ function withDials(steps) {
     if (!isPlainObject(s)) return s;
     const out = { ...s };
     if (typeof s.assistance === 'string' && !('driver' in s)) {
-      const driver = DRIVER_FROM_ASSISTANCE[s.assistance];
-      if (driver) out.driver = driver;
+      // Own-property lookup: a value like "toString" would otherwise resolve through the prototype.
+      if (Object.hasOwn(DRIVER_FROM_ASSISTANCE, s.assistance)) out.driver = DRIVER_FROM_ASSISTANCE[s.assistance];
     }
-    if (typeof s.automation === 'string' && !('advance' in s)) {
-      const advance = ADVANCE_FROM_AUTOMATION[s.automation];
+    if (typeof s.automation === 'string' && !('advance' in s) && Object.hasOwn(ADVANCE_FROM_AUTOMATION, s.automation)) {
       // The review pin: never write `auto` onto a step a human has to sign off.
-      if (advance) out.advance = isReviewStep(s) ? 'human' : advance;
+      out.advance = isReviewStep(s) ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
     }
     return out;
   });
@@ -189,7 +188,6 @@ function readRaw(file) {
   }
 }
 
-const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
 // A file's shape as recorded ON DISK. An object with no key is shape 1 by rule 1; so is an array,
 // which cannot carry a key at all.

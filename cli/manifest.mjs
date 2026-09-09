@@ -297,12 +297,6 @@ export const stepAdvance = (step) => {
   if (typeof step.advance === 'string') return step.advance;
   return null;
 };
-export const stepDriver = (step) => {
-  if (!step || typeof step !== 'object') return null;
-  if (typeof step.assistance === 'string') return DRIVER_FROM_ASSISTANCE[step.assistance] ?? null;
-  if (typeof step.driver === 'string') return step.driver;
-  return null;
-};
 
 // ---- `yad commit` conventions (mirror skills/sdlc/config.yaml `build`) ----
 // Conventional-commit types (config.yaml commit_subject_style).

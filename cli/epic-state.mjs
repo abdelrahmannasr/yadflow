@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import { readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
+import { isPlainObject, readJSON, readJSONStrict, writeJSON, fileSha } from './lib.mjs';
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, AUTOMATION_FROM_ADVANCE, DRIVER_FROM_ASSISTANCE, epicFiles, preferring,
@@ -226,13 +226,15 @@ export function stampStepDials(state) {
   if (!state || typeof state !== 'object' || !Array.isArray(state.steps)) return state;
   let moved = false;
   const steps = state.steps.map((s) => {
-    if (!s || typeof s !== 'object') return s;
+    if (!isPlainObject(s)) return s;
     const out = { ...s };
-    if (typeof s.assistance === 'string' && !('driver' in s) && DRIVER_FROM_ASSISTANCE[s.assistance]) {
+    // Object.hasOwn, not a bare lookup: a value like "toString" would otherwise resolve through the
+    // prototype to a function, get assigned as the dial, and mark the state as changed.
+    if (typeof s.assistance === 'string' && !('driver' in s) && Object.hasOwn(DRIVER_FROM_ASSISTANCE, s.assistance)) {
       out.driver = DRIVER_FROM_ASSISTANCE[s.assistance];
       moved = true;
     }
-    if (typeof s.automation === 'string' && !('advance' in s) && ADVANCE_FROM_AUTOMATION[s.automation]) {
+    if (typeof s.automation === 'string' && !('advance' in s) && Object.hasOwn(ADVANCE_FROM_AUTOMATION, s.automation)) {
       const isReview = s.type === 'review+approve' || s.locked === true;
       out.advance = isReview ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
       moved = true;

@@ -49,7 +49,10 @@ Safe to run twice. A step that already has the new name is left exactly as it is
 is the one rule in yadflow that never bends. If a step is a review (`type: "review+approve"`, or
 `locked: true`) and somehow carried `machine_advance`, the migration writes `advance: human` instead
 and leaves the old value where it is, so `yad doctor` reports the mismatch rather than hiding it.
-This is the first release where that rule is enforced by code rather than by instructions.
+
+To be exact about what the code does: it never WRITES that value, and `yad doctor` fails on one it
+finds. It does not override a step that already says `machine_advance` — the old name is still the
+one being read, so that step still behaves as it did. Doctor telling you is the fix, not silence.
 
 **`trust-log.json` is not migrated, on purpose.** Its `automation` field records what the dial *was*
 when a run happened. That is history, not a setting. Rewriting it would falsify the evidence the trust

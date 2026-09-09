@@ -9571,3 +9571,42 @@ test('doctor dials: a project that agrees, or carries only the old names, says n
     'an un-migrated project is not broken, and a migrated one that agrees is not a finding');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('doctor dials: a step carrying ONLY the new name is reported', () => {
+  // The half-made pair, and it is silent from every other direction: this CLI reads it fine,
+  // `yad migrate` only ever adds new-from-old so it can never repair it, and an OLDER yadflow finds
+  // no dial at all and falls back to human_approve — turning an earned lane back into a manual one.
+  const checks = [];
+  const T = dialProject([{ id: 'implement', driver: 'agent', advance: 'auto', status: 'in_progress' }]);
+  dialChecks(checks, T);
+  const d = checks.find((c) => c.id === 'dials:new-only');
+  assert.ok(d, JSON.stringify(checks.map((c) => c.id)));
+  assert.equal(d.status, 'warn');
+  assert.match(d.message, /driver` with no `assistance/);
+  assert.match(d.message, /advance` with no `automation/);
+  assert.match(d.hint, /cannot repair this/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: an array-valued step does not crash the check', () => {
+  const checks = [];
+  const T = dialProject([['weird'], null, 42, { id: 'ok', assistance: 'heavy', driver: 'agent' }]);
+  assert.doesNotThrow(() => dialChecks(checks, T));
+  assert.equal(checks.filter((c) => c.id.startsWith('dials:')).length, 0, 'and reports nothing about the junk');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('state.json has exactly ONE writer, and it is writeState', async () => {
+  // The whole argument for `writeState` is that a single writer cannot be half-updated. That argument
+  // lived only in a comment, so nothing stopped the NEXT writer being added as a raw writeJSON.
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const offenders = [];
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.mjs') && !n.startsWith('test'))) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    for (const m of src.matchAll(/writeJSON\(\s*([^,]+),/g)) {
+      if (/\bfiles\.state\b/.test(m[1])) offenders.push(`${f}: ${m[0]}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'every state.json write must go through writeState (cli/epic-state.mjs) so the dials are always stamped');
+});

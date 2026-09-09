@@ -5,7 +5,7 @@
 // `--json` emits the checks for CI / bug reports.
 import path from 'node:path';
 import fs from 'node:fs';
-import { c, log, ok, info, warn, fail, hand, run, has, exists, readJSON, readJSONStrict } from './lib.mjs';
+import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
@@ -665,11 +665,12 @@ export function dialChecks(checks, root) {
   if (!exists(epicsDir)) return;
   const disagree = [];
   const reviewAuto = [];
+  const newOnly = [];
 
   const inspect = (rel, where, steps) => {
     if (!Array.isArray(steps)) return;
     for (const s of steps) {
-      if (!s || typeof s !== 'object') continue;
+      if (!isPlainObject(s)) continue;
       const at = `${rel}${where ? ` (${where})` : ''} step \`${s.id || '?'}\``;
       if (typeof s.assistance === 'string' && typeof s.driver === 'string'
           && DRIVER_FROM_ASSISTANCE[s.assistance] !== s.driver) {
@@ -678,6 +679,17 @@ export function dialChecks(checks, root) {
       if (typeof s.automation === 'string' && typeof s.advance === 'string'
           && ADVANCE_FROM_AUTOMATION[s.automation] !== s.advance) {
         disagree.push(`${at}: \`automation: ${s.automation}\` but \`advance: ${s.advance}\``);
+      }
+      // A step holding ONLY the new name is the half-made pair, and it is silent from every other
+      // direction: this CLI reads it fine, `yad migrate` only ever adds new-from-old so it can never
+      // repair it, and an OLDER CLI finds no dial at all and falls back to `human_approve` — turning
+      // a lane earned to auto back into a manual one with nothing to say why. That is the exact
+      // failure the two-name window exists to prevent, so doctor has to be the one that sees it.
+      if (typeof s.driver === 'string' && typeof s.assistance !== 'string') {
+        newOnly.push(`${at}: \`driver\` with no \`assistance\``);
+      }
+      if (typeof s.advance === 'string' && typeof s.automation !== 'string') {
+        newOnly.push(`${at}: \`advance\` with no \`automation\``);
       }
       const isReview = s.type === 'review+approve' || s.locked === true;
       if (isReview && (s.advance === 'auto' || s.automation === 'machine_advance')) {
@@ -709,6 +721,13 @@ export function dialChecks(checks, root) {
       checks, 'dials:review-auto', 'shape', 'fail',
       `a review step is set to advance on its own: ${reviewAuto.slice(0, 3).join('; ')}${reviewAuto.length > 3 ? ` (+${reviewAuto.length - 3} more)` : ''}`,
       'a review gate can never be `auto` — set it back to `advance: human` (`automation: human_approve`). `yad migrate` never writes this value; something else did',
+    );
+  }
+  if (newOnly.length) {
+    check(
+      checks, 'dials:new-only', 'shape', 'warn',
+      `${newOnly.length} step(s) carry only the new dial name: ${newOnly.slice(0, 2).join('; ')}${newOnly.length > 2 ? ` (+${newOnly.length - 2} more)` : ''}`,
+      'add the older name beside it (`driver` needs `assistance`, `advance` needs `automation`) — an older yadflow reads only the old one and would see no dial at all. `yad migrate` cannot repair this: it only ever adds the new name from the old',
     );
   }
   if (disagree.length) {
