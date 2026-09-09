@@ -272,8 +272,22 @@ export function stampWorkItemType(state, epicDir) {
   if (!isPlainObject(state) || typeof state.type === 'string') return state;
   const md = path.join(epicDir, 'epic.md');
   if (!fs.existsSync(md)) return state;
-  // Same object back when nothing changed, so writeJSON's byte-identical short-circuit still holds.
-  return { ...state, type: workItemType(readFrontmatter(md)) };
+  const type = workItemType(readFrontmatter(md));
+  // Placed at the TOP of the file, not appended. `{ ...state, type }` is the one-line version and it
+  // puts the key last, which on a real state.json means `"type": "feature"` dangling at the bottom
+  // directly beneath a `steps` array whose every entry carries its own `"type"` — the exact two-axis
+  // confusion the rest of this change exists to prevent. JSON key order IS the file's bytes, so the
+  // object is rebuilt in order rather than spread and assigned.
+  //
+  // Idempotent either way: a state that already records a type returns above, keeping the position it
+  // has, so a file seeded by a skill is never reordered by a later engine write.
+  const out = {};
+  for (const [k, v] of Object.entries(state)) {
+    if ((k === 'currentStep' || k === 'steps') && !('type' in out)) out.type = type;
+    out[k] = v;
+  }
+  if (!('type' in out)) out.type = type;
+  return out;
 }
 
 export function writeState(file, state) {

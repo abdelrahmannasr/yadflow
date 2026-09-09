@@ -747,6 +747,30 @@ test('migrate 4 -> 5: state.json takes its `type` FROM epic.md, it does not defa
   } finally { cleanup(T); }
 });
 
+test('migrate 4 -> 5: `type` is written at the TOP of the file, not dangling under `steps`', async () => {
+  // Key order is the file's bytes, and a person opening state.json is the reason this matters:
+  // appending would put `"type": "feature"` directly beneath a `steps` array whose every entry
+  // carries its own `"type"`, which is exactly the two-axis confusion this whole change avoids.
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: feature'),
+    'epics/EP-x/.sdlc/state.json': stateWith([{ id: 'epic', type: 'author', status: 'done' }]),
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const f = path.join(T, 'epics/EP-x/.sdlc/state.json');
+    const keys = Object.keys(read(f));
+    assert.ok(keys.indexOf('type') < keys.indexOf('steps'), `type came after steps: ${keys.join(', ')}`);
+    assert.equal(keys[0], 'schemaVersion', 'and the shape stamp is still first');
+    // Re-running writes nothing at all, and a gate write over the same content writes nothing either.
+    const bytes = fs.readFileSync(f, 'utf8');
+    await runMigrate(T, { apply: true });
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'a second migrate is a no-op');
+    const { writeState } = await import('./epic-state.mjs');
+    writeState(f, read(f));
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'and so is a gate write — no byte churn');
+  } finally { cleanup(T); }
+});
+
 test('migrate 4 -> 5: the OLD frontmatter name wins, because it is still the one that counts', async () => {
   // `lineage-check.sh` lives in the user's repo and reads `kind:`. It is refreshed by `yad update`,
   // which has no ordering with `yad migrate` — so a repo WILL exist that migrated but did not update.
