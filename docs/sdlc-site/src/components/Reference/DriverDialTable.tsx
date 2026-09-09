@@ -1,9 +1,9 @@
 import { Icon } from '../shared/Icon';
 import { useStakeholderFilter } from '../../hooks/useStakeholderFilter';
-import { AUTOMATION_DIAL_STATES } from '../../data/referenceData';
+import { DRIVER_DIAL_STATES } from '../../data/referenceData';
 
-export function AutomationDialTable() {
-  const states = useStakeholderFilter(AUTOMATION_DIAL_STATES);
+export function DriverDialTable() {
+  const states = useStakeholderFilter(DRIVER_DIAL_STATES);
 
   if (states.length === 0) return null;
 
@@ -11,14 +11,14 @@ export function AutomationDialTable() {
     <section>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <Icon name="smart_toy" size={20} className="text-purple-400" />
-          <h3 className="text-slate-100 text-lg font-bold font-display">Automation Dial</h3>
+          <Icon name="tune" size={20} className="text-emerald-400" />
+          <h3 className="text-slate-100 text-lg font-bold font-display">Driver Dial</h3>
         </div>
         <span
           className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border"
-          style={{ color: '#a78bfa', background: 'rgba(167,139,250,0.1)', borderColor: 'rgba(167,139,250,0.2)' }}
+          style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', borderColor: 'rgba(16,185,129,0.2)' }}
         >
-          automation
+          driver
         </span>
       </div>
       <div
@@ -30,7 +30,7 @@ export function AutomationDialTable() {
             <tr>
               <th className="px-4 py-3 font-semibold text-slate-300">Value</th>
               <th className="px-4 py-3 font-semibold text-slate-300">Setting</th>
-              <th className="px-4 py-3 font-semibold text-slate-300 text-right">Earned</th>
+              <th className="px-4 py-3 font-semibold text-slate-300 text-right">Default</th>
             </tr>
           </thead>
           <tbody>

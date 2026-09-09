@@ -139,9 +139,11 @@ gate the ledger is already on the default branch: cut the review branch from the
 artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `reviews/*.md` to CI.
 | `type` | `author` \| `review+approve` | Authoring step or a team review gate. |
 | `artifact` | filename or folder | The file/folder this step produces or gates. |
-| `assistance` | `none` \| `review` \| `heavy` | Dial 1 — how much AI helps (build plan §2). |
-| `automation` | `human_approve` \| `machine_advance` | Dial 2 — who advances (build plan §2). |
-| `locked` | `true` \| `false` | Shape steps are `true`: may NOT be set to `machine_advance` in this version. |
+| `assistance` | `none` \| `review` \| `heavy` | Dial 1 (driver) — who does the work. **The name the engine reads.** |
+| `driver` | `human` \| `pair` \| `agent` | Dial 1, shape-4 name, written beside `assistance`: `human`=`none`, `pair`=`review`, `agent`=`heavy`. |
+| `automation` | `human_approve` \| `machine_advance` | Dial 2 (advance) — who moves it forward. **The name the engine reads.** |
+| `advance` | `human` \| `auto` | Dial 2, shape-4 name, written beside `automation`: `human`=`human_approve`, `auto`=`machine_advance`. A review step is NEVER `auto`. |
+| `locked` | `true` \| `false` | Shape steps are `true`: may NOT be set to `advance: auto` in this version. |
 | `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `blocked` = upstream step not yet approved. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4). |
 
@@ -218,9 +220,9 @@ Human-readable review records, one file per round:
 and `<artifact-base>` is the artifact without extension (e.g. `epic`, `architecture`, `stories-S01`).
 
 ## Dial defaults & locks
-- Every step defaults to `automation: human_approve` (build plan §2).
+- Every step defaults to `automation: human_approve` / `advance: human` (build plan §2).
 - The five authoring Shape steps and their reviews are `locked: true` — the engine refuses to set
-  them to `machine_advance` in this version (build plan §1, §8.7). Only back states (build pipeline,
+  them to `advance: auto` in this version (build plan §1, §8.7). Only back states (build pipeline,
   steps 9–14) may move toward machine-advance in a later iteration.
 
 ---
@@ -228,7 +230,7 @@ and `<artifact-base>` is the artifact without extension (e.g. `epic`, `architect
 # Phase 4 Build state (Build made dial-bearing)
 
 Phase 3 recorded build progress only *after the fact* in `build-log.json`. Phase 4 needs the Build
-steps to carry their own `automation` dial so the orchestrator (`yad-run`) can read it and decide
+steps to carry their own advance dial so the orchestrator (`yad-run`) can read it and decide
 whether to advance on its own. Two new files under `.sdlc/` do this.
 
 > **Who commits these.** `build-state/<story-id>.json`, `trust-log.json`, and `build-log.json` are
@@ -267,18 +269,18 @@ Each `steps[]` entry:
 | Field | Values | Meaning |
 |-------|--------|---------|
 | `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Build step identity (the `back_steps` from `config.yaml` + the human merge gate). |
-| `automation` | `human_approve` \| `machine_advance` | Dial 2. Defaults to `human_approve`; flipped to `machine_advance` only after the trust threshold is met (and never for `locked` steps). |
+| `automation` / `advance` | `human_approve`/`human` \| `machine_advance`/`auto` | Dial 2, written under both names (the OLD one is read). Defaults to `human_approve`; flipped to `machine_advance` only after the trust threshold is met (and never for `locked` steps). |
 | `locked` | `true` \| `false` | `engineer-review` is `true` — it never auto-advances (build plan §E). |
 | `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `yad-run` advances `done` steps and `blocked`s on a halt. |
 
 `currentStep` is the `id` the orchestrator is waiting on / about to run for that repo. The file is
-created when a story enters Build; all dials start `human_approve` (the `config.yaml`
+created when a story enters Build; all dials start `advance: human` (`automation: human_approve`) (the `config.yaml`
 `automation.default`).
 
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
 story/repo's `currentStep` into the next build sub-step (`spec`/`tasks` → `yad-spec`, `implement` →
 `yad-implement`, `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`) and prints it with
-the remaining chain and the step's automation dial — so Build is guided, not just hinted at.
+the remaining chain and the step's advance dial — so Build is guided, not just hinted at.
 
 ## `trust-log.json` (shard-then-fold)
 Append-only ledger, the Build analogue of `approvals.json`. **This is the evidence base** that
@@ -324,7 +326,7 @@ back:
 |-------|--------|---------|
 | `step` | a `back_steps` id | Which step this run is recorded against. |
 | `uid` | short unique token | Generated fresh per run (never reused) — makes each shard file and each re-run distinct; also the folded/loose de-dup guard. Legacy folded entries may lack it. |
-| `automation` | dial in force at run time | So the log shows whether the run was a manual or an automated advance. |
+| `automation` | dial in force at run time (recorded in the OLD vocabulary — this is history, and `yad migrate` deliberately does not rewrite it) | So the log shows whether the run was a manual or an automated advance. |
 | `verdict` | `approved-unchanged` \| `approved-with-edits` \| `rejected` | The trust signal. **Provisional verdict is derived** (below); the human gate for that step confirms or overrides it and finalizes the entry. |
 | `signals` | object | The raw inputs the provisional verdict was derived from. The fields present depend on the step (table below). |
 | `ranBy` | `machine` \| `human` | Whether the orchestrator advanced it or a human did. |

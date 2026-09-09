@@ -394,7 +394,7 @@ const automationSteps: FlowStep[] = [
     id: "run",
     title: "Run (Automation)",
     description:
-      "The Phase 4 orchestrator: drive a story's Build loop (spec→tasks→implement→checks) in one repo, reading each step's automation dial. On machine_advance it advances on its own; on human_approve it stops for a human.",
+      "The Phase 4 orchestrator: drive a story's Build loop (spec→tasks→implement→checks) in one repo, reading each step's advance dial. On `auto` it advances on its own; on `human` it stops for a human.",
     actor: "system",
     status: "running",
     stepState: "build-state/<story-id>.json",
@@ -429,7 +429,7 @@ const automationSteps: FlowStep[] = [
     id: "set-dial",
     title: "Set Dial (earn automation)",
     description:
-      "Once a Build step's trust slice clears the threshold, `yad-run set-dial step:<step> to: machine_advance` flips it. The setter REFUSES if evidence is short, or for any Shape step / the engineer review. Earned per step.",
+      "Once a Build step's trust slice clears the threshold, `yad-run set-dial step:<step> to: auto` flips it. The setter REFUSES if evidence is short, or for any Shape step / the engineer review. Earned per step.",
     actor: "engineer",
     status: "earned",
     stepState: "state.json (automation dial)",
@@ -438,7 +438,7 @@ const automationSteps: FlowStep[] = [
     activeComponents: ["trust-log", "state-json"],
     messages: [
       { id: "sd-1", from: "trust-log", to: "engineer", label: "threshold cleared?", type: "event", color: "#1e8449", delay: 0, duration: 700 },
-      { id: "sd-2", from: "engineer", to: "state-json", label: "set dial → machine_advance", type: "write", color: "#2471a3", delay: 800, duration: 700 },
+      { id: "sd-2", from: "engineer", to: "state-json", label: "set dial → advance: auto", type: "write", color: "#2471a3", delay: 800, duration: 700 },
     ],
     sideEffects: { jobs: "back_steps: spec · tasks · implement · checks", notifications: "Shape steps + engineer-review hard-locked" },
   },
@@ -446,7 +446,7 @@ const automationSteps: FlowStep[] = [
     id: "kill-switch",
     title: "Kill Switch",
     description:
-      "Safety: `yad-run action: kill` forces every step back to human_approve system-wide instantly — no code change, no per-step edits. `action: unkill` restores earned automation. Automation is reversible in one move.",
+      "Safety: `yad-run action: kill` forces every step back to `advance: human` system-wide instantly — no code change, no per-step edits. `action: unkill` restores earned automation. Automation is reversible in one move.",
     actor: "engineer",
     status: "reversible",
     stepState: "automation.kill_switch",
@@ -454,7 +454,7 @@ const automationSteps: FlowStep[] = [
     handler: "yad-run (kill / unkill)",
     activeComponents: ["state-json", "trust-log"],
     messages: [
-      { id: "ks-1", from: "engineer", to: "state-json", label: "kill → all steps human_approve", type: "cleanup", color: "#c0392b", delay: 0, duration: 800 },
+      { id: "ks-1", from: "engineer", to: "state-json", label: "kill → all steps advance: human", type: "cleanup", color: "#c0392b", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: "kill_switch: true | false (one line, instantly reversible)" },
   },
@@ -598,7 +598,7 @@ export const PATHS: FlowPath[] = [
     icon: "smart_toy",
     color: "#ca6f1e",
     description:
-      "The second dial made real: run Build on each step's dial, record every run in the trust log, earn machine_advance per step, and keep the kill switch.",
+      "The second dial made real: run Build on each step's dial, record every run in the trust log, earn `advance: auto` per step, and keep the kill switch.",
     category: "automate",
     steps: automationSteps,
   },

@@ -12,7 +12,7 @@ When both artifacts are drafted, control passes to `yad-review-gate`, which **es
 by default (the architecture step carries `risk_tags: ["contract"]`).
 
 This skill enforces the build plan's core rules: all state lives in files; the contract holds only the
-shared cross-repo surface at charter altitude; Shape steps stay locked to `human_approve`.
+shared cross-repo surface at charter altitude; Shape steps stay locked to `advance: human`.
 
 ## Conventions
 

@@ -1,6 +1,6 @@
 ---
 name: yad-engineer-review
-description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same human_approve discipline as the Shape gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
+description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
 ---
 
 # SDLC — Engineer Review & Merge (Build Step E)
@@ -8,7 +8,7 @@ description: 'Build Step E of the gated SDLC — AI review, engineer review, the
 **Goal:** Take a task PR/MR that has passed the **check gates** (Step C) through two sets of eyes and
 out to production: an **AI first-pass** (advisory) and a **human engineer review** (the authority),
 then **ship** — merge, record the ship, and update the story state. This is the last Build step
-(build plan §E). It is a **human gate**, the same `human_approve` discipline as the Shape steps:
+(build plan §E). It is a **human gate**, the same `advance: human` discipline as the Shape steps:
 **nothing auto-advances**; the engineer owns the merge.
 
 ## Conventions
@@ -91,7 +91,7 @@ engineer-review rule is satisfied (Step 2). Then:
   `epics/<epic>/.sdlc/trust-log/<story>-<repo>-implement-<uid>.json` (or, if the run was already folded
   by `yad tidy up`, into its entry in the folded `trust-log.json`). The human has the last word on the trust signal: a diff merged
   as authored is `approved-unchanged`; one the engineer edited before merge is `approved-with-edits`;
-  a rejected one is `rejected`. This is the evidence that later earns a step its `machine_advance`
+  a rejected one is `rejected`. This is the evidence that later earns a step its `advance: auto`
   (it never weakens the merge gate — the engineer still owns the merge).
 - **Commit the machine-written ledgers.** Run `yad checkpoint --push` from `{project-root}` to commit
   the Build ledgers just written (the `build-log/` shard, and the `trust-log/` shard /

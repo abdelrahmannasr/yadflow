@@ -92,7 +92,7 @@ comment on the platform; `yad gate sync` maps that state into the file ledger (`
 `comments.json`, `reviews/*.md`) — which stays the source of truth — and the step **auto-advances on
 merge** once three things hold: the reviewer rule is satisfied (owner + 1 reviewer, plus a domain-owner
 per touched repo on escalated steps), every comment thread is resolved, and the review PR/MR is merged.
-The merge click is the human approval act, so Shape steps still never `machine_advance`. Approvals are
+The merge click is the human approval act, so Shape steps still never advance on their own. Approvals are
 **revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. With no
 Product platform / no `gh`/`glab`, the gate degrades to local with no error.
 

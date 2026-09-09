@@ -1,6 +1,6 @@
 ---
 name: yad-implement
-description: 'Build Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). The step never advances itself; it produces a committed branch and hands off to the check gates, which the orchestrator (yad-run) may auto-run once `implement` is earned to machine_advance (Phase 4b Step D) — the merge still needs the gates and the engineer review. Use when the user says "implement task <id>" or after a story is spec''d.'
+description: 'Build Step B of the gated SDLC. With the dev lens, implement ONE atomic task from a story''s Spec Kit tasks.md as a small diff (≤3 files) on its own branch in the code repo. The diff stays inside the files the task declared — flag and STOP if it would grow beyond them. Commit per convention, ending with the task ID; add Contract-Change: yes only if the diff touches the locked contract surface (which routes back to the architecture gate). The step never advances itself; it produces a committed branch and hands off to the check gates, which the orchestrator (yad-run) may auto-run once `implement` is earned to `advance: auto` (Phase 4b Step D) — the merge still needs the gates and the engineer review. Use when the user says "implement task <id>" or after a story is spec''d.'
 ---
 
 # SDLC — Implement Task (Build Step B)
@@ -109,13 +109,13 @@ then the PR and review (Steps D–E). Do **not** open a PR, merge, or hand-edit 
 - **Run standalone:** stop here; a human triggers the gates.
 - **Run by the orchestrator** (`yad-run`): this skill still just produces the committed branch and
   signals success (or a scope/contract halt). The orchestrator records the `implement` step's status
-  and trust entry and, when `implement` is earned to `machine_advance` (Step D, Phase 4b), **auto-runs
+  and trust entry and, when `implement` is earned to `advance: auto` (Step D, Phase 4b), **auto-runs
   the check gates** instead of waiting for a manual nudge. The diff still cannot merge without the
   gates passing and the engineer review — Step D removes only the "now run the gates" hand-off.
 
 ### Step 8 — Record the `tasks` trust signal on first consume (Phase 4b)
 Resolving a task from `tasks.md` (Step 1) is the moment the generated task list "survives contact" —
-the evidence that could later earn the `tasks` step a `machine_advance`. When driven by `yad-run`,
+the evidence that could later earn the `tasks` step an `advance: auto`. When driven by `yad-run`,
 finalize a `tasks` trust entry, anchored to what the human/dev actually did with the list:
 - the task is implemented with its declared `Files:`/scope **as generated** → `approved-unchanged`;
 - the task is **re-scoped** first (its `Files:`/boundary edited) → `approved-with-edits`
@@ -124,7 +124,7 @@ finalize a `tasks` trust entry, anchored to what the human/dev actually did with
 Write the entry to its own shard `epics/<epic>/.sdlc/trust-log/<story>-<repo>-tasks-<uid>.json` (a fresh
 `uid` per run, so concurrent writers never conflict; readers union the folded `trust-log.json` + the
 loose shards, skipping any shard whose full `(story, repo, step, uid)` already appears folded — a
-half-applied `yad tidy up` — so entries are never double-counted). Schema: `../yad-epic/references/state-schema.md`. `tasks` stays `human_approve` until its slice clears
+half-applied `yad tidy up` — so entries are never double-counted). Schema: `../yad-epic/references/state-schema.md`. `tasks` stays `advance: human` until its slice clears
 the threshold — this only *gathers* evidence. (The `implement` step's own verdict is finalized later,
 at the engineer review in `yad-engineer-review`: merged as authored → `approved-unchanged`; edited first →
 `approved-with-edits`; scope/contract/checks halt → `rejected`.)
@@ -136,7 +136,7 @@ at the engineer review in `yad-engineer-review`: merged as authored → `approve
 - **Never widen the contract here.** Surface changes go back to the architecture gate (Step 5).
 - **The step never advances itself.** A scope overrun or contract touch always halts. The
   `implement → checks` hand-off advances only when the orchestrator's `implement` dial is
-  `machine_advance` (earned, Step D) — and never past the engineer review, which is always human.
+  `advance: auto` (earned, Step D) — and never past the engineer review, which is always human.
   Standalone, the step stops at a committed branch.
 
 ## Reference

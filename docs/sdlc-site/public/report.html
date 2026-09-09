@@ -260,18 +260,23 @@
   <table>
     <tr><th>Dial</th><th>Values</th><th>What it answers</th></tr>
     <tr>
-      <td><strong>Assistance</strong></td>
-      <td><code>none</code> · <code>review</code> · <code>heavy</code></td>
-      <td>How much does AI help with the work of this step?</td>
+      <td><strong>Driver</strong></td>
+      <td><code>human</code> · <code>pair</code> · <code>agent</code></td>
+      <td>Who does the work of this step &mdash; a person, a person and an agent together, or an agent?</td>
     </tr>
     <tr>
-      <td><strong>Automation</strong></td>
-      <td><code>human_approve</code> · <code>machine_advance</code></td>
-      <td>Who moves this step forward — a human or the machine?</td>
+      <td><strong>Advance</strong></td>
+      <td><code>human</code> · <code>auto</code></td>
+      <td>Who moves this step forward &mdash; a person or the machine?</td>
     </tr>
   </table>
-  <p>Keeping the dials separate lets you say “heavy AI help, but a human must approve” — the exact setting
-  for the design steps. Every step starts at <code>human_approve</code>. The Shape steps and the final
+  <p>Each dial is written under two names while the rename settles, and the OLDER one is still the one the
+  engine reads: <code>driver</code> beside <code>assistance</code> (<code>human</code>=<code>none</code>,
+  <code>pair</code>=<code>review</code>, <code>agent</code>=<code>heavy</code>) and <code>advance</code> beside
+  <code>automation</code> (<code>human</code>=<code>human_approve</code>, <code>auto</code>=<code>machine_advance</code>).
+  <code>yad migrate</code> adds the new names to an existing project.</p>
+  <p>Keeping the dials separate lets you say &ldquo;an agent does the drafting, but a person must approve&rdquo; &mdash; the exact
+  setting for the design steps. Every step starts at <code>advance: human</code>. The Shape steps and the final
   engineer review are <strong>locked there permanently</strong>.</p>
 </section>
 
@@ -379,7 +384,7 @@
       <div class="flow-v">
         <div class="node"><strong>yad-run</strong><small>drives Build on each step’s automation dial, recording every run in <code>trust-log.json</code></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>Kill switch</strong><small><code>yad-run action: kill</code> → everything back to <code>human_approve</code> instantly</small></div>
+        <div class="node plain"><strong>Kill switch</strong><small><code>yad-run action: kill</code> → everything back to <code>advance: human</code> instantly</small></div>
       </div>
     </div>
 
@@ -484,8 +489,8 @@ each code repo/
   <div class="term"><strong>Shape (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the Product: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside Build. Permanently human-approved.</div>
   <div class="term"><strong>Build / Build (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
-  <div class="term"><strong>Assistance dial</strong><span class="badge b-core">core</span><br>A per-step setting for how much AI helps with the work: <code>none</code>, <code>review</code> (AI checks human work), or <code>heavy</code> (AI does the drafting, human directs).</div>
-  <div class="term"><strong>Automation dial</strong><span class="badge b-core">core</span><br>A per-step setting for who advances the step: <code>human_approve</code> (default — a person clicks/records the approval) or <code>machine_advance</code> (the orchestrator moves on by itself). Shape steps and the engineer review can never be set to <code>machine_advance</code>.</div>
+  <div class="term"><strong>Driver dial</strong><span class="badge b-core">core</span><br>A per-step setting for who does the work: <code>human</code> (no AI), <code>pair</code> (a person and an agent together), or <code>agent</code> (the agent drafts, the person directs). Older name in the files: <code>assistance</code> &mdash; <code>none</code>, <code>review</code>, <code>heavy</code>.</div>
+  <div class="term"><strong>Advance dial</strong><span class="badge b-core">core</span><br>A per-step setting for who moves the step forward: <code>human</code> (default &mdash; a person records the approval) or <code>auto</code> (the orchestrator moves on by itself). Older name in the files: <code>automation</code> &mdash; <code>human_approve</code>, <code>machine_advance</code>. Shape steps and the engineer review can never be set to <code>advance: auto</code>.</div>
   <div class="term"><strong>End-first automation</strong><span class="badge b-core">core</span><br>The rule for <em>which</em> steps get automated first: start from the safe end (checks, implement — a mistake there is one revert, caught by gates) and move toward the valuable end (design decisions), which is never automated at all.</div>
   <div class="term"><strong>Epic</strong><span class="badge b-core">core</span><br>One feature, described well: the problem, the goal, the scope. The unit Shape works on. Gets a stable ID like <code>EP-checkout</code>.</div>
   <div class="term"><strong>Story (user story)</strong><span class="badge b-core">core</span><br>A slice of an epic small enough to build and review on its own. Each story is <em>repo-tagged</em> — it lists which code repos must implement it (e.g. <code>repos: [backend, mobile]</code>). ID: <code>EP-&lt;slug&gt;-S01</code>.</div>
@@ -557,15 +562,15 @@ each code repo/
   <div class="term"><strong>Do-not-touch zones</strong><span class="badge b-build">build</span><br>Parts of an existing codebase marked off-limits to AI changes — part of the setup when adopting the workflow on a brownfield project.</div>
 
   <h3>Automation &amp; trust</h3>
-  <div class="term"><strong>Orchestrator (<code>yad-run</code>)</strong><span class="badge b-auto">automation</span><br>The engine that drives a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: on <code>machine_advance</code> it advances alone; on <code>human_approve</code> it stops; on any failure, scope overrun, or contract-surface touch it <strong>halts and pulls in a human</strong>. It always stops at the engineer review.</div>
-  <div class="term"><strong>Earned automation</strong><span class="badge b-auto">automation</span><br>The principle that no step is automated by promise — only by evidence. A step may be flipped to <code>machine_advance</code> only after its trust record clears the threshold, and the flip is refused otherwise.</div>
+  <div class="term"><strong>Orchestrator (<code>yad-run</code>)</strong><span class="badge b-auto">automation</span><br>The engine that drives a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: on <code>advance: auto</code> it advances alone; on <code>advance: human</code> it stops; on any failure, scope overrun, or contract-surface touch it <strong>halts and pulls in a human</strong>. It always stops at the engineer review.</div>
+  <div class="term"><strong>Earned automation</strong><span class="badge b-auto">automation</span><br>The principle that no step is automated by promise — only by evidence. A step may be flipped to <code>advance: auto</code> only after its trust record clears the threshold, and the flip is refused otherwise.</div>
   <div class="term"><strong>Trust log (<code>trust-log.json</code>)</strong><span class="badge b-auto">automation</span><br>The evidence base: every orchestrated run’s verdict is recorded here. This is what justifies (or blocks) flipping a step’s dial. Written <strong>shard-then-fold</strong> (one shard file per entry, so parallel writers never conflict); <code>yad tidy up</code> folds a shipped story's shards back into the single folded file.</div>
   <div class="term"><strong>Checkpoint (<code>yad checkpoint</code>)</strong><span class="badge b-auto">automation</span><br>Commits the machine-written Build ledgers — <code>trust-log.json</code>, <code>build-log.json</code>, <code>build-state/&lt;story&gt;.json</code> — plus any story <code>status:</code> flip (→ in-build/shipped) now backed by a <code>build-log</code> ship (#112) — as one <code>chore(hub)</code> audit-trail commit so no human hand-commits them. The Build analogue of the Shape <code>yad gate ci</code> sync: it stages only those ledgers + ship-backed story flips by an explicit allowlist (never a Shape gate file, so <code>ledger-guard</code> never trips) and commits only on the default branch. Carrying the story flip keeps the artifact from drifting from <code>build-log.json</code>, so no operator falls back to a raw git-to-main push. Called by <code>yad-run</code> each loop iteration and by <code>yad-engineer-review</code> after recording the ship.</div>
   <div class="term"><strong>Tidy up (<code>yad tidy up</code>)</strong><span class="badge b-auto">automation</span><br>Folds a <strong>shipped</strong> story's finished <code>trust-log</code>/<code>build-log</code> <strong>shards</strong> back into the single folded ledger file, as one <code>chore(hub)</code> commit — the manual "pack it up" companion to the shard-then-fold storage, and the analogue of loose git objects → <code>git gc</code>. Concurrent Build writers each write their own shard file so parallel stories never conflict; readers union the folded file + loose shards, and <code>tidy up</code> is the on-demand compaction. Default branch only, <code>--push</code> to push; a no-op when nothing is foldable.</div>
   <div class="term"><strong>Trust threshold</strong><span class="badge b-auto">automation</span><br>The bar a step must clear to earn automation — by default at least 5 runs with ≥80% “approved-unchanged” (configurable in <code>config.yaml</code>).</div>
   <div class="term"><strong>Run verdicts</strong><span class="badge b-auto">automation</span><br>How each engineer review scores an automated run: <code>approved-unchanged</code> (merged exactly as authored — the strongest signal), <code>approved-with-edits</code> (a human fixed it first), <code>rejected</code> (failed).</div>
-  <div class="term"><strong>Kill switch</strong><span class="badge b-auto">automation</span><br><code>yad-run action: kill</code> — one move that forces <em>every</em> step system-wide back to <code>human_approve</code> instantly, no code change needed. <code>unkill</code> restores earned automation. Automation is always reversible in one move.</div>
-  <div class="term"><strong>Locked steps</strong><span class="badge b-auto">automation</span><br>The steps that may <em>never</em> be set to <code>machine_advance</code>: all five Shape authoring steps, their reviews, and the engineer review. A Shape step advances only on a human act.</div>
+  <div class="term"><strong>Kill switch</strong><span class="badge b-auto">automation</span><br><code>yad-run action: kill</code> — one move that forces <em>every</em> step system-wide back to <code>advance: human</code> instantly, no code change needed. <code>unkill</code> restores earned automation. Automation is always reversible in one move.</div>
+  <div class="term"><strong>Locked steps</strong><span class="badge b-auto">automation</span><br>The steps that may <em>never</em> be set to <code>advance: auto</code>: all five Shape authoring steps, their reviews, and the engineer review. A Shape step advances only on a human act.</div>
   <div class="term"><strong>Fleet roll-up</strong><span class="badge b-auto">automation</span><br>The cross-epic summary <code>yad-status</code> prints: where every epic stands, which steps are “earned but still manual” (nudge cost), at a glance.</div>
 
   <h3>Tools the workflow builds on</h3>
@@ -655,13 +660,13 @@ each code repo/
     <p><strong>What it means:</strong> an existing codebase and a team adopting AI for the first time.
     Trust must be built before AI touches anything important.</p>
     <p><strong>Setup differences:</strong> same wiring as Type 2, but <strong>start AI on safe tasks only</strong>
-    — tests, docs, refactors — with every dial at <code>human_approve</code>. Run the <strong>backfill step
+    — tests, docs, refactors — with every dial at <code>advance: human</code>. Run the <strong>backfill step
     before any new feature touches old code</strong>. Let automation be earned slowly through the trust log,
     exactly as the end-first rule prescribes.</p>
   </div>
   <div class="diagram">
     <div class="flow-v">
-      <div class="node plain"><strong>Setup</strong><small>install skills · wire + connect repos · everything at <code>human_approve</code> · AI assistance limited to safe tasks (tests, docs, refactors)</small></div>
+      <div class="node plain"><strong>Setup</strong><small>install skills · wire + connect repos · everything at <code>advance: human</code> · AI assistance limited to safe tasks (tests, docs, refactors)</small></div>
       <div class="arrow-v">▼</div>
       <div class="node gate"><strong>Backfill first</strong><small>before new features touch old code, produce human-verified specs for the features they touch</small></div>
       <div class="arrow-v">▼</div>
@@ -713,7 +718,7 @@ each code repo/
     <tr><td>Spec-link check</td><td>On from day one</td><td><strong>Add it</strong> + mark do-not-touch zones</td><td>Add with the rest of the wiring</td></tr>
     <tr><td>Impeccable order (UI)</td><td><code>craft</code> → <code>extract</code></td><td><code>document</code> → <code>extract</code> → <code>craft</code></td><td><code>document</code> → <code>extract</code> → <code>craft</code></td></tr>
     <tr><td>AI scope at start</td><td>Full (specs from the start)</td><td>Full, minus do-not-touch zones</td><td><strong>Safe tasks only</strong> (tests, docs, refactors)</td></tr>
-    <tr><td>Automation pace</td><td colspan="3">Identical for all: every dial starts <code>human_approve</code>; Build steps earn <code>machine_advance</code> via the trust log; Shape steps + engineer review locked human forever.</td></tr>
+    <tr><td>Automation pace</td><td colspan="3">Identical for all: every dial starts <code>advance: human</code>; Build steps earn <code>advance: auto</code> via the trust log; Shape steps + engineer review locked human forever.</td></tr>
   </table>
 </section>
 
@@ -998,11 +1003,11 @@ yad-engineer-review … action: ship        # merge + record in build-log.json</
 
   <div class="skillcard" id="sk-run">
     <h4><code>yad-run</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The orchestrator that makes automation real. It walks a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: <code>machine_advance</code> → it proceeds alone; <code>human_approve</code> → it stops for you. Any failure, scope overrun, or contract-surface touch <strong>halts and pulls in a human</strong>, and it always stops at the engineer review. Every run lands in the trust log. It also flips dials (refusing without enough evidence) and owns the kill switch.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The orchestrator that makes automation real. It walks a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: <code>advance: auto</code> → it proceeds alone; <code>advance: human</code> → it stops for you. Any failure, scope overrun, or contract-surface touch <strong>halts and pulls in a human</strong>, and it always stops at the engineer review. Every run lands in the trust log. It also flips dials (refusing without enough evidence) and owns the kill switch.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-run story: EP-checkout-S02 repo: backend        # drive Build on the dials
-yad-run action: set-dial step: checks to: machine_advance    # earn automation (needs trust evidence)
-yad-run action: set-dial step: checks to: human_approve      # revert — always allowed
+yad-run action: set-dial step: checks to: auto            # earn automation (needs trust evidence)
+yad-run action: set-dial step: checks to: human          # revert &mdash; always allowed
 yad-run action: kill      # everything back to human, system-wide, instantly
 yad-run action: unkill    # restore earned automation</code></pre>
     <div class="row"><span class="lbl lbl-when">When</span> Entirely optional — ignore it at first; every step is human-approved by default. Reach for it once a Build step’s trust record clears the threshold (default: ≥5 runs, ≥80% approved-unchanged). Use <code>kill</code> the moment anything feels wrong.</div>

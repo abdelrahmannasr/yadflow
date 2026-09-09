@@ -2,7 +2,7 @@
 
 This is the detail behind `SKILL.md`. It restates the orchestration so the skill is self-contained,
 and pins down the two judgments the skill makes: **what trust verdict to record** and **when a step
-has earned `machine_advance`**.
+has earned `advance: auto`**.
 
 ## The Build steps
 
@@ -37,9 +37,9 @@ while step is a Build step (not engineer-review):
 
     if result is a HALT (failed / scope overrun / contract touch / ambiguous):
         bs.step.status = "blocked"; persist; checkpoint; STOP and report the human action needed
-    elif eff == "machine_advance":
+    elif eff == "auto":
         bs.step.status = "done"; advance bs.currentStep to next; persist; checkpoint; continue  # Step B advance
-    else:  # human_approve
+    else:  # "human"
         bs.step.status = "done"; persist; checkpoint; STOP and report "waiting for human at <next>"
 
 # reached engineer-review: always stop, hand to yad-engineer-review (human gate, finalizes the verdict)
@@ -66,10 +66,12 @@ commit inside a future PR range would fail `verified-commits` and strand the PR)
 ## Effective dial (kill switch & locks always win)
 
 ```
-eff = bs.step.automation                 # human_approve | machine_advance
-if cfg.kill_switch == true:        eff = "human_approve"
-if bs.step.locked == true:         eff = "human_approve"
-if step in cfg.locked_steps:       eff = "human_approve"
+# The step carries the dial under EITHER spelling while the shape-4 rename settles, and the
+# OLD name is the one that wins. `human_approve` -> "human", `machine_advance` -> "auto".
+eff = bs.step.automation ? map(bs.step.automation) : bs.step.advance    # "human" | "auto"
+if cfg.kill_switch == true:        eff = "human"
+if bs.step.locked == true:         eff = "human"
+if step in cfg.locked_steps:       eff = "human"
 ```
 
 So a kill switch, a `locked` flag, or membership in `locked_steps` forces a stop no matter what the
@@ -111,9 +113,9 @@ yet trustworthy enough to automate); any failure or boundary breach is `rejected
 
 ## The trust threshold (when a step is earned)
 
-A step is a **candidate** for `machine_advance` only when its trust evidence clears
+A step is a **candidate** for `advance: auto` only when its trust evidence clears
 `config.yaml` `automation.trust_threshold`. `set-dial` enforces this predicate before flipping a step
-to `machine_advance`:
+to `advance: auto`:
 
 ```
 # read the ledger by UNION: the folded trust-log.json `runs` array PLUS every loose trust-log/ shard
@@ -129,7 +131,7 @@ earned = runs >= trust_threshold.min_runs
 Defaults: `min_runs: 5`, `min_approved_unchanged: 0.8`. If `earned` is false, `set-dial` refuses and
 reports `runs`, the `unchanged/runs` fraction, and how far short of the bar it is.
 
-Reverting (`to: human_approve`) is never gated — automation must be reversible in one move.
+Reverting (`to: human`) is never gated — automation must be reversible in one move.
 
 ## What stays human, always
 

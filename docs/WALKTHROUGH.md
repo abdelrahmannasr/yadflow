@@ -10,18 +10,23 @@ version see [`TEAM-GUIDE.md`](../TEAM-GUIDE.md).
 
 ## The two dials (per step)
 
-- **assistance:** `none` | `review` | `heavy` — how much AI helps.
-- **automation:** `human_approve` | `machine_advance` — who advances the step.
+- **driver:** `human` | `pair` | `agent` — who does the work.
+- **advance:** `human` | `auto` — who moves the step forward.
 
-Defaults: every step starts `human_approve`. The four **front** authoring steps (epic, architecture,
-UI, stories) and their reviews are **locked** — they may not be set to `machine_advance` in this
+Each dial is written under two names while the shape-4 rename settles, and the OLDER one is still
+the one the engine reads: `driver` beside `assistance` (`human`/`pair`/`agent` = `none`/`review`/`heavy`),
+and `advance` beside `automation` (`human`/`auto` = `human_approve`/`machine_advance`). Run `yad migrate`
+to add the new names to an existing project — see `migrations/shape-4.md`.
+
+Defaults: every step starts `advance: human`. The four **front** authoring steps (epic, architecture,
+UI, stories) and their reviews are **locked** — they may not be set to `advance: auto` in this
 version. A Shape step advances only on a **human act** — recording an approval and `advance`, or
 merging the approved, fully-resolved review PR — never on a machine.
 
-As of **Phase 4a** the `automation` dial is no longer inert: the orchestrator `yad-run` reads it and,
-for the safe **back** steps, advances on its own when a step is set to `machine_advance` (and has
+As of **Phase 4a** the `advance` dial is no longer inert: the orchestrator `yad-run` reads it and,
+for the safe **back** steps, advances on its own when a step is set to `advance: auto` (and has
 *earned* it — see "Run Build on the dial" below). The engineer review and all five Shape
-steps stay `human_approve` forever.
+steps stay `advance: human` forever.
 
 ## 0 — One-time setup
 
@@ -120,7 +125,7 @@ Build by hand"** below.
 ## C — Automation (optional, earned over time)
 
 15. After a Build step accumulates trust evidence, earn it:
-    `yad-run action: set-dial step:<step> to: machine_advance` (refused if evidence is short or for a
+    `yad-run action: set-dial step:<step> to: auto` (refused if evidence is short or for a
     Shape step / the engineer review).
 16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
     earned steps and stops for a human otherwise, always halting at the engineer review. Each iteration
@@ -174,7 +179,7 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 ### Author steps
 
 1. **`yad-epic`** (state 1) → `epic.md`; assigns the stable `EP-<slug>` ID; seeds
-   `.sdlc/state.json` (all `human_approve`, Shape steps locked) + empty `.sdlc/approvals.json`.
+   `.sdlc/state.json` (all `advance: human`, Shape steps locked) + empty `.sdlc/approvals.json`.
 2. **`yad-architecture`** (state 3) → `architecture.md` + the locked `contract.md`; writes the
    contract-surface SHA-256 to `.sdlc/contract-lock.json`.
 3. **`yad-ui`** (state 5) → `ui-design.md` + `DESIGN.md` (drives Impeccable
@@ -304,7 +309,7 @@ with their dials, per repo) and `trust-log.json` (every run's verdict). See
 `docs/phase-4-build-plan.md` and `docs/phase-4b-build-plan.md`.
 
 - **Drive a story's Build:** `yad-run {story} {repo}` walks `spec → tasks → implement → checks`,
-  reading each step's dial. On `machine_advance` it advances on its own; on `human_approve` it stops
+  reading each step's dial. On `advance: auto` it advances on its own; on `advance: human` it stops
   for a human; on any FAIL, scope overrun, or contract-surface touch it **halts and pulls in a human**.
   It always stops at the engineer review (`yad-engineer-review`), which is never automated.
 - **Read the trust log:** `yad-status {epic}` shows each Build step's dial, status, and trust record —
@@ -313,15 +318,15 @@ with their dials, per repo) and `trust-log.json` (every run's verdict). See
   (a diff merged as-authored is `approved-unchanged`; one edited first is `approved-with-edits`; a
   failed one is `rejected`).
 - **Earn automation for a step:** once a step's trust record clears the threshold,
-  `yad-run action: set-dial step: checks to: machine_advance` flips it. The setter **refuses** if the
+  `yad-run action: set-dial step: checks to: auto` flips it. The setter **refuses** if the
   evidence is short, or for any Shape step / the engineer review. Reverting
-  (`to: human_approve`) is always allowed — automation is reversible in one move.
-- **Kill switch:** `yad-run action: kill` forces every step back to `human_approve` system-wide
+  (`to: human`) is always allowed — automation is reversible in one move.
+- **Kill switch:** `yad-run action: kill` forces every step back to `advance: human` system-wide
   instantly (no code change, no per-step edits); `yad-run action: unkill` restores earned automation.
 
 **Earned so far:** `checks` (Step B, Phase 4a) and `implement` (Step D, Phase 4b — the
 `implement → check` hand-off; the scope/contract halts and the engineer review still gate the merge).
-`tasks` (Step C) and `spec` have their dials + trust hooks but stay `human_approve` until their own
+`tasks` (Step C) and `spec` have their dials + trust hooks but stay `advance: human` until their own
 runs clear the threshold — there is no historical signal to seed them from, so they are earned only on
 genuine runs (never fabricated). See `docs/phase-4b-build-plan.md`.
 
@@ -330,7 +335,7 @@ genuine runs (never fabricated). See `docs/phase-4b-build-plan.md`.
 **Phase 4b Step C** (the remaining automation): `tasks` generation advance — gated until real
 `tasks`/`spec` trust evidence accrues. The hook that records that evidence is built; the dial flips
 only once the threshold is genuinely met. The scope guard and contract-surface halt always override
-the dial, and **Shape steps and the engineer review stay `human_approve`, permanently.**
+the dial, and **Shape steps and the engineer review stay `advance: human`, permanently.**
 
 **Phase 5 (conditional):** the optional service layer (watch repos, run earned-automation steps
 unattended, read-only dashboards), built only when the CLI genuinely can't keep up, with git remaining

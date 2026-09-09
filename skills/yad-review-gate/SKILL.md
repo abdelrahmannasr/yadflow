@@ -156,7 +156,7 @@ gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-
 
 ### Step 3 — Gate predicate (the only path that advances)
 The step may advance **iff ALL hold**:
-1. `automation` is `human_approve` (it always is for Shape steps) and the required approvals exist:
+1. the advance dial is `human` (`automation: human_approve` — it always is for Shape steps) and the required approvals exist:
    ≥1 `owner` AND ≥`review_gate.default_reviewers` (1) distinct non-owner `reviewer`, AND — if the
    step is escalated — ≥1 `domain-owner` for each touched domain.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
@@ -216,7 +216,7 @@ write path.
 ### Hard rules (build plan §1, §5)
 - **The merge click is the human approval act.** A Shape step advances only when a human merges the
   approved, fully-resolved review PR — there is no machine-driven advance. A step `locked: true` may not
-  be switched to `machine_advance`; refuse such a request.
+  be switched to `advance: auto`; refuse such a request.
 - **Approvals are revoked when the reviewed artifact changes.** `sync` re-hashes the artifact (the locked
   contract surface for architecture) and drops any approval bound to a stale hash, so a reviewer must
   re-approve the new content. Unresolved comments / `CHANGES_REQUESTED` hold the gate `in_review`.

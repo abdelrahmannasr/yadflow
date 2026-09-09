@@ -31,7 +31,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#2471a3",
     position: { x: 28, y: 14 },
     description:
-      "Per-epic state machine: currentStep, each step's assistance/automation dials, and shape_steps_locked.",
+      "Per-epic state machine: currentStep, each step's driver/advance dials (older names: assistance/automation), and shape_steps_locked.",
   },
   {
     id: "approvals-json",

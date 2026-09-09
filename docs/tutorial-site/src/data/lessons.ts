@@ -675,14 +675,14 @@ export const MODULES: Module[] = [
         title: 'The two dials',
         duration: '5 min',
         level: 'advanced',
-        summary: 'assistance = how much AI helps; automation = who advances.',
+        summary: 'driver = who does the work; advance = who moves it forward.',
         body: [
           { kind: 'p', text: 'Each step has two independent dials:' },
           { kind: 'list', items: [
-            '**assistance** — none | review | heavy — how much the AI helps.',
-            '**automation** — human_approve | machine_advance — who advances the step.',
+            '**driver** — human | pair | agent — who does the work. (Older name: `assistance` — none | review | heavy. Both are written; the old one is still the one read.)',
+            '**advance** — human | auto — who moves the step forward. (Older name: `automation` — human_approve | machine_advance.)',
           ] },
-          { kind: 'p', text: 'Every step starts at `human_approve`. The Shape authoring steps and their reviews are **locked** — they may never be set to machine_advance. The engineer review is locked too.' },
+          { kind: 'p', text: 'Every step starts at `advance: human`. The Shape authoring steps and their reviews are **locked** — they may never be set to `advance: auto`. The engineer review is locked too.' },
         ],
         quiz: [
           {
@@ -694,7 +694,7 @@ export const MODULES: Module[] = [
               'The font of the docs site',
             ],
             answer: 1,
-            explain: 'assistance = how much AI helps; automation = who advances. Shape steps and the engineer review stay human_approve.',
+            explain: 'driver = who does the work; advance = who moves it forward. Shape steps and the engineer review stay `advance: human`.',
           },
         ],
       },
@@ -706,17 +706,17 @@ export const MODULES: Module[] = [
         summary: 'A step earns automation with evidence; revert in one move.',
         body: [
           { kind: 'p', text: 'Automation is **earned with evidence and reversible in one move**. The orchestrator `yad-run` drives a story\'s Build, recording every run\'s verdict in a trust log. A diff merged as authored is `approved-unchanged`; one edited first is `approved-with-edits`; a failed one is `rejected`.' },
-          { kind: 'p', text: 'Once a step\'s trust record clears the threshold (default ≥5 runs and ≥80% unchanged), you can flip it to machine_advance. The setter refuses if the evidence is short, or for any Shape step or the engineer review.' },
-          { kind: 'callout', tone: 'key', text: 'The kill switch is instant: `yad-run action: kill` forces every step back to human_approve system-wide. `action: unkill` restores earned automation. No code change, no per-step edits.' },
+          { kind: 'p', text: 'Once a step\'s trust record clears the threshold (default ≥5 runs and ≥80% unchanged), you can flip it to `advance: auto`. The setter refuses if the evidence is short, or for any Shape step or the engineer review.' },
+          { kind: 'callout', tone: 'key', text: 'The kill switch is instant: `yad-run action: kill` forces every step back to `advance: human` system-wide. `action: unkill` restores earned automation. No code change, no per-step edits.' },
         ],
         commands: [
           { cmd: 'yad-run story:<id> repo:<repo>', note: 'drive Build on the dials' },
-          { cmd: 'yad-run action: set-dial step: checks to: machine_advance', note: 'flip an earned step' },
+          { cmd: 'yad-run action: set-dial step: checks to: auto', note: 'flip an earned step' },
           { cmd: 'yad-run action: kill', note: 'everything → manual, instantly' },
         ],
         quiz: [
           {
-            q: 'Can you set a step to machine_advance whenever you like?',
+            q: 'Can you set a step to `advance: auto` whenever you like?',
             options: [
               'Yes, any step at any time',
               'Only once its trust record clears the threshold — and never for Shape steps or the engineer review',
@@ -724,7 +724,7 @@ export const MODULES: Module[] = [
               'Only by editing the database',
             ],
             answer: 1,
-            explain: 'A step must earn automation with trust evidence; Shape steps and the engineer review are permanently locked to human_approve.',
+            explain: 'A step must earn automation with trust evidence; Shape steps and the engineer review are permanently locked to `advance: human`.',
           },
         ],
       },

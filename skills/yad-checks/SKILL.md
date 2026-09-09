@@ -224,8 +224,8 @@ human engineer review (Step E) still own the merge. This skill never edits the e
 - **Run standalone** (the Phase 3 default): **stop** here. A clean pass does not advance anything; a
   human takes the next step.
 - **Run by the orchestrator** (`yad-run`, Phase 4): this skill still just reports PASS/FAIL — the
-  *advance decision* is the orchestrator's, read from the `checks` step's `automation` dial. On a clean
-  pass with `checks` earned to `machine_advance`, `yad-run` advances to `engineer-review` on its own;
+  *advance decision* is the orchestrator's, read from the `checks` step's advance dial. On a clean
+  pass with `checks` earned to `advance: auto`, `yad-run` advances to `engineer-review` on its own;
   on any FAIL it halts and pulls in a human (build plan §B). **What the gates check is unchanged** —
   only who decides to proceed after a clean pass.
 
@@ -236,7 +236,7 @@ human engineer review (Step E) still own the merge. This skill never edits the e
   to the architecture gate; only an updated, re-locked contract + `Contract-Change: yes` may pass.
 - **Tests must exercise behavior.** build/test/lint is not satisfied by empty or trivial tests.
 - **The gate never advances itself.** A FAIL always halts. A clean PASS advances only when the
-  orchestrator's `checks` dial is `machine_advance` (earned) — and only as far as the engineer review,
+  orchestrator's `checks` dial is `advance: auto` (earned) — and only as far as the engineer review,
   which is always human. Standalone, the gate still stops and the human owns the merge.
 
 ## Reference

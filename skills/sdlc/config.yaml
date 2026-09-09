@@ -40,7 +40,7 @@ defaults:
   advance: human              # human | auto                  (new name, shape 4)
   # Shape steps (discovery [optional front-zero], analysis [optional], epic, architecture,
   # ui-design [optional — skippable N/A for UI-less epics via `yad skip <epic> ui-design --reason "<why>"`],
-  # stories, test-cases) are locked to human_approve and may NOT be set to machine_advance in this
+  # stories, test-cases) are locked to `advance: human` and may NOT be set to `advance: auto` in this
   # version (build plan §1, §8.7).
   shape_steps_locked: true
   # Each Shape authoring step opens its own branch at the start of the step (the <step> is the step id:
@@ -64,7 +64,7 @@ review_gate:
   # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
   # AUTO-ADVANCES on merge, once (a) the reviewer rule is met, (b) every comment thread is resolved,
   # and (c) the review PR/MR is merged. The merge is the human approval act, so Shape steps still never
-  # machine_advance. The file ledger stays the source of truth; no platform / no gh|glab => local.
+  # `advance: auto`. The file ledger stays the source of truth; no platform / no gh|glab => local.
   advance_on: merge             # merge of the approved, fully-resolved review PR advances the step
   revoke_on: artifact-change    # re-hash the artifact (contract surface for architecture); a changed
                                 # hash drops the bound approvals so reviewers re-approve. NOT per-commit.
@@ -284,17 +284,17 @@ automation:
   # The only steps that MAY be automated, safest-end first (phase-4-build-plan.md build order).
   # Phase 4a ships the engine + earns `checks` (Step B). `tasks`/`implement` advance are Phase 4b.
   back_steps: [spec, tasks, implement, checks]
-  default: human_approve            # every Build step starts manual; machine_advance must be earned
+  default: human_approve            # = `advance: human`. Every Build step starts manual; `auto` must be earned
   # A Build step is a CANDIDATE for machine_advance only once its trust-log slice clears this bar.
   # "It seems fine" is not evidence (phase-4-build-plan.md §"Explicitly NOT").
   trust_threshold:
     min_runs: 5                     # at least this many recorded runs at the step
     min_approved_unchanged: 0.8     # >= this fraction "approved-unchanged" over those runs
-  # Hard lock — the dial-setter REFUSES machine_advance for these, regardless of trust evidence.
+  # Hard lock — the dial-setter REFUSES `advance: auto` for these, regardless of trust evidence.
   # The Shape authoring steps (already locked:true in state.json; analysis is optional) + the human
   # merge gate.
   locked_steps: [discovery, analysis, epic, architecture, ui-design, stories, test-cases, engineer-review]
-  # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to human_approve
+  # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to `advance: human`
   # system-wide, no per-step edits. One line, instantly reversible. Toggle via `yad-run action: kill`.
   kill_switch: false
 

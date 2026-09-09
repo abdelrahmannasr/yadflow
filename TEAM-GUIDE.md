@@ -108,7 +108,7 @@ flowchart TD
       direction TB
       run["yad-run<br/>automation dial + trust-log.json"]:::earns
       cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state (chore(hub))"]
-      kill["kill switch → all human_approve"]
+      kill["kill switch → all advance: human"]
       run --> cpt
       run --- kill
     end
