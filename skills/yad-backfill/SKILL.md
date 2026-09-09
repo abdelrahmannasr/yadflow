@@ -90,7 +90,11 @@ thread off it, `promote` is what makes that anchor real — run it once the feat
   - **`epic.md`:** set `verified: true`, **remove** the `stub:` marker, and add a `backfill:` block linking
     the approved spec, e.g. `backfill: { spec: specs/backfill/<feature>/spec.md, promoted: <YYYY-MM-DD> }`.
   - **`state.json`:** **remove** the top-level `kind: "stub"`, and move `currentStep` off the
-    `backfill-pending` sentinel (per the promote flavour below).
+    `backfill-pending` sentinel (per the promote flavour below). **Leave the top-level `type` exactly
+    as it is.** `kind` and `type` are two different things in this file: `kind: "stub"` is the
+    lifecycle marker you are clearing, and `type: "feature"` is the work-item type, which a promoted
+    stub still has. Removing it would make `yad doctor` report the ledger as disagreeing with
+    `epic.md`.
 - **Light promote (default):** the feature's documentation lives in the approved backfill spec — do NOT
   wake the Shape chain. Set `state.json` `currentStep: "backfill-done"` (a terminal sentinel, like
   `discovery-done`): the epic is now a real, verified anchor and its later evolution threads normally with
