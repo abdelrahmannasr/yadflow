@@ -24,7 +24,7 @@ import {
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
-import { isValidEpicId } from './epic-state.mjs';
+import { isValidEpicId, stampWorkItemType } from './epic-state.mjs';
 
 // ---- the migration list --------------------------------------------------------------------
 // Ordered steps, each moving a file from one shape to the next. A step is applied to a file only when
@@ -151,6 +151,35 @@ export const MIGRATIONS = [
       return { ...obj, repos };
     },
   },
+  {
+    from: 4,
+    to: 5,
+    title: "every epic's `state.json` records its work-item `type`",
+    // The work item's type — feature | change | defect | hotfix | chore — is authored in `epic.md`
+    // frontmatter. Shape 5 copies it into the epic's `state.json`, which is the file CI writes and
+    // the gates read.
+    //
+    // WHERE THE VALUE COMES FROM is the whole point of this step, and it is why it needs `ctx.root`:
+    // it is READ from the sibling `epic.md`, never defaulted. Stamping `feature` on every epic would
+    // silently reclassify every defect and change-epic in the project as a parent-free genesis, and
+    // the lineage gate would stop asking them for a parent — an upgrade nobody asked for, quietly
+    // dropping a safety check. An epic with no `epic.md` gets no `type` at all (see
+    // stampWorkItemType): that is `EP-discovery`, which is not a work item on the ladder.
+    //
+    // `epic.md` itself is NOT rewritten here. It is markdown, hand-authored by people and by the
+    // skills, and `kind:` in it is still the name that counts for this whole major — so there is
+    // nothing an upgrade has to change for an existing project to keep reading correctly. The skills
+    // write `type:` beside `kind:` on everything they author from here on.
+    //
+    // `state.json` on a VERIFIED Product is `ci-owned` and is skipped by this command, the same gap
+    // shape 4 had. What closes it is that the gate's own write goes through `writeState`, which calls
+    // the same stamper this step does.
+    apply: (obj, ctx) => {
+      if (!isEpicStatePath(ctx?.rel) || !ctx?.root) return obj;
+      // `epics/<id>/.sdlc/state.json` -> `<root>/epics/<id>`
+      return stampWorkItemType(obj, path.join(ctx.root, path.dirname(path.dirname(ctx.rel))));
+    },
+  },
 ];
 
 // A review step must never be told it may advance on its own. `type` is what the Shape chain uses;
@@ -194,7 +223,9 @@ function readRaw(file) {
 const shapeOf = (v) => (isPlainObject(v) && Number.isInteger(v.schemaVersion) ? v.schemaVersion : 1);
 
 // Walk the migration list once. Returns the migrated object, the shape it ended on, and which steps ran.
-// `ctx` is `{ base, rel }` — the file's basename and its project-relative path. A step that only
+// `ctx` is `{ base, rel, root }` — the file's basename, its project-relative path, and the project
+// root. A step that has to read a SIBLING file (the 4 -> 5 type copy reads the epic's own
+// `epic.md`) needs the root to find it; the path alone is relative and cannot be opened. A step that only
 // concerns one kind of file (the 1 → 2 Product switch below is the first) needs to know which file it is
 // holding; every other step ignores the argument. Passing it is what keeps such a step from having
 // to guess from the object's own fields, which would mean a Product-shaped ledger got silently rewritten.
@@ -377,7 +408,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
       rows.push({ file: rel, from, to: from, action: 'ci-owned', changes: false, stamped: isStamped });
       continue;
     }
-    const { obj, version, applied } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel });
+    const { obj, version, applied } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel, root });
     const next = serialize(stamped(obj, version));
     const current = fs.readFileSync(file, 'utf8');
     let changes = next !== current;
@@ -481,7 +512,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       // The SAME ctx the preview used. Passing it in one place and not the other is how a preview
       // promises one thing and an apply writes another — the single worst failure this command can
       // have, because the preview is the reason anyone trusts it enough to run --apply.
-      const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel: row.file });
+      const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(file), rel: row.file, root });
       // The product config is the one file whose NAME changed (shape 3). Writing it through
       // `writeProductConfig` puts it under both names, which is what actually creates
       // `.sdlc/product.json` for an upgrading project. Everything else is an ordinary write.

@@ -6,7 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
-  isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, KIND_NOUN, kindNoun,
+  isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
+  workItemType, isGenesisType, WORK_ITEM_TYPES,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -288,14 +289,15 @@ test('backfillAnchorKind: one classifier drives nextAction + preconditionsMet �
   assert.match(preconditionsMet(corrupt, 'epic').reason, /stub \(backfill pending\)/);  // NOT "documented anchor"
 });
 
-test('kindNoun renders the human noun per kind and falls back to Epic', () => {
-  assert.equal(kindNoun('feature'), 'Epic');
-  assert.equal(kindNoun('change'), 'Change request');
-  assert.equal(kindNoun('defect'), 'Defect');   // a bug is a defect — same noun
-  assert.equal(kindNoun('hotfix'), 'Hotfix');
-  assert.equal(kindNoun(undefined), 'Epic');     // absent kind → Epic
-  assert.equal(kindNoun('nonsense'), 'Epic');    // unknown kind → Epic
-  assert.equal(KIND_NOUN.defect, 'Defect');
+test('typeNoun renders the human noun per work-item type and falls back to Epic', () => {
+  assert.equal(typeNoun('feature'), 'Epic');
+  assert.equal(typeNoun('change'), 'Change request');
+  assert.equal(typeNoun('defect'), 'Defect');   // a bug is a defect — same noun
+  assert.equal(typeNoun('hotfix'), 'Hotfix');
+  assert.equal(typeNoun('chore'), 'Chore');      // the fifth type, new in shape 5
+  assert.equal(typeNoun(undefined), 'Epic');     // absent type → Epic
+  assert.equal(typeNoun('nonsense'), 'Epic');    // unknown type → Epic
+  assert.equal(TYPE_NOUN.defect, 'Defect');
 });
 
 test('runThread renders each node with its kind noun, not the generic word "epic"', async () => {
@@ -307,14 +309,68 @@ test('runThread renders each node with its kind noun, not the generic word "epic
   assert.match(out, /EP-fix\s+Defect/);   // the defect node reads "Defect"
 });
 
-test('epicLineage defaults an un-migrated genesis epic to kind:feature', () => {
+test('epicLineage defaults an un-migrated genesis epic to type:feature', () => {
   const T = hub();
-  // No kind/parent/thread frontmatter at all.
+  // No kind/type/parent/thread frontmatter at all.
   const dir = path.join(T, 'epics', 'EP-legacy');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'epic.md'), '---\nid: EP-legacy\nrepos: [backend]\n---\n\n## Goal\nx\n');
   const lin = epicLineage(T, 'EP-legacy');
-  assert.equal(lin.kind, 'feature');
+  assert.equal(lin.type, 'feature');
   assert.equal(lin.parent, null);
   assert.deepEqual(resolveThread(T, 'EP-legacy').chain, ['EP-legacy']);
+});
+
+// ---- the work-item type (E21) --------------------------------------------------------------------
+
+test('workItemType reads the OLD name first — `kind:` still wins for this whole major', () => {
+  // The rename is staged: `type:` is written beside `kind:`, and `kind:` is the one that counts
+  // until the next major. If the new name won here, a repo that ran `yad migrate` but not
+  // `yad update` would have `lineage-check.sh` (which reads `kind:`) and the engine disagreeing
+  // about what a work item IS — and the gate would stop asking a change-epic for its parent.
+  assert.equal(workItemType({ kind: 'defect', type: 'feature' }), 'defect');
+  assert.equal(workItemType({ type: 'defect' }), 'defect', 'the new name alone is read');
+  assert.equal(workItemType({ kind: 'change' }), 'change', 'the old name alone is read');
+  assert.equal(workItemType({}), 'feature', 'nothing written at all is a genesis');
+  assert.equal(workItemType(), 'feature');
+});
+
+test('workItemType hands back a value it does not recognise instead of correcting it', () => {
+  // Quietly reading a typo as `feature` would make it parent-free, which drops the lineage gate on
+  // a work item that may well be a defect. Doctor reports the value; nothing here guesses.
+  assert.equal(workItemType({ kind: 'Defect' }), 'Defect');
+  assert.equal(workItemType({ kind: 'nonsense' }), 'nonsense');
+  assert.equal(workItemType({ kind: 42 }), 'feature', 'a non-string is not a type at all');
+});
+
+test('isGenesisType: feature and chore may stand alone, the other three may not', () => {
+  assert.equal(isGenesisType('feature'), true);
+  assert.equal(isGenesisType('chore'), true, 'upkeep often has no feature to hang off');
+  for (const t of ['change', 'defect', 'hotfix']) {
+    assert.equal(isGenesisType(t), false, `${t} is work ON something and must name it`);
+  }
+  assert.equal(isGenesisType(undefined), false);
+  assert.deepEqual(WORK_ITEM_TYPES, ['feature', 'change', 'defect', 'hotfix', 'chore']);
+});
+
+test('a parentless chore resolves as its own thread root', () => {
+  // The walk in resolveThread stops on "no parent", not on the type — so this already worked. The
+  // test pins it, because the alternative (stopping on `feature`) would strand every chore.
+  const T = hub();
+  writeEpic(T, 'EP-bump-deps', { kind: 'chore', status: 'draft', repos: ['backend'] });
+  const lin = epicLineage(T, 'EP-bump-deps');
+  assert.equal(lin.type, 'chore');
+  assert.equal(lin.parent, null);
+  const { rootId, chain, broken } = resolveThread(T, 'EP-bump-deps');
+  assert.equal(broken, null, 'a chore with no parent is not broken lineage');
+  assert.equal(rootId, 'EP-bump-deps');
+  assert.deepEqual(chain, ['EP-bump-deps']);
+});
+
+test('epicLineage reads `type:` when an epic.md carries only the new name', () => {
+  const T = hub();
+  writeEpic(T, 'EP-new', { type: 'defect', parent: 'EP-old', thread: 'EP-old', repos: ['backend'] });
+  writeEpic(T, 'EP-old', { type: 'feature', repos: ['backend'] });
+  assert.equal(epicLineage(T, 'EP-new').type, 'defect');
+  assert.equal(resolveThread(T, 'EP-new').rootId, 'EP-old');
 });

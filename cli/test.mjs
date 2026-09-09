@@ -5635,6 +5635,153 @@ test('doctor shape: each epic is reported separately, so drift can be located', 
   ]);
 });
 
+// ---- doctor: the work-item type mid-rename (E21) -------------------------------------------------
+
+// A project holding just epics — enough for typeChecks, which reads epic.md and state.json only.
+function typeProject(epics) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e21d-'));
+  for (const [id, { fm = '', state = null }] of Object.entries(epics)) {
+    const dir = path.join(T, 'epics', id);
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    if (fm !== null) fs.writeFileSync(path.join(dir, 'epic.md'), `---\nid: ${id}\n${fm}\n---\n\n## Goal\nx\n`);
+    if (state) fs.writeFileSync(path.join(dir, '.sdlc', 'state.json'), JSON.stringify(state, null, 2) + '\n');
+  }
+  return T;
+}
+async function typeChecksOn(epics) {
+  const { typeChecks } = await import('./doctor.mjs');
+  const T = typeProject(epics);
+  const checks = [];
+  try { typeChecks(checks, T); } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  return checks;
+}
+
+test('doctor type: a defect named only by the NEW key is a FAILURE, not a warning', async () => {
+  // This is the one case in the rename that can disarm a gate. `lineage-check.sh` is committed inside
+  // the user's repository and refreshed by `yad update` — a separate act from `yad migrate`, with no
+  // ordering between them. Its copy reads `kind:`. Finding none it defaults to `feature`, decides the
+  // epic is a parent-free genesis, and stops requiring the `parent:` a defect must have.
+  const checks = await typeChecksOn({
+    'EP-bug': { fm: 'type: defect\nparent: EP-root\nthread: EP-root', state: null },
+  });
+  const c = checks.find((x) => x.id === 'type:gate-blind');
+  assert.equal(c.status, 'fail');
+  assert.equal(c.section, 'shape');
+  assert.match(c.message, /EP-bug: `type: defect` with no `kind:`/);
+  assert.match(c.hint, /add `kind:` beside `type:`/);
+  assert.equal(checks.find((x) => x.id === 'type:new-only'), undefined, 'it is reported once, as the failure');
+});
+
+test('doctor type: the same half-made pair on a GENESIS type is only a warning', async () => {
+  // `feature` and `chore` are what an older reader defaults to anyway, so nothing is at stake.
+  const checks = await typeChecksOn({
+    'EP-a': { fm: 'type: feature' },
+    'EP-b': { fm: 'type: chore' },
+  });
+  assert.equal(checks.find((x) => x.id === 'type:gate-blind'), undefined);
+  assert.equal(checks.find((x) => x.id === 'type:new-only').status, 'warn');
+});
+
+test('doctor type: two names carrying two different values is reported, and the OLD one is read', async () => {
+  const checks = await typeChecksOn({
+    'EP-x': { fm: 'kind: defect\ntype: feature\nparent: EP-root\nthread: EP-root' },
+  });
+  const c = checks.find((x) => x.id === 'type:disagree');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /`kind: defect` but `type: feature`/);
+  assert.match(c.hint, /the OLD name \(`kind:`\) is the one being read/);
+  // …and it is not ALSO reported as unknown: the resolved value is `defect`, which is a real type.
+  assert.equal(checks.find((x) => x.id === 'type:unknown'), undefined);
+});
+
+test('doctor type: a ledger that disagrees with its epic.md is reported', async () => {
+  const checks = await typeChecksOn({
+    'EP-x': {
+      fm: 'kind: defect\ntype: defect\nparent: EP-root\nthread: EP-root',
+      state: { schemaVersion: 5, type: 'feature', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'todo' }] },
+    },
+  });
+  const c = checks.find((x) => x.id === 'type:ledger');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /epic\.md says `defect`, state\.json says `feature`/);
+});
+
+test('doctor type: a stub keeps its lifecycle marker without being called a bad type', async () => {
+  // state.json's top-level `kind` is `stub`/`discovery` — a different axis from the work-item type.
+  // A check that read THAT would report every stub in the project as an undefined type.
+  const checks = await typeChecksOn({
+    'EP-x': {
+      fm: 'kind: feature\ntype: feature\nstub: backfill-pending',
+      state: { schemaVersion: 5, kind: 'stub', type: 'feature', currentStep: 'backfill-pending', steps: [{ id: 'epic', type: 'author', status: 'todo' }] },
+    },
+  });
+  assert.deepEqual(checks, [], 'a correctly stamped stub has nothing wrong with it');
+});
+
+test('doctor type: a type nobody defined is reported, and an epic with no epic.md is not', async () => {
+  const checks = await typeChecksOn({
+    'EP-x': { fm: 'kind: improvement\nparent: EP-root\nthread: EP-root' },
+    // EP-discovery is the product front-zero: no epic.md, marked in state.json only. Not on the ladder.
+    'EP-discovery': { fm: null, state: { schemaVersion: 5, kind: 'discovery', currentStep: 'discovery', steps: [{ id: 'discovery', type: 'author', status: 'done' }] } },
+  });
+  const c = checks.find((x) => x.id === 'type:unknown');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /EP-x: `improvement`/);
+  assert.match(c.hint, /feature · change · defect · hotfix · chore/);
+  assert.equal(checks.length, 1, 'the discovery front-zero is silent, not reported five ways');
+});
+
+test('doctor type: a project written the shape-5 way says nothing at all', async () => {
+  const checks = await typeChecksOn({
+    'EP-root': { fm: 'kind: feature\ntype: feature', state: { schemaVersion: 5, type: 'feature', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'done' }] } },
+    'EP-fix': { fm: 'kind: defect\ntype: defect\nparent: EP-root\nthread: EP-root', state: { schemaVersion: 5, type: 'defect', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'todo' }] } },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor type: the section is wired into collectDoctor, not just exported', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T } = scaffold();
+  const dir = path.join(T, 'epics', 'EP-bug');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'epic.md'), '---\nid: EP-bug\ntype: defect\nparent: EP-root\nthread: EP-root\n---\n\n## Goal\nx\n');
+  try {
+    const c = collectDoctor(T).checks.find((x) => x.id === 'type:gate-blind');
+    assert.equal(c?.status, 'fail', 'running yad doctor surfaces it, not only calling typeChecks by hand');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor threads: a chore is skipped like a feature, and a broken thread is still caught', async () => {
+  // `chore` joins `feature` as a type that may stand alone (isGenesisType). Upkeep — a dependency
+  // bump, a CI move — often has no feature to hang off, and an INVENTED parent is worse than none:
+  // the thread rollups, the defect report and the timeline all walk `parent:` and would file the
+  // upkeep under a feature it has nothing to do with. Everything else names what it changes.
+  //
+  // Whether a NON-genesis type declares a parent at all is `lineage-check.sh`'s job, in CI, per
+  // commit — this section reports a thread that does not resolve. So the assertion here is about
+  // which epics doctor stops looking at, plus proof that widening that set did not blind it.
+  const { threadChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e21-'));
+  const epic = (id, fm) => {
+    const dir = path.join(T, 'epics', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'epic.md'), `---\nid: ${id}\n${fm}\n---\n\n## Goal\nx\n`);
+  };
+  try {
+    epic('EP-bump-deps', 'kind: chore');
+    epic('EP-greenfield', 'kind: feature');
+    epic('EP-broken', 'kind: defect\nparent: EP-gone\nthread: EP-gone');
+    const checks = [];
+    threadChecks(checks, T);
+    assert.equal(checks.find((c) => c.id === 'thread:EP-bump-deps'), undefined,
+      'a parentless chore has no lineage to check, so doctor says nothing about it');
+    assert.equal(checks.find((c) => c.id === 'thread:EP-greenfield'), undefined, 'as before, for a feature');
+    const broken = checks.find((c) => c.id === 'thread:EP-broken');
+    assert.equal(broken.status, 'fail', 'and a defect threaded to an epic that does not exist still fails');
+    assert.match(broken.message, /missing parent epic EP-gone/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('doctor shape: a project with an un-migrated file is reported as behind, in --json', async () => {
   // The scaffold writes .sdlc/repos.json with a raw fs.writeFileSync, so it carries no stamp and is
   // shape 1 by rule 1 — exactly the state a real project is in before it runs `yad migrate`. This is

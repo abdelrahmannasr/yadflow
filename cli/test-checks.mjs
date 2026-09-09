@@ -534,8 +534,8 @@ const GATES = [
   {
     name: 'lineage-check',
     script: LINEAGE,
-    seed: (hub) => seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change' } }), // kind:change, no parent
-    expect: /is kind:change but declares no 'parent:'/,
+    seed: (hub) => seedHubEpic(hub, 'EP-demo', { fm: { kind: 'change' } }), // type change, no parent
+    expect: /is type:change but declares no 'parent:'/,
   },
   {
     name: 'epic-open',
@@ -2274,4 +2274,71 @@ test('shape guide: with no release tag at all, this shape is the baseline', () =
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /baseline/);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---- the work-item type, read in two languages (E21) ---------------------------------------------
+
+// `lineage-check.sh` runs inside the user's repository with no Node, so it re-implements the type
+// reader that lives in cli/epic-state.mjs. Two readers is two ways to drift, and the drift here is
+// not loud: a bash copy that disagreed would either demand a parent for work that has none, or —
+// far worse — stop demanding one for a defect, which is the whole point of the gate.
+//
+// The table covers every frontmatter a real epic.md can carry mid-rename: old name only, new name
+// only, both agreeing, both disagreeing, neither, and a value nobody defined.
+test('lineage-check: the bash type reader and workItemType agree on every epic.md shape', async () => {
+  const { workItemType, isGenesisType } = await import('./epic-state.mjs');
+  const T = scaffoldRepo();
+  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  git(hub, 'init', '-q');
+  const variants = [
+    ['old name only', { kind: 'change' }],
+    ['new name only', { type: 'change' }],
+    ['both, agreeing', { kind: 'defect', type: 'defect' }],
+    ['both, disagreeing — the OLD one wins', { kind: 'defect', type: 'feature' }],
+    ['neither — a genesis by default', {}],
+    ['old name only, feature', { kind: 'feature' }],
+    ['new name only, feature', { type: 'feature' }],
+    ['old name only, chore', { kind: 'chore' }],
+    ['new name only, chore', { type: 'chore' }],
+    ['a type nobody defined', { kind: 'improvement' }],
+  ];
+  try {
+    for (const [name, fm] of variants) {
+      fs.rmSync(path.join(hub, 'epics'), { recursive: true, force: true });
+      // No `parent:`, so the gate PASSES exactly when it reads the type as a genesis one.
+      seedHubEpic(hub, 'EP-demo', { fm });
+      linkedCommit(T, hub);
+      const r = runGate(LINEAGE, T, ['main']);
+      const bashSaysGenesis = /genesis \w+ epic/.test(r.out);
+      assert.equal(bashSaysGenesis, isGenesisType(workItemType(fm)), `${name}: bash and JS disagree — ${r.out}`);
+      git(T, 'reset', '-q', '--hard', 'main');
+    }
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(hub, { recursive: true, force: true });
+  }
+});
+
+test('lineage-check: a chore with no parent PASSES, a defect with no parent FAILS', () => {
+  const T = scaffoldRepo();
+  const hub = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hub-'));
+  git(hub, 'init', '-q');
+  try {
+    seedHubEpic(hub, 'EP-demo', { fm: { type: 'chore' } });
+    linkedCommit(T, hub);
+    const okRun = runGate(LINEAGE, T, ['main']);
+    assert.equal(okRun.code, 0, okRun.out);
+    assert.match(okRun.out, /genesis chore epic/);
+
+    git(T, 'reset', '-q', '--hard', 'main');
+    fs.rmSync(path.join(hub, 'epics'), { recursive: true, force: true });
+    seedHubEpic(hub, 'EP-demo', { fm: { type: 'defect' } });
+    linkedCommit(T, hub);
+    const bad = runGate(LINEAGE, T, ['main']);
+    assert.equal(bad.code, 1, bad.out);
+    assert.match(bad.out, /is type:defect but declares no 'parent:'/);
+  } finally {
+    fs.rmSync(T, { recursive: true, force: true });
+    fs.rmSync(hub, { recursive: true, force: true });
+  }
 });

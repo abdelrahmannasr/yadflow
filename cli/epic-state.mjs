@@ -247,8 +247,40 @@ export function stampStepDials(state) {
   return moved ? { ...state, steps } : state;
 }
 
+// Copy the work-item type into `state.json`. Shape 5.
+//
+// The type is AUTHORED in `epic.md` frontmatter and copied here, because `state.json` is the file CI
+// writes and the gates read. Opening a hand-edited markdown file from inside a gate decision would
+// make the ledger depend on something the engine does not own; E17 will seed a whole step chain from
+// the type, and it needs the answer in the ledger.
+//
+// TWO OTHER WORDS IN THIS FILE LOOK LIKE THIS ONE AND ARE NOT IT. Neither is touched here:
+//   * top-level `kind` in state.json is the lifecycle marker `"stub"` / `"discovery"`. A stub epic
+//     legitimately carries `kind: "stub"` AND `type: "feature"` at once.
+//   * `steps[].type` is `author` / `review+approve` — which kind of STEP, not which kind of work.
+//
+// Add-only, and idempotent, so a second `yad migrate` and every later gate write are no-ops:
+//   * a state that already records a `type` is returned untouched, whatever it says;
+//   * so is one whose epic has no `epic.md` to read a type from. That is the discovery front-zero
+//     (`EP-discovery`, `kind: "discovery"`), which is not a work item on the ladder and has no
+//     frontmatter to copy. Inventing `feature` for it would put a fifth thing on the ladder that
+//     nobody authored.
+//
+// ONE of these, called from `writeState` below and from the 4 -> 5 step in cli/migrate.mjs. E28
+// shipped two dial stampers and they drifted — one guarded array-valued steps, the other did not.
+export function stampWorkItemType(state, epicDir) {
+  if (!isPlainObject(state) || typeof state.type === 'string') return state;
+  const md = path.join(epicDir, 'epic.md');
+  if (!fs.existsSync(md)) return state;
+  // Same object back when nothing changed, so writeJSON's byte-identical short-circuit still holds.
+  return { ...state, type: workItemType(readFrontmatter(md)) };
+}
+
 export function writeState(file, state) {
-  return writeJSON(file, stampStepDials(state));
+  // `file` is <epicDir>/.sdlc/state.json, so the epic's own directory is two levels up — that is
+  // where `epic.md` lives, and the stamper needs it to read the type the author wrote.
+  const epicDir = path.dirname(path.dirname(file));
+  return writeJSON(file, stampWorkItemType(stampStepDials(state), epicDir));
 }
 
 export function loadLedger(epicDir) {
@@ -858,19 +890,65 @@ export function readFrontmatter(file) {
 
 const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 
-// The human-facing noun for a lineage kind. Presentation only — the artifact is always an epic
+// ---- the work-item type ------------------------------------------------------------------------
+// The ladder is Product -> Epic -> Story -> Task, and every work item on it also declares a TYPE.
+// The type is what stops everything being called an epic:
+//
+//   feature   new value
+//   change    a change to something already shipped
+//   defect    something is broken
+//   hotfix    broken and urgent
+//   chore     upkeep, no user-visible change
+//
+// The word for this used to be `kind`, and in `epic.md` frontmatter `kind:` is STILL the one that
+// counts. Shape 5 adds `type:` beside it and teaches every writer to write both; `kind:` stays
+// authoritative for this whole major, and is removed in the one after. The reason is the same as for
+// every other rename in this codebase: `epic.md` is hand-authored by people and by ~29 skills, and
+// `lineage-check.sh` reads `kind:` from inside the USER's repository, refreshed by `yad update` —
+// a separate act from `yad migrate` with no ordering between them. Make the new name win now and a
+// change-epic in a repo that migrated but did not update reads as a parent-free genesis, and the
+// lineage gate stops asking it for a parent.
+export const WORK_ITEM_TYPES = ['feature', 'change', 'defect', 'hotfix', 'chore'];
+
+// Resolve the type from `epic.md` frontmatter. OLD name first (see above), then the new one, then
+// `feature` — an epic authored before types existed is the root of its own thread, which is what a
+// genesis is. An unrecognised value is returned AS WRITTEN rather than corrected to `feature`:
+// silently reading someone's typo as a genesis would drop the lineage gate. `yad doctor` reports it.
+export function workItemType(fm = {}) {
+  if (typeof fm.kind === 'string' && fm.kind) return fm.kind;
+  if (typeof fm.type === 'string' && fm.type) return fm.type;
+  return 'feature';
+}
+
+// Which types may stand alone with no `parent:` — the root of a thread.
+//
+// `feature` is the original genesis. `chore` joins it because upkeep frequently has no feature to
+// hang off: a dependency bump, a CI move, a lockfile refresh. Requiring a parent there would push
+// people to invent one, and an invented parent is worse than none — the thread rollups, the defect
+// report and the timeline all walk `parent:` and would attribute the upkeep to a feature it has
+// nothing to do with. Everything else (`change`, `defect`, `hotfix`) describes work ON something
+// that already exists, so it must name what.
+//
+// `templates/checks/lineage-check.sh` re-implements this in bash, because the check gates are
+// standalone by design and run inside the user's repo with no Node. `cli/test-checks.mjs` runs a
+// table of types through both and asserts they agree — two readers is two ways to drift.
+export const isGenesisType = (t) => t === 'feature' || t === 'chore';
+
+// The human-facing noun for a work-item type. Presentation only — the artifact is always an epic
 // (`EP-<slug>`); this just renders WHAT KIND of work it is so `yad next`/`yad thread`/`yad status`
 // read as "Defect EP-…" / "Change request EP-…" instead of a generic "Epic". `feature` (and any
-// unknown/absent kind) falls back to "Epic". A bug is a defect (kind:defect) — no separate noun.
-export const KIND_NOUN = { feature: 'Epic', change: 'Change request', defect: 'Defect', hotfix: 'Hotfix' };
-export const kindNoun = (kind) => KIND_NOUN[kind] || 'Epic';
+// unknown/absent type) falls back to "Epic". A bug is a defect (`defect`) — no separate noun.
+export const TYPE_NOUN = {
+  feature: 'Epic', change: 'Change request', defect: 'Defect', hotfix: 'Hotfix', chore: 'Chore',
+};
+export const typeNoun = (t) => TYPE_NOUN[t] || 'Epic';
 
-// The lineage of an epic from epic.md frontmatter. `kind` defaults to `feature` (genesis) when absent,
-// so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
+// The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
+// absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {
   const fm = readFrontmatter(path.join(epicRoot(root, epic), 'epic.md'));
   return {
-    kind: fm.kind || 'feature',
+    type: workItemType(fm),
     parent: fm.parent || null,
     thread: fm.thread || null,
     inherits: asList(fm.inherits),
@@ -912,7 +990,7 @@ export function resolveThread(root, epicId) {
   // A missing cache is corruption too — without it the bash gates' parent-walk is the only safety net,
   // and a tool reading the field would mis-scope the thread.
   if (!broken && tip.parent && !tip.thread) {
-    broken = `missing thread cache on ${epicId} (kind:${tip.kind}, parent:${tip.parent}) — should be '${rootId}'`;
+    broken = `missing thread cache on ${epicId} (type:${tip.type}, parent:${tip.parent}) — should be '${rootId}'`;
   }
   if (!broken && tip.thread && tip.thread !== rootId) {
     broken = `thread cache '${tip.thread}' != computed root '${rootId}'`;
