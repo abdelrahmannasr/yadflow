@@ -204,7 +204,14 @@ function generalNext(root, { all } = {}) {
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
   log(`\n  ${c.bold(`${featureEpics.length} epics`)} ${c.dim('— next action each:')}`);
-  for (const a of actions) log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}  ${actionLine(a, { solo })}`);
+  // The grouping theme rides this list too. This is the ONE `yad next` view that shows several epics
+  // side by side, so it is where seeing which of them belong together is worth most — and leaving it
+  // off would have meant bare `yad next`, the command people run by default, never showed the tag.
+  for (const a of actions) {
+    const tag = epicLineage(root, a.epicId).theme;
+    const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
+    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo })}`);
+  }
   // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
   // form loses the dim from the first bold word to the end of the line.
   info(`${c.dim('detail:')} ${c.bold('yad next <epic>')}  ${c.dim('•  all at once:')} ${c.bold('yad next --all')}`);

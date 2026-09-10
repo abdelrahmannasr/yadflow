@@ -446,8 +446,17 @@ test('themeKey folds the ways one theme gets typed, and keeps different themes a
   const keys = new Set(same.map(themeKey));
   assert.equal(keys.size, 1, `these are one theme typed five ways, folded to ${[...keys].join(' / ')}`);
   assert.notEqual(themeKey('checkout'), themeKey('checkout-revamp'), 'different themes stay different');
-  assert.equal(themeKey('###'), '', 'punctuation alone folds to nothing — doctor calls that unreadable');
   assert.equal(themeKey(null), '');
+  // Letters and digits in ANY script survive the fold. An ASCII-only fold flattens a whole team's
+  // themes to the empty string at once — they would look identical to each other AND to a tag of pure
+  // punctuation, so `yad doctor` would call every one of them ungroupable with no way to clear it.
+  assert.equal(themeKey('Дизайн'), 'дизайн');
+  assert.equal(themeKey('дизайн'), themeKey('Дизайн'), 'case folds outside ASCII too');
+  assert.notEqual(themeKey('дизайн'), themeKey('结账改版'), 'and two of them stay apart');
+  assert.equal(themeKey('结账改版'), '结账改版');
+  // An empty fold means one thing only: nothing in the tag to match another epic on.
+  assert.equal(themeKey('###'), '');
+  assert.equal(themeKey('🎯'), '');
 });
 
 test('epicLineage carries the theme, and null when there is none', () => {

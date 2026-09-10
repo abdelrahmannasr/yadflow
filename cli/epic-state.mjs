@@ -1138,7 +1138,13 @@ export function themeOf(fm = {}) {
 // Two themes that only differ in case, spacing or punctuation are the same idea typed twice, and they
 // split the group in silence. Folding to this key is how `yad doctor` finds them; it is NEVER stored
 // or displayed — the tag people wrote is the tag they see.
-export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+//
+// Letters and digits in ANY script survive the fold (`\p{L}\p{N}`, not `a-z0-9`). A team writing its
+// themes in Arabic, Cyrillic or Chinese groups exactly as well as one writing them in English, and an
+// ASCII-only fold would flatten every one of their themes to the empty string — making them look
+// identical to each other and to a tag of pure punctuation. An empty fold therefore means one thing
+// only: there is nothing here to compare.
+export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
 // The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
 // absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.

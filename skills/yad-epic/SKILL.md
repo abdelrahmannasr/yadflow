@@ -114,9 +114,10 @@ the line, so a comment becomes part of the value and the gates stop recognising 
   registered first and no list of allowed themes exists. Ask the user whether this epic belongs to a
   group; if one already exists, **copy its spelling exactly** (`yad doctor` reports a theme spelled
   two ways, because two spellings group as two themes). Leave the key empty when there is no group.
-  Write ONE tag, never a list — `theme: [a, b]` is read as no theme at all, and never write a `#`:
+  Write ONE tag, never a list — `theme: [a, b]` is read as no theme at all — and never write a `#`:
   `yad next` and `yad thread` PRINT the tag as `#checkout-revamp`, but the `#` is decoration on the
-  screen and is kept as part of the value if it lands in the file. Set it NOW, while the epic
+  screen, and anything from a `#` onward is kept as part of the value, so the epic then groups only
+  with epics carrying that exact text. Any language is fine. Set it NOW, while the epic
   is being written: the epic review gate is bound to a hash of the whole file, so adding a theme after
   that gate is approved drops the approval as stale and the step has to be approved again.
 

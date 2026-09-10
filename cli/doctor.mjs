@@ -845,6 +845,7 @@ export function themeChecks(checks, root) {
   if (!exists(epicsDir)) return;
   const spellings = new Map();   // folded key -> the distinct spellings seen, in first-seen order
   const unreadable = [];
+  const commented = [];
 
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!isValidEpicId(e)) continue;
@@ -853,16 +854,27 @@ export function themeChecks(checks, root) {
     const fm = readFrontmatter(md);
     // `readFrontmatter` turns `theme: [a, b]` into an array, and a theme is ONE tag. Left alone the
     // value would simply read as absent, so the epic would drop out of every grouping in silence.
-    // A blank `theme:` is not this: it is the template's own default, and means "no theme".
-    if (Array.isArray(fm.theme)) { unreadable.push(`${e}: \`theme: [${fm.theme.join(', ')}]\``); continue; }
+    // An EMPTY list is not this — `theme: []` plainly says "no theme", and so does a blank `theme:`,
+    // which is what the skill templates ship.
+    if (Array.isArray(fm.theme)) {
+      if (fm.theme.length) unreadable.push(`${e}: \`theme: [${fm.theme.join(', ')}]\``);
+      continue;
+    }
     const t = themeOf(fm);
     if (!t) continue;
-    const key = themeKey(t);
     // A `#` inside the tag is almost always the comment trap: neither `readFrontmatter` nor the check
-    // gates' `fm_val` strips a trailing `# …`, so it lands in the value. It is caught HERE rather than
-    // left to the variant report, which would otherwise call `#checkout-revamp` a second spelling of
-    // `checkout-revamp` — a true statement that names the wrong problem.
-    if (!key || t.includes('#')) { unreadable.push(`${e}: \`theme: ${t}\``); continue; }
+    // gates' `fm_val` strips a trailing `# …`, so it lands in the value. The tag IS read — it is not
+    // unreadable — but it now includes the note, so it groups only with epics carrying that exact
+    // text. Reported on its own rather than as a spelling variant, which would be true of
+    // `#checkout-revamp` beside `checkout-revamp` while naming the wrong problem.
+    if (t.includes('#')) { commented.push(`${e}: \`theme: ${t}\``); continue; }
+    const key = themeKey(t);
+    // Nothing left after the fold — a tag of pure punctuation or symbols, like `🎯`. Nothing is wrong
+    // with it: it reads, and two epics carrying it group by being the same string. It is only left OUT
+    // of the variant report, which has nothing to compare. Keeping it IN would be the bug: every such
+    // tag folds to the same empty key, so `🎯` and `···` would be reported as one theme spelled two
+    // ways — which is exactly backwards.
+    if (!key) continue;
     const seen = spellings.get(key) || [];
     if (!seen.includes(t)) seen.push(t);
     spellings.set(key, seen);
@@ -881,7 +893,14 @@ export function themeChecks(checks, root) {
     check(
       checks, 'theme:unreadable', 'shape', 'warn',
       `${unreadable.length} epic(s) have a \`theme:\` nothing can read: ${some(unreadable, 3)}`,
-      'a theme is ONE free tag — a word or short phrase, written plainly and with no `#`. A list groups nothing, and a `#` is kept as part of the tag (these frontmatter readers do not strip comments), so both are read as no theme at all',
+      'a theme is ONE free tag — a word or short phrase, in any language. A list is read as no theme at all, so the epic drops out of every grouping',
+    );
+  }
+  if (commented.length) {
+    check(
+      checks, 'theme:commented', 'shape', 'warn',
+      `${commented.length} epic(s) have a \`#\` inside the theme itself: ${some(commented, 3)}`,
+      'these frontmatter readers keep the whole rest of the line, so a `#` and everything after it becomes part of the tag — the epic then groups only with epics carrying that exact text. Write the tag bare. `yad next` and `yad thread` print a `#` in front of it, but that is decoration on the screen, not part of the value',
     );
   }
 }

@@ -1839,6 +1839,27 @@ test('runNext: a themed epic prints its grouping tag, an untagged one prints not
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('runNext: the several-epics list shows each theme — the default view is not skipped', async () => {
+  // Bare `yad next` with more than one epic takes a different path from `yad next <epic>`: a one-line
+  // roll-up built by `actionLine`, not `printAction`. It is the command people run by default AND the
+  // only view that puts several epics side by side, so it is where seeing which of them belong
+  // together is worth most. Leaving it out would also have made the docs added beside it untrue.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-theme3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  for (const [id, theme] of [['EP-a', 'checkout-revamp'], ['EP-b', 'checkout-revamp'], ['EP-c', null]]) {
+    seedEpic(T, id, chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+    fs.writeFileSync(path.join(T, 'epics', id, 'epic.md'),
+      `---\nid: ${id}\nkind: feature\n${theme ? `theme: ${theme}\n` : ''}---\n\n## Goal\nx\n`);
+  }
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /3 epics/);
+  assert.match(s, /Epic EP-a #checkout-revamp/);
+  assert.match(s, /Epic EP-b #checkout-revamp/);
+  assert.match(s, /Epic EP-c {2}/, 'the untagged epic gets no marker');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('runNext --json does NOT gain a theme key, even on a themed epic', async () => {
   // `yad next --json` is deep-equalled by the golden test (cli/test-golden.mjs), and rule 6 says that
   // snapshot never changes — an ADDED key breaks it exactly as hard as a renamed one. The golden
@@ -5860,26 +5881,89 @@ test('doctor theme: a project that spells its themes consistently says nothing a
   assert.deepEqual(checks, []);
 });
 
-test('doctor theme: a `theme:` written as a list is reported as unreadable, not ignored', async () => {
-  // `readFrontmatter` parses `[a, b]` into an array, and a theme is ONE tag — so left alone the epic
-  // would simply drop out of every grouping with nothing said. Same for punctuation that folds away.
+test('doctor theme: a `theme:` written as a list is reported — a list groups nothing', async () => {
+  // `readFrontmatter` parses `[a, b]` into an array, and a theme is ONE tag. `themeOf` therefore
+  // returns null, so left alone the epic drops out of every grouping with nothing said.
   const checks = await themeChecksOn({
     'EP-a': { fm: 'kind: feature\ntheme: [checkout, billing]' },
-    'EP-b': { fm: 'kind: feature\ntheme: ###' },
-    // The comment trap. `yad next` and `yad thread` PRINT the tag as `#checkout-revamp`, so someone
-    // will write the `#` back into epic.md — and neither frontmatter reader strips it. Reported here
-    // rather than as a variant of the bare spelling, which would name the wrong problem.
-    'EP-c': { fm: 'kind: feature\ntheme: #checkout-revamp' },
-    'EP-d': { fm: 'kind: feature\ntheme: checkout-revamp' },
+    'EP-b': { fm: 'kind: feature\ntheme: checkout' },
   });
   const c = checks.find((x) => x.id === 'theme:unreadable');
   assert.equal(c.status, 'warn');
   assert.match(c.message, /EP-a: `theme: \[checkout, billing\]`/);
-  assert.match(c.message, /EP-b: `theme: ###`/);
-  assert.match(c.message, /EP-c: `theme: #checkout-revamp`/);
-  assert.match(c.hint, /no `#`/);
   assert.match(c.hint, /a theme is ONE free tag/);
-  assert.equal(checks.find((x) => x.id === 'theme:variants'), undefined, 'an unreadable theme groups nothing');
+  assert.equal(checks.length, 1, 'nothing else is wrong here');
+});
+
+test('doctor theme: a tag of pure symbols is left alone, and never called a variant of another', async () => {
+  // `🎯` reads fine and two epics carrying it group by being the same string. It only cannot take
+  // part in the VARIANT report, because the fold has nothing to compare. Folding it in would be the
+  // real bug: every symbol-only tag folds to the same empty key, so `🎯` and `···` would be reported
+  // as one theme spelled two ways — exactly backwards.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: 🎯' },
+    'EP-b': { fm: 'kind: feature\ntheme: 🎯' },
+    'EP-c': { fm: 'kind: feature\ntheme: ···' },
+  });
+  assert.deepEqual(checks, []);
+  const { epicLineage } = await import('./epic-state.mjs');
+  const T = typeProject({ 'EP-a': { fm: 'kind: feature\ntheme: 🎯' } });
+  try {
+    assert.equal(epicLineage(T, 'EP-a').theme, '🎯', 'and it is a real theme everywhere else');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor theme: an empty list and a blank key both mean "no theme", and say nothing', async () => {
+  // `readFrontmatter` parses `theme: []` to an empty array. Somebody writing that plainly means the
+  // epic has no theme — reporting it would be nagging about a correct file.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: []' },
+    'EP-b': { fm: 'kind: feature\ntheme:' },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor theme: a theme in any script groups normally and is never called ungroupable', async () => {
+  // An ASCII-only fold would flatten every one of these to the empty string, so a team writing its
+  // themes in Cyrillic or Chinese would be told on every run that none of them can group — with no
+  // way to clear it except renaming their themes into English.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: дизайн' },
+    'EP-b': { fm: 'kind: feature\ntheme: дизайн' },
+    'EP-c': { fm: 'kind: feature\ntheme: 结账改版' },
+  });
+  assert.deepEqual(checks, [], 'two epics share a theme, a third has its own — nothing is wrong');
+  // …and the variant report still works in those scripts.
+  const mixed = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: дизайн' },
+    'EP-b': { fm: 'kind: feature\ntheme: Дизайн' },
+  });
+  assert.equal(mixed.find((x) => x.id === 'theme:variants')?.status, 'warn');
+});
+
+test('doctor theme: a `#` in the tag is reported as a comment, not as unreadable', async () => {
+  // The `#` case is NOT unreadable: `themeOf` hands the value back verbatim, so the tag IS read and
+  // does group — with the note attached. Two epics carrying `theme: x # note` group together, and
+  // neither groups with a plain `theme: x`. Calling that "nothing can read it" would send the reader
+  // looking for a missing theme that is present but polluted.
+  const checks = await themeChecksOn({
+    'EP-c': { fm: 'kind: feature\ntheme: #checkout-revamp' },
+    'EP-e': { fm: 'kind: feature\ntheme: checkout-revamp # the big one' },
+    'EP-d': { fm: 'kind: feature\ntheme: checkout-revamp' },
+    'EP-f': { fm: 'kind: feature\ntheme: ###' },     // symbols AND a `#` — the comment report wins
+  });
+  const c = checks.find((x) => x.id === 'theme:commented');
+  assert.equal(c.status, 'warn');
+  assert.equal(c.section, 'shape');
+  assert.match(c.message, /EP-c: `theme: #checkout-revamp`/);
+  assert.match(c.message, /EP-e: `theme: checkout-revamp # the big one`/);
+  assert.match(c.message, /EP-f: `theme: ###`/, 'symbols AND a `#`: the comment report is the actionable one');
+  assert.match(c.hint, /decoration on the screen/);
+  assert.equal(checks.find((x) => x.id === 'theme:unreadable'), undefined, 'it reads fine; it is just polluted');
+  // …and it is NOT also called a spelling variant of the clean tag beside it, which would be true and
+  // would name the wrong problem.
+  assert.equal(checks.find((x) => x.id === 'theme:variants'), undefined);
+  assert.equal(checks.length, 1);
 });
 
 test('doctor type: a project written the shape-5 way says nothing at all', async () => {

@@ -243,8 +243,8 @@ theme: checkout-revamp
 ```
 
 That is the whole feature. There is no list of allowed themes, nothing to register first, and no
-command to run. Any word or short phrase does. Most epics have no theme, and that is normal — leave
-the key empty.
+command to run. Any word or short phrase in any language does. Most epics have no theme, and that
+is normal — leave the key empty.
 
 The theme is what this method has **instead of a level above the Epic**. The ladder stays Product →
 Epic → Story → Task. Grouping is a label, not a rung you have to create and keep in step. If you later
@@ -252,10 +252,12 @@ move to a tracker that has an Initiative level, a theme maps onto one.
 
 Four things are worth knowing:
 
-- **One tag, not a list, and no `#`.** `theme: [checkout, billing]` is read as **no theme at all**, so
-  the epic drops out of every grouping. The same goes for a `#` in the value: the commands print the
-  tag as `#checkout-revamp`, but that `#` is decoration on the screen, and the frontmatter reader keeps
-  it as part of the tag if you write it into the file. `yad doctor` reports both (`theme:unreadable`).
+- **One tag, not a list.** `theme: [checkout, billing]` is read as **no theme at all**, so the epic
+  drops out of every grouping. `yad doctor` reports it (`theme:unreadable`).
+- **No `#` in the value.** The commands print the tag as `#checkout-revamp`, but that `#` is decoration
+  on the screen. The header reader keeps the whole rest of the line, so `theme: checkout # the big one`
+  becomes a tag of `checkout # the big one` — it still reads, and it still groups, but only with other
+  epics carrying that exact text. `yad doctor` reports it (`theme:commented`).
 - **Spelling is the grouping.** `checkout-revamp` and `Checkout Revamp` are two themes, not one.
   `yad doctor` reports a theme spelled more than one way (`theme:variants`) so it does not split a
   group in silence. Copy the spelling from an epic already in the group.
@@ -267,9 +269,9 @@ Four things are worth knowing:
   writes the parent's theme onto the new epic. Nothing works it out afterwards, so if you add a theme
   to a parent later, add it to the children too.
 
-Where it shows up: `yad next` prints it beside the epic id (`Epic EP-cart #checkout-revamp`), `yad
-thread` with no argument lists every thread under its theme, and `yad thread <epic>` prints it on each
-node and carries it in `--json`. It lives only in `epic.md` — there is
+Where it shows up: `yad next` prints it beside the epic id (`Epic EP-cart #checkout-revamp`), in the
+single-epic view and in the several-epics roll-up. `yad thread` with no argument prints each thread's
+theme beside its id, and `yad thread <epic>` prints it on each node and carries it in `--json`. It lives only in `epic.md` — there is
 no copy in any ledger file, so no file shape changed and there is nothing to migrate.
 
 ## File shape: `schemaVersion`
