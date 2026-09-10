@@ -53,6 +53,35 @@ Each `steps[]` entry:
 |-------|--------|---------|
 | `id` | `analysis`, `analysis-review`, `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review`, `test-cases`, `test-cases-review` | Step identity. |
 
+### The six phases
+
+Every step belongs to one of six named phases, and each phase sits inside one of the three parts:
+
+| Phase | Part | Steps |
+|---|---|---|
+| Discover | Shape | `discovery` · `analysis` · `epic`, each with its review gate |
+| Design | Shape | `architecture` · `ui-design`, each with its review gate |
+| Plan | Shape | `stories` · `test-cases`, each with its review gate |
+| Build | Build | `spec` · `tasks` · `implement` · `checks` · `engineer-review` |
+| Release | Run | **planned, not built** |
+| Operate | Run | **planned, not built** |
+
+**A phase is never written into `state.json`.** It is worked out from `currentStep`, so there is
+nothing to author, nothing to keep in step, and no way for it to disagree with the step it describes.
+
+- A Shape review gate takes the phase of the artifact it reviews, so `epic-review` is Discover beside
+  `epic`. Build steps have no such gates — `engineer-review` is a step in its own right — so
+  `checks-review` is not a step and resolves to nothing.
+- The `currentStep` markers are not steps and never appear in `steps[]`. Three of them
+  (`backfill-pending`, `backfill-done`, `discovery-done`) have no phase. **`ready-for-build` is the
+  exception:** an epic sitting on it is in Build, and stays there for the rest of its life, because
+  the individual Build steps live per story per repo in `build-state/` rather than in this file.
+- `EP-discovery` has no phase at all. It is the product-level front-zero and does not walk the feature
+  lifecycle.
+
+`yad doctor` reports a step id no phase claims. That is the same table that binds a step to its skill,
+so an id with no phase is an id no skill runs.
+
 ### Two valid chain shapes (analysis is optional)
 
 The `analysis` step (and its `analysis-review` gate) is **optional** — it exists only when the team

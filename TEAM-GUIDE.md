@@ -142,6 +142,32 @@ Shape step, **permanently human**.
 
 Each step writes a file and then **stops at a gate**. A human moves it forward. That is the whole idea.
 
+### Inside the parts: six phases
+
+A part is a big chunk. A **phase** is the smaller named stretch of work inside it, and every step
+belongs to exactly one:
+
+| Phase | Part | The steps in it |
+|---|---|---|
+| Discover | Shape | discovery · analysis · epic, each with its gate |
+| Design | Shape | architecture, with the locked contract · ui-design, each with its gate |
+| Plan | Shape | stories · test-cases, each with its gate |
+| Build | Build | spec · tasks · implement · checks · engineer-review |
+| Release | Run | **planned, not built** — release notes · version · deploy record · gate |
+| Operate | Run | **planned, not built** — defects · feedback · retrospective · improvements |
+
+`yad next <epic>` prints this list with your current phase marked, so you can see where you are
+without counting steps. The last two are shown greyed, because the lifecycle does not stop at merge
+even though the tool does not run those phases yet.
+
+Once the stories gate passes, the epic is in **Build** and stays there for the rest of its life — the
+individual Build steps run per story per code repo, so the epic-level view names the phase rather than
+the step. A stub epic and the project's discovery epic show no phase line at all: neither walks this
+lifecycle.
+
+Phases are worked out from the step you are on. They are not written into any file, so there is
+nothing to keep in step and nothing to migrate.
+
 ---
 
 ## 3. One-time setup (the team lead does this once)

@@ -682,6 +682,131 @@ export const BUILD_STEP_SKILL = {
 // repo's `steps` array is partial or out of order.
 const BUILD_STEP_ORDER = ['spec', 'tasks', 'implement', 'checks', 'engineer-review'];
 
+// ---- the six phases ------------------------------------------------------------------------------
+//
+// Between the three PARTS (Shape · Build · Run) and the individual steps sits one more rung: the
+// phase. Six of them, in order, each belonging to exactly one part:
+//
+//   Discover   Shape   discovery · analysis · epic, each with its gate
+//   Design     Shape   architecture (with the locked contract) · ui-design, each with its gate
+//   Plan       Shape   stories · test-cases, each with its gate
+//   Build      Build   spec · tasks · implement · checks · engineer-review
+//   Release    Run     PLANNED — release notes · version · deploy record · gate
+//   Operate    Run     PLANNED — defects · feedback · retrospective · improvements
+//
+// Release and Operate are NAMED and not built. No step, skill or gate exists for either, and none is
+// invented: `built: false` is the whole of what is known about them. (`skills/sdlc/config.yaml`
+// carries the same table for the skills to read, and a test holds the two together row for row.) They are listed
+// rather than left out because a person has to be able to see that the lifecycle does not stop at
+// merge — and a renderer that shows them as planned tells the truth, while one that hides them
+// implies the work ends at Build.
+//
+// DERIVED, NOT STORED. A step's phase is a pure function of its id, so nothing is written into
+// `state.json` and there is no file-shape change. Storing it would put a second copy of the step
+// catalogue on disk one task before E4 builds the real one, and the two copies would then need a
+// doctor check to catch a drift that cannot happen while there is only one answer.
+//
+// "PHASE" IS A CROWDED WORD IN THIS REPOSITORY, and none of the other three mean this one:
+//   * `cli/gate.mjs` says "merge phase" for a stage INSIDE a single gate run;
+//   * the `build-state` notes say "Phase 4a/4b", from the old build-plan numbering;
+//   * `docs/phase-N-build-plan.md` are the development phases of yadflow itself.
+// So the phase NUMBER is deliberately never printed: "Phase 4" already means something else to anyone
+// who has read those. The name is what is shown.
+export const PHASES = [
+  { id: 'discover', name: 'Discover', part: 'Shape', built: true },
+  { id: 'design', name: 'Design', part: 'Shape', built: true },
+  { id: 'plan', name: 'Plan', part: 'Shape', built: true },
+  { id: 'build', name: 'Build', part: 'Build', built: true },
+  { id: 'release', name: 'Release', part: 'Run', built: false },
+  { id: 'operate', name: 'Operate', part: 'Run', built: false },
+];
+
+// Which phase each step belongs to. Split in two on purpose, because the `-review` rule differs.
+//
+// SHAPE steps each have a review gate named `<id>-review`, and that gate belongs to the phase of the
+// artifact it reviews — `epic-review` is Discover beside `epic`. BUILD steps have no such gates:
+// `engineer-review` is a step in its own right, the locked human merge gate, not the review of a step
+// called `engineer`. So the suffix is only ever stripped against the Shape table, which is what keeps
+// `checks-review` — a step that does not exist — from quietly resolving into Build.
+//
+// Every id in STEP_SKILL and BUILD_STEP_SKILL above appears in one of these two, and a test asserts
+// membership directly rather than through `stepPhase`, so a step added to one table and forgotten
+// here fails rather than resolving by accident.
+//
+// The roadmap also names a `feasibility` step in Discover. Nothing implements it — no skill, no step
+// id, no gate — so it is deliberately absent rather than declared and dead. E4 (the step catalogue) is
+// where a new step gets defined. When E4 RENAMES one, rule 3 applies here too: add the new key beside
+// the old, because a project still carrying the old id would otherwise trip `phase:unknown` on every
+// `yad doctor` run for a whole major.
+const SHAPE_STEP_PHASE = {
+  discovery: 'discover',
+  analysis: 'discover',
+  epic: 'discover',
+  architecture: 'design',
+  'ui-design': 'design',
+  stories: 'plan',
+  'test-cases': 'plan',
+};
+const BUILD_STEP_PHASE = {
+  spec: 'build',
+  tasks: 'build',
+  implement: 'build',
+  checks: 'build',
+  'engineer-review': 'build',
+};
+const STEP_PHASE = { ...SHAPE_STEP_PHASE, ...BUILD_STEP_PHASE };
+
+// `currentStep` markers that are NOT steps: they never appear in `steps[]`, and no phase claims them.
+// `ready-for-build` is the one with a phase anyway — see `currentPhase` below, which is where an epic's
+// position is decided rather than a step's.
+export const SENTINELS = ['ready-for-build', 'backfill-pending', 'backfill-done', 'discovery-done'];
+
+// The phase a STEP id belongs to, or null for anything this engine does not recognise — a sentinel, a
+// step from a future profile, a typo. Null, never a guess: a renderer showing the wrong phase is worse
+// than one showing none.
+//
+// THE FULL ID IS TRIED FIRST, and that is load-bearing rather than an optimisation. Strip `-review`
+// first and `engineer-review` resolves to `engineer`, which nothing claims, so the last step of Build
+// falls out of every phase.
+export function stepPhase(id) {
+  const s = String(id || '');
+  if (Object.hasOwn(STEP_PHASE, s)) return STEP_PHASE[s];
+  const base = s.replace(/-review$/, '');
+  return Object.hasOwn(SHAPE_STEP_PHASE, base) ? SHAPE_STEP_PHASE[base] : null;
+}
+
+// The phase an EPIC is in. Different question from `stepPhase`, and this is the one every renderer
+// asks — so there is one of it, shared by `yad next` and `yad thread`.
+//
+// TWO THINGS A STEP LOOKUP ALONE GETS WRONG:
+//
+//   * `ready-for-build` is a marker, not a step, so `stepPhase` gives it nothing — and it is the
+//     `currentStep` for the WHOLE of Build. `nextAction` never reports a concrete build step id at the
+//     epic level either; the real ones (`spec`, `implement`, …) live per story per repo in
+//     `build-state`. So a step lookup alone can never place an epic in Build at all, which is the
+//     phase with the most steps in it. The marker means "Shape is approved, Build can run" — that is
+//     Build, and it is resolved here rather than in `stepPhase`, which stays a pure id lookup.
+//   * `EP-discovery` is the PRODUCT-level front-zero, not a work item on the feature ladder. Its whole
+//     chain is `discovery` → `discovery-review` → `discovery-done`; it never enters Design, Plan or
+//     Build. Printing the six-phase lifecycle for it claims a journey it does not take. E75 folds it
+//     into Foundation, which is a Product-level phase of its own; until then it has none.
+//
+// A stub epic (`backfill-pending` / `backfill-done`) has no phase either, and needs no special case:
+// neither marker is a step.
+export function currentPhase(currentStep, { discovery = false } = {}) {
+  if (discovery) return null;
+  const cur = String(currentStep || '');
+  if (cur === 'ready-for-build') return 'build';
+  return stepPhase(cur);
+}
+
+// The phase record for an epic's current step, or null. `.name` is the word a person reads.
+export const phaseOf = (currentStep, opts) => PHASES.find((p) => p.id === currentPhase(currentStep, opts)) || null;
+
+// Every step id this engine knows in a phase, in chain order. Empty for a phase nothing implements
+// yet, which is exactly what `built: false` says.
+export const phaseSteps = (phaseId) => Object.keys(STEP_PHASE).filter((s) => STEP_PHASE[s] === phaseId);
+
 // Collapse consecutive identical skills (spec+tasks → one yad-spec) so the rendered chain reads
 // yad-spec → yad-implement → yad-checks → yad-engineer-review, matching the Build mental model.
 // Folds against the last KEPT element (not the raw neighbor) so a dropped null between duplicates can't

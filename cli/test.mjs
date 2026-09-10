@@ -1790,6 +1790,66 @@ test('runNext: specific epic prints the action; --check on a blocked step exits 
   process.exitCode = 0; // do not leak a failing exit code into the test runner
 });
 
+test('runNext: the phase line marks where the epic is, and shows the two planned phases', async () => {
+  // The line a person actually reads. All six are printed on purpose: one that stopped at Build would
+  // say the lifecycle ends at merge, which is the opposite of what the roadmap settled.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase1-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /phase: Discover · Design · Plan · Build · Release \(planned\) · Operate \(planned\)/);
+  // Named in words, not only bolded: captured output has no colour, and neither does a pipe, a log
+  // file or a CI job. Without the words the line would list six phases and say nothing.
+  assert.match(s, /— now: Design \(Shape part\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext: an epic in Build is marked Build, from the `ready-for-build` marker', async () => {
+  // Review found this: `nextAction` never reports a concrete build step id at the epic level — the
+  // real ones live per story per repo in build-state — so `currentStep` is `ready-for-build` for the
+  // WHOLE of Build. A step lookup alone can therefore never place an epic in the phase with the most
+  // steps in it, and Build would be the one phase this line could never mark.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'ready-for-build' }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /phase: Discover · Design · Plan · Build · Release \(planned\) · Operate \(planned\)/);
+  assert.match(s, /— now: Build$/m, 'the epic is IN Build, not merely listed beside it');
+  // Build's phase and its part are the same word, so the part note is left off rather than printing
+  // "now: Build (Build part)".
+  assert.equal(/Build part/.test(s), false, s);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext: NO phase line for EP-discovery — it does not walk the feature lifecycle', async () => {
+  // The product-level front-zero. Its whole chain is discovery -> discovery-review -> discovery-done;
+  // it never enters Design, Plan or Build, so printing the six-phase lifecycle for it claims a
+  // journey it does not take. E75 folds it into Foundation, which is a Product-level phase of its own.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-discovery', {
+    epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery',
+    steps: [S('discovery', 'author', 'in_progress', 'discovery/'), S('discovery-review', 'review+approve', 'blocked', 'discovery/')],
+  });
+  const s = await grab(() => runNext(T, { epic: 'EP-discovery' }));
+  assert.match(s, /yad-discovery/, 'the action itself is still printed');
+  assert.equal(/phase:/.test(s), false, s);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext: NO phase line for a stub epic, whose marker is not a step either', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase4-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', { ...chain({ currentStep: 'backfill-pending' }), kind: 'stub' });
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.equal(/phase:/.test(s), false, s);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('runNext: review-sync action in solo mode notes the merge-only path', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next4-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -5779,6 +5839,59 @@ test('doctor threads: a chore is skipped like a feature, and a broken thread is 
     const broken = checks.find((c) => c.id === 'thread:EP-broken');
     assert.equal(broken.status, 'fail', 'and a defect threaded to an epic that does not exist still fails');
     assert.match(broken.message, /missing parent epic EP-gone/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor phase: a step no phase claims is reported, and a sentinel is not', async () => {
+  // Every step the engine can run belongs to one of the six phases, and that same table is what binds
+  // a step to its skill. So a step id no phase claims is one `yad next` cannot guide and no renderer
+  // can place — worth saying. A warning, not a failure: a project may hold a step from a newer
+  // yadflow than the one being run.
+  const { phaseChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e22-'));
+  const seed = (id, steps, currentStep) => {
+    const dir = path.join(T, 'epics', id, '.sdlc');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ schemaVersion: 5, currentStep, steps }, null, 2) + '\n');
+  };
+  try {
+    // All four sentinels are currentStep markers, NOT entries in steps[] — none may be reported.
+    seed('EP-ok', [{ id: 'epic', type: 'author', status: 'done' }, { id: 'engineer-review', type: 'review+approve', status: 'todo' }], 'ready-for-build');
+    seed('EP-odd', [{ id: 'epic', type: 'author', status: 'done' }, { id: 'feasibility', type: 'author', status: 'todo' }], 'feasibility');
+    // A typo in `currentStep` alone. Nothing else validates that field, and `yad next` hides it by
+    // falling back to the first step that is not done — so without this it sits in a project unseen.
+    seed('EP-typo', [{ id: 'epic', type: 'author', status: 'done' }], 'architecure');
+    // …and a Build step id, which lives in build-state rather than in state.json.
+    const bs = path.join(T, 'epics', 'EP-ok', '.sdlc', 'build-state');
+    fs.mkdirSync(bs, { recursive: true });
+    fs.writeFileSync(path.join(bs, 'EP-ok-S01.json'), JSON.stringify({
+      story: 'EP-ok-S01', repos: { backend: { currentStep: 'implment', steps: [{ id: 'implment', status: 'todo' }] } },
+    }, null, 2) + '\n');
+    const checks = [];
+    phaseChecks(checks, T);
+    assert.equal(checks.length, 1, JSON.stringify(checks));
+    const c = checks[0];
+    assert.equal(c.id, 'phase:unknown');
+    assert.equal(c.status, 'warn');
+    assert.equal(c.section, 'shape');
+    assert.match(c.message, /EP-odd: `feasibility`/);
+    assert.match(c.message, /EP-typo \(currentStep\): `architecure`/);
+    assert.match(c.message, /EP-ok\/EP-ok-S01\.json \(backend\): `implment`/);
+    assert.equal(/`epic`|`engineer-review`|ready-for-build/.test(c.message), false,
+      'a known chain, its Build steps, and every sentinel say nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor phase: the section is wired into collectDoctor, not just exported', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T } = scaffold();
+  const dir = path.join(T, 'epics', 'EP-odd', '.sdlc');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'state.json'),
+    JSON.stringify({ schemaVersion: 5, currentStep: 'wat', steps: [{ id: 'wat', type: 'author', status: 'todo' }] }, null, 2) + '\n');
+  try {
+    const c = collectDoctor(T).checks.find((x) => x.id === 'phase:unknown');
+    assert.equal(c?.status, 'warn', 'running yad doctor surfaces it, not only calling phaseChecks by hand');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

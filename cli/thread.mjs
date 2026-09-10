@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import { readShips } from './ledger.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun, currentPhase,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -58,6 +58,10 @@ export function threadSummary(root, threadOrEpic) {
       // always had. Both are emitted for one major so a script reading either keeps working.
       id, type: lin.type, kind: lin.type, parent: lin.parent, inherits: lin.inherits,
       currentStep: state?.currentStep || 'unseeded',
+      // Which of the six phases this epic is in — the same answer `yad next` prints, from the same
+      // function. Null is a real answer, not a gap: a stub, the discovery front-zero, and any step id
+      // this release does not recognise all have no phase, and none of them is guessed at.
+      phase: currentPhase(state?.currentStep, { discovery: state?.kind === 'discovery' }),
       sealed: sealedEpic(root, id),
       stub: isStubEpic(root, id),
       depth: change?.depth || null,

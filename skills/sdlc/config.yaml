@@ -30,6 +30,30 @@ document_output_language: English
 output_folder: "{project-root}/_bmad-output"
 
 # Default dials applied to every new step (build plan §2).
+# The lifecycle, top down: three PARTS, six PHASES inside them, and the steps inside those.
+#
+# A phase is DERIVED from a step's id and is never written into `state.json` — there is nothing to
+# author here, nothing to keep in step, and no way for it to disagree with the step it describes.
+# `stepPhase` in cli/epic-state.mjs is the one definition; this block is the same table in the file
+# people read. A review gate takes the phase of the artifact it reviews, so `epic-review` is Discover.
+#
+# Release and Operate are NAMED and not built. No step, skill or gate exists for either yet.
+#
+# NOTE the word: "phase" here means one of these six. It does NOT mean the numbered development
+# phases of yadflow itself (docs/phase-N-build-plan.md), which is what "Phase 4a/4b" means elsewhere
+# in these files, nor a gate's internal merge phase.
+lifecycle:
+  parts: [Shape, Build, Run]
+  phases:
+    - { id: discover, name: Discover, part: Shape, built: true,  steps: [discovery, analysis, epic] }
+    - { id: design,   name: Design,   part: Shape, built: true,  steps: [architecture, ui-design] }
+    - { id: plan,     name: Plan,     part: Shape, built: true,  steps: [stories, test-cases] }
+    - { id: build,    name: Build,    part: Build, built: true,  steps: [spec, tasks, implement, checks, engineer-review] }
+    - { id: release,  name: Release,  part: Run,   built: false, steps: [] }   # E32 builds it
+    - { id: operate,  name: Operate,  part: Run,   built: false, steps: [] }   # E33 builds it
+  # `currentStep` markers that are NOT steps: they never appear in `steps[]` and have no phase.
+  sentinels: [ready-for-build, backfill-pending, backfill-done, discovery-done]
+
 defaults:
   # The two dials: who does the work, and who moves it forward. Renamed in shape 4; BOTH names are
   # written on every step and the OLD one is still the one read, so an older CLI and the skills that
