@@ -1790,6 +1790,31 @@ test('runNext: specific epic prints the action; --check on a blocked step exits 
   process.exitCode = 0; // do not leak a failing exit code into the test runner
 });
 
+test('runNext: the phase line marks where the epic is, and shows the two planned phases', async () => {
+  // The line a person actually reads. All six are printed on purpose: one that stopped at Build would
+  // say the lifecycle ends at merge, which is the opposite of what the roadmap settled.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase1-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /phase: Discover · Design · Plan · Build · Release \(planned\) · Operate \(planned\)/);
+  assert.match(s, /Design is a Shape phase/, 'and which part the current phase belongs to');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext: no phase line when the epic is on a sentinel, because that is not a step', async () => {
+  // `ready-for-build` is a `currentStep` marker, not an entry in `steps[]`. Placing it in a phase
+  // would be inventing one, and a wrong phase is worse than none — so the line stays away entirely.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'ready-for-build' }));
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.equal(/phase:/.test(s), false, s);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('runNext: review-sync action in solo mode notes the merge-only path', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next4-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
