@@ -46,10 +46,21 @@ function listEpics(root) {
 // beside it. `yad next --json` is deep-equalled by the golden test (cli/test-golden.mjs), which
 // rule 6 says never changes — and a deep-equal breaks on an ADDED key just as hard as a renamed
 // one. The value is the same either way; only the label is old.
-const actionFor = (root, id) => ({
+//
+// The lineage may be passed in. `epicLineage` opens and parses `epic.md`, and every printed surface
+// needs the grouping theme off the SAME read — without this the file would be parsed twice per epic
+// on every `yad next`. The default keeps the `--json` path a one-liner, where the theme is not wanted.
+const actionFor = (root, id, lin = epicLineage(root, id)) => ({
   ...nextAction(loadLedger(epicRoot(root, id)), { epic: id }),
-  lineageKind: epicLineage(root, id).type,
+  lineageKind: lin.type,
 });
+
+// One `epic.md` read, both things that come out of it: the action to print and the tag to print
+// beside it. Every printed path in this file goes through here.
+const rowFor = (root, id) => {
+  const lin = epicLineage(root, id);
+  return { action: actionFor(root, id, lin), theme: lin.theme };
+};
 
 // EP-checkout-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
 const shortStory = (s) => (s && s.match(/S\d+$/i)?.[0]) || s || '(story)';
@@ -120,16 +131,16 @@ function actionLine(a, { solo } = {}) {
 
 // Full, friendly printout for a single epic.
 //
-// `root` is taken rather than another field on the action object: `printAction` renders `a` and
-// `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled by the golden test, which an
-// added key breaks (see actionFor). The grouping theme is for the person reading the line.
-function printAction(a, { solo, root } = {}) {
+// The grouping theme arrives as an argument rather than as another field on the action object:
+// `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
+// by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
+// `epic.md` read the action's own `lineageKind` came from.
+function printAction(a, { solo, theme: tag = null } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The discovery front-zero is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${typeNoun(a.lineageKind)} ` : '';
   // The free grouping tag, printed only when the epic has one — most do not, and an empty marker on
   // every line would cost more attention than it pays back.
-  const tag = root && a.epicId ? epicLineage(root, a.epicId).theme : null;
   const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
   log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)}${theme} ${c.dim(`— ${a.why}`)}`);
   // In Build with live lanes, print each story/repo's next sub-step + remaining chain instead
@@ -183,11 +194,11 @@ function generalNext(root, { all } = {}) {
   const allEpics = listEpics(root);
   const hasDiscovery = allEpics.includes(DISCOVERY_EPIC);
   const featureEpics = allEpics.filter((id) => id !== DISCOVERY_EPIC);
-  const discoveryAction = hasDiscovery ? actionFor(root, DISCOVERY_EPIC) : null;
-  const discoveryOpen = !!discoveryAction && discoveryAction.kind !== 'discovery-done';
+  const discoveryRow = hasDiscovery ? rowFor(root, DISCOVERY_EPIC) : null;
+  const discoveryOpen = !!discoveryRow && discoveryRow.action.kind !== 'discovery-done';
 
   if (!featureEpics.length) {
-    if (discoveryOpen) { printAction(discoveryAction, { solo, root }); return; }
+    if (discoveryOpen) { printAction(discoveryRow.action, { solo, ...discoveryRow }); return; }
     log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
     if (!hasDiscovery) hand(`frame the whole project (market, feasibility, roadmap): invoke the ${c.bold('yad-discovery')} skill ${c.dim('(optional front-zero)')}`);
@@ -195,11 +206,11 @@ function generalNext(root, { all } = {}) {
     return;
   }
 
-  const actions = featureEpics.map((id) => actionFor(root, id));
-  if (discoveryOpen) printAction(discoveryAction, { solo, root });   // an unfinished discovery comes first
+  const rows = featureEpics.map((id) => rowFor(root, id));
+  if (discoveryOpen) printAction(discoveryRow.action, { solo, ...discoveryRow });   // an unfinished discovery comes first
 
   if (featureEpics.length === 1 || all) {
-    for (const a of actions) printAction(a, { solo, root });
+    for (const r of rows) printAction(r.action, { solo, ...r });
     return;
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
@@ -207,8 +218,7 @@ function generalNext(root, { all } = {}) {
   // The grouping theme rides this list too. This is the ONE `yad next` view that shows several epics
   // side by side, so it is where seeing which of them belong together is worth most — and leaving it
   // off would have meant bare `yad next`, the command people run by default, never showed the tag.
-  for (const a of actions) {
-    const tag = epicLineage(root, a.epicId).theme;
+  for (const { action: a, theme: tag } of rows) {
     const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
     log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo })}`);
   }
@@ -293,5 +303,6 @@ export async function runNext(root, { epic, check, all, json } = {}) {
     process.exitCode = 1;
     return;
   }
-  printAction(actionFor(root, epic), { solo: isSolo(root), root });
+  const row = rowFor(root, epic);
+  printAction(row.action, { solo: isSolo(root), ...row });
 }

@@ -1860,6 +1860,39 @@ test('runNext: the several-epics list shows each theme — the default view is n
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('runNext reads each epic.md exactly once, not once per thing it needs from it', async () => {
+  // `epic.md` is opened and parsed by `epicLineage`, and TWO things printed on the same line come out
+  // of it: the action's `lineageKind` and the grouping theme. Reading it once per value would parse
+  // every epic's file twice on every `yad next`, and `--all` on a large project multiplies that.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-theme4-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  for (const id of ['EP-a', 'EP-b']) {
+    seedEpic(T, id, chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+    fs.writeFileSync(path.join(T, 'epics', id, 'epic.md'),
+      `---\nid: ${id}\nkind: feature\ntheme: checkout-revamp\n---\n\n## Goal\nx\n`);
+  }
+  const real = fs.readFileSync;
+  const reads = [];
+  fs.readFileSync = (f, ...rest) => {
+    if (typeof f === 'string' && f.endsWith(`${path.sep}epic.md`)) reads.push(f);
+    return real(f, ...rest);
+  };
+  try {
+    await grab(() => runNext(T, { epic: 'EP-a' }));
+    assert.equal(reads.length, 1, `one epic, one read — got ${reads.length}`);
+    reads.length = 0;
+    await grab(() => runNext(T, {}));            // the several-epics roll-up
+    assert.equal(reads.length, 2, `two epics, two reads — got ${reads.length}`);
+    reads.length = 0;
+    await grab(() => runNext(T, { all: true })); // and the full per-epic view
+    assert.equal(reads.length, 2, `two epics, two reads — got ${reads.length}`);
+  } finally {
+    fs.readFileSync = real;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('runNext --json does NOT gain a theme key, even on a themed epic', async () => {
   // `yad next --json` is deep-equalled by the golden test (cli/test-golden.mjs), and rule 6 says that
   // snapshot never changes — an ADDED key breaks it exactly as hard as a renamed one. The golden

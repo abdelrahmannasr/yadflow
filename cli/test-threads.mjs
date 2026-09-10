@@ -395,16 +395,34 @@ function templateFrontmatter(skillFile) {
   return m[1];
 }
 
+// The three skills that author an `epic.md`. `yad-change`'s template writes a THREADED epic, so its
+// row substitutes a real type in for the `<change|defect|hotfix>` placeholder and plants the parent it
+// names on disk — without that its `parent:` and `thread:` cannot resolve and the round trip proves
+// nothing about them.
 for (const [skillFile, expected] of [
-  ['yad-epic/SKILL.md', { kind: 'feature', type: 'feature', genesis: true }],
-  ['yad-stub/SKILL.md', { kind: 'feature', type: 'feature', genesis: true, stub: 'backfill-pending' }],
+  ['yad-epic/SKILL.md', { kind: 'feature', type: 'feature', genesis: true, root: 'EP-demo' }],
+  ['yad-stub/SKILL.md', { kind: 'feature', type: 'feature', genesis: true, stub: 'backfill-pending', root: 'EP-demo' }],
+  ['yad-change/SKILL.md', {
+    kind: 'defect', type: 'defect', genesis: false, root: 'EP-parent',
+    fill: (t) => t
+      .replace('<change|defect|hotfix>', 'defect')
+      .replace('<the same value as kind>', 'defect')
+      .replace('<EP-parent>', 'EP-parent')
+      .replace('<EP-genesis>', 'EP-parent')
+      // This template's `theme:` is a placeholder telling the author to copy the parent's tag down,
+      // not a blank. Fill it the way the skill says to, and check it reads back as that exact tag.
+      .replace("<the parent's theme, or leave empty>", 'checkout-revamp'),
+    parent: 'EP-parent',
+    theme: 'checkout-revamp',
+  }],
 ]) {
   test(`${skillFile}: the epic.md template it tells people to copy reads back correctly`, () => {
     const T = hub();
+    if (expected.parent) writeEpic(T, expected.parent, { kind: 'feature', thread: expected.parent });
     const dir = path.join(T, 'epics', 'EP-demo');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'epic.md'),
-      templateFrontmatter(skillFile).replace(/EP-<slug>/g, 'EP-demo') + '\n## Goal\nx\n');
+    const filled = (expected.fill || ((t) => t))(templateFrontmatter(skillFile));
+    fs.writeFileSync(path.join(dir, 'epic.md'), filled.replace(/EP-<slug>/g, 'EP-demo') + '\n## Goal\nx\n');
 
     const fm = readFrontmatter(path.join(dir, 'epic.md'));
     // No value the engine reads may carry a trailing comment — that is the whole failure.
@@ -418,9 +436,12 @@ for (const [skillFile, expected] of [
     assert.equal(workItemType(fm), expected.kind);
     assert.equal(isGenesisType(workItemType(fm)), expected.genesis);
     if (expected.stub) assert.equal(isStubEpic(T, 'EP-demo'), true, 'the stub marker is readable');
+    // The grouping tag round-trips: an empty `theme:` reads back as NO theme rather than as a value,
+    // and a filled one reads back as exactly what was written.
+    assert.equal(epicLineage(T, 'EP-demo').theme, expected.theme ?? null);
     // …and the thread cache resolves, which is what `yad doctor` checks.
     assert.equal(resolveThread(T, 'EP-demo').broken, null);
-    assert.equal(resolveThread(T, 'EP-demo').rootId, 'EP-demo');
+    assert.equal(resolveThread(T, 'EP-demo').rootId, expected.root);
     fs.rmSync(T, { recursive: true, force: true });
   });
 }

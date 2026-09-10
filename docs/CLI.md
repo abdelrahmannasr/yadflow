@@ -266,7 +266,8 @@ Four things are worth knowing:
   that approval as stale and the step has to be approved again. This is not new to themes; it is how
   every edit to an approved artifact behaves. Before the gate, edit freely.
 - **A child gets a copy, not a link.** When `yad-change` opens a change or defect epic off a parent, it
-  writes the parent's theme onto the new epic. Nothing works it out afterwards, so if you add a theme
+  writes the parent's theme onto the new epic. A brownfield stub minted by `yad-stub` normally has
+  none: it is captured from code that already exists, so there is nobody to ask which group it is in. Nothing works it out afterwards, so if you add a theme
   to a parent later, add it to the children too.
 
 Where it shows up: `yad next` prints it beside the epic id (`Epic EP-cart #checkout-revamp`), in the
