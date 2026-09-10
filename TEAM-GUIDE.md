@@ -518,6 +518,11 @@ Product  →  Epic  →  Story  →  Task
 ```
 
 Grouping several epics under one heading is a free `theme` tag on the epic, not a rung of its own.
+Write one word or a short phrase in `epic.md` — `theme: checkout-revamp` — and every epic carrying the
+same tag is in the same group. It is optional and most epics have none. There is no list of allowed
+themes and nothing to register. Two rules: write **one** tag, never a list, and spell an existing
+theme exactly as the other epics do, because two spellings group as two. `yad doctor` reports both
+mistakes. `yad next` prints the tag beside the epic id and `yad thread` shows it on every node.
 
 Every work item also carries a **type**, which is what stops everything being called an epic:
 

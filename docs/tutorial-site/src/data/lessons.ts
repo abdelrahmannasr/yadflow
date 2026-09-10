@@ -270,6 +270,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Run `yad-epic` in the Product. With the analyst and pm lenses it shapes the idea and writes `epic.md`. It assigns the stable `EP-<slug>` ID and seeds the epic\'s state (`.sdlc/state.json`, all human-approve, Shape steps locked).' },
           { kind: 'p', text: 'When the step finishes it sets itself `done`, moves `currentStep` to the epic review, and **stops at the gate**. You clear the gate before moving on (next module).' },
+          { kind: 'p', text: 'To put several epics under one heading, give them the same `theme:` in `epic.md` — one word or short phrase, such as `theme: checkout-revamp`. It is optional, there is no list to pick from, and there is no level above the Epic: grouping is a label. Write **one** tag (a list is read as no theme), and spell an existing theme exactly as the other epics do — two spellings group as two, which `yad doctor` reports.' },
           { kind: 'callout', tone: 'warn', text: 'IDs are immutable once assigned. Renaming an EP-<slug> breaks every downstream link (stories, tasks, branches, PRs).' },
         ],
         commands: [{ cmd: 'run yad-epic', note: 'invoke the skill by name in your AI IDE' }],
