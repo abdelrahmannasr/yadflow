@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import { readShips } from './ledger.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun, stepPhase,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -58,6 +58,9 @@ export function threadSummary(root, threadOrEpic) {
       // always had. Both are emitted for one major so a script reading either keeps working.
       id, type: lin.type, kind: lin.type, parent: lin.parent, inherits: lin.inherits,
       currentStep: state?.currentStep || 'unseeded',
+      // Which of the six phases that step sits in, or null for a sentinel like `ready-for-build`
+      // (not a step) and for any id this release does not recognise. Never guessed.
+      phase: stepPhase(state?.currentStep),
       sealed: sealedEpic(root, id),
       stub: isStubEpic(root, id),
       depth: change?.depth || null,

@@ -5782,6 +5782,47 @@ test('doctor threads: a chore is skipped like a feature, and a broken thread is 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor phase: a step no phase claims is reported, and a sentinel is not', async () => {
+  // Every step the engine can run belongs to one of the six phases, and that same table is what binds
+  // a step to its skill. So a step id no phase claims is one `yad next` cannot guide and no renderer
+  // can place — worth saying. A warning, not a failure: a project may hold a step from a newer
+  // yadflow than the one being run.
+  const { phaseChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e22-'));
+  const seed = (id, steps, currentStep) => {
+    const dir = path.join(T, 'epics', id, '.sdlc');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ schemaVersion: 5, currentStep, steps }, null, 2) + '\n');
+  };
+  try {
+    // `ready-for-build` is a currentStep sentinel, NOT an entry in steps[] — it must not be reported.
+    seed('EP-ok', [{ id: 'epic', type: 'author', status: 'done' }, { id: 'engineer-review', type: 'review+approve', status: 'todo' }], 'ready-for-build');
+    seed('EP-odd', [{ id: 'epic', type: 'author', status: 'done' }, { id: 'feasibility', type: 'author', status: 'todo' }], 'feasibility');
+    const checks = [];
+    phaseChecks(checks, T);
+    assert.equal(checks.length, 1, JSON.stringify(checks));
+    const c = checks[0];
+    assert.equal(c.id, 'phase:unknown');
+    assert.equal(c.status, 'warn');
+    assert.equal(c.section, 'shape');
+    assert.match(c.message, /EP-odd: `feasibility`/);
+    assert.equal(/EP-ok/.test(c.message), false, 'a known chain, and its sentinel, say nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor phase: the section is wired into collectDoctor, not just exported', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T } = scaffold();
+  const dir = path.join(T, 'epics', 'EP-odd', '.sdlc');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'state.json'),
+    JSON.stringify({ schemaVersion: 5, currentStep: 'wat', steps: [{ id: 'wat', type: 'author', status: 'todo' }] }, null, 2) + '\n');
+  try {
+    const c = collectDoctor(T).checks.find((x) => x.id === 'phase:unknown');
+    assert.equal(c?.status, 'warn', 'running yad doctor surfaces it, not only calling phaseChecks by hand');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('doctor shape: a project with an un-migrated file is reported as behind, in --json', async () => {
   // The scaffold writes .sdlc/repos.json with a raw fs.writeFileSync, so it carries no stamp and is
   // shape 1 by rule 1 — exactly the state a real project is in before it runs `yad migrate`. This is

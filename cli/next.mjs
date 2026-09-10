@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
-import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, DISCOVERY_EPIC } from './epic-state.mjs';
+import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, PHASES, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -130,6 +130,26 @@ function printAction(a, { solo } = {}) {
   else hand(actionLine(a, { solo }));
   if (a.kind === 'review-sync') info(c.dim(`unresolved comments? ${c.bold(`yad gate comments ${a.epicId} ${a.artifact}`)}`));
   if (a.parallel) hand(`parallel track: invoke the ${c.bold(a.parallel.skill)} skill ${c.dim(`(author ${a.parallel.artifact})`)}`);
+  phaseLine(a);
+}
+
+// Where this epic sits in the lifecycle: the six phases, with the current one marked.
+//
+// Printed only when the active step HAS a phase. A sentinel like `ready-for-build` is not a step and
+// has none, and so does a step from a profile this release has never heard of — showing the wrong
+// phase would be worse than showing no line at all, so `phaseOf` returns null and this stays quiet.
+//
+// The two unbuilt phases are shown, greyed, rather than hidden. Someone reading this needs to see
+// that the lifecycle does not stop at merge; a list that ended at Build would say it does.
+function phaseLine(a) {
+  const here = phaseOf(a.step);
+  if (!here) return;
+  const rendered = PHASES.map((p) => (
+    p.id === here.id ? c.bold(p.name) : c.dim(p.built ? p.name : `${p.name} (planned)`)
+  ));
+  // Coloured PER SEGMENT, never nested: `paint` closes with a full reset (\x1b[0m), so a bold word
+  // inside a dim string ends the dim for everything after it and the rest of the line reads bright.
+  info(`${c.dim('phase:')} ${rendered.join(c.dim(' · '))} ${c.dim(`(${here.name} is a ${here.part} phase)`)}`);
 }
 
 // `yad next` with no epic: orient across the whole project, always ending on ONE thing to do.

@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, stepPhase } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -832,6 +832,37 @@ export function typeChecks(checks, root) {
   }
 }
 
+// A step this release does not recognise. Every step the engine can run belongs to one of the six
+// phases, and the same table is what binds a step to its skill — so an id no phase claims is an id
+// `yad next` cannot guide, `yad gate` has no artifact rule for, and no renderer can place in the
+// lifecycle. It is reported rather than ignored, and only warned about rather than failed: a project
+// may legitimately hold a step from a newer yadflow than the one being run, and a hand-written
+// `state.json` is allowed to be ahead of the tool reading it.
+//
+// Sentinels are not steps and are never looked at here. `currentStep` can be `ready-for-build`,
+// `backfill-pending`, `backfill-done` or `discovery-done`, none of which appear in `steps[]`.
+export function phaseChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const unplaced = [];
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
+    for (const s of state.steps) {
+      if (!isPlainObject(s) || typeof s.id !== 'string') continue;
+      if (!stepPhase(s.id)) unplaced.push(`${e}: \`${s.id}\``);
+    }
+  }
+  if (unplaced.length) {
+    check(
+      checks, 'phase:unknown', 'shape', 'warn',
+      `${unplaced.length} step(s) belong to no phase: ${unplaced.slice(0, 3).join('; ')}${unplaced.length > 3 ? ` (+${unplaced.length - 3} more)` : ''}`,
+      'this yadflow does not recognise that step id, so it cannot say which phase it is in, which skill runs it, or what `yad next` should tell you to do. Check the spelling, or upgrade if the step comes from a newer release',
+    );
+  }
+}
+
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
   if (!injected && !exists(productConfigPath(root)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
@@ -902,6 +933,7 @@ export function collectDoctor(root) {
   mirrorChecks(checks, root);
   dialChecks(checks, root);
   typeChecks(checks, root);
+  phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

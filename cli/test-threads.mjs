@@ -8,6 +8,7 @@ import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
   isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
   workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter,
+  PHASES, stepPhase, phaseOf, phaseSteps, STEP_SKILL, BUILD_STEP_SKILL,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -423,3 +424,81 @@ for (const [skillFile, expected] of [
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
+
+// ---- the six phases (E22) ------------------------------------------------------------------------
+
+test('the six phases are named, in order, each in exactly one part', () => {
+  assert.deepEqual(PHASES.map((p) => p.id), ['discover', 'design', 'plan', 'build', 'release', 'operate']);
+  assert.deepEqual(PHASES.map((p) => p.part), ['Shape', 'Shape', 'Shape', 'Build', 'Run', 'Run']);
+  // Release and Operate are named and NOT built. Listing them is the point — a person has to see the
+  // lifecycle does not stop at merge — and `built: false` is what keeps every renderer honest.
+  assert.deepEqual(PHASES.filter((p) => !p.built).map((p) => p.id), ['release', 'operate']);
+  for (const p of PHASES.filter((x) => !x.built)) {
+    assert.deepEqual(phaseSteps(p.id), [], `${p.id} must claim no step until E32/E33 build one`);
+  }
+});
+
+test('a review gate takes its phase from the artifact it reviews', () => {
+  assert.equal(stepPhase('epic'), 'discover');
+  assert.equal(stepPhase('epic-review'), 'discover');
+  assert.equal(stepPhase('architecture-review'), 'design');
+  assert.equal(stepPhase('ui-design-review'), 'design');
+  assert.equal(stepPhase('test-cases-review'), 'plan');
+  assert.equal(stepPhase('discovery-review'), 'discover');
+});
+
+test('`engineer-review` is a step, not the review of a step called `engineer`', () => {
+  // The trap this pins. Strip `-review` first and this id resolves to `engineer`, which nothing
+  // claims — so the last step of Build would render with no phase at all. The full id has to be
+  // tried before the suffix is touched, and only this test says so.
+  assert.equal(stepPhase('engineer-review'), 'build');
+  assert.equal(phaseOf('engineer-review').name, 'Build');
+  assert.ok(phaseSteps('build').includes('engineer-review'));
+});
+
+test('an id the engine does not recognise has NO phase, rather than a guessed one', () => {
+  // Sentinels are `currentStep` values, not entries in `steps[]`, and a future profile may carry step
+  // ids this release has never heard of. A renderer showing the wrong phase is worse than one
+  // showing none, so this returns null and every caller has to decide what to do about it.
+  for (const id of ['ready-for-build', 'backfill-pending', 'backfill-done', 'discovery-done',
+    'feasibility', 'engineer', 'review', '', null, undefined]) {
+    assert.equal(stepPhase(id), null, `${id} should have no phase`);
+    assert.equal(phaseOf(id), null);
+  }
+});
+
+test('every step the engine can run belongs to a phase', () => {
+  // The invariant that keeps the three tables from drifting: a step added to STEP_SKILL or
+  // BUILD_STEP_SKILL and forgotten here would render with no phase and no test would notice.
+  for (const id of [...Object.keys(STEP_SKILL), ...Object.keys(BUILD_STEP_SKILL)]) {
+    assert.ok(stepPhase(id), `${id} has a skill but no phase`);
+  }
+  // …and every phase that claims to be built really has steps.
+  for (const p of PHASES.filter((x) => x.built)) {
+    assert.ok(phaseSteps(p.id).length, `${p.id} is marked built but claims no step`);
+  }
+  // Every review gate of a known authoring step resolves too.
+  for (const id of Object.keys(STEP_SKILL)) {
+    assert.equal(stepPhase(`${id}-review`), stepPhase(id), `${id}-review drifted from ${id}`);
+  }
+});
+
+test('a thread node carries the phase its current step is in, or null for a sentinel', () => {
+  // `yad thread --json` is not frozen by the golden test, so it gains the new word directly. Null is
+  // a real answer here, not a gap: `ready-for-build` is a currentStep sentinel, not a step, and
+  // placing it in a phase would be inventing one.
+  const T = hub();
+  writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' });
+  const dir = path.join(T, 'epics', 'EP-gen', '.sdlc');
+  fs.mkdirSync(dir, { recursive: true });
+  const at = (currentStep) => {
+    fs.writeFileSync(path.join(dir, 'state.json'),
+      JSON.stringify({ schemaVersion: 5, currentStep, steps: [{ id: 'epic', type: 'author', status: 'done' }] }, null, 2) + '\n');
+    return threadSummary(T, 'EP-gen').nodes[0];
+  };
+  assert.equal(at('architecture-review').phase, 'design');
+  assert.equal(at('stories').phase, 'plan');
+  assert.equal(at('engineer-review').phase, 'build');
+  assert.equal(at('ready-for-build').phase, null, 'a sentinel is not a step');
+  fs.rmSync(T, { recursive: true, force: true });
+});
