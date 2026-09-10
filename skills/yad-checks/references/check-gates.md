@@ -11,7 +11,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | spec-link | the `Task: <story>-<task>` commit trailer; `specs/<story>/link.md` | `yad-implement` (trailer), `yad-spec` (link.md) |
 | contract-check | changed files under `specs/<story>/contracts/`; the `Contract-Change: yes` trailer; `link.md`'s pinned `contract-lock`; the product repo's `contract-lock.json` | `yad-architecture` (lock), `yad-spec` (slice + link), `yad-implement` (trailer) |
 | build/test/lint | the repo's configured package manager running `lint` / `build` / `test` | the repo |
-| lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's `kind`/`parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
+| lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's work-item type (`kind:`, then `type:`) and `parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
 | epic-open | the `Task:` trailer → `link.md` → the Product epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
 | reconcile-debt | the `Task:` trailer → `link.md` → the Product epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
 | verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | Product roster `email` fields (`yad check --fix` generates the allowlist) |
@@ -269,7 +269,9 @@ gate now **prints that note**, so a deferred check is never mistaken for a passe
 duplicated verbatim across the four scripts (they are standalone by design) and a test asserts the
 four copies stay byte-identical.
 
-- **lineage-check** — reads the Product epic's `kind`/`parent` frontmatter. A `feature` (genesis) epic
+- **lineage-check** — reads the Product epic's work-item type and `parent` frontmatter. The type has
+  two names and the gate reads `kind:` first, then `type:` — the same order the CLI uses, asserted by a
+  table test in `cli/test-checks.mjs`. A `feature` or `chore` (genesis) epic
   passes. A `change`/`defect`/`hotfix` epic **FAILS** unless it declares a `parent:` that resolves to a
   real `epics/<parent>/` in the Product (no orphan threads). This is the "every code change has an owning
   epic in a thread" enforcement, layered on spec-link.

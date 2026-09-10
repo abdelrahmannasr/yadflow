@@ -1,6 +1,6 @@
 ---
 name: yad-change
-description: 'Phase 6 post-lock change management — the change-request/defect INTAKE + TRIAGE step of a feature thread. After the contract locks and code ships, a change must NOT mutate a locked artifact; it becomes a NEW epic threaded to its parent. This skill classifies the change DEPTH (defect-fix / behavioral-no-surface / contract-surface / new-capability), seeds a new EP-<slug> change-epic threaded to its parent (lineage frontmatter kind/parent/thread/inherits/supersedes + a state.json whose inherited steps are pre-marked done and only the changed steps run; a pointer-lock contract-lock.json when architecture is inherited), and records the intake in change.json (escape_stage + root_cause for defects). For hotfixes it records the ship-first exception and opens reconcile-debt.json. Never auto-advances — hands off to the normal authoring skills + the team review gate. Use when the user says "log a change request", "file a defect", "thread a change off EP-…", "open a hotfix", or after a shipped feature needs a fix.'
+description: 'Phase 6 post-lock change management — the change-request/defect INTAKE + TRIAGE step of a feature thread. After the contract locks and code ships, a change must NOT mutate a locked artifact; it becomes a NEW epic threaded to its parent. This skill classifies the change DEPTH (defect-fix / behavioral-no-surface / contract-surface / new-capability), seeds a new EP-<slug> change-epic threaded to its parent (lineage frontmatter kind+type/parent/thread/inherits/supersedes + a state.json whose inherited steps are pre-marked done and only the changed steps run; a pointer-lock contract-lock.json when architecture is inherited), and records the intake in change.json (escape_stage + root_cause for defects). For hotfixes it records the ship-first exception and opens reconcile-debt.json. Never auto-advances — hands off to the normal authoring skills + the team review gate. Use when the user says "log a change request", "file a defect", "thread a change off EP-…", "open a hotfix", or after a shipped feature needs a fix.'
 ---
 
 # SDLC — Change/Defect Intake + Triage (Phase 6, the entry of a feature thread)
@@ -26,7 +26,7 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
   equal the computed root (`yad doctor` flags a mismatch). Thread id = the genesis epic's id.
 - Lineage frontmatter, the inherited-step shape, the pointer-lock, `change.json`, and
   `reconcile-debt.json` are all defined in `../yad-epic/references/state-schema.md` (Phase 6 section).
-- Genesis epics authored before Phase 6 must be **migrated once** (`kind: feature`, `thread: <self>` in
+- Genesis epics authored before Phase 6 must be **migrated once** (`kind: feature` + `type: feature`, `thread: <self>` in
   their `epic.md`) before a change threads off them — see `references/triage.md`.
 - Speak in the configured `communication_language`; write documents in `document_output_language`.
 
@@ -35,8 +35,11 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 - `parent` — **required.** The `EP-<slug>` this change evolves (the thread predecessor; usually the
   feature's current tip).
 - `title` — **required.** One line describing the change.
-- `kind` — `change` | `defect` | `hotfix` (default `change`). `feature` is reserved for a genesis epic
-  (use `yad-epic`, not this skill).
+- `kind` (also accepted as `type`) — the work-item **type**: `change` | `defect` | `hotfix`
+  (default `change`). Both input names mean the same thing, the same way both frontmatter keys do.
+  `feature` and
+  `chore` are the genesis types and are reserved for a work item with no parent (use `yad-epic`,
+  not this skill). Two names carry this value — see Step 4.
 - `origin` — defect/hotfix only: `production` | `staging` | `qa` | `review`.
 - `severity` — defect/hotfix only: `sev1`..`sev4`.
 - `escape_stage` — defect/hotfix only: the SDLC gate that *should* have caught it (`stories`,
@@ -51,12 +54,12 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
 Confirm `parent` exists (`epics/<parent>/epic.md` + `.sdlc/state.json`). Read its lineage and resolve
 the thread root (`yad thread <parent>` / `resolveThread`). **STOP** if the parent is missing, or its
 lineage is broken (a cycle, or a `thread` cache ≠ the computed root) — fix the parent first. If the
-parent is a **genesis epic not yet migrated** (no `kind:`), migrate it now: add `kind: feature` and
+parent is a **genesis epic not yet migrated** (no type at all), migrate it now: add `kind: feature`, `type: feature` and
 `thread: <its own id>` to its `epic.md` (a one-line, non-gated frontmatter add).
 
 **Missing parent (brownfield) — never silent.** If the requested `parent` does **not exist at all**
 because the feature was built before it had an epic, do NOT dead-end: point the user at **`yad-stub`** to
-mint a stub genesis epic (a minimal `kind: feature` thread anchor) for that feature first, then re-run
+mint a stub genesis epic (a minimal `feature`-type thread anchor) for that feature first, then re-run
 this skill with that stub as the `parent`. A change MUST still thread to a real parent — `yad-stub` just
 creates the smallest real one so the defect can be captured now (the `yad-reconcile` → anchor → change
 discipline).
@@ -86,13 +89,21 @@ a word if needed). Create `{project-root}/epics/EP-<slug>/`. Open the `change/EP
 per the shared "Authoring branches" procedure (git/greenfield-safe).
 
 ### Step 4 — Write `epic.md` (the change brief + lineage frontmatter)
-Write a thin brief carrying the lineage frontmatter:
+Write a thin brief carrying the lineage frontmatter.
+
+**Write the work-item type under BOTH names, with the same value.** `kind:` is the original name and
+is still the one every reader uses; `type:` is the name from shape 5 on. Writing `type:` alone is the
+one mistake here that breaks something: `lineage-check.sh` runs inside the code repo and reads
+`kind:`. Finding none it defaults to `feature`, decides the epic is a parent-free genesis, and stops
+requiring the `parent:` a change, defect or hotfix must have. `yad doctor` FAILS on that.
+
 
 ```markdown
 ---
 id: EP-<slug>
 status: draft
 kind: <change|defect|hotfix>
+type: <the same value as kind>
 parent: <EP-parent>
 thread: <EP-genesis>
 inherits: [<the inherited bases>]
@@ -159,14 +170,15 @@ change against an undocumented feature should wait until the stub is promoted (b
 contract locked).
 
 ### Step 6 — Write `.sdlc/change.json` (intake + triage record)
-Record the intake: `epicId`, `thread`, `parent`, `kind`, `depth`, `intakeBy`, `intakeDate`, `title`,
+Record the intake: `epicId`, `thread`, `parent`, `kind` **and `type`** (the same value under both
+names, as in `epic.md`), `depth`, `intakeBy`, `intakeDate`, `title`,
 `description`, `affectedArtifacts`, `reauthors`, `inherits`, and for a defect/hotfix the `defect` block
 (`origin`, `severity`, `escape_stage`, `root_cause`). This is what `yad-defects` reads to attribute the
 defect to the gate that should have caught it. Add `"parentStub": true` when the parent is an
 un-promoted stub (Step 5) — omit it (or `false`) otherwise.
 
 ### Step 7 — Hotfix only: record the ship-first exception + open reconcile debt
-If `kind: hotfix`, Build MAY run before these Shape gates approve (severity demands it). Record
+If the type is `hotfix`, Build MAY run before these Shape gates approve (severity demands it). Record
 `hotfix: { "shipFirst": true }` in `change.json` and **append** to `.sdlc/reconcile-debt.json`:
 `{ "thread": "<…>", "epicId": "<…>", "openedDate": "<today>", "reason": "<why>", "requires": ["artifacts-updated","regression-test"], "status": "open", "paidDate": null, "paidBy": null, "evidence": { "artifacts": [], "regressionTest": "" } }`.
 Tell the user the debt **freezes the next normal change** on this thread (`reconcile-debt` gate) until it

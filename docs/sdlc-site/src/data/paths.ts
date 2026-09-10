@@ -467,7 +467,7 @@ const changeSteps: FlowStep[] = [
     id: "stub",
     title: "Brownfield Stub Anchor",
     description:
-      "Brownfield entry to a thread: an already-built feature with no epic can't be a change parent (yad-change needs a real parent; lineage-check rejects a missing one). yad-stub mints the smallest real thread anchor — a stub genesis epic.md (kind:feature, thread:self, verified:false, stub:backfill-pending) + a seeded state.json (kind:stub / currentStep:backfill-pending) — never inventing behaviour. Defects thread off it immediately; yad-backfill promote later flips it to a real, verified epic.",
+      "Brownfield entry to a thread: an already-built feature with no epic can't be a change parent (yad-change needs a real parent; lineage-check rejects a missing one). yad-stub mints the smallest real thread anchor — a stub genesis epic.md (type feature, thread:self, verified:false, stub:backfill-pending) + a seeded state.json (the lifecycle marker kind:stub / currentStep:backfill-pending) — never inventing behaviour. Defects thread off it immediately; yad-backfill promote later flips it to a real, verified epic.",
     actor: "pm",
     status: "draft",
     stepState: "epic.md (stub) · state.json (backfill-pending)",
@@ -475,7 +475,7 @@ const changeSteps: FlowStep[] = [
     handler: "yad-stub",
     activeComponents: ["product-hub", "state-json"],
     messages: [
-      { id: "sb-1", from: "product-hub", to: "state-json", label: "seed stub genesis (kind:feature · stub:backfill-pending)", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "sb-1", from: "product-hub", to: "state-json", label: "seed stub genesis (type feature · stub:backfill-pending)", type: "write", color: "#2471a3", delay: 0, duration: 800 },
       { id: "sb-2", from: "state-json", to: "product-hub", label: "anchor ready → thread a defect with yad-change", type: "event", color: "#1e8449", delay: 900, duration: 700 },
     ],
     sideEffects: { jobs: "epic.md (stub) · state.json · approvals.json · comments.json", notifications: "never auto-advances — thread bugs now; yad-backfill promote makes it real" },
@@ -492,7 +492,7 @@ const changeSteps: FlowStep[] = [
     handler: "yad-change",
     activeComponents: ["product-hub", "state-json", "change-json", "reconcile-debt-json"],
     messages: [
-      { id: "cg-1", from: "product-hub", to: "change-json", label: "seed change-epic (kind / parent / thread)", type: "write", color: "#2471a3", delay: 0, duration: 800 },
+      { id: "cg-1", from: "product-hub", to: "change-json", label: "seed change-epic (type / parent / thread)", type: "write", color: "#2471a3", delay: 0, duration: 800 },
       { id: "cg-2", from: "change-json", to: "state-json", label: "inherited-step state + pointer-lock", type: "event", color: "#1e8449", delay: 900, duration: 700 },
       { id: "cg-3", from: "change-json", to: "reconcile-debt-json", label: "hotfix → open reconcile-debt", type: "cleanup", color: "#c0392b", delay: 1700, duration: 600 },
     ],

@@ -82,7 +82,9 @@ every route, so a caller never branches on the output shape:
 Each action carries `epicId`, `kind`
 (`new|author|review-open|review-sync|build|discovery-done|backfill-pending|backfill-done`), `step`,
 `status`, `artifact`, `skill`, `command`, `pr`, `parallel`, `builds` (the per-story/per-repo lanes)
-`why`, and `lineageKind`. `--all` is implied — the array always carries every epic. Exit codes are
+`why`, and `lineageKind` — the work-item type (`feature|change|defect|hotfix|chore`). That key keeps
+its older name on purpose: the golden compatibility test deep-equals this output, and a deep-equal
+breaks on an added key as hard as on a renamed one. `--all` is implied — the array always carries every epic. Exit codes are
 identical to the prose path, and the prose path itself is unchanged.
 
 ## The PR-driven review gate

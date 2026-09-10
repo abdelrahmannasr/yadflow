@@ -618,7 +618,7 @@ export const MODULES: Module[] = [
         level: 'advanced',
         summary: 'Classify the change depth; re-author only what it touches.',
         body: [
-          { kind: 'p', text: 'Run `yad-change` with the parent epic, a title, and the kind (change / defect / hotfix). For a defect or hotfix, also give the origin, severity, the **escape_stage** (which gate should have caught it) and the root cause.' },
+          { kind: 'p', text: 'Run `yad-change` with the parent epic, a title, and the type (change / defect / hotfix). For a defect or hotfix, also give the origin, severity, the **escape_stage** (which gate should have caught it) and the root cause.' },
           { kind: 'p', text: 'It triages the **depth** and tells you what to re-author vs inherit:' },
           { kind: 'list', items: [
             '**defect-fix** — re-author stories (a regression story) + test-cases; inherit the rest.',
@@ -627,7 +627,7 @@ export const MODULES: Module[] = [
           ] },
           { kind: 'p', text: 'Then you author and gate only the re-authored artifacts, and build + ship the change-epic\'s story the normal way. A defect\'s regression test is the durable memory of the bug.' },
         ],
-        commands: [{ cmd: 'yad-change parent:<epic> title:"…" kind:<change|defect|hotfix>' }],
+        commands: [{ cmd: 'yad-change parent:<epic> title:"…" type:<change|defect|hotfix>' }],
         produces: ['a new threaded EP-<slug> with inherited steps pre-approved', 'change.json (+ reconcile-debt.json for hotfixes)'],
       },
       {

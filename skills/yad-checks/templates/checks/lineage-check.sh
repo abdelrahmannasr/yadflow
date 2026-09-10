@@ -124,16 +124,30 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
-  kind="$(fm_val kind "$epicmd")"
-  [ -z "$kind" ] && kind="feature"
-  if [ "$kind" = "feature" ]; then
-    echo "PASS [lineage-check]: ${short} ${task} -> ${epic} (genesis feature epic)."
+  # The work-item TYPE. Two names are alive: `kind:` is the original and is still the one that
+  # counts; `type:` is the name from shape 5 on, written beside it. READ ORDER IS OLD FIRST, and it
+  # is the same order `workItemType` uses in cli/epic-state.mjs — cli/test-checks.mjs runs a table of
+  # frontmatter through both and asserts they agree, because two readers is two ways to drift.
+  # Absent from both means `feature`: an epic authored before types existed is its own thread root.
+  wtype="$(fm_val kind "$epicmd")"
+  [ -z "$wtype" ] && wtype="$(fm_val type "$epicmd")"
+  [ -z "$wtype" ] && wtype="feature"
+  # `feature` and `chore` may stand alone. Upkeep — a dependency bump, a CI move — usually has no
+  # feature to hang off, and an invented parent is worse than none: every thread rollup walks
+  # `parent:` and would file the upkeep under a feature it has nothing to do with.
+  #
+  # NOTE the asymmetry, which `feature` has always had: this PASSES before it looks at `parent:` at
+  # all, so a genesis type that DOES declare a dangling parent is not checked here. `yad doctor`
+  # catches that one (threadChecks skips only the parent-LESS case), so it is covered — just not by
+  # this gate.
+  if [ "$wtype" = "feature" ] || [ "$wtype" = "chore" ]; then
+    echo "PASS [lineage-check]: ${short} ${task} -> ${epic} (genesis ${wtype} epic)."
     continue
   fi
   # A change/defect/hotfix epic MUST thread to a real parent.
   parent="$(fm_val parent "$epicmd")"
   if [ -z "$parent" ]; then
-    echo "FAIL [lineage-check]: ${short} ${task} -> ${epic} is kind:${kind} but declares no 'parent:' — a change-epic must thread to its predecessor."
+    echo "FAIL [lineage-check]: ${short} ${task} -> ${epic} is type:${wtype} but declares no 'parent:' — a change-epic must thread to its predecessor."
     rc=1
     continue
   fi
@@ -142,7 +156,7 @@ while IFS= read -r sha; do
     rc=1
     continue
   fi
-  echo "PASS [lineage-check]: ${short} ${task} -> ${epic} (kind:${kind} threaded to ${parent})."
+  echo "PASS [lineage-check]: ${short} ${task} -> ${epic} (type:${wtype} threaded to ${parent})."
 done <<EOF
 $commits
 EOF

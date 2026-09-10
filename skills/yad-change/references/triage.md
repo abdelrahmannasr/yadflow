@@ -28,8 +28,9 @@ re-authors stories+test-cases:
 
 ```json
 {
-  "schemaVersion": 1,
-  "epicId": "EP-<slug>", "createdAt": "<today>", "currentStep": "stories",
+  "schemaVersion": 5,
+  "epicId": "EP-<slug>", "createdAt": "<today>", "type": "<the same value as epic.md kind/type>",
+  "currentStep": "stories",
   "steps": [
     { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "risk_tags": [] },
     { "id": "epic-review",         "type": "review+approve", "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "risk_tags": [] },
@@ -85,11 +86,14 @@ to its `epic.md` frontmatter:
 
 ```yaml
 kind: feature
+type: feature
 thread: <its own id>
 ```
 
+Both names, same value: `kind:` is the one every reader still uses, `type:` is the name from shape 5 on.
+
 This is a non-gated, idempotent frontmatter add (no `parent`, since a genesis epic is the thread root).
-`epicLineage` already defaults an absent `kind` to `feature`, so an un-migrated genesis still behaves as
+`workItemType` already defaults an absent type to `feature`, so an un-migrated genesis still behaves as
 a root — migration just makes the `thread` cache explicit and lets `yad thread` group it.
 
 ## Concurrent changes on one feature (forward-only resolution)

@@ -1,12 +1,12 @@
 ---
 name: yad-defects
-description: 'Phase 6 output enrichment (never a gate) — the quality-gap report. Generates a per-epic AND per-thread defect/bug report (the vendored React/Vite/Tailwind shell HTML + a DEFECTS.md) that aggregates every kind:defect change-epic + each change.json defect block + shipped regressions in the build ledger (the folded build-log.json unioned with every build-log/ shard) BY escape_stage (the SDLC gate that should have caught the defect) and root_cause, and visualizes WHERE quality gaps systematically come from — e.g. "% of this feature''s defects that escaped at the test-cases gate" — so the team hardens the originating stage instead of just fixing symptoms. Degrades to markdown-only when no docs target is connected. Use when the user says "show the defect report", "where are our quality gaps", "generate the bug report for this epic", or "which gate is leaking defects".'
+description: 'Phase 6 output enrichment (never a gate) — the quality-gap report. Generates a per-epic AND per-thread defect/bug report (the vendored React/Vite/Tailwind shell HTML + a DEFECTS.md) that aggregates every defect-type change-epic + each change.json defect block + shipped regressions in the build ledger (the folded build-log.json unioned with every build-log/ shard) BY escape_stage (the SDLC gate that should have caught the defect) and root_cause, and visualizes WHERE quality gaps systematically come from — e.g. "% of this feature''s defects that escaped at the test-cases gate" — so the team hardens the originating stage instead of just fixing symptoms. Degrades to markdown-only when no docs target is connected. Use when the user says "show the defect report", "where are our quality gaps", "generate the bug report for this epic", or "which gate is leaking defects".'
 ---
 
 # SDLC — Quality-Gap Report (Phase 6, output enrichment)
 
 **Goal:** Turn the thread's defects into a **systemic quality signal**. Because every defect is a
-first-class `kind: defect` change-epic carrying an `escape_stage` (the gate that *should* have caught it)
+first-class `defect`-type change-epic carrying an `escape_stage` (the gate that *should* have caught it)
 and a `root_cause`, this report can show not just *what* broke but *where the SDLC let it through* — so
 the team fixes the originating stage (weak test design, an under-specified story, a missed architecture
 risk), not just the symptom. It is an **output enrichment**, exactly like `yad-docs` — **never a gate**.
@@ -30,7 +30,7 @@ risk), not just the symptom. It is an **output enrichment**, exactly like `yad-d
 
 ### Step 1 — Collect the defects
 Resolve the scope (`yad thread <id> --json` for a thread). Collect, across the scoped epic(s):
-- every `kind: defect` (and `kind: hotfix`) change-epic + its `.sdlc/change.json` `defect` block
+- every `defect` (and `hotfix`) type change-epic + its `.sdlc/change.json` `defect` block
   (`origin`, `severity`, `escape_stage`, `root_cause`);
 - the shipped regression fixes from each epic's build ledger (the fix that closed the defect, linking
   the change-epic → its regression story/test);

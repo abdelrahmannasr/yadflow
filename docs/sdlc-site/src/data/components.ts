@@ -158,7 +158,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#7d3c98",
     position: { x: 18, y: 92 },
     description:
-      "The feature-thread record: a change-epic's kind (change/defect/hotfix), its parent, and the thread lineage — inherit unchanged Shape artifacts by reference, re-author only what changes.",
+      "The feature-thread record: a change-epic's type (change/defect/hotfix), its parent, and the thread lineage — inherit unchanged Shape artifacts by reference, re-author only what changes.",
   },
   {
     id: "reconcile-debt-json",

@@ -166,12 +166,14 @@ export const LEARNING_PRIMARY = 'deeptutor';
 // 3 — the Product's settings gain `.sdlc/product.json` beside `.sdlc/hub.json`, and a roster entry's
 //     product-level roles gain a `product` spelling beside `hub` (E30).
 // 4 — every step declares `driver` beside `assistance` and `advance` beside `automation` (E28).
+// 5 — every epic's `state.json` records its work-item `type`, and `epic.md` gains `type:` beside
+//     `kind:` (E21). `kind:` is still the name that is READ — see workItemType in epic-state.mjs.
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {

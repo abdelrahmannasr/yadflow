@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, resolveThread, stateInvariants, contractSurfaceHash, artifactHash } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -739,6 +739,99 @@ export function dialChecks(checks, root) {
   }
 }
 
+// The work-item type, mid-rename. Shape 5 writes `type:` beside `kind:` in `epic.md` and copies the
+// value into `state.json`; `kind:` is still the name that is READ. Four things can go wrong while two
+// names are alive, and only one of them is a failure:
+//
+//   A GATE THAT CANNOT SEE THE TYPE   `type:` alone, with no `kind:`, on a change/defect/hotfix.
+//             `templates/checks/lineage-check.sh` runs inside the user's repository and is refreshed
+//             by `yad update`, which is a separate act from `yad migrate` with no ordering between
+//             them — so a repo that migrated but did not update has a copy that reads only `kind:`.
+//             It finds none, defaults to `feature`, decides the epic is a parent-free genesis, and
+//             stops asking it for its parent. A lineage gate silently disarmed by an upgrade is worth
+//             failing over; everything else here is drift a person can take their time with.
+//   ONLY THE NEW NAME, on a genesis type. The same half-made pair with nothing at stake — `feature`
+//             is what an older reader defaults to anyway.
+//   TWO DIFFERENT VALUES   `kind:` and `type:` disagree. The OLD one is being read, and `yad migrate`
+//             skips an epic that already has the new key, so only a person can say which was meant.
+//   A LEDGER THAT DISAGREES WITH THE EPIC   `state.json` records a `type` that is not what `epic.md`
+//             says. The epic.md value is the one the engine reads, so this is a stale copy.
+//   A TYPE NOBODY DEFINED   a value outside the five. It reads as a non-genesis type, so the lineage
+//             gate gets stricter rather than looser — a warning, not a failure.
+//
+// `state.json`'s own top-level `kind` is NOT looked at here. That is the `stub` / `discovery`
+// lifecycle marker, a different axis, and a stub legitimately carries both at once.
+export function typeChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const gateBlind = [];
+  const newOnly = [];
+  const disagree = [];
+  const ledger = [];
+  const unknown = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const md = path.join(epicsDir, e, 'epic.md');
+    if (!exists(md)) continue; // no epic.md — EP-discovery, not a work item on the ladder
+    const fm = readFrontmatter(md);
+    const hasOld = typeof fm.kind === 'string' && fm.kind;
+    const hasNew = typeof fm.type === 'string' && fm.type;
+    const resolved = workItemType(fm);
+
+    if (hasNew && !hasOld) {
+      if (isGenesisType(fm.type)) newOnly.push(`${e}: \`type: ${fm.type}\` with no \`kind:\``);
+      else gateBlind.push(`${e}: \`type: ${fm.type}\` with no \`kind:\``);
+    }
+    if (hasOld && hasNew && fm.kind !== fm.type) {
+      disagree.push(`${e}: \`kind: ${fm.kind}\` but \`type: ${fm.type}\``);
+    }
+    if (!WORK_ITEM_TYPES.includes(resolved)) unknown.push(`${e}: \`${resolved}\``);
+
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    if (isPlainObject(state) && typeof state.type === 'string' && state.type !== resolved) {
+      ledger.push(`${e}: epic.md says \`${resolved}\`, state.json says \`${state.type}\``);
+    }
+  }
+
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  if (gateBlind.length) {
+    check(
+      checks, 'type:gate-blind', 'shape', 'fail',
+      `${gateBlind.length} epic(s) record a type only the newest yadflow can see: ${some(gateBlind, 3)}`,
+      'add `kind:` beside `type:` in epic.md. `lineage-check.sh` inside your repo reads `kind:` and, finding none, treats the epic as a parent-free genesis — so it stops requiring the `parent:` a change/defect/hotfix must have. Run `yad update` to refresh the check gates too',
+    );
+  }
+  if (newOnly.length) {
+    check(
+      checks, 'type:new-only', 'shape', 'warn',
+      `${newOnly.length} epic(s) carry only the new name: ${some(newOnly, 2)}`,
+      'add `kind:` beside `type:` — it is still the name every other reader uses. Nothing can do it for you: `yad migrate` never writes `epic.md` at all',
+    );
+  }
+  if (disagree.length) {
+    check(
+      checks, 'type:disagree', 'shape', 'warn',
+      `${disagree.length} epic(s) name two different types: ${some(disagree, 2)}`,
+      'the OLD name (`kind:`) is the one being read. Set both to the type you meant',
+    );
+  }
+  if (ledger.length) {
+    check(
+      checks, 'type:ledger', 'shape', 'warn',
+      `${ledger.length} epic ledger(s) disagree with their epic.md: ${some(ledger, 2)}`,
+      'epic.md is where the type is authored and is what the engine reads. Correct `type` in `.sdlc/state.json`, or fix epic.md if the ledger was right',
+    );
+  }
+  if (unknown.length) {
+    check(
+      checks, 'type:unknown', 'shape', 'warn',
+      `${unknown.length} epic(s) use a type nobody defined: ${some(unknown, 3)}`,
+      `a work item is one of ${WORK_ITEM_TYPES.join(' · ')}. An unrecognised value reads as a non-genesis type, so the lineage gate will demand a \`parent:\` for it`,
+    );
+  }
+}
+
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
   if (!injected && !exists(productConfigPath(root)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
@@ -777,13 +870,15 @@ export function threadChecks(checks, root) {
     if (!fs.statSync(path.join(epicsDir, e)).isDirectory() || !isValidEpicId(e)) continue;
     if (!exists(path.join(epicsDir, e, 'epic.md'))) continue;
     const lin = epicLineage(root, e);
-    if (lin.kind === 'feature' && !lin.parent) continue; // genesis with no lineage — nothing to check
+    // A genesis type with no parent has no lineage to check. `chore` joins `feature` here from
+    // shape 5 on: upkeep often has no feature to hang off (see isGenesisType).
+    if (isGenesisType(lin.type) && !lin.parent) continue;
     const { broken } = resolveThread(root, e);
     if (broken) {
       check(checks, `thread:${e}`, 'threads', 'fail', `${e}: ${broken}`,
         'a change-epic must thread to a real parent; fix `parent:`/`thread:` in epic.md frontmatter');
     } else {
-      check(checks, `thread:${e}`, 'threads', 'ok', `${e}: ${lin.kind} threaded to ${lin.thread || lin.parent}`);
+      check(checks, `thread:${e}`, 'threads', 'ok', `${e}: ${lin.type} threaded to ${lin.thread || lin.parent}`);
     }
     for (const d of loadDebt(root, e)) {
       if (d.status === 'open') {
@@ -806,6 +901,7 @@ export function collectDoctor(root) {
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
   dialChecks(checks, root);
+  typeChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

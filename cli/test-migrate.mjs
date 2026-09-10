@@ -724,3 +724,240 @@ test('stampStepDials: returns the SAME object when nothing changed', async () =>
   assert.notEqual(stampStepDials(pending), pending, 'a state that needs stamping is a new object');
   assert.equal(stampStepDials(pending).steps[0].advance, 'human');
 });
+
+// ---- shape 4 -> 5: the work-item type (E21) ------------------------------------------------------
+
+// An epic.md carrying whatever frontmatter the test needs. The type is READ from here, never guessed.
+const epicMd = (fm) => `---\nid: EP-x\n${fm}\n---\n\n## Goal\nx\n`;
+
+test('migrate 4 -> 5: state.json takes its `type` FROM epic.md, it does not default it', async () => {
+  // Defaulting to `feature` would reclassify every defect and change-epic in the project as a
+  // parent-free genesis, and the lineage gate would stop asking them for a parent. An upgrade must
+  // never quietly drop a safety check.
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root\nthread: EP-root'),
+    'epics/EP-x/.sdlc/state.json': stateWith([{ id: 'epic', type: 'author', status: 'done' }]),
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const st = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+    assert.equal(st.type, 'defect', 'the type the author wrote, not the convenient one');
+    assert.equal(st.schemaVersion, ENGINE_SHAPE);
+    assert.equal(st.steps[0].type, 'author', 'a STEP type is a different axis and is untouched');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: `type` is written at the TOP of the file, not dangling under `steps`', async () => {
+  // Key order is the file's bytes, and a person opening state.json is the reason this matters:
+  // appending would put `"type": "feature"` directly beneath a `steps` array whose every entry
+  // carries its own `"type"`, which is exactly the two-axis confusion this whole change avoids.
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: feature'),
+    'epics/EP-x/.sdlc/state.json': stateWith([{ id: 'epic', type: 'author', status: 'done' }]),
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const f = path.join(T, 'epics/EP-x/.sdlc/state.json');
+    const keys = Object.keys(read(f));
+    assert.ok(keys.indexOf('type') < keys.indexOf('steps'), `type came after steps: ${keys.join(', ')}`);
+    assert.equal(keys[0], 'schemaVersion', 'and the shape stamp is still first');
+    // Re-running writes nothing at all, and a gate write over the same content writes nothing either.
+    const bytes = fs.readFileSync(f, 'utf8');
+    await runMigrate(T, { apply: true });
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'a second migrate is a no-op');
+    const { writeState } = await import('./epic-state.mjs');
+    writeState(f, read(f));
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'and so is a gate write — no byte churn');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: the OLD frontmatter name wins, because it is still the one that counts', async () => {
+  // `lineage-check.sh` lives in the user's repo and reads `kind:`. It is refreshed by `yad update`,
+  // which has no ordering with `yad migrate` — so a repo WILL exist that migrated but did not update.
+  // If the new name won here, that repo's engine and its gate would disagree about what the work is.
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: defect\ntype: feature\nparent: EP-root\nthread: EP-root'),
+    'epics/EP-x/.sdlc/state.json': stateWith([{ id: 'epic', type: 'author', status: 'done' }]),
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).type, 'defect');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: an epic with no epic.md gets no type at all', async () => {
+  // EP-discovery is the case: the product front-zero, marked `kind: "discovery"` in state.json, with
+  // no epic.md and no frontmatter to copy. It is not a work item on the ladder, so inventing
+  // `feature` for it would put a fifth thing on that ladder nobody authored.
+  const T = project({ files: {
+    'epics/EP-discovery/.sdlc/state.json':
+      JSON.stringify({ schemaVersion: 3, kind: 'discovery', currentStep: 'discovery',
+        steps: [{ id: 'discovery', type: 'author', status: 'done' }] }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const st = read(path.join(T, 'epics/EP-discovery/.sdlc/state.json'));
+    assert.equal('type' in st, false, 'nothing to copy, so nothing is written');
+    assert.equal(st.kind, 'discovery', 'and the lifecycle marker is left exactly as it was');
+    assert.equal(st.schemaVersion, ENGINE_SHAPE, 'the file still moves shape — the shape is the project\'s');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: a STUB carries the lifecycle marker and the type at once', async () => {
+  // The trap this pins: `kind` in state.json means "stub"/"discovery", and `type` means the work-item
+  // type. A stamper that read or wrote the wrong one of those would look right and be wrong — a stub
+  // would come out typed "stub", which is not a type, or the marker would be overwritten and
+  // `yad-backfill` would lose the epic it has to promote.
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: feature\nstub: backfill-pending'),
+    'epics/EP-x/.sdlc/state.json':
+      JSON.stringify({ schemaVersion: 3, kind: 'stub', currentStep: 'backfill-pending',
+        steps: [{ id: 'epic', type: 'author', status: 'todo' }] }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const st = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+    assert.equal(st.kind, 'stub', 'the lifecycle marker survives');
+    assert.equal(st.type, 'feature', 'and the work-item type arrives beside it');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: a type already recorded is never rewritten, and a re-run is a no-op', async () => {
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root\nthread: EP-root'),
+    'epics/EP-x/.sdlc/state.json':
+      JSON.stringify({ schemaVersion: 4, type: 'hotfix', currentStep: 'epic',
+        steps: [{ id: 'epic', type: 'author', status: 'done' }] }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    const f = path.join(T, 'epics/EP-x/.sdlc/state.json');
+    assert.equal(read(f).type, 'hotfix', 'a value already on disk is the answer, not epic.md');
+    const bytes = fs.readFileSync(f, 'utf8');
+    await runMigrate(T, { apply: true });
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'the second run changes nothing');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: on a VERIFIED project state.json is skipped, and the gate write carries it', async () => {
+  // The same half-applied gap shape 4 had, for the same reason: CI owns state.json on a verified
+  // Product, so migrate refuses to write it. What closes the gap is that the gate's own write goes
+  // through ONE function, and that function runs the same stamper this migration step does.
+  const { stampWorkItemType } = await import('./epic-state.mjs');
+  const T = project({ bridge: true, files: {
+    'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root\nthread: EP-root'),
+    'epics/EP-x/.sdlc/state.json': stateWith([{ id: 'epic', type: 'author', status: 'done' }]),
+  } });
+  try {
+    const { rows } = planMigration(T);
+    assert.equal(rowFor(rows, 'epics/EP-x/.sdlc/state.json').action, 'ci-owned', 'migrate will not write it');
+    await runMigrate(T, { apply: true });
+    const st = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+    assert.equal('type' in st, false, 'and indeed it did not');
+    assert.equal(stampWorkItemType(st, path.join(T, 'epics/EP-x')).type, 'defect', 'the gate write closes the gap');
+  } finally { cleanup(T); }
+});
+
+test('migrate 4 -> 5: a `type` key that is already there is never overwritten, whatever it holds', async () => {
+  // The guard is "is the key present", not "is it a string". Overwriting a value somebody wrote —
+  // even `null` — would be the migration deciding what their file meant, during an upgrade they ran
+  // to be safe. Doctor is what reports a value nobody defined; correcting one here is not this
+  // command's job, and a migration that silently rewrites hand-written values is the reason people
+  // stop trusting one.
+  const { stampWorkItemType } = await import('./epic-state.mjs');
+  const T = project({ files: { 'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root') } });
+  try {
+    const dir = path.join(T, 'epics/EP-x');
+    for (const held of [null, 42, '', 'nonsense', 'feature']) {
+      const before = { schemaVersion: 5, type: held, currentStep: 'epic', steps: [] };
+      const after = stampWorkItemType(before, dir);
+      assert.equal(after, before, `a state holding ${JSON.stringify(held)} came back as a new object`);
+    }
+    // …and with no key at all, it is stamped from epic.md as usual.
+    assert.equal(stampWorkItemType({ schemaVersion: 5, currentStep: 'epic', steps: [] }, dir).type, 'defect');
+  } finally { cleanup(T); }
+});
+
+// ---- the gate write IS the migration, for the one file no migration reaches --------------------
+
+// A shape-1 `state.json` in the vocabulary a real 3.18.1 project holds: old dial names, no work-item
+// type, and — the part that mattered — a `schemaVersion` already written, so `writeShape` had
+// something to preserve.
+const LEGACY_STATE = JSON.stringify({
+  schemaVersion: 1,
+  epicId: 'EP-x',
+  createdAt: '2026-01-01',
+  currentStep: 'implement',
+  steps: [
+    { id: 'epic', type: 'author', assistance: 'review', automation: 'human_approve', locked: true, status: 'done' },
+    { id: 'implement', assistance: 'heavy', automation: 'machine_advance', status: 'in_progress' },
+  ],
+}, null, 2) + '\n';
+const LEGACY_FILES = {
+  'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root\nthread: EP-root'),
+  'epics/EP-x/.sdlc/state.json': LEGACY_STATE,
+};
+const STATE_REL = 'epics/EP-x/.sdlc/state.json';
+
+test('the gate write on a VERIFIED project equals the migration on a local one, byte for byte', async () => {
+  // The invariant the whole verified path rests on. `yad migrate` refuses to write `state.json` on a
+  // verified Product — CI owns it — so `writeState` is the only thing that will ever move that file.
+  // If the two ever produce different bytes, a verified project is on a shape nobody defined, and
+  // nothing would say so. Comparing them directly is the only way to keep that from happening
+  // quietly: a future shape 6 that changes `state.json` without teaching `writeState` fails HERE.
+  const { writeState } = await import('./epic-state.mjs');
+  const local = project({ files: LEGACY_FILES });
+  const verified = project({ bridge: true, files: LEGACY_FILES });
+  try {
+    await runMigrate(local, { apply: true });
+
+    const vf = path.join(verified, STATE_REL);
+    await runMigrate(verified, { apply: true });
+    assert.equal(fs.readFileSync(vf, 'utf8'), LEGACY_STATE, 'migrate really did refuse to touch it');
+    writeState(vf, read(vf));
+
+    assert.equal(fs.readFileSync(vf, 'utf8'), fs.readFileSync(path.join(local, STATE_REL), 'utf8'));
+  } finally { cleanup(local); cleanup(verified); }
+});
+
+test('a gate write moves a STALE schemaVersion up to this engine, and never down', async () => {
+  // 3.18.1 stamps shape 1, so every verified project on disk holds a state.json recording 1. Before
+  // this, the gate write brought its FIELDS up to date and left the NUMBER at 1 for ever — `yad
+  // doctor` warned "CI-owned and behind" with a hint promising CI would fix it, which it never could.
+  const { writeState } = await import('./epic-state.mjs');
+  const T = project({ files: LEGACY_FILES });
+  try {
+    const f = path.join(T, STATE_REL);
+    writeState(f, read(f));
+    const now = read(f);
+    assert.equal(now.schemaVersion, ENGINE_SHAPE, 'the number moves with the fields');
+    assert.equal(now.steps[1].advance, 'auto', 'and the fields really did move');
+    assert.equal(now.type, 'defect');
+    assert.equal(Object.keys(now)[0], 'schemaVersion', 'still the first key');
+
+    // Writing it again changes nothing at all.
+    const bytes = fs.readFileSync(f, 'utf8');
+    writeState(f, read(f));
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'no byte churn on an unchanged re-write');
+
+    // A file AHEAD of this engine is left exactly as it is — the same refusal `yad migrate` makes.
+    // Lowering it would have this release claim it wrote a shape it cannot read.
+    const ahead = { ...read(f), schemaVersion: ENGINE_SHAPE + 1 };
+    fs.writeFileSync(f, JSON.stringify(ahead, null, 2) + '\n');
+    writeState(f, read(f));
+    assert.equal(read(f).schemaVersion, ENGINE_SHAPE + 1, 'never moved backwards');
+  } finally { cleanup(T); }
+});
+
+test('an UNSTAMPED state.json is unaffected — writeShape already stamped those correctly', async () => {
+  const { writeState } = await import('./epic-state.mjs');
+  const T = project({ files: {
+    ...LEGACY_FILES,
+    [STATE_REL]: JSON.stringify({ epicId: 'EP-x', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'done' }] }, null, 2) + '\n',
+  } });
+  try {
+    const f = path.join(T, STATE_REL);
+    writeState(f, read(f));
+    assert.equal(read(f).schemaVersion, ENGINE_SHAPE);
+  } finally { cleanup(T); }
+});

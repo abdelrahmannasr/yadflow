@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import { readShips } from './ledger.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, kindNoun,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -54,7 +54,9 @@ export function threadSummary(root, threadOrEpic) {
     const state = readJSON(path.join(epicRoot(root, id), '.sdlc', 'state.json'), null);
     const change = loadChange(root, id);
     return {
-      id, kind: lin.kind, parent: lin.parent, inherits: lin.inherits,
+      // `type` is the word from shape 5 on; `kind` is the same value under the name this key has
+      // always had. Both are emitted for one major so a script reading either keeps working.
+      id, type: lin.type, kind: lin.type, parent: lin.parent, inherits: lin.inherits,
       currentStep: state?.currentStep || 'unseeded',
       sealed: sealedEpic(root, id),
       stub: isStubEpic(root, id),
@@ -73,10 +75,12 @@ export function threadSummary(root, threadOrEpic) {
   };
 }
 
-// Colour a node's kind noun for the tree render. The noun words live in one place (`kindNoun`); this
-// only layers the per-kind colour on top, so the two never drift. Unknown kind → uncoloured noun.
-const KIND_COLOR = { feature: c.green, change: c.cyan, defect: c.yellow, hotfix: c.red };
-const kindTag = (kind) => (KIND_COLOR[kind] || ((s) => s))(kindNoun(kind));
+// Colour a node's type noun for the tree render. The noun words live in one place (`typeNoun`); this
+// only layers the per-type colour on top, so the two never drift. Unknown type → uncoloured noun.
+const TYPE_COLOR = {
+  feature: c.green, change: c.cyan, defect: c.yellow, hotfix: c.red, chore: c.dim,
+};
+const typeTag = (t) => (TYPE_COLOR[t] || ((s) => s))(typeNoun(t));
 
 export async function runThread(root, { epic, json = false } = {}) {
   if (!epic) {
@@ -106,7 +110,7 @@ export async function runThread(root, { epic, json = false } = {}) {
   log(c.bold(`\nThread ${s.thread}`) + c.dim('  (genesis → tip)'));
   if (s.broken) log(c.red(`  ✗ broken lineage: ${s.broken}`));
   for (const n of s.nodes) {
-    const tag = kindTag(n.kind);
+    const tag = typeTag(n.type);
     const seal = n.sealed ? c.dim(' [sealed]') : '';
     const stub = n.stub ? c.yellow(' [stub · backfill pending]') : '';
     const dep = n.depth ? c.dim(` ${n.depth}`) : '';
@@ -168,7 +172,7 @@ export async function runReconcile(root, { action = 'check', thread = null } = {
 
   if (action === 'refresh') {
     log('');
-    info('refresh is advisory: open a reconcile change-epic with `yad-change` (kind: change) threaded to');
+    info('refresh is advisory: open a reconcile change-epic with `yad-change` (type change) threaded to');
     info('the affected feature, then pay any open debt (update artifacts + add a regression test).');
     info('for shipped brownfield code with NO epic at all, anchor it first with `yad-stub`, then thread');
     info('the change/defect off that stub (and run `yad-backfill` to make the anchor real).');

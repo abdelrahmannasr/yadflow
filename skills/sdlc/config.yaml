@@ -307,8 +307,12 @@ automation:
 # docs/phase-6-build-plan.md and skills/yad-change. yad-defects/yad-timeline render it; yad-reconcile
 # (read-only, like yad-docs-sync) flags orphan/drift; the three gates above enforce it.
 change:
-  # The kind of an epic (epic.md frontmatter `kind:`). `feature` is the genesis (default when absent).
-  kinds: [feature, change, defect, hotfix]
+  # The work-item TYPE (epic.md frontmatter). Two names carry it: `kind:` is the original and is still
+  # the one that is READ; `type:` is the same value under the name from shape 5 on. Write both.
+  # `feature` and `chore` are the genesis types — they may stand alone with no `parent:`.
+  kinds: [feature, change, defect, hotfix, chore]
+  types: [feature, change, defect, hotfix, chore]     # the same list under the newer name
+  genesis_types: [feature, chore]                     # may have no `parent:` (cli isGenesisType)
   # Triage DEPTH (yad-change auto-proposes, human confirms) -> which Shape steps are re-authored vs
   # inherited. defect-fix re-authors stories+test-cases only; contract-surface re-authors architecture
   # and RE-LOCKS (a new hash routes architecture-review through the contract escalation, as today).
@@ -318,7 +322,7 @@ change:
   # state.json step shape is untouched). `thread` is a DERIVED cache (authoritative = walk `parent` to
   # the root); a mismatch is detectable corruption (yad doctor threadChecks). defect/hotfix also carry
   # origin/severity/escape_stage/root_cause for the quality report (yad-defects).
-  lineage_frontmatter: [kind, thread, parent, inherits, supersedes, origin, severity, escape_stage, root_cause]
+  lineage_frontmatter: [kind, type, thread, parent, inherits, supersedes, origin, severity, escape_stage, root_cause]
   artifact_bases: [epic, architecture, contract, ui-design, stories, test-cases]   # what `inherits` may list
   severity: [sev1, sev2, sev3, sev4]    # defect/hotfix severity
   # Per-change-epic ledgers (siblings of approvals.json; the locked state.json shape is untouched).
@@ -336,14 +340,16 @@ change:
   seal_on: all-stories-shipped
   # Brownfield stub anchor (yad-stub): an already-built feature with NO epic can't be a change parent
   # (yad-change requires a real parent; lineage-check rejects a missing one). yad-stub mints the smallest
-  # real thread anchor — a genesis epic.md (kind:feature, thread:self) marked `stub: backfill-pending` /
-  # `verified: false`, with a state.json carrying `kind: stub` + `currentStep: backfill-pending`. A change
+  # real thread anchor — a genesis epic.md (kind+type: feature, thread:self) marked `stub:
+  # backfill-pending` / `verified: false`, with a state.json carrying the lifecycle marker `kind: stub`
+  # BESIDE the work-item `type: feature` + `currentStep: backfill-pending`. A change
   # threaded off a stub inherits only what exists (boundHash: null for the undocumented surface bases) and
   # writes NO pointer-lock; change.json records `parentStub: true`. `yad-backfill promote` flips the stub
   # to verified (clears the marker), at which point contract protection begins for the thread.
   stub:
     marker: backfill-pending            # epic.md `stub:` value while the anchor is un-promoted
-    state_kind: stub                    # state.json top-level `kind` + `currentStep: backfill-pending` sentinel
+    state_kind: stub                    # state.json top-level `kind` + `currentStep: backfill-pending` sentinel.
+                                        # A LIFECYCLE marker, not the work-item type — a stub carries both.
     allow_stub_parent: true             # a change/defect MAY thread off an un-promoted stub (default on)
     promote_by: yad-backfill            # `yad-backfill promote EP-<slug>` documents + flips the stub to real
   hotfix:

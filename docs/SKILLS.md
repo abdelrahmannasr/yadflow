@@ -219,7 +219,7 @@ head of the thread. This is what keeps the SDLC a trusted source of truth for AI
   a gate). The hard block is the CI gates.
 - **`yad-stub`** — mint a **stub genesis epic** for a brownfield feature that has *no* epic, so a
   defect/change can thread off it today (`yad-change` needs a real parent). The stub is the smallest real
-  thread anchor — `kind: feature`, `stub: backfill-pending`, `verified: false` — never inventing
+  thread anchor — type `feature`, `stub: backfill-pending`, `verified: false` — never inventing
   behaviour; `yad-backfill promote` flips it to a real, verified feature epic once its spec is approved.
 
 Three CI gates (in `yad-checks`) enforce it: **lineage-check** (a change links a real threaded epic),

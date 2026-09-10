@@ -28,7 +28,7 @@ reference) and **re-authors** only the ones it does. So:
 
 - Artifacts are never stale — they are **superseded**. The feature's current truth is the **head of the
   thread**, composed by the resolver; the chain *is* the evolution timeline.
-- Defects are first-class (`kind: defect`, carrying `escape_stage` + `root_cause`), so a report can show
+- Defects are first-class (type `defect`, carrying `escape_stage` + `root_cause`), so a report can show
   *where quality gaps systematically come from*.
 - Hotfixes ship-first then reconcile-after, with **debt** that freezes the thread's next change until paid.
 
@@ -42,7 +42,8 @@ is actually present.)
 ## What gets built
 
 ### 1. The lineage layer (schema + engine)
-- `epic.md` frontmatter: `kind` (feature|change|defect|hotfix), `parent`, `thread` (a derived cache),
+- `epic.md` frontmatter: the work-item type under two names, `kind` and `type`
+  (feature|change|defect|hotfix|chore), plus `parent`, `thread` (a derived cache),
   `inherits`, `supersedes`, and for defects `origin`/`severity`/`escape_stage`/`root_cause`.
 - Two per-epic ledgers: `change.json` (intake + triage) and `reconcile-debt.json` (hotfix ship-first debt).
 - `cli/epic-state.mjs`: `resolveThread` (cycle/missing-safe), `threadEpics`, `resolveCurrentArtifacts`
@@ -70,7 +71,7 @@ not reachable from CI.
 - **yad-reconcile** — read-only drift/orphan/debt sweep (mirrors `yad-docs-sync`). Never a gate.
 - **yad-stub** — brownfield helper: mint a **stub genesis epic** for an already-built feature that has no
   epic, so a change/defect can thread off it *today*. A stub is the smallest real thread anchor
-  (`kind: feature`, `stub: backfill-pending`, `verified: false`, a `kind: stub` /
+  (type `feature`, `stub: backfill-pending`, `verified: false`, a `kind: stub` /
   `currentStep: backfill-pending` state sentinel); `yad-backfill promote` flips it to a real, verified
   epic. Never auto-advances.
 

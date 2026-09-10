@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
-import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, kindNoun, DISCOVERY_EPIC } from './epic-state.mjs';
+import { epicRoot, loadLedger, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -38,12 +38,17 @@ function listEpics(root) {
     .sort();
 }
 
-// The action object for ONE epic, with its lineage kind attached. The single shape both surfaces
+// The action object for ONE epic, with its work-item type attached. The single shape both surfaces
 // consume — `printAction` renders it, `--json` emits it verbatim — so the prose and the machine
 // answer can never drift apart.
+//
+// The key stays `lineageKind` even though the word is now `type`, and there is no `lineageType`
+// beside it. `yad next --json` is deep-equalled by the golden test (cli/test-golden.mjs), which
+// rule 6 says never changes — and a deep-equal breaks on an ADDED key just as hard as a renamed
+// one. The value is the same either way; only the label is old.
 const actionFor = (root, id) => ({
   ...nextAction(loadLedger(epicRoot(root, id)), { epic: id }),
-  lineageKind: epicLineage(root, id).kind,
+  lineageKind: epicLineage(root, id).type,
 });
 
 // EP-checkout-S03 → S03 (the compact lane label for the roll-up). Falls back to the full id.
@@ -115,9 +120,9 @@ function actionLine(a, { solo } = {}) {
 
 // Full, friendly printout for a single epic.
 function printAction(a, { solo } = {}) {
-  // Prefix the id with the kind noun (Defect / Change request / Hotfix / Epic) so a glance says what
-  // kind of work this is. The discovery front-zero is not a feature epic — leave it un-prefixed.
-  const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${kindNoun(a.lineageKind)} ` : '';
+  // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
+  // says what kind of work this is. The discovery front-zero is not a feature — leave it un-prefixed.
+  const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${typeNoun(a.lineageKind)} ` : '';
   log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)} ${c.dim(`— ${a.why}`)}`);
   // In Build with live lanes, print each story/repo's next sub-step + remaining chain instead
   // of the single static hint; otherwise the one actionable line.
@@ -162,7 +167,7 @@ function generalNext(root, { all } = {}) {
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
   log(`\n  ${c.bold(`${featureEpics.length} epics`)} ${c.dim('— next action each:')}`);
-  for (const a of actions) log(`    ${c.cyan(`${kindNoun(a.lineageKind)} ${a.epicId}`)}  ${actionLine(a, { solo })}`);
+  for (const a of actions) log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}  ${actionLine(a, { solo })}`);
   info(c.dim(`detail: ${c.bold('yad next <epic>')}  •  all at once: ${c.bold('yad next --all')}`));
 }
 
@@ -215,7 +220,7 @@ function jsonNext(root, { epic, check }) {
     return emitJSON({ ok: true, actions: [actionFor(root, epic)] });
   }
   if (!isSetUp(root)) return emitJSON({ ok: true, setUp: false, actions: [] });
-  // Every epic that HAS a ledger, discovery included — its `kind` already says whether it is open
+  // Every epic that HAS a ledger, discovery included — its ACTION kind already says whether it is open
   // (`discovery-*`) or finished, so filtering it out would hide a fact rather than clarify one.
   // `--all` is implied: an array always carries everything, so there is nothing left to expand.
   return emitJSON({ ok: true, actions: listEpics(root).map((id) => actionFor(root, id)) });

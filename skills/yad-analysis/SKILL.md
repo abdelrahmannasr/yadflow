@@ -108,9 +108,10 @@ authoring step **locked**. Use this exact shape (see `references/state-schema.md
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 5,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
+  "type": "<the same value as epic.md — feature, or chore>",
   "currentStep": "analysis-review",
   "steps": [
     { "id": "analysis",           "type": "author",         "artifact": "analysis.md",      "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },
