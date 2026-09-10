@@ -1116,6 +1116,30 @@ export const TYPE_NOUN = {
 };
 export const typeNoun = (t) => TYPE_NOUN[t] || 'Epic';
 
+// ---- the grouping theme (E31) --------------------------------------------------------------------
+// A `theme:` on an epic is a FREE grouping tag: any word or short phrase the team picks, shared by
+// however many epics belong together. It is what this engine has instead of an Initiative rung above
+// the Epic — the ladder stays Product -> Epic -> Story -> Task, and grouping is a label rather than a
+// level. Nothing enforces a vocabulary and nothing has to be registered first; an epic with no theme
+// is perfectly normal, which is why the answer is `null` rather than a default.
+//
+// It lives ONLY in `epic.md`. No copy in `state.json`, so no file shape changes and no migration:
+// every reader that wants the theme already has the epic's frontmatter open. `yad next --json` does
+// not carry it either — that answer is deep-equalled by the golden test (rule 6) and an ADDED key
+// breaks it as hard as a renamed one. `yad thread --json` is where a script reads it.
+//
+// One string, always. `readFrontmatter` turns `theme: [a, b]` into an array and keeps whatever else
+// someone typed, so the normalization is done HERE, once, and every caller shares it — a tag that is
+// a string in one reader and an array in the next groups nothing.
+export function themeOf(fm = {}) {
+  return typeof fm?.theme === 'string' && fm.theme.trim() ? fm.theme.trim() : null;
+}
+
+// Two themes that only differ in case, spacing or punctuation are the same idea typed twice, and they
+// split the group in silence. Folding to this key is how `yad doctor` finds them; it is NEVER stored
+// or displayed — the tag people wrote is the tag they see.
+export const themeKey = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+
 // The lineage of an epic from epic.md frontmatter. `type` defaults to `feature` (genesis) when
 // absent, so an un-migrated genesis epic behaves as the thread root. Greenfield/missing-safe.
 export function epicLineage(root, epic) {
@@ -1131,6 +1155,8 @@ export function epicLineage(root, epic) {
     thread: fm.thread || null,
     inherits: asList(fm.inherits),
     supersedes: asList(fm.supersedes),
+    // The free grouping tag (E31). Null when unset, which is most epics.
+    theme: themeOf(fm),
   };
 }
 

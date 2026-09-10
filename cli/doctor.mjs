@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, stepPhase, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, SENTINELS } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -832,6 +832,60 @@ export function typeChecks(checks, root) {
   }
 }
 
+// The grouping theme (E31) — a free tag on `epic.md` that puts several epics under one heading. It is
+// deliberately unvalidated: there is no list of allowed themes, and having none is normal. So there is
+// nothing here to check about a SINGLE epic. Both reports below are about the tag failing at the one
+// job it has, which is putting epics together.
+//
+// Reported in the `shape` section beside the type and phase checks: those three are the engine's own
+// vocabulary, and the golden test freezes the `epics` and `threads` sections against exactly this kind
+// of addition (rule 6).
+export function themeChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const spellings = new Map();   // folded key -> the distinct spellings seen, in first-seen order
+  const unreadable = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const md = path.join(epicsDir, e, 'epic.md');
+    if (!exists(md)) continue;   // no epic.md — EP-discovery, not a work item on the ladder
+    const fm = readFrontmatter(md);
+    // `readFrontmatter` turns `theme: [a, b]` into an array, and a theme is ONE tag. Left alone the
+    // value would simply read as absent, so the epic would drop out of every grouping in silence.
+    // A blank `theme:` is not this: it is the template's own default, and means "no theme".
+    if (Array.isArray(fm.theme)) { unreadable.push(`${e}: \`theme: [${fm.theme.join(', ')}]\``); continue; }
+    const t = themeOf(fm);
+    if (!t) continue;
+    const key = themeKey(t);
+    // A `#` inside the tag is almost always the comment trap: neither `readFrontmatter` nor the check
+    // gates' `fm_val` strips a trailing `# …`, so it lands in the value. It is caught HERE rather than
+    // left to the variant report, which would otherwise call `#checkout-revamp` a second spelling of
+    // `checkout-revamp` — a true statement that names the wrong problem.
+    if (!key || t.includes('#')) { unreadable.push(`${e}: \`theme: ${t}\``); continue; }
+    const seen = spellings.get(key) || [];
+    if (!seen.includes(t)) seen.push(t);
+    spellings.set(key, seen);
+  }
+
+  const variants = [...spellings.values()].filter((v) => v.length > 1);
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  if (variants.length) {
+    check(
+      checks, 'theme:variants', 'shape', 'warn',
+      `${variants.length} grouping theme(s) are spelled more than one way: ${some(variants.map((v) => v.map((x) => `\`${x}\``).join(' / ')), 2)}`,
+      'these are one theme typed differently, and they group as two. Pick one spelling and use it in every `epic.md` that belongs to the group',
+    );
+  }
+  if (unreadable.length) {
+    check(
+      checks, 'theme:unreadable', 'shape', 'warn',
+      `${unreadable.length} epic(s) have a \`theme:\` nothing can read: ${some(unreadable, 3)}`,
+      'a theme is ONE free tag — a word or short phrase, written plainly and with no `#`. A list groups nothing, and a `#` is kept as part of the tag (these frontmatter readers do not strip comments), so both are read as no theme at all',
+    );
+  }
+}
+
 // A step this release does not recognise. Every step the engine can run belongs to one of the six
 // phases, and the same table is what binds a step to its skill — so an id no phase claims is an id
 // `yad next` cannot guide, `yad gate` has no artifact rule for, and no renderer can place in the
@@ -962,6 +1016,7 @@ export function collectDoctor(root) {
   mirrorChecks(checks, root);
   dialChecks(checks, root);
   typeChecks(checks, root);
+  themeChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

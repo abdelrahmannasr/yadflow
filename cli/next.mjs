@@ -119,11 +119,19 @@ function actionLine(a, { solo } = {}) {
 }
 
 // Full, friendly printout for a single epic.
-function printAction(a, { solo } = {}) {
+//
+// `root` is taken rather than another field on the action object: `printAction` renders `a` and
+// `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled by the golden test, which an
+// added key breaks (see actionFor). The grouping theme is for the person reading the line.
+function printAction(a, { solo, root } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The discovery front-zero is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${typeNoun(a.lineageKind)} ` : '';
-  log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)} ${c.dim(`— ${a.why}`)}`);
+  // The free grouping tag, printed only when the epic has one — most do not, and an empty marker on
+  // every line would cost more attention than it pays back.
+  const tag = root && a.epicId ? epicLineage(root, a.epicId).theme : null;
+  const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
+  log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)}${theme} ${c.dim(`— ${a.why}`)}`);
   // In Build with live lanes, print each story/repo's next sub-step + remaining chain instead
   // of the single static hint; otherwise the one actionable line.
   if (a.kind === 'build' && a.builds?.length) printBuildLanes(a.builds);
@@ -179,7 +187,7 @@ function generalNext(root, { all } = {}) {
   const discoveryOpen = !!discoveryAction && discoveryAction.kind !== 'discovery-done';
 
   if (!featureEpics.length) {
-    if (discoveryOpen) { printAction(discoveryAction, { solo }); return; }
+    if (discoveryOpen) { printAction(discoveryAction, { solo, root }); return; }
     log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
     if (!hasDiscovery) hand(`frame the whole project (market, feasibility, roadmap): invoke the ${c.bold('yad-discovery')} skill ${c.dim('(optional front-zero)')}`);
@@ -188,10 +196,10 @@ function generalNext(root, { all } = {}) {
   }
 
   const actions = featureEpics.map((id) => actionFor(root, id));
-  if (discoveryOpen) printAction(discoveryAction, { solo });   // an unfinished discovery comes first
+  if (discoveryOpen) printAction(discoveryAction, { solo, root });   // an unfinished discovery comes first
 
   if (featureEpics.length === 1 || all) {
-    for (const a of actions) printAction(a, { solo });
+    for (const a of actions) printAction(a, { solo, root });
     return;
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
@@ -278,5 +286,5 @@ export async function runNext(root, { epic, check, all, json } = {}) {
     process.exitCode = 1;
     return;
   }
-  printAction(actionFor(root, epic), { solo: isSolo(root) });
+  printAction(actionFor(root, epic), { solo: isSolo(root), root });
 }

@@ -7,7 +7,7 @@ import path from 'node:path';
 import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
   isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
-  workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter,
+  workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter, themeOf, themeKey,
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
@@ -385,7 +385,7 @@ test('epicLineage reads `type:` when an epic.md carries only the new name', () =
 // the epic stops being a genesis and `lineage-check` refuses every commit that links a story to it.
 // A commented `thread:` reads as a cache that disagrees with the computed root, so `yad doctor` fails.
 // Every epic the tool creates went through one of these two templates.
-const TEMPLATE_KEYS = ['id', 'status', 'kind', 'type', 'thread', 'verified', 'stub', 'owner', 'repos'];
+const TEMPLATE_KEYS = ['id', 'status', 'kind', 'type', 'theme', 'thread', 'verified', 'stub', 'owner', 'repos'];
 
 // Pull the first fenced ```markdown block that opens with a `---` frontmatter fence.
 function templateFrontmatter(skillFile) {
@@ -424,6 +424,76 @@ for (const [skillFile, expected] of [
     fs.rmSync(T, { recursive: true, force: true });
   });
 }
+
+// ---- the grouping theme (E31) --------------------------------------------------------------------
+
+test('themeOf: a theme is ONE tag, and having none is the normal answer', () => {
+  assert.equal(themeOf({ theme: 'checkout-revamp' }), 'checkout-revamp');
+  assert.equal(themeOf({ theme: '  checkout-revamp  ' }), 'checkout-revamp', 'trimmed');
+  assert.equal(themeOf({}), null, 'no theme is not an error, it is most epics');
+  assert.equal(themeOf(), null);
+  assert.equal(themeOf({ theme: '' }), null, 'the template ships the key empty');
+  assert.equal(themeOf({ theme: '   ' }), null);
+  // `readFrontmatter` turns `theme: [a, b]` into an array. A theme groups by being one value, so a
+  // list is not a weaker theme, it is no theme — and `yad doctor` says so out loud.
+  assert.equal(themeOf({ theme: ['a', 'b'] }), null);
+  assert.equal(themeOf({ theme: 42 }), null);
+  assert.equal(themeOf({ theme: null }), null);
+});
+
+test('themeKey folds the ways one theme gets typed, and keeps different themes apart', () => {
+  const same = ['checkout-revamp', 'Checkout Revamp', 'checkout_revamp', 'CheckoutRevamp', ' checkout revamp '];
+  const keys = new Set(same.map(themeKey));
+  assert.equal(keys.size, 1, `these are one theme typed five ways, folded to ${[...keys].join(' / ')}`);
+  assert.notEqual(themeKey('checkout'), themeKey('checkout-revamp'), 'different themes stay different');
+  assert.equal(themeKey('###'), '', 'punctuation alone folds to nothing — doctor calls that unreadable');
+  assert.equal(themeKey(null), '');
+});
+
+test('epicLineage carries the theme, and null when there is none', () => {
+  const T = hub();
+  writeEpic(T, 'EP-a', { kind: 'feature', thread: 'EP-a', theme: 'checkout-revamp' });
+  writeEpic(T, 'EP-b', { kind: 'feature', thread: 'EP-b' });
+  writeEpic(T, 'EP-c', { kind: 'feature', thread: 'EP-c', theme: ['x', 'y'] });
+  assert.equal(epicLineage(T, 'EP-a').theme, 'checkout-revamp');
+  assert.equal(epicLineage(T, 'EP-b').theme, null);
+  assert.equal(epicLineage(T, 'EP-c').theme, null, 'a list is read as no theme');
+  // The theme is additive: nothing else about the lineage moved.
+  assert.equal(epicLineage(T, 'EP-a').type, 'feature');
+  assert.equal(epicLineage(T, 'EP-a').kind, 'feature');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('yad thread --json carries the theme; the printed tree shows it only when set', async () => {
+  const T = hub();
+  writeEpic(T, 'EP-cart', { kind: 'feature', thread: 'EP-cart', theme: 'checkout-revamp' });
+  writeEpic(T, 'EP-cart-fix', { kind: 'defect', parent: 'EP-cart', thread: 'EP-cart', theme: 'checkout-revamp' });
+  writeEpic(T, 'EP-plain', { kind: 'feature', thread: 'EP-plain' });
+
+  const nodes = threadSummary(T, 'EP-cart').nodes;
+  assert.deepEqual(nodes.map((n) => n.theme), ['checkout-revamp', 'checkout-revamp'],
+    'a change inherits nothing automatically — yad-change copies the parent tag down');
+  assert.equal(threadSummary(T, 'EP-plain').nodes[0].theme, null);
+
+  const themed = await grab(() => runThread(T, { epic: 'EP-cart' }));
+  assert.match(themed, /#checkout-revamp/);
+  const plain = await grab(() => runThread(T, { epic: 'EP-plain' }));
+  assert.equal(plain.includes('#'), false, 'no theme, no marker — an empty tag on every line is noise');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('yad thread with no epic lists each thread under its theme', async () => {
+  // This list is where a person looks to see which threads belong together, so it is where the tag
+  // does the most work. The theme shown is the GENESIS epic's — the thread's own heading.
+  const T = hub();
+  writeEpic(T, 'EP-cart', { kind: 'feature', thread: 'EP-cart', theme: 'checkout-revamp' });
+  writeEpic(T, 'EP-cart-fix', { kind: 'defect', parent: 'EP-cart', thread: 'EP-cart', theme: 'checkout-revamp' });
+  writeEpic(T, 'EP-plain', { kind: 'feature', thread: 'EP-plain' });
+  const out = await grab(() => runThread(T, {}));
+  assert.match(out, /EP-cart #checkout-revamp {2}2 epic\(s\)/);
+  assert.match(out, /EP-plain {2}1 epic\(s\)/, 'no theme, no marker');
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 // ---- the six phases (E22) ------------------------------------------------------------------------
 
