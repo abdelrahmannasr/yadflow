@@ -78,6 +78,7 @@ export const MODULES: Module[] = [
         summary: 'Shape decides; Build builds; automation is opt-in.',
         body: [
           { kind: 'p', text: 'The lifecycle has three parts — Shape, Build and Run. (Run is planned, not built yet.) The **Shape** part is where you decide — the epic, the architecture and its locked contract, the UI, the stories. It is always human-gated; nothing auto-advances.' },
+          { kind: 'p', text: 'Inside the parts sit six named **phases**, and every step belongs to one: **Discover**, **Design** and **Plan** make up Shape; **Build** is its own; **Release** and **Operate** make up Run and are planned rather than built. `yad next <epic>` prints all six with your current one marked, so you can see where you are without counting steps.' },
           { kind: 'p', text: 'The **Build** is where you build — once per story, per code repo: spec → implement → checks → ship.' },
           { kind: 'callout', tone: 'key', text: 'Automation is opt-in and earned. A safe Build step can earn the right to auto-advance only after it proves itself — and one command reverts everything to manual. The engineer review and every Shape step are never automatable.' },
         ],

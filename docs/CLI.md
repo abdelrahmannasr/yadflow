@@ -43,7 +43,7 @@ no clone needed.
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo refresh [name] --push` | After the re-pack (and the AI regenerating the code-map), commit the tracked code-maps + `.sdlc/repos.json` as an audit-trail `chore(hub): sync code-context … [skip ci]` commit and push it straight to the Product's **default branch** (`--allow-branch` to override). The code-context analogue of `yad checkpoint`. |
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
-| `yad thread [<epic>]` | **Feature threads (Phase 6).** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling. Read-only. |
+| `yad thread [<epic>]` | **Feature threads.** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling, where each node carries its work-item `type` and the lifecycle `phase` its current step is in. Read-only. |
 | `yad reconcile [check\|refresh\|wire]` | Sweep threads for **drift / orphans / open hotfix debt** and report which thread drifted and why (mirrors `yad docs sync`; advisory — the CI gates block at merge). |
 | `yad hook ledger-guard` | **Harness-invoked, never typed.** The local half of the `ledger-guard` rule: in verified mode the gate ledger is CI-owned, so an agent that hand-edits `epics/*/.sdlc/state.json` is refused **at the moment of the edit** and told the command that owns the transition (`yad gate open`) — instead of discovering it twenty minutes later in a failed pipeline (#171). Reads a tool-call payload as JSON on **stdin** (or `--path <p>`); **exit 0 allows, exit 2 denies** with the reason on stderr, which is Claude Code's `PreToolUse` contract and any other harness's too. Same scope as the CI gate, including the new-epic seed exemption (#162); a **no-op** with a local ledger. **Fails open** — no `yad`, no Product, an unreadable config all allow, because the CI gate is the one that fails closed. `YAD_HOOK_DISABLE=1` skips it. Wired by `setup` / `check --fix`; `yad doctor` reports whether it is armed. |
 | `npx yadflow --version` | Print the installed CLI version. |
@@ -203,11 +203,34 @@ never a silent reset — restore it from git, or delete it to start over from th
 > **Not yet supported:** marking a customization as *accepted* so it stops being reported (an
 > opt-out list of managed paths you own). Until then, `modified` is a permanent, deliberate nag.
 
+## The six phases
+
+The lifecycle has three **parts** — Shape, Build and Run. Inside them sit six named **phases**, and
+every step belongs to exactly one:
+
+| Phase | Part | Steps |
+|---|---|---|
+| Discover | Shape | `discovery` · `analysis` · `epic`, each with its review gate |
+| Design | Shape | `architecture` (with the locked contract) · `ui-design`, each with its review gate |
+| Plan | Shape | `stories` · `test-cases`, each with its review gate |
+| Build | Build | `spec` · `tasks` · `implement` · `checks` · `engineer-review` |
+| Release | Run | **planned, not built** — release notes · version · deploy record · gate |
+| Operate | Run | **planned, not built** — defects · feedback · retrospective · improvements |
+
+`yad next <epic>` prints all six with the current one marked and the two planned ones greyed, so the
+lifecycle does not appear to stop at merge. The line is printed only when the step you are on has a
+phase: `ready-for-build` is a marker rather than a step, so it has none and no line is shown.
+
+A phase is worked out from the step id. It is **not stored in any file**, so there is nothing to keep
+in step, nothing to migrate, and no way for it to disagree with the step it describes. `yad doctor`
+reports a step id no phase claims (`phase:unknown`) — that is also a step no skill runs and `yad next`
+cannot guide, so it is usually a typo or a file from a newer release.
+
 ## File shape: `schemaVersion`
 
-Every JSON **object** `yad` writes under a `.sdlc/` directory starts with `"schemaVersion": 1`. It
-records what shape the file is in, so a later release can recognise a file written by an older one and
-upgrade it rather than guess.
+Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **5**
+in this release. It records what shape the file is in, so a later release can recognise a file written
+by an older one and upgrade it rather than guess.
 
 You do not have to do anything about it. Three things are worth knowing:
 
@@ -265,8 +288,8 @@ line for the project and one per epic:
 
 ```text
   shape
-  ✓ this project is on shape 1, the engine is on shape 1
-  ✓ EP-checkout is on shape 1, the engine is on shape 1
+  ✓ this project is on shape 5, the engine is on shape 5
+  ✓ EP-checkout is on shape 5, the engine is on shape 5
 ```
 
 | What it says | What it means | What to do |
@@ -275,6 +298,8 @@ line for the project and one per epic:
 | *N file(s) do not record it yet* | those files predate the stamp. They count as shape 1, so they are **correct**, just silent | optional: `yad migrate --apply` writes it in |
 | *N file(s) are **behind*** (warn) | this release expects a newer shape | `yad migrate` to preview, then `yad migrate --apply` |
 | *N file(s) are **newer** than this yadflow* (fail) | they were written by a newer release | upgrade the CLI. **Never** migrate — that would move them backward and lose what the newer version wrote |
+| *N are **CI-owned** and behind* (warn) | in verified mode CI is the only writer of those files, so `yad migrate` will not touch them | nothing. The next `yad gate` command, or CI's next gate sync, moves them and the warning clears |
+| *N step(s) belong to no phase* (warn) | a step id this release does not recognise — so no skill runs it and `yad next` cannot guide it | check the spelling, or upgrade if the step comes from a newer release |
 
 The reading comes from the same code `yad migrate` previews with, so the two can never disagree. In
 `--json`, each shape check carries a `shape` object with the engine's version and a per-file list, so

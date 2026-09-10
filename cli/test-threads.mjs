@@ -502,3 +502,34 @@ test('a thread node carries the phase its current step is in, or null for a sent
   assert.equal(at('ready-for-build').phase, null, 'a sentinel is not a step');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('the phase table in skills/sdlc/config.yaml agrees with the code, row for row', () => {
+  // config.yaml is documentation-as-config: the skills read it, people read it, and nothing else
+  // checks it against the engine. A table copied by hand into a second file is a table that drifts —
+  // the same reason `ledger-guard.sh` and `lineage-check.sh` have agreement tests. There is no YAML
+  // parser in this repo (Node built-ins only), so the six inline maps are read with a regex; a change
+  // to their layout fails loudly here rather than silently skipping the comparison.
+  const src = fs.readFileSync(new URL('../skills/sdlc/config.yaml', import.meta.url), 'utf8');
+  const block = src.match(/^lifecycle:\n([\s\S]*?)\n^defaults:/m);
+  assert.ok(block, 'the lifecycle block is gone or was renamed');
+  const rows = [...block[1].matchAll(
+    /- \{ id: (\w+),\s+name: (\w+),\s+part: (\w+),\s+built: (true|false),?\s+steps: \[([^\]]*)\] \}/g,
+  )].map((m) => ({
+    id: m[1], name: m[2], part: m[3], built: m[4] === 'true',
+    steps: m[5].split(',').map((x) => x.trim()).filter(Boolean),
+  }));
+  assert.equal(rows.length, PHASES.length, `parsed ${rows.length} rows, the code has ${PHASES.length}`);
+  for (const [i, row] of rows.entries()) {
+    const p = PHASES[i];
+    assert.deepEqual(
+      { id: row.id, name: row.name, part: row.part, built: row.built },
+      { id: p.id, name: p.name, part: p.part, built: p.built },
+      `config row ${i} disagrees with PHASES[${i}]`,
+    );
+    assert.deepEqual(row.steps, phaseSteps(p.id), `config lists different steps for ${p.id}`);
+  }
+  // The sentinel list is the other half: those are `currentStep` markers, and none of them is a step.
+  const sentinels = block[1].match(/sentinels: \[([^\]]*)\]/)[1].split(',').map((x) => x.trim());
+  assert.ok(sentinels.length, 'the sentinel list is gone');
+  for (const sent of sentinels) assert.equal(stepPhase(sent), null, `${sent} is listed as a sentinel but has a phase`);
+});
