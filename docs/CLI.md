@@ -246,13 +246,14 @@ You do not interact with the catalogue and there is nothing to configure. It mat
 rewritten. A project may run a chain the tool does not know, and leaving a step out is normal — not
 every epic has screens, so many have no `ui-design`. `yad doctor` says what it noticed and stops there.
 
-**Three things it can now notice**, all warnings in the `shape` section:
+**Four things it can now notice**, all warnings in the `shape` section:
 
 | Check | What it means |
 |---|---|
-| `step:artifact` | A step names a different file from the one the catalogue expects. This matters because the review gate hashes that file, so a wrong name binds the approval to the wrong thing. |
+| `step:artifact` | A step names a different file from the one the catalogue expects. This matters because the review gate hashes that file, so a wrong name binds the approval to the wrong thing. Different **spellings** of the same artifact are fine and are not reported: `stories`, `stories/` and `stories.md` are one gate. |
+| `step:no-artifact` | A step names no file at all. This is the one case that stops `yad gate` outright rather than quietly misfiring, because the field is read, not defaulted. |
 | `step:kind` | A step is on the wrong side of the author / review line. An author step is run by a skill and a review step by `yad gate`, so on the wrong side nothing drives it. |
-| `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. The gate closes that step when it passes, so everything after it stays blocked behind a review that already went through. |
+| `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. Nothing then tells anyone to write the artifact being reviewed, and for a folder artifact the gate has nothing to bind an approval to. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 

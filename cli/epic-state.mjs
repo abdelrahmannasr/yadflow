@@ -381,7 +381,14 @@ export function authorStepFor(state, reviewStep) {
   // An id this release does not carry — a step from a newer yadflow or a future profile. Fall back to
   // the convention every gate in the catalogue follows, so an unknown `<x>-review` still finds `<x>`.
   if (!id.endsWith('-review')) return null;
-  return state?.steps?.find((s) => s.id === id.replace(/-review$/, '')) || null;
+  const base = id.replace(/-review$/, '');
+  // …but never against a base the catalogue knows to be something OTHER than a gated Shape step.
+  // `checks-review` is not a step, and `checks` is a Build step nothing gates: resolving it would let
+  // a chain that lists both make `stateInvariants` demand a repair, and `yad gate repair` would then
+  // flip `checks` to done as though the merge gate had reviewed it. Same discipline as `stepPhase`.
+  const baseDef = stepDef(base);
+  if (baseDef && (baseDef.phase === 'build' || baseDef.kind !== 'author')) return null;
+  return state?.steps?.find((s) => s.id === base) || null;
 }
 
 // Closing a review gate implies its artifact was authored — so the CLI, not the authoring skill, is
@@ -743,19 +750,23 @@ export const STEPS = [
 const STEP_BY_ID = new Map(STEPS.map((s) => [s.id, s]));
 export const stepDef = (id) => STEP_BY_ID.get(String(id || '')) || null;
 
-const catalogueSkills = (phaseIds) => Object.fromEntries(
-  STEPS.filter((s) => s.skill && phaseIds.includes(s.phase)).map((s) => [s.id, s.skill]),
+// Split by the one line that matters: Build steps run per story per code repo out of `build-state/`,
+// everything else runs at the epic level. Expressed as `=== 'build'` / `!== 'build'` rather than as a
+// list of Shape phases, so the first `release` step (E32) lands in the epic-level table by default
+// instead of falling silently out of BOTH and leaving `yad next` with no skill to name.
+const catalogueSkills = (inBuild) => Object.fromEntries(
+  STEPS.filter((s) => s.skill && (s.phase === 'build') === inBuild).map((s) => [s.id, s.skill]),
 );
 
 // The Shape authoring step a `yad next` action maps to — the skill the user invokes for that step.
 // Review (review+approve) steps are driven by the `yad gate` CLI, not a skill, so they are not here.
 // A VIEW of the catalogue; `cli/test-threads.mjs` deep-equals it against one.
-export const STEP_SKILL = catalogueSkills(['discover', 'design', 'plan']);
+export const STEP_SKILL = catalogueSkills(false);
 
 // The skill that runs each Build (build) step — the build-state analogue of STEP_SKILL. `spec`
 // and `tasks` are the two legs of the SAME yad-spec ceremony (run-loop.md), so both map to yad-spec;
 // the chain renderer collapses the consecutive duplicate. `engineer-review` is the human merge gate.
-export const BUILD_STEP_SKILL = catalogueSkills(['build']);
+export const BUILD_STEP_SKILL = catalogueSkills(true);
 
 // The fixed Build order. Used to derive the "remaining chain" from the active step onward even if a
 // repo's `steps` array is partial or out of order. The catalogue's own order IS this order.

@@ -577,6 +577,9 @@ test('the catalogue and the artifact helpers agree on every step that writes a f
 test('the derived tables are views of the catalogue, not copies beside it', () => {
   // Each of these was a hand-kept table before E4. If any of them stops agreeing, a step has been
   // added in one place and forgotten in another — the exact failure the catalogue exists to end.
+  // The SAME rule the production derivation uses — `build` or not — not a second rule that agrees with
+  // it today. An allowlist of Shape phases here and a denylist there would agree only until the first
+  // `release` step (E32) landed in neither, leaving `yad next` with no skill to name for it.
   assert.deepEqual(
     STEP_SKILL,
     Object.fromEntries(STEPS.filter((r) => r.skill && r.phase !== 'build').map((r) => [r.id, r.skill])),
@@ -619,6 +622,14 @@ test('a gate finds its author step through the catalogue, and engineer-review ga
   // An id from a newer release still resolves by the convention every gate in the catalogue follows.
   const future = chain(['feasibility', 'feasibility-review']);
   assert.equal(authorStepFor(future, { id: 'feasibility-review' }).id, 'feasibility');
+  // But the fallback never strips onto a base the catalogue knows to be something else. `checks` is a
+  // Build step nothing gates, so `checks-review` — not a step at all — must not resolve to it: a chain
+  // listing both would otherwise make `stateInvariants` demand a repair, and `yad gate repair` would
+  // flip `checks` to done as though the merge gate had reviewed it.
+  const bad = chain(['checks', 'checks-review']);
+  assert.equal(authorStepFor(bad, { id: 'checks-review' }), null);
+  const alsoBad = chain(['epic-review', 'epic-review-review']);
+  assert.equal(authorStepFor(alsoBad, { id: 'epic-review-review' }), null, 'a gate does not gate a gate');
 });
 
 // ---- the six phases (E22) ------------------------------------------------------------------------

@@ -5832,16 +5832,51 @@ test('doctor catalogue: a step naming the wrong artifact is reported — the gat
       fm: 'kind: feature',
       state: chainState([
         { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
-        { id: 'stories', type: 'author', artifact: 'stories.md', status: 'todo' },   // it is a directory
+        { id: 'stories', type: 'author', artifact: 'epic.md', status: 'todo' },   // a different artifact
       ]),
     },
   });
   const c = checks.find((x) => x.id === 'step:artifact');
   assert.equal(c.status, 'warn');
   assert.equal(c.section, 'shape');
-  assert.match(c.message, /EP-x `stories`: `stories\.md`, catalogue says `stories\/`/);
+  assert.match(c.message, /EP-x `stories`: `epic\.md`, catalogue says `stories\/`/);
   assert.match(c.hint, /binds the approval to the wrong file/);
   assert.equal(checks.length, 1);
+});
+
+test('doctor catalogue: spellings of the SAME artifact are not reported', async () => {
+  // `artifactBase` maps `stories`, `stories/`, `stories.md` and a single story file all to one gate,
+  // and every consumer of this field reads it that way. Comparing the raw strings would warn that a
+  // chain which gates, hashes and approves perfectly is bound to the wrong file — false, and the kind
+  // of warning that teaches people to stop reading the section.
+  const checks = await catalogueChecksOn({
+    'EP-a': { fm: 'kind: feature', state: chainState([{ id: 'stories', type: 'author', artifact: 'stories', status: 'todo' }]) },
+    'EP-b': { fm: 'kind: feature', state: chainState([{ id: 'stories', type: 'author', artifact: 'stories.md', status: 'todo' }]) },
+    'EP-c': { fm: 'kind: feature', state: chainState([{ id: 'discovery', type: 'author', artifact: 'discovery', status: 'todo' }]) },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor catalogue: a Shape step with NO artifact is reported — that one crashes yad gate', async () => {
+  // The only shape here that does not merely misfire. `artifactBase(undefined)` throws, so `yad gate`
+  // on such a chain dies with an unhandled TypeError rather than a message.
+  const { artifactBase } = await import('./epic-state.mjs');
+  assert.throws(() => artifactBase(undefined), TypeError, 'the crash this check exists to warn about');
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'stories-review', type: 'review+approve', status: 'in_review' },   // no artifact at all
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'done' },
+      ]),
+    },
+  });
+  const c = checks.find((x) => x.id === 'step:no-artifact');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /EP-x `stories-review` \(should be `stories\/`\)/);
+  assert.match(c.hint, /stops with an unhandled error/);
+  assert.equal(checks.find((x) => x.id === 'step:artifact'), undefined, 'it names none, not a wrong one');
 });
 
 test('doctor catalogue: a step on the wrong side of author / review is reported', async () => {
@@ -5873,7 +5908,16 @@ test('doctor catalogue: a gate with no step to close is reported', async () => {
   const c = checks.find((x) => x.id === 'step:orphan-gate');
   assert.equal(c.status, 'warn');
   assert.match(c.message, /EP-x `stories-review` reviews `stories`, which is not in the chain/);
-  assert.match(c.hint, /stays blocked behind a review that already passed/);
+  assert.match(c.hint, /nothing in this chain tells anyone to write the artifact/);
+  // The hint must NOT claim later steps are blocked: `preconditionsMet` only requires the steps
+  // BEFORE one in the array to be done, and an absent step is in no such position. That is the
+  // different problem of an author step present and stranded, which `stateInvariants` reports.
+  const { preconditionsMet } = await import('./epic-state.mjs');
+  const after = preconditionsMet(
+    { steps: [{ id: 'epic', status: 'done' }, { id: 'stories-review', status: 'done' }, { id: 'test-cases', status: 'todo' }] },
+    'test-cases',
+  );
+  assert.equal(after.ok, true, 'nothing after an orphan gate is blocked by it');
 });
 
 test('doctor catalogue: a step the catalogue does not carry is left to phase:unknown', async () => {
@@ -5888,12 +5932,12 @@ test('doctor catalogue: a step the catalogue does not carry is left to phase:unk
   assert.deepEqual(checks, []);
 });
 
-test('doctor catalogue: a BUILD id in an epic chain is skipped, not reported', async () => {
-  // Build runs per story per code repo and is recorded in `build-state/`, so a Build row carries no
-  // epic-level artifact and there is nothing to compare it against. Such a chain is odd, but this
-  // check has no rule for it and inventing one would be guessing. Pinned so the silence is a decision
-  // rather than a side effect of the `def.artifact &&` guard.
-  const checks = await catalogueChecksOn({
+test('doctor catalogue: only the ARTIFACT comparison skips a Build id, and the rest still runs', async () => {
+  // Build runs per story per code repo out of `build-state/`, so a Build row carries no epic-level
+  // artifact and there is nothing to compare — an artifact on one is not reported. The kind check is
+  // a different question and still applies: `implement` written as a gate is wrong wherever it sits.
+  // Pinned in BOTH directions so the silence is a decision rather than a side effect of one guard.
+  const quiet = await catalogueChecksOn({
     'EP-x': {
       fm: 'kind: feature',
       state: chainState([
@@ -5902,7 +5946,16 @@ test('doctor catalogue: a BUILD id in an epic chain is skipped, not reported', a
       ]),
     },
   });
-  assert.deepEqual(checks, []);
+  assert.deepEqual(quiet, []);
+
+  const loud = await catalogueChecksOn({
+    'EP-y': {
+      fm: 'kind: feature',
+      state: chainState([{ id: 'implement', type: 'review+approve', status: 'todo' }]),
+    },
+  });
+  assert.equal(loud.find((x) => x.id === 'step:kind')?.status, 'warn');
+  assert.equal(loud.find((x) => x.id === 'step:no-artifact'), undefined, 'a Build step names no artifact by design');
 });
 
 test('doctor catalogue: the section is wired into collectDoctor, not just exported', async () => {
@@ -5913,7 +5966,7 @@ test('doctor catalogue: the section is wired into collectDoctor, not just export
   fs.writeFileSync(path.join(T, 'epics', 'EP-x', 'epic.md'), '---\nid: EP-x\nkind: feature\ntype: feature\n---\n\n## Goal\nx\n');
   fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(chainState([
     { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
-    { id: 'stories', type: 'author', artifact: 'stories.md', status: 'todo' },
+    { id: 'stories', type: 'author', artifact: 'epic.md', status: 'todo' },
   ]), null, 2));
   try {
     const c = collectDoctor(T).checks.find((x) => x.id === 'step:artifact');

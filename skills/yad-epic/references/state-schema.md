@@ -65,11 +65,13 @@ The catalogue is code. Nothing about it is written into `state.json`, so no file
 
 **When a chain disagrees with the catalogue, the chain wins.** The seed below is still hand-written by
 this skill, a project may run a chain from a newer release, and leaving a step out is normal — not
-every epic has screens. `yad doctor` reports three disagreements it can see and rewrites nothing:
-`step:artifact` (a step naming a different file from the one the gate hashes), `step:kind` (a step on
-the wrong side of the author / review line) and `step:orphan-gate` (a gate whose step is not in the
-chain, so everything after it stays blocked behind a review that already passed). An id the catalogue
-does not carry is left to `phase:unknown`.
+every epic has screens. `yad doctor` reports four disagreements it can see and rewrites nothing:
+`step:artifact` (a step naming a different file from the one the gate hashes — different spellings of
+the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one gate),
+`step:no-artifact` (a step naming no file at all, the one case that stops `yad gate` outright),
+`step:kind` (a step on the wrong side of the author / review line) and `step:orphan-gate` (a gate whose
+step is not in the chain, so nothing tells anyone to write what it reviews). An id the catalogue does
+not carry is left to `phase:unknown`.
 
 ### The six phases
 

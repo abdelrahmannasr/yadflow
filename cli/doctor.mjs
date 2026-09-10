@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, SENTINELS } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -922,6 +922,7 @@ export function catalogueChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
   const wrongArtifact = [];
+  const noArtifact = [];
   const wrongKind = [];
   const orphanGate = [];
 
@@ -934,16 +935,30 @@ export function catalogueChecks(checks, root) {
     for (const step of state.steps) {
       const def = step && typeof step.id === 'string' ? stepDef(step.id) : null;
       if (!def) continue;   // unknown id — `phase:unknown` below is the check for that
-      // A BUILD id in an epic's `steps[]` is skipped rather than reported, and that is on purpose.
-      // Build runs per story per code repo and is recorded in `build-state/`, so those rows carry no
-      // artifact in the catalogue and there is nothing here to compare. An epic-level chain listing
-      // `implement` is odd, but `phase:unknown` will not flag it either — it is a real step id — and
-      // inventing a rule for it here would be guessing at a chain this release does not seed.
-
-      // The artifact is what the gate HASHES. A chain naming the wrong one binds the approval to the
-      // wrong file, so the gate can pass while the artifact everybody reviewed sits unapproved.
-      if (def.artifact && typeof step.artifact === 'string' && step.artifact !== def.artifact) {
+      // ONLY THE ARTIFACT COMPARISON skips a Build id, and only because there is nothing to compare:
+      // Build runs per story per code repo out of `build-state/`, so those catalogue rows carry no
+      // epic-level artifact. The two checks below still run on a Build id in an epic chain, which is
+      // right — `implement` written as a `review+approve` step is wrong wherever it appears.
+      //
+      // The artifact is what the gate HASHES. A chain naming a different one binds the approval to
+      // the wrong file, so the gate can pass while the artifact everybody reviewed sits unapproved.
+      //
+      // Compared through `artifactBase`, which is how every consumer reads this field
+      // (`findReviewStep`, `artifactHash`, `yad gate`). It maps `stories`, `stories/`, `stories.md`
+      // and `stories/EP-x-S01.md` all to one gate, so those spellings differ on paper and are the
+      // same artifact in fact. Comparing the raw strings would warn that a chain which gates, hashes
+      // and approves perfectly is bound to the wrong file — a false statement, and the kind that
+      // teaches people to stop reading warnings.
+      if (def.artifact && typeof step.artifact === 'string' && step.artifact
+          && artifactBase(step.artifact) !== artifactBase(def.artifact)) {
         wrongArtifact.push(`${e} \`${step.id}\`: \`${step.artifact}\`, catalogue says \`${def.artifact}\``);
+      }
+      // A Shape step with NO artifact at all is the one shape that crashes rather than misfires:
+      // `artifactBase(undefined)` throws, so `yad gate` on such a chain dies with an unhandled
+      // TypeError instead of a message. Reported here because this is where the catalogue knows the
+      // step should have named a file.
+      if (def.artifact && (step.artifact === undefined || step.artifact === null || step.artifact === '')) {
+        noArtifact.push(`${e} \`${step.id}\` (should be \`${def.artifact}\`)`);
       }
       // `type` in the file is `author` or `review+approve`; the catalogue calls the second one
       // `review`. A step on the wrong side of that line is not driven by what drives it: an author
@@ -953,8 +968,11 @@ export function catalogueChecks(checks, root) {
       if (fileKind && fileKind !== def.kind) {
         wrongKind.push(`${e} \`${step.id}\`: \`${step.type}\`, catalogue says \`${def.kind}\``);
       }
-      // A gate whose author step is not in the chain can never close it, so every later step stays
-      // blocked behind a review that has already passed.
+      // A gate whose author step is not in the chain has nothing to review. Note what this does NOT
+      // do: it does not block the steps after it. `preconditionsMet` only requires the steps BEFORE
+      // one in the array to be done, and an absent step is in no such position — that is the
+      // different problem of an author step present and stranded (issue #131), which
+      // `stateInvariants` already reports.
       if (def.reviews && !present.has(def.reviews)) {
         orphanGate.push(`${e} \`${step.id}\` reviews \`${def.reviews}\`, which is not in the chain`);
       }
@@ -969,6 +987,13 @@ export function catalogueChecks(checks, root) {
       'the artifact is the file the review gate hashes, so a wrong one binds the approval to the wrong file. Correct `artifact` in `.sdlc/state.json`, or leave it if this project deliberately runs a different chain — nothing is rewritten either way',
     );
   }
+  if (noArtifact.length) {
+    check(
+      checks, 'step:no-artifact', 'shape', 'warn',
+      `${noArtifact.length} step(s) name no artifact at all: ${some(noArtifact, 3)}`,
+      'the gate reads this field to know what to hash, and a missing one is not treated as "nothing" — `yad gate` stops with an unhandled error on this epic. Add `artifact` to the step in `.sdlc/state.json`',
+    );
+  }
   if (wrongKind.length) {
     check(
       checks, 'step:kind', 'shape', 'warn',
@@ -979,17 +1004,16 @@ export function catalogueChecks(checks, root) {
   if (orphanGate.length) {
     check(
       checks, 'step:orphan-gate', 'shape', 'warn',
-      `${orphanGate.length} review gate(s) have no step to close: ${some(orphanGate, 3)}`,
-      'a gate closes its author step when it passes. With that step missing from the chain, everything after the gate stays blocked behind a review that already passed',
+      `${orphanGate.length} review gate(s) review a step that is not there: ${some(orphanGate, 3)}`,
+      'nothing in this chain tells anyone to write the artifact the gate reviews, and for a directory artifact the hash comes back empty, so the gate has nothing to bind an approval to. Add the author step, or drop the gate if this chain deliberately inherits that artifact from its parent epic',
     );
   }
 }
 
 // A step this release does not recognise. Every step the engine can run has a row in the step
-// catalogue (E4), and that row is what gives it a phase AND binds it to a skill — so an id no phase
-// claims is an id with no row at all, which means an id
-// `yad next` cannot guide, `yad gate` has no artifact rule for, and no renderer can place in the
-// lifecycle. It is reported rather than ignored, and only warned about rather than failed: a project
+// catalogue (E4), and that row is what gives it both a phase and a skill. So an id no phase claims is
+// an id with no row at all: one `yad next` cannot guide, `yad gate` has no artifact rule for, and no
+// renderer can place in the lifecycle. It is reported rather than ignored, and only warned about rather than failed: a project
 // may legitimately hold a step from a newer yadflow than the one being run, and a hand-written
 // `state.json` is allowed to be ahead of the tool reading it.
 //
