@@ -8,7 +8,7 @@ import {
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, epicLineage, gatePredicate,
   isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
   workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter,
-  PHASES, stepPhase, phaseOf, phaseSteps, STEP_SKILL, BUILD_STEP_SKILL,
+  PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -456,6 +456,17 @@ test('`engineer-review` is a step, not the review of a step called `engineer`', 
   assert.ok(phaseSteps('build').includes('engineer-review'));
 });
 
+test('a review suffix is only ever stripped against a step that HAS a review gate', () => {
+  // Shape steps each have a `<id>-review` gate, so the suffix resolves to the artifact's phase. Build
+  // steps have none — `engineer-review` is a step in its own right, the locked merge gate. Stripping
+  // the suffix against the Build table too would quietly invent `checks-review` and `spec-review`,
+  // steps that do not exist, and `phase:unknown` would then stay silent on them.
+  for (const id of ['spec-review', 'tasks-review', 'implement-review', 'checks-review', 'engineer-review-review']) {
+    assert.equal(stepPhase(id), null, `${id} is not a step and must not resolve`);
+  }
+  assert.equal(stepPhase('engineer-review'), 'build', 'while the real one still does');
+});
+
 test('an id the engine does not recognise has NO phase, rather than a guessed one', () => {
   // Sentinels are `currentStep` values, not entries in `steps[]`, and a future profile may carry step
   // ids this release has never heard of. A renderer showing the wrong phase is worse than one
@@ -463,7 +474,11 @@ test('an id the engine does not recognise has NO phase, rather than a guessed on
   for (const id of ['ready-for-build', 'backfill-pending', 'backfill-done', 'discovery-done',
     'feasibility', 'engineer', 'review', '', null, undefined]) {
     assert.equal(stepPhase(id), null, `${id} should have no phase`);
-    assert.equal(phaseOf(id), null);
+  }
+  // `phaseOf` asks the other question — where is the EPIC — so `ready-for-build` is Build there, and
+  // is covered by its own test. Everything that is not a step is still nothing to either function.
+  for (const id of ['backfill-pending', 'backfill-done', 'discovery-done', 'feasibility', '', null]) {
+    assert.equal(phaseOf(id), null, `${id} should place no epic`);
   }
 });
 
@@ -483,7 +498,7 @@ test('every step the engine can run belongs to a phase', () => {
   }
 });
 
-test('a thread node carries the phase its current step is in, or null for a sentinel', () => {
+test('a thread node carries the phase the EPIC is in, the same answer yad next prints', () => {
   // `yad thread --json` is not frozen by the golden test, so it gains the new word directly. Null is
   // a real answer here, not a gap: `ready-for-build` is a currentStep sentinel, not a step, and
   // placing it in a phase would be inventing one.
@@ -499,7 +514,10 @@ test('a thread node carries the phase its current step is in, or null for a sent
   assert.equal(at('architecture-review').phase, 'design');
   assert.equal(at('stories').phase, 'plan');
   assert.equal(at('engineer-review').phase, 'build');
-  assert.equal(at('ready-for-build').phase, null, 'a sentinel is not a step');
+  // `ready-for-build` is the marker that stands in for the whole of Build — an epic sitting on it is
+  // in Build, and this key would otherwise be null for the entire back half of every epic.
+  assert.equal(at('ready-for-build').phase, 'build');
+  assert.equal(at('backfill-pending').phase, null, 'a stub is not walking the lifecycle');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -528,8 +546,49 @@ test('the phase table in skills/sdlc/config.yaml agrees with the code, row for r
     );
     assert.deepEqual(row.steps, phaseSteps(p.id), `config lists different steps for ${p.id}`);
   }
-  // The sentinel list is the other half: those are `currentStep` markers, and none of them is a step.
-  const sentinels = block[1].match(/sentinels: \[([^\]]*)\]/)[1].split(',').map((x) => x.trim());
-  assert.ok(sentinels.length, 'the sentinel list is gone');
-  for (const sent of sentinels) assert.equal(stepPhase(sent), null, `${sent} is listed as a sentinel but has a phase`);
+  // The other two lists, pinned the same way — by deepEqual against the code, not by "is it truthy".
+  // `[].split(',')` yields [''] with length 1, so a length check would pass on an emptied list, and a
+  // one-directional loop would pass on a shortened one.
+  const listOf = (key) => (block[1].match(new RegExp(`${key}: \\[([^\\]]*)\\]`))?.[1] ?? '')
+    .split(',').map((x) => x.trim()).filter(Boolean);
+  assert.deepEqual(listOf('sentinels'), SENTINELS, 'the sentinel list drifted from the code');
+  assert.deepEqual(listOf('parts'), [...new Set(PHASES.map((p) => p.part))], 'the parts list drifted');
+  for (const sent of SENTINELS) assert.equal(stepPhase(sent), null, `${sent} is a sentinel but has a phase`);
+});
+
+test('an epic in Build is placed in Build, from the marker that stands in for its steps', () => {
+  // `stepPhase` is a pure id lookup and `ready-for-build` is not an id, so it has none — correct.
+  // `currentPhase` answers the other question, which every renderer actually asks: WHERE IS THIS
+  // EPIC. `nextAction` never reports a concrete build step id at the epic level (the real ones live
+  // per story per repo in build-state), so without this Build could never be shown at all.
+  assert.equal(stepPhase('ready-for-build'), null, 'still not a step');
+  assert.equal(currentPhase('ready-for-build'), 'build');
+  assert.equal(phaseOf('ready-for-build').name, 'Build');
+  // The other three markers stay phase-less: a stub is not walking the lifecycle, and neither is a
+  // finished discovery.
+  for (const sent of ['backfill-pending', 'backfill-done', 'discovery-done']) {
+    assert.equal(currentPhase(sent), null, sent);
+  }
+});
+
+test('the discovery front-zero has no phase — it does not walk the feature lifecycle', () => {
+  // EP-discovery is PRODUCT level. Its chain is discovery -> discovery-review -> discovery-done and
+  // it never enters Design, Plan or Build, so placing it on the six-phase ladder claims a journey it
+  // does not take. E75 folds it into Foundation, a Product-level phase of its own.
+  assert.equal(currentPhase('discovery'), 'discover', 'the STEP is a Discover step…');
+  assert.equal(currentPhase('discovery', { discovery: true }), null, '…but this epic is not on the ladder');
+  assert.equal(phaseOf('discovery-review', { discovery: true }), null);
+});
+
+test('every step the engine can run is listed in a phase table BY NAME', () => {
+  // Asserted on the tables, not through `stepPhase` — a `-review` id would satisfy a truthiness check
+  // through the suffix strip without ever appearing in a table, so the looser test would pass while
+  // the entry was missing.
+  const listed = new Set(PHASES.flatMap((p) => phaseSteps(p.id)));
+  for (const id of [...Object.keys(STEP_SKILL), ...Object.keys(BUILD_STEP_SKILL)]) {
+    assert.ok(listed.has(id), `${id} has a skill but is in no phase table`);
+  }
+  // …and nothing is listed that no skill runs. Both directions, so neither table can grow alone.
+  const runnable = new Set([...Object.keys(STEP_SKILL), ...Object.keys(BUILD_STEP_SKILL)]);
+  for (const id of listed) assert.ok(runnable.has(id), `${id} is in a phase but no skill runs it`);
 });

@@ -218,8 +218,13 @@ every step belongs to exactly one:
 | Operate | Run | **planned, not built** — defects · feedback · retrospective · improvements |
 
 `yad next <epic>` prints all six with the current one marked and the two planned ones greyed, so the
-lifecycle does not appear to stop at merge. The line is printed only when the step you are on has a
-phase: `ready-for-build` is a marker rather than a step, so it has none and no line is shown.
+lifecycle does not appear to stop at merge.
+
+An epic sitting on the `ready-for-build` marker is in **Build**, and stays there for the rest of its
+life: the individual Build steps run per story per code repo, so the epic-level view names the phase
+rather than the step. No line is printed at all for a stub epic, for `EP-discovery` (which is
+product-level and does not walk this lifecycle), or for a step id this release does not recognise —
+showing the wrong phase would be worse than showing none.
 
 A phase is worked out from the step id. It is **not stored in any file**, so there is nothing to keep
 in step, nothing to migrate, and no way for it to disagree with the step it describes. `yad doctor`

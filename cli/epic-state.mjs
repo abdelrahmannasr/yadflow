@@ -694,8 +694,9 @@ const BUILD_STEP_ORDER = ['spec', 'tasks', 'implement', 'checks', 'engineer-revi
 //   Release    Run     PLANNED — release notes · version · deploy record · gate
 //   Operate    Run     PLANNED — defects · feedback · retrospective · improvements
 //
-// Release and Operate are NAMED here and nowhere else. No step, skill or gate exists for either, and
-// none is invented: `built: false` is the whole of what this file knows about them. They are listed
+// Release and Operate are NAMED and not built. No step, skill or gate exists for either, and none is
+// invented: `built: false` is the whole of what is known about them. (`skills/sdlc/config.yaml`
+// carries the same table for the skills to read, and a test holds the two together row for row.) They are listed
 // rather than left out because a person has to be able to see that the lifecycle does not stop at
 // merge — and a renderer that shows them as planned tells the truth, while one that hides them
 // implies the work ends at Build.
@@ -720,15 +721,24 @@ export const PHASES = [
   { id: 'operate', name: 'Operate', part: 'Run', built: false },
 ];
 
-// Which phase each step belongs to. Only the AUTHORING step ids are listed; a review gate takes its
-// phase from the artifact it reviews, resolved below, so `epic-review` is Discover because `epic` is.
-// Every id in STEP_SKILL and BUILD_STEP_SKILL above must appear here — a test asserts it, so a step
-// added to one table and forgotten in the other fails rather than rendering with no phase.
+// Which phase each step belongs to. Split in two on purpose, because the `-review` rule differs.
+//
+// SHAPE steps each have a review gate named `<id>-review`, and that gate belongs to the phase of the
+// artifact it reviews — `epic-review` is Discover beside `epic`. BUILD steps have no such gates:
+// `engineer-review` is a step in its own right, the locked human merge gate, not the review of a step
+// called `engineer`. So the suffix is only ever stripped against the Shape table, which is what keeps
+// `checks-review` — a step that does not exist — from quietly resolving into Build.
+//
+// Every id in STEP_SKILL and BUILD_STEP_SKILL above appears in one of these two, and a test asserts
+// membership directly rather than through `stepPhase`, so a step added to one table and forgotten
+// here fails rather than resolving by accident.
 //
 // The roadmap also names a `feasibility` step in Discover. Nothing implements it — no skill, no step
-// id, no gate — so it is deliberately absent rather than declared and dead. E4 (the step catalogue)
-// is where a new step gets defined.
-const STEP_PHASE = {
+// id, no gate — so it is deliberately absent rather than declared and dead. E4 (the step catalogue) is
+// where a new step gets defined. When E4 RENAMES one, rule 3 applies here too: add the new key beside
+// the old, because a project still carrying the old id would otherwise trip `phase:unknown` on every
+// `yad doctor` run for a whole major.
+const SHAPE_STEP_PHASE = {
   discovery: 'discover',
   analysis: 'discover',
   epic: 'discover',
@@ -736,30 +746,62 @@ const STEP_PHASE = {
   'ui-design': 'design',
   stories: 'plan',
   'test-cases': 'plan',
+};
+const BUILD_STEP_PHASE = {
   spec: 'build',
   tasks: 'build',
   implement: 'build',
   checks: 'build',
   'engineer-review': 'build',
 };
+const STEP_PHASE = { ...SHAPE_STEP_PHASE, ...BUILD_STEP_PHASE };
 
-// The phase a step id belongs to, or null for anything this engine does not recognise — a sentinel
-// (`ready-for-build`, `backfill-pending`, `discovery-done`), a step from a future profile, a typo.
-// Null, never a guess: a renderer showing the wrong phase is worse than one showing none.
+// `currentStep` markers that are NOT steps: they never appear in `steps[]`, and no phase claims them.
+// `ready-for-build` is the one with a phase anyway — see `currentPhase` below, which is where an epic's
+// position is decided rather than a step's.
+export const SENTINELS = ['ready-for-build', 'backfill-pending', 'backfill-done', 'discovery-done'];
+
+// The phase a STEP id belongs to, or null for anything this engine does not recognise — a sentinel, a
+// step from a future profile, a typo. Null, never a guess: a renderer showing the wrong phase is worse
+// than one showing none.
 //
-// THE FULL ID IS TRIED FIRST, and that is load-bearing rather than an optimisation. `engineer-review`
-// is a step in its own right, not the review OF a step called `engineer` — strip the suffix first and
-// it resolves to nothing and falls out of Build. Only after a direct miss is `-review` removed, which
-// is what puts `epic-review` in Discover beside `epic`.
+// THE FULL ID IS TRIED FIRST, and that is load-bearing rather than an optimisation. Strip `-review`
+// first and `engineer-review` resolves to `engineer`, which nothing claims, so the last step of Build
+// falls out of every phase.
 export function stepPhase(id) {
   const s = String(id || '');
   if (Object.hasOwn(STEP_PHASE, s)) return STEP_PHASE[s];
   const base = s.replace(/-review$/, '');
-  return Object.hasOwn(STEP_PHASE, base) ? STEP_PHASE[base] : null;
+  return Object.hasOwn(SHAPE_STEP_PHASE, base) ? SHAPE_STEP_PHASE[base] : null;
 }
 
-// The phase record for a step id, or null. `phaseOf('epic-review').name` is the word a person reads.
-export const phaseOf = (id) => PHASES.find((p) => p.id === stepPhase(id)) || null;
+// The phase an EPIC is in. Different question from `stepPhase`, and this is the one every renderer
+// asks — so there is one of it, shared by `yad next` and `yad thread`.
+//
+// TWO THINGS A STEP LOOKUP ALONE GETS WRONG:
+//
+//   * `ready-for-build` is a marker, not a step, so `stepPhase` gives it nothing — and it is the
+//     `currentStep` for the WHOLE of Build. `nextAction` never reports a concrete build step id at the
+//     epic level either; the real ones (`spec`, `implement`, …) live per story per repo in
+//     `build-state`. So a step lookup alone can never place an epic in Build at all, which is the
+//     phase with the most steps in it. The marker means "Shape is approved, Build can run" — that is
+//     Build, and it is resolved here rather than in `stepPhase`, which stays a pure id lookup.
+//   * `EP-discovery` is the PRODUCT-level front-zero, not a work item on the feature ladder. Its whole
+//     chain is `discovery` → `discovery-review` → `discovery-done`; it never enters Design, Plan or
+//     Build. Printing the six-phase lifecycle for it claims a journey it does not take. E75 folds it
+//     into Foundation, which is a Product-level phase of its own; until then it has none.
+//
+// A stub epic (`backfill-pending` / `backfill-done`) has no phase either, and needs no special case:
+// neither marker is a step.
+export function currentPhase(currentStep, { discovery = false } = {}) {
+  if (discovery) return null;
+  const cur = String(currentStep || '');
+  if (cur === 'ready-for-build') return 'build';
+  return stepPhase(cur);
+}
+
+// The phase record for an epic's current step, or null. `.name` is the word a person reads.
+export const phaseOf = (currentStep, opts) => PHASES.find((p) => p.id === currentPhase(currentStep, opts)) || null;
 
 // Every step id this engine knows in a phase, in chain order. Empty for a phase nothing implements
 // yet, which is exactly what `built: false` says.

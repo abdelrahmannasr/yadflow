@@ -128,28 +128,37 @@ function printAction(a, { solo } = {}) {
   // of the single static hint; otherwise the one actionable line.
   if (a.kind === 'build' && a.builds?.length) printBuildLanes(a.builds);
   else hand(actionLine(a, { solo }));
-  if (a.kind === 'review-sync') info(c.dim(`unresolved comments? ${c.bold(`yad gate comments ${a.epicId} ${a.artifact}`)}`));
+  // Not `c.dim(... c.bold(...) ...)`: `paint` closes with a full reset, so a bold word inside a dim
+  // string ends the dim and everything after it reads bright. Painted per segment instead.
+  if (a.kind === 'review-sync') info(`${c.dim('unresolved comments?')} ${c.bold(`yad gate comments ${a.epicId} ${a.artifact}`)}`);
   if (a.parallel) hand(`parallel track: invoke the ${c.bold(a.parallel.skill)} skill ${c.dim(`(author ${a.parallel.artifact})`)}`);
   phaseLine(a);
 }
 
 // Where this epic sits in the lifecycle: the six phases, with the current one marked.
 //
-// Printed only when the active step HAS a phase. A sentinel like `ready-for-build` is not a step and
-// has none, and so does a step from a profile this release has never heard of — showing the wrong
-// phase would be worse than showing no line at all, so `phaseOf` returns null and this stays quiet.
+// `phaseOf` is given the same two facts every renderer needs — the epic's current step and whether it
+// is the discovery front-zero — so `yad next` and `yad thread` cannot answer this differently. It
+// returns null for a stub, for the discovery epic, and for any step id this release does not
+// recognise, and this line then stays away entirely: a wrong phase is worse than no phase.
 //
 // The two unbuilt phases are shown, greyed, rather than hidden. Someone reading this needs to see
 // that the lifecycle does not stop at merge; a list that ended at Build would say it does.
 function phaseLine(a) {
-  const here = phaseOf(a.step);
+  const here = phaseOf(a.step, { discovery: a.epicId === DISCOVERY_EPIC });
   if (!here) return;
   const rendered = PHASES.map((p) => (
     p.id === here.id ? c.bold(p.name) : c.dim(p.built ? p.name : `${p.name} (planned)`)
   ));
   // Coloured PER SEGMENT, never nested: `paint` closes with a full reset (\x1b[0m), so a bold word
   // inside a dim string ends the dim for everything after it and the rest of the line reads bright.
-  info(`${c.dim('phase:')} ${rendered.join(c.dim(' · '))} ${c.dim(`(${here.name} is a ${here.part} phase)`)}`);
+  // The current phase is named in WORDS as well as marked in bold, because bold is not always there:
+  // `useColor` is off whenever output is not a terminal or NO_COLOR is set, which is every pipe, every
+  // log file and every CI job. Without this the line would list six phases and give no way to tell
+  // which one you are in — the one thing it exists to say. The part is added only when it is a
+  // different word; "now: Build (Build part)" tells nobody anything.
+  const part = here.name === here.part ? '' : ` (${here.part} part)`;
+  info(`${c.dim('phase:')} ${rendered.join(c.dim(' · '))} ${c.dim(`— now: ${here.name}${part}`)}`);
 }
 
 // `yad next` with no epic: orient across the whole project, always ending on ONE thing to do.
@@ -188,7 +197,9 @@ function generalNext(root, { all } = {}) {
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
   log(`\n  ${c.bold(`${featureEpics.length} epics`)} ${c.dim('— next action each:')}`);
   for (const a of actions) log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}  ${actionLine(a, { solo })}`);
-  info(c.dim(`detail: ${c.bold('yad next <epic>')}  •  all at once: ${c.bold('yad next --all')}`));
+  // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
+  // form loses the dim from the first bold word to the end of the line.
+  info(`${c.dim('detail:')} ${c.bold('yad next <epic>')}  ${c.dim('•  all at once:')} ${c.bold('yad next --all')}`);
 }
 
 // `yad next <epic> --check <step>`: the precondition guard. Exit 0 if runnable now, 1 otherwise.

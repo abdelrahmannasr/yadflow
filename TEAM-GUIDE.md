@@ -160,6 +160,11 @@ belongs to exactly one:
 without counting steps. The last two are shown greyed, because the lifecycle does not stop at merge
 even though the tool does not run those phases yet.
 
+Once the stories gate passes, the epic is in **Build** and stays there for the rest of its life — the
+individual Build steps run per story per code repo, so the epic-level view names the phase rather than
+the step. A stub epic and the project's discovery epic show no phase line at all: neither walks this
+lifecycle.
+
 Phases are worked out from the step you are on. They are not written into any file, so there is
 nothing to keep in step and nothing to migrate.
 

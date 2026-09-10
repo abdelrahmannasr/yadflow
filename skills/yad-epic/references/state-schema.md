@@ -66,11 +66,18 @@ Every step belongs to one of six named phases, and each phase sits inside one of
 | Release | Run | **planned, not built** |
 | Operate | Run | **planned, not built** |
 
-**A phase is never written into `state.json`.** It is worked out from the step's `id`, so there is
+**A phase is never written into `state.json`.** It is worked out from `currentStep`, so there is
 nothing to author, nothing to keep in step, and no way for it to disagree with the step it describes.
-A review gate takes the phase of the artifact it reviews, so `epic-review` is Discover beside `epic`.
-The `currentStep` sentinels (`ready-for-build`, `backfill-pending`, `backfill-done`,
-`discovery-done`) are not steps and have no phase — that is why they never appear in `steps[]`.
+
+- A Shape review gate takes the phase of the artifact it reviews, so `epic-review` is Discover beside
+  `epic`. Build steps have no such gates — `engineer-review` is a step in its own right — so
+  `checks-review` is not a step and resolves to nothing.
+- The `currentStep` markers are not steps and never appear in `steps[]`. Three of them
+  (`backfill-pending`, `backfill-done`, `discovery-done`) have no phase. **`ready-for-build` is the
+  exception:** an epic sitting on it is in Build, and stays there for the rest of its life, because
+  the individual Build steps live per story per repo in `build-state/` rather than in this file.
+- `EP-discovery` has no phase at all. It is the product-level front-zero and does not walk the feature
+  lifecycle.
 
 `yad doctor` reports a step id no phase claims. That is the same table that binds a step to its skill,
 so an id with no phase is an id no skill runs.

@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, stepPhase } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, stepPhase, SENTINELS } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -839,19 +839,48 @@ export function typeChecks(checks, root) {
 // may legitimately hold a step from a newer yadflow than the one being run, and a hand-written
 // `state.json` is allowed to be ahead of the tool reading it.
 //
-// Sentinels are not steps and are never looked at here. `currentStep` can be `ready-for-build`,
-// `backfill-pending`, `backfill-done` or `discovery-done`, none of which appear in `steps[]`.
+// THREE PLACES A STEP ID CAN APPEAR, and all three are read:
+//   * `state.json` `steps[]` — the Shape chain;
+//   * `state.json` `currentStep` — the field `yad thread --json` derives its `phase` from, and the one
+//     nothing else validates. A typo there does not break `yad next`, which falls back to the first
+//     step that is not done, so it would otherwise sit in a project unreported;
+//   * `build-state/<story>.json` `repos.<name>.steps[]` — the Build half. Without these, five of the
+//     twelve known step ids have no reader on this path at all.
+// The four `currentStep` sentinels are markers rather than steps and are skipped by name.
 export function phaseChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
   const unplaced = [];
+  // One report per unknown id per epic. `currentStep` usually names a step that is also in `steps[]`,
+  // so a single typo would otherwise be listed twice and push a genuinely different one out of the
+  // three the message has room for.
+  let seen = new Set();
+  const consider = (where, id) => {
+    if (typeof id !== 'string' || !id || SENTINELS.includes(id) || seen.has(id)) return;
+    if (stepPhase(id)) return;
+    seen.add(id);
+    unplaced.push(`${where}: \`${id}\``);
+  };
+  const considerSteps = (where, steps) => {
+    if (!Array.isArray(steps)) return;
+    for (const s of steps) if (isPlainObject(s)) consider(where, s.id);
+  };
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!isValidEpicId(e)) continue;
+    seen = new Set();
     const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
-    if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
-    for (const s of state.steps) {
-      if (!isPlainObject(s) || typeof s.id !== 'string') continue;
-      if (!stepPhase(s.id)) unplaced.push(`${e}: \`${s.id}\``);
+    if (isPlainObject(state)) {
+      considerSteps(e, state.steps);
+      consider(`${e} (currentStep)`, state.currentStep);
+    }
+    const bsDir = path.join(epicsDir, e, '.sdlc', 'build-state');
+    if (!exists(bsDir)) continue;
+    let names;
+    try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
+    for (const n of names) {
+      const bs = readJSON(path.join(bsDir, n), null);
+      if (!isPlainObject(bs) || !isPlainObject(bs.repos)) continue;
+      for (const [repo, r] of Object.entries(bs.repos)) considerSteps(`${e}/${n} (${repo})`, r?.steps);
     }
   }
   if (unplaced.length) {
