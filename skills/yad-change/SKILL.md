@@ -97,6 +97,14 @@ one mistake here that breaks something: `lineage-check.sh` runs inside the code 
 `kind:`. Finding none it defaults to `feature`, decides the epic is a parent-free genesis, and stops
 requiring the `parent:` a change, defect or hotfix must have. `yad doctor` FAILS on that.
 
+**Carry the parent's `theme:` down.** A theme is the free grouping tag that puts several epics under
+one heading (there is no rung above the Epic; grouping is a label). Read the parent's `epic.md`: if it
+has a `theme:`, copy the spelling **exactly** onto this one, so the change groups with the work it
+changes. If the parent has none, leave `theme:` empty. Never invent a new spelling of an existing
+theme — `yad doctor` reports that, because two spellings group as two themes. Write the tag bare, with
+no `#`: `yad next` and `yad thread` print it as `#checkout-revamp`, but that `#` is decoration on the
+screen and is kept as part of the value if it lands in the file.
+
 
 ```markdown
 ---
@@ -106,6 +114,7 @@ kind: <change|defect|hotfix>
 type: <the same value as kind>
 parent: <EP-parent>
 thread: <EP-genesis>
+theme: <the parent's theme, or leave empty>
 inherits: [<the inherited bases>]
 supersedes: [<parent story ids this replaces, optional>]
 owner:

@@ -57,6 +57,9 @@ export function threadSummary(root, threadOrEpic) {
       // `type` is the word from shape 5 on; `kind` is the same value under the name this key has
       // always had. Both are emitted for one major so a script reading either keeps working.
       id, type: lin.type, kind: lin.type, parent: lin.parent, inherits: lin.inherits,
+      // The free grouping tag from epic.md (E31), null when unset. This is the only machine-readable
+      // surface that carries it: `yad next --json` is frozen by the golden test and cannot gain a key.
+      theme: lin.theme,
       currentStep: state?.currentStep || 'unseeded',
       // Which of the six phases this epic is in — the same answer `yad next` prints, from the same
       // function. Null is a real answer, not a gap: a stub, the discovery front-zero, and any step id
@@ -102,7 +105,10 @@ export async function runThread(root, { epic, json = false } = {}) {
       const s = threadSummary(root, r);
       const debt = s.openDebt.length ? c.red(`  ⚠ ${s.openDebt.length} open reconcile-debt`) : '';
       const stub = s.nodes[0]?.stub ? c.yellow('  [stub · backfill pending]') : '';
-      log(`  ${c.bold(r)}  ${c.dim(`${s.nodes.length} epic(s)`)}${stub}${debt}`);
+      // The genesis epic's grouping theme (E31). This list is where a person looks to see which
+      // threads belong together, so it is the one place the tag earns its keep most.
+      const theme = s.nodes[0]?.theme ? c.dim(` #${s.nodes[0].theme}`) : '';
+      log(`  ${c.bold(r)}${theme}  ${c.dim(`${s.nodes.length} epic(s)`)}${stub}${debt}`);
     }
     log(c.dim('\n  yad thread <epic>   show one thread in full'));
     return;
@@ -118,7 +124,10 @@ export async function runThread(root, { epic, json = false } = {}) {
     const seal = n.sealed ? c.dim(' [sealed]') : '';
     const stub = n.stub ? c.yellow(' [stub · backfill pending]') : '';
     const dep = n.depth ? c.dim(` ${n.depth}`) : '';
-    log(`  • ${c.bold(n.id)}  ${tag}${dep}  ${c.dim('@ ' + n.currentStep)}${seal}${stub}`);
+    // The grouping theme prints only when there is one. An epic with no theme is normal, and an
+    // empty `theme: —` on every line would be noise on a surface people read top to bottom.
+    const theme = n.theme ? c.dim(` #${n.theme}`) : '';
+    log(`  • ${c.bold(n.id)}  ${tag}${dep}${theme}  ${c.dim('@ ' + n.currentStep)}${seal}${stub}`);
     if (n.parent) log(c.dim(`      parent: ${n.parent}   inherits: [${n.inherits.join(', ') || '—'}]`));
     if (n.defect) log(c.dim(`      defect: ${n.defect.severity || '?'} · escaped@${n.defect.escape_stage || '?'} · ${n.defect.root_cause || ''}`));
     if (n.brokenThread) log(c.red(`      ✗ ${n.brokenThread}`));

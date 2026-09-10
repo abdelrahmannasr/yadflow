@@ -1823,6 +1823,92 @@ test('runNext: an epic in Build is marked Build, from the `ready-for-build` mark
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('runNext: a themed epic prints its grouping tag, an untagged one prints nothing', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-theme1-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '---\nid: EP-x\nkind: feature\ntheme: checkout-revamp\n---\n\n## Goal\nx\n');
+  const themed = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(themed, /Epic EP-x #checkout-revamp/, 'the tag rides beside the id, before the reason');
+
+  seedEpic(T, 'EP-y', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  fs.writeFileSync(path.join(T, 'epics/EP-y/epic.md'), '---\nid: EP-y\nkind: feature\n---\n\n## Goal\nx\n');
+  const plain = await grab(() => runNext(T, { epic: 'EP-y' }));
+  assert.equal(plain.includes('#'), false, 'most epics have no theme; an empty marker would be noise');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext: the several-epics list shows each theme — the default view is not skipped', async () => {
+  // Bare `yad next` with more than one epic takes a different path from `yad next <epic>`: a one-line
+  // roll-up built by `actionLine`, not `printAction`. It is the command people run by default AND the
+  // only view that puts several epics side by side, so it is where seeing which of them belong
+  // together is worth most. Leaving it out would also have made the docs added beside it untrue.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-theme3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  for (const [id, theme] of [['EP-a', 'checkout-revamp'], ['EP-b', 'checkout-revamp'], ['EP-c', null]]) {
+    seedEpic(T, id, chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+    fs.writeFileSync(path.join(T, 'epics', id, 'epic.md'),
+      `---\nid: ${id}\nkind: feature\n${theme ? `theme: ${theme}\n` : ''}---\n\n## Goal\nx\n`);
+  }
+  const s = await grab(() => runNext(T, {}));
+  assert.match(s, /3 epics/);
+  assert.match(s, /Epic EP-a #checkout-revamp/);
+  assert.match(s, /Epic EP-b #checkout-revamp/);
+  assert.match(s, /Epic EP-c {2}/, 'the untagged epic gets no marker');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext reads each epic.md exactly once, not once per thing it needs from it', async () => {
+  // `epic.md` is opened and parsed by `epicLineage`, and TWO things printed on the same line come out
+  // of it: the action's `lineageKind` and the grouping theme. Reading it once per value would parse
+  // every epic's file twice on every `yad next`, and `--all` on a large project multiplies that.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-theme4-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  for (const id of ['EP-a', 'EP-b']) {
+    seedEpic(T, id, chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+    fs.writeFileSync(path.join(T, 'epics', id, 'epic.md'),
+      `---\nid: ${id}\nkind: feature\ntheme: checkout-revamp\n---\n\n## Goal\nx\n`);
+  }
+  const real = fs.readFileSync;
+  const reads = [];
+  fs.readFileSync = (f, ...rest) => {
+    if (typeof f === 'string' && f.endsWith(`${path.sep}epic.md`)) reads.push(f);
+    return real(f, ...rest);
+  };
+  try {
+    await grab(() => runNext(T, { epic: 'EP-a' }));
+    assert.equal(reads.length, 1, `one epic, one read — got ${reads.length}`);
+    reads.length = 0;
+    await grab(() => runNext(T, {}));            // the several-epics roll-up
+    assert.equal(reads.length, 2, `two epics, two reads — got ${reads.length}`);
+    reads.length = 0;
+    await grab(() => runNext(T, { all: true })); // and the full per-epic view
+    assert.equal(reads.length, 2, `two epics, two reads — got ${reads.length}`);
+  } finally {
+    fs.readFileSync = real;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('runNext --json does NOT gain a theme key, even on a themed epic', async () => {
+  // `yad next --json` is deep-equalled by the golden test (cli/test-golden.mjs), and rule 6 says that
+  // snapshot never changes — an ADDED key breaks it exactly as hard as a renamed one. The golden
+  // fixture's epics carry no theme, so it could only ever prove the untagged case. This pins the
+  // intent: the theme is printed for people, and read by machines from `yad thread --json`.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-theme2-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T, 'EP-x', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+  fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '---\nid: EP-x\nkind: feature\ntheme: checkout-revamp\n---\n\n## Goal\nx\n');
+  const [a] = JSON.parse(await grab(() => runNext(T, { epic: 'EP-x', json: true }))).actions;
+  assert.equal('theme' in a, false, `--json grew a theme key: ${Object.keys(a).join(', ')}`);
+  assert.equal(a.lineageKind, 'feature', 'the key that IS there is untouched');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('runNext: NO phase line for EP-discovery — it does not walk the feature lifecycle', async () => {
   // The product-level front-zero. Its whole chain is discovery -> discovery-review -> discovery-done;
   // it never enters Design, Plan or Build, so printing the six-phase lifecycle for it claims a
@@ -5791,6 +5877,128 @@ test('doctor type: a type nobody defined is reported, and an epic with no epic.m
   assert.equal(checks.length, 1, 'the discovery front-zero is silent, not reported five ways');
 });
 
+// ---- doctor: the grouping theme (E31) ------------------------------------------------------------
+// `themeChecks` reads the same epic.md-only project `typeChecks` does, so it reuses that builder.
+async function themeChecksOn(epics) {
+  const { themeChecks } = await import('./doctor.mjs');
+  const T = typeProject(epics);
+  const checks = [];
+  try { themeChecks(checks, T); } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  return checks;
+}
+
+test('doctor theme: one theme spelled two ways is reported — two spellings group as two', async () => {
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: checkout-revamp' },
+    'EP-b': { fm: 'kind: feature\ntheme: Checkout Revamp' },
+    'EP-c': { fm: 'kind: feature\ntheme: checkout-revamp' },
+  });
+  const c = checks.find((x) => x.id === 'theme:variants');
+  assert.equal(c.status, 'warn');
+  assert.equal(c.section, 'shape');
+  assert.match(c.message, /`checkout-revamp` \/ `Checkout Revamp`/);
+  assert.match(c.hint, /Pick one spelling/);
+  assert.equal(checks.length, 1);
+});
+
+test('doctor theme: a project that spells its themes consistently says nothing at all', async () => {
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: checkout-revamp' },
+    'EP-b': { fm: 'kind: feature\ntheme: checkout-revamp' },
+    'EP-c': { fm: 'kind: feature\ntheme: billing' },     // a different theme is not a variant
+    'EP-d': { fm: 'kind: feature' },                     // no theme at all is the normal case
+    'EP-e': { fm: 'kind: feature\ntheme:' },             // the template ships the key empty
+    // The product front-zero has no epic.md and is not a work item on the ladder.
+    'EP-discovery': { fm: null, state: { schemaVersion: 5, kind: 'discovery', currentStep: 'discovery', steps: [] } },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor theme: a `theme:` written as a list is reported — a list groups nothing', async () => {
+  // `readFrontmatter` parses `[a, b]` into an array, and a theme is ONE tag. `themeOf` therefore
+  // returns null, so left alone the epic drops out of every grouping with nothing said.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: [checkout, billing]' },
+    'EP-b': { fm: 'kind: feature\ntheme: checkout' },
+  });
+  const c = checks.find((x) => x.id === 'theme:unreadable');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /EP-a: `theme: \[checkout, billing\]`/);
+  assert.match(c.hint, /a theme is ONE free tag/);
+  assert.equal(checks.length, 1, 'nothing else is wrong here');
+});
+
+test('doctor theme: a tag of pure symbols is left alone, and never called a variant of another', async () => {
+  // `🎯` reads fine and two epics carrying it group by being the same string. It only cannot take
+  // part in the VARIANT report, because the fold has nothing to compare. Folding it in would be the
+  // real bug: every symbol-only tag folds to the same empty key, so `🎯` and `···` would be reported
+  // as one theme spelled two ways — exactly backwards.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: 🎯' },
+    'EP-b': { fm: 'kind: feature\ntheme: 🎯' },
+    'EP-c': { fm: 'kind: feature\ntheme: ···' },
+  });
+  assert.deepEqual(checks, []);
+  const { epicLineage } = await import('./epic-state.mjs');
+  const T = typeProject({ 'EP-a': { fm: 'kind: feature\ntheme: 🎯' } });
+  try {
+    assert.equal(epicLineage(T, 'EP-a').theme, '🎯', 'and it is a real theme everywhere else');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor theme: an empty list and a blank key both mean "no theme", and say nothing', async () => {
+  // `readFrontmatter` parses `theme: []` to an empty array. Somebody writing that plainly means the
+  // epic has no theme — reporting it would be nagging about a correct file.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: []' },
+    'EP-b': { fm: 'kind: feature\ntheme:' },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor theme: a theme in any script groups normally and is never called ungroupable', async () => {
+  // An ASCII-only fold would flatten every one of these to the empty string, so a team writing its
+  // themes in Cyrillic or Chinese would be told on every run that none of them can group — with no
+  // way to clear it except renaming their themes into English.
+  const checks = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: дизайн' },
+    'EP-b': { fm: 'kind: feature\ntheme: дизайн' },
+    'EP-c': { fm: 'kind: feature\ntheme: 结账改版' },
+  });
+  assert.deepEqual(checks, [], 'two epics share a theme, a third has its own — nothing is wrong');
+  // …and the variant report still works in those scripts.
+  const mixed = await themeChecksOn({
+    'EP-a': { fm: 'kind: feature\ntheme: дизайн' },
+    'EP-b': { fm: 'kind: feature\ntheme: Дизайн' },
+  });
+  assert.equal(mixed.find((x) => x.id === 'theme:variants')?.status, 'warn');
+});
+
+test('doctor theme: a `#` in the tag is reported as a comment, not as unreadable', async () => {
+  // The `#` case is NOT unreadable: `themeOf` hands the value back verbatim, so the tag IS read and
+  // does group — with the note attached. Two epics carrying `theme: x # note` group together, and
+  // neither groups with a plain `theme: x`. Calling that "nothing can read it" would send the reader
+  // looking for a missing theme that is present but polluted.
+  const checks = await themeChecksOn({
+    'EP-c': { fm: 'kind: feature\ntheme: #checkout-revamp' },
+    'EP-e': { fm: 'kind: feature\ntheme: checkout-revamp # the big one' },
+    'EP-d': { fm: 'kind: feature\ntheme: checkout-revamp' },
+    'EP-f': { fm: 'kind: feature\ntheme: ###' },     // symbols AND a `#` — the comment report wins
+  });
+  const c = checks.find((x) => x.id === 'theme:commented');
+  assert.equal(c.status, 'warn');
+  assert.equal(c.section, 'shape');
+  assert.match(c.message, /EP-c: `theme: #checkout-revamp`/);
+  assert.match(c.message, /EP-e: `theme: checkout-revamp # the big one`/);
+  assert.match(c.message, /EP-f: `theme: ###`/, 'symbols AND a `#`: the comment report is the actionable one');
+  assert.match(c.hint, /decoration on the screen/);
+  assert.equal(checks.find((x) => x.id === 'theme:unreadable'), undefined, 'it reads fine; it is just polluted');
+  // …and it is NOT also called a spelling variant of the clean tag beside it, which would be true and
+  // would name the wrong problem.
+  assert.equal(checks.find((x) => x.id === 'theme:variants'), undefined);
+  assert.equal(checks.length, 1);
+});
+
 test('doctor type: a project written the shape-5 way says nothing at all', async () => {
   const checks = await typeChecksOn({
     'EP-root': { fm: 'kind: feature\ntype: feature', state: { schemaVersion: 5, type: 'feature', currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'done' }] } },
@@ -5808,6 +6016,20 @@ test('doctor type: the section is wired into collectDoctor, not just exported', 
   try {
     const c = collectDoctor(T).checks.find((x) => x.id === 'type:gate-blind');
     assert.equal(c?.status, 'fail', 'running yad doctor surfaces it, not only calling typeChecks by hand');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor theme: the section is wired into collectDoctor, not just exported', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T } = scaffold();
+  for (const [id, theme] of [['EP-a', 'checkout-revamp'], ['EP-b', 'Checkout Revamp']]) {
+    const dir = path.join(T, 'epics', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'epic.md'), `---\nid: ${id}\nkind: feature\ntype: feature\ntheme: ${theme}\n---\n\n## Goal\nx\n`);
+  }
+  try {
+    const c = collectDoctor(T).checks.find((x) => x.id === 'theme:variants');
+    assert.equal(c?.status, 'warn', 'running yad doctor surfaces it, not only calling themeChecks by hand');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

@@ -98,7 +98,7 @@ branch. Author and commit `epic.md` on it. This is **distinct** from the verifie
 Adopt the **pm** lens (`bmad-agent-pm`, John) and write `{project-root}/epics/EP-<slug>/epic.md`
 using EXACTLY this template (build plan §6b).
 
-**Three of these keys are read by machines, so write them BARE — no trailing `#` comment.** The
+**Four of these keys are read by machines, so write them BARE — no trailing `#` comment.** The
 frontmatter readers (`readFrontmatter` in the CLI, `fm_val` in the check gates) keep the whole rest of
 the line, so a comment becomes part of the value and the gates stop recognising it:
 
@@ -108,6 +108,18 @@ the line, so a comment becomes part of the value and the gates stop recognising 
   alone with no `parent:`. Everything else (`change`, `defect`, `hotfix`) is authored by `yad-change`.
 - `thread` is the thread id. A genesis epic is the root of its own thread, so `thread == id` and there
   is no `parent:`.
+- `theme` is an optional **grouping tag**: one word or short phrase shared by every epic that belongs
+  together, such as `checkout-revamp`. It is what this method has instead of a rung above the Epic —
+  the ladder stays Product → Epic → Story → Task, and grouping is a label. Nothing has to be
+  registered first and no list of allowed themes exists. Ask the user whether this epic belongs to a
+  group; if one already exists, **copy its spelling exactly** (`yad doctor` reports a theme spelled
+  two ways, because two spellings group as two themes). Leave the key empty when there is no group.
+  Write ONE tag, never a list — `theme: [a, b]` is read as no theme at all — and never write a `#`:
+  `yad next` and `yad thread` PRINT the tag as `#checkout-revamp`, but the `#` is decoration on the
+  screen, and anything from a `#` onward is kept as part of the value, so the epic then groups only
+  with epics carrying that exact text. Any language is fine. Set it NOW, while the epic
+  is being written: the epic review gate is bound to a hash of the whole file, so adding a theme after
+  that gate is approved drops the approval as stale and the step has to be approved again.
 
 ```markdown
 ---
@@ -116,6 +128,7 @@ status: draft
 kind: feature
 type: feature
 thread: EP-<slug>
+theme:
 owner:
 technical_product_owner:
 repos: [backend, mobile, dashboard]
@@ -132,7 +145,7 @@ code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # which code-maps in
 ```
 
 Fill the body with the user; leave `owner` / `technical_product_owner` for the user to set. Set
-`repos` to the repos this epic will touch.
+`repos` to the repos this epic will touch, and `theme` only if the user names a group.
 
 ### Step 5 — Seed the state machine — analysis-skipped only
 *(Skip when analysis ran — `yad-analysis` already seeded the 12-step chain. Go to Step 5b.)*

@@ -43,7 +43,7 @@ no clone needed.
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo refresh [name] --push` | After the re-pack (and the AI regenerating the code-map), commit the tracked code-maps + `.sdlc/repos.json` as an audit-trail `chore(hub): sync code-context … [skip ci]` commit and push it straight to the Product's **default branch** (`--allow-branch` to override). The code-context analogue of `yad checkpoint`. |
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
-| `yad thread [<epic>]` | **Feature threads.** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling, where each node carries its work-item `type` and the lifecycle `phase` its current step is in. Read-only. |
+| `yad thread [<epic>]` | **Feature threads.** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling, where each node carries its work-item `type`, its grouping `theme` and the lifecycle `phase` its current step is in. Read-only. |
 | `yad reconcile [check\|refresh\|wire]` | Sweep threads for **drift / orphans / open hotfix debt** and report which thread drifted and why (mirrors `yad docs sync`; advisory — the CI gates block at merge). |
 | `yad hook ledger-guard` | **Harness-invoked, never typed.** The local half of the `ledger-guard` rule: in verified mode the gate ledger is CI-owned, so an agent that hand-edits `epics/*/.sdlc/state.json` is refused **at the moment of the edit** and told the command that owns the transition (`yad gate open`) — instead of discovering it twenty minutes later in a failed pipeline (#171). Reads a tool-call payload as JSON on **stdin** (or `--path <p>`); **exit 0 allows, exit 2 denies** with the reason on stderr, which is Claude Code's `PreToolUse` contract and any other harness's too. Same scope as the CI gate, including the new-epic seed exemption (#162); a **no-op** with a local ledger. **Fails open** — no `yad`, no Product, an unreadable config all allow, because the CI gate is the one that fails closed. `YAD_HOOK_DISABLE=1` skips it. Wired by `setup` / `check --fix`; `yad doctor` reports whether it is armed. |
 | `npx yadflow --version` | Print the installed CLI version. |
@@ -84,7 +84,9 @@ Each action carries `epicId`, `kind`
 `status`, `artifact`, `skill`, `command`, `pr`, `parallel`, `builds` (the per-story/per-repo lanes)
 `why`, and `lineageKind` — the work-item type (`feature|change|defect|hotfix|chore`). That key keeps
 its older name on purpose: the golden compatibility test deep-equals this output, and a deep-equal
-breaks on an added key as hard as on a renamed one. `--all` is implied — the array always carries every epic. Exit codes are
+breaks on an added key as hard as on a renamed one. For the same reason the grouping `theme` is **not**
+here: `yad next` prints it for a person to read, and a machine reads it from `yad thread --json`.
+`--all` is implied — the array always carries every epic. Exit codes are
 identical to the prose path, and the prose path itself is unchanged.
 
 ## The PR-driven review gate
@@ -230,6 +232,48 @@ A phase is worked out from the step id. It is **not stored in any file**, so the
 in step, nothing to migrate, and no way for it to disagree with the step it describes. `yad doctor`
 reports a step id no phase claims (`phase:unknown`) — that is also a step no skill runs and `yad next`
 cannot guide, so it is usually a typo or a file from a newer release.
+
+## Grouping: the `theme` tag
+
+A **theme** is a free label you put on an epic to say which group of work it belongs to. Write it in
+`epic.md`, next to the other frontmatter keys:
+
+```markdown
+theme: checkout-revamp
+```
+
+That is the whole feature. There is no list of allowed themes, nothing to register first, and no
+command to run. Any word or short phrase in any language does. Most epics have no theme, and that
+is normal — leave the key empty.
+
+The theme is what this method has **instead of a level above the Epic**. The ladder stays Product →
+Epic → Story → Task. Grouping is a label, not a rung you have to create and keep in step. If you later
+move to a tracker that has an Initiative level, a theme maps onto one.
+
+Four things are worth knowing:
+
+- **One tag, not a list.** `theme: [checkout, billing]` is read as **no theme at all**, so the epic
+  drops out of every grouping. `yad doctor` reports it (`theme:unreadable`).
+- **No `#` in the value.** The commands print the tag as `#checkout-revamp`, but that `#` is decoration
+  on the screen. The header reader keeps the whole rest of the line, so `theme: checkout # the big one`
+  becomes a tag of `checkout # the big one` — it still reads, and it still groups, but only with other
+  epics carrying that exact text. `yad doctor` reports it (`theme:commented`).
+- **Spelling is the grouping.** `checkout-revamp` and `Checkout Revamp` are two themes, not one.
+  `yad doctor` reports a theme spelled more than one way (`theme:variants`) so it does not split a
+  group in silence. Copy the spelling from an epic already in the group.
+- **Set it when you write the epic.** The epic review gate is bound to a hash of the whole `epic.md`
+  file, so editing any frontmatter key — the theme included — after the gate has been approved drops
+  that approval as stale and the step has to be approved again. This is not new to themes; it is how
+  every edit to an approved artifact behaves. Before the gate, edit freely.
+- **A child gets a copy, not a link.** When `yad-change` opens a change or defect epic off a parent, it
+  writes the parent's theme onto the new epic. A brownfield stub minted by `yad-stub` normally has
+  none: it is captured from code that already exists, so there is nobody to ask which group it is in. Nothing works it out afterwards, so if you add a theme
+  to a parent later, add it to the children too.
+
+Where it shows up: `yad next` prints it beside the epic id (`Epic EP-cart #checkout-revamp`), in the
+single-epic view and in the several-epics roll-up. `yad thread` with no argument prints each thread's
+theme beside its id, and `yad thread <epic>` prints it on each node and carries it in `--json`. It lives only in `epic.md` — there is
+no copy in any ledger file, so no file shape changed and there is nothing to migrate.
 
 ## File shape: `schemaVersion`
 
