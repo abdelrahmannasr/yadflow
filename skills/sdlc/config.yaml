@@ -337,6 +337,13 @@ change:
   kinds: [feature, change, defect, hotfix, chore]
   types: [feature, change, defect, hotfix, chore]     # the same list under the newer name
   genesis_types: [feature, chore]                     # may have no `parent:` (cli isGenesisType)
+  # GROUPING. `theme:` on epic.md is a FREE tag — one word or short phrase shared by every epic that
+  # belongs together. It is what stands in for a rung above the Epic: the ladder is
+  # Product -> Epic -> Story -> Task, and grouping is a label rather than a level. There is no list of
+  # allowed themes and nothing to register, it is optional, and it is ONE tag (`theme: [a, b]` reads
+  # as no theme at all). It lives only in epic.md — no copy in state.json, so no file shape changed.
+  # `yad doctor` reports one theme spelled two ways (theme:variants); two spellings group as two.
+  grouping_frontmatter: [theme]
   # Triage DEPTH (yad-change auto-proposes, human confirms) -> which Shape steps are re-authored vs
   # inherited. defect-fix re-authors stories+test-cases only; contract-surface re-authors architecture
   # and RE-LOCKS (a new hash routes architecture-review through the contract escalation, as today).
