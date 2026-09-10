@@ -369,6 +369,17 @@ export const isEscalated = (step) =>
 // at an unrelated step. Returns null when the chain has no such step.
 export function authorStepFor(state, reviewStep) {
   const id = String(reviewStep?.id || '');
+  // The catalogue names the author step a gate reviews (E4), so a gate that reviews NOTHING says so by
+  // carrying no `reviews` — which is how `engineer-review` stays what it is, the last step of Build
+  // rather than the review of a step called `engineer`. Before this it worked only by accident: the
+  // strip produced `engineer`, and nothing was found because no chain has such a step.
+  const def = stepDef(id);
+  if (def) {
+    if (!def.reviews) return null;
+    return state?.steps?.find((s) => s.id === def.reviews) || null;
+  }
+  // An id this release does not carry — a step from a newer yadflow or a future profile. Fall back to
+  // the convention every gate in the catalogue follows, so an unknown `<x>-review` still finds `<x>`.
   if (!id.endsWith('-review')) return null;
   return state?.steps?.find((s) => s.id === id.replace(/-review$/, '')) || null;
 }
@@ -655,32 +666,100 @@ export function markInReview(state, step) {
   return state;
 }
 
+// ---- the step catalogue (E4) ---------------------------------------------------------------------
+//
+// ONE place that says what a step IS. Before this, the answer was spread across five tables in this
+// file, an order array, two artifact helpers, and a hand-written `state.json` seed copied into five
+// skill files — so "which phase is `stories` in", "which skill authors it", "what does it produce"
+// and "what reviews it" were four separate lookups that nothing held together.
+//
+// Everything below this constant is DERIVED from it. `STEP_SKILL`, `BUILD_STEP_SKILL`,
+// `BUILD_STEP_ORDER`, `SHAPE_STEP_PHASE` and `BUILD_STEP_PHASE` are still exported under the names
+// they had, because ~20 call sites and the golden test use them — but they are now VIEWS of this
+// table, not sources beside it. A test deep-equals each one against what the catalogue says, so a
+// step added here and forgotten there cannot happen, and neither can the reverse.
+//
+// WHAT THIS TASK DELIBERATELY DOES NOT DO. The catalogue is the data structure the rest of Wave 2b
+// keys off, and each of those is its own task: seeding an epic's chain FROM it is E5 (profiles, where
+// today's chain ships as `classic`) and E17 (`yad epic new`); moving the skill binding out of code is
+// E6; per-step gate rules are E7; the fuller step-state model is E38. So the five skills still
+// hand-write their `state.json` seed, and this release only reads the catalogue and reports against
+// it.
+//
+// IT IS CODE, NOT A FILE. Nothing here is written to disk, so no file shape changes and there is
+// nothing to migrate. When a project's `state.json` disagrees with the catalogue, THE FILE WINS for
+// this whole major (rule 3): a project may hold a step from a newer yadflow, and a hand-written chain
+// is allowed to be ahead of the tool reading it. `yad doctor` reports the disagreement and changes
+// nothing — the same discipline as `workItemType`.
+//
+// The row fields, each of which had a home somewhere before:
+//   id        the step id as it appears in `state.json` `steps[]`
+//   phase     which of the six phases it belongs to (was SHAPE_STEP_PHASE / BUILD_STEP_PHASE)
+//   kind      'author' (produces an artifact) or 'review' (a gate on one)
+//   artifact  what it produces or reviews, relative to the epic dir (was only in the skill seeds)
+//   skill     the skill that runs it (was STEP_SKILL / BUILD_STEP_SKILL). Review gates in Shape are
+//             driven by the `yad gate` CLI and have none; `engineer-review` is a Build step in its own
+//             right — the locked human merge gate — and does have one.
+//   reviews   for a review gate, the id of the author step it gates. This replaces stripping
+//             `-review` off a string, which is what made `checks-review` look resolvable.
+//   chain     'feature' (a normal epic) or 'discovery' (the product front-zero, EP-discovery). E75
+//             folds the discovery chain into Foundation; it is listed, not modelled further.
+//   risk_tags the DEFAULT tags a seed gives this step. `architecture-review` carries `contract`, which
+//             is what routes it through the escalated gate rule. E7 owns the rules themselves.
+//
+// `spec` and `tasks` are two legs of the same yad-spec ceremony (run-loop.md) and share a skill; the
+// chain renderer collapses the consecutive duplicate. `ready-for-build` and the other SENTINELS are
+// not steps and are not here.
+export const STEPS = [
+  // Discover
+  { id: 'discovery', phase: 'discover', kind: 'author', artifact: 'discovery/', skill: 'yad-discovery', chain: 'discovery', risk_tags: [] },
+  { id: 'discovery-review', phase: 'discover', kind: 'review', artifact: 'discovery/', reviews: 'discovery', chain: 'discovery', risk_tags: [] },
+  { id: 'analysis', phase: 'discover', kind: 'author', artifact: 'analysis.md', skill: 'yad-analysis', chain: 'feature', risk_tags: [] },
+  { id: 'analysis-review', phase: 'discover', kind: 'review', artifact: 'analysis.md', reviews: 'analysis', chain: 'feature', risk_tags: [] },
+  { id: 'epic', phase: 'discover', kind: 'author', artifact: 'epic.md', skill: 'yad-epic', chain: 'feature', risk_tags: [] },
+  { id: 'epic-review', phase: 'discover', kind: 'review', artifact: 'epic.md', reviews: 'epic', chain: 'feature', risk_tags: [] },
+  // Design
+  { id: 'architecture', phase: 'design', kind: 'author', artifact: 'architecture.md', skill: 'yad-architecture', chain: 'feature', risk_tags: [] },
+  { id: 'architecture-review', phase: 'design', kind: 'review', artifact: 'architecture.md', reviews: 'architecture', chain: 'feature', risk_tags: ['contract'] },
+  { id: 'ui-design', phase: 'design', kind: 'author', artifact: 'ui-design.md', skill: 'yad-ui', chain: 'feature', risk_tags: [] },
+  { id: 'ui-design-review', phase: 'design', kind: 'review', artifact: 'ui-design.md', reviews: 'ui-design', chain: 'feature', risk_tags: [] },
+  // Plan
+  { id: 'stories', phase: 'plan', kind: 'author', artifact: 'stories/', skill: 'yad-stories', chain: 'feature', risk_tags: [] },
+  { id: 'stories-review', phase: 'plan', kind: 'review', artifact: 'stories/', reviews: 'stories', chain: 'feature', risk_tags: [] },
+  { id: 'test-cases', phase: 'plan', kind: 'author', artifact: 'test-cases.md', skill: 'yad-test-cases', chain: 'feature', risk_tags: [] },
+  { id: 'test-cases-review', phase: 'plan', kind: 'review', artifact: 'test-cases.md', reviews: 'test-cases', chain: 'feature', risk_tags: [] },
+  // Build — these run per story per code repo, recorded in build-state/, not in the epic's steps[]
+  { id: 'spec', phase: 'build', kind: 'author', artifact: null, skill: 'yad-spec', chain: 'feature', risk_tags: [] },
+  { id: 'tasks', phase: 'build', kind: 'author', artifact: null, skill: 'yad-spec', chain: 'feature', risk_tags: [] },
+  { id: 'implement', phase: 'build', kind: 'author', artifact: null, skill: 'yad-implement', chain: 'feature', risk_tags: [] },
+  { id: 'checks', phase: 'build', kind: 'author', artifact: null, skill: 'yad-checks', chain: 'feature', risk_tags: [] },
+  // Not the review of a step called `engineer` — a step in its own right, and the one Build step that
+  // is a gate. It carries no `reviews`, which is what keeps `checks-review` from resolving.
+  { id: 'engineer-review', phase: 'build', kind: 'review', artifact: null, skill: 'yad-engineer-review', chain: 'feature', risk_tags: [] },
+];
+
+// The catalogue keyed by id. `stepDef(id)` is null for an id this release does not know — a real
+// answer, not a gap, and the reason every reader below has a fallback.
+const STEP_BY_ID = new Map(STEPS.map((s) => [s.id, s]));
+export const stepDef = (id) => STEP_BY_ID.get(String(id || '')) || null;
+
+const catalogueSkills = (phaseIds) => Object.fromEntries(
+  STEPS.filter((s) => s.skill && phaseIds.includes(s.phase)).map((s) => [s.id, s.skill]),
+);
+
 // The Shape authoring step a `yad next` action maps to — the skill the user invokes for that step.
 // Review (review+approve) steps are driven by the `yad gate` CLI, not a skill, so they are not here.
-export const STEP_SKILL = {
-  discovery: 'yad-discovery',
-  analysis: 'yad-analysis',
-  epic: 'yad-epic',
-  architecture: 'yad-architecture',
-  'ui-design': 'yad-ui',
-  stories: 'yad-stories',
-  'test-cases': 'yad-test-cases',
-};
+// A VIEW of the catalogue; `cli/test-threads.mjs` deep-equals it against one.
+export const STEP_SKILL = catalogueSkills(['discover', 'design', 'plan']);
 
 // The skill that runs each Build (build) step — the build-state analogue of STEP_SKILL. `spec`
 // and `tasks` are the two legs of the SAME yad-spec ceremony (run-loop.md), so both map to yad-spec;
 // the chain renderer collapses the consecutive duplicate. `engineer-review` is the human merge gate.
-export const BUILD_STEP_SKILL = {
-  spec: 'yad-spec',
-  tasks: 'yad-spec',
-  implement: 'yad-implement',
-  checks: 'yad-checks',
-  'engineer-review': 'yad-engineer-review',
-};
+export const BUILD_STEP_SKILL = catalogueSkills(['build']);
 
 // The fixed Build order. Used to derive the "remaining chain" from the active step onward even if a
-// repo's `steps` array is partial or out of order.
-const BUILD_STEP_ORDER = ['spec', 'tasks', 'implement', 'checks', 'engineer-review'];
+// repo's `steps` array is partial or out of order. The catalogue's own order IS this order.
+const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.id);
 
 // ---- the six phases ------------------------------------------------------------------------------
 //
@@ -701,10 +780,10 @@ const BUILD_STEP_ORDER = ['spec', 'tasks', 'implement', 'checks', 'engineer-revi
 // merge — and a renderer that shows them as planned tells the truth, while one that hides them
 // implies the work ends at Build.
 //
-// DERIVED, NOT STORED. A step's phase is a pure function of its id, so nothing is written into
-// `state.json` and there is no file-shape change. Storing it would put a second copy of the step
-// catalogue on disk one task before E4 builds the real one, and the two copies would then need a
-// doctor check to catch a drift that cannot happen while there is only one answer.
+// DERIVED, NOT STORED. A step's phase is a pure function of its id — it comes off the step catalogue
+// (E4, above), so nothing is written into `state.json` and there is no file-shape change. Storing it
+// would put a second copy of the catalogue on disk, and the two copies would then need a doctor check
+// to catch a drift that cannot happen while there is only one answer.
 //
 // "PHASE" IS A CROWDED WORD IN THIS REPOSITORY, and none of the other three mean this one:
 //   * `cli/gate.mjs` says "merge phase" for a stage INSIDE a single gate run;
@@ -734,26 +813,19 @@ export const PHASES = [
 // here fails rather than resolving by accident.
 //
 // The roadmap also names a `feasibility` step in Discover. Nothing implements it — no skill, no step
-// id, no gate — so it is deliberately absent rather than declared and dead. E4 (the step catalogue) is
-// where a new step gets defined. When E4 RENAMES one, rule 3 applies here too: add the new key beside
-// the old, because a project still carrying the old id would otherwise trip `phase:unknown` on every
-// `yad doctor` run for a whole major.
-const SHAPE_STEP_PHASE = {
-  discovery: 'discover',
-  analysis: 'discover',
-  epic: 'discover',
-  architecture: 'design',
-  'ui-design': 'design',
-  stories: 'plan',
-  'test-cases': 'plan',
-};
-const BUILD_STEP_PHASE = {
-  spec: 'build',
-  tasks: 'build',
-  implement: 'build',
-  checks: 'build',
-  'engineer-review': 'build',
-};
+// id, no gate — so it is deliberately absent from the catalogue rather than declared and dead. A new
+// step is added by adding a row to `STEPS`; RENAMING one means adding the new row beside the old and
+// keeping both for a major (rule 3), because a project still carrying the old id would otherwise trip
+// `phase:unknown` on every `yad doctor` run until it is migrated.
+//
+// Both tables are now VIEWS of the catalogue (E4). A row is listed under its phase unless it is a
+// review gate that gates ANOTHER step — that is, unless it carries `reviews`. That one rule is what
+// keeps `epic-review` out (it is the gate on `epic`, which is already listed) while keeping
+// `engineer-review` in (it gates nothing; it is the last step of Build in its own right), and it is
+// the same distinction the `-review` strip below depends on.
+const phaseTable = (rows) => Object.fromEntries(rows.filter((r) => !r.reviews).map((r) => [r.id, r.phase]));
+const SHAPE_STEP_PHASE = phaseTable(STEPS.filter((r) => r.phase !== 'build'));
+const BUILD_STEP_PHASE = phaseTable(STEPS.filter((r) => r.phase === 'build'));
 const STEP_PHASE = { ...SHAPE_STEP_PHASE, ...BUILD_STEP_PHASE };
 
 // `currentStep` markers that are NOT steps: they never appear in `steps[]`, and no phase claims them.
@@ -765,12 +837,18 @@ export const SENTINELS = ['ready-for-build', 'backfill-pending', 'backfill-done'
 // step from a future profile, a typo. Null, never a guess: a renderer showing the wrong phase is worse
 // than one showing none.
 //
-// THE FULL ID IS TRIED FIRST, and that is load-bearing rather than an optimisation. Strip `-review`
+// THE CATALOGUE IS ASKED FIRST, and that is load-bearing rather than an optimisation. Strip `-review`
 // first and `engineer-review` resolves to `engineer`, which nothing claims, so the last step of Build
-// falls out of every phase.
+// falls out of every phase. The strip below is reached only by an id the catalogue does not carry.
 export function stepPhase(id) {
   const s = String(id || '');
-  if (Object.hasOwn(STEP_PHASE, s)) return STEP_PHASE[s];
+  // The catalogue answers for every id this release knows, review gates included — no string surgery.
+  const def = stepDef(s);
+  if (def) return def.phase;
+  // Only reached by an id the catalogue does not carry: a step from a newer yadflow or a future
+  // profile. `<known-shape-step>-review` still resolves, so a project ahead of this release keeps its
+  // gates placed. Stripped against the SHAPE table only, which is what stops `checks-review` — a step
+  // that does not exist — from quietly resolving into Build.
   const base = s.replace(/-review$/, '');
   return Object.hasOwn(SHAPE_STEP_PHASE, base) ? SHAPE_STEP_PHASE[base] : null;
 }

@@ -233,6 +233,29 @@ in step, nothing to migrate, and no way for it to disagree with the step it desc
 reports a step id no phase claims (`phase:unknown`) — that is also a step no skill runs and `yad next`
 cannot guide, so it is usually a typo or a file from a newer release.
 
+## The step catalogue
+
+Every step the engine knows is defined in **one place in the code**: its phase, whether it writes an
+artifact or reviews one, which file it produces, which skill runs it, and which step a review gate
+gates. Before this there was no single answer — the phase came from one table, the skill from another,
+and the artifact only from the chain a skill hand-wrote into your project.
+
+You do not interact with the catalogue and there is nothing to configure. It matters for two reasons.
+
+**Your file wins.** When your `state.json` describes a step differently from the catalogue, nothing is
+rewritten. A project may run a chain the tool does not know, and leaving a step out is normal — not
+every epic has screens, so many have no `ui-design`. `yad doctor` says what it noticed and stops there.
+
+**Three things it can now notice**, all warnings in the `shape` section:
+
+| Check | What it means |
+|---|---|
+| `step:artifact` | A step names a different file from the one the catalogue expects. This matters because the review gate hashes that file, so a wrong name binds the approval to the wrong thing. |
+| `step:kind` | A step is on the wrong side of the author / review line. An author step is run by a skill and a review step by `yad gate`, so on the wrong side nothing drives it. |
+| `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. The gate closes that step when it passes, so everything after it stays blocked behind a review that already went through. |
+
+A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
+
 ## Grouping: the `theme` tag
 
 A **theme** is a free label you put on an epic to say which group of work it belongs to. Write it in

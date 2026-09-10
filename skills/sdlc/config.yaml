@@ -42,6 +42,13 @@ output_folder: "{project-root}/_bmad-output"
 # NOTE the word: "phase" here means one of these six. It does NOT mean the numbered development
 # phases of yadflow itself (docs/phase-N-build-plan.md), which is what "Phase 4a/4b" means elsewhere
 # in these files, nor a gate's internal merge phase.
+# The step CATALOGUE lives in code — `STEPS` in `cli/epic-state.mjs` (E4). It is the one place that
+# says what a step is: its phase, whether it authors or gates, what artifact it writes, which skill
+# runs it, and which step a gate reviews. The phase rows below mirror the `steps:` half of it and a
+# test holds the two together row for row; everything else about a step is read from the code, not
+# from here. `yad doctor` reports a project chain that disagrees with the catalogue and rewrites
+# nothing — for this whole major the FILE wins (rule 3), because the five authoring skills still
+# hand-write their `state.json` seed. E5 makes a profile seed the chain from the catalogue instead.
 lifecycle:
   parts: [Shape, Build, Run]
   phases:

@@ -5783,6 +5783,144 @@ test('doctor shape: each epic is reported separately, so drift can be located', 
 
 // ---- doctor: the work-item type mid-rename (E21) -------------------------------------------------
 
+// ---- doctor: the chain against the step catalogue (E4) --------------------------------------------
+async function catalogueChecksOn(epics) {
+  const { catalogueChecks } = await import('./doctor.mjs');
+  const T = typeProject(epics);
+  const checks = [];
+  try { catalogueChecks(checks, T); } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  return checks;
+}
+const chainState = (steps) => ({ schemaVersion: 5, type: 'feature', currentStep: steps[0].id, steps });
+
+test('doctor catalogue: a chain seeded the way the skills seed it says nothing at all', async () => {
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature\ntype: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review' },
+        { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'blocked' },
+        { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'blocked' },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'blocked' },
+        { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'blocked' },
+      ]),
+    },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor catalogue: an epic that leaves a step out is NOT reported', async () => {
+  // Not every epic has screens, so skipping `ui-design` is a normal thing to do. A check that nagged
+  // about it would teach people to ignore the section that also carries real breakage.
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'todo' },
+      ]),
+    },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor catalogue: a step naming the wrong artifact is reported — the gate hashes it', async () => {
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'stories', type: 'author', artifact: 'stories.md', status: 'todo' },   // it is a directory
+      ]),
+    },
+  });
+  const c = checks.find((x) => x.id === 'step:artifact');
+  assert.equal(c.status, 'warn');
+  assert.equal(c.section, 'shape');
+  assert.match(c.message, /EP-x `stories`: `stories\.md`, catalogue says `stories\/`/);
+  assert.match(c.hint, /binds the approval to the wrong file/);
+  assert.equal(checks.length, 1);
+});
+
+test('doctor catalogue: a step on the wrong side of author / review is reported', async () => {
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'epic-review', type: 'author', artifact: 'epic.md', status: 'todo' },   // a gate, seeded as authoring
+      ]),
+    },
+  });
+  const c = checks.find((x) => x.id === 'step:kind');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /EP-x `epic-review`: `author`, catalogue says `review`/);
+  assert.equal(checks.length, 1);
+});
+
+test('doctor catalogue: a gate with no step to close is reported', async () => {
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'blocked' },
+      ]),
+    },
+  });
+  const c = checks.find((x) => x.id === 'step:orphan-gate');
+  assert.equal(c.status, 'warn');
+  assert.match(c.message, /EP-x `stories-review` reviews `stories`, which is not in the chain/);
+  assert.match(c.hint, /stays blocked behind a review that already passed/);
+});
+
+test('doctor catalogue: a step the catalogue does not carry is left to phase:unknown', async () => {
+  // A project may hold a chain from a newer yadflow. This check has nothing to say about an id it does
+  // not know — reporting it here as well would say the same thing twice in the same section.
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([{ id: 'feasibility', type: 'author', artifact: 'feasibility.md', status: 'todo' }]),
+    },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor catalogue: a BUILD id in an epic chain is skipped, not reported', async () => {
+  // Build runs per story per code repo and is recorded in `build-state/`, so a Build row carries no
+  // epic-level artifact and there is nothing to compare it against. Such a chain is odd, but this
+  // check has no rule for it and inventing one would be guessing. Pinned so the silence is a decision
+  // rather than a side effect of the `def.artifact &&` guard.
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'implement', type: 'author', artifact: 'nonsense.md', status: 'todo' },
+      ]),
+    },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor catalogue: the section is wired into collectDoctor, not just exported', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const { T } = scaffold();
+  const dir = path.join(T, 'epics', 'EP-x', '.sdlc');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(T, 'epics', 'EP-x', 'epic.md'), '---\nid: EP-x\nkind: feature\ntype: feature\n---\n\n## Goal\nx\n');
+  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify(chainState([
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+    { id: 'stories', type: 'author', artifact: 'stories.md', status: 'todo' },
+  ]), null, 2));
+  try {
+    const c = collectDoctor(T).checks.find((x) => x.id === 'step:artifact');
+    assert.equal(c?.status, 'warn', 'running yad doctor surfaces it, not only calling catalogueChecks by hand');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // A project holding just epics — enough for typeChecks, which reads epic.md and state.json only.
 function typeProject(epics) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e21d-'));

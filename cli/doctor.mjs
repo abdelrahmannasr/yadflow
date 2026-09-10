@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, SENTINELS } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -905,8 +905,89 @@ export function themeChecks(checks, root) {
   }
 }
 
-// A step this release does not recognise. Every step the engine can run belongs to one of the six
-// phases, and the same table is what binds a step to its skill — so an id no phase claims is an id
+// A project's chain against the step catalogue (E4). `phaseChecks` below asks whether a step id is
+// KNOWN; this asks whether a known step is set up the way the catalogue says it is.
+//
+// IT REPORTS AND CHANGES NOTHING, and when the two disagree THE FILE WINS for this whole major
+// (rule 3). Today all five authoring skills hand-write the `state.json` seed, a chain may legitimately
+// leave a step out (not every epic has a `ui-design`), and a project may hold a chain from a newer
+// yadflow. So a mismatch is a warning about a file somebody should look at, never a rewrite — the same
+// discipline as `workItemType`. E5 seeds the chain FROM the catalogue and E17 writes it, at which
+// point most of these stop being reachable by accident.
+//
+// Nothing here reports a step that is ABSENT from a chain. Skipping `ui-design` on an epic with no
+// screens is a normal thing to do, and a check that nagged about it would train people to ignore the
+// section that also carries the two below, which are real breakage.
+export function catalogueChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const wrongArtifact = [];
+  const wrongKind = [];
+  const orphanGate = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
+    const present = new Set(state.steps.map((s) => s?.id).filter((x) => typeof x === 'string'));
+
+    for (const step of state.steps) {
+      const def = step && typeof step.id === 'string' ? stepDef(step.id) : null;
+      if (!def) continue;   // unknown id — `phase:unknown` below is the check for that
+      // A BUILD id in an epic's `steps[]` is skipped rather than reported, and that is on purpose.
+      // Build runs per story per code repo and is recorded in `build-state/`, so those rows carry no
+      // artifact in the catalogue and there is nothing here to compare. An epic-level chain listing
+      // `implement` is odd, but `phase:unknown` will not flag it either — it is a real step id — and
+      // inventing a rule for it here would be guessing at a chain this release does not seed.
+
+      // The artifact is what the gate HASHES. A chain naming the wrong one binds the approval to the
+      // wrong file, so the gate can pass while the artifact everybody reviewed sits unapproved.
+      if (def.artifact && typeof step.artifact === 'string' && step.artifact !== def.artifact) {
+        wrongArtifact.push(`${e} \`${step.id}\`: \`${step.artifact}\`, catalogue says \`${def.artifact}\``);
+      }
+      // `type` in the file is `author` or `review+approve`; the catalogue calls the second one
+      // `review`. A step on the wrong side of that line is not driven by what drives it: an author
+      // step written as a gate is never closed by `yad gate`, and a gate written as an author step is
+      // handed to a skill that has no artifact to write.
+      const fileKind = step.type === 'review+approve' ? 'review' : step.type === 'author' ? 'author' : null;
+      if (fileKind && fileKind !== def.kind) {
+        wrongKind.push(`${e} \`${step.id}\`: \`${step.type}\`, catalogue says \`${def.kind}\``);
+      }
+      // A gate whose author step is not in the chain can never close it, so every later step stays
+      // blocked behind a review that has already passed.
+      if (def.reviews && !present.has(def.reviews)) {
+        orphanGate.push(`${e} \`${step.id}\` reviews \`${def.reviews}\`, which is not in the chain`);
+      }
+    }
+  }
+
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  if (wrongArtifact.length) {
+    check(
+      checks, 'step:artifact', 'shape', 'warn',
+      `${wrongArtifact.length} step(s) name an artifact the catalogue does not: ${some(wrongArtifact, 3)}`,
+      'the artifact is the file the review gate hashes, so a wrong one binds the approval to the wrong file. Correct `artifact` in `.sdlc/state.json`, or leave it if this project deliberately runs a different chain — nothing is rewritten either way',
+    );
+  }
+  if (wrongKind.length) {
+    check(
+      checks, 'step:kind', 'shape', 'warn',
+      `${wrongKind.length} step(s) are the wrong kind of step: ${some(wrongKind, 3)}`,
+      'an author step is run by a skill and a `review+approve` step by `yad gate`. On the wrong side of that line the step is never driven by the thing that drives it',
+    );
+  }
+  if (orphanGate.length) {
+    check(
+      checks, 'step:orphan-gate', 'shape', 'warn',
+      `${orphanGate.length} review gate(s) have no step to close: ${some(orphanGate, 3)}`,
+      'a gate closes its author step when it passes. With that step missing from the chain, everything after the gate stays blocked behind a review that already passed',
+    );
+  }
+}
+
+// A step this release does not recognise. Every step the engine can run has a row in the step
+// catalogue (E4), and that row is what gives it a phase AND binds it to a skill — so an id no phase
+// claims is an id with no row at all, which means an id
 // `yad next` cannot guide, `yad gate` has no artifact rule for, and no renderer can place in the
 // lifecycle. It is reported rather than ignored, and only warned about rather than failed: a project
 // may legitimately hold a step from a newer yadflow than the one being run, and a hand-written
@@ -1036,6 +1117,7 @@ export function collectDoctor(root) {
   dialChecks(checks, root);
   typeChecks(checks, root);
   themeChecks(checks, root);
+  catalogueChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
