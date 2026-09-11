@@ -34,8 +34,11 @@ chain from the CLI. So the question is whether `.sdlc/state.json` exists, not wh
 
 - **A chain already exists** — run `yad next EP-<slug> --check analysis`. If it exits non-zero, **STOP**
   and point the user at `yad next EP-<slug>` (the epic is past analysis). If it exits zero, resume
-  analysis for that epic: **skip Step 6** (do not re-seed) and run **Step 6b** instead.
-- **No `state.json`** — this is the entry point. Run Step 6 to seed the chain, and skip Step 6b.
+  analysis for that epic and **skip Step 6** (the chain is already there — re-seeding is refused anyway).
+- **No `state.json`** — this is the entry point. Run Step 6 to seed the chain.
+
+**Step 6b runs on both paths.** It is what closes the authoring step and opens its gate, and nothing
+else does it.
 
 ### Step 2 — Shape the idea (assist: analyst)
 Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) to pressure-test the idea in depth: who is the
@@ -143,8 +146,10 @@ Notes:
   exempts a new epic's ledger (creation, not mutation, #162); every later change to it is CI's. See
   `../yad-epic/references/state-schema.md`, "Authoring branches".
 
-### Step 6b — Advance the authoring step — only when the chain was already seeded
-*(Only when `state.json` already existed — seeded by `yad epic new`.)*
+### Step 6b — Open the analysis review gate
+*(**Always run this**, on both entry modes. The chain is seeded by now either way — by `yad epic new`
+in Step 6, or by `yad epic new` before this skill was invoked — and `analysis.md` is written. This is
+the step that closes the authoring step and opens its gate.)*
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run
 `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
@@ -161,10 +166,15 @@ epic's first review PR exactly as a Step 6 seed does. Leave their contents alone
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> analysis.md` marks `analysis-review` `in_review`, closes `analysis` as `done`,
-and moves `currentStep` to the gate — the same transition, from the one function that owns it
-(`markInReview`, `cli/epic-state.mjs`). With no platform configured it still writes the ledger and
-simply opens no PR, so this works offline. Hand it to `yad-review-gate`, which runs that command. Do
-**not** hand-edit `state.json`, do **not** re-seed, and do **not** touch `approvals.json` — only real
+and moves `currentStep` to the gate — the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+`yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
+
+**With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
+**With a platform** the `review/EP-<slug>/analysis.md` branch must already be **on origin** — the command refuses
+and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(`yad open-pr` does both, then delegates).
+
+Do **not** hand-edit `state.json`, do **not** re-seed, and do **not** touch `approvals.json` — only real
 reviewers approve, through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)

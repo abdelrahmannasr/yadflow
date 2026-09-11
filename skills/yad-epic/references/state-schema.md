@@ -156,13 +156,18 @@ seeds the product front-zero, and `yad-change` seeds a threaded chain whose inhe
 to a parent's artifact hashes. A seeded chain leaves its first author step **open**, not `done` — the
 command runs before the artifact exists; `yad gate open` closes it when the gate opens.
 
-- **With analysis** (12 steps — `yad-analysis` seeded the chain):
+- **With analysis** — the `analysis-first` route, 12 steps:
   `analysis → analysis-review → epic → epic-review → architecture → architecture-review → ui-design →
   ui-design-review → stories → stories-review → test-cases → test-cases-review`. Seeded `currentStep`
-  is `analysis-review`; `epic` starts `blocked`.
-- **Without analysis** (10 steps — `yad-epic` is the entry point, the default):
+  is `analysis`, which starts `in_progress`; everything after it starts `blocked`.
+- **Without analysis** — the `classic` route, 10 steps, and the default:
   `epic → epic-review → … → stories-review → test-cases → test-cases-review`. Seeded `currentStep` is
-  `epic-review`.
+  `epic`, which starts `in_progress`.
+
+Both seeded values move to the review gate when `yad gate open` runs, which is also what closes the
+authoring step. Before E17b the seeds recorded the gate directly, because a skill only seeded once it
+had already written the artifact; a chain seeded that way is still perfectly valid and nothing rewrites
+it.
 
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
 owner + 1 reviewer).

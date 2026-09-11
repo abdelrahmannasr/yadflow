@@ -33,13 +33,16 @@ engine (never typed by hand); Shape steps are locked to `advance: human`.
 Read `{project-root}/epics/EP-<slug>/.sdlc/state.json` if an epic is named, otherwise check whether one
 exists for the idea.
 
-- **Chain already seeded** — `state.json` exists with `currentStep == "epic"` and the `epic` step
-  `status == "in_progress"`. Skip **Step 3** (the ID is already assigned) and **Step 5** (state is
-  already seeded), and run Step 5b to advance the authoring step. For Step 2, read `analysis.md` when
-  it is there (the analysis ran); when it is not, the chain came from `yad epic new` and no analysis
-  exists — shape the idea inline with the analyst exactly as the greenfield branch does.
+- **Chain already seeded** — `state.json` exists with `currentStep == "epic"`. Skip **Step 3** (the ID
+  is already assigned) and **Step 5** (the chain is already there — re-seeding is refused anyway). For
+  Step 2, read `analysis.md` when it is there (the analysis ran); when it is not, the chain came from
+  `yad epic new` and no analysis exists, so shape the idea inline with the analyst exactly as the
+  greenfield branch does.
 - **Nothing seeded** (the default) — no `state.json`. The epic is the entry point: run Steps 2–5
-  (inline analyst shaping + ID assignment + seed) and **skip Step 5b**.
+  (inline analyst shaping + ID assignment + seed).
+
+**Step 5b runs on both paths.** It is what closes the authoring step and opens its gate, and nothing
+else does it.
 
 Either mode runs Step 3b (branch), Step 4 (write the epic), and Step 6 (stop at the gate).
 
@@ -157,7 +160,8 @@ seeded the 10-step one. Go to Step 5b.)*
 **Run the engine. Do not hand-write the chain.**
 
 ```bash
-yad epic new EP-<slug> --type <feature|chore>
+yad epic new EP-<slug>              # after Step 4: the type comes from epic.md
+yad epic new EP-<slug> --type chore # only when there is no epic.md yet
 ```
 
 That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the full **10-step** `classic` chain
@@ -191,8 +195,10 @@ Notes:
   reversible with `--undo` until the stories review opens. Don't hand-edit the chain to drop the steps;
   the skip is the single, auditable mechanism (see `references/state-schema.md` → "ui-design is optional").
 
-### Step 5b — Advance the authoring step — only when the chain was already seeded
-*(Only when `state.json` already existed — seeded by `yad-analysis` or by `yad epic new`.)*
+### Step 5b — Open the epic's review gate
+*(**Always run this**, on both entry modes. The chain is seeded by now either way — by `yad-analysis`,
+by `yad epic new` in Step 5, or by `yad epic new` before this skill was invoked — and `epic.md` is
+written. This is the step that closes the authoring step and opens its gate.)*
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
@@ -220,11 +226,16 @@ unmodified (the `yad-analysis` path), commit `epic.md` alone. Then hand off to `
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> epic.md` marks `epic-review` `in_review`, closes `epic` as `done`, and moves
-`currentStep` to the gate — the same transition, from the one function that owns it (`markInReview`,
-`cli/epic-state.mjs`). With no platform configured it still writes the ledger and simply opens no PR,
-so this works offline. Hand it to `yad-review-gate`, which runs that command. Do **not** hand-edit
-`state.json`, do **not** re-seed, and do **not** touch `approvals.json` — only real reviewers approve,
-through the gate.
+`currentStep` to the gate — the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+`yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
+
+**With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
+**With a platform** the `review/EP-<slug>/epic.md` branch must already be **on origin** — the command refuses
+and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(`yad open-pr` does both, then delegates).
+
+Do **not** hand-edit `state.json`, do **not** re-seed, and do **not** touch `approvals.json` — only real
+reviewers approve, through the gate.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via

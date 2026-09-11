@@ -65,8 +65,29 @@ touched `repos` — never a forked or copied gate.
 > state; the approvals, comments, review records and the advance all land through CI at merge.
 
 **`open`** — Present the artifact for review. Summarise what changed, list the required reviewers per
-the rule above, and tell reviewers how to comment/approve. Set the step `status` to `in_review` and
-`currentStep` to this step in `state.json` if not already. Do not advance.
+the rule above, and tell reviewers how to comment/approve. Then make the transition with the engine:
+
+```bash
+yad gate open <epic> <artifact>
+```
+
+**Do not hand-write this one.** It does three things, and the second is the one a transcription keeps
+forgetting:
+
+1. marks the review step `in_review`;
+2. **closes the paired authoring step as `done`** — a gate cannot open on an unauthored artifact, and
+   an author step left `in_progress` behind a passed gate blocks every step after it
+   (`YAD-STATE-005`, issue #131) until someone runs `yad gate repair`;
+3. moves `currentStep` to the gate — **except** when the epic is already `ready-for-build`, where it
+   leaves it alone, so opening the parallel `test-cases` gate never pulls the epic back from Build.
+
+With **no platform** configured it writes the ledger and simply opens no PR, so this works offline.
+With a platform, the `review/<epic>/<artifact>` branch must already be **on origin** — cut it from the
+authoring branch and push it, or run `yad open-pr` from it, which pushes first and then delegates here.
+In **verified mode** the command deliberately writes nothing: CI owns the ledger and performs the whole
+transition at merge.
+
+Do not advance.
 
 If `.sdlc/hub.json` has a non-null `platform` and `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true` / legacy `bridge: true` —
 `.sdlc/hub.json` is the only source the CLI reads, see `isVerifiedLedger` in `cli/manifest.mjs`), and `gh`/`glab`
@@ -170,18 +191,27 @@ If the predicate **fails**: report exactly which approvals are still missing and
 
 If the predicate **passes**:
 
-> **This is the last place a skill still hand-writes `state.json`, and it is deliberate.** Every other
-> skill now calls the engine: `yad epic new` seeds a chain, `yad gate open` closes an authoring step and
-> opens its gate. There is no engine verb for *"an approval landed, advance the chain"* on a Product
-> with **no platform**: `yad gate sync` and `yad gate ci` both return immediately without one, and
-> `advanceState` — the function holding the rules written out below — has no other caller. So on a
-> local-only Product these steps ARE the engine's rules, transcribed. Keep them exactly in step with
-> `advanceState` in `cli/epic-state.mjs` until a local approve verb exists.
+> **These rules are a TRANSCRIPTION of `advanceState`, and that is deliberate — it is the one
+> transition with no engine verb behind it.** Everything else this skill does now calls the engine, and
+> so do the authoring skills: `yad epic new` seeds a chain, `yad gate open` closes an authoring step and
+> opens its gate. But there is no verb for *"an approval landed, advance the chain"* on a Product with
+> **no platform**: `yad gate sync` and `yad gate ci` both return immediately without one, and
+> `advanceState` — the function holding the rules below — has no other caller. So on a local-only
+> Product these bullets ARE the engine's rules, written out. Keep them in step with `advanceState` in
+> `cli/epic-state.mjs`, including the author-step close, until a local approve verb exists.
 >
 > With a platform, you do not perform them at all: `yad gate sync` (local ledger) or `yad gate ci`
 > (verified) runs the same transition from that function.
+>
+> Two other skills still write a chain by hand, and neither is an oversight: `yad-discovery` seeds the
+> product front-zero (E75 absorbs it) and `yad-change` seeds a threaded chain bound to a parent's
+> artifact hashes (E42 owns inheritance). `yad-backfill promote` rewrites one too, and needs its own
+> verb.
 
 - Mark this review step `status: "done"`.
+- **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
+  (issue #131) because a passed gate can never leave its author step behind. Skipping it strands every
+  later step behind `YAD-STATE-005`.
 - **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
   handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track
   (set its step `blocked` → `in_progress`). Build can now start **and** the tester can work

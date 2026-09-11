@@ -973,19 +973,96 @@ test('the skills that call the engine carry no chain of their own to drift', () 
   }
 });
 
-test('only `yad-review-gate` still hand-writes state.json, and it says why', () => {
-  // The honest remainder. `advanceState` is what these rules duplicate, and it has exactly one caller
-  // (`gateSync`), which returns immediately on a Product with no platform — so on a local-only Product
-  // this skill IS the only path. Pinning the count keeps a NEW hand-writer from slipping in beside it,
-  // and pinning the explanation keeps the reason from being lost the next time someone tidies the file.
-  const writers = fs.readdirSync(new URL('../skills/', import.meta.url))
-    .filter((d) => fs.existsSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url)))
-    .filter((d) => /In `state\.json`: set|Write `state\.json`/.test(
-      fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8')));
-  assert.deepEqual(writers, ['yad-review-gate']);
+test('the skills E17b changed instruct no ledger write at all', () => {
+  // The first version of this keyed on two literal phrases lifted from the deleted blocks, and a
+  // matcher loose enough to catch any rewording also caught `yad-test-cases` READING the file
+  // ("state.json shows it `skipped`") and missed `yad-discovery` writing it, because its path is long.
+  // A prose heuristic over 38 files cannot be made both. So the check is narrow and exact instead: the
+  // nine skills this task changed, each asserted to contain no imperative aimed at the ledger.
+  const CHANGED = ['yad-epic', 'yad-analysis', 'yad-stub', 'yad-architecture', 'yad-ui',
+    'yad-stories', 'yad-test-cases', 'yad-review-gate'];
+  // An imperative aimed at the ledger, in EITHER word order — and both orders are needed, because the
+  // blocks this task deleted used the second one. `Create {project-root}/…/.sdlc/state.json` puts the
+  // verb first; ``In `state.json`: set `architecture.status` to done`` puts the file first, and a
+  // matcher that only looked one way would have missed every block E17b exists to remove.
+  //
+  // The two directions take different verb lists on purpose. Verb-first is a stem match, so `Creates`
+  // and `Seeding` both count. File-first must be an exact word, or "if `state.json` already exists
+  // (SEEDED, or a re-entry)" — a sentence about whether the file is there — reads as an instruction
+  // to write it.
+  const FILE = '`?\\.?/?[\\w/<>{}.-]{0,60}state\\.json`?';
+  // Up to a short run of words between the verb and the file, so `Mark the step done in state.json`
+  // counts as well as `Create .sdlc/state.json`. Bounded, and stopped at a sentence end, so the verb
+  // and the file have to be in the same clause.
+  const VERB_FIRST = '\\b(creat|writ|seed|re-seed|set|mark|mov|remov|rewrit|updat|append|delet|clear|stamp|flip)[a-z]*\\s+[^.\n]{0,30}?[`\'"({[]*';
+  const VERB_AFTER = '\\b(set|mark|move|remove|write|add|update|append|delete|clear|stamp|flip)\\b';
+  const WRITE = new RegExp(`${VERB_FIRST}${FILE}|${FILE}[^.\n]{0,20}${VERB_AFTER}`, 'i');
+  for (const d of CHANGED) {
+    const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    const offenders = src.split('\n')
+      // A prohibition is not a write, and neither is a conditional that forbids one.
+      .filter((l) => !/never|read-only|do \*\*not\*\*|do not|don't|refus|exempt|rejects/i.test(l))
+      // Nor is a sentence whose subject is the ENGINE. "That writes …/state.json with the classic
+      // chain" describes what `yad epic new` does; it is the opposite of an instruction to the author,
+      // and it is the sentence this whole task exists to put there. A line naming an engine command,
+      // or opening with "That"/"It", is describing one.
+      .filter((l) => !/yad (epic new|gate open|migrate)|^(That|It) (writes|sets|marks|moves|creates)/i.test(l.trim()))
+      // A heading is a label for the step, not an imperative inside it. The instruction lives in the
+      // body underneath, which this still reads.
+      .filter((l) => !l.trimStart().startsWith('#'))
+      // And the file as the SUBJECT of a reading verb is a read: "(state.json shows it `skipped`)"
+      // tells you where to look, it does not tell you to write anything.
+      .filter((l) => !/state\.json`?\s*(shows|says|records|holds|reads|lists|is |has )/i.test(l))
+      .filter((l) => WRITE.test(l));
+    // `yad-review-gate` is the one exception and it is deliberate: its `advance` action transcribes
+    // `advanceState`, which has no engine verb on a Product with no platform. Its `open` action must
+    // still be clean, which the next test checks.
+    if (d === 'yad-review-gate') continue;
+    assert.deepEqual(offenders, [], `${d}: still instructs a ledger write`);
+  }
+});
+
+test('the skills that still write a chain by hand are named, with the reason', () => {
+  // Not "only yad-review-gate", which is what this used to claim and was false. Three others write a
+  // chain too, and each is out of scope for a stated reason rather than by oversight. The claim lives
+  // in the review gate's own banner, so a reader hits it where the transcription is.
+  const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
+  assert.match(gate, /TRANSCRIPTION of `advanceState`/);
+  for (const [skill, why] of [
+    ['yad-discovery', /front-zero/],
+    ['yad-change', /threaded/],
+    ['yad-backfill', /promote/],
+  ]) {
+    assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
+    assert.match(gate, why, `the banner does not say WHY ${skill} is still one`);
+  }
+  // …and each of those three really does still seed or rewrite a chain, so the banner is not naming
+  // skills that have already been converted.
+  for (const d of ['yad-discovery', 'yad-change', 'yad-backfill']) {
+    const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    assert.match(src, /state\.json/, `${d}: no longer touches the ledger — drop it from the banner`);
+  }
+});
+
+test('the review gate opens a gate with the ENGINE, not by hand', () => {
+  // The regression this exists for. E17b deleted the six authoring-skill blocks that closed the author
+  // step, on the promise that `yad-review-gate` runs `yad gate open`. It did not — its `open` action
+  // hand-wrote `in_review` and never closed the author step, so every epic on a local Product would
+  // have stranded behind YAD-STATE-005 with nothing in the suite to notice. The rule lives in the
+  // interaction between two skill files, which is why no code test could see it.
   const src = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
-  assert.match(src, /last place a skill still hand-writes/);
-  assert.match(src, /advanceState/);
+  assert.match(src, /yad gate open <epic> <artifact>/);
+  // The two rules a transcription of that command keeps losing.
+  assert.match(src, /closes the paired authoring step/i);
+  assert.match(src, /ready-for-build/);
+  // And every skill that hands off to it names the command and its one prerequisite, rather than
+  // leaving the transition to nobody.
+  for (const d of ['yad-epic', 'yad-analysis', 'yad-architecture', 'yad-ui', 'yad-stories', 'yad-test-cases']) {
+    const skill = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    assert.match(skill, /yad gate open/, `${d}: does not name the command that makes the transition`);
+    assert.match(skill, /must already be \*\*on origin\*\*/,
+      `${d}: does not say the review branch must be pushed first — with a platform the command refuses and writes nothing`);
+  }
 });
 
 test('every skill seed template states this shape and the route its own chain is on', () => {

@@ -99,7 +99,7 @@ created: <YYYY-MM-DD>
 
 Leave `owner` for the human to set. Set `repos` to the code repo(s) the feature lives in.
 
-### Step 5 — Seed the stub `state.json` (a `backfill-pending` sentinel)
+### Step 5 — Seed the stub ledger (a `backfill-pending` sentinel)
 
 **Run the engine. Do not hand-write the chain.**
 
