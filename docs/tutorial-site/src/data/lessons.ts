@@ -271,9 +271,13 @@ export const MODULES: Module[] = [
           { kind: 'p', text: 'Run `yad-epic` in the Product. With the analyst and pm lenses it shapes the idea and writes `epic.md`. It assigns the stable `EP-<slug>` ID and seeds the epic\'s state (`.sdlc/state.json`, all human-approve, Shape steps locked).' },
           { kind: 'p', text: 'When the step finishes it sets itself `done`, moves `currentStep` to the epic review, and **stops at the gate**. You clear the gate before moving on (next module).' },
           { kind: 'p', text: 'To put several epics under one heading, give them the same `theme:` in `epic.md` — one word or short phrase, such as `theme: checkout-revamp`. It is optional, there is no list to pick from, and there is no level above the Epic: grouping is a label. Write **one** tag (a list is read as no theme), and spell an existing theme exactly as the other epics do — two spellings group as two, which `yad doctor` reports.' },
+          { kind: 'p', text: 'You can also have the engine lay the track first: `yad epic new <slug>` writes the epic\'s step chain and its empty ledgers, then you run `yad-epic` to author `epic.md` against it. The chain comes from a **profile** — the named route an epic takes. `classic` is the 10-step chain and the default; `--profile analysis-first` is the 12-step one, which puts the analysis before the epic. The command writes no `epic.md`, no branch and no commit, and it refuses an epic that already has a chain.' },
           { kind: 'callout', tone: 'warn', text: 'IDs are immutable once assigned. Renaming an EP-<slug> breaks every downstream link (stories, tasks, branches, PRs).' },
         ],
-        commands: [{ cmd: 'run yad-epic', note: 'invoke the skill by name in your AI IDE' }],
+        commands: [
+          { cmd: 'yad epic new <slug>', note: 'optional: seed the step chain first, from a lifecycle profile' },
+          { cmd: 'run yad-epic', note: 'invoke the skill by name in your AI IDE' },
+        ],
         produces: ['epics/EP-<slug>/epic.md', '.sdlc/state.json', '.sdlc/approvals.json'],
         quiz: [
           {

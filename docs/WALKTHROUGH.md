@@ -141,6 +141,9 @@ Build by hand"** below.
 - **`yad doctor`** — health check. Its `shape` section says whether this project's state files match
   the shape this release expects, one line for the project and one per epic, and names the command to
   run if they do not.
+- **`yad epic new <slug>`** — start an epic by writing its step chain from a lifecycle profile
+  (`--profile classic|analysis-first`, `--type feature|chore`), plus its empty ledgers. It writes no
+  `epic.md`, no branch and no commit, and refuses an epic that already has a chain.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.
@@ -180,6 +183,8 @@ side-effect). With no repos connected the steps proceed exactly as before (green
 
 1. **`yad-epic`** (state 1) → `epic.md`; assigns the stable `EP-<slug>` ID; seeds
    `.sdlc/state.json` (all `advance: human`, Shape steps locked) + empty `.sdlc/approvals.json`.
+   Or lay the track first with **`yad epic new <slug>`**, which writes that same chain from a
+   lifecycle profile and leaves `epic.md` to the skill.
 2. **`yad-architecture`** (state 3) → `architecture.md` + the locked `contract.md`; writes the
    contract-surface SHA-256 to `.sdlc/contract-lock.json`.
 3. **`yad-ui`** (state 5) → `ui-design.md` + `DESIGN.md` (drives Impeccable
