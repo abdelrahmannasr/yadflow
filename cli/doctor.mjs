@@ -1134,7 +1134,8 @@ export function skillBindingChecks(checks, root) {
   const bound = Object.entries(bindings.steps);
   // Dropped by `normalizeBindings` — a number, an empty string, an empty list. The line is in the file
   // and does nothing, which is the one thing a person editing it would never guess.
-  const unusable = Object.keys(raw.steps || {}).filter((id) => !bindings.steps[id]);
+  const unusable = Object.keys(raw.steps || {})
+    .filter((id) => !Object.hasOwn(bindings.steps, id));
   // A step id this engine does not run. The file still wins — a project may hold a step from a newer
   // release — so this changes nothing and only says the binding is asleep.
   const unknown = bound.map(([id]) => id).filter((id) => !stepDef(id));

@@ -13,9 +13,8 @@ spec → tasks → implement → checks → engineer-review(locked)
 ```
 
 **These names are the engine's DEFAULTS, not a fixed wiring.** Which skill runs a step is the
-project's setting in `.sdlc/skills.json`, so the loop asks `yad next <epic> --json` for each lane and
-runs the `skill` it names (and every entry of `skills`, in order, when the step is bound to more than
-one). Unbound: `spec` and `tasks` are the two legs of `yad-spec` (the heavy ceremony, then the atomic
+project's setting in `.sdlc/skills.json`, so the loop reads `yad skill list --json` once at Step 0 and
+runs every entry of that step's `skills`, in order, when it is bound to more than one. Unbound: `spec` and `tasks` are the two legs of `yad-spec` (the heavy ceremony, then the atomic
 `tasks.md`), `implement` is one atomic task via `yad-implement`, and `checks` is
 `yad-checks (action: run)`. `engineer-review` is the human gate at `yad-engineer-review` — always a
 stop, never automated, and bindable like any other step.

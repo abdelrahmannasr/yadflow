@@ -36,12 +36,16 @@ const skillsFile = (root) => path.join(root, PROJECT_FILES.skillsConfig);
 // the document from nothing and delete every binding the file held — silently, with a green tick, on
 // the file the docs tell people to hand-edit. Returns null when the bytes do not parse; the caller
 // refuses rather than writing.
+// Returns `{ doc }`, or `{ error }` naming which of the two failures it is. The two are reported with
+// different codes by `yad doctor` on the same bytes, and saying "does not parse" about a file that
+// parses perfectly and is simply a JSON array sends the reader looking for a missing comma.
 const readRaw = (root) => {
   const file = skillsFile(root);
-  if (!exists(file)) return {};
+  if (!exists(file)) return { doc: {} };
   let raw;
-  try { raw = readJSONStrict(file, null); } catch { return null; }
-  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null;
+  try { raw = readJSONStrict(file, null); } catch { return { error: 'does not parse [YAD-STATE-001]' }; }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'has the wrong shape [YAD-STATE-002]' };
+  return { doc: raw };
 };
 
 // An existing document plus this edit, ready to write.
@@ -53,8 +57,15 @@ const readRaw = (root) => {
 // `writeState`, its write IS the file's migration.
 const withSteps = (raw, steps) => ({ ...raw, schemaVersion: SCHEMA_VERSION, steps });
 
-const brokenFile = () => bail(`${PROJECT_FILES.skillsConfig} does not parse [YAD-STATE-001]`,
-  'fix the JSON (or restore it from git) first — writing over it would delete every binding it holds');
+const brokenFile = (error) => bail(`${PROJECT_FILES.skillsConfig} ${error}`,
+  'fix the file (or restore it from git) first — writing over it would delete every binding it holds');
+
+// A step id has the shape every catalogue id has. An id this release does not KNOW is allowed through
+// with a warning (the file wins, rule 3), so this is not an allowlist — it is a shape guard, and the
+// one thing it has to stop is `__proto__`: assigning that key to the document sets the object's
+// prototype instead of adding a line, `JSON.stringify` then drops it, and the command would report a
+// binding it did not write. `yad epic new` guards its slug the same way.
+const STEP_ID = /^[a-z][a-z0-9-]*$/;
 
 // One row per step the engine can run a skill for: what runs it now, and whether that is the project's
 // choice or the engine's. `source` is the field worth having — "yad-stories" alone never says whether
@@ -77,8 +88,8 @@ export function skillRows(root, bindings = loadSkillBindings(root), written = nu
 
 export function runSkillList(root, { json = false } = {}) {
   const bindings = loadSkillBindings(root);
-  const raw = readRaw(root);
-  const written = new Set(raw === null ? [] : Object.keys(raw.steps && typeof raw.steps === 'object' ? raw.steps : {}));
+  const { doc, error } = readRaw(root);
+  const written = new Set(error ? [] : Object.keys(doc.steps && typeof doc.steps === 'object' ? doc.steps : {}));
   const rows = skillRows(root, bindings, written);
   // Bindings on ids the catalogue does not know are listed too, and marked. They are the ones a person
   // most needs to see: `yad next` never looks them up, so without this line they are invisible.
@@ -93,9 +104,7 @@ export function runSkillList(root, { json = false } = {}) {
 
   if (json) return log(JSON.stringify({ ok: true, file: PROJECT_FILES.skillsConfig, steps: [...rows, ...extra] }, null, 2));
 
-  if (raw === null) {
-    warn(`${PROJECT_FILES.skillsConfig} does not parse — showing the engine's defaults [YAD-STATE-001]`);
-  }
+  if (error) warn(`${PROJECT_FILES.skillsConfig} ${error} — showing the engine's defaults`);
   log(`\n  ${c.bold('step')}                 ${c.bold('skill(s)')}`);
   for (const r of [...rows, ...extra]) {
     const mark = r.source === 'project' ? c.cyan('•') : (r.source === 'ignored' ? c.red('!') : ' ');
@@ -120,6 +129,9 @@ export function runSkillBind(root, { step, skills = [] } = {}) {
     return bail('usage: yad skill bind <step> <skill> [<skill> …]',
       `bindable steps: ${bindableSteps().join(' · ')}`);
   }
+  if (!STEP_ID.test(step)) {
+    return bail(`\`${step}\` is not a step id`, 'a step id is lower-case letters, digits and dashes — for example `architecture` or `ui-design`');
+  }
   const def = stepDef(step);
   // A review gate is refused rather than warned about: nothing would ever invoke the binding, so
   // writing it would record a decision that silently never happens.
@@ -129,11 +141,11 @@ export function runSkillBind(root, { step, skills = [] } = {}) {
   }
   // An UNKNOWN id is allowed through with a warning, not refused. The file wins for this whole major
   // (rule 3), and a project may legitimately hold a step from a newer release than the CLI in hand.
-  const raw = readRaw(root);
-  if (raw === null) return brokenFile();
-  const steps = raw.steps && typeof raw.steps === 'object' && !Array.isArray(raw.steps) ? { ...raw.steps } : {};
+  const { doc, error } = readRaw(root);
+  if (error) return brokenFile(error);
+  const steps = doc.steps && typeof doc.steps === 'object' && !Array.isArray(doc.steps) ? { ...doc.steps } : {};
   steps[step] = names.length === 1 ? names[0] : names;
-  writeJSON(skillsFile(root), withSteps(raw, steps));
+  writeJSON(skillsFile(root), withSteps(doc, steps));
 
   ok(`${step} → ${names.join(' → ')}`);
   if (!def) {
@@ -149,9 +161,9 @@ export function runSkillBind(root, { step, skills = [] } = {}) {
 
 export function runSkillUnbind(root, { step } = {}) {
   if (!step) return bail('usage: yad skill unbind <step>');
-  const raw = readRaw(root);
-  if (raw === null) return brokenFile();
-  const steps = raw.steps && typeof raw.steps === 'object' && !Array.isArray(raw.steps) ? { ...raw.steps } : {};
+  const { doc, error } = readRaw(root);
+  if (error) return brokenFile(error);
+  const steps = doc.steps && typeof doc.steps === 'object' && !Array.isArray(doc.steps) ? { ...doc.steps } : {};
   if (!(step in steps)) {
     return bail(`${step} is not bound in ${PROJECT_FILES.skillsConfig}`, 'see `yad skill list` for what is bound');
   }
@@ -159,7 +171,7 @@ export function runSkillUnbind(root, { step } = {}) {
   // The file is left behind, holding an empty `steps`, rather than deleted. Deleting a file the user
   // may have hand-authored — with comments-by-convention, or keys a later release reads — to undo one
   // line would throw away more than was asked for.
-  writeJSON(skillsFile(root), withSteps(raw, steps));
+  writeJSON(skillsFile(root), withSteps(doc, steps));
   // What runs it now: the engine's default, or nothing at all if this engine does not know the step.
   const fallback = stepSkills(step, null);
   ok(`${step} unbound${fallback.length ? ` — back to the engine's default (${fallback.join(' → ')})` : ' — this yadflow runs no skill for it'}`);

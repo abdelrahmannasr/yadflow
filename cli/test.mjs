@@ -11037,6 +11037,11 @@ test('doctor reports a skill binding that does nothing, and corrects none of the
   assert.match(unusable[0].message, /YAD-CFG-006/);
   assert.match(unusable[0].message, /epic, stories/);
 
+  // A line keyed on a prototype member. `!bindings.steps[id]` found `Object.prototype.constructor`,
+  // called it usable, and reported nothing — the invisible line this check exists to catch.
+  const proto = run({ steps: { constructor: '', stories: 'mine' } });
+  assert.ok(proto.some((c) => c.id === 'skills' && c.status === 'warn' && /constructor/.test(c.message)));
+
   // A step id this engine does not run. The file still wins; this only says the binding is asleep.
   const unknown = run({ steps: { relase: 'ship-it' } });
   assert.ok(unknown.some((c) => c.id === 'skills:unknown-step' && c.status === 'warn'));
@@ -11108,6 +11113,17 @@ test('yad skill refuses to write over a file that does not parse', () => {
     const listed = grabSync(() => runSkillList(T, {}));
     assert.match(listed, /does not parse/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  // A file that parses perfectly and is simply the wrong shape gets the OTHER message, the one
+  // `yad doctor` gives for the same bytes. "Does not parse" would send the reader hunting a comma
+  // that is not missing.
+  const A = skillProject({ '.sdlc/skills.json': '[1, 2]\n' });
+  try {
+    const { out, failed } = grabFailing(() => runSkillBind(A, { step: 'stories', skills: ['x'] }));
+    assert.equal(failed, true);
+    assert.match(out, /wrong shape \[YAD-STATE-002\]/);
+    assert.equal(fs.readFileSync(path.join(A, '.sdlc/skills.json'), 'utf8'), '[1, 2]\n');
+  } finally { fs.rmSync(A, { recursive: true, force: true }); }
 });
 
 test('yad skill bind stamps this engine\'s shape onto a hand-authored file', async () => {
@@ -11149,6 +11165,23 @@ test('yad skill bind refuses a review gate and writes nothing', () => {
     assert.match(out, /`architecture`/);
     assert.equal(fs.existsSync(path.join(T, '.sdlc/skills.json')), false,
       'a refused bind must not leave a half-written config behind');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad skill bind refuses an id that is not a step id', () => {
+  const T = skillProject();
+  try {
+    // `__proto__` is the one that matters: assigned into the document it sets the object's PROTOTYPE
+    // instead of adding a line, `JSON.stringify` drops it, and the command would report a binding it
+    // never wrote. The guard is a SHAPE check, not an allowlist — an unknown but plausible id still
+    // goes through, because the file wins.
+    for (const bad of ['__proto__', 'Architecture', 'ui design', '../etc', '']) {
+      const { failed } = grabFailing(() => runSkillBind(T, { step: bad, skills: ['x'] }));
+      assert.equal(failed, true, `${JSON.stringify(bad)} was accepted`);
+    }
+    assert.equal(fs.existsSync(path.join(T, '.sdlc/skills.json')), false, 'a refused id must write nothing');
+    const okRun = grabFailing(() => runSkillBind(T, { step: 'release', skills: ['ship-it'] }));
+    assert.equal(okRun.failed, false, 'a plausible unknown id must still be allowed');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
