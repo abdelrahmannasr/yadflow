@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -1048,6 +1048,75 @@ export function catalogueChecks(checks, root) {
 // and it already tells the user their chain is broken and how. Re-reporting the same epic here as
 // "the recorded route disagrees" would name the same fault twice with two different remedies, so this
 // check speaks only when the chain fits a route CLEANLY and it is a different one from the record.
+// `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
+// default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
+//
+// REPORTS, NEVER CORRECTS, and never judges a skill NAME. The engine cannot know which skills a team
+// has installed — that is E50's job — and binding a skill this release has never heard of is the whole
+// point of the file. So the only things checked here are the ones the engine CAN know: does the file
+// parse, is a value usable, and is the step id one this engine runs at all.
+//
+// Three warnings, all of them "your line did nothing", which is the failure a config file makes easy
+// to miss. A typo in a step id is silent otherwise: the binding sits in the file, `yad next` never
+// looks it up, and the team concludes the feature does not work.
+export function skillBindingChecks(checks, root) {
+  const rel = PROJECT_FILES.skillsConfig;
+  const file = path.join(root, rel);
+  if (!exists(file)) return;
+
+  let raw;
+  try {
+    raw = readJSONStrict(file, null);
+  } catch (e) {
+    check(checks, 'skills', 'project', 'fail', `${rel} does not parse [${e.code || 'YAD-STATE-001'}]`,
+      e.hint || 'fix the JSON or restore it from git');
+    return;
+  }
+  if (!isPlainObject(raw)) {
+    check(checks, 'skills', 'project', 'fail', `${rel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    return;
+  }
+  // `steps` missing entirely is fine — a file holding only `schemaVersion` is what `yad skill unbind`
+  // leaves behind when the last binding goes, and it binds nothing, correctly.
+  if (raw.steps !== undefined && !isPlainObject(raw.steps)) {
+    check(checks, 'skills', 'project', 'fail', `${rel}: \`steps\` must be a JSON object [YAD-STATE-002]`,
+      'expected `"steps": { "<step-id>": "<skill>" }`');
+    return;
+  }
+
+  const bindings = normalizeBindings(raw);
+  const bound = Object.entries(bindings.steps);
+  // Dropped by `normalizeBindings` — a number, an empty string, an empty list. The line is in the file
+  // and does nothing, which is the one thing a person editing it would never guess.
+  const unusable = Object.keys(raw.steps || {}).filter((id) => !bindings.steps[id]);
+  // A step id this engine does not run. The file still wins — a project may hold a step from a newer
+  // release — so this changes nothing and only says the binding is asleep.
+  const unknown = bound.map(([id]) => id).filter((id) => !stepDef(id));
+  // A step id the engine knows but runs no skill for: a Shape review gate, driven by `yad gate`.
+  const gates = bound.map(([id]) => id).filter((id) => stepDef(id) && !stepDef(id).skill);
+
+  if (unusable.length) {
+    check(checks, 'skills', 'project', 'warn',
+      `${rel}: ${unusable.length} binding(s) name no skill and are ignored — ${unusable.join(', ')} [YAD-CFG-006]`,
+      'each value must be a skill name or a non-empty list of them');
+  }
+  if (unknown.length) {
+    check(checks, 'skills:unknown-step', 'project', 'warn',
+      `${rel} binds ${unknown.length} step(s) this yadflow does not run: ${unknown.join(', ')}`,
+      'check the spelling against `yad skill list`, or upgrade yadflow if the step is from a newer release');
+  }
+  if (gates.length) {
+    check(checks, 'skills:review-step', 'project', 'warn',
+      `${rel} binds ${gates.join(', ')}, which no skill runs — review gates are driven by \`yad gate\``,
+      'bind the author step instead (for example `architecture`, not `architecture-review`)');
+  }
+  if (bound.length) {
+    const chained = bound.filter(([, list]) => list.length > 1).length;
+    check(checks, 'skills', 'project', 'ok',
+      `skills: ${bound.length} step(s) bound${chained ? `, ${chained} to more than one skill` : ''}`);
+  }
+}
+
 export function profileChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
@@ -1221,6 +1290,7 @@ export function collectDoctor(root) {
   themeChecks(checks, root);
   catalogueChecks(checks, root);
   profileChecks(checks, root);
+  skillBindingChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

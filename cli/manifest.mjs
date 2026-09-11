@@ -190,6 +190,10 @@ export const PROJECT_FILES = {
   testingConfig: '.sdlc/testing.json',
   learningConfig: '.sdlc/learning.json',
   docsConfig: '.sdlc/docs.json',
+  // Which skill runs which step, when the project does not want the engine's default (E6). Absent is
+  // the normal case and means "every step uses the skill the catalogue names" — like design.json,
+  // which is absent on a markdown-only project.
+  skillsConfig: '.sdlc/skills.json',
   version: '.sdlc/cli-version.json',
 };
 
