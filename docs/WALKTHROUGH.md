@@ -144,6 +144,10 @@ Build by hand"** below.
 - **`yad epic new <slug>`** — start an epic by writing its step chain from a lifecycle profile
   (`--profile classic|analysis-first`, `--type feature|chore`), plus its empty ledgers. It writes no
   `epic.md`, no branch and no commit, and refuses an epic that already has a chain.
+- **`yad skill list`** — which skill runs which lifecycle step, and whether that answer is your
+  project's choice or the engine's default. `yad skill bind <step> <skill>` records your own in
+  `.sdlc/skills.json`; pass several and they run as a chain, in order, each costing another model run.
+  `yad skill unbind <step>` goes back to the default.
 - **`yad migrate`** — read-only preview of the state files this release would rewrite, and why. Run it
   after upgrading to a release whose notes mention a file-shape change; `--apply` makes the change,
   keeping a `<file>.yad-orig` copy of everything it touches. Running it twice is safe.

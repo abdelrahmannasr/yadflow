@@ -4,6 +4,11 @@ The CLI **installs and wires** the module; the skills below are the **agents you
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
 directly. Each skill stops at a gate and never auto-advances unless a step has *earned* automation.
 
+**These are the defaults, not a fixed wiring.** Which skill runs a lifecycle step is a project
+setting: `yad skill bind <step> <skill>` records your own in `.sdlc/skills.json`, and `yad next` names
+that one from then on. Several skills on one step run as a chain, in order. See
+[choosing the skill for a step](CLI.md#choosing-the-skill-for-a-step).
+
 For the big-picture concepts see the [README](../README.md); for the step-by-step path see
 [`WALKTHROUGH.md`](WALKTHROUGH.md) or the [team guide](../TEAM-GUIDE.md). A condensed "when do I reach
 for it" table is in the [team guide §11](../TEAM-GUIDE.md).

@@ -20,6 +20,7 @@ no clone needed.
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
 | `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first` (default `classic`) — the `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `blocked`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script. It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-discovery` and `yad-change` still write one, because the engine deliberately seeds neither. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
+| `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step, what runs it, and whether that answer is your project's or the engine's (`--json` for a script). `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A review gate is refused (`yad gate` drives those, not a skill); a step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct, and never overwrites a managed file reported as `modified`. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. A gate script or CI file a newer release **adds** to a repo's wiring is installed on every repo that is already wired (reported as `new`); a wired file you deleted on purpose stays deleted (the provenance record proves yad wrote it — on a repo wired before that record existed, 3.16.0, the first update re-adds such a file once; delete it again and it is recorded and stays gone), and a repo with none of its wiring is left for `yad check --fix`. A managed file you edited is reported and **left alone**; `--overwrite-local` replaces it after saving a `<file>.yad-orig` backup. |
@@ -85,7 +86,12 @@ Each action carries `epicId`, `kind`
 `status`, `artifact`, `skill`, `command`, `pr`, `parallel`, `builds` (the per-story/per-repo lanes)
 `why`, and `lineageKind` — the work-item type (`feature|change|defect|hotfix|chore`). That key keeps
 its older name on purpose: the golden compatibility test deep-equals this output, and a deep-equal
-breaks on an added key as hard as on a renamed one. For the same reason the grouping `theme` is **not**
+breaks on an added key as hard as on a renamed one.
+
+`skill` is the **first** skill that runs the step, and it is always a single name. A step bound to
+several ([below](#choosing-the-skill-for-a-step)) carries a `skills` array beside it holding the whole
+chain in order. That key appears **only** when there is more than one, for the deep-equal reason
+above — a project that binds nothing emits exactly the JSON it always did. For the same reason the grouping `theme` is **not**
 here: `yad next` prints it for a person to read, and a machine reads it from `yad thread --json`.
 `--all` is implied — the array always carries every epic. Exit codes are
 identical to the prose path, and the prose path itself is unchanged.
@@ -241,7 +247,9 @@ artifact or reviews one, which file it produces, which skill runs it, and which 
 gates. Before this there was no single answer — the phase came from one table, the skill from another,
 and the artifact only from the chain a skill hand-wrote into your project.
 
-You do not interact with the catalogue and there is nothing to configure. It matters for two reasons.
+You do not edit the catalogue. The one part of it you can change is **which skill runs a step** — that
+is a project setting, not a fact about the lifecycle, and it lives in a file: see
+[choosing the skill for a step](#choosing-the-skill-for-a-step). The rest matters for two reasons.
 
 **Your file wins.** When your `state.json` describes a step differently from the catalogue, nothing is
 rewritten. A project may run a chain the tool does not know, and leaving a step out is normal — not
@@ -289,6 +297,53 @@ the steps says which route it is on **now**, and `yad doctor` compares the two:
 still `classic`. What takes an epic off its route is a step no route has, or two steps in the wrong
 order. `yad doctor` reports that as `step:off-route`, because the guidance command reads the chain in
 the order it is written: off the route, it names whatever sits next rather than what comes next.
+
+## Choosing the skill for a step
+
+The step catalogue names a skill for every step it runs: `yad-architecture` writes the architecture,
+`yad-stories` writes the stories. Those are **defaults**, not the only possible answer. Your project
+picks its own in `.sdlc/skills.json`:
+
+```jsonc
+{
+  "schemaVersion": 6,
+  "steps": {
+    "architecture": "our-architecture-skill",
+    "stories": ["shape-the-stories", "yad-stories"]
+  }
+}
+```
+
+The easiest way to write it is the command, which stamps the file and checks what it can:
+
+```bash
+yad skill list                                   # what runs each step, and whose choice that is
+yad skill bind architecture our-architecture-skill
+yad skill bind stories shape-the-stories yad-stories
+yad skill unbind architecture                    # back to the engine's default
+```
+
+**Several skills on one step are a chain, never a contest.** They run in the order you wrote them,
+each one seeing what the one before it produced, and the last output is the artifact. There is no
+"run three and pick the best": picking needs a judge, which is either a person reading three
+architectures or an AI deciding for you, and neither belongs inside a tool whose job is the audit
+trail. Every extra skill is another model run and costs more, so `yad skill bind` and `yad next` both
+say so when a step has more than one.
+
+**Your file wins, and `yad doctor` only reports.** Nothing here checks that a skill exists — the engine
+cannot know which skills your team installed, and binding one it has never heard of is the point. What
+it does report, in the `project` section, is a line that will never do anything:
+
+| Check | Fires when |
+|---|---|
+| `skills` (fail) | the file does not parse, or `steps` is not a JSON object |
+| `skills` (warn, `YAD-CFG-006`) | a value is not a skill name — an empty string, a number, an empty list |
+| `skills:unknown-step` | the step id is one this release does not run, so nothing will look the binding up |
+| `skills:review-step` | the step is a **review gate**, which `yad gate` drives — no skill ever runs it |
+
+Review gates are the one thing `yad skill bind` refuses outright rather than warning about, because a
+binding on one would record a decision that never happens. Bind the step being reviewed instead:
+`architecture`, not `architecture-review`.
 
 ## Grouping: the `theme` tag
 
