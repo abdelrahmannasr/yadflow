@@ -10,6 +10,7 @@ import {
   workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter, themeOf, themeKey,
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
+  LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, SKIPPABLE_STEPS, optionalStepsOf,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -538,7 +539,7 @@ test('the catalogue is self-consistent — every row answers for itself', () => 
     assert.ok(phaseIds.has(r.phase), `${r.id}: phase '${r.phase}' is not one of the six`);
     assert.ok(['author', 'review'].includes(r.kind), `${r.id}: kind '${r.kind}'`);
     assert.ok(Array.isArray(r.risk_tags), `${r.id}: risk_tags must be a list`);
-    assert.ok(['feature', 'discovery'].includes(r.chain), `${r.id}: chain '${r.chain}'`);
+    assert.ok(['feature', 'product'].includes(r.level), `${r.id}: level '${r.level}'`);
     // An author step is something a person or agent RUNS, so it must say what runs it.
     if (r.kind === 'author') assert.ok(r.skill, `${r.id}: an author step with no skill cannot be run`);
     // A Shape step writes a file into the epic directory, and its gate hashes that file. A BUILD step
@@ -630,6 +631,124 @@ test('a gate finds its author step through the catalogue, and engineer-review ga
   assert.equal(authorStepFor(bad, { id: 'checks-review' }), null);
   const alsoBad = chain(['epic-review', 'epic-review-review']);
   assert.equal(authorStepFor(alsoBad, { id: 'epic-review-review' }), null, 'a gate does not gate a gate');
+});
+
+// ---- lifecycle profiles (E5) ---------------------------------------------------------------------
+
+// The three chains five skill files seed by hand today, written out verbatim. If E5 has described
+// them wrongly, every assertion below is measuring the wrong thing — so they are spelled out here
+// rather than derived from the same code under test.
+const CLASSIC_10 = ['epic', 'epic-review', 'architecture', 'architecture-review',
+  'ui-design', 'ui-design-review', 'stories', 'stories-review', 'test-cases', 'test-cases-review'];
+const ANALYSIS_12 = ['analysis', 'analysis-review', ...CLASSIC_10];
+const DISCOVERY_2 = ['discovery', 'discovery-review'];
+
+test('the profiles are the chains the skills already seed, step for step', () => {
+  assert.deepEqual(profileSteps('classic'), CLASSIC_10);
+  assert.deepEqual(profileSteps('analysis-first'), ANALYSIS_12);
+  assert.deepEqual(profileSteps('discovery'), DISCOVERY_2);
+  assert.deepEqual(LIFECYCLE_PROFILES.map((p) => p.id), ['classic', 'analysis-first', 'discovery']);
+  assert.equal(lifecycleProfile('nonsense'), null, 'a route this release does not carry is null, not a guess');
+  assert.deepEqual(profileSteps('nonsense'), []);
+});
+
+test('every profile is self-consistent — its steps exist and its gates follow their authors', () => {
+  const phaseIds = new Set(PHASES.map((p) => p.id));
+  for (const p of LIFECYCLE_PROFILES) {
+    const rows = lifecycleProfile(p.id).rows;
+    assert.ok(rows.length, `${p.id}: a route with no steps is not a route`);
+    assert.equal(new Set(rows.map((r) => r.id)).size, rows.length, `${p.id}: a step twice in one route`);
+    for (const [i, r] of rows.entries()) {
+      const def = stepDef(r.id);
+      assert.ok(def, `${p.id}: '${r.id}' is not in the step catalogue`);
+      assert.ok(phaseIds.has(def.phase), `${p.id}: '${r.id}' has no phase`);
+      assert.equal(def.level, p.level, `${p.id}: '${r.id}' is ${def.level}-level, the route is ${p.level}`);
+      // A gate must come straight after the step it reviews. `skipStep` refuses a chain whose
+      // optional step has no paired gate, and `closeAuthorStep` reaches backwards for it.
+      if (def.reviews) {
+        assert.equal(rows[i - 1]?.id, def.reviews, `${p.id}: '${r.id}' does not follow '${def.reviews}'`);
+        assert.equal(r.optional, rows[i - 1].optional, `${p.id}: '${r.id}' and its step disagree on optional`);
+      }
+      // Nothing in Build belongs in a Shape chain: Build runs per story per repo in `build-state/`.
+      assert.notEqual(def.phase, 'build', `${p.id}: '${r.id}' is a Build step`);
+    }
+  }
+});
+
+test('SKIPPABLE_STEPS is a view of EVERY profile, not a list beside them', () => {
+  // Across every route, not just `classic`: a route's own `optional` marks would otherwise sit there
+  // unread, which is the same drift one level down from the one this derivation exists to stop.
+  assert.deepEqual([...SKIPPABLE_STEPS], optionalStepsOf());
+  // The assertion that actually separates "every route" from "just the first one". With today's data
+  // both rules give `['ui-design']`, so only synthetic routes that DISAGREE can tell them apart.
+  assert.deepEqual(optionalStepsOf([
+    { id: 'a', steps: ['epic', { id: 'ui-design', optional: true }, 'ui-design-review'] },
+    { id: 'b', steps: ['epic', { id: 'architecture', optional: true }, 'architecture-review'] },
+  ]), ['ui-design', 'architecture'], 'a step optional in a LATER route counts too');
+  assert.deepEqual(optionalStepsOf([{ id: 'a', steps: ['epic'] }]), [], 'a route with nothing optional');
+  // The gate is the author step's pair, never listed on its own — `isSkippableStep` adds it back.
+  assert.deepEqual(optionalStepsOf([
+    { id: 'a', steps: [{ id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true }] },
+  ]), ['ui-design']);
+  // …and unchanged from before E5. A derivation that agrees with itself while marking `architecture`
+  // optional would pass the assertion above and let a real gate be skipped with a reason.
+  assert.deepEqual([...SKIPPABLE_STEPS], ['ui-design']);
+});
+
+test('a profile carries no per-step field nothing reads', () => {
+  // `optional` is here because `SKIPPABLE_STEPS` reads it. Nothing else is, and that is the point: the
+  // parallel `test-cases` track is decided by `advanceState` from the step id, so recording it in the
+  // profile as well would be a second copy of a rule living elsewhere — free to drift with every test
+  // still green, which is exactly what this file exists to prevent.
+  const READ_FIELDS = new Set(['id', 'optional']);
+  for (const p of LIFECYCLE_PROFILES) {
+    for (const row of lifecycleProfile(p.id).rows) {
+      for (const k of Object.keys(row)) {
+        assert.ok(READ_FIELDS.has(k), `${p.id}/${row.id}: '${k}' is on a profile row and nothing reads it`);
+      }
+    }
+  }
+});
+
+test('matchLifecycleProfile: a chain says which route it is on, and says nothing when it is on none', () => {
+  const S = (ids) => ids.map((id) => ({ id }));
+  assert.equal(matchLifecycleProfile(S(CLASSIC_10)), 'classic');
+  assert.equal(matchLifecycleProfile(S(ANALYSIS_12)), 'analysis-first');
+  assert.equal(matchLifecycleProfile(S(DISCOVERY_2)), 'discovery');
+  // Leaving a step out is normal — an epic with no screens drops `ui-design` and is still classic.
+  assert.equal(matchLifecycleProfile(S(CLASSIC_10.filter((x) => !x.startsWith('ui-design')))), 'classic');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review'])), 'classic', 'a chain part-way through');
+  // The tie that length breaks: the 10-step chain is also a correctly ordered subset of the 12-step
+  // one. Without the shortest-wins rule every classic epic would read as an analysis-first epic that
+  // skipped its first two steps — and E17 would then seed the wrong route from the wrong answer.
+  //
+  // Asserted against a REVERSED list, because with today's three routes the shortest fit is also the
+  // one declared first: matching on declaration order gives the same answers, so a plain call here
+  // proves nothing. E40 adds shorter routes declared last, and this is the assertion that will still
+  // be true then.
+  // A caller-supplied route must be MATCHED, not silently dropped. The seam reads the rows off the
+  // profile it is handed; resolving `p.id` through the module's own index instead would come back
+  // empty for a route that is not in it, the route would never fit, and the answer would be a wrong
+  // one with no error. E40 adds the chore and spike lanes, and this is the shape of that call.
+  const chore = { id: 'chore-lane', level: 'feature', steps: ['epic', 'epic-review'] };
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), [...LIFECYCLE_PROFILES, chore]), 'chore-lane',
+    'a two-step route beats classic on the same two steps');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'stories']), [...LIFECYCLE_PROFILES, chore]), 'classic',
+    'and loses as soon as the chain goes past it');
+
+  const reversed = [...LIFECYCLE_PROFILES].reverse();
+  assert.equal(matchLifecycleProfile(S(CLASSIC_10), reversed), 'classic');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), reversed), 'classic');
+  assert.equal(matchLifecycleProfile(S(ANALYSIS_12), reversed), 'analysis-first',
+    'the longer route still wins when it is the only one that fits');
+  // Out of order is a different thing from missing, and is not a route.
+  assert.equal(matchLifecycleProfile(S(['stories', 'epic'])), null);
+  assert.equal(matchLifecycleProfile(S(['epic', 'analysis'])), null, 'analysis comes BEFORE epic or not at all');
+  assert.equal(matchLifecycleProfile(S(['epic', 'discovery'])), null, 'the front-zero is not on the Epic ladder');
+  assert.equal(matchLifecycleProfile(S(['epic', 'feasibility'])), null, 'a step no route has');
+  assert.equal(matchLifecycleProfile([]), null);
+  assert.equal(matchLifecycleProfile(null), null);
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic'])), null, 'the same step twice is not in order');
 });
 
 // ---- the six phases (E22) ------------------------------------------------------------------------
@@ -760,6 +879,7 @@ test('the phase table in skills/sdlc/config.yaml agrees with the code, row for r
     .split(',').map((x) => x.trim()).filter(Boolean);
   assert.deepEqual(listOf('sentinels'), SENTINELS, 'the sentinel list drifted from the code');
   assert.deepEqual(listOf('parts'), [...new Set(PHASES.map((p) => p.part))], 'the parts list drifted');
+  assert.deepEqual(listOf('profiles'), LIFECYCLE_PROFILES.map((x) => x.id), 'the profile list drifted');
   for (const sent of SENTINELS) assert.equal(stepPhase(sent), null, `${sent} is a sentinel but has a phase`);
 });
 

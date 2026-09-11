@@ -5932,12 +5932,13 @@ test('doctor catalogue: a step the catalogue does not carry is left to phase:unk
   assert.deepEqual(checks, []);
 });
 
-test('doctor catalogue: only the ARTIFACT comparison skips a Build id, and the rest still runs', async () => {
-  // Build runs per story per code repo out of `build-state/`, so a Build row carries no epic-level
-  // artifact and there is nothing to compare — an artifact on one is not reported. The kind check is
-  // a different question and still applies: `implement` written as a gate is wrong wherever it sits.
-  // Pinned in BOTH directions so the silence is a decision rather than a side effect of one guard.
-  const quiet = await catalogueChecksOn({
+test('doctor catalogue: a Build id in an epic chain is off-route, and its artifact is still not compared', async () => {
+  // E4 left this case alone — "inventing a rule for it here would be guessing". E5 supplies the rule
+  // rather than inventing one: Build runs per story per code repo out of `build-state/`, so no
+  // lifecycle profile contains a Build step and a chain holding one is on no route. That is reported
+  // by `step:off-route`, once, and not by the artifact comparison — a Build row carries no
+  // epic-level artifact, so there is still nothing there to compare.
+  const build = await catalogueChecksOn({
     'EP-x': {
       fm: 'kind: feature',
       state: chainState([
@@ -5946,7 +5947,7 @@ test('doctor catalogue: only the ARTIFACT comparison skips a Build id, and the r
       ]),
     },
   });
-  assert.deepEqual(quiet, []);
+  assert.deepEqual(build.map((c) => c.id), ['step:off-route']);
 
   const loud = await catalogueChecksOn({
     'EP-y': {
@@ -5956,6 +5957,72 @@ test('doctor catalogue: only the ARTIFACT comparison skips a Build id, and the r
   });
   assert.equal(loud.find((x) => x.id === 'step:kind')?.status, 'warn');
   assert.equal(loud.find((x) => x.id === 'step:no-artifact'), undefined, 'a Build step names no artifact by design');
+});
+
+test('doctor catalogue: a chain that matches no route is reported, and a short one is not', async () => {
+  // Nothing on disk says which route an epic walks — E17 adds that field — so it is worked out from
+  // the chain. Leaving a step out is fine; out of order is not, because `yad next` reads the chain in
+  // the order it is written and would name whatever sits next rather than what comes next.
+  const checks = await catalogueChecksOn({
+    'EP-short': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done' },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'todo' },
+      ]),
+    },
+    'EP-jumbled': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'todo' },
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'todo' },
+      ]),
+    },
+  });
+  const c = checks.find((x) => x.id === 'step:off-route');
+  assert.equal(c.status, 'warn');
+  assert.equal(c.section, 'shape');
+  assert.match(c.message, /EP-jumbled: `stories → epic`/);
+  assert.equal(/EP-short/.test(c.message), false, 'a chain missing steps is still on its route');
+  assert.match(c.hint, /classic.*10-step/);
+  // Both remedies, because reordering cannot fix every cause. A step no route has — a Build id, say —
+  // has to be removed, and a hint offering only "reorder" sends the reader in a circle.
+  assert.match(c.hint, /REMOVE any step no route has/);
+  assert.match(c.hint, /Build runs per story per repo/);
+  assert.equal(checks.length, 1);
+});
+
+test('doctor catalogue: a chain carrying an UNKNOWN step is left to phase:unknown, not called off-route', async () => {
+  // A project may hold a chain from a newer release. Reporting it here as well would say the same
+  // thing twice in the same section, and the off-route wording would be wrong: the route is not
+  // broken, it is one this release has not got.
+  const checks = await catalogueChecksOn({
+    'EP-x': {
+      fm: 'kind: feature',
+      state: chainState([
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+        { id: 'feasibility', type: 'author', artifact: 'feasibility.md', status: 'todo' },
+      ]),
+    },
+  });
+  assert.deepEqual(checks, []);
+});
+
+test('doctor catalogue: the discovery front-zero is on its own route and is not reported', async () => {
+  const checks = await catalogueChecksOn({
+    'EP-discovery': {
+      fm: null,
+      state: {
+        schemaVersion: 5, kind: 'discovery', currentStep: 'discovery-review',
+        steps: [
+          { id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done' },
+          { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'in_review' },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(checks, []);
 });
 
 test('doctor catalogue: the section is wired into collectDoctor, not just exported', async () => {

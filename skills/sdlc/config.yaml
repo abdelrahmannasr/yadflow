@@ -51,6 +51,14 @@ output_folder: "{project-root}/_bmad-output"
 # hand-write their `state.json` seed. E5 makes a profile seed the chain from the catalogue instead.
 lifecycle:
   parts: [Shape, Build, Run]
+  # Lifecycle PROFILES (E5) — the route an epic takes through the steps, defined in code as
+  # `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`). All three are routes the skills already seeded by
+  # hand: `classic` (the 10-step chain, `epic` first — yad-epic / yad-stub / yad-change),
+  # `analysis-first` (the 12-step chain, `analysis` before `epic` — yad-analysis) and `discovery`
+  # (the product front-zero — yad-discovery). Nothing on disk records which one an epic is on; it is
+  # matched from the chain, and the `state.json` field arrives with `yad epic new` (E17). NOT the
+  # `hub.json` `profile`, which is the unrelated setup record { codebase, repo_layout, team_size }.
+  profiles: [classic, analysis-first, discovery]
   phases:
     - { id: discover, name: Discover, part: Shape, built: true,  steps: [discovery, analysis, epic] }
     - { id: design,   name: Design,   part: Shape, built: true,  steps: [architecture, ui-design] }

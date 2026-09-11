@@ -65,13 +65,40 @@ The catalogue is code. Nothing about it is written into `state.json`, so no file
 
 **When a chain disagrees with the catalogue, the chain wins.** The seed below is still hand-written by
 this skill, a project may run a chain from a newer release, and leaving a step out is normal — not
-every epic has screens. `yad doctor` reports four disagreements it can see and rewrites nothing:
+every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
 `step:artifact` (a step naming a different file from the one the gate hashes — different spellings of
 the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one gate),
 `step:no-artifact` (a step naming no file at all, the one case that stops `yad gate` outright),
-`step:kind` (a step on the wrong side of the author / review line) and `step:orphan-gate` (a gate whose
-step is not in the chain, so nothing tells anyone to write what it reviews). An id the catalogue does
-not carry is left to `phase:unknown`.
+`step:kind` (a step on the wrong side of the author / review line), `step:orphan-gate` (a gate whose
+step is not in the chain, so nothing tells anyone to write what it reviews) and `step:off-route` (a
+chain matching no lifecycle profile — see below). An id the catalogue does not carry is left to
+`phase:unknown`.
+
+### Lifecycle profiles
+
+A **profile** is a named, ordered chain of catalogue steps — the route an epic takes. Three are
+defined, in `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`, E5), and all three are routes the skills
+already seeded by hand:
+
+| Profile | Steps | Seeded by |
+|---|---|---|
+| `classic` | the 10-step chain, `epic` first | `yad-epic`, `yad-stub`, `yad-change` |
+| `analysis-first` | the 12-step chain, `analysis` before `epic` | `yad-analysis` |
+| `discovery` | `discovery` · `discovery-review` | `yad-discovery` |
+
+`ui-design` and its gate are the optional pair in both feature routes — `SKIPPABLE_STEPS` is now a
+view of the profiles rather than a list beside them. The parallel, non-blocking `test-cases` track is
+NOT recorded in the profile: `advanceState` still decides it from the step id, and a second copy of
+that rule sitting unread in the profile would be free to drift.
+
+**Nothing records which profile an epic is on.** It is worked out by matching the chain
+(`matchLifecycleProfile`). A chain missing steps still matches — dropping `ui-design` is normal — while
+a step no route has, or two out of order, matches nothing and `yad doctor` reports `step:off-route`.
+The `state.json` field that names the profile arrives with `yad epic new` (E17), as a shape change with
+its own migration.
+
+> **Two different things are called a profile.** This one is the lifecycle route. `hub.json.profile` is
+> the unrelated setup record `yad setup` writes: `{ codebase, repo_layout, team_size }`.
 
 ### The six phases
 
