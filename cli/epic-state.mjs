@@ -1121,7 +1121,10 @@ const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.i
 // The catalogue's own answer for a step, Shape or Build. One lookup, because a step id belongs to
 // exactly one of the two tables (`catalogueSkills` splits them on the same `phase === 'build'` rule),
 // and a caller asking "which skill runs `implement`" should not have to know which half it is in.
-const CATALOGUE_SKILL = { ...STEP_SKILL, ...BUILD_STEP_SKILL };
+// `__proto__: null` because this is looked up by a step id read out of a project's `state.json`, and
+// on a normal object literal `Object.prototype` answers for `constructor`, `toString` and friends. A
+// chain carrying a step called `constructor` would otherwise resolve its "skill" to a function.
+const CATALOGUE_SKILL = { __proto__: null, ...STEP_SKILL, ...BUILD_STEP_SKILL };
 
 // Read a raw parsed `.sdlc/skills.json` into `{ steps: { <id>: [skill, …] } }`.
 //
@@ -1130,15 +1133,25 @@ const CATALOGUE_SKILL = { ...STEP_SKILL, ...BUILD_STEP_SKILL };
 // list, a number, a nested object — each simply leaves that step on its catalogue default, and
 // `yad doctor` is what tells the user their line did nothing. A command that refuses to say what to do
 // next because a config file has a stray comma would be the worse failure.
+// Written with `defineProperty`, not `out[id] = …`. A plain assignment of the key `__proto__` sets
+// the object's PROTOTYPE instead of adding a key, so a binding spelled that way would vanish
+// completely — unlisted by `yad skill list` and unreported by all three doctor checks, which is
+// exactly the invisible binding those checks exist to catch. The object keeps its normal prototype;
+// `stepSkills` guards the LOOKUP side with `Object.hasOwn` instead.
+//
+// Consecutive duplicates are collapsed, because running the same skill twice in a row means nothing
+// and the two surfaces would disagree about it: the rendered Build chain folds them (that is what
+// `dedupeConsecutive` has always done for spec+tasks) while the cost note counted them, so a step
+// bound to `["a", "a"]` would be billed for two runs and shown as one.
 export function normalizeBindings(raw) {
   const out = {};
   const steps = isPlainObject(raw) ? raw.steps : null;
   if (isPlainObject(steps)) {
     for (const [id, value] of Object.entries(steps)) {
-      const list = (Array.isArray(value) ? value : [value])
+      const list = dedupeConsecutive((Array.isArray(value) ? value : [value])
         .filter((s) => typeof s === 'string' && s.trim())
-        .map((s) => s.trim());
-      if (list.length) out[id] = list;
+        .map((s) => s.trim()));
+      if (list.length) Object.defineProperty(out, id, { value: list, enumerable: true, writable: true, configurable: true });
     }
   }
   return { steps: out };
@@ -1156,10 +1169,15 @@ export const loadSkillBindings = (root) =>
 // disagrees with the catalogue. A resolver that opened the file itself would be untestable against
 // any project but the one the test happens to be standing in.
 export function stepSkills(stepId, bindings = null) {
-  const bound = bindings?.steps?.[stepId];
-  if (bound?.length) return [...bound];
+  // `Object.hasOwn`, not a bare lookup. The id comes out of a project's `state.json`, and on a plain
+  // object `Object.prototype` answers for `constructor`, `toString` and friends — so a chain carrying
+  // a step called `constructor` resolved its "skill" to a function, and `yad next` threw trying to
+  // spread it. The catalogue map below is `__proto__: null` for the same reason.
+  const steps = bindings?.steps;
+  const bound = isPlainObject(steps) && Object.hasOwn(steps, stepId) ? steps[stepId] : null;
+  if (Array.isArray(bound) && bound.length) return [...bound];
   const fallback = CATALOGUE_SKILL[stepId];
-  return fallback ? [fallback] : [];
+  return typeof fallback === 'string' ? [fallback] : [];
 }
 
 // The two keys every action object carries for its skill, from one resolved list.

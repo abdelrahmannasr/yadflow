@@ -194,6 +194,9 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   hand(stub
     ? `every step is blocked behind \`${state.currentStep}\` — document the code with the ${skill} skill, then \`yad-backfill promote\` to wake the chain. Defects can thread off it now`
     : `${first.id} is open${skill ? ` — run the ${skills.join(' skill, then the ')} skill to author ${first.artifact}` : ''}`);
+  // Closed decision 7: every surface that prints a chain of more than one says what the extra runs
+  // cost. This one prints a chain too.
+  if (skills.length > 1) info(`${skills.length} skills run for this step, one after another — each one costs tokens`);
   // Only worth saying when there is no header yet. When one exists it is where the type came FROM, so
   // telling its author to go and write what they already wrote reads as the command not having looked.
   if (!fs.existsSync(mdPath) && !stub) {
@@ -201,7 +204,7 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
     // `lineage-check.sh` inside the user's own repo, which is refreshed by a different command
     // (`yad update`) with no ordering against this one. A header carrying only `type:` reads to that
     // gate as an epic with no type at all.
-    info(`epic.md is authored by the skill above, not by this command. Give it \`kind: ${type}\` and \`type: ${type}\` so the ledger and the header agree.`);
+    info(`epic.md is authored by ${skills.length > 1 ? 'those skills' : 'that skill'}, not by this command. Give it \`kind: ${type}\` and \`type: ${type}\` so the ledger and the header agree.`);
   }
   // Nothing was committed here, and on a verified Product the seed HAS to ride the first review PR:
   // `ledger-guard` exempts a new epic's ledger only while it is absent from the base ref (creation,

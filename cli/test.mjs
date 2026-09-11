@@ -10725,7 +10725,7 @@ test('CLI: `--stub` reaches the command through the arg parser', () => {
 // catalogue — a test whose binding happens to match the default would pass against a resolver that
 // ignores the file completely.
 const {
-  normalizeBindings, loadSkillBindings, stepSkills, skillFields,
+  normalizeBindings, loadSkillBindings, stepSkills, skillFields, dedupeConsecutive: dedupe,
   nextAction: nextActionE6, buildNextForRepo: buildNextE6,
 } = await import('./epic-state.mjs');
 
@@ -10748,6 +10748,18 @@ test('a binding is read as a list whatever it was written as, and junk is droppe
   }
   // A list holding one usable name beside junk keeps the usable one rather than dropping the line.
   assert.deepEqual(normalizeBindings({ steps: { epic: [7, 'mine', ''] } }).steps, { epic: ['mine'] });
+
+  // Consecutive duplicates collapse. Running the same skill twice in a row means nothing, and the two
+  // surfaces disagreed about it: the rendered Build chain folds them, the cost note counted them.
+  assert.deepEqual(normalizeBindings({ steps: { epic: ['a', 'a', 'b', 'b', 'a'] } }).steps, { epic: ['a', 'b', 'a'] });
+
+  // `__proto__` is a real key here, not the object's prototype. Assigned the plain way it would set
+  // the prototype instead, and the binding would vanish — unlisted by `yad skill list` and unreported
+  // by every doctor check, which is exactly the invisible line those checks exist to catch.
+  const evil = normalizeBindings(JSON.parse('{"steps":{"__proto__":"nasty","epic":"ok"}}'));
+  assert.deepEqual(Object.keys(evil.steps).sort(), ['__proto__', 'epic']);
+  assert.deepEqual(stepSkills('__proto__', evil), ['nasty']);
+  assert.equal(Object.getPrototypeOf({}), Object.prototype, 'the global prototype was touched');
 });
 
 test('stepSkills asks the project first and falls back to the catalogue', () => {
@@ -10766,6 +10778,18 @@ test('stepSkills asks the project first and falls back to the catalogue', () => 
   // …but a project may bind a step this engine does not know (rule 3: the file wins), and then the
   // binding is what comes back.
   assert.deepEqual(stepSkills('release', { steps: { release: ['ship-it'] } }), ['ship-it']);
+  // A step id read out of a project's `state.json` must never reach `Object.prototype`. Before the
+  // guard, `constructor` made `yad next` throw ("bound is not iterable") and `toString` printed a
+  // function body as the skill to invoke.
+  for (const id of ['constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
+    assert.deepEqual(stepSkills(id, bound), [], `${id} resolved through the prototype chain`);
+    assert.deepEqual(stepSkills(id, null), [], `${id} resolved through the catalogue's prototype`);
+  }
+  // Only OWN data counts. An inherited key is not this project's binding, and E51 layers per-profile
+  // defaults under the project's own — layering them by prototype chain must not work by accident,
+  // because then `source: 'project'` in `yad skill list` would be a lie about half the rows.
+  assert.deepEqual(stepSkills('epic', { steps: Object.create({ epic: ['inherited'] }) }), ['yad-epic']);
+
   // The returned list is a copy: a caller that sorts or splices it must not edit the project's file
   // in memory for everything that reads it afterwards.
   const list = stepSkills('epic', bound);
@@ -10868,6 +10892,15 @@ test('a Build lane names the bound skill, and its remaining chain does not repea
   assert.deepEqual(buildNextE6({ currentStep: 'spec', steps: [
     { id: 'spec', status: 'in_progress' }, { id: 'tasks', status: 'todo' }, { id: 'implement', status: 'todo' },
   ] }).chain, ['yad-spec', 'yad-implement', 'yad-checks', 'yad-engineer-review']);
+
+  // A binding handed straight to the resolver, NOT through `normalizeBindings` — the two are separate
+  // code paths, and the renderer must not assume the list it got was already folded. `chain` folds
+  // consecutive duplicates, so this step has two entries in its own list and one in the chain: the
+  // renderer drops its own by folding the same way, never by counting.
+  const raw = buildNextE6(repo, { bindings: { steps: { implement: ['twice', 'twice'] } } });
+  assert.deepEqual(raw.chain, ['twice', 'yad-checks', 'yad-engineer-review']);
+  assert.deepEqual(raw.chain.slice(dedupe(raw.skills || [raw.skill]).length), ['yad-checks', 'yad-engineer-review'],
+    'dropping by the raw count would swallow the next step');
 });
 
 // A bare project with the two files that make `yad doctor` and `yad migrate` recognise it.
@@ -10920,12 +10953,13 @@ test('yad next prints a bound chain, and says what the extra skills cost', async
     assert.doesNotMatch(b, /then → build-b/, 'the lane repeated a skill it had just named');
     assert.match(b, /2 skills run for this step/);
 
-    // The same lane bound to ONE skill twice. `chain` collapses consecutive duplicates, so this step
-    // has two entries in its own list and one in the chain — dropping by the raw count would swallow
-    // the next step's skill and tell the user Build ends one step early.
+    // A step bound to ONE skill twice comes back collapsed, so the line reads once and is billed once.
     fs.writeFileSync(path.join(T, '.sdlc/skills.json'), JSON.stringify({ steps: { implement: ['twice', 'twice'] } }));
     const d = await grab(() => runNext(T, { epic: 'EP-b' }));
-    assert.match(d, /then → yad-checks → yad-engineer-review/, 'a step bound to one skill twice lost the next step');
+    assert.match(d, /invoke the twice skill/);
+    assert.doesNotMatch(d, /then twice/, 'the same skill was named twice in a row');
+    assert.doesNotMatch(d, /skills run for this step/, 'one skill was billed as a chain');
+    assert.match(d, /then → yad-checks → yad-engineer-review/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -10938,6 +10972,19 @@ test('`yad epic new` hands the first step to the skill the project bound, not th
     assert.equal(j.next, 'shape-it');
     assert.deepEqual(j.nextSkills, ['shape-it', 'yad-epic']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  // …and the prose path says what the extra run costs. Every surface that prints a chain of more than
+  // one says so; this one prints a chain too.
+  const P = skillProject({ '.sdlc/skills.json': { steps: { epic: ['shape-it', 'yad-epic'] } } });
+  try {
+    const out = await grab(() => runEpicNew(P, { slug: 'demo', today: '2026-01-02' }));
+    assert.match(out, /run the shape-it skill, then the yad-epic skill/);
+    assert.match(out, /2 skills run for this step/);
+    assert.match(out, /authored by those skills/, 'two skills were named and then called "that skill"');
+    const single = await grab(() => runEpicNew(skillProject(), { slug: 'demo', today: '2026-01-02' }));
+    assert.doesNotMatch(single, /skills run for this step/);
+    assert.match(single, /authored by that skill/);
+  } finally { fs.rmSync(P, { recursive: true, force: true }); }
 
   // Unbound, the seed answer is the catalogue's and carries no chain key.
   const U = skillProject();
@@ -11001,10 +11048,15 @@ test('doctor reports a skill binding that does nothing, and corrects none of the
 
   // The happy summary counts the chains, because that is the line with a cost attached to it.
   const good = run({ steps: { epic: 'mine', stories: ['a', 'b'] } });
-  assert.deepEqual(ids(good), ['ok:skills']);
+  assert.deepEqual(ids(good), ['ok:skills:bound']);
   assert.match(good[0].message, /2 step\(s\) bound, 1 to more than one skill/);
   assert.doesNotMatch(run({ steps: { epic: 'mine' } })[0].message, /more than one/,
     'a single binding must not be described as a chain');
+
+  // A file with one good line and one broken one fires BOTH. They must not share an id: in prose that
+  // puts a green tick under the complaint, and a `--json` consumer keying by id loses the warning.
+  const both = run({ steps: { epic: '', stories: 'mine' } });
+  assert.deepEqual(ids(both).sort(), ['ok:skills:bound', 'warn:skills']);
 });
 
 // ---- `yad skill` — binding a step from the command line (E6) -------------------------------------
@@ -11034,6 +11086,44 @@ test('yad skill bind writes a stamped file, and one skill stays one string', () 
     // A second bind adds beside the first rather than replacing the document.
     grabSync(() => runSkillBind(T, { step: 'stories', skills: ['a', 'b'] }));
     assert.deepEqual(readSkillsFile(T).steps, { architecture: 'my-arch', stories: ['a', 'b'] });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad skill refuses to write over a file that does not parse', () => {
+  // `readRaw` is a read-modify-write on a file the docs tell people to hand-edit. Treating a broken
+  // one as empty — which is what the resolver does, deliberately, so `yad next` still answers — would
+  // rebuild the document from nothing and delete every binding it held, silently, with a green tick.
+  const broken = '{\n  "schemaVersion": 6,\n  "steps": { "epic": "mine", "architecture": "our-arch", }\n}\n';
+  const T = skillProject({ '.sdlc/skills.json': broken });
+  try {
+    for (const run of [() => runSkillBind(T, { step: 'stories', skills: ['x'] }), () => runSkillUnbind(T, { step: 'epic' })]) {
+      const { out, failed } = grabFailing(run);
+      assert.equal(failed, true);
+      assert.match(out, /does not parse/);
+      assert.match(out, /YAD-STATE-001/);
+      assert.equal(fs.readFileSync(path.join(T, '.sdlc/skills.json'), 'utf8'), broken, 'the bindings were rewritten away');
+    }
+    // `list` still answers — it only reads — but says the file is broken rather than quietly showing
+    // the defaults as if the project had bound nothing.
+    const listed = grabSync(() => runSkillList(T, {}));
+    assert.match(listed, /does not parse/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad skill bind stamps this engine\'s shape onto a hand-authored file', async () => {
+  // The module's whole reason for existing is that a file the engine never writes carries no shape and
+  // doctor then tells the user to migrate the config it just asked them to write. `readJSON`
+  // back-stamps an unstamped file as shape 1 (rule 1), so carrying that through would have written
+  // shape 1 — reintroducing the exact nag the command exists to prevent.
+  const { planMigration } = await import('./migrate.mjs');
+  const T = skillProject({ '.sdlc/skills.json': '{\n  "steps": { "epic": "mine" }\n}\n' });
+  try {
+    grabSync(() => runSkillBind(T, { step: 'stories', skills: ['my-stories'] }));
+    const file = readSkillsFile(T);
+    assert.equal(file.schemaVersion, ENGINE_SHAPE);
+    assert.deepEqual(file.steps, { epic: 'mine', stories: 'my-stories' });
+    const row = planMigration(T).rows.find((r) => r.file.endsWith('skills.json'));
+    assert.equal(row.action, 'unchanged', `yad migrate still wants to rewrite it: ${row.action}`);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -11122,6 +11212,20 @@ test('yad skill list says which answers are the project\'s and which are the eng
     assert.match(prose, /architecture/);
     assert.match(prose, /not a step this yadflow runs/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  // A line the file HAS but that names no skill is its own state: the step runs the engine's default,
+  // and without this it looks identical to a step the project never mentioned. That invisible line is
+  // what the listing exists to expose.
+  const I = skillProject({ '.sdlc/skills.json': { steps: { epic: '', stories: 'mine' } } });
+  try {
+    const rows = JSON.parse(grabSync(() => runSkillList(I, { json: true }))).steps;
+    const byId = Object.fromEntries(rows.map((r) => [r.step, r]));
+    assert.equal(byId.epic.source, 'ignored');
+    assert.deepEqual(byId.epic.skills, ['yad-epic'], 'the step still runs the engine default');
+    assert.equal(byId.stories.source, 'project');
+    assert.equal(byId.architecture.source, 'engine');
+    assert.match(grabSync(() => runSkillList(I, {})), /names no skill/);
+  } finally { fs.rmSync(I, { recursive: true, force: true }); }
 });
 
 test('CLI: `yad skill` reaches the command through the arg parser', () => {
@@ -11147,7 +11251,7 @@ test('doctor: the skills check is wired into collectDoctor, inside the project b
   });
   try {
     const checks = collectDoctor(T).checks;
-    const at = checks.findIndex((c) => c.id === 'skills');
+    const at = checks.findIndex((c) => c.id === 'skills:bound');
     assert.ok(at >= 0, 'the check is exported but never called');
     assert.equal(checks[at].section, 'project');
     // The renderer prints a section header every time the section CHANGES, so a `project` check
@@ -11163,6 +11267,22 @@ test('doctor: the skills check is wired into collectDoctor, inside the project b
       }
     }
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad setup hands off to the skill the project bound, not the catalogue default', async () => {
+  // `yad setup` re-runs on a project that already has a binding, so its "Next:" line must say what
+  // `yad next` and `yad skill list` say. It is a separate module from the driver and was missed once.
+  const { T } = scaffold();
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/skills.json'), JSON.stringify({ steps: { epic: 'ours' } }));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  let out;
+  try {
+    out = await captureConsole(() => runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] }));
+  } finally { delete process.env.SDLC_NONINTERACTIVE; }
+  assert.match(out.out, /author your first epic: run `ours`/);
+  assert.doesNotMatch(out.out, /author your first epic: run `yad-epic`/);
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('the prose lines that name a skill no action carries honour the binding too', async () => {

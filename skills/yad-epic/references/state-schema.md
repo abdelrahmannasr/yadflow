@@ -396,9 +396,11 @@ created when a story enters Build; all dials start `advance: human` (`automation
 `automation.default`).
 
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
-story/repo's `currentStep` into the next build sub-step (`spec`/`tasks` → `yad-spec`, `implement` →
-`yad-implement`, `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`) and prints it with
-the remaining chain and the step's advance dial — so Build is guided, not just hinted at.
+story/repo's `currentStep` into the next build sub-step and prints it with the remaining chain and the
+step's advance dial — so Build is guided, not just hinted at. The skill it names comes from
+`.sdlc/skills.json` when the project bound one (see "The one column a project overrides is the skill"
+above); unbound, the defaults are `spec`/`tasks` → `yad-spec`, `implement` → `yad-implement`,
+`checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`.
 
 ## `trust-log.json` (shard-then-fold)
 Append-only ledger, the Build analogue of `approvals.json`. **This is the evidence base** that

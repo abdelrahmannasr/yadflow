@@ -1054,6 +1054,46 @@ export function catalogueChecks(checks, root) {
 // and it already tells the user their chain is broken and how. Re-reporting the same epic here as
 // "the recorded route disagrees" would name the same fault twice with two different remedies, so this
 // check speaks only when the chain fits a route CLEANLY and it is a different one from the record.
+export function profileChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const unknown = [];
+  const disagree = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    // No key at all is the normal state for a chain that matches no route: `stampProfile` declines to
+    // invent one, and `step:off-route` is what reports that chain. Nothing to say here.
+    if (!isPlainObject(state) || !('profile' in state)) continue;
+    const recorded = state.profile;
+    if (!lifecycleProfile(recorded)) {
+      unknown.push(`${e}: \`${recorded === null ? 'null' : String(recorded)}\``);
+      continue;
+    }
+    const matched = matchLifecycleProfile(state.steps);
+    if (matched && matched !== recorded) {
+      disagree.push(`${e}: records \`${recorded}\`, its chain is \`${matched}\``);
+    }
+  }
+
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  if (unknown.length) {
+    check(
+      checks, 'profile:unknown', 'shape', 'warn',
+      `${unknown.length} epic(s) record a lifecycle profile nobody defined: ${some(unknown, 3)}`,
+      `a profile is one of ${LIFECYCLE_PROFILES.map((p) => p.id).join(' · ')}. An unrecognised value means nothing can say which route this epic is on, so every reader falls back to matching the chain — set \`profile\` in \`.sdlc/state.json\` to the route it walks, or delete the key and let it be derived`,
+    );
+  }
+  if (disagree.length) {
+    check(
+      checks, 'profile:disagree', 'shape', 'warn',
+      `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
+      'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
+    );
+  }
+}
+
 // `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
 // default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
 //
@@ -1116,50 +1156,13 @@ export function skillBindingChecks(checks, root) {
       `${rel} binds ${gates.join(', ')}, which no skill runs — review gates are driven by \`yad gate\``,
       'bind the author step instead (for example `architecture`, not `architecture-review`)');
   }
+  // Its OWN id, not `skills` again. A file with one good binding and one broken line fires both, and
+  // two checks sharing an id put a green tick under the complaint in prose — and, worse, let a `--json`
+  // consumer keying by id overwrite the warning with the tick.
   if (bound.length) {
     const chained = bound.filter(([, list]) => list.length > 1).length;
-    check(checks, 'skills', 'project', 'ok',
+    check(checks, 'skills:bound', 'project', 'ok',
       `skills: ${bound.length} step(s) bound${chained ? `, ${chained} to more than one skill` : ''}`);
-  }
-}
-
-export function profileChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
-  const unknown = [];
-  const disagree = [];
-
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
-    // No key at all is the normal state for a chain that matches no route: `stampProfile` declines to
-    // invent one, and `step:off-route` is what reports that chain. Nothing to say here.
-    if (!isPlainObject(state) || !('profile' in state)) continue;
-    const recorded = state.profile;
-    if (!lifecycleProfile(recorded)) {
-      unknown.push(`${e}: \`${recorded === null ? 'null' : String(recorded)}\``);
-      continue;
-    }
-    const matched = matchLifecycleProfile(state.steps);
-    if (matched && matched !== recorded) {
-      disagree.push(`${e}: records \`${recorded}\`, its chain is \`${matched}\``);
-    }
-  }
-
-  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
-  if (unknown.length) {
-    check(
-      checks, 'profile:unknown', 'shape', 'warn',
-      `${unknown.length} epic(s) record a lifecycle profile nobody defined: ${some(unknown, 3)}`,
-      `a profile is one of ${LIFECYCLE_PROFILES.map((p) => p.id).join(' · ')}. An unrecognised value means nothing can say which route this epic is on, so every reader falls back to matching the chain — set \`profile\` in \`.sdlc/state.json\` to the route it walks, or delete the key and let it be derived`,
-    );
-  }
-  if (disagree.length) {
-    check(
-      checks, 'profile:disagree', 'shape', 'warn',
-      `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
-      'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
-    );
   }
 }
 

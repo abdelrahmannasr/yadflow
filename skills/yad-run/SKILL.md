@@ -65,8 +65,15 @@ Read `config.yaml` `automation`, the story's `build-state/<story>.json` (create 
 ### `action: run` — drive the loop
 Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
 
-1. **Run the step's skill** — `spec`→`yad-spec`, `tasks`→ the tasks leg of `yad-spec`,
-   `implement`→`yad-implement`, `checks`→`yad-checks (action: run)`. Capture its result.
+1. **Run the step's skill — ask the engine which one, never this list.** Run
+   `yad next <epic> --json` and use the Build lane for this `story`/`repo`: its `skill` is the skill to
+   invoke, and when the step is bound to several it also carries a `skills` array, which you run **in
+   order**, each one seeing what the one before it produced (the last output is the result). Which
+   skill runs a step is the project's setting in `.sdlc/skills.json` (`yad skill list` shows it), so a
+   hardcoded name here would make this loop do one thing while `yad next` tells the user another — on
+   the same project, with the automation half winning. Unbound, the engine answers `spec`→`yad-spec`,
+   `tasks`→ the tasks leg of `yad-spec`, `implement`→`yad-implement`, `checks`→`yad-checks`, which is
+   what this step used to say. Pass `action: run` to `yad-checks`. Capture the result.
 2. **Derive trust signals & write a trust-log shard** — write the entry to its own file
    `trust-log/<story>-<repo>-<step>-<uid>.json` (a fresh `uid` per run; never append to a shared file),
    with `ranBy: machine` if this advance was automated, else `human` — see `references/run-loop.md` for
