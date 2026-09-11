@@ -169,6 +169,18 @@ If the predicate **fails**: report exactly which approvals are still missing and
 `currentStep`.
 
 If the predicate **passes**:
+
+> **This is the last place a skill still hand-writes `state.json`, and it is deliberate.** Every other
+> skill now calls the engine: `yad epic new` seeds a chain, `yad gate open` closes an authoring step and
+> opens its gate. There is no engine verb for *"an approval landed, advance the chain"* on a Product
+> with **no platform**: `yad gate sync` and `yad gate ci` both return immediately without one, and
+> `advanceState` — the function holding the rules written out below — has no other caller. So on a
+> local-only Product these steps ARE the engine's rules, transcribed. Keep them exactly in step with
+> `advanceState` in `cli/epic-state.mjs` until a local approve verb exists.
+>
+> With a platform, you do not perform them at all: `yad gate sync` (local ledger) or `yad gate ci`
+> (verified) runs the same transition from that function.
+
 - Mark this review step `status: "done"`.
 - **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
   handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track

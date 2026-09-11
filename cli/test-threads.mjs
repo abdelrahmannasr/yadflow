@@ -937,16 +937,56 @@ function templateSeed(skillFile) {
     .replace(/"sha256:…"/g, '"sha256:abc"'));
 }
 
+// What is LEFT after E17b. `yad-epic`, `yad-analysis` and `yad-stub` no longer carry one — they run
+// `yad epic new` instead, and the test below is what keeps those templates from coming back. These two
+// remain because the engine deliberately does not seed either: `yad-discovery` is the product
+// front-zero that E75 absorbs, and `yad-change`'s chain is threaded — inherited steps bound to a
+// parent's hashes, with provenance records beside them.
 const SEED_TEMPLATES = [
-  ['yad-epic/SKILL.md', 'classic'],
-  ['yad-analysis/SKILL.md', 'analysis-first'],
-  ['yad-stub/SKILL.md', 'classic'],
   ['yad-discovery/SKILL.md', 'discovery'],
-  // `yad-change` describes its seed in prose and shows the worked shape in a reference file. That is
-  // the block a skill author actually copies, so it is the one that has to be right — and being the
-  // odd one out is exactly how it went stale the last two times the shape moved.
   ['yad-change/references/triage.md', 'classic'],
 ];
+
+// The skills that USED to hand-write a chain and now call the engine. The rule is invisible from the
+// code alone — nothing breaks if a JSON seed reappears in one of these files, and the copy would
+// simply start drifting from the catalogue again, silently, exactly as five copies did before E4. So
+// the absence is asserted.
+const ENGINE_SEEDED = [
+  ['yad-epic/SKILL.md', 'yad epic new'],
+  ['yad-analysis/SKILL.md', 'yad epic new EP-<slug> --profile analysis-first'],
+  ['yad-stub/SKILL.md', 'yad epic new EP-<slug> --stub'],
+];
+
+test('the skills that call the engine carry no chain of their own to drift', () => {
+  for (const [skillFile, command] of ENGINE_SEEDED) {
+    const src = fs.readFileSync(new URL(`../skills/${skillFile}`, import.meta.url), 'utf8');
+    // Not "no ```json fence" — a skill may legitimately show some other JSON. The thing that must not
+    // come back is a STEP CHAIN, which is what a `steps` array of ids is.
+    for (const m of src.matchAll(/```json\n([\s\S]*?)\n```/g)) {
+      assert.equal(/"steps"\s*:\s*\[/.test(m[1]), false,
+        `${skillFile}: a hand-written step chain is back — the engine owns it now`);
+    }
+    assert.ok(src.includes(command), `${skillFile}: does not tell the author to run \`${command}\``);
+    // And no instruction to hand-edit the ledger either, which is the other half of E17b.
+    assert.equal(/In `state\.json`: set|Write `state\.json`/.test(src), false,
+      `${skillFile}: still instructs a hand-edit of state.json`);
+  }
+});
+
+test('only `yad-review-gate` still hand-writes state.json, and it says why', () => {
+  // The honest remainder. `advanceState` is what these rules duplicate, and it has exactly one caller
+  // (`gateSync`), which returns immediately on a Product with no platform — so on a local-only Product
+  // this skill IS the only path. Pinning the count keeps a NEW hand-writer from slipping in beside it,
+  // and pinning the explanation keeps the reason from being lost the next time someone tidies the file.
+  const writers = fs.readdirSync(new URL('../skills/', import.meta.url))
+    .filter((d) => fs.existsSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url)))
+    .filter((d) => /In `state\.json`: set|Write `state\.json`/.test(
+      fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8')));
+  assert.deepEqual(writers, ['yad-review-gate']);
+  const src = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
+  assert.match(src, /last place a skill still hand-writes/);
+  assert.match(src, /advanceState/);
+});
 
 test('every skill seed template states this shape and the route its own chain is on', () => {
   for (const [skillFile, profile] of SEED_TEMPLATES) {
@@ -1029,24 +1069,27 @@ test('seedState refuses a route it must not seed', () => {
     /cannot seed the 'nonsense' lifecycle profile/);
 });
 
-// The engine seed and the hand-written skill template must be the SAME FILE, not two files that agree
-// on values — key order is the file's bytes, and both write `state.json` for one more release (E17b
-// is what retires the skill copies). The only differences allowed are the ones that come from WHEN
-// each is written: the skill seeds after authoring the artifact, so its first step is `done` and its
-// gate is open.
-for (const [skillFile, profile] of [['yad-epic/SKILL.md', 'classic'], ['yad-analysis/SKILL.md', 'analysis-first']]) {
-  test(`${skillFile}: the engine seed is byte-for-byte the template it tells people to copy`, () => {
-    const template = templateSeed(skillFile);
-    const seeded = seedState({ epic: template.epicId, profile, type: template.type, today: template.createdAt });
-    // Advance the engine seed to the point the skill writes its own: artifact authored, gate open.
-    const advanced = {
-      schemaVersion: ENGINE_SHAPE,
-      ...seeded,
-      currentStep: seeded.steps[1].id,
-      steps: seeded.steps.map((s, i) => (i === 0 ? { ...s, status: 'done' }
-        : i === 1 ? { ...s, status: 'in_review' } : s)),
-    };
-    // JSON.stringify, not deepEqual: key order is what this is about.
-    assert.equal(JSON.stringify(advanced, null, 2), JSON.stringify(template, null, 2));
-  });
-}
+// A STUB is a variation of the STATUSES, not of the chain: same `classic` route, every step blocked
+// behind the `backfill-pending` sentinel, plus the `kind: "stub"` lifecycle marker. It replaced a
+// hand-written template, so the shape it produces is asserted field by field rather than trusted.
+test('seedState --stub: the classic chain, every step blocked behind the sentinel', () => {
+  const s = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02', stub: true });
+  assert.deepEqual(s.steps.map((x) => x.id), CLASSIC_10, 'the same chain `promote` wakes');
+  assert.deepEqual([...new Set(s.steps.map((x) => x.status))], ['blocked'], 'nothing is runnable yet');
+  assert.equal(s.currentStep, 'backfill-pending');
+  assert.equal(s.kind, 'stub', 'the lifecycle marker the engine keys off');
+  assert.equal(s.type, 'feature', '…which is a different axis from the work-item type');
+  // `kind` sits between `type` and `profile` — where the template always put it, and where
+  // `stampProfile` would insert on a stub that lacked a route. Key order is the file's bytes.
+  assert.deepEqual(Object.keys(s), ['epicId', 'createdAt', 'type', 'kind', 'profile', 'currentStep', 'steps']);
+  // The readers agree it is an anchor: no step is runnable and `yad next` routes it to the backfill
+  // skill rather than to authoring.
+  assert.equal(backfillAnchorKind(s), 'stub');
+  assert.equal(preconditionsMet(s, 'epic').ok, false);
+  assert.equal(nextAction({ state: s }, { epic: 'EP-demo' }).kind, 'backfill-pending');
+  // A plain seed is none of those things — the assertion that keeps the flag from becoming a no-op.
+  const plain = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
+  assert.equal('kind' in plain, false);
+  assert.equal(plain.currentStep, 'epic');
+  assert.equal(backfillAnchorKind(plain), null);
+});

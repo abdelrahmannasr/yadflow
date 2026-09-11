@@ -100,50 +100,34 @@ created: <YYYY-MM-DD>
 Leave `owner` for the human to set. Set `repos` to the code repo(s) the feature lives in.
 
 ### Step 5 — Seed the stub `state.json` (a `backfill-pending` sentinel)
-Create `{project-root}/epics/EP-<slug>/.sdlc/state.json`. It carries the top-level marker
-`kind: "stub"` and the sentinel `currentStep: "backfill-pending"`. **`kind` and `type` here are two
-different things and a stub carries both:** `kind: "stub"` is the lifecycle marker, and
-`type: "feature"` is the work-item type copied from `epic.md`. It also carries the **same 10-step Shape chain**
-as a normal epic (`yad-epic` Step 5) but with **every step `status: "blocked"`** — so the state is valid
-(`validateState` needs a non-empty `steps` + a string `currentStep`) and `promote` can later "wake" it
-into normal authoring with zero re-seeding.
 
-```json
-{
-  "schemaVersion": 6,
-  "epicId": "EP-<slug>",
-  "createdAt": "<YYYY-MM-DD>",
-  "type": "feature",
-  "kind": "stub",
-  "profile": "classic",
-  "currentStep": "backfill-pending",
-  "steps": [
-    { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "epic-review",        "type": "review+approve", "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "architecture",       "type": "author",         "artifact": "architecture.md",  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "architecture-review","type": "review+approve", "artifact": "architecture.md",  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": ["contract"] },
-    { "id": "ui-design",          "type": "author",         "artifact": "ui-design.md",     "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "ui-design-review",   "type": "review+approve", "artifact": "ui-design.md",     "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "stories",            "type": "author",         "artifact": "stories/",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "stories-review",     "type": "review+approve", "artifact": "stories/",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "test-cases",         "type": "author",         "artifact": "test-cases.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
-    { "id": "test-cases-review",  "type": "review+approve", "artifact": "test-cases.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] }
-  ]
-}
+**Run the engine. Do not hand-write the chain.**
+
+```bash
+yad epic new EP-<slug> --stub
 ```
 
-`profile: "classic"` names the **route** this chain takes — the same 10-step chain a normal epic walks,
-which is what `promote` wakes. `yad doctor` reads it back and reports an epic whose chain is not on the
-route it records. (`yad epic new` does not seed a stub: a stub's whole chain is `blocked` behind a
-`backfill-pending` sentinel, which is this skill's own shape, not a plain route.)
+That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the **same 10-step `classic` chain**
+a normal epic walks, but with **every step `blocked`**, the top-level marker `kind: "stub"`, and
+`currentStep: "backfill-pending"`. It also writes the empty `approvals.json` and `comments.json` and
+the `reviews/` directory. It writes no `epic.md`, no branch and no commit, and it refuses an epic that
+already has a `state.json`.
 
-Also create the empty ledgers `{.sdlc/approvals.json}` and `{.sdlc/comments.json}` (each `[]`) and the
-`reviews/` directory. **Do NOT** write a `contract-lock.json` — a stub has no locked surface yet.
+**Do NOT** write a `contract-lock.json` — a stub has no locked surface yet.
 
-Commit the seed on this step's authoring branch; it reaches the Product's default branch through the
-epic's **first** review PR/MR (or, for a stub, the PR that carries the stub itself). In verified mode
-`ledger-guard` exempts a new epic's ledger — creation, not mutation (#162) — while every later change
-to it stays CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
+Notes:
+- **`kind` and `type` are different things and a stub carries both.** `kind: "stub"` is the lifecycle
+  marker the engine keys off; `type: "feature"` is the work-item type, copied from `epic.md`. A stub is
+  always a `feature` and always `classic` — `--type` and `--profile` are refused here, because
+  `yad-backfill promote` wakes the chain at its `epic` step and upkeep leaves nothing to backfill.
+- The blocked chain is what makes the state valid (`validateState` needs a non-empty `steps` and a
+  string `currentStep`) and what lets `promote` **wake** it into normal authoring with zero re-seeding.
+- Nothing in the chain is runnable until then: `preconditionsMet` refuses every step of an anchor, and
+  `yad next` routes the epic to `yad-backfill` rather than to authoring.
+- Commit the seed on this step's authoring branch; it reaches the Product's default branch through the
+  epic's **first** review PR/MR (or, for a stub, the PR that carries the stub itself). In verified mode
+  `ledger-guard` exempts a new epic's ledger — creation, not mutation (#162) — while every later change
+  to it stays CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
 
 ### Step 6 — Stop; hand off (NO auto-advance)
 Report the new `EP-<slug>`, that it is a **stub (backfill pending)**, and the two next moves:

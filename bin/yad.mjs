@@ -81,12 +81,16 @@ ${c.bold('Team usage (EM adoption & behavior report)')}
                                        --member <name>, --format html|json|md, --repos (code commits)
 
 ${c.bold('Where am I / what next')}
-  yad epic new <slug> [--type <t>] [--profile <p>] [--json]
+  yad epic new <slug> [--type <t>] [--profile <p>] [--stub] [--json]
                                        Seed a new epic's lifecycle: writes its step chain from a
                                        profile, plus empty approval/comment ledgers and reviews/.
                                        --type feature|chore (default feature) — a change/defect/
                                        hotfix threads off an existing epic, so use yad-change.
                                        --profile classic|analysis-first (default classic).
+                                       --stub seeds a brownfield anchor instead: the same chain
+                                       with every step blocked behind backfill-pending, so a
+                                       defect can thread off a feature that shipped before the
+                                       Product existed (yad-backfill promote wakes it).
                                        Writes no epic.md, no branch and no commit: run the skill
                                        the chain names next. Refuses an epic that already has one
   yad next                             Project-wide: the one next action to take (or run setup)
@@ -222,6 +226,7 @@ function parseArgs(argv) {
     else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
     else if (a === '--undo') o.undo = true;
+    else if (a === '--stub') o.stub = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
     else if (a === '--greenfield') o.greenfield = true;
@@ -316,7 +321,7 @@ async function main() {
         log('usage: yad epic new <slug> [--type feature|chore] [--profile classic|analysis-first]');
         process.exitCode = 1; break;
       }
-      await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, today, json: o.json });
+      await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, today, json: o.json });
       break;
     }
     case 'next': {

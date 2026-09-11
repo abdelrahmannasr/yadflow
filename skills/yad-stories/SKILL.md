@@ -112,15 +112,12 @@ fails the gate if it rides the review PR, and desynchronises the ledger CI is ab
 is pushed around the gate. Commit **the story files under `stories/` only** — nothing else
 under `.sdlc/` — then hand off to `yad-review-gate`.
 
-**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
-`stories.status: "done"`, set `stories-review.status: "in_review"`, and set
-`currentStep: "stories-review"`. Write `state.json`. Do **not** touch `approvals.json`.
-
-> **local branch only.** Since 3.11 the CLI also closes the authoring step when its review gate
-> opens or advances, so this edit is a no-op once `yad gate open` has run. A `stories` step left
-> `in_progress` behind a passed `stories-review` used to block the parallel `test-cases` track
-> (`YAD-STATE-005`). In verified mode `gate open` writes nothing and local `gate sync` is advisory —
-> `gate ci` closes the step at merge.
+**Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
+`yad gate open <epic> stories/` marks `stories-review` `in_review`, closes `stories` as `done`, and moves `currentStep` to the gate
+— the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`). With
+no platform configured it still writes the ledger and simply opens no PR, so this works offline.
+Hand it to `yad-review-gate`, which runs that command. Do **not** hand-edit `state.json`, and do
+**not** touch `approvals.json` — only real reviewers approve, through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the story IDs created, the repos each touches, and that the next action is **review** via

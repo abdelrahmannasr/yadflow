@@ -10668,3 +10668,51 @@ test('CLI: `yad epic new` is wired end to end, flags and all', () => {
     assert.match(yadRun(T, '--help').out, /yad epic new <slug>/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('yad epic new --stub: an anchor for a feature that shipped before the Product existed', async () => {
+  const { T, out, failed } = await epicNewOn({ slug: 'legacy-cart', stub: true });
+  try {
+    assert.equal(failed, false, out);
+    const st = JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-legacy-cart/.sdlc/state.json'), 'utf8'));
+    assert.equal(st.kind, 'stub');
+    assert.equal(st.currentStep, 'backfill-pending');
+    assert.deepEqual([...new Set(st.steps.map((s) => s.status))], ['blocked']);
+    assert.equal(st.profile, 'classic');
+    // It names the skill that WAKES the chain, not the one that would have authored its first step —
+    // no step of an anchor is runnable, so pointing at `yad-epic` would be guidance nobody can follow.
+    assert.match(out, /yad-backfill/);
+    assert.doesNotMatch(out, /run the yad-epic skill/);
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new --stub: refuses the two things a stub can never be', async () => {
+  // Both restrictions come from what a stub IS. `promote` wakes the chain at its `epic` step, so a
+  // route starting elsewhere has nothing to wake into; and upkeep leaves nothing to backfill and
+  // nothing for a defect to thread off, so a chore stub would anchor no feature.
+  const route = await epicNewOn({ slug: 'x', stub: true, profile: 'analysis-first' });
+  try {
+    assert.equal(route.failed, true);
+    assert.match(route.out, /always on the classic route/);
+    assert.equal(fs.existsSync(path.join(route.T, 'epics')), false);
+  } finally { cleanTmp(route.T); }
+  const kind = await epicNewOn({ slug: 'x', stub: true, type: 'chore' });
+  try {
+    assert.equal(kind.failed, true);
+    assert.match(kind.out, /always a feature/);
+  } finally { cleanTmp(kind.T); }
+  // …and `--stub --type feature` is not a contradiction, it is the default said out loud.
+  const ok2 = await epicNewOn({ slug: 'x', stub: true, type: 'feature' });
+  try { assert.equal(ok2.failed, false, ok2.out); } finally { cleanTmp(ok2.T); }
+});
+
+test('CLI: `--stub` reaches the command through the arg parser', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e17bcli-'));
+  try {
+    const r = yadRun(T, 'epic', 'new', 'legacy', '--stub', '--json');
+    assert.equal(r.code, 0, r.out);
+    const j = JSON.parse(r.out);
+    assert.equal(j.stub, true);
+    assert.equal(j.currentStep, 'backfill-pending');
+    assert.equal(j.next, 'yad-backfill');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
