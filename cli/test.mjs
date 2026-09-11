@@ -10451,6 +10451,9 @@ test('yad epic new: writes the ledger, and only the ledger', async () => {
     // Nothing was committed either, and on a verified Product the seed has to ride the first review
     // PR — the guard exempts it only while it is off the base ref. Say so, or it lands by no path.
     assert.match(out, /commit the seed/);
+    // The hint names the OLD key first — `kind:` is the one `lineage-check.sh` reads inside the
+    // user's own repo, and that gate is refreshed by a different command with no ordering to this one.
+    assert.match(out, /Give it `kind: feature` and `type: feature`/);
   } finally { cleanTmp(T); }
 });
 
@@ -10536,6 +10539,40 @@ test('yad epic new: the discovery front-zero is refused and named, not listed as
   } finally { cleanTmp(T); }
 });
 
+test('yad epic new: the front-zero id is reserved, whatever route is asked for', async () => {
+  // Refusing the PROFILE is not enough: the route defaults to `classic`, so this slug would otherwise
+  // write a 10-step feature chain onto the one id a product may have only one of — with no
+  // `kind: "discovery"` marker, which is what every reader of the front-zero keys off. And it would
+  // stick: the next run refuses the id as already seeded, so `yad-discovery` would author over it.
+  for (const slug of ['discovery', 'EP-discovery']) {
+    const { T, out, failed } = await epicNewOn({ slug });
+    try {
+      assert.equal(failed, true, slug);
+      assert.match(out, /product front-zero/);
+      assert.match(out, /yad-discovery/);
+      assert.equal(fs.existsSync(path.join(T, 'epics/EP-discovery')), false, slug);
+    } finally { cleanTmp(T); }
+  }
+});
+
+test('yad epic new: an epic.md that declares NO type is not a clash', async () => {
+  // `workItemType` defaults to `feature`, so a header naming no type resolves the same as one that
+  // says `feature`. Clashing on the resolved value would refuse `--type chore` beside a drafted
+  // epic.md and tell the author to go and fix a value their file does not contain — blocking the one
+  // legitimate way to seed a chore against an epic document already in progress.
+  const bare = '---\nid: EP-x\ntitle: Something\n---\n\n## Goal\nx\n';
+  const r = await epicNewOn({ slug: 'x', type: 'chore' }, { files: { 'epics/EP-x/epic.md': bare } });
+  try {
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(r.T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'chore');
+  } finally { cleanTmp(r.T); }
+  // With no flag either, the default still applies.
+  const plain = await epicNewOn({ slug: 'x' }, { files: { 'epics/EP-x/epic.md': bare } });
+  try {
+    assert.equal(JSON.parse(fs.readFileSync(path.join(plain.T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'feature');
+  } finally { cleanTmp(plain.T); }
+});
+
 test('yad epic new: an id that is not EP-<slug> is refused before it becomes a path', async () => {
   for (const slug of ['../escape', 'Has-Caps', 'a/b', '']) {
     const { T, failed } = await epicNewOn({ slug });
@@ -10572,7 +10609,7 @@ test('yad epic new: an epic.md already there is what says the type, not the defa
     assert.equal(taken.failed, false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(taken.T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'chore');
     // …and it does not then tell the author to go and write the type it just read out of their file.
-    assert.doesNotMatch(taken.out, /Give it `type:/);
+    assert.doesNotMatch(taken.out, /Give it `kind:/);
   } finally { cleanTmp(taken.T); }
 
   // A flag that contradicts the header is refused, not resolved. Only the person typing it knows

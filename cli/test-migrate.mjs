@@ -1095,3 +1095,32 @@ test('a gate write and a migration agree on the ORDER of the two shape keys, not
     assert.equal(fs.readFileSync(vf, 'utf8'), fs.readFileSync(lf, 'utf8'));
   } finally { cleanup(local); cleanup(verified); }
 });
+
+test('a gate write lands `type` in front of `profile` even when it arrives long afterwards', async () => {
+  // The realistic gap: an epic seeded by `yad-analysis` before shape 5, migrated during the upgrade
+  // while it still had no `epic.md`, and the epic authored days later. The 4 -> 5 step never runs
+  // again, so `type` can only arrive from a gate write — by which time `profile` is already in the
+  // file. Appending it there would give a verified project `profile, type`, which no local project
+  // can produce, and the byte-equality invariant would be false without anything saying so.
+  const { writeState } = await import('./epic-state.mjs');
+  const T = project({ files: {
+    'epics/EP-x/.sdlc/state.json': JSON.stringify(
+      { schemaVersion: 1, epicId: 'EP-x', createdAt: '2026-01-01', currentStep: 'epic', steps: chain(CLASSIC) },
+      null, 2) + '\n',
+  } });
+  try {
+    const f = path.join(T, STATE_REL);
+    await runMigrate(T, { apply: true });
+    const migrated = read(f);
+    assert.equal('type' in migrated, false, 'nothing to copy yet — the epic had no epic.md');
+    assert.equal(migrated.profile, 'classic');
+
+    // The epic is authored later, and the next gate write copies its type in.
+    fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), epicMd('kind: chore'));
+    writeState(f, read(f));
+    const now = read(f);
+    assert.equal(now.type, 'chore');
+    assert.deepEqual(Object.keys(now).slice(0, 6),
+      ['schemaVersion', 'epicId', 'createdAt', 'type', 'profile', 'currentStep']);
+  } finally { cleanup(T); }
+});

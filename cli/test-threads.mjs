@@ -930,7 +930,11 @@ function templateSeed(skillFile) {
   const src = fs.readFileSync(new URL(`../skills/${skillFile}`, import.meta.url), 'utf8');
   const m = src.match(/```json\n(\{[\s\S]*?\n\})\n```/);
   assert.ok(m, `${skillFile}: no json seed template found`);
-  return JSON.parse(m[1].replace(/<the same value as epic\.md[^"]*>/, 'feature'));
+  return JSON.parse(m[1]
+    .replace(/<the same value as epic\.md[^"]*>/, 'feature')
+    .replace(/"EP-<[a-z]+>"/g, '"EP-x"')
+    .replace(/"<today>"/g, '"2026-01-02"')
+    .replace(/"sha256:…"/g, '"sha256:abc"'));
 }
 
 const SEED_TEMPLATES = [
@@ -938,6 +942,10 @@ const SEED_TEMPLATES = [
   ['yad-analysis/SKILL.md', 'analysis-first'],
   ['yad-stub/SKILL.md', 'classic'],
   ['yad-discovery/SKILL.md', 'discovery'],
+  // `yad-change` describes its seed in prose and shows the worked shape in a reference file. That is
+  // the block a skill author actually copies, so it is the one that has to be right — and being the
+  // odd one out is exactly how it went stale the last two times the shape moved.
+  ['yad-change/references/triage.md', 'classic'],
 ];
 
 test('every skill seed template states this shape and the route its own chain is on', () => {

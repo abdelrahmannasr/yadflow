@@ -285,9 +285,18 @@ export function stampWorkItemType(state, epicDir) {
   //
   // Idempotent either way: a state that already records a type returns above, keeping the position it
   // has, so a file seeded by a skill is never reordered by a later engine write.
+  //
+  // `profile` is in the anchor list, and that is what makes the canonical order `type, profile`
+  // unconditional rather than a happy accident of the order `writeState` calls the two stampers in.
+  // The migration chain adds `type` at 4 -> 5 and `profile` at 5 -> 6, so it always produces that
+  // order. A gate write does not always have both to add at the same moment: an epic whose ledger
+  // reached shape 5 before its `epic.md` existed (seeded by `yad-analysis`, migrated during the
+  // upgrade, the epic authored afterwards) gets `profile` from the migration and `type` only from a
+  // LATER gate write. Without this anchor that write would append `type` after `profile`, and a
+  // verified project would hold a key order no local project can produce.
   const out = {};
   for (const [k, v] of Object.entries(state)) {
-    if ((k === 'currentStep' || k === 'steps') && !('type' in out)) out.type = type;
+    if ((k === 'profile' || k === 'currentStep' || k === 'steps') && !('type' in out)) out.type = type;
     out[k] = v;
   }
   if (!('type' in out)) out.type = type;
@@ -323,12 +332,16 @@ export function stampProfile(state) {
   // `"profile": "classic"` dangling under the `steps` array, where the eye reads it as a property of
   // the last step rather than of the epic. JSON key order IS the file's bytes, so the object is
   // rebuilt in order rather than spread and assigned.
+  //
+  // No trailing "if it still is not there, append it" guard, unlike `stampWorkItemType`. That guard is
+  // reachable there because that stamper runs on states with no `steps` at all; here a profile is only
+  // ever derived FROM `steps`, so reaching this loop means `steps` is present and the `k === 'steps'`
+  // arm has already placed the key. A line that cannot run is a line no test can cover.
   const out = {};
   for (const [k, v] of Object.entries(state)) {
     if ((k === 'currentStep' || k === 'steps') && !('profile' in out)) out.profile = profile;
     out[k] = v;
   }
-  if (!('profile' in out)) out.profile = profile;
   return out;
 }
 
@@ -347,7 +360,12 @@ export function stampProfile(state) {
 // gate sync" — a warning that could never clear, attached to a sentence that was not true.
 //
 // WHAT MAKES THIS CORRECT is an invariant, not an assumption: for `state.json`, running the whole
-// migration chain must produce exactly what these stampers produce. It holds today — shapes 2 and 3
+// migration chain must produce exactly what these stampers produce — in the same ORDER, down to the
+// bytes. Two things hold that up and both are load-bearing. The stampers are called here in the
+// migration's own order (dials, type, profile), and each inserts its key in front of every key a LATER
+// shape adds, so a gate write that supplies one of them long after the other still lands it in the
+// canonical position. Without the second, a ledger that reached shape 5 before its `epic.md` existed
+// would come out `profile, type` while every migrated project reads `type, profile`. It holds today — shapes 2 and 3
 // change `hub.json` and the roster, shape 4 is the dials (`stampStepDials`), shape 5 is the work-item
 // type (`stampWorkItemType`). cli/test-migrate.mjs pins it by migrating one project, gate-writing
 // another, and comparing the two files byte for byte. A future shape that changes `state.json`

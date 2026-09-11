@@ -22,8 +22,9 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok } from './lib.mjs';
 import {
-  epicRoot, isGenesisType, isValidEpicId, lifecycleProfile, readFrontmatter, seedableProfiles,
-  seedState, STEP_SKILL, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
+  DISCOVERY_EPIC, epicRoot, isGenesisType, isValidEpicId, lifecycleProfile, readFrontmatter,
+  seedableProfiles, seedState, STEP_SKILL, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON,
+  writeState,
 } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -58,6 +59,15 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // The id becomes a path segment under epics/ — reject anything but EP-<slug> outright, the same
   // guard every other epic-taking command applies.
   if (!isValidEpicId(epic)) return bail(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`);
+  // The front-zero's id is RESERVED, and refusing the profile is not enough to protect it: the route
+  // defaults to `classic`, so `yad epic new discovery` would have written a 10-step feature chain onto
+  // the one id a product may only ever have one of — with no `kind: "discovery"` marker, which is what
+  // every reader of the front-zero keys off. Worse, it would then be permanent: the next run refuses
+  // the id as already seeded, and `yad-discovery` would be authoring over a foreign ledger.
+  if (epic === DISCOVERY_EPIC) {
+    return bail(`${DISCOVERY_EPIC} is the product front-zero, not an epic on the ladder`,
+      'it is one per product, has no epic.md and no work-item type, and its ledger carries a `kind: "discovery"` marker this command does not write. Run the yad-discovery skill for it');
+  }
 
   const dir = epicRoot(root, epic);
   const files = epicFiles(dir);
@@ -79,14 +89,26 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // An explicit `--type` that CONTRADICTS the header is refused rather than silently resolved. Only
   // the person typing it knows which of the two they meant, and picking one would overwrite an answer.
   // The OLD frontmatter name wins inside `workItemType`, the same tie-break the stamper uses.
+  //
+  // DECLARES is the word, and it is not the same as what `workItemType` RESOLVES. That function
+  // defaults to `feature`, so a header carrying no type at all resolves identically to one that says
+  // `feature` — and clashing on the resolved value would refuse `--type chore` beside a drafted
+  // epic.md whose frontmatter names no type, telling the author to go and fix a value their file does
+  // not contain. So the raw keys decide whether there is anything to clash WITH, and `workItemType`
+  // still decides what it says: the OLD name (`kind:`) wins there, the same tie-break the stamper uses.
   const mdPath = path.join(dir, 'epic.md');
   if (fs.existsSync(mdPath)) {
-    const authored = workItemType(readFrontmatter(mdPath));
-    if (type && type !== authored) {
-      return bail(`${epic}: epic.md says \`${authored}\`, --type says \`${type}\``,
-        'the type is authored in epic.md and copied into the ledger. Drop the flag to take the header\'s answer, or fix the header first — nothing here rewrites epic.md');
+    const fm = readFrontmatter(mdPath);
+    const declares = typeof fm.kind === 'string' && fm.kind.trim()
+      || typeof fm.type === 'string' && fm.type.trim();
+    if (declares) {
+      const authored = workItemType(fm);
+      if (type && type !== authored) {
+        return bail(`${epic}: epic.md says \`${authored}\`, --type says \`${type}\``,
+          'the type is authored in epic.md and copied into the ledger. Drop the flag to take the header\'s answer, or fix the header first — nothing here rewrites epic.md');
+      }
+      type = authored;
     }
-    type = authored;
   }
   type = type || 'feature';
 
@@ -136,7 +158,11 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // Only worth saying when there is no header yet. When one exists it is where the type came FROM, so
   // telling its author to go and write what they already wrote reads as the command not having looked.
   if (!fs.existsSync(mdPath)) {
-    info(`epic.md is authored by that skill, not by this command. Give it \`type: ${type}\` so the ledger and the header agree.`);
+    // BOTH keys, old name first. `kind:` is the one that is read — by `workItemType` here and by
+    // `lineage-check.sh` inside the user's own repo, which is refreshed by a different command
+    // (`yad update`) with no ordering against this one. A header carrying only `type:` reads to that
+    // gate as an epic with no type at all.
+    info(`epic.md is authored by that skill, not by this command. Give it \`kind: ${type}\` and \`type: ${type}\` so the ledger and the header agree.`);
   }
   // Nothing was committed here, and on a verified Product the seed HAS to ride the first review PR:
   // `ledger-guard` exempts a new epic's ledger only while it is absent from the base ref (creation,
