@@ -64,9 +64,9 @@ be missing from another.
 
 The catalogue is code. Nothing about it is written into `state.json`, so no file shape changed.
 
-**When a chain disagrees with the catalogue, the chain wins.** The seed below is still hand-written by
-this skill, a project may run a chain from a newer release, and leaving a step out is normal — not
-every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
+**When a chain disagrees with the catalogue, the chain wins.** `yad-discovery` and `yad-change` still
+write a chain by hand, a project may run a chain from a newer release, and leaving a step out is normal
+— not every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
 `step:artifact` (a step naming a different file from the one the gate hashes — different spellings of
 the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one gate),
 `step:no-artifact` (a step naming no file at all, the one case that stops `yad gate` outright),
@@ -145,17 +145,29 @@ so an id with no phase is an id no skill runs.
 ### Two valid chain shapes (analysis is optional)
 
 The `analysis` step (and its `analysis-review` gate) is **optional** — it exists only when the team
-ran `yad-analysis` before the epic. The entry-point skill (whichever runs first) is the one
-that assigns `EP-<slug>` and seeds `state.json` + the empty ledgers; the other skill detects an
+ran `yad-analysis` before the epic. The entry-point skill (whichever runs first) assigns `EP-<slug>`
+and runs **`yad epic new`**, which writes `state.json` and the empty ledgers; the other skill sees an
 existing `state.json` and does **not** re-seed.
 
-- **With analysis** (12 steps — `yad-analysis` seeded the chain):
+**The engine owns the chain.** No skill writes one by hand on these two routes any more — `yad-epic`
+runs `yad epic new EP-<slug>`, `yad-analysis` runs it with `--profile analysis-first`, and `yad-stub`
+runs it with `--stub`. Two seeds are still hand-written and neither is an oversight: `yad-discovery`
+seeds the product front-zero, and `yad-change` seeds a threaded chain whose inherited steps are bound
+to a parent's artifact hashes. A seeded chain leaves its first author step **open**, not `done` — the
+command runs before the artifact exists; `yad gate open` closes it when the gate opens.
+
+- **With analysis** — the `analysis-first` route, 12 steps:
   `analysis → analysis-review → epic → epic-review → architecture → architecture-review → ui-design →
   ui-design-review → stories → stories-review → test-cases → test-cases-review`. Seeded `currentStep`
-  is `analysis-review`; `epic` starts `blocked`.
-- **Without analysis** (10 steps — `yad-epic` is the entry point, the default):
+  is `analysis`, which starts `in_progress`; everything after it starts `blocked`.
+- **Without analysis** — the `classic` route, 10 steps, and the default:
   `epic → epic-review → … → stories-review → test-cases → test-cases-review`. Seeded `currentStep` is
-  `epic-review`.
+  `epic`, which starts `in_progress`.
+
+Both seeded values move to the review gate when `yad gate open` runs, which is also what closes the
+authoring step. Before E17b the seeds recorded the gate directly, because a skill only seeded once it
+had already written the artifact; a chain seeded that way is still perfectly valid and nothing rewrites
+it.
 
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
 owner + 1 reviewer).

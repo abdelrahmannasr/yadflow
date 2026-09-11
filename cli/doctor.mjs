@@ -909,10 +909,10 @@ export function themeChecks(checks, root) {
 // KNOWN; this asks whether a known step is set up the way the catalogue says it is.
 //
 // IT REPORTS AND CHANGES NOTHING, and when the two disagree THE FILE WINS for this whole major
-// (rule 3). `yad epic new` now seeds a chain from the catalogue, so a fresh epic cannot disagree with
-// it by accident — but the five authoring skills still hand-write a seed too (rewriting them is E17b),
-// a chain may legitimately leave a step out (not every epic has a `ui-design`), and a project may hold
-// a chain from a newer yadflow. So a mismatch is a warning about a file somebody should look at, never
+// (rule 3). `yad epic new` seeds from the catalogue and three of the five authoring skills now call
+// it, so a fresh epic on those routes cannot disagree with it by accident — but `yad-discovery` and
+// `yad-change` still write their own, a chain may legitimately leave a step out (not every epic has a
+// `ui-design`), and a project may hold a chain from a newer yadflow. So a mismatch is a warning about a file somebody should look at, never
 // a rewrite — the same discipline as `workItemType`.
 //
 // Nothing here reports a step that is ABSENT from a chain. Skipping `ui-design` on an epic with no

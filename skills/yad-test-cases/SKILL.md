@@ -174,11 +174,18 @@ is pushed around the gate. Commit the artifact set — **`test-cases.md` and, wh
 tool was used, `.sdlc/test-links.json`** (artifact-side, not ledger; generated tests live in their
 own code repo, not here) — then hand off to `yad-review-gate`.
 
-**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
-`test-cases.status: "done"` and set `test-cases-review.status: "in_review"`. **Leave `currentStep` at
-`ready-for-build`** — this is the parallel track; moving `currentStep` would pull it back from Build. Write `state.json`. Do **not** touch `approvals.json`. On this branch `yad gate open`
-makes the same edit — `markInReview` leaves `currentStep` alone once it is `ready-for-build`
-(`cli/epic-state.mjs`) — so it is a no-op once the gate has run.
+**Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
+`yad gate open <epic> test-cases.md` marks `test-cases-review` `in_review`, closes `test-cases` as `done`, and **leaves `currentStep` at `ready-for-build`** — this is the parallel track, and moving it would pull the epic back from Build
+— the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+`yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
+
+**With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
+**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
+refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
+and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+
+Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
+through the gate.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the path to `test-cases.md`, the connected testing tool and what it produced (e.g. "Playwright —

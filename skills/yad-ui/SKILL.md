@@ -183,10 +183,18 @@ is pushed around the gate. Commit the artifact set — **`ui-design.md`, `DESIGN
 design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) — then hand off to
 `yad-review-gate`.
 
-**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
-`ui-design.status: "done"`, set `ui-design-review.status: "in_review"`, and set
-`currentStep: "ui-design-review"`. Write `state.json`. Do **not** touch `approvals.json`. On this
-branch `yad gate open` makes the same edit, so it is a no-op once the gate has run.
+**Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
+`yad gate open <epic> ui-design.md` marks `ui-design-review` `in_review`, closes `ui-design` as `done`, and moves `currentStep` to the gate
+— the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+`yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
+
+**With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
+**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
+refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
+and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+
+Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
+through the gate.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, the connected design

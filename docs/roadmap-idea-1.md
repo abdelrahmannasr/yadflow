@@ -487,7 +487,7 @@ files first and you have frozen already-changed files.
 | E4 | The step catalogue, validated in code not prose | M | E22 |
 | E5 | Profiles; today's chain ships as `classic` | M | E4 |
 | **E17** | **The engine seeds the lifecycle** — new `yad epic new <slug> --type --profile` writes `state.json` from the profile | L | E5 |
-| E17b | Rewrite the **29 skills** that hand-edit `state.json` today to call the engine instead | M | E17 |
+| E17b | Rewrite the skills that hand-write `state.json` to call the engine instead. **13 write sites in 9 skills**, not 29 — 29 is how many files mention the file, most of them to say they never touch it. Done: 3 seeds and 6 author-step advances. Left: the `yad-change` threaded seed (E42), the `yad-discovery` front-zero (E75), `yad-backfill promote`, and `yad-review-gate`'s local advance, which has no engine verb because `gate sync`/`ci` both need a platform | M | E17 |
 | E6 | Skill binding leaves the code, allows multiple skills per step | M | E4 |
 | E7 | Gate rules per step — **people-free by design**: base + risk step only, never a name or a role. The capacity cap arrives in E72 | M | E4 |
 | E75 | The Product level — Foundation as a phase with its own gate. **Absorbs `EP-discovery` and `roadmap.md`** | M | E22 |
@@ -626,7 +626,7 @@ v4.x or v5.
 | **E1** | Large, dull, touches every command. Easy to under-estimate |
 | **E25** | Every AI tool behaves differently. The fallback path is what saves us |
 | **E62** | 399 references across 20 files, plus 126 tests. Deletion, but wide |
-| **E17b** | 29 skills stop hand-editing `state.json`. Easy to forget, and if forgotten the engine and the skills fight over one file |
+| **E17b** | The skills stop hand-writing `state.json`. Easy to forget, and if forgotten the engine and the skills fight over one file |
 
 ---
 

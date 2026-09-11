@@ -748,9 +748,9 @@ export function markInReview(state, step) {
 // WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
 // below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); moving the skill binding out
-// of code is E6; per-step gate rules are E7; the fuller step-state model is E38. The five skills still
-// hand-write their own `state.json` seed as well — rewriting them to call the engine is E17b — so for
-// now both paths exist and both produce the same file.
+// of code is E6; per-step gate rules are E7; the fuller step-state model is E38. Three of the five
+// skills that used to hand-write a seed now run `yad epic new` instead (E17b); the two that do not are
+// the product front-zero (E75 absorbs it) and the threaded change-epic (E42 owns inheritance).
 //
 // IT IS CODE, NOT A FILE. Nothing here is written to disk, so no file shape changes and there is
 // nothing to migrate. When a project's `state.json` disagrees with the catalogue, THE FILE WINS for
@@ -820,8 +820,8 @@ export const STEPS = [
 // code, and `next.mjs` reads the other one through `setupProfileOf`. Two different things under one
 // word is a trap for whoever reads this next; two clearly different names is not.
 //
-// THESE ARE NOT NEW ROUTES. All three already exist and are seeded today by hand, in five skill
-// files. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
+// THESE ARE NOT NEW ROUTES. All three predate this table — they were seeded by hand, in five skill
+// files, until `yad epic new` took over the two feature ones. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
 // chain". E5 writes them down in one place and checks projects against them; it does not change what
 // any epic does, and nothing here is written to disk.
 //
@@ -977,22 +977,32 @@ export const seedableProfiles = (profiles = LIFECYCLE_PROFILES) =>
 // returns an object and writes nothing; `runEpicNew` (cli/epic.mjs) is what puts it on disk, through
 // `writeState` like every other save.
 //
-// WHY THE FIRST STEP IS `in_progress` AND NOT `done`. The five skills that seed a chain today write
-// the first author step `done` and its gate `in_review`, because by the time a skill seeds, it has
-// already WRITTEN the artifact — the seed is a record of work finished. The engine seeds before any
+// WHY THE FIRST STEP IS `in_progress` AND NOT `done`. The skill templates this replaced wrote the
+// first author step `done` and its gate `in_review`, because by the time a skill seeded, it had
+// already WRITTEN the artifact — the seed was a record of work finished. The engine seeds before any
 // work exists, so the honest chain is: the first author step open, everything after it blocked, and
 // `currentStep` on the first step. `yad next` then names that step and the skill that authors it,
 // which is the whole point of seeding ahead of the author instead of behind it.
 //
-// FIELD ORDER IS THE FILE'S BYTES. Each step is built key by key in the order the five skill
-// templates use, so an engine-seeded epic and a skill-seeded one are the same file, not two files
-// that happen to hold the same values. A test deep-equals this against the template in
-// `skills/yad-epic/SKILL.md`, key order included.
+// FIELD ORDER IS THE FILE'S BYTES, and it is the order those deleted templates used. Every chain on
+// disk in every existing project was written that way, so ordering the keys differently here would
+// churn the bytes of any epic gate-written after an upgrade — on a verified Product, one CI commit per
+// epic saying nothing. It is also still the order `yad-discovery` and `yad-change` write, which are
+// the two seeds the engine deliberately does not own.
 //
 // BOTH DIAL NAMES ARE WRITTEN — `assistance`/`automation` beside `driver`/`advance`. The old pair is
 // still the one every reader outside this repo uses (rule 3, add before remove), and a seed that
 // wrote only the new names would produce an epic that a user's un-updated check gates cannot read.
-export function seedState({ epic, profile, type, today }) {
+//
+// A STUB is the one variation, and it is a variation of the STATUSES, not of the chain. `yad-stub`
+// mints an anchor for a feature that was built before the Product existed, so a defect can thread off
+// it today: the same `classic` chain, every step `blocked`, a top-level `kind: "stub"` marker and the
+// `backfill-pending` sentinel as `currentStep`. Nothing is runnable until `yad-backfill promote` wakes
+// it — `preconditionsMet` refuses every step of an anchor, and `nextAction` routes it to the backfill
+// skill rather than to authoring. Modelled here rather than in a second function because it differs
+// from a plain seed in three fields, and two functions sharing a chain is how the five skill copies
+// drifted in the first place. `yad-stub` Step 5 is one line now: run `yad epic new --stub`.
+export function seedState({ epic, profile, type, today, stub = false }) {
   const p = lifecycleProfile(profile);
   if (!p || !seedableProfiles().includes(p.id)) {
     throw err('YAD-STATE-007', `cannot seed the '${profile}' lifecycle profile`,
@@ -1009,7 +1019,7 @@ export function seedState({ epic, profile, type, today }) {
       automation: 'human_approve',
       advance: 'human',
       locked: true,
-      status: i === 0 ? 'in_progress' : 'blocked',
+      status: !stub && i === 0 ? 'in_progress' : 'blocked',
       risk_tags: [...def.risk_tags],
     };
   });
@@ -1017,7 +1027,18 @@ export function seedState({ epic, profile, type, today }) {
   // bytes. `schemaVersion` is deliberately absent: `writeJSON` stamps this engine's shape onto an
   // object that was never read from disk (writeShape, cli/lib.mjs), and naming the number here would
   // be a second place to forget to change.
-  return { epicId: epic, createdAt: today, type, profile: p.id, currentStep: steps[0].id, steps };
+  // `kind` sits between `type` and `profile`, which is where the `yad-stub` template has always put it
+  // and where `stampProfile` would insert on a stub that lacked one. The two words look alike and are
+  // different axes: `kind` is the LIFECYCLE marker (`stub`, `discovery`), `type` is the work item.
+  return {
+    epicId: epic,
+    createdAt: today,
+    type,
+    ...(stub ? { kind: 'stub' } : {}),
+    profile: p.id,
+    currentStep: stub ? 'backfill-pending' : steps[0].id,
+    steps,
+  };
 }
 
 // The catalogue keyed by id. `stepDef(id)` is null for an id this release does not know — a real

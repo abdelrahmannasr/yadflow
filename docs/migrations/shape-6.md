@@ -82,8 +82,10 @@ Two things it deliberately will not seed, each with a skill that does it properl
 - **The `discovery` front-zero.** There is one per product, its id is fixed, and it has no `epic.md`
   and so no work-item type. Use the `yad-discovery` skill.
 
-The skills that seed a chain today keep doing so, and they now write the same `profile` key. Rewriting
-them to call the command is a separate piece of work; until then both paths produce the same file.
+The skills that start an epic run this command rather than writing a chain of their own. Two still
+write one, because the engine deliberately does not seed either: the `discovery` front-zero, and a
+`change`/`defect`/`hotfix`, whose chain inherits its parent's approved steps. Both record the same
+`profile` key.
 
 ## What to do
 

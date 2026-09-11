@@ -33,13 +33,16 @@ engine (never typed by hand); Shape steps are locked to `advance: human`.
 Read `{project-root}/epics/EP-<slug>/.sdlc/state.json` if an epic is named, otherwise check whether one
 exists for the idea.
 
-- **Chain already seeded** — `state.json` exists with `currentStep == "epic"` and the `epic` step
-  `status == "in_progress"`. Skip **Step 3** (the ID is already assigned) and **Step 5** (state is
-  already seeded), and run Step 5b to advance the authoring step. For Step 2, read `analysis.md` when
-  it is there (the analysis ran); when it is not, the chain came from `yad epic new` and no analysis
-  exists — shape the idea inline with the analyst exactly as the greenfield branch does.
+- **Chain already seeded** — `state.json` exists with `currentStep == "epic"`. Skip **Step 3** (the ID
+  is already assigned) and **Step 5** (the chain is already there — re-seeding is refused anyway). For
+  Step 2, read `analysis.md` when it is there (the analysis ran); when it is not, the chain came from
+  `yad epic new` and no analysis exists, so shape the idea inline with the analyst exactly as the
+  greenfield branch does.
 - **Nothing seeded** (the default) — no `state.json`. The epic is the entry point: run Steps 2–5
-  (inline analyst shaping + ID assignment + seed) and **skip Step 5b**.
+  (inline analyst shaping + ID assignment + seed).
+
+**Step 5b runs on both paths.** It is what closes the authoring step and opens its gate, and nothing
+else does it.
 
 Either mode runs Step 3b (branch), Step 4 (write the epic), and Step 6 (stop at the gate).
 
@@ -153,45 +156,31 @@ Fill the body with the user; leave `owner` / `technical_product_owner` for the u
 ### Step 5 — Seed the state machine — only when nothing is seeded
 *(Skip when `state.json` already exists — `yad-analysis` seeded the 12-step chain, or `yad epic new`
 seeded the 10-step one. Go to Step 5b.)*
-Create `{project-root}/epics/EP-<slug>/.sdlc/state.json` describing the full **10-step** Shape step
-sequence (no analysis), all steps defaulting to `automation: human_approve` / `advance: human`, with the five authoring
-steps **locked**. Use this exact shape (see `references/state-schema.md`):
 
-```json
-{
-  "schemaVersion": 6,
-  "epicId": "EP-<slug>",
-  "createdAt": "<YYYY-MM-DD>",
-  "type": "<the same value as epic.md — feature, or chore>",
-  "profile": "classic",
-  "currentStep": "epic-review",
-  "steps": [
-    { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },
-    { "id": "epic-review",        "type": "review+approve", "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "in_review",   "risk_tags": [] },
-    { "id": "architecture",       "type": "author",         "artifact": "architecture.md",  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "architecture-review","type": "review+approve", "artifact": "architecture.md",  "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": ["contract"] },
-    { "id": "ui-design",          "type": "author",         "artifact": "ui-design.md",     "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "ui-design-review",   "type": "review+approve", "artifact": "ui-design.md",     "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "stories",            "type": "author",         "artifact": "stories/",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "stories-review",     "type": "review+approve", "artifact": "stories/",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "test-cases",         "type": "author",         "artifact": "test-cases.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] },
-    { "id": "test-cases-review",  "type": "review+approve", "artifact": "test-cases.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked",     "risk_tags": [] }
-  ]
-}
+**Run the engine. Do not hand-write the chain.**
+
+```bash
+yad epic new EP-<slug>              # after Step 4: the type comes from epic.md
+yad epic new EP-<slug> --type chore # only when there is no epic.md yet
 ```
 
+That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the full **10-step** `classic` chain
+(no analysis), the empty `approvals.json` and `comments.json`, and the `reviews/` directory. Every step
+is `advance: human` and locked; `epic` is open and the rest are blocked. The chain comes from the step
+catalogue and the `classic` lifecycle profile in the engine (`references/state-schema.md`), so there is
+one definition of it and no copy here to drift from it.
+
+It writes no `epic.md`, no branch and no commit, and it refuses an epic that already has a
+`state.json`. Run it **after** Step 4 when `epic.md` exists, and it reads the type from that header —
+then `--type` is unnecessary and a contradicting one is refused.
+
 Notes:
-- **The engine can write this whole block for you.** `yad epic new <slug> --type <feature|chore>` seeds
-  exactly this chain from the `classic` profile, plus the empty `approvals.json` / `comments.json` and
-  the `reviews/` directory — then run this skill to author `epic.md` against the seeded chain, which is
-  the already-seeded path in Step 5b. It writes no `epic.md`, no branch and no commit, and it refuses an
-  epic that already has a `state.json`. Hand-seeding stays correct and supported; the two produce the
-  same file.
-- `profile: "classic"` names the **route** this chain takes through the lifecycle — the 10-step chain.
-  The routes are listed in `docs/CLI.md`; `yad doctor` reads the value back and reports an epic whose
-  chain is not on the route it records.
+- **Then advance the authoring step.** The seed leaves `epic` open, which is truthful: the command runs
+  before the artifact exists. Closing it is Step 5b's job, and on the local path `yad gate open` does it
+  — so after writing `epic.md`, take Step 5b.
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
-  (build plan §4): the contract review needs domain owners, not just owner + 1.
+  (build plan §4): the contract review needs domain owners, not just owner + 1. The catalogue sets it;
+  there is nothing to type.
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
   when `stories-review` passes — at which point the epic is already `ready-for-build`, so Build
   runs alongside the tester. They never gate `ready-for-build` (see `references/state-schema.md`).
@@ -199,19 +188,17 @@ Notes:
   epic's **first** review PR/MR — cut `review/EP-<slug>/epic` from the authoring branch so it carries
   the seed. In verified mode `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162);
   every later change to it is CI's. See `references/state-schema.md`, "Authoring branches".
-- Also create an empty approvals ledger `{project-root}/epics/EP-<slug>/.sdlc/approvals.json`
-  and an empty comments ledger `{project-root}/epics/EP-<slug>/.sdlc/comments.json`, each containing
-  `[]`, and the `reviews/` directory. (`comments.json` is the machine-readable counterpart to the
-  `reviews/*--comments.md` markdown — `yad-review-gate` appends to it on every `comment`.)
-- **No UI?** Seed the chain **as-is** (always include the two `ui-design` steps). If this epic has no
+- **No UI?** Seed the chain **as-is** (the two `ui-design` steps are always in it). If this epic has no
   user-facing surface (a backend/API service, data pipeline, infra), the `ui-design` step is optional
   and can be marked N/A now with `yad skip EP-<slug> ui-design --reason "<why>"` — it stays visible,
   short-circuits its gate, and advances straight to `stories` when architecture is approved. It is
-  reversible with `--undo` until the stories review opens. Don't hand-edit the seed to drop the steps;
+  reversible with `--undo` until the stories review opens. Don't hand-edit the chain to drop the steps;
   the skip is the single, auditable mechanism (see `references/state-schema.md` → "ui-design is optional").
 
-### Step 5b — Advance the authoring step — only when the chain was already seeded
-*(Only when `state.json` already existed — seeded by `yad-analysis` or by `yad epic new`.)*
+### Step 5b — Open the epic's review gate
+*(**Always run this**, on both entry modes. The chain is seeded by now either way — by `yad-analysis`,
+by `yad epic new` in Step 5, or by `yad epic new` before this skill was invoked — and `epic.md` is
+written. This is the step that closes the authoring step and opens its gate.)*
 **Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
@@ -237,16 +224,18 @@ unmodified (the `yad-analysis` path), commit `epic.md` alone. Then hand off to `
 > in Step 5. Either way the instruction above is the safe one: in verified mode, do not write
 > `state.json` here. Advancing a step is a mutation on any path, and CI performs it at merge.
 
-**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
-`epic.status: "done"`, set `epic-review.status: "in_review"`, and set `currentStep: "epic-review"`.
-Write `state.json`. Do **not** re-seed and do **not** touch `approvals.json` — only real reviewers
-approve, through the gate.
+**Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
+`yad gate open <epic> epic.md` marks `epic-review` `in_review`, closes `epic` as `done`, and moves
+`currentStep` to the gate — the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+`yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
-> **local branch only.** Since 3.11 the CLI closes the authoring step itself whenever its review
-> gate opens or advances (`yad gate open` / `sync`), so this edit is a no-op when the gate has already
-> run. It keeps `state.json` truthful before the gate opens, but it is no longer load-bearing: an epic
-> whose author step is left `in_progress` used to strand forever (`YAD-STATE-005`). In verified mode
-> `gate open` writes nothing and local `gate sync` is advisory — `gate ci` closes the step at merge.
+**With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
+**With a platform** the `review/EP-<slug>/epic.md` branch must already be **on origin** — the command refuses
+and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(`yad open-pr` does both, then delegates).
+
+Do **not** hand-edit `state.json`, do **not** re-seed, and do **not** touch `approvals.json` — only real
+reviewers approve, through the gate.
 
 ### Step 6 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `epic.md`, and that the next action is **review** via

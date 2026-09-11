@@ -1,9 +1,9 @@
 // `yad epic new <slug> --type <type> --profile <profile>` — the ENGINE seeds an epic's lifecycle.
 //
-// Roadmap E17. Until now the chain a new epic walks was hand-written — five skills seed one, four of
-// them from a literal JSON block and `yad-change` in prose. Five copies of one table is five chances
-// to disagree, and they already did: two of them were on different routes, a third was on the same
-// route with different statuses, and nothing in the engine could tell. The catalogue (E4) says what each step IS and the profiles (E5) say which route an
+// Roadmap E17. The chain a new epic walks used to be hand-written — five skills seeded one, four from
+// a literal JSON block and `yad-change` in prose. Five copies of one table is five chances to
+// disagree, and they already did: two of them were on different routes, a third was on the same route
+// with different statuses, and nothing in the engine could tell. The catalogue (E4) says what each step IS and the profiles (E5) say which route an
 // epic takes; this command is what finally writes one from the other.
 //
 // WHAT IT WRITES, AND WHAT IT DOES NOT. It writes the LEDGER — `state.json`, an empty `approvals.json`
@@ -12,11 +12,19 @@
 // stays there; a command that guessed a goal and a scope would produce a document nobody wrote. So the
 // order is: seed the chain here, then run the authoring skill the chain names.
 //
-// THE SKILLS STILL SEED. Rewriting the skills to call this command is E17b, a separate task, so for
-// this release both paths exist and neither may break the other. That is why the seed below is built
-// key-by-key in the order the skill templates use: an engine-seeded epic and a skill-seeded one are the
-// same file, not two files that happen to agree. The refusal on an existing `state.json` is what keeps
-// the two from colliding when a user runs both.
+// THREE OF THE FIVE NOW CALL THIS (E17b): `yad-epic`, `yad-analysis` and `yad-stub` run it instead of
+// carrying a chain, and their templates are gone — a test asserts no step chain comes back into those
+// files, because nothing else would notice a copy quietly drifting from the catalogue again.
+//
+// TWO DO NOT, and neither is an oversight. `yad-discovery` seeds the product front-zero, which E75
+// absorbs into Foundation. `yad-change` seeds a THREADED chain: its inherited steps are pre-marked
+// done and bound to the parent's artifact hashes, its approvals ledger carries a provenance record per
+// inherited gate, and an inherited architecture materialises a pointer contract-lock — inheritance is
+// E42's, and the depth triage that decides which steps are inherited is a design, not a flag. Both are
+// refused here by name rather than half-supported.
+//
+// The seed is still built key-by-key in the order those templates used, because the chains on disk in
+// every existing project were written that way and a re-seeded epic must not churn their bytes.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -47,7 +55,7 @@ export function epicIdFrom(slug) {
 
 // `type` defaults to null rather than `feature` so an explicit `--type` is distinguishable from no
 // flag at all — which is what lets an existing `epic.md` supply the answer without overriding the user.
-export async function runEpicNew(root, { slug, type = null, profile = 'classic', today, json = false } = {}) {
+export async function runEpicNew(root, { slug, type = null, profile = 'classic', stub = false, today, json = false } = {}) {
   const bail = (message, hint) => {
     if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
     else { fail(message); if (hint) hand(hint); }
@@ -124,6 +132,24 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
     );
   }
 
+  // A STUB anchors a feature that was built before the Product existed, so a defect can thread off it
+  // today. Two restrictions, both from what a stub IS rather than from anything technical:
+  //   * always `classic`. A stub's whole chain is blocked behind the `backfill-pending` sentinel and
+  //     `yad-backfill promote` wakes it at `epic`, so a route that starts somewhere else has nothing
+  //     to wake into.
+  //   * always `feature`. A stub is an anchor for shipped behaviour; upkeep leaves nothing to backfill
+  //     and nothing to thread a defect off, so a `chore` stub would be an anchor for no feature.
+  if (stub) {
+    if (profile !== 'classic') {
+      return bail(`a stub is always on the classic route, not '${profile}'`,
+        '`yad-backfill promote` wakes a stub at its `epic` step, so a route starting anywhere else has nothing to wake into. Drop --profile');
+    }
+    if (type !== 'feature') {
+      return bail(`a stub is always a feature, not a ${type}`,
+        'a stub anchors behaviour that already shipped so a defect can thread off it. Upkeep leaves nothing to backfill. Drop --type');
+    }
+  }
+
   const known = lifecycleProfile(profile);
   const seedable = seedableProfiles();
   if (!seedable.includes(profile)) {
@@ -137,7 +163,7 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
     );
   }
 
-  const state = seedState({ epic, profile, type, today });
+  const state = seedState({ epic, profile, type, today, stub });
   writeState(files.state, state);
   // The two ledgers the gate appends to, and the folder its markdown lands in. Empty is their correct
   // starting value: an approval is written only by a real review, never by a seed.
@@ -145,19 +171,23 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
 
   const first = state.steps[0];
-  const skill = STEP_SKILL[first.id] || null;
+  // A stub has no runnable step — its whole chain is blocked behind the sentinel — so the skill it
+  // names is the one that wakes it, not the one that would have authored its first step.
+  const skill = stub ? 'yad-backfill' : (STEP_SKILL[first.id] || null);
   if (json) {
     return log(JSON.stringify({
-      ok: true, epic, type, profile, currentStep: state.currentStep,
+      ok: true, epic, type, profile, stub, currentStep: state.currentStep,
       steps: state.steps.map((s) => s.id), next: skill,
     }, null, 2));
   }
-  ok(`${epic} seeded — ${typeNoun(type)} on the ${c.bold(profile)} route (${state.steps.length} steps)`);
-  info(`chain: ${state.steps.map((s) => (s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
-  hand(`${first.id} is open${skill ? ` — run the ${skill} skill to author ${first.artifact}` : ''}`);
+  ok(`${epic} seeded — ${stub ? 'stub anchor' : typeNoun(type)} on the ${c.bold(profile)} route (${state.steps.length} steps)`);
+  info(`chain: ${state.steps.map((s) => (!stub && s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
+  hand(stub
+    ? `every step is blocked behind \`${state.currentStep}\` — document the code with the ${skill} skill, then \`yad-backfill promote\` to wake the chain. Defects can thread off it now`
+    : `${first.id} is open${skill ? ` — run the ${skill} skill to author ${first.artifact}` : ''}`);
   // Only worth saying when there is no header yet. When one exists it is where the type came FROM, so
   // telling its author to go and write what they already wrote reads as the command not having looked.
-  if (!fs.existsSync(mdPath)) {
+  if (!fs.existsSync(mdPath) && !stub) {
     // BOTH keys, old name first. `kind:` is the one that is read — by `workItemType` here and by
     // `lineage-check.sh` inside the user's own repo, which is refreshed by a different command
     // (`yad update`) with no ordering against this one. A header carrying only `type:` reads to that

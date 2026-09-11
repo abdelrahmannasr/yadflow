@@ -937,16 +937,133 @@ function templateSeed(skillFile) {
     .replace(/"sha256:…"/g, '"sha256:abc"'));
 }
 
+// What is LEFT after E17b. `yad-epic`, `yad-analysis` and `yad-stub` no longer carry one — they run
+// `yad epic new` instead, and the test below is what keeps those templates from coming back. These two
+// remain because the engine deliberately does not seed either: `yad-discovery` is the product
+// front-zero that E75 absorbs, and `yad-change`'s chain is threaded — inherited steps bound to a
+// parent's hashes, with provenance records beside them.
 const SEED_TEMPLATES = [
-  ['yad-epic/SKILL.md', 'classic'],
-  ['yad-analysis/SKILL.md', 'analysis-first'],
-  ['yad-stub/SKILL.md', 'classic'],
   ['yad-discovery/SKILL.md', 'discovery'],
-  // `yad-change` describes its seed in prose and shows the worked shape in a reference file. That is
-  // the block a skill author actually copies, so it is the one that has to be right — and being the
-  // odd one out is exactly how it went stale the last two times the shape moved.
   ['yad-change/references/triage.md', 'classic'],
 ];
+
+// The skills that USED to hand-write a chain and now call the engine. The rule is invisible from the
+// code alone — nothing breaks if a JSON seed reappears in one of these files, and the copy would
+// simply start drifting from the catalogue again, silently, exactly as five copies did before E4. So
+// the absence is asserted.
+const ENGINE_SEEDED = [
+  ['yad-epic/SKILL.md', 'yad epic new'],
+  ['yad-analysis/SKILL.md', 'yad epic new EP-<slug> --profile analysis-first'],
+  ['yad-stub/SKILL.md', 'yad epic new EP-<slug> --stub'],
+];
+
+test('the skills that call the engine carry no chain of their own to drift', () => {
+  for (const [skillFile, command] of ENGINE_SEEDED) {
+    const src = fs.readFileSync(new URL(`../skills/${skillFile}`, import.meta.url), 'utf8');
+    // Not "no ```json fence" — a skill may legitimately show some other JSON. The thing that must not
+    // come back is a STEP CHAIN, which is what a `steps` array of ids is.
+    for (const m of src.matchAll(/```json\n([\s\S]*?)\n```/g)) {
+      assert.equal(/"steps"\s*:\s*\[/.test(m[1]), false,
+        `${skillFile}: a hand-written step chain is back — the engine owns it now`);
+    }
+    assert.ok(src.includes(command), `${skillFile}: does not tell the author to run \`${command}\``);
+    // And no instruction to hand-edit the ledger either, which is the other half of E17b.
+    assert.equal(/In `state\.json`: set|Write `state\.json`/.test(src), false,
+      `${skillFile}: still instructs a hand-edit of state.json`);
+  }
+});
+
+test('the skills E17b changed instruct no ledger write at all', () => {
+  // The first version of this keyed on two literal phrases lifted from the deleted blocks, and a
+  // matcher loose enough to catch any rewording also caught `yad-test-cases` READING the file
+  // ("state.json shows it `skipped`") and missed `yad-discovery` writing it, because its path is long.
+  // A prose heuristic over 38 files cannot be made both. So the check is narrow and exact instead: the
+  // nine skills this task changed, each asserted to contain no imperative aimed at the ledger.
+  const CHANGED = ['yad-epic', 'yad-analysis', 'yad-stub', 'yad-architecture', 'yad-ui',
+    'yad-stories', 'yad-test-cases', 'yad-review-gate'];
+  // An imperative aimed at the ledger, in EITHER word order — and both orders are needed, because the
+  // blocks this task deleted used the second one. `Create {project-root}/…/.sdlc/state.json` puts the
+  // verb first; ``In `state.json`: set `architecture.status` to done`` puts the file first, and a
+  // matcher that only looked one way would have missed every block E17b exists to remove.
+  //
+  // The two directions take different verb lists on purpose. Verb-first is a stem match, so `Creates`
+  // and `Seeding` both count. File-first must be an exact word, or "if `state.json` already exists
+  // (SEEDED, or a re-entry)" — a sentence about whether the file is there — reads as an instruction
+  // to write it.
+  const FILE = '`?\\.?/?[\\w/<>{}.-]{0,60}state\\.json`?';
+  // Up to a short run of words between the verb and the file, so `Mark the step done in state.json`
+  // counts as well as `Create .sdlc/state.json`. Bounded, and stopped at a sentence end, so the verb
+  // and the file have to be in the same clause.
+  const VERB_FIRST = '\\b(creat|writ|seed|re-seed|set|mark|mov|remov|rewrit|updat|append|delet|clear|stamp|flip)[a-z]*\\s+[^.\n]{0,30}?[`\'"({[]*';
+  const VERB_AFTER = '\\b(set|mark|move|remove|write|add|update|append|delete|clear|stamp|flip)\\b';
+  const WRITE = new RegExp(`${VERB_FIRST}${FILE}|${FILE}[^.\n]{0,20}${VERB_AFTER}`, 'i');
+  for (const d of CHANGED) {
+    const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    const offenders = src.split('\n')
+      // A prohibition is not a write, and neither is a conditional that forbids one.
+      .filter((l) => !/never|read-only|do \*\*not\*\*|do not|don't|refus|exempt|rejects/i.test(l))
+      // Nor is a sentence whose subject is the ENGINE. "That writes …/state.json with the classic
+      // chain" describes what `yad epic new` does; it is the opposite of an instruction to the author,
+      // and it is the sentence this whole task exists to put there. A line naming an engine command,
+      // or opening with "That"/"It", is describing one.
+      .filter((l) => !/yad (epic new|gate open|migrate)|^(That|It) (writes|sets|marks|moves|creates)/i.test(l.trim()))
+      // A heading is a label for the step, not an imperative inside it. The instruction lives in the
+      // body underneath, which this still reads.
+      .filter((l) => !l.trimStart().startsWith('#'))
+      // And the file as the SUBJECT of a reading verb is a read: "(state.json shows it `skipped`)"
+      // tells you where to look, it does not tell you to write anything.
+      .filter((l) => !/state\.json`?\s*(shows|says|records|holds|reads|lists|is |has )/i.test(l))
+      .filter((l) => WRITE.test(l));
+    // `yad-review-gate` is the one exception and it is deliberate: its `advance` action transcribes
+    // `advanceState`, which has no engine verb on a Product with no platform. Its `open` action must
+    // still be clean, which the next test checks.
+    if (d === 'yad-review-gate') continue;
+    assert.deepEqual(offenders, [], `${d}: still instructs a ledger write`);
+  }
+});
+
+test('the skills that still write a chain by hand are named, with the reason', () => {
+  // Not "only yad-review-gate", which is what this used to claim and was false. Three others write a
+  // chain too, and each is out of scope for a stated reason rather than by oversight. The claim lives
+  // in the review gate's own banner, so a reader hits it where the transcription is.
+  const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
+  assert.match(gate, /TRANSCRIPTION of `advanceState`/);
+  for (const [skill, why] of [
+    ['yad-discovery', /front-zero/],
+    ['yad-change', /threaded/],
+    ['yad-backfill', /promote/],
+  ]) {
+    assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
+    assert.match(gate, why, `the banner does not say WHY ${skill} is still one`);
+  }
+  // …and each of those three really does still seed or rewrite a chain, so the banner is not naming
+  // skills that have already been converted.
+  for (const d of ['yad-discovery', 'yad-change', 'yad-backfill']) {
+    const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    assert.match(src, /state\.json/, `${d}: no longer touches the ledger — drop it from the banner`);
+  }
+});
+
+test('the review gate opens a gate with the ENGINE, not by hand', () => {
+  // The regression this exists for. E17b deleted the six authoring-skill blocks that closed the author
+  // step, on the promise that `yad-review-gate` runs `yad gate open`. It did not — its `open` action
+  // hand-wrote `in_review` and never closed the author step, so every epic on a local Product would
+  // have stranded behind YAD-STATE-005 with nothing in the suite to notice. The rule lives in the
+  // interaction between two skill files, which is why no code test could see it.
+  const src = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
+  assert.match(src, /yad gate open <epic> <artifact>/);
+  // The two rules a transcription of that command keeps losing.
+  assert.match(src, /closes the paired authoring step/i);
+  assert.match(src, /ready-for-build/);
+  // And every skill that hands off to it names the command and its one prerequisite, rather than
+  // leaving the transition to nobody.
+  for (const d of ['yad-epic', 'yad-analysis', 'yad-architecture', 'yad-ui', 'yad-stories', 'yad-test-cases']) {
+    const skill = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
+    assert.match(skill, /yad gate open/, `${d}: does not name the command that makes the transition`);
+    assert.match(skill, /must already be \*\*on origin\*\*/,
+      `${d}: does not say the review branch must be pushed first — with a platform the command refuses and writes nothing`);
+  }
+});
 
 test('every skill seed template states this shape and the route its own chain is on', () => {
   for (const [skillFile, profile] of SEED_TEMPLATES) {
@@ -1029,24 +1146,27 @@ test('seedState refuses a route it must not seed', () => {
     /cannot seed the 'nonsense' lifecycle profile/);
 });
 
-// The engine seed and the hand-written skill template must be the SAME FILE, not two files that agree
-// on values — key order is the file's bytes, and both write `state.json` for one more release (E17b
-// is what retires the skill copies). The only differences allowed are the ones that come from WHEN
-// each is written: the skill seeds after authoring the artifact, so its first step is `done` and its
-// gate is open.
-for (const [skillFile, profile] of [['yad-epic/SKILL.md', 'classic'], ['yad-analysis/SKILL.md', 'analysis-first']]) {
-  test(`${skillFile}: the engine seed is byte-for-byte the template it tells people to copy`, () => {
-    const template = templateSeed(skillFile);
-    const seeded = seedState({ epic: template.epicId, profile, type: template.type, today: template.createdAt });
-    // Advance the engine seed to the point the skill writes its own: artifact authored, gate open.
-    const advanced = {
-      schemaVersion: ENGINE_SHAPE,
-      ...seeded,
-      currentStep: seeded.steps[1].id,
-      steps: seeded.steps.map((s, i) => (i === 0 ? { ...s, status: 'done' }
-        : i === 1 ? { ...s, status: 'in_review' } : s)),
-    };
-    // JSON.stringify, not deepEqual: key order is what this is about.
-    assert.equal(JSON.stringify(advanced, null, 2), JSON.stringify(template, null, 2));
-  });
-}
+// A STUB is a variation of the STATUSES, not of the chain: same `classic` route, every step blocked
+// behind the `backfill-pending` sentinel, plus the `kind: "stub"` lifecycle marker. It replaced a
+// hand-written template, so the shape it produces is asserted field by field rather than trusted.
+test('seedState --stub: the classic chain, every step blocked behind the sentinel', () => {
+  const s = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02', stub: true });
+  assert.deepEqual(s.steps.map((x) => x.id), CLASSIC_10, 'the same chain `promote` wakes');
+  assert.deepEqual([...new Set(s.steps.map((x) => x.status))], ['blocked'], 'nothing is runnable yet');
+  assert.equal(s.currentStep, 'backfill-pending');
+  assert.equal(s.kind, 'stub', 'the lifecycle marker the engine keys off');
+  assert.equal(s.type, 'feature', '…which is a different axis from the work-item type');
+  // `kind` sits between `type` and `profile` — where the template always put it, and where
+  // `stampProfile` would insert on a stub that lacked a route. Key order is the file's bytes.
+  assert.deepEqual(Object.keys(s), ['epicId', 'createdAt', 'type', 'kind', 'profile', 'currentStep', 'steps']);
+  // The readers agree it is an anchor: no step is runnable and `yad next` routes it to the backfill
+  // skill rather than to authoring.
+  assert.equal(backfillAnchorKind(s), 'stub');
+  assert.equal(preconditionsMet(s, 'epic').ok, false);
+  assert.equal(nextAction({ state: s }, { epic: 'EP-demo' }).kind, 'backfill-pending');
+  // A plain seed is none of those things — the assertion that keeps the flag from becoming a no-op.
+  const plain = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
+  assert.equal('kind' in plain, false);
+  assert.equal(plain.currentStep, 'epic');
+  assert.equal(backfillAnchorKind(plain), null);
+});

@@ -189,11 +189,18 @@ fails the gate if it rides the review PR, and desynchronises the ledger CI is ab
 is pushed around the gate. Commit the artifact set — **`architecture.md`, `contract.md`, and
 `.sdlc/contract-lock.json`** (artifact-side, not ledger) — then hand off to `yad-review-gate`.
 
-**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
-`architecture.status: "done"`, set `architecture-review.status: "in_review"`, and set
-`currentStep: "architecture-review"`. Write `state.json`. Do **not** touch `approvals.json` — only
-real reviewers approve, through the gate. On this branch `yad gate open` makes the same edit, so it
-is a no-op once the gate has run.
+**Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
+`yad gate open <epic> architecture.md` marks `architecture-review` `in_review`, closes `architecture` as `done`, and moves `currentStep` to the gate
+— the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+`yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
+
+**With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
+**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
+refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
+and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+
+Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
+through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
