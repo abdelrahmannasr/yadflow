@@ -10,7 +10,7 @@ import {
   workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter, themeOf, themeKey,
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
-  LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, SKIPPABLE_STEPS,
+  LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, SKIPPABLE_STEPS, optionalStepsOf,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -675,14 +675,39 @@ test('every profile is self-consistent — its steps exist and its gates follow 
   }
 });
 
-test('SKIPPABLE_STEPS is a view of the classic profile, not a list beside it', () => {
-  assert.deepEqual(
-    [...SKIPPABLE_STEPS],
-    lifecycleProfile('classic').rows.filter((r) => r.optional && !r.id.endsWith('-review')).map((r) => r.id),
-  );
+test('SKIPPABLE_STEPS is a view of EVERY profile, not a list beside them', () => {
+  // Across every route, not just `classic`: a route's own `optional` marks would otherwise sit there
+  // unread, which is the same drift one level down from the one this derivation exists to stop.
+  assert.deepEqual([...SKIPPABLE_STEPS], optionalStepsOf());
+  // The assertion that actually separates "every route" from "just the first one". With today's data
+  // both rules give `['ui-design']`, so only synthetic routes that DISAGREE can tell them apart.
+  assert.deepEqual(optionalStepsOf([
+    { id: 'a', steps: ['epic', { id: 'ui-design', optional: true }, 'ui-design-review'] },
+    { id: 'b', steps: ['epic', { id: 'architecture', optional: true }, 'architecture-review'] },
+  ]), ['ui-design', 'architecture'], 'a step optional in a LATER route counts too');
+  assert.deepEqual(optionalStepsOf([{ id: 'a', steps: ['epic'] }]), [], 'a route with nothing optional');
+  // The gate is the author step's pair, never listed on its own — `isSkippableStep` adds it back.
+  assert.deepEqual(optionalStepsOf([
+    { id: 'a', steps: [{ id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true }] },
+  ]), ['ui-design']);
   // …and unchanged from before E5. A derivation that agrees with itself while marking `architecture`
   // optional would pass the assertion above and let a real gate be skipped with a reason.
   assert.deepEqual([...SKIPPABLE_STEPS], ['ui-design']);
+});
+
+test('a profile carries no per-step field nothing reads', () => {
+  // `optional` is here because `SKIPPABLE_STEPS` reads it. Nothing else is, and that is the point: the
+  // parallel `test-cases` track is decided by `advanceState` from the step id, so recording it in the
+  // profile as well would be a second copy of a rule living elsewhere — free to drift with every test
+  // still green, which is exactly what this file exists to prevent.
+  const READ_FIELDS = new Set(['id', 'optional']);
+  for (const p of LIFECYCLE_PROFILES) {
+    for (const row of lifecycleProfile(p.id).rows) {
+      for (const k of Object.keys(row)) {
+        assert.ok(READ_FIELDS.has(k), `${p.id}/${row.id}: '${k}' is on a profile row and nothing reads it`);
+      }
+    }
+  }
 });
 
 test('matchLifecycleProfile: a chain says which route it is on, and says nothing when it is on none', () => {
@@ -701,6 +726,16 @@ test('matchLifecycleProfile: a chain says which route it is on, and says nothing
   // one declared first: matching on declaration order gives the same answers, so a plain call here
   // proves nothing. E40 adds shorter routes declared last, and this is the assertion that will still
   // be true then.
+  // A caller-supplied route must be MATCHED, not silently dropped. The seam reads the rows off the
+  // profile it is handed; resolving `p.id` through the module's own index instead would come back
+  // empty for a route that is not in it, the route would never fit, and the answer would be a wrong
+  // one with no error. E40 adds the chore and spike lanes, and this is the shape of that call.
+  const chore = { id: 'chore-lane', level: 'feature', steps: ['epic', 'epic-review'] };
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), [...LIFECYCLE_PROFILES, chore]), 'chore-lane',
+    'a two-step route beats classic on the same two steps');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'stories']), [...LIFECYCLE_PROFILES, chore]), 'classic',
+    'and loses as soon as the chain goes past it');
+
   const reversed = [...LIFECYCLE_PROFILES].reverse();
   assert.equal(matchLifecycleProfile(S(CLASSIC_10), reversed), 'classic');
   assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), reversed), 'classic');

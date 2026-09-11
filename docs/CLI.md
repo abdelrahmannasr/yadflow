@@ -246,7 +246,7 @@ You do not interact with the catalogue and there is nothing to configure. It mat
 rewritten. A project may run a chain the tool does not know, and leaving a step out is normal — not
 every epic has screens, so many have no `ui-design`. `yad doctor` says what it noticed and stops there.
 
-**Four things it can now notice**, all warnings in the `shape` section:
+**Five things it can now notice**, all warnings in the `shape` section:
 
 | Check | What it means |
 |---|---|
@@ -254,6 +254,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `step:no-artifact` | A step names no file at all. This is the one case that stops `yad gate` outright rather than quietly misfiring, because the field is read, not defaulted. |
 | `step:kind` | A step is on the wrong side of the author / review line. An author step is run by a skill and a review step by `yad gate`, so on the wrong side nothing drives it. |
 | `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. Nothing then tells anyone to write the artifact being reviewed, and for a folder artifact the gate has nothing to bind an approval to. |
+| `step:off-route` | The chain matches no lifecycle profile. See the section above: leaving a step out is fine, a step no route has or two in the wrong order is not. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 

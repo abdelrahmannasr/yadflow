@@ -785,11 +785,7 @@ export const LIFECYCLE_PROFILES = [
       'architecture', 'architecture-review',
       { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
       'stories', 'stories-review',
-      // The parallel track. `test-cases` seeds `blocked` and opens when `stories-review` passes, at
-      // which point the epic is already `ready-for-build` — so the tester works alongside Build rather
-      // than in front of it. It is a property of these two steps in this profile, recorded once here
-      // and nowhere else.
-      { id: 'test-cases', parallel: true }, { id: 'test-cases-review', parallel: true },
+      'test-cases', 'test-cases-review',
     ],
   },
   {
@@ -802,7 +798,7 @@ export const LIFECYCLE_PROFILES = [
       'architecture', 'architecture-review',
       { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
       'stories', 'stories-review',
-      { id: 'test-cases', parallel: true }, { id: 'test-cases-review', parallel: true },
+      'test-cases', 'test-cases-review',
     ],
   },
   {
@@ -813,9 +809,16 @@ export const LIFECYCLE_PROFILES = [
   },
 ];
 
-// One profile's steps as plain rows: `{ id, optional, parallel }`, in chain order.
+// One profile's steps as plain rows: `{ id, optional }`, in chain order.
+//
+// `optional` is the only per-step field a profile carries today, and it is carried because something
+// READS it (`SKIPPABLE_STEPS`, below). The parallel `test-cases` track is deliberately NOT recorded
+// here: `advanceState` decides it from the step id, and a flag nothing reads would be a second copy of
+// a rule that lives somewhere else — free to drift, with every test still green. Moving that rule into
+// the profile is worth doing, and it belongs to whichever task takes it, not to a field added on
+// spec here.
 const profileRows = (p) => p.steps.map((x) => (typeof x === 'string' ? { id: x } : x))
-  .map((x) => ({ id: x.id, optional: !!x.optional, parallel: !!x.parallel }));
+  .map((x) => ({ id: x.id, optional: !!x.optional }));
 
 const PROFILE_BY_ID = new Map(LIFECYCLE_PROFILES.map((p) => [p.id, { ...p, rows: profileRows(p) }]));
 
@@ -847,8 +850,13 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
   if (!Array.isArray(steps)) return null;
   const ids = steps.map((s) => s?.id).filter((x) => typeof x === 'string' && x);
   if (!ids.length) return null;
+  // Read the rows off the profile that was HANDED IN, never by resolving its id — a caller-supplied
+  // route is not in the module's own index, so `profileSteps(p.id)` would come back empty and the
+  // route would silently never fit. That is a wrong answer with no error, and the one thing a seam
+  // for the tests must not quietly do differently from the real call.
+  const orderOf = (p) => profileRows(p).map((r) => r.id);
   const fits = profiles.filter((p) => {
-    const order = profileSteps(p.id);
+    const order = orderOf(p);
     let at = -1;
     return ids.every((id) => {
       const i = order.indexOf(id);
@@ -858,7 +866,7 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
     });
   });
   if (!fits.length) return null;
-  return fits.sort((a, b) => profileSteps(a.id).length - profileSteps(b.id).length)[0].id;
+  return fits.sort((a, b) => orderOf(a).length - orderOf(b).length)[0].id;
 }
 
 // The Shape steps that may be marked N/A ("skipped") for an epic that does not need them. Only the
@@ -867,16 +875,24 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
 // and its review gate pre-marked `done`, short-circuited by `gatePredicate`) — the auditable,
 // reversible counterpart to omitting `analysis` from the chain entirely.
 //
-// A VIEW of the `classic` lifecycle profile (E5), not a list beside it: a step is optional because a
-// profile says so, and saying it twice is how the two drift. Author steps only — `isSkippableStep`
+// A VIEW of the lifecycle profiles (E5), not a list beside them: a step is optional because a profile
+// says so, and saying it twice is how the two drift. Taken across EVERY route, not just `classic` —
+// otherwise a route's own `optional` marks would sit there unread, which is the same drift one level
+// down. The union is `ui-design` either way today, because both feature routes mark the same pair. Author steps only — `isSkippableStep`
 // below pairs each with its gate, which is the shape every caller expects. A test deep-equals this
 // against both what `classic` says and its literal pre-E5 value.
 //
 // E35 moves `required` into the profile properly and deletes this set. Until then it stays exported
 // and stays authoritative for `skipStep`, because ~6 call sites and an error message read it.
-export const SKIPPABLE_STEPS = new Set(
-  (lifecycleProfile('classic')?.rows || []).filter((r) => r.optional && !r.id.endsWith('-review')).map((r) => r.id),
-);
+// The rule, as a function taking the routes, for the same reason `matchLifecycleProfile` takes them:
+// today every feature route marks the SAME pair optional, so "across all routes" and "from `classic`"
+// give the identical answer and no test could tell them apart. A test passes routes where they differ.
+export const optionalStepsOf = (profiles = LIFECYCLE_PROFILES) => [
+  ...new Set(profiles.flatMap((p) => profileRows(p))
+    .filter((r) => r.optional && !r.id.endsWith('-review')).map((r) => r.id)),
+];
+
+export const SKIPPABLE_STEPS = new Set(optionalStepsOf());
 
 // The catalogue keyed by id. `stepDef(id)` is null for an id this release does not know — a real
 // answer, not a gap, and the reason every reader below has a fallback.

@@ -5986,6 +5986,10 @@ test('doctor catalogue: a chain that matches no route is reported, and a short o
   assert.match(c.message, /EP-jumbled: `stories → epic`/);
   assert.equal(/EP-short/.test(c.message), false, 'a chain missing steps is still on its route');
   assert.match(c.hint, /classic.*10-step/);
+  // Both remedies, because reordering cannot fix every cause. A step no route has — a Build id, say —
+  // has to be removed, and a hint offering only "reorder" sends the reader in a circle.
+  assert.match(c.hint, /REMOVE any step no route has/);
+  assert.match(c.hint, /Build runs per story per repo/);
   assert.equal(checks.length, 1);
 });
 

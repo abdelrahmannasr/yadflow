@@ -999,7 +999,7 @@ export function catalogueChecks(checks, root) {
     check(
       checks, 'step:off-route', 'shape', 'warn',
       `${offRoute.length} epic(s) walk a chain that matches no lifecycle profile: ${some(offRoute, 2)}`,
-      `a profile is the route an epic takes through the steps — ${routes}. Leaving a step OUT is fine; a step no route has, or two in the wrong order, is not: \`yad next\` reads the chain in the order it is written, so it will name whatever sits next rather than what comes next. Reorder the steps in \`.sdlc/state.json\` to match a route`,
+      `a profile is the route an epic takes through the steps — ${routes}. Leaving a step OUT is fine; a step no route has, or two in the wrong order, is not: \`yad next\` reads the chain in the order it is written, so it will name whatever sits next rather than what comes next. In \`.sdlc/state.json\`, put the steps back in a route's order — and REMOVE any step no route has, which reordering cannot fix. A Build step (\`spec\`, \`tasks\`, \`implement\`, \`checks\`, \`engineer-review\`) is one of those: Build runs per story per repo out of \`build-state/\`, so it belongs in no epic chain`,
     );
   }
   if (wrongArtifact.length) {
