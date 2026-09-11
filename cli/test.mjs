@@ -10350,3 +10350,321 @@ test('state.json has exactly ONE writer, and it is writeState', async () => {
   assert.deepEqual(offenders, [],
     'every state.json write must go through writeState (cli/epic-state.mjs) so the dials are always stamped');
 });
+
+// ---- doctor: the route an epic records against the one it walks (E17) ----------------------------
+async function profileChecksOn(epics) {
+  const { profileChecks } = await import('./doctor.mjs');
+  const T = typeProject(epics);
+  const checks = [];
+  try { profileChecks(checks, T); } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  return checks;
+}
+const CLASSIC_CHAIN = ['epic', 'epic-review', 'architecture', 'architecture-review',
+  'ui-design', 'ui-design-review', 'stories', 'stories-review', 'test-cases', 'test-cases-review']
+  .map((id) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', status: 'blocked' }));
+const routed = (profile, steps = CLASSIC_CHAIN) =>
+  ({ schemaVersion: 6, type: 'feature', profile, currentStep: steps[0].id, steps });
+
+test('doctor profile: an epic on the route it records says nothing', async () => {
+  assert.deepEqual(await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('classic') } }), []);
+  // A chain part-way through its route still matches it — this is the normal state of every epic.
+  assert.deepEqual(await profileChecksOn({
+    'EP-x': { fm: 'kind: feature', state: routed('classic', CLASSIC_CHAIN.slice(0, 4)) },
+  }), []);
+});
+
+test('doctor profile: no `profile` key at all is silent — nothing to compare', async () => {
+  // Two real cases: an epic written before shape 6 that has not been migrated, and one whose chain
+  // matches no route, so `stampProfile` declined to invent one. `step:off-route` owns the second.
+  const state = routed('classic');
+  delete state.profile;
+  assert.deepEqual(await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state } }), []);
+});
+
+test('doctor profile: a recorded route nobody defined is reported', async () => {
+  const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('spike') } });
+  assert.deepEqual(checks.map((c) => [c.id, c.status, c.section]), [['profile:unknown', 'warn', 'shape']]);
+  assert.match(checks[0].message, /EP-x/);
+  assert.match(checks[0].hint, /classic · analysis-first · discovery/);
+  // A value that is not even a string is the same answer, not a crash.
+  const nulled = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed(null) } });
+  assert.deepEqual(nulled.map((c) => c.id), ['profile:unknown']);
+});
+
+test('doctor profile: a stale label on a chain that is cleanly on another route is reported', async () => {
+  const steps = [{ id: 'analysis', type: 'author', status: 'done' },
+    { id: 'analysis-review', type: 'review+approve', status: 'done' }, ...CLASSIC_CHAIN];
+  const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('classic', steps) } });
+  assert.deepEqual(checks.map((c) => c.id), ['profile:disagree']);
+  assert.match(checks[0].message, /records `classic`, its chain is `analysis-first`/);
+});
+
+test('doctor profile: an OFF-ROUTE chain is left to step:off-route, never reported twice', async () => {
+  // The two checks would name the same fault with two different remedies. `step:off-route` already
+  // says the chain is broken and how to fix it; "your label disagrees" would send the user to correct
+  // the label instead, which fixes nothing.
+  const steps = [...CLASSIC_CHAIN, { id: 'implement', type: 'author', status: 'blocked' }];
+  assert.deepEqual(await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('classic', steps) } }), []);
+  const { catalogueChecks } = await import('./doctor.mjs');
+  const T = typeProject({ 'EP-x': { fm: 'kind: feature', state: routed('classic', steps) } });
+  const other = [];
+  try { catalogueChecks(other, T); } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  assert.ok(other.some((c) => c.id === 'step:off-route'), 'the other check really does own this case');
+});
+
+// ---- `yad epic new` — the engine seeds the lifecycle (E17) ---------------------------------------
+async function epicNewOn(opts, { files = {} } = {}) {
+  const { runEpicNew } = await import('./epic.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e17-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+    fs.writeFileSync(path.join(T, rel), body);
+  }
+  const code = process.exitCode;
+  process.exitCode = undefined;
+  const out = await grab(() => runEpicNew(T, { today: "2026-01-02", ...opts }));
+  const failed = process.exitCode === 1;
+  process.exitCode = code;
+  return { T, out, failed };
+}
+const cleanTmp = (T) => fs.rmSync(T, { recursive: true, force: true });
+
+test('yad epic new: writes the ledger, and only the ledger', async () => {
+  const { T, out, failed } = await epicNewOn({ slug: 'checkout' });
+  try {
+    assert.equal(failed, false);
+    const dir = path.join(T, 'epics', 'EP-checkout');
+    const state = JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'state.json'), 'utf8'));
+    assert.equal(state.schemaVersion, ENGINE_SHAPE, 'stamped by the one writer, not by the seed');
+    assert.equal(state.profile, 'classic');
+    assert.equal(state.type, 'feature');
+    assert.equal(state.currentStep, 'epic');
+    assert.equal(state.steps.length, 10);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'approvals.json'), 'utf8')), []);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'comments.json'), 'utf8')), []);
+    assert.ok(fs.existsSync(path.join(dir, 'reviews')));
+    // The epic document is prose authored WITH the user — the skill's job, not a command's. So is the
+    // branch, and so is the commit.
+    assert.equal(fs.existsSync(path.join(dir, 'epic.md')), false, 'it invented an epic.md');
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['.sdlc', 'reviews']);
+    // Nothing was committed either, and on a verified Product the seed has to ride the first review
+    // PR — the guard exempts it only while it is off the base ref. Say so, or it lands by no path.
+    assert.match(out, /commit the seed/);
+    // The hint names the OLD key first — `kind:` is the one `lineage-check.sh` reads inside the
+    // user's own repo, and that gate is refreshed by a different command with no ordering to this one.
+    assert.match(out, /Give it `kind: feature` and `type: feature`/);
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new: the seeded chain is what yad next reads back', async () => {
+  const { nextAction, loadLedger, epicRoot } = await import('./epic-state.mjs');
+  const { T } = await epicNewOn({ slug: 'checkout', profile: 'analysis-first' });
+  try {
+    const action = nextAction(loadLedger(epicRoot(T, 'EP-checkout')), { epic: 'EP-checkout' });
+    assert.equal(action.kind, 'author');
+    assert.equal(action.step, 'analysis');
+    assert.equal(action.skill, 'yad-analysis', 'the chain names the skill that authors its first step');
+    assert.equal(action.artifact, 'analysis.md');
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new: `foo`, `EP-foo` and `epics/EP-foo` all name the same epic', async () => {
+  for (const slug of ['checkout', 'EP-checkout', 'epics/EP-checkout']) {
+    const { T, failed } = await epicNewOn({ slug });
+    try {
+      assert.equal(failed, false, slug);
+      assert.ok(fs.existsSync(path.join(T, 'epics', 'EP-checkout', '.sdlc', 'state.json')), slug);
+    } finally { cleanTmp(T); }
+  }
+});
+
+test('yad epic new: it refuses an epic that already has a ledger, and writes nothing', async () => {
+  // A state.json IS the epic's audit trail. Replacing one loses every approval it holds, which is why
+  // there is no --force for it.
+  const existing = JSON.stringify({ schemaVersion: 6, currentStep: 'stories', steps: [{ id: 'stories', type: 'author', status: 'done' }] }, null, 2) + '\n';
+  const { T, out, failed } = await epicNewOn({ slug: 'checkout' },
+    { files: { 'epics/EP-checkout/.sdlc/state.json': existing } });
+  try {
+    assert.equal(failed, true);
+    assert.match(out, /already has a lifecycle/);
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-checkout/.sdlc/state.json'), 'utf8'), existing);
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-checkout/reviews')), false, 'a refusal wrote a directory');
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new: a change, defect or hotfix is sent to the skill that threads it', async () => {
+  // A threaded epic's chain is not a plain route: its inherited steps are pre-done and bound to the
+  // parent's artifact hashes, and its approvals ledger carries a provenance record per inherited gate.
+  // Seeding a bare profile would produce an epic that re-reviews everything its parent approved.
+  for (const type of ['change', 'defect', 'hotfix']) {
+    const { T, out, failed } = await epicNewOn({ slug: 'x', type });
+    try {
+      assert.equal(failed, true, type);
+      assert.match(out, new RegExp(`a ${type} epic cannot be seeded`));
+      assert.match(out, /yad-change/);
+      assert.equal(fs.existsSync(path.join(T, 'epics')), false, type);
+    } finally { cleanTmp(T); }
+  }
+  // `chore` is the other genesis type and IS seedable — it may stand alone with no parent.
+  const { T, failed } = await epicNewOn({ slug: 'x', type: 'chore' });
+  try {
+    assert.equal(failed, false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'chore');
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new: an unknown type and an unknown route each say what is allowed', async () => {
+  const bad = await epicNewOn({ slug: 'x', type: 'epic' });
+  try {
+    assert.equal(bad.failed, true);
+    assert.match(bad.out, /unknown work-item type: epic/);
+    assert.match(bad.out, /feature · change · defect · hotfix · chore/);
+  } finally { cleanTmp(bad.T); }
+  const route = await epicNewOn({ slug: 'x', profile: 'spike' });
+  try {
+    assert.equal(route.failed, true);
+    assert.match(route.out, /unknown lifecycle profile: spike/);
+    // The list comes from the code, so a route added later needs no edit here.
+    assert.match(route.out, /classic · analysis-first/);
+  } finally { cleanTmp(route.T); }
+});
+
+test('yad epic new: the discovery front-zero is refused and named, not listed as a typo', async () => {
+  const { T, out, failed } = await epicNewOn({ slug: 'x', profile: 'discovery' });
+  try {
+    assert.equal(failed, true);
+    assert.match(out, /not seeded from here/);
+    assert.match(out, /yad-discovery/);
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new: the front-zero id is reserved, whatever route is asked for', async () => {
+  // Refusing the PROFILE is not enough: the route defaults to `classic`, so this slug would otherwise
+  // write a 10-step feature chain onto the one id a product may have only one of — with no
+  // `kind: "discovery"` marker, which is what every reader of the front-zero keys off. And it would
+  // stick: the next run refuses the id as already seeded, so `yad-discovery` would author over it.
+  for (const slug of ['discovery', 'EP-discovery']) {
+    const { T, out, failed } = await epicNewOn({ slug });
+    try {
+      assert.equal(failed, true, slug);
+      assert.match(out, /product front-zero/);
+      assert.match(out, /yad-discovery/);
+      assert.equal(fs.existsSync(path.join(T, 'epics/EP-discovery')), false, slug);
+    } finally { cleanTmp(T); }
+  }
+});
+
+test('yad epic new: an epic.md that declares NO type is not a clash', async () => {
+  // `workItemType` defaults to `feature`, so a header naming no type resolves the same as one that
+  // says `feature`. Clashing on the resolved value would refuse `--type chore` beside a drafted
+  // epic.md and tell the author to go and fix a value their file does not contain — blocking the one
+  // legitimate way to seed a chore against an epic document already in progress.
+  const bare = '---\nid: EP-x\ntitle: Something\n---\n\n## Goal\nx\n';
+  const r = await epicNewOn({ slug: 'x', type: 'chore' }, { files: { 'epics/EP-x/epic.md': bare } });
+  try {
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(r.T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'chore');
+  } finally { cleanTmp(r.T); }
+  // With no flag either, the default still applies.
+  const plain = await epicNewOn({ slug: 'x' }, { files: { 'epics/EP-x/epic.md': bare } });
+  try {
+    assert.equal(JSON.parse(fs.readFileSync(path.join(plain.T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'feature');
+  } finally { cleanTmp(plain.T); }
+});
+
+test('yad epic new: an id that is not EP-<slug> is refused before it becomes a path', async () => {
+  for (const slug of ['../escape', 'Has-Caps', 'a/b', '']) {
+    const { T, failed } = await epicNewOn({ slug });
+    try { assert.equal(failed, true, JSON.stringify(slug)); } finally { cleanTmp(T); }
+  }
+});
+
+test('yad epic new --json: the machine answer carries the chain and the skill to run next', async () => {
+  const { T, out, failed } = await epicNewOn({ slug: 'checkout', json: true });
+  try {
+    assert.equal(failed, false);
+    const j = JSON.parse(out);
+    assert.equal(j.ok, true);
+    assert.equal(j.epic, 'EP-checkout');
+    assert.equal(j.profile, 'classic');
+    assert.equal(j.currentStep, 'epic');
+    assert.equal(j.next, 'yad-epic');
+    assert.equal(j.steps.length, 10);
+  } finally { cleanTmp(T); }
+  const bad = await epicNewOn({ slug: 'x', profile: 'spike', json: true });
+  try {
+    assert.equal(bad.failed, true);
+    assert.equal(JSON.parse(bad.out).ok, false, 'a refusal is machine-readable too');
+  } finally { cleanTmp(bad.T); }
+});
+
+test('yad epic new: an epic.md already there is what says the type, not the default', async () => {
+  // The shape-5 rule holds here too: the type is authored in `epic.md` and copied into the ledger.
+  // Seeding `feature` beside a header that says `chore` would mint an epic whose two records disagree
+  // from its first second — which `yad doctor` would then report on an epic nobody had touched.
+  const md = (kind) => `---\nid: EP-x\nkind: ${kind}\n---\n\n## Goal\nx\n`;
+  const taken = await epicNewOn({ slug: 'x' }, { files: { 'epics/EP-x/epic.md': md('chore') } });
+  try {
+    assert.equal(taken.failed, false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(taken.T, 'epics/EP-x/.sdlc/state.json'), 'utf8')).type, 'chore');
+    // …and it does not then tell the author to go and write the type it just read out of their file.
+    assert.doesNotMatch(taken.out, /Give it `kind:/);
+  } finally { cleanTmp(taken.T); }
+
+  // A flag that contradicts the header is refused, not resolved. Only the person typing it knows
+  // which they meant, and picking one would overwrite an answer somebody wrote.
+  const clash = await epicNewOn({ slug: 'x', type: 'feature' }, { files: { 'epics/EP-x/epic.md': md('chore') } });
+  try {
+    assert.equal(clash.failed, true);
+    assert.match(clash.out, /epic\.md says `chore`, --type says `feature`/);
+    assert.equal(fs.existsSync(path.join(clash.T, 'epics/EP-x/.sdlc/state.json')), false);
+  } finally { cleanTmp(clash.T); }
+
+  // Agreeing is not a clash.
+  const same = await epicNewOn({ slug: 'x', type: 'chore' }, { files: { 'epics/EP-x/epic.md': md('chore') } });
+  try { assert.equal(same.failed, false); } finally { cleanTmp(same.T); }
+
+  // A header naming a threaded type is refused for the same reason a flag naming one is.
+  const threaded = await epicNewOn({ slug: 'x' }, { files: { 'epics/EP-x/epic.md': md('defect') } });
+  try {
+    assert.equal(threaded.failed, true);
+    assert.match(threaded.out, /yad-change/);
+  } finally { cleanTmp(threaded.T); }
+});
+
+test('yad epic new: an existing ledger is refused before the header is even read', async () => {
+  // Otherwise an epic that is both already seeded AND has a clashing header would be told about the
+  // header, sending the user to fix the one thing that is not the problem.
+  const { T, out, failed } = await epicNewOn({ slug: 'x', type: 'feature' }, { files: {
+    'epics/EP-x/epic.md': '---\nid: EP-x\nkind: chore\n---\n\n## Goal\nx\n',
+    'epics/EP-x/.sdlc/state.json': JSON.stringify({ schemaVersion: 6, currentStep: 'epic', steps: [{ id: 'epic', type: 'author', status: 'done' }] }, null, 2) + '\n',
+  } });
+  try {
+    assert.equal(failed, true);
+    assert.match(out, /already has a lifecycle/);
+  } finally { cleanTmp(T); }
+});
+
+test('CLI: `yad epic new` is wired end to end, flags and all', () => {
+  // The unit tests above call `runEpicNew` directly, so nothing there would notice `--profile`
+  // missing from VALUE_FLAGS — the flag would be pushed as a positional and the route would silently
+  // fall back to `classic`.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e17cli-'));
+  try {
+    const r = yadRun(T, 'epic', 'new', 'checkout', '--profile', 'analysis-first', '--type', 'chore', '--json');
+    assert.equal(r.code, 0, r.out);
+    const j = JSON.parse(r.out);
+    assert.equal(j.profile, 'analysis-first');
+    assert.equal(j.type, 'chore');
+    assert.equal(j.epic, 'EP-checkout');
+    // An unknown sub-action names the one that exists rather than falling through to the top-level
+    // "unknown command" message, which would send the user looking for a command they did type.
+    const bad = yadRun(T, 'epic', 'list');
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /unknown epic action: list/);
+    assert.match(yadRun(T, 'epic').out, /unknown epic action: \(none\)/);
+    // And it is discoverable.
+    assert.match(yadRun(T, '--help').out, /yad epic new <slug>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

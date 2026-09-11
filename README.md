@@ -96,7 +96,8 @@ In one pass it produces:
 - **PR/MR templates** and an opt-in CodeRabbit config.
 
 Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — state, approvals, and the contract lock —
-so the audit trail starts the moment you begin real work.
+so the audit trail starts the moment you begin real work. `yad epic new <slug>` does the same seeding
+from the CLI when you would rather lay the track before the writing starts.
 
 ## Your first five minutes
 

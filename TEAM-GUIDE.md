@@ -325,6 +325,12 @@ you can also read and edit directly.
 Do these in order. After each author step, the matching review opens and **waits** — you clear it with
 `yad-review-gate` (`action: open → comment → approve → advance`).
 
+Either of the first two steps can lay the track for you, or you can have the engine do it first:
+`yad epic new <slug>` writes the epic's step chain and its empty ledgers, then the skill authors the
+document against it. The chain comes from a **lifecycle profile** — `classic` is the 10-step route and
+the default, `--profile analysis-first` is the 12-step one. It writes no `epic.md`, no branch and no
+commit, and refuses an epic that already has a chain.
+
 | # | Run this | It produces | Then approve at |
 |---|----------|-------------|-----------------|
 | 0 *(optional)* | `yad-analysis` | `analysis.md` — the analyst's discovery brief (assigns the `EP-<slug>` ID, seeds state) | analysis review |
@@ -499,6 +505,9 @@ surfaces (`contract`, `auth`, `payments`):
   no commands and writing no tracked state. Write it anywhere: `yad usage --out report.html --all` (or
   `--since/--until`, `--member <name>`, `--format json|md`). No emails or comment bodies are ever
   included. (To attribute *authored* artifacts to a member, give them an `email` in the roster.)
+- **Start an epic from the CLI:** `yad epic new <slug>` seeds its lifecycle — the step chain from a
+  profile, plus empty approval and comment ledgers and the `reviews/` folder. `--type feature|chore`; a
+  change, defect or hotfix threads off an existing epic, so `yad-change` seeds those instead.
 - **Keep the install in sync with the CLI** (run from the Product):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).

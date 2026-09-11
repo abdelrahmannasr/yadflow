@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, LIFECYCLE_PROFILES, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -909,11 +909,11 @@ export function themeChecks(checks, root) {
 // KNOWN; this asks whether a known step is set up the way the catalogue says it is.
 //
 // IT REPORTS AND CHANGES NOTHING, and when the two disagree THE FILE WINS for this whole major
-// (rule 3). Today all five authoring skills hand-write the `state.json` seed, a chain may legitimately
-// leave a step out (not every epic has a `ui-design`), and a project may hold a chain from a newer
-// yadflow. So a mismatch is a warning about a file somebody should look at, never a rewrite — the same
-// discipline as `workItemType`. E5 seeds the chain FROM the catalogue and E17 writes it, at which
-// point most of these stop being reachable by accident.
+// (rule 3). `yad epic new` now seeds a chain from the catalogue, so a fresh epic cannot disagree with
+// it by accident — but the five authoring skills still hand-write a seed too (rewriting them is E17b),
+// a chain may legitimately leave a step out (not every epic has a `ui-design`), and a project may hold
+// a chain from a newer yadflow. So a mismatch is a warning about a file somebody should look at, never
+// a rewrite — the same discipline as `workItemType`.
 //
 // Nothing here reports a step that is ABSENT from a chain. Skipping `ui-design` on an epic with no
 // screens is a normal thing to do, and a check that nagged about it would train people to ignore the
@@ -933,10 +933,12 @@ export function catalogueChecks(checks, root) {
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     const present = new Set(state.steps.map((s) => s?.id).filter((x) => typeof x === 'string'));
 
-    // Which lifecycle profile is this epic walking (E5)? Nothing on disk says so yet — E17 adds that
-    // field — so it is worked out from the chain. A chain matching NO profile carries a step no route
-    // has, or has them out of order, and `yad next` walks a chain in array order: the step it names
-    // next is then whatever happens to sit there, not the step that comes next in any route.
+    // Which lifecycle profile is this epic walking? Worked out from the CHAIN, not from the `profile`
+    // key shape 6 records — the key says which route the epic was started on, and this is about the
+    // steps as they stand. (`profileChecks` below is what compares the two.) A chain matching NO
+    // profile carries a step no route has, or has them out of order, and `yad next` walks a chain in
+    // array order: the step it names next is then whatever happens to sit there, not the step that
+    // comes next in any route.
     if (state.steps.length && !matchLifecycleProfile(state.steps)) {
       const known = state.steps.filter((x) => stepDef(x?.id));
       // Only reported when every step is one the catalogue knows. An id from a newer release is
@@ -1028,6 +1030,60 @@ export function catalogueChecks(checks, root) {
       checks, 'step:orphan-gate', 'shape', 'warn',
       `${orphanGate.length} review gate(s) review a step that is not there: ${some(orphanGate, 3)}`,
       'nothing in this chain tells anyone to write the artifact the gate reviews, and for a directory artifact the hash comes back empty, so the gate has nothing to bind an approval to. Add the author step, or drop the gate if this chain deliberately inherits that artifact from its parent epic',
+    );
+  }
+}
+
+// The lifecycle profile an epic RECORDS (E17, shape 6) against the chain it actually walks.
+//
+// Before shape 6 the route was only ever derived, so it could not be wrong — it was whatever the chain
+// said. Now `state.json` names it, and a name can go stale: someone edits the chain by hand, or copies
+// a ledger from another epic, and the file claims a route it is no longer on. That matters because the
+// name is what a seed and a renderer trust WITHOUT re-reading the chain.
+//
+// Reported, never corrected. The file wins for this whole major (rule 3) — an epic may carry a route
+// from a newer yadflow, and `yad migrate` deliberately never overwrites a `profile` somebody wrote.
+//
+// NO OVERLAP WITH `step:off-route`, on purpose. That check fires when a chain fits no route at all,
+// and it already tells the user their chain is broken and how. Re-reporting the same epic here as
+// "the recorded route disagrees" would name the same fault twice with two different remedies, so this
+// check speaks only when the chain fits a route CLEANLY and it is a different one from the record.
+export function profileChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const unknown = [];
+  const disagree = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    // No key at all is the normal state for a chain that matches no route: `stampProfile` declines to
+    // invent one, and `step:off-route` is what reports that chain. Nothing to say here.
+    if (!isPlainObject(state) || !('profile' in state)) continue;
+    const recorded = state.profile;
+    if (!lifecycleProfile(recorded)) {
+      unknown.push(`${e}: \`${recorded === null ? 'null' : String(recorded)}\``);
+      continue;
+    }
+    const matched = matchLifecycleProfile(state.steps);
+    if (matched && matched !== recorded) {
+      disagree.push(`${e}: records \`${recorded}\`, its chain is \`${matched}\``);
+    }
+  }
+
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  if (unknown.length) {
+    check(
+      checks, 'profile:unknown', 'shape', 'warn',
+      `${unknown.length} epic(s) record a lifecycle profile nobody defined: ${some(unknown, 3)}`,
+      `a profile is one of ${LIFECYCLE_PROFILES.map((p) => p.id).join(' · ')}. An unrecognised value means nothing can say which route this epic is on, so every reader falls back to matching the chain — set \`profile\` in \`.sdlc/state.json\` to the route it walks, or delete the key and let it be derived`,
+    );
+  }
+  if (disagree.length) {
+    check(
+      checks, 'profile:disagree', 'shape', 'warn',
+      `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
+      'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
     );
   }
 }
@@ -1164,6 +1220,7 @@ export function collectDoctor(root) {
   typeChecks(checks, root);
   themeChecks(checks, root);
   catalogueChecks(checks, root);
+  profileChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

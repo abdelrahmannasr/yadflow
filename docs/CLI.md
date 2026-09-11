@@ -18,6 +18,7 @@ no clone needed.
 | Command | What it does |
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
+| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first` (default `classic`) — the `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--json` for a script. It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The seeding skills still write their own chain (they now record the same `profile`), so the two paths coexist and produce the same file. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct, and never overwrites a managed file reported as `modified`. |
@@ -270,9 +271,19 @@ five skill files, and are now written down once:
 | `analysis-first` | The 12-step chain, which puts the analysis before the epic | An idea shaped by the analyst before it becomes an epic |
 | `discovery` | The product front-zero, two steps and no Build | The one `EP-discovery` item, which frames the whole product |
 
-Nothing about profiles is written into your project, so no file format changed. Which profile an epic
-is on is worked out from the steps it carries. Recording it in the file, and a command that creates an
-epic from a chosen profile, come with the next task.
+**Each epic records its route.** `epics/<epic>/.sdlc/state.json` carries a `profile` key from file
+shape 6 on, and `yad epic new` writes it when it seeds the chain. An epic created before that key
+existed gets it from `yad migrate`, read off the chain it already carries — see
+[shape 6](migrations/shape-6.md).
+
+The chain stays the truth. The recorded name says which route the epic was **started** on; matching
+the steps says which route it is on **now**, and `yad doctor` compares the two:
+
+| Check | Fires when |
+|---|---|
+| `profile:unknown` | the recorded value is not one of the three |
+| `profile:disagree` | the chain is cleanly on a route, and it is not the one recorded |
+| `step:off-route` | the chain is on no route at all |
 
 **Leaving a step out keeps you on the route.** An epic with no screens drops the UI design step and is
 still `classic`. What takes an epic off its route is a step no route has, or two steps in the wrong
@@ -323,7 +334,7 @@ no copy in any ledger file, so no file shape changed and there is nothing to mig
 
 ## File shape: `schemaVersion`
 
-Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **5**
+Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **6**
 in this release. It records what shape the file is in, so a later release can recognise a file written
 by an older one and upgrade it rather than guess.
 
@@ -383,8 +394,8 @@ line for the project and one per epic:
 
 ```text
   shape
-  ✓ this project is on shape 5, the engine is on shape 5
-  ✓ EP-checkout is on shape 5, the engine is on shape 5
+  ✓ this project is on shape 6, the engine is on shape 6
+  ✓ EP-checkout is on shape 6, the engine is on shape 6
 ```
 
 | What it says | What it means | What to do |
@@ -395,6 +406,8 @@ line for the project and one per epic:
 | *N file(s) are **newer** than this yadflow* (fail) | they were written by a newer release | upgrade the CLI. **Never** migrate — that would move them backward and lose what the newer version wrote |
 | *N are **CI-owned** and behind* (warn) | in verified mode CI is the only writer of those files, so `yad migrate` will not touch them | nothing. The next `yad gate` command, or CI's next gate sync, moves them and the warning clears |
 | *N step(s) belong to no phase* (warn) | a step id this release does not recognise — so no skill runs it and `yad next` cannot guide it | check the spelling, or upgrade if the step comes from a newer release |
+| *N epic(s) record a lifecycle profile nobody defined* (warn) | `profile` in `state.json` is not one of the three routes | set it to the route the chain walks, or delete the key and let it be derived |
+| *N epic(s) record a route their chain is not on* (warn) | the recorded name and the steps disagree, and the steps are cleanly on another route | the chain is what every gate walks. Correct `profile` in `.sdlc/state.json` |
 
 The reading comes from the same code `yad migrate` previews with, so the two can never disagree. In
 `--json`, each shape check carries a `shape` object with the engine's version and a per-file list, so

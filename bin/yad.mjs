@@ -6,6 +6,7 @@ import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 import { isValidEpicId } from '../cli/epic-state.mjs';
+import { runEpicNew } from '../cli/epic.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile, reviewWalkthrough } from '../cli/review.mjs';
@@ -80,6 +81,14 @@ ${c.bold('Team usage (EM adoption & behavior report)')}
                                        --member <name>, --format html|json|md, --repos (code commits)
 
 ${c.bold('Where am I / what next')}
+  yad epic new <slug> [--type <t>] [--profile <p>] [--json]
+                                       Seed a new epic's lifecycle: writes its step chain from a
+                                       profile, plus empty approval/comment ledgers and reviews/.
+                                       --type feature|chore (default feature) — a change/defect/
+                                       hotfix threads off an existing epic, so use yad-change.
+                                       --profile classic|analysis-first (default classic).
+                                       Writes no epic.md, no branch and no commit: run the skill
+                                       the chain names next. Refuses an epic that already has one
   yad next                             Project-wide: the one next action to take (or run setup)
   yad next <epic>                      The single next action for one epic (skill or yad command)
   yad next <epic> --check <step>       Exit 0 if <step> is runnable now, else 1 (precondition guard)
@@ -191,7 +200,7 @@ ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--retro-ship', '--merge-commit', '--path']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--retro-ship', '--merge-commit', '--path']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -298,6 +307,16 @@ async function main() {
       const [, epic] = o._;
       if (epic && !isValidEpicId(epic)) { log(c.red(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       await syncStatuses(o.dir, { epic, dryRun: o.dryRun });
+      break;
+    }
+    case 'epic': {
+      const [, action, slug] = o._;
+      if (action !== 'new') {
+        log(c.red(`unknown epic action: ${action ?? '(none)'} (new)`));
+        log('usage: yad epic new <slug> [--type feature|chore] [--profile classic|analysis-first]');
+        process.exitCode = 1; break;
+      }
+      await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, today, json: o.json });
       break;
     }
     case 'next': {

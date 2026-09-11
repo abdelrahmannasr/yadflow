@@ -110,11 +110,12 @@ into normal authoring with zero re-seeding.
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
   "type": "feature",
   "kind": "stub",
+  "profile": "classic",
   "currentStep": "backfill-pending",
   "steps": [
     { "id": "epic",               "type": "author",         "artifact": "epic.md",          "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "blocked", "risk_tags": [] },
@@ -130,6 +131,11 @@ into normal authoring with zero re-seeding.
   ]
 }
 ```
+
+`profile: "classic"` names the **route** this chain takes — the same 10-step chain a normal epic walks,
+which is what `promote` wakes. `yad doctor` reads it back and reports an epic whose chain is not on the
+route it records. (`yad epic new` does not seed a stub: a stub's whole chain is `blocked` behind a
+`backfill-pending` sentinel, which is this skill's own shape, not a plain route.)
 
 Also create the empty ledgers `{.sdlc/approvals.json}` and `{.sdlc/comments.json}` (each `[]`) and the
 `reviews/` directory. **Do NOT** write a `contract-lock.json` — a stub has no locked surface yet.

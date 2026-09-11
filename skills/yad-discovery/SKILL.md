@@ -91,9 +91,11 @@ engine keys off. Use this exact shape (see `references/discovery-schema.md`):
 
 ```json
 {
+  "schemaVersion": 6,
   "epicId": "EP-discovery",
   "kind": "discovery",
   "createdAt": "<YYYY-MM-DD>",
+  "profile": "discovery",
   "currentStep": "discovery-review",
   "steps": [
     { "id": "discovery",        "type": "author",         "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done",      "risk_tags": [] },
@@ -103,6 +105,10 @@ engine keys off. Use this exact shape (see `references/discovery-schema.md`):
 ```
 
 Notes:
+- `profile: "discovery"` names the **route** this chain takes — the product front-zero, two steps and
+  no Build. `yad doctor` reads it back and reports an epic whose chain is not on the route it records.
+  `yad epic new` deliberately refuses this route: the front-zero has a fixed id, no `epic.md` and no
+  work-item type, so this skill stays its author.
 - The review step's artifact is the virtual base `discovery/` — the gate fingerprints the whole
   discovery file set (`market-research`, `competitor-analysis`, `current-state`, `feasibility`,
   `requirements`, `roadmap`), so editing any of them revokes prior approvals (mirrors `stories/`).

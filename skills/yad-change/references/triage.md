@@ -28,8 +28,9 @@ re-authors stories+test-cases:
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "epicId": "EP-<slug>", "createdAt": "<today>", "type": "<the same value as epic.md kind/type>",
+  "profile": "classic",
   "currentStep": "stories",
   "steps": [
     { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "risk_tags": [] },

@@ -28,10 +28,14 @@ engine (never typed by hand); Shape steps are locked to `advance: human`.
 ### Step 1 — Get the idea
 Ask the user for a one-line feature idea if not provided.
 
-**Precondition gate (rail):** analysis is the optional first entry point and seeds state exactly once.
-If `.sdlc/state.json` already exists for the target epic, run `yad next EP-<slug> --check analysis`; if it
-exits non-zero, **STOP** and point the user at `yad next EP-<slug>` (the epic is past analysis). If it
-exits zero, resume analysis for that epic. When no `state.json` exists yet, proceed and seed state.
+**Precondition gate (rail):** the chain is seeded exactly once, and this skill is no longer the only
+thing that can have done it — `yad epic new <slug> --profile analysis-first` seeds the same 12-step
+chain from the CLI. So the question is whether `.sdlc/state.json` exists, not who wrote it:
+
+- **A chain already exists** — run `yad next EP-<slug> --check analysis`. If it exits non-zero, **STOP**
+  and point the user at `yad next EP-<slug>` (the epic is past analysis). If it exits zero, resume
+  analysis for that epic: **skip Step 6** (do not re-seed) and run **Step 6b** instead.
+- **No `state.json`** — this is the entry point. Run Step 6 to seed the chain, and skip Step 6b.
 
 ### Step 2 — Shape the idea (assist: analyst)
 Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) to pressure-test the idea in depth: who is the
@@ -61,6 +65,7 @@ roadmap. **Optional & non-blocking:** if there is no discovery, or it has not ye
 `discovery-done`, proceed unchanged — do not consume an unapproved roadmap.
 
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand)
+*(Skip when `state.json` already exists — the id was assigned by whatever seeded the chain.)*
 Derive `EP-<slug>` where `slug` is **2–4 lowercase words joined by hyphens**, drawn from the idea
 (e.g. `EP-checkout`). Lowercase except the fixed `EP` prefix. `EP-discovery` is **reserved**
 for the project front-zero — never use it for a feature. **The ID is assigned once and
@@ -101,17 +106,21 @@ code-context: { repos: [], loaded: <YYYY-MM-DD or none> }   # which code-maps in
 
 Fill the body with the user; leave `owner` for the user to set.
 
-### Step 6 — Seed the state machine
+### Step 6 — Seed the state machine — only when nothing is seeded
+*(Skip when `state.json` already exists — `yad epic new --profile analysis-first` seeded it. Go to
+Step 6b. Re-seeding would overwrite a ledger, and in verified mode that is the mutation
+`ledger-guard` rejects.)*
 Create `{project-root}/epics/EP-<slug>/.sdlc/state.json` describing the full **12-step** Shape step
 sequence (analysis before epic), all steps defaulting to `automation: human_approve` / `advance: human`, with every
 authoring step **locked**. Use this exact shape (see `references/state-schema.md`):
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
   "type": "<the same value as epic.md — feature, or chore>",
+  "profile": "analysis-first",
   "currentStep": "analysis-review",
   "steps": [
     { "id": "analysis",           "type": "author",         "artifact": "analysis.md",      "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },
@@ -131,6 +140,13 @@ authoring step **locked**. Use this exact shape (see `references/state-schema.md
 ```
 
 Notes:
+- **The engine can write this whole block for you.** `yad epic new <slug> --profile analysis-first`
+  seeds exactly this chain, plus the empty `approvals.json` / `comments.json` and the `reviews/`
+  directory. It writes no `analysis.md`, no branch and no commit, and it refuses an epic that already
+  has a `state.json`. Hand-seeding stays correct and supported; the two produce the same file.
+- `profile: "analysis-first"` names the **route** this chain takes — the 12-step chain, `analysis`
+  before `epic`. `yad doctor` reads it back and reports an epic whose chain is not on the route it
+  records.
 - `analysis-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer).
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1.
@@ -144,6 +160,29 @@ Notes:
   epic's **first** review PR/MR carries the ledger to the default branch. In verified mode `ledger-guard`
   exempts a new epic's ledger (creation, not mutation, #162); every later change to it is CI's. See
   `../yad-epic/references/state-schema.md`, "Authoring branches".
+
+### Step 6b — Advance the authoring step — only when the chain was already seeded
+*(Only when `state.json` already existed — seeded by `yad epic new`.)*
+**Check the mode first — the two modes have opposite instructions here.** Read `.sdlc/hub.json`:
+**verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run
+`yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
+
+**verified mode — do NOT write `state.json`.** The ledger is CI-owned and advancing a step is a
+mutation: `ledger-guard` rejects any non-bot commit that changes one, and `yad gate ci --merged`
+performs the whole transition when the review PR merges.
+
+**Do not EDIT the ledger — but do COMMIT it when it is untracked.** Those are two different acts.
+Commit `analysis.md`, and also `.sdlc/state.json`, `.sdlc/approvals.json` and `.sdlc/comments.json`
+when `git status` shows them **untracked** — an engine-seeded ledger has never been reviewed, so it is
+still off the base ref and `ledger-guard` exempts it (creation, not mutation, #162). It rides this
+epic's first review PR exactly as a Step 6 seed does. Leave their contents alone.
+
+**Otherwise — local, or a platform with no gate-sync CI — write it.** In `state.json`: set
+`analysis.status: "done"`, set `analysis-review.status: "in_review"`, and set
+`currentStep: "analysis-review"`. Do **not** re-seed, and do **not** touch `approvals.json` — only real
+reviewers approve, through the gate. The CLI closes the authoring step itself when its review gate
+opens (`yad gate open` / `sync`), so this edit is a no-op once the gate has run; it keeps
+`state.json` truthful before that.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `analysis.md`, and that the next action is **review** via

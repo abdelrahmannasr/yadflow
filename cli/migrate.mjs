@@ -24,7 +24,7 @@ import {
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
-import { isValidEpicId, stampWorkItemType } from './epic-state.mjs';
+import { isValidEpicId, stampProfile, stampWorkItemType } from './epic-state.mjs';
 
 // ---- the migration list --------------------------------------------------------------------
 // Ordered steps, each moving a file from one shape to the next. A step is applied to a file only when
@@ -179,6 +179,31 @@ export const MIGRATIONS = [
       // `epics/<id>/.sdlc/state.json` -> `<root>/epics/<id>`
       return stampWorkItemType(obj, path.join(ctx.root, path.dirname(path.dirname(ctx.rel))));
     },
+  },
+  {
+    from: 5,
+    to: 6,
+    title: "every epic's `state.json` records the lifecycle profile its chain came from",
+    // A profile is the route an epic takes through the lifecycle: `classic` (the 10-step chain),
+    // `analysis-first` (the 12-step one) or `discovery` (the product front-zero). E5 wrote the three
+    // down in code; shape 6 records, per epic, which one that epic is walking.
+    //
+    // THE VALUE IS READ OFF THE CHAIN THE FILE ALREADY CARRIES, never defaulted — the same discipline
+    // as the 4 -> 5 type copy, and for a sharper reason. Stamping `classic` on every epic would put a
+    // route on the record that nobody chose, and it would do it to exactly the chains that fit no
+    // route at all: the ones `yad doctor` reports as off-route. After the stamp the file would agree
+    // with itself and the report would go quiet, so an upgrade run for safety would have hidden the
+    // one thing it was meant to surface. A chain that matches no profile gets NO key (stampProfile),
+    // and `yad doctor` keeps saying so.
+    //
+    // Nothing else moves. The chain, the statuses and the gates are untouched; this step only names
+    // what the chain already is. An epic seeded before a route existed keeps behaving exactly as it
+    // does today, which is rule 5.
+    //
+    // `state.json` on a VERIFIED Product is `ci-owned` and is skipped by this command, the same gap
+    // shapes 4 and 5 had. What closes it is that the gate's own write goes through `writeState`,
+    // which calls this same stamper.
+    apply: (obj, ctx) => (isEpicStatePath(ctx?.rel) ? stampProfile(obj) : obj),
   },
 ];
 
