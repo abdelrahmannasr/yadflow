@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
-import { epicRoot, loadLedger, loadSkillBindings, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, PHASES, DISCOVERY_EPIC } from './epic-state.mjs';
+import { dedupeConsecutive, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, PHASES, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -123,10 +123,12 @@ function printBuildLanes(builds) {
     // No resolvable next skill (an empty/half-seeded build-state file): show it as not-started, no ▸.
     if (!lane.skill) { log(`    ${where} ${c.dim('— not started yet (no build steps recorded)')}`); continue; }
     log(`    ${where} ${c.dim('—')} ${c.bold(lane.step)}  (${dialNote(lane)})`);
-    // `chain` is every skill still to run in this lane, the active step's own included — so drop as
-    // many leading entries as this step resolves to, not just one, or a bound chain would print its
-    // own second skill again as if it came later.
-    const rest = (lane.chain || []).slice(skillList(lane).length);
+    // `chain` is every skill still to run in this lane, the active step's own included — so drop this
+    // step's own off the front, or a bound chain would print its second skill again as if it came
+    // later. Folded through the SAME helper the chain was built with: `chain` collapses consecutive
+    // duplicates, so a step bound to one skill twice has two entries here and one there, and slicing
+    // by the raw count would swallow the next step's skill.
+    const rest = (lane.chain || []).slice(dedupeConsecutive(skillList(lane)).length);
     const then = rest.length ? `   ${c.dim(`then → ${rest.join(' → ')}`)}` : '';
     hand(`invoke ${skillPhrase(lane)}${then}`);
     const note = costNote(lane);
@@ -135,7 +137,14 @@ function printBuildLanes(builds) {
 }
 
 // A short, copy-pasteable line for one action — the `▸` line a user can act on directly.
-function actionLine(a, { solo } = {}) {
+//
+// `bindings` arrives here as well as on the action object, because two of these lines name a skill
+// the RESOLVER never put on the action: the `discovery-done` hand-off to the epic step, and the Build
+// fallback printed when no story has a build-state yet. Both are the engine naming a step's skill in
+// prose, so both must name the project's choice — otherwise `yad next` and `yad skill list` disagree
+// about the same project.
+function actionLine(a, { solo, bindings = null } = {}) {
+  const runs = (stepId, fallback) => stepSkills(stepId, bindings)[0] || fallback;
   switch (a.kind) {
     case 'new':
       return `invoke ${skillPhrase(a)} ${c.dim('(author the epic)')}`;
@@ -154,10 +163,10 @@ function actionLine(a, { solo } = {}) {
         if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet`);
         return `${c.dim(`${open.length} lane(s) in build — next:`)} ${c.bold(first.skill)} ${c.dim(`@ ${shortStory(first.story)}/${first.repo}`)}`;
       }
-      return `${c.bold('yad-run')} ${c.dim('(or per story: yad-spec → yad-implement → yad ship → yad-engineer-review)')}`;
+      return `${c.bold('yad-run')} ${c.dim(`(or per story: ${runs('spec', 'yad-spec')} → ${runs('implement', 'yad-implement')} → yad ship → ${runs('engineer-review', 'yad-engineer-review')})`)}`;
     }
     case 'discovery-done':
-      return `invoke the ${c.bold('yad-epic')} skill ${c.dim('(seed a feature epic from roadmap.md)')}`;
+      return `invoke the ${c.bold(runs('epic', 'yad-epic'))} skill ${c.dim('(seed a feature epic from roadmap.md)')}`;
     case 'backfill-pending':
       return `invoke the ${c.bold('yad-backfill')} skill ${c.dim('(document the code, then `yad-backfill promote` — or thread bugs now with yad-change)')}`;
     case 'backfill-done':
@@ -173,7 +182,7 @@ function actionLine(a, { solo } = {}) {
 // `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
 // by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
 // `epic.md` read the action's own `lineageKind` came from.
-function printAction(a, { solo, theme: tag = null } = {}) {
+function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The discovery front-zero is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${typeNoun(a.lineageKind)} ` : '';
@@ -185,7 +194,7 @@ function printAction(a, { solo, theme: tag = null } = {}) {
   // of the single static hint; otherwise the one actionable line.
   if (a.kind === 'build' && a.builds?.length) printBuildLanes(a.builds);
   else {
-    hand(actionLine(a, { solo }));
+    hand(actionLine(a, { solo, bindings }));
     const note = costNote(a);
     if (note) info(c.dim(note));
   }
@@ -246,19 +255,21 @@ function generalNext(root, { all } = {}) {
   const discoveryOpen = !!discoveryRow && discoveryRow.action.kind !== 'discovery-done';
 
   if (!featureEpics.length) {
-    if (discoveryOpen) { printAction(discoveryRow.action, { solo, ...discoveryRow }); return; }
+    if (discoveryOpen) { printAction(discoveryRow.action, { solo, bindings, ...discoveryRow }); return; }
     log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
-    if (!hasDiscovery) hand(`frame the whole project (market, feasibility, roadmap): invoke the ${c.bold('yad-discovery')} skill ${c.dim('(optional front-zero)')}`);
-    hand(`start your first epic: invoke the ${c.bold('yad-epic')} skill${hasDiscovery ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
+    // Both name a STEP's skill, so both ask the project. `yad-backfill` above does not: waking a
+    // brownfield anchor is the engine's own promote verb, not a step on any chain.
+    if (!hasDiscovery) hand(`frame the whole project (market, feasibility, roadmap): invoke the ${c.bold(stepSkills('discovery', bindings)[0] || 'yad-discovery')} skill ${c.dim('(optional front-zero)')}`);
+    hand(`start your first epic: invoke the ${c.bold(stepSkills('epic', bindings)[0] || 'yad-epic')} skill${hasDiscovery ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
     return;
   }
 
   const rows = featureEpics.map((id) => rowFor(root, id, bindings));
-  if (discoveryOpen) printAction(discoveryRow.action, { solo, ...discoveryRow });   // an unfinished discovery comes first
+  if (discoveryOpen) printAction(discoveryRow.action, { solo, bindings, ...discoveryRow });   // an unfinished discovery comes first
 
   if (featureEpics.length === 1 || all) {
-    for (const r of rows) printAction(r.action, { solo, ...r });
+    for (const r of rows) printAction(r.action, { solo, bindings, ...r });
     return;
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
@@ -352,6 +363,9 @@ export async function runNext(root, { epic, check, all, json } = {}) {
     process.exitCode = 1;
     return;
   }
-  const row = rowFor(root, epic);
-  printAction(row.action, { solo: isSolo(root), ...row });
+  // One read, two readers: the resolver puts the bound skill on the action, and the renderer names it
+  // in the two prose lines no action carries.
+  const bindings = loadSkillBindings(root);
+  const row = rowFor(root, epic, bindings);
+  printAction(row.action, { solo: isSolo(root), bindings, ...row });
 }

@@ -10919,6 +10919,13 @@ test('yad next prints a bound chain, and says what the extra skills cost', async
     assert.match(b, /then → yad-checks → yad-engineer-review/);
     assert.doesNotMatch(b, /then → build-b/, 'the lane repeated a skill it had just named');
     assert.match(b, /2 skills run for this step/);
+
+    // The same lane bound to ONE skill twice. `chain` collapses consecutive duplicates, so this step
+    // has two entries in its own list and one in the chain — dropping by the raw count would swallow
+    // the next step's skill and tell the user Build ends one step early.
+    fs.writeFileSync(path.join(T, '.sdlc/skills.json'), JSON.stringify({ steps: { implement: ['twice', 'twice'] } }));
+    const d = await grab(() => runNext(T, { epic: 'EP-b' }));
+    assert.match(d, /then → yad-checks → yad-engineer-review/, 'a step bound to one skill twice lost the next step');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -11129,6 +11136,61 @@ test('CLI: `yad skill` reaches the command through the arg parser', () => {
     const bad = yadRun(T, 'skill', 'rebind', 'stories', 'a');
     assert.equal(bad.code, 1);
     assert.match(bad.out, /unknown skill action/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: the skills check is wired into collectDoctor, inside the project block', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = skillProject({
+    '.sdlc/cli-version.json': { version: '3.0.0' },
+    '.sdlc/skills.json': { steps: { stories: 'mine' } },
+  });
+  try {
+    const checks = collectDoctor(T).checks;
+    const at = checks.findIndex((c) => c.id === 'skills');
+    assert.ok(at >= 0, 'the check is exported but never called');
+    assert.equal(checks[at].section, 'project');
+    // The renderer prints a section header every time the section CHANGES, so a `project` check
+    // sitting after the `shape` section makes doctor print the word "project" twice on one run.
+    const sections = checks.map((c) => c.section);
+    const seen = new Set();
+    let last = null;
+    for (const sec of sections) {
+      if (sec !== last) {
+        assert.equal(seen.has(sec), false, `section '${sec}' is printed twice — its checks are not contiguous`);
+        seen.add(sec);
+        last = sec;
+      }
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('the prose lines that name a skill no action carries honour the binding too', async () => {
+  // Two lines in `yad next` name a step's skill without an action object to read it from: the
+  // orientation screen on a project with no epics, and the hand-off after discovery is approved. Both
+  // must say what `yad skill list` says, or the same project gets two different answers.
+  const T = skillProject({
+    '.sdlc/cli-version.json': { version: '3.0.0' },
+    '.sdlc/skills.json': { steps: { epic: ['ours'], discovery: ['our-discovery'], spec: ['our-spec'] } },
+  });
+  try {
+    const orient = await grab(() => runNext(T, {}));
+    assert.match(orient, /invoke the our-discovery skill/);
+    assert.match(orient, /start your first epic: invoke the ours skill/);
+    assert.doesNotMatch(orient, /invoke the yad-epic skill/);
+
+    // The approved front-zero hands off to the epic step.
+    seedEpic(T, 'EP-discovery', { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-done',
+      steps: [{ id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done' }] });
+    seedEpic(T, 'EP-b', { epicId: 'EP-b', currentStep: 'ready-for-build', steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+    ] });
+    const after = await grab(() => runNext(T, { epic: 'EP-discovery' }));
+    assert.match(after, /invoke the ours skill/);
+
+    // And the Build fallback printed when no story has a build-state yet.
+    const build = await grab(() => runNext(T, { epic: 'EP-b' }));
+    assert.match(build, /our-spec → yad-implement/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

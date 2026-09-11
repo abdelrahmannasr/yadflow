@@ -270,6 +270,12 @@ export function projectChecks(checks, root) {
     else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
 
+  // skills.json: which skill runs which step, when the project does not want the engine's default.
+  // Called from HERE rather than from `collectDoctor` beside the other E6 code so its findings land
+  // inside the `project` block. The renderer prints a header every time the section CHANGES, so a
+  // `project` check added after the `shape` section prints the word "project" a second time.
+  skillBindingChecks(checks, root);
+
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
   let registry = { repos: [] };
   let regBroken = false;
@@ -1290,7 +1296,6 @@ export function collectDoctor(root) {
   themeChecks(checks, root);
   catalogueChecks(checks, root);
   profileChecks(checks, root);
-  skillBindingChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

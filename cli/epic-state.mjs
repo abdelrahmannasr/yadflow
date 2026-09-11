@@ -1303,7 +1303,11 @@ export const phaseSteps = (phaseId) => Object.keys(STEP_PHASE).filter((s) => STE
 // yad-spec → yad-implement → yad-checks → yad-engineer-review, matching the Build mental model.
 // Folds against the last KEPT element (not the raw neighbor) so a dropped null between duplicates can't
 // reintroduce one.
-function dedupeConsecutive(skills) {
+//
+// Exported because `yad next` has to fold the SAME way to know how much of `chain` belongs to the
+// active step. A second copy of this rule there would agree until the first step bound to the same
+// skill twice, which folds to one entry in the chain and two in the step's own list.
+export function dedupeConsecutive(skills) {
   const out = [];
   for (const s of skills) if (s && s !== out[out.length - 1]) out.push(s);
   return out;
