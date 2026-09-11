@@ -251,8 +251,8 @@ export function stampStepDials(state) {
 //
 // The type is AUTHORED in `epic.md` frontmatter and copied here, because `state.json` is the file CI
 // writes and the gates read. Opening a hand-edited markdown file from inside a gate decision would
-// make the ledger depend on something the engine does not own; E17 will seed a whole step chain from
-// the type, and it needs the answer in the ledger.
+// make the ledger depend on something the engine does not own. `yad epic new` (E17) seeds a whole
+// step chain from the type, and it needs the answer in the ledger.
 //
 // TWO OTHER WORDS IN THIS FILE LOOK LIKE THIS ONE AND ARE NOT IT. Neither is touched here:
 //   * top-level `kind` in state.json is the lifecycle marker `"stub"` / `"discovery"`. A stub epic
@@ -294,6 +294,44 @@ export function stampWorkItemType(state, epicDir) {
   return out;
 }
 
+// Record which lifecycle profile the chain came from. Shape 6.
+//
+// A PROFILE is the route an epic takes through the lifecycle — the named, ordered chain of catalogue
+// steps E5 wrote down. Until now nothing on disk said which one an epic was on, and every reader
+// worked it out by matching the chain. That is a fine answer for a report and a bad one for a seed:
+// `yad epic new` has to know the route BEFORE there is a chain to match, and an epic that legitimately
+// dropped steps reads as a shorter route than the one it was started on.
+//
+// DERIVED, NEVER DEFAULTED, for an epic that already exists. The value comes from
+// `matchLifecycleProfile`, which returns null for a chain that fits no route — and a null means NO
+// KEY, not `classic`. Stamping a guess would put a route on the record that nobody chose, and
+// `yad doctor` would then stop reporting the chain as off-route because the file would finally agree
+// with itself. `yad doctor` reports the gap; an upgrade never invents an answer for it.
+//
+// Add-only and idempotent, exactly like `stampWorkItemType`: ANY `profile` key already present is
+// left alone, whatever it says. A project may carry a route from a newer yadflow, and a hand-written
+// chain is allowed to be ahead of the tool reading it (rule 3 — the file wins for this whole major).
+//
+// ONE of these, called from `writeState` below and from the 5 -> 6 step in cli/migrate.mjs, because
+// on a VERIFIED Product `yad migrate` never rewrites `state.json` — CI is its only writer, so the
+// gate's own write is the only path a shape change has into that file.
+export function stampProfile(state) {
+  if (!isPlainObject(state) || 'profile' in state) return state;
+  const profile = matchLifecycleProfile(state.steps);
+  if (!profile) return state;
+  // Placed beside `type` at the TOP, for the same reason: `{ ...state, profile }` would leave
+  // `"profile": "classic"` dangling under the `steps` array, where the eye reads it as a property of
+  // the last step rather than of the epic. JSON key order IS the file's bytes, so the object is
+  // rebuilt in order rather than spread and assigned.
+  const out = {};
+  for (const [k, v] of Object.entries(state)) {
+    if ((k === 'currentStep' || k === 'steps') && !('profile' in out)) out.profile = profile;
+    out[k] = v;
+  }
+  if (!('profile' in out)) out.profile = profile;
+  return out;
+}
+
 // Move a `state.json`'s recorded shape up to this engine's, AFTER both stampers above have run.
 //
 // This is the other half of the verified-mode gap, and without it the first half is a half-truth.
@@ -328,7 +366,12 @@ export function writeState(file, state) {
   // `file` is <epicDir>/.sdlc/state.json, so the epic's own directory is two levels up — that is
   // where `epic.md` lives, and the stamper needs it to read the type the author wrote.
   const epicDir = path.dirname(path.dirname(file));
-  return writeJSON(file, atEngineShape(stampWorkItemType(stampStepDials(state), epicDir)));
+  // Same ORDER as the migration chain in cli/migrate.mjs — dials (4), type (5), profile (6). The two
+  // paths must produce byte-identical files (cli/test-migrate.mjs pins it), and both `type` and
+  // `profile` insert themselves in front of `currentStep`, so running them out of order would swap
+  // two keys and make a migrated project's bytes differ from a gate-written one's.
+  const stamped = stampProfile(stampWorkItemType(stampStepDials(state), epicDir));
+  return writeJSON(file, atEngineShape(stamped));
 }
 
 export function loadLedger(epicDir) {
@@ -684,12 +727,12 @@ export function markInReview(state, step) {
 // table, not sources beside it. A test deep-equals each one against what the catalogue says, so a
 // step added here and forgotten there cannot happen, and neither can the reverse.
 //
-// WHAT THIS TASK DELIBERATELY DOES NOT DO. The catalogue is the data structure the rest of Wave 2b
-// keys off, and each of those is its own task: seeding an epic's chain FROM it is E5 (profiles, where
-// today's chain ships as `classic`) and E17 (`yad epic new`); moving the skill binding out of code is
-// E6; per-step gate rules are E7; the fuller step-state model is E38. So the five skills still
-// hand-write their `state.json` seed, and this release only reads the catalogue and reports against
-// it.
+// WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
+// of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
+// below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); moving the skill binding out
+// of code is E6; per-step gate rules are E7; the fuller step-state model is E38. The five skills still
+// hand-write their own `state.json` seed as well — rewriting them to call the engine is E17b — so for
+// now both paths exist and both produce the same file.
 //
 // IT IS CODE, NOT A FILE. Nothing here is written to disk, so no file shape changes and there is
 // nothing to migrate. When a project's `state.json` disagrees with the catalogue, THE FILE WINS for
@@ -770,11 +813,11 @@ export const STEPS = [
 //   discovery       the product front-zero (`EP-discovery`), two steps and no Build. Product-level,
 //                   not on the Epic ladder — E75 folds it into Foundation.
 //
-// WHAT E5 DOES NOT DO. Seeding a chain FROM a profile is E17 (`yad epic new`), which is also where an
-// epic first records WHICH profile it is on — a `state.json` field, so a file-shape change with its
-// own migration. Until then the profile an epic is on is DERIVED by matching its chain. `required`
-// per step moves in here in E35 (deleting `SKIPPABLE_STEPS`), the short chore and spike lanes are E40,
-// and skill binding moves in at E51.
+// WHAT IS AND IS NOT HERE. Seeding a chain from a profile is `seedState` below, driven by
+// `yad epic new` (E17, cli/epic.mjs); shape 6 is where an epic first RECORDS which profile it is on,
+// and an epic seeded before that field existed still has its route derived by matching its chain
+// (`matchLifecycleProfile`). `required` per step moves in here in E35 (deleting `SKIPPABLE_STEPS`),
+// the short chore and spike lanes are E40, and skill binding moves in at E51.
 export const LIFECYCLE_PROFILES = [
   {
     id: 'classic',
@@ -828,9 +871,12 @@ export const lifecycleProfile = (id) => PROFILE_BY_ID.get(String(id || '')) || n
 // The step ids of a profile, in chain order.
 export const profileSteps = (id) => (lifecycleProfile(id)?.rows || []).map((r) => r.id);
 
-// WHICH profile a chain is on, worked out from the chain itself. Nothing on disk says it today, and
-// nothing here writes it: `state.json` gains that field in E17, with the migration a shape change
-// needs. Until then this is how `yad doctor` knows which route an epic is meant to be walking.
+// WHICH profile a chain is on, worked out from the chain itself — and NOT from the `profile` key
+// shape 6 records. Two readers with two jobs: the recorded key says which route the epic was STARTED
+// on, and this says which route its steps are on NOW. `yad doctor` compares them, so a function that
+// read the key would compare it with itself; and `stampProfile` calls this to fill the key in the
+// first place, for every epic that existed before shape 6. A chain that has never been recorded is
+// the normal case for those, and this is the only answer available for it.
 //
 // A chain MATCHES a profile when every step it carries belongs to that profile and they appear in the
 // profile's order. Missing steps are allowed — an epic with no screens legitimately drops `ui-design`,
@@ -839,7 +885,8 @@ export const profileSteps = (id) => (lifecycleProfile(id)?.rows || []).map((r) =
 //
 // The most specific match wins. A 10-step `classic` chain is a subset of `analysis-first` in the right
 // order too, so the SHORTEST fitting route breaks the tie — otherwise every classic epic would read as
-// an analysis-first epic that skipped its first two steps, and E17 would seed the wrong route from it.
+// an analysis-first epic that skipped its first two steps, and shape 6 would record that wrong route
+// on every one of them during an upgrade.
 //
 // `profiles` is a seam for the tests, and it is here because the tie-break is otherwise invisible:
 // with today's three routes the shortest fit also happens to be declared first, so dropping the sort
@@ -893,6 +940,67 @@ export const optionalStepsOf = (profiles = LIFECYCLE_PROFILES) => [
 ];
 
 export const SKIPPABLE_STEPS = new Set(optionalStepsOf());
+
+// ---- seeding a chain FROM a profile (E17) --------------------------------------------------------
+//
+// The routes a `yad epic new` may seed: the FEATURE-level ones. Read off the profiles, never written
+// out again — a route added to `LIFECYCLE_PROFILES` is seedable the day it lands, and E40's chore and
+// spike lanes need no edit here.
+//
+// `discovery` is excluded because it is not a work item on the Epic ladder. Its ledger carries a
+// top-level `kind: "discovery"` marker the engine keys off, its id is fixed (`EP-discovery`), it has
+// no `epic.md` and therefore no work-item type, and E75 folds the whole level into Foundation. A
+// seed that produced its chain without those would be a broken front-zero, not a plain one — so the
+// command refuses it and sends the user to `yad-discovery`, which is still its author.
+export const seedableProfiles = (profiles = LIFECYCLE_PROFILES) =>
+  profiles.filter((p) => p.level === 'feature').map((p) => p.id);
+
+// The `state.json` an epic starts life with, built from a profile and the catalogue. PURE — it
+// returns an object and writes nothing; `runEpicNew` (cli/epic.mjs) is what puts it on disk, through
+// `writeState` like every other save.
+//
+// WHY THE FIRST STEP IS `in_progress` AND NOT `done`. The five skills that seed a chain today write
+// the first author step `done` and its gate `in_review`, because by the time a skill seeds, it has
+// already WRITTEN the artifact — the seed is a record of work finished. The engine seeds before any
+// work exists, so the honest chain is: the first author step open, everything after it blocked, and
+// `currentStep` on the first step. `yad next` then names that step and the skill that authors it,
+// which is the whole point of seeding ahead of the author instead of behind it.
+//
+// FIELD ORDER IS THE FILE'S BYTES. Each step is built key by key in the order the five skill
+// templates use, so an engine-seeded epic and a skill-seeded one are the same file, not two files
+// that happen to hold the same values. A test deep-equals this against the template in
+// `skills/yad-epic/SKILL.md`, key order included.
+//
+// BOTH DIAL NAMES ARE WRITTEN — `assistance`/`automation` beside `driver`/`advance`. The old pair is
+// still the one every reader outside this repo uses (rule 3, add before remove), and a seed that
+// wrote only the new names would produce an epic that a user's un-updated check gates cannot read.
+export function seedState({ epic, profile, type, today }) {
+  const p = lifecycleProfile(profile);
+  if (!p || !seedableProfiles().includes(p.id)) {
+    throw err('YAD-STATE-007', `cannot seed the '${profile}' lifecycle profile`,
+      `pick one of ${seedableProfiles().join(' · ')}`);
+  }
+  const steps = p.rows.map((row, i) => {
+    const def = stepDef(row.id);
+    return {
+      id: def.id,
+      type: def.kind === 'review' ? 'review+approve' : 'author',
+      artifact: def.artifact,
+      assistance: 'review',
+      driver: 'pair',
+      automation: 'human_approve',
+      advance: 'human',
+      locked: true,
+      status: i === 0 ? 'in_progress' : 'blocked',
+      risk_tags: [...def.risk_tags],
+    };
+  });
+  // Key order mirrors what the stampers produce, so a seeded file and a migrated one are the same
+  // bytes. `schemaVersion` is deliberately absent: `writeJSON` stamps this engine's shape onto an
+  // object that was never read from disk (writeShape, cli/lib.mjs), and naming the number here would
+  // be a second place to forget to change.
+  return { epicId: epic, createdAt: today, type, profile: p.id, currentStep: steps[0].id, steps };
+}
 
 // The catalogue keyed by id. `stepDef(id)` is null for an id this release does not know — a real
 // answer, not a gap, and the reason every reader below has a fallback.

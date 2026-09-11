@@ -6,7 +6,7 @@ in files on disk. Nothing hidden."). No database, no browser storage.
 ## Every file states its shape — `schemaVersion`
 
 Each JSON **object** the CLI writes under a `.sdlc/` directory carries a `"schemaVersion"` as its
-first key, holding the shape this release writes — **5** today. It says what shape the file is in, so
+first key, holding the shape this release writes — **6** today. It says what shape the file is in, so
 a future release can recognise an older file and upgrade it instead of guessing.
 
 **When you author one of these files by hand, include the key**, exactly as the examples below show.
@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "epicId": "EP-checkout"
 }
 ```
@@ -44,6 +44,7 @@ The per-epic state machine.
 | `epicId` | The stable `EP-<slug>` ID. Never renamed. |
 | `createdAt` | ISO date the epic was created. |
 | `type` | The work-item type — `feature` \| `change` \| `defect` \| `hotfix` \| `chore` — copied from `epic.md`. Shape 5 on. **Not the same field as `steps[].type`**, which is `author` \| `review+approve`, and not the same as the top-level `kind` a stub or the discovery front-zero carries. |
+| `profile` | The lifecycle route this chain came from — `classic` \| `analysis-first` \| `discovery`. Shape 6 on. See "Lifecycle profiles" below. |
 | `currentStep` | `id` of the step the workflow is waiting on right now. |
 | `steps[]` | Ordered list of every Shape step step. |
 
@@ -91,11 +92,23 @@ view of the profiles rather than a list beside them. The parallel, non-blocking 
 NOT recorded in the profile: `advanceState` still decides it from the step id, and a second copy of
 that rule sitting unread in the profile would be free to drift.
 
-**Nothing records which profile an epic is on.** It is worked out by matching the chain
-(`matchLifecycleProfile`). A chain missing steps still matches — dropping `ui-design` is normal — while
-a step no route has, or two out of order, matches nothing and `yad doctor` reports `step:off-route`.
-The `state.json` field that names the profile arrives with `yad epic new` (E17), as a shape change with
-its own migration.
+**Each epic records its route in `state.json` as `profile`** (shape 6). The value is one of `classic`,
+`analysis-first` and `discovery`. `yad epic new` writes it when it seeds the chain, the seeding skills
+write it in their templates, and `yad migrate` fills it in for an epic that predates the field by
+reading the chain that epic already carries.
+
+The chain is still the truth. The recorded name says which route the epic was STARTED on; matching the
+chain (`matchLifecycleProfile`) says which route the steps are on NOW, and `yad doctor` compares them:
+
+| Check | Fires when |
+|---|---|
+| `profile:unknown` | `profile` holds a value that is not one of the three |
+| `profile:disagree` | the chain is cleanly on a route, and it is not the one recorded |
+| `step:off-route` | the chain is on no route at all — a step no route has, or two out of order |
+
+A chain missing steps still matches — dropping `ui-design` is normal. An epic whose chain matches
+nothing gets NO `profile` key from the migration: inventing one would silence `step:off-route` by
+making the file agree with itself.
 
 > **Two different things are called a profile.** This one is the lifecycle route. `hub.json.profile` is
 > the unrelated setup record `yad setup` writes: `{ codebase, repo_layout, team_size }`.

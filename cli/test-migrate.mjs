@@ -961,3 +961,137 @@ test('an UNSTAMPED state.json is unaffected — writeShape already stamped those
     assert.equal(read(f).schemaVersion, ENGINE_SHAPE);
   } finally { cleanup(T); }
 });
+
+// ---- shape 5 -> 6: the lifecycle profile (E17) ---------------------------------------------------
+
+// The `classic` 10-step chain and the `analysis-first` 12-step one, as step rows a state.json holds.
+const chain = (ids) => ids.map((id) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', status: 'blocked' }));
+const CLASSIC = ['epic', 'epic-review', 'architecture', 'architecture-review',
+  'ui-design', 'ui-design-review', 'stories', 'stories-review', 'test-cases', 'test-cases-review'];
+
+test('migrate 5 -> 6: the profile is READ off the chain the epic already carries', async () => {
+  const T = project({ files: {
+    'epics/EP-x/.sdlc/state.json': stateWith(chain(CLASSIC)),
+    'epics/EP-y/.sdlc/state.json': stateWith(chain(['analysis', 'analysis-review', ...CLASSIC])),
+    'epics/EP-discovery/.sdlc/state.json': stateWith(chain(['discovery', 'discovery-review'])),
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).profile, 'classic');
+    assert.equal(read(path.join(T, 'epics/EP-y/.sdlc/state.json')).profile, 'analysis-first');
+    assert.equal(read(path.join(T, 'epics/EP-discovery/.sdlc/state.json')).profile, 'discovery');
+  } finally { cleanup(T); }
+});
+
+test('migrate 5 -> 6: a chain on NO route gets no profile, so doctor keeps reporting it', async () => {
+  // The whole reason the value is derived rather than defaulted. Stamping `classic` here would make
+  // the file agree with itself, `step:off-route` would go quiet, and an upgrade run for safety would
+  // have hidden the one epic that needed looking at.
+  const T = project({ files: {
+    'epics/EP-x/.sdlc/state.json': stateWith(chain(['stories', 'epic'])),
+    'epics/EP-y/.sdlc/state.json': stateWith(chain(['epic', 'epic-review', 'implement'])),
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    for (const e of ['EP-x', 'EP-y']) {
+      const st = read(path.join(T, `epics/${e}/.sdlc/state.json`));
+      assert.equal('profile' in st, false, `${e}: a route was invented for a chain that has none`);
+      assert.equal(st.schemaVersion, ENGINE_SHAPE, `${e}: the file still moves shape`);
+    }
+  } finally { cleanup(T); }
+});
+
+test('migrate 5 -> 6: a `profile` already recorded is never overwritten, whatever it says', async () => {
+  // The file wins for this whole major (rule 3): a project may hold a route from a newer yadflow, and
+  // correcting a value somebody wrote during an upgrade they ran to be safe is not this command's job.
+  const T = project({ files: {
+    'epics/EP-x/.sdlc/state.json': JSON.stringify(
+      { schemaVersion: 5, profile: 'spike', currentStep: 'epic', steps: chain(CLASSIC) }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).profile, 'spike');
+  } finally { cleanup(T); }
+});
+
+test('migrate 5 -> 6: `profile` is written beside `type` at the TOP, not under `steps`', async () => {
+  const T = project({ files: {
+    'epics/EP-x/epic.md': epicMd('kind: feature'),
+    'epics/EP-x/.sdlc/state.json': stateWith(chain(CLASSIC)),
+  } });
+  try {
+    const f = path.join(T, 'epics/EP-x/.sdlc/state.json');
+    await runMigrate(T, { apply: true });
+    const keys = Object.keys(read(f));
+    assert.equal(keys[0], 'schemaVersion');
+    assert.ok(keys.indexOf('profile') < keys.indexOf('steps'), `profile came after steps: ${keys.join(', ')}`);
+    assert.ok(keys.indexOf('type') < keys.indexOf('profile'), `the two shape keys are out of order: ${keys.join(', ')}`);
+    // Safe to run twice, and a gate write over the same content changes nothing either — the two
+    // paths have to agree down to the bytes, which is what the invariant test above pins in general.
+    const bytes = fs.readFileSync(f, 'utf8');
+    await runMigrate(T, { apply: true });
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'a second migrate is a no-op');
+    const { writeState } = await import('./epic-state.mjs');
+    writeState(f, read(f));
+    assert.equal(fs.readFileSync(f, 'utf8'), bytes, 'and so is a gate write');
+  } finally { cleanup(T); }
+});
+
+test('migrate 5 -> 6: only an epic ledger gains a profile — no other file is touched', async () => {
+  // `ctx.rel` is what scopes the step. Without it a `repos.json` holding a `steps` array of its own
+  // would be handed to the matcher and could come out with a lifecycle route stamped on it.
+  const T = project({ files: {
+    '.sdlc/repos.json': JSON.stringify({ schemaVersion: 5, steps: chain(CLASSIC) }, null, 2) + '\n',
+    'epics/EP-x/.sdlc/change.json': JSON.stringify({ schemaVersion: 5, steps: chain(CLASSIC) }, null, 2) + '\n',
+  } });
+  try {
+    await runMigrate(T, { apply: true });
+    assert.equal('profile' in read(path.join(T, '.sdlc/repos.json')), false);
+    assert.equal('profile' in read(path.join(T, 'epics/EP-x/.sdlc/change.json')), false);
+  } finally { cleanup(T); }
+});
+
+test('stampProfile: add-only, never invents, and hands back the SAME object when idle', async () => {
+  const { stampProfile } = await import('./epic-state.mjs');
+  const already = { profile: 'spike', steps: chain(CLASSIC) };
+  assert.equal(stampProfile(already), already, 'a recorded route is untouched, object identity and all');
+  const offRoute = { currentStep: 'x', steps: chain(['stories', 'epic']) };
+  assert.equal(stampProfile(offRoute), offRoute, 'no route fits, so no key and no new object');
+  const empty = { steps: [] };
+  assert.equal(stampProfile(empty), empty, 'an empty chain names no route');
+  assert.equal(stampProfile(null), null);
+  assert.equal(stampProfile([1, 2]).length, 2, 'an array is not a state');
+  // …and it DOES return a new object when there is something to add, or nothing would be written.
+  const pending = { currentStep: 'epic', steps: chain(CLASSIC) };
+  assert.notEqual(stampProfile(pending), pending);
+  assert.equal(stampProfile(pending).profile, 'classic');
+});
+
+test('a gate write and a migration agree on the ORDER of the two shape keys, not just their values', async () => {
+  // The general invariant above is checked on a fixture whose chain is off-route, so it gains `type`
+  // and no `profile` — and with only one key added, running the two stampers in either order gives
+  // the same bytes. Nothing there could tell. This fixture gains BOTH, which is the only case where
+  // the order is observable: stamping profile first yields `profile, type`, the migration chain
+  // (4 -> 5, then 5 -> 6) yields `type, profile`, and a verified project would then hold a key order
+  // no local project ever produces.
+  const { writeState } = await import('./epic-state.mjs');
+  const FILES = {
+    'epics/EP-x/epic.md': epicMd('kind: feature'),
+    'epics/EP-x/.sdlc/state.json': JSON.stringify(
+      { schemaVersion: 1, epicId: 'EP-x', createdAt: '2026-01-01', currentStep: 'epic', steps: chain(CLASSIC) },
+      null, 2) + '\n',
+  };
+  const local = project({ files: FILES });
+  const verified = project({ bridge: true, files: FILES });
+  try {
+    await runMigrate(local, { apply: true });
+    const lf = path.join(local, STATE_REL);
+    assert.deepEqual(Object.keys(read(lf)).slice(0, 6),
+      ['schemaVersion', 'epicId', 'createdAt', 'type', 'profile', 'currentStep']);
+
+    const vf = path.join(verified, STATE_REL);
+    await runMigrate(verified, { apply: true });
+    writeState(vf, read(vf));
+    assert.equal(fs.readFileSync(vf, 'utf8'), fs.readFileSync(lf, 'utf8'));
+  } finally { cleanup(local); cleanup(verified); }
+});

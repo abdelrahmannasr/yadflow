@@ -141,7 +141,8 @@ by `yad-architecture` downstream.
 
 ### Step 5 — Seed `state.json` (inherited steps pre-done; only the changed steps run)
 Create `.sdlc/state.json` with the **same 10-step chain** as `yad-epic` (so `advanceState`/`nextAction`/
-`gatePredicate`/the verified ledger run unchanged), but:
+`gatePredicate`/the verified ledger run unchanged) — same `schemaVersion: 6` and same
+`profile: "classic"`, which names the route the chain takes — but:
 - **Inherited** authoring steps **and their review gates**: `status: "done"`, `"inherited": true`,
   `"inheritedFrom": "<owning epic from the resolved truth>"`, `"boundHash": "<that artifact's current
   hash>"`.

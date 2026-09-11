@@ -108,10 +108,11 @@ authoring step **locked**. Use this exact shape (see `references/state-schema.md
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "epicId": "EP-<slug>",
   "createdAt": "<YYYY-MM-DD>",
   "type": "<the same value as epic.md — feature, or chore>",
+  "profile": "analysis-first",
   "currentStep": "analysis-review",
   "steps": [
     { "id": "analysis",           "type": "author",         "artifact": "analysis.md",      "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,  "status": "done",        "risk_tags": [] },
@@ -131,6 +132,13 @@ authoring step **locked**. Use this exact shape (see `references/state-schema.md
 ```
 
 Notes:
+- **The engine can write this whole block for you.** `yad epic new <slug> --profile analysis-first`
+  seeds exactly this chain, plus the empty `approvals.json` / `comments.json` and the `reviews/`
+  directory. It writes no `analysis.md`, no branch and no commit, and it refuses an epic that already
+  has a `state.json`. Hand-seeding stays correct and supported; the two produce the same file.
+- `profile: "analysis-first"` names the **route** this chain takes — the 12-step chain, `analysis`
+  before `epic`. `yad doctor` reads it back and reports an epic whose chain is not on the route it
+  records.
 - `analysis-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer).
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1.

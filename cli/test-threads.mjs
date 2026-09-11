@@ -11,7 +11,9 @@ import {
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, SKIPPABLE_STEPS, optionalStepsOf,
+  seedableProfiles, seedState, stateInvariants,
 } from './epic-state.mjs';
+import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
 // Capture console.log output produced while running fn (the CLI commands print via console.log).
@@ -919,3 +921,124 @@ test('every step the engine can run is listed in a phase table BY NAME', () => {
   const runnable = new Set([...Object.keys(STEP_SKILL), ...Object.keys(BUILD_STEP_SKILL)]);
   for (const id of listed) assert.ok(runnable.has(id), `${id} is in a phase but no skill runs it`);
 });
+
+// ---- seeding a chain from a profile (E17) --------------------------------------------------------
+
+// Pull the first fenced ```json block out of a skill file — the `state.json` seed it tells people to
+// copy. Four skills carry one, and each is the hand-written twin of what the engine now writes.
+function templateSeed(skillFile) {
+  const src = fs.readFileSync(new URL(`../skills/${skillFile}`, import.meta.url), 'utf8');
+  const m = src.match(/```json\n(\{[\s\S]*?\n\})\n```/);
+  assert.ok(m, `${skillFile}: no json seed template found`);
+  return JSON.parse(m[1].replace(/<the same value as epic\.md[^"]*>/, 'feature'));
+}
+
+const SEED_TEMPLATES = [
+  ['yad-epic/SKILL.md', 'classic'],
+  ['yad-analysis/SKILL.md', 'analysis-first'],
+  ['yad-stub/SKILL.md', 'classic'],
+  ['yad-discovery/SKILL.md', 'discovery'],
+];
+
+test('every skill seed template states this shape and the route its own chain is on', () => {
+  for (const [skillFile, profile] of SEED_TEMPLATES) {
+    const seed = templateSeed(skillFile);
+    // A template left on the previous shape mints epics that `yad doctor` calls behind the moment
+    // they are created — and `yad migrate` never touches a skill file, so nothing would ever fix it.
+    assert.equal(seed.schemaVersion, ENGINE_SHAPE, `${skillFile}: seeds shape ${seed.schemaVersion}`);
+    assert.equal(seed.profile, profile, `${skillFile}: records the wrong route`);
+    // The claim is checked against the chain it actually writes, not just against this test's table.
+    assert.equal(matchLifecycleProfile(seed.steps), profile, `${skillFile}: its chain is not on ${profile}`);
+  }
+});
+
+test('seedableProfiles is the FEATURE routes, read off the profiles', () => {
+  assert.deepEqual(seedableProfiles(), ['classic', 'analysis-first']);
+  // The rule is `level === 'feature'`, and with today's data "all but the last" and "all but
+  // `discovery` by name" give the same answer — so it is asserted on routes where they differ.
+  assert.deepEqual(seedableProfiles([
+    { id: 'a', level: 'product', steps: ['discovery'] },
+    { id: 'b', level: 'feature', steps: ['epic'] },
+    { id: 'c', level: 'product', steps: ['discovery'] },
+  ]), ['b'], 'a product route is excluded wherever it is declared');
+  assert.deepEqual(seedableProfiles([]), []);
+});
+
+test('seedState: the first step is open, everything after it is blocked', () => {
+  const s = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
+  assert.deepEqual(s.steps.map((x) => x.id), CLASSIC_10);
+  assert.equal(s.currentStep, 'epic');
+  // The engine seeds BEFORE anything is authored, which is the opposite of what a skill records. A
+  // seed that copied the skill's `done` + `in_review` would claim an artifact exists and open a gate
+  // on a file nobody has written.
+  assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(9).fill('blocked')]);
+  assert.equal(s.epicId, 'EP-demo');
+  assert.equal(s.createdAt, '2026-01-02');
+  assert.equal(s.type, 'feature');
+  assert.equal(s.profile, 'classic');
+  // The chain the seed writes is on the route it records — the round trip `yad doctor` compares.
+  assert.equal(matchLifecycleProfile(s.steps), 'classic');
+
+  const a = seedState({ epic: 'EP-demo', profile: 'analysis-first', type: 'chore', today: '2026-01-02' });
+  assert.deepEqual(a.steps.map((x) => x.id), ANALYSIS_12);
+  assert.equal(a.currentStep, 'analysis');
+  assert.equal(a.steps[0].status, 'in_progress');
+  assert.equal(matchLifecycleProfile(a.steps), 'analysis-first');
+});
+
+test('seedState: every step carries what the catalogue says it is', () => {
+  const s = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
+  for (const step of s.steps) {
+    const def = stepDef(step.id);
+    assert.equal(step.type, def.kind === 'review' ? 'review+approve' : 'author');
+    assert.equal(step.artifact, def.artifact);
+    assert.deepEqual(step.risk_tags, def.risk_tags);
+    // Both dial names, old beside new (rule 3). A check gate inside a user's repo still reads the old
+    // pair, and `yad update` is a separate act from creating an epic — so a seed writing only the new
+    // names would mint epics an un-refreshed gate cannot read.
+    assert.equal(step.assistance, 'review');
+    assert.equal(step.driver, 'pair');
+    assert.equal(step.automation, 'human_approve');
+    assert.equal(step.advance, 'human');
+    assert.equal(step.locked, true);
+  }
+  // The escalation tag is not invented here — it comes from the catalogue row, and this is the one
+  // step that carries one.
+  assert.deepEqual(s.steps.find((x) => x.id === 'architecture-review').risk_tags, ['contract']);
+  assert.deepEqual(s.steps.find((x) => x.id === 'stories-review').risk_tags, []);
+  // A fresh seed is internally consistent and its first step is runnable.
+  assert.deepEqual(stateInvariants(s), []);
+  assert.equal(preconditionsMet(s, 'epic').ok, true);
+  assert.equal(preconditionsMet(s, 'stories').ok, false, 'a later step is still blocked');
+});
+
+test('seedState refuses a route it must not seed', () => {
+  // `discovery` is a real route and still not seedable: the front-zero has a fixed id, a `kind`
+  // marker and no work-item type, so a plain-profile seed of it would be a broken front-zero.
+  assert.throws(() => seedState({ epic: 'EP-discovery', profile: 'discovery', type: 'feature', today: 'x' }),
+    /cannot seed the 'discovery' lifecycle profile/);
+  assert.throws(() => seedState({ epic: 'EP-x', profile: 'nonsense', type: 'feature', today: 'x' }),
+    /cannot seed the 'nonsense' lifecycle profile/);
+});
+
+// The engine seed and the hand-written skill template must be the SAME FILE, not two files that agree
+// on values — key order is the file's bytes, and both write `state.json` for one more release (E17b
+// is what retires the skill copies). The only differences allowed are the ones that come from WHEN
+// each is written: the skill seeds after authoring the artifact, so its first step is `done` and its
+// gate is open.
+for (const [skillFile, profile] of [['yad-epic/SKILL.md', 'classic'], ['yad-analysis/SKILL.md', 'analysis-first']]) {
+  test(`${skillFile}: the engine seed is byte-for-byte the template it tells people to copy`, () => {
+    const template = templateSeed(skillFile);
+    const seeded = seedState({ epic: template.epicId, profile, type: template.type, today: template.createdAt });
+    // Advance the engine seed to the point the skill writes its own: artifact authored, gate open.
+    const advanced = {
+      schemaVersion: ENGINE_SHAPE,
+      ...seeded,
+      currentStep: seeded.steps[1].id,
+      steps: seeded.steps.map((s, i) => (i === 0 ? { ...s, status: 'done' }
+        : i === 1 ? { ...s, status: 'in_review' } : s)),
+    };
+    // JSON.stringify, not deepEqual: key order is what this is about.
+    assert.equal(JSON.stringify(advanced, null, 2), JSON.stringify(template, null, 2));
+  });
+}

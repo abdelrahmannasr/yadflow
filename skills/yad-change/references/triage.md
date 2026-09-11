@@ -28,7 +28,7 @@ re-authors stories+test-cases:
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "epicId": "EP-<slug>", "createdAt": "<today>", "type": "<the same value as epic.md kind/type>",
   "currentStep": "stories",
   "steps": [

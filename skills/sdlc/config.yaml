@@ -55,9 +55,11 @@ lifecycle:
   # `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`). All three are routes the skills already seeded by
   # hand: `classic` (the 10-step chain, `epic` first — yad-epic / yad-stub / yad-change),
   # `analysis-first` (the 12-step chain, `analysis` before `epic` — yad-analysis) and `discovery`
-  # (the product front-zero — yad-discovery). Nothing on disk records which one an epic is on; it is
-  # matched from the chain, and the `state.json` field arrives with `yad epic new` (E17). NOT the
-  # `hub.json` `profile`, which is the unrelated setup record { codebase, repo_layout, team_size }.
+  # (the product front-zero — yad-discovery). Each epic RECORDS its route as `profile` in `state.json`
+  # (file shape 6); `yad epic new` writes it when it seeds the chain, and for an epic that predates the
+  # field `yad migrate` fills it in by matching the chain. The chain stays the truth — `yad doctor`
+  # compares the two. NOT the `hub.json` `profile`, which is the unrelated setup record
+  # { codebase, repo_layout, team_size }.
   profiles: [classic, analysis-first, discovery]
   phases:
     - { id: discover, name: Discover, part: Shape, built: true,  steps: [discovery, analysis, epic] }
