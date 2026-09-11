@@ -73,6 +73,31 @@ the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one
 step is not in the chain, so nothing tells anyone to write what it reviews). An id the catalogue does
 not carry is left to `phase:unknown`.
 
+### Lifecycle profiles
+
+A **profile** is a named, ordered chain of catalogue steps — the route an epic takes. Three are
+defined, in `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`, E5), and all three are routes the skills
+already seeded by hand:
+
+| Profile | Steps | Seeded by |
+|---|---|---|
+| `classic` | the 10-step chain, `epic` first | `yad-epic`, `yad-stub`, `yad-change` |
+| `analysis-first` | the 12-step chain, `analysis` before `epic` | `yad-analysis` |
+| `discovery` | `discovery` · `discovery-review` | `yad-discovery` |
+
+`ui-design` and its gate are the optional pair in both feature routes — `SKIPPABLE_STEPS` is now a
+view of `classic` rather than a list beside it. `test-cases` and its gate are the parallel,
+non-blocking track, recorded in the profile and nowhere else.
+
+**Nothing records which profile an epic is on.** It is worked out by matching the chain
+(`matchLifecycleProfile`). A chain missing steps still matches — dropping `ui-design` is normal — while
+a step no route has, or two out of order, matches nothing and `yad doctor` reports `step:off-route`.
+The `state.json` field that names the profile arrives with `yad epic new` (E17), as a shape change with
+its own migration.
+
+> **Two different things are called a profile.** This one is the lifecycle route. `hub.json.profile` is
+> the unrelated setup record `yad setup` writes: `{ codebase, repo_layout, team_size }`.
+
 ### The six phases
 
 Every step belongs to one of six named phases, and each phase sits inside one of the three parts:

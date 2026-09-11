@@ -257,6 +257,27 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 
+## Lifecycle profiles: the route an epic takes
+
+The step catalogue says what each step is. A **profile** says which steps an epic walks and in what
+order. Three exist, and all three are routes the tool already used — they were written by hand into
+five skill files, and are now written down once:
+
+| Profile | What it is | Used by |
+|---|---|---|
+| `classic` | The 10-step chain, starting at the epic | Most epics, and every change, defect and hotfix |
+| `analysis-first` | The 12-step chain, which puts the analysis before the epic | An idea shaped by the analyst before it becomes an epic |
+| `discovery` | The product front-zero, two steps and no Build | The one `EP-discovery` item, which frames the whole product |
+
+Nothing about profiles is written into your project, so no file format changed. Which profile an epic
+is on is worked out from the steps it carries. Recording it in the file, and a command that creates an
+epic from a chosen profile, come with the next task.
+
+**Leaving a step out keeps you on the route.** An epic with no screens drops the UI design step and is
+still `classic`. What takes an epic off its route is a step no route has, or two steps in the wrong
+order. `yad doctor` reports that as `step:off-route`, because the guidance command reads the chain in
+the order it is written: off the route, it names whatever sits next rather than what comes next.
+
 ## Grouping: the `theme` tag
 
 A **theme** is a free label you put on an epic to say which group of work it belongs to. Write it in

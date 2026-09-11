@@ -549,12 +549,10 @@ export function advanceState(state, step) {
   return state;
 }
 
-// The Shape steps that may be marked N/A ("skipped") for an epic that does not need them. Only the
-// UI-design step is optional today: an epic with no user-facing surface (backend/API, data, infra)
-// can skip it. A skip carries a recorded reason and stays VISIBLE in the chain (both the author step
-// and its review gate pre-marked `done`, short-circuited by `gatePredicate`) — the auditable,
-// reversible counterpart to omitting `analysis` from the chain entirely.
-export const SKIPPABLE_STEPS = new Set(['ui-design']);
+// The Shape steps that may be marked N/A ("skipped") are declared with the lifecycle profiles below
+// (`SKIPPABLE_STEPS`), because the set is derived from the `classic` profile and a `const` cannot be
+// read before the thing it derives from exists. The functions just below are hoisted declarations, so
+// they see it by the time anything calls them.
 
 // True for a genuinely skippable step id — the author step (`ui-design`) OR its paired review gate
 // (`ui-design-review`). Used to gate the `gatePredicate` skip short-circuit so a corrupted/hand-edited
@@ -709,8 +707,11 @@ export function markInReview(state, step) {
 //             right — the locked human merge gate — and does have one.
 //   reviews   for a review gate, the id of the author step it gates. This replaces stripping
 //             `-review` off a string, which is what made `checks-review` look resolvable.
-//   chain     'feature' (a normal epic) or 'discovery' (the product front-zero, EP-discovery). E75
-//             folds the discovery chain into Foundation; it is listed, not modelled further.
+//   level     'feature' (a step on the Epic ladder) or 'product' (the front-zero, `EP-discovery`,
+//             which is product-level and does not walk the feature lifecycle). E75 folds the product
+//             level into Foundation; it is named here, not modelled further. This field was called
+//             `chain` when E4 landed and was renamed before any release carried it — `chain` is the
+//             word for an ordered LIST of steps, which is what a lifecycle profile holds (E5).
 //   risk_tags the DEFAULT tags a seed gives this step. `architecture-review` carries `contract`, which
 //             is what routes it through the escalated gate rule. E7 owns the rules themselves.
 //
@@ -719,31 +720,163 @@ export function markInReview(state, step) {
 // not steps and are not here.
 export const STEPS = [
   // Discover
-  { id: 'discovery', phase: 'discover', kind: 'author', artifact: 'discovery/', skill: 'yad-discovery', chain: 'discovery', risk_tags: [] },
-  { id: 'discovery-review', phase: 'discover', kind: 'review', artifact: 'discovery/', reviews: 'discovery', chain: 'discovery', risk_tags: [] },
-  { id: 'analysis', phase: 'discover', kind: 'author', artifact: 'analysis.md', skill: 'yad-analysis', chain: 'feature', risk_tags: [] },
-  { id: 'analysis-review', phase: 'discover', kind: 'review', artifact: 'analysis.md', reviews: 'analysis', chain: 'feature', risk_tags: [] },
-  { id: 'epic', phase: 'discover', kind: 'author', artifact: 'epic.md', skill: 'yad-epic', chain: 'feature', risk_tags: [] },
-  { id: 'epic-review', phase: 'discover', kind: 'review', artifact: 'epic.md', reviews: 'epic', chain: 'feature', risk_tags: [] },
+  { id: 'discovery', phase: 'discover', kind: 'author', artifact: 'discovery/', skill: 'yad-discovery', level: 'product', risk_tags: [] },
+  { id: 'discovery-review', phase: 'discover', kind: 'review', artifact: 'discovery/', reviews: 'discovery', level: 'product', risk_tags: [] },
+  { id: 'analysis', phase: 'discover', kind: 'author', artifact: 'analysis.md', skill: 'yad-analysis', level: 'feature', risk_tags: [] },
+  { id: 'analysis-review', phase: 'discover', kind: 'review', artifact: 'analysis.md', reviews: 'analysis', level: 'feature', risk_tags: [] },
+  { id: 'epic', phase: 'discover', kind: 'author', artifact: 'epic.md', skill: 'yad-epic', level: 'feature', risk_tags: [] },
+  { id: 'epic-review', phase: 'discover', kind: 'review', artifact: 'epic.md', reviews: 'epic', level: 'feature', risk_tags: [] },
   // Design
-  { id: 'architecture', phase: 'design', kind: 'author', artifact: 'architecture.md', skill: 'yad-architecture', chain: 'feature', risk_tags: [] },
-  { id: 'architecture-review', phase: 'design', kind: 'review', artifact: 'architecture.md', reviews: 'architecture', chain: 'feature', risk_tags: ['contract'] },
-  { id: 'ui-design', phase: 'design', kind: 'author', artifact: 'ui-design.md', skill: 'yad-ui', chain: 'feature', risk_tags: [] },
-  { id: 'ui-design-review', phase: 'design', kind: 'review', artifact: 'ui-design.md', reviews: 'ui-design', chain: 'feature', risk_tags: [] },
+  { id: 'architecture', phase: 'design', kind: 'author', artifact: 'architecture.md', skill: 'yad-architecture', level: 'feature', risk_tags: [] },
+  { id: 'architecture-review', phase: 'design', kind: 'review', artifact: 'architecture.md', reviews: 'architecture', level: 'feature', risk_tags: ['contract'] },
+  { id: 'ui-design', phase: 'design', kind: 'author', artifact: 'ui-design.md', skill: 'yad-ui', level: 'feature', risk_tags: [] },
+  { id: 'ui-design-review', phase: 'design', kind: 'review', artifact: 'ui-design.md', reviews: 'ui-design', level: 'feature', risk_tags: [] },
   // Plan
-  { id: 'stories', phase: 'plan', kind: 'author', artifact: 'stories/', skill: 'yad-stories', chain: 'feature', risk_tags: [] },
-  { id: 'stories-review', phase: 'plan', kind: 'review', artifact: 'stories/', reviews: 'stories', chain: 'feature', risk_tags: [] },
-  { id: 'test-cases', phase: 'plan', kind: 'author', artifact: 'test-cases.md', skill: 'yad-test-cases', chain: 'feature', risk_tags: [] },
-  { id: 'test-cases-review', phase: 'plan', kind: 'review', artifact: 'test-cases.md', reviews: 'test-cases', chain: 'feature', risk_tags: [] },
+  { id: 'stories', phase: 'plan', kind: 'author', artifact: 'stories/', skill: 'yad-stories', level: 'feature', risk_tags: [] },
+  { id: 'stories-review', phase: 'plan', kind: 'review', artifact: 'stories/', reviews: 'stories', level: 'feature', risk_tags: [] },
+  { id: 'test-cases', phase: 'plan', kind: 'author', artifact: 'test-cases.md', skill: 'yad-test-cases', level: 'feature', risk_tags: [] },
+  { id: 'test-cases-review', phase: 'plan', kind: 'review', artifact: 'test-cases.md', reviews: 'test-cases', level: 'feature', risk_tags: [] },
   // Build — these run per story per code repo, recorded in build-state/, not in the epic's steps[]
-  { id: 'spec', phase: 'build', kind: 'author', artifact: null, skill: 'yad-spec', chain: 'feature', risk_tags: [] },
-  { id: 'tasks', phase: 'build', kind: 'author', artifact: null, skill: 'yad-spec', chain: 'feature', risk_tags: [] },
-  { id: 'implement', phase: 'build', kind: 'author', artifact: null, skill: 'yad-implement', chain: 'feature', risk_tags: [] },
-  { id: 'checks', phase: 'build', kind: 'author', artifact: null, skill: 'yad-checks', chain: 'feature', risk_tags: [] },
+  { id: 'spec', phase: 'build', kind: 'author', artifact: null, skill: 'yad-spec', level: 'feature', risk_tags: [] },
+  { id: 'tasks', phase: 'build', kind: 'author', artifact: null, skill: 'yad-spec', level: 'feature', risk_tags: [] },
+  { id: 'implement', phase: 'build', kind: 'author', artifact: null, skill: 'yad-implement', level: 'feature', risk_tags: [] },
+  { id: 'checks', phase: 'build', kind: 'author', artifact: null, skill: 'yad-checks', level: 'feature', risk_tags: [] },
   // Not the review of a step called `engineer` — a step in its own right, and the one Build step that
   // is a gate. It carries no `reviews`, which is what keeps `checks-review` from resolving.
-  { id: 'engineer-review', phase: 'build', kind: 'review', artifact: null, skill: 'yad-engineer-review', chain: 'feature', risk_tags: [] },
+  { id: 'engineer-review', phase: 'build', kind: 'review', artifact: null, skill: 'yad-engineer-review', level: 'feature', risk_tags: [] },
 ];
+
+// ---- lifecycle profiles (E5) ---------------------------------------------------------------------
+//
+// A PROFILE is a named, ordered chain of catalogue steps — the route an epic takes through the
+// lifecycle. The catalogue above says what each step IS; a profile says which ones an epic walks and
+// in what order. Two epics can now take different routes without the engine pretending every piece of
+// work is the same size.
+//
+// THE WORD. The roadmap calls this a profile, so that is the word (rule: the roadmap's vocabulary
+// wins). `hub.json` already carries an unrelated `profile` — the SETUP answers `{ codebase,
+// repo_layout, team_size }` that `yad setup` records — so nothing here is called plain `profile` in
+// code, and `next.mjs` reads the other one through `setupProfileOf`. Two different things under one
+// word is a trap for whoever reads this next; two clearly different names is not.
+//
+// THESE ARE NOT NEW ROUTES. All three already exist and are seeded today by hand, in five skill
+// files. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
+// chain". E5 writes them down in one place and checks projects against them; it does not change what
+// any epic does, and nothing here is written to disk.
+//
+//   classic         the 10-step chain, seeded by yad-epic, yad-stub and yad-change. `epic` first.
+//   analysis-first  the 12-step chain, seeded by yad-analysis, which puts `analysis` before `epic`
+//                   when a feature is shaped by the analyst before it becomes an epic.
+//   discovery       the product front-zero (`EP-discovery`), two steps and no Build. Product-level,
+//                   not on the Epic ladder — E75 folds it into Foundation.
+//
+// WHAT E5 DOES NOT DO. Seeding a chain FROM a profile is E17 (`yad epic new`), which is also where an
+// epic first records WHICH profile it is on — a `state.json` field, so a file-shape change with its
+// own migration. Until then the profile an epic is on is DERIVED by matching its chain. `required`
+// per step moves in here in E35 (deleting `SKIPPABLE_STEPS`), the short chore and spike lanes are E40,
+// and skill binding moves in at E51.
+export const LIFECYCLE_PROFILES = [
+  {
+    id: 'classic',
+    title: 'the 10-step chain',
+    level: 'feature',
+    steps: [
+      'epic', 'epic-review',
+      'architecture', 'architecture-review',
+      { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
+      'stories', 'stories-review',
+      // The parallel track. `test-cases` seeds `blocked` and opens when `stories-review` passes, at
+      // which point the epic is already `ready-for-build` — so the tester works alongside Build rather
+      // than in front of it. It is a property of these two steps in this profile, recorded once here
+      // and nowhere else.
+      { id: 'test-cases', parallel: true }, { id: 'test-cases-review', parallel: true },
+    ],
+  },
+  {
+    id: 'analysis-first',
+    title: 'the 12-step chain',
+    level: 'feature',
+    steps: [
+      'analysis', 'analysis-review',
+      'epic', 'epic-review',
+      'architecture', 'architecture-review',
+      { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
+      'stories', 'stories-review',
+      { id: 'test-cases', parallel: true }, { id: 'test-cases-review', parallel: true },
+    ],
+  },
+  {
+    id: 'discovery',
+    title: 'the product front-zero',
+    level: 'product',
+    steps: ['discovery', 'discovery-review'],
+  },
+];
+
+// One profile's steps as plain rows: `{ id, optional, parallel }`, in chain order.
+const profileRows = (p) => p.steps.map((x) => (typeof x === 'string' ? { id: x } : x))
+  .map((x) => ({ id: x.id, optional: !!x.optional, parallel: !!x.parallel }));
+
+const PROFILE_BY_ID = new Map(LIFECYCLE_PROFILES.map((p) => [p.id, { ...p, rows: profileRows(p) }]));
+
+// A profile by id, or null for one this release does not carry.
+export const lifecycleProfile = (id) => PROFILE_BY_ID.get(String(id || '')) || null;
+
+// The step ids of a profile, in chain order.
+export const profileSteps = (id) => (lifecycleProfile(id)?.rows || []).map((r) => r.id);
+
+// WHICH profile a chain is on, worked out from the chain itself. Nothing on disk says it today, and
+// nothing here writes it: `state.json` gains that field in E17, with the migration a shape change
+// needs. Until then this is how `yad doctor` knows which route an epic is meant to be walking.
+//
+// A chain MATCHES a profile when every step it carries belongs to that profile and they appear in the
+// profile's order. Missing steps are allowed — an epic with no screens legitimately drops `ui-design`,
+// and a chain seeded before a step existed simply lacks it. Extra or out-of-order steps are not: those
+// mean a different route, or a broken one.
+//
+// The most specific match wins. A 10-step `classic` chain is a subset of `analysis-first` in the right
+// order too, so the SHORTEST fitting route breaks the tie — otherwise every classic epic would read as
+// an analysis-first epic that skipped its first two steps, and E17 would seed the wrong route from it.
+//
+// `profiles` is a seam for the tests, and it is here because the tie-break is otherwise invisible:
+// with today's three routes the shortest fit also happens to be declared first, so dropping the sort
+// changes no answer and no test could tell. E40 adds the chore and spike lanes — shorter routes,
+// declared last — and on that day declaration order would quietly become the rule. A test passes the
+// list reversed and asserts the answer does not move.
+export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
+  if (!Array.isArray(steps)) return null;
+  const ids = steps.map((s) => s?.id).filter((x) => typeof x === 'string' && x);
+  if (!ids.length) return null;
+  const fits = profiles.filter((p) => {
+    const order = profileSteps(p.id);
+    let at = -1;
+    return ids.every((id) => {
+      const i = order.indexOf(id);
+      if (i <= at) return false;    // not in this profile, or out of order
+      at = i;
+      return true;
+    });
+  });
+  if (!fits.length) return null;
+  return fits.sort((a, b) => profileSteps(a.id).length - profileSteps(b.id).length)[0].id;
+}
+
+// The Shape steps that may be marked N/A ("skipped") for an epic that does not need them. Only the
+// UI-design step is optional today: an epic with no user-facing surface (backend/API, data, infra)
+// can skip it. A skip carries a recorded reason and stays VISIBLE in the chain (both the author step
+// and its review gate pre-marked `done`, short-circuited by `gatePredicate`) — the auditable,
+// reversible counterpart to omitting `analysis` from the chain entirely.
+//
+// A VIEW of the `classic` lifecycle profile (E5), not a list beside it: a step is optional because a
+// profile says so, and saying it twice is how the two drift. Author steps only — `isSkippableStep`
+// below pairs each with its gate, which is the shape every caller expects. A test deep-equals this
+// against both what `classic` says and its literal pre-E5 value.
+//
+// E35 moves `required` into the profile properly and deletes this set. Until then it stays exported
+// and stays authoritative for `skipStep`, because ~6 call sites and an error message read it.
+export const SKIPPABLE_STEPS = new Set(
+  (lifecycleProfile('classic')?.rows || []).filter((r) => r.optional && !r.id.endsWith('-review')).map((r) => r.id),
+);
 
 // The catalogue keyed by id. `stepDef(id)` is null for an id this release does not know — a real
 // answer, not a gap, and the reason every reader below has a fallback.

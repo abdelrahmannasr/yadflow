@@ -22,8 +22,11 @@ function isSolo(root) {
   const hub = readJSON(productConfigPath(root), null);
   return !!(hub && (hub.solo === true || hub.review_gate?.solo === true));
 }
-// The setup profile recorded by `yad setup` (codebase / repo_layout / team_size), or null.
-const profileOf = (root) => readJSON(productConfigPath(root), null)?.profile || null;
+// The SETUP profile recorded by `yad setup` (codebase / repo_layout / team_size), or null. Not the
+// lifecycle profile — that is the route an epic walks through the steps (`LIFECYCLE_PROFILES` in
+// epic-state.mjs, E5). Two unrelated things share the word `profile`, one of them a `hub.json` field
+// that predates the other, so this one is spelled out wherever it is read.
+const setupProfileOf = (root) => readJSON(productConfigPath(root), null)?.profile || null;
 // Has `yad setup` run here? True once the version stamp or Product config exists.
 const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(productConfigPath(root));
 
@@ -188,7 +191,7 @@ function generalNext(root, { all } = {}) {
     return;
   }
   const solo = isSolo(root);
-  const brownfield = profileOf(root)?.codebase === 'brownfield';
+  const brownfield = setupProfileOf(root)?.codebase === 'brownfield';
   // The project front-zero (EP-discovery / "epic zero") is not a feature epic — split it out so it is
   // surfaced on its own line and never mixed into the feature-epic roll-up.
   const allEpics = listEpics(root);

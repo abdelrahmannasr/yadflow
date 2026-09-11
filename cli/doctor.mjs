@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, LIFECYCLE_PROFILES, SENTINELS } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -925,12 +925,26 @@ export function catalogueChecks(checks, root) {
   const noArtifact = [];
   const wrongKind = [];
   const orphanGate = [];
+  const offRoute = [];
 
   for (const e of fs.readdirSync(epicsDir).sort()) {
     if (!isValidEpicId(e)) continue;
     const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     const present = new Set(state.steps.map((s) => s?.id).filter((x) => typeof x === 'string'));
+
+    // Which lifecycle profile is this epic walking (E5)? Nothing on disk says so yet — E17 adds that
+    // field — so it is worked out from the chain. A chain matching NO profile carries a step no route
+    // has, or has them out of order, and `yad next` walks a chain in array order: the step it names
+    // next is then whatever happens to sit there, not the step that comes next in any route.
+    if (state.steps.length && !matchLifecycleProfile(state.steps)) {
+      const known = state.steps.filter((x) => stepDef(x?.id));
+      // Only reported when every step is one the catalogue knows. An id from a newer release is
+      // `phase:unknown`'s business, and a chain full of them would otherwise be reported twice.
+      if (known.length === state.steps.length) {
+        offRoute.push(`${e}: \`${state.steps.map((x) => x.id).join(' → ')}\``);
+      }
+    }
 
     for (const step of state.steps) {
       const def = step && typeof step.id === 'string' ? stepDef(step.id) : null;
@@ -980,6 +994,14 @@ export function catalogueChecks(checks, root) {
   }
 
   const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  if (offRoute.length) {
+    const routes = LIFECYCLE_PROFILES.map((p) => `\`${p.id}\` (${p.title})`).join(' · ');
+    check(
+      checks, 'step:off-route', 'shape', 'warn',
+      `${offRoute.length} epic(s) walk a chain that matches no lifecycle profile: ${some(offRoute, 2)}`,
+      `a profile is the route an epic takes through the steps — ${routes}. Leaving a step OUT is fine; a step no route has, or two in the wrong order, is not: \`yad next\` reads the chain in the order it is written, so it will name whatever sits next rather than what comes next. Reorder the steps in \`.sdlc/state.json\` to match a route`,
+    );
+  }
   if (wrongArtifact.length) {
     check(
       checks, 'step:artifact', 'shape', 'warn',
