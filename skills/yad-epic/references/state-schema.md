@@ -53,6 +53,26 @@ Each `steps[]` entry:
 |-------|--------|---------|
 | `id` | `analysis`, `analysis-review`, `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review`, `test-cases`, `test-cases-review` | Step identity. |
 
+### The step catalogue
+
+Every one of those ids is defined in **one place in the code** — `STEPS` in `cli/epic-state.mjs` (E4).
+A row says which phase the step is in, whether it authors an artifact or gates one, which file it
+writes, which skill runs it, and — for a gate — which step it reviews. The phase table, the skill
+tables and the Build order are all views of it, held to it by tests, so a step cannot exist in one and
+be missing from another.
+
+The catalogue is code. Nothing about it is written into `state.json`, so no file shape changed.
+
+**When a chain disagrees with the catalogue, the chain wins.** The seed below is still hand-written by
+this skill, a project may run a chain from a newer release, and leaving a step out is normal — not
+every epic has screens. `yad doctor` reports four disagreements it can see and rewrites nothing:
+`step:artifact` (a step naming a different file from the one the gate hashes — different spellings of
+the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one gate),
+`step:no-artifact` (a step naming no file at all, the one case that stops `yad gate` outright),
+`step:kind` (a step on the wrong side of the author / review line) and `step:orphan-gate` (a gate whose
+step is not in the chain, so nothing tells anyone to write what it reviews). An id the catalogue does
+not carry is left to `phase:unknown`.
+
 ### The six phases
 
 Every step belongs to one of six named phases, and each phase sits inside one of the three parts:

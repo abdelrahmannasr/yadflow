@@ -9,6 +9,7 @@ import {
   isStubEpic, nextAction, preconditionsMet, backfillAnchorKind, TYPE_NOUN, typeNoun,
   workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter, themeOf, themeKey,
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
+  STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
 } from './epic-state.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
 
@@ -523,6 +524,112 @@ test('yad thread with no epic lists each thread under its theme', async () => {
   assert.match(out, /EP-cart #checkout-revamp {2}2 epic\(s\)/);
   assert.match(out, /EP-plain {2}1 epic\(s\)/, 'no theme, no marker');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---- the step catalogue (E4) ---------------------------------------------------------------------
+
+test('the catalogue is self-consistent — every row answers for itself', () => {
+  // The whole point of E4 is that a step is defined ONCE. That only holds if the one definition is
+  // internally sound, so each rule below is a way the table could lie without any caller noticing.
+  const ids = STEPS.map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length, 'a duplicate id would make stepDef return one of two rows');
+  const phaseIds = new Set(PHASES.map((p) => p.id));
+  for (const r of STEPS) {
+    assert.ok(phaseIds.has(r.phase), `${r.id}: phase '${r.phase}' is not one of the six`);
+    assert.ok(['author', 'review'].includes(r.kind), `${r.id}: kind '${r.kind}'`);
+    assert.ok(Array.isArray(r.risk_tags), `${r.id}: risk_tags must be a list`);
+    assert.ok(['feature', 'discovery'].includes(r.chain), `${r.id}: chain '${r.chain}'`);
+    // An author step is something a person or agent RUNS, so it must say what runs it.
+    if (r.kind === 'author') assert.ok(r.skill, `${r.id}: an author step with no skill cannot be run`);
+    // A Shape step writes a file into the epic directory, and its gate hashes that file. A BUILD step
+    // does not: Build runs per story per code repo and is recorded in `build-state/`, so there is no
+    // epic-level artifact to name and no epic-level gate to hash one. Without this rule a new step
+    // could be added with no artifact and nothing would object until a gate had nothing to bind to.
+    if (r.phase === 'build') assert.equal(r.artifact, null, `${r.id}: a Build step has no epic-level artifact`);
+    else assert.ok(r.artifact, `${r.id}: a Shape step must name what it writes or reviews`);
+    // A gate must point at a step that exists, or it can never close its author step.
+    if (r.reviews) {
+      const target = stepDef(r.reviews);
+      assert.ok(target, `${r.id}: reviews '${r.reviews}', which is not in the catalogue`);
+      assert.equal(target.kind, 'author', `${r.id}: reviews '${r.reviews}', which is not an author step`);
+      assert.equal(target.phase, r.phase, `${r.id}: a gate belongs to the phase of what it reviews`);
+      assert.equal(target.artifact, r.artifact, `${r.id}: a gate reviews the artifact its author step wrote`);
+    }
+    if (r.reviews) assert.equal(r.kind, 'review', `${r.id}: only a gate reviews something`);
+  }
+  // Exactly one gate per author step that has one — two gates on one step would both try to close it.
+  const gatedTwice = ids.filter((id) => STEPS.filter((r) => r.reviews === id).length > 1);
+  assert.deepEqual(gatedTwice, []);
+});
+
+test('the catalogue and the artifact helpers agree on every step that writes a file', () => {
+  // `artifactBase` / `artifactFromBase` are NOT derived from the catalogue: they also serve artifact
+  // bases that no step writes (`contract`), and `artifactHash` special-cases some of them (stories
+  // hashes a directory, architecture hashes the locked contract surface too). Rather than merge them
+  // and risk the gate hashing something different, the two are pinned in AGREEMENT here.
+  for (const r of STEPS.filter((x) => x.artifact)) {
+    const base = artifactBase(r.artifact);
+    assert.equal(artifactFromBase(base), r.artifact,
+      `${r.id}: '${r.artifact}' does not survive the round trip through base '${base}'`);
+  }
+});
+
+test('the derived tables are views of the catalogue, not copies beside it', () => {
+  // Each of these was a hand-kept table before E4. If any of them stops agreeing, a step has been
+  // added in one place and forgotten in another — the exact failure the catalogue exists to end.
+  // The SAME rule the production derivation uses — `build` or not — not a second rule that agrees with
+  // it today. An allowlist of Shape phases here and a denylist there would agree only until the first
+  // `release` step (E32) landed in neither, leaving `yad next` with no skill to name for it.
+  assert.deepEqual(
+    STEP_SKILL,
+    Object.fromEntries(STEPS.filter((r) => r.skill && r.phase !== 'build').map((r) => [r.id, r.skill])),
+  );
+  assert.deepEqual(
+    BUILD_STEP_SKILL,
+    Object.fromEntries(STEPS.filter((r) => r.skill && r.phase === 'build').map((r) => [r.id, r.skill])),
+  );
+  for (const p of PHASES) {
+    assert.deepEqual(
+      phaseSteps(p.id),
+      STEPS.filter((r) => r.phase === p.id && !r.reviews).map((r) => r.id),
+      `phaseSteps('${p.id}') drifted from the catalogue`,
+    );
+  }
+  // And the values themselves are unchanged from before E4 — a derivation that agrees with itself but
+  // renamed a skill would pass everything above.
+  assert.deepEqual(STEP_SKILL, {
+    discovery: 'yad-discovery', analysis: 'yad-analysis', epic: 'yad-epic',
+    architecture: 'yad-architecture', 'ui-design': 'yad-ui', stories: 'yad-stories',
+    'test-cases': 'yad-test-cases',
+  });
+  assert.deepEqual(BUILD_STEP_SKILL, {
+    spec: 'yad-spec', tasks: 'yad-spec', implement: 'yad-implement',
+    checks: 'yad-checks', 'engineer-review': 'yad-engineer-review',
+  });
+});
+
+test('a gate finds its author step through the catalogue, and engineer-review gates nothing', () => {
+  const chain = (ids) => ({ steps: ids.map((id) => ({ id, type: 'author', status: 'todo' })) });
+  const st = chain(['epic', 'epic-review', 'architecture', 'architecture-review']);
+  assert.equal(authorStepFor(st, { id: 'epic-review' }).id, 'epic');
+  assert.equal(authorStepFor(st, { id: 'architecture-review' }).id, 'architecture');
+  assert.equal(authorStepFor(st, { id: 'epic' }), null, 'an author step reviews nothing');
+  // `engineer-review` is the last step of Build, not the review of a step called `engineer`. Before
+  // E4 this worked only because no chain happens to contain a step called `engineer` — plant one and
+  // the old string-strip would have closed it as if the merge gate had reviewed it.
+  const trap = chain(['engineer', 'engineer-review']);
+  assert.equal(authorStepFor(trap, { id: 'engineer-review' }), null);
+  // An id from a newer release still resolves by the convention every gate in the catalogue follows.
+  const future = chain(['feasibility', 'feasibility-review']);
+  assert.equal(authorStepFor(future, { id: 'feasibility-review' }).id, 'feasibility');
+  // But the fallback never strips onto a base the catalogue knows to be something else. `checks` is a
+  // Build step nothing gates, so `checks-review` — not a step at all — must not resolve to it: a chain
+  // listing both would otherwise make `stateInvariants` demand a repair, and `yad gate repair` would
+  // flip `checks` to done as though the merge gate had reviewed it.
+  const bad = chain(['checks', 'checks-review']);
+  assert.equal(authorStepFor(bad, { id: 'checks-review' }), null);
+  const alsoBad = chain(['epic-review', 'epic-review-review']);
+  assert.equal(authorStepFor(alsoBad, { id: 'epic-review-review' }), null, 'a gate does not gate a gate');
 });
 
 // ---- the six phases (E22) ------------------------------------------------------------------------
