@@ -108,7 +108,8 @@ yad epic new EP-<slug> --stub
 ```
 
 That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the **same 10-step `classic` chain**
-a normal epic walks, but with **every step `blocked`**, the top-level marker `kind: "stub"`, and
+a normal epic walks, but with **every step `todo`** (nobody is running it yet), the top-level marker
+`kind: "stub"`, and
 `currentStep: "backfill-pending"`. It also writes the empty `approvals.json` and `comments.json` and
 the `reviews/` directory. It writes no `epic.md`, no branch and no commit, and it refuses an epic that
 already has a `state.json`.
