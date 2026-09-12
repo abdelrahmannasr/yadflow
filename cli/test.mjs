@@ -4916,6 +4916,14 @@ test('which steps are optional comes from the epic\'s own route, not from the en
   assert.deepEqual(optionalStepsFor({ profile: 'classic' }), ['ui-design']);
   assert.deepEqual(optionalStepsFor({ profile: 'analysis-first' }), ['ui-design']);
   assert.deepEqual(optionalStepsFor({ profile: 'discovery' }), []);
+
+  // Against the REAL routes, an unrecognisable chain still has nothing optional. This is the assertion
+  // that a `|| 'classic'` fallback fails: with the synthetic routes above, a fallback to a route they
+  // do not carry gives an empty list too, so it could hide there.
+  assert.deepEqual(optionalStepsFor({ steps: [{ id: 'stories' }, { id: 'epic' }] }), [],
+    'an off-route chain was given some route\'s optional steps');
+  assert.deepEqual(optionalStepsFor({ profile: 'made-up', steps: [{ id: 'stories' }, { id: 'epic' }] }), []);
+  assert.deepEqual(optionalStepsFor({}), [], 'a state with no chain and no route');
 });
 
 test('skipStep: at the ui-design step marks both ui steps N/A (done) and advances currentStep to stories', () => {
@@ -5061,6 +5069,56 @@ test('skipStep / unskipStep refuse a step this epic\'s route does not mark optio
   assert.throws(() => skipStep({ ...real, steps: chain('long').steps }, 'stories', { reason: 'x' }), /not optional/);
 });
 
+test('gate sync honours a skip only when the epic\'s route allows it', async () => {
+  // The wiring test for the gate half: `gatePredicate` fails closed with no route, so if `gateSync`
+  // stopped handing it the epic's own optional set, a legitimately skipped step would start asking
+  // for approvals nobody gave.
+  const build = (profile) => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e35-gate-'));
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [{ login: 'al', name: 'alice', role: 'owner' }] }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    const ep = path.join(T, 'epics/EP-x');
+    fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(ep, 'ui-design.md'), '# ui\n');
+    const skipped = { skipped: true, skipReason: 'backend only', skippedBy: null, skippedAt: null };
+    fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-x', profile, currentStep: 'ui-design-review',
+      steps: [
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+        { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'in_review', risk_tags: [], ...skipped },
+        { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'in_review', risk_tags: [], ...skipped },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'blocked', risk_tags: [] },
+      ],
+    }));
+    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+      { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
+    ]));
+    return { T, ep };
+  };
+  // NOT merged and NOT approved: only the skip short-circuit can make this gate pass.
+  const pr = { ok: true, state: 'OPEN', merged: false, headOid: 'abc', reviews: [], threads: [] };
+
+  const good = build('classic');
+  try {
+    await gateSync(good.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr });
+    const state = JSON.parse(fs.readFileSync(path.join(good.ep, '.sdlc/state.json')));
+    assert.equal(state.steps.find((x) => x.id === 'ui-design-review').status, 'done');
+    assert.equal(state.currentStep, 'stories', 'the skipped gate did not advance the chain');
+  } finally { fs.rmSync(good.T, { recursive: true, force: true }); }
+
+  // The same ledger on the front-zero route, which marks nothing optional: the flag is not honoured,
+  // the gate asks for its approvals, and the step stays where it was rather than being un-done.
+  const bad = build('discovery');
+  try {
+    await gateSync(bad.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr });
+    const state = JSON.parse(fs.readFileSync(path.join(bad.ep, '.sdlc/state.json')));
+    assert.equal(state.steps.find((x) => x.id === 'ui-design-review').status, 'in_review');
+    assert.equal(state.currentStep, 'ui-design-review');
+  } finally { fs.rmSync(bad.T, { recursive: true, force: true }); }
+});
+
 test('doctor reports a skip the epic\'s route does not allow, and corrects nothing', async () => {
   const { skipChecks } = await import('./doctor.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e35-doc-'));
@@ -5100,6 +5158,15 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
     const clean = [];
     skipChecks(clean, T);
     assert.deepEqual(clean, []);
+
+    // …and it is WIRED, not just exported. Put the disallowed skip back and ask the real entry point.
+    fs.writeFileSync(file, before);
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.0.0' }));
+    const { collectDoctor } = await import('./doctor.mjs');
+    const wired = collectDoctor(T).checks.find((c) => c.id === 'skip:not-optional');
+    assert.ok(wired, 'skipChecks is exported but never called');
+    assert.equal(wired.section, 'shape');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
