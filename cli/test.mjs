@@ -1603,7 +1603,7 @@ test('gatePredicate: a SKIPPED step short-circuits — passes with zero approval
 // The cases below are the ones where the count is the rule that BINDS — each of them passes the role
 // rule and is still held. Without them the count would be invisible: every fixture in this file has
 // two distinct approvers, so a rule asking for one or two would never be the reason anything failed.
-const { gateRuleFor } = await import('./epic-state.mjs');
+const { gateRuleFor, gateRuleSum } = await import('./epic-state.mjs');
 
 test('gateRuleFor: the risk step is contract +2, auth/payments +1, nothing +0', () => {
   assert.deepEqual(gateRuleFor({ id: 'epic-review', risk_tags: [] }), { base: 1, riskStep: 0, needed: 1, risk: 'normal' });
@@ -1628,6 +1628,14 @@ test('gateRuleFor: an unknown tag adds nothing, and a step with no tags at all i
   assert.equal(gateRuleFor(null).needed, 1);
 });
 
+test('gateRuleSum: one sentence of arithmetic, shared by every surface that prints it', () => {
+  // Four surfaces print this (the predicate's `missing` line, `gate sync`, `gate status`, the review-PR
+  // body). Pinned here because four copies of the same sum would eventually disagree with each other.
+  assert.equal(gateRuleSum(gateRuleFor({ risk_tags: [] })), '1 approver = base 1');
+  assert.equal(gateRuleSum(gateRuleFor({ risk_tags: ['auth'] })), '2 approvers = base 1 + high risk 1');
+  assert.equal(gateRuleSum(gateRuleFor({ risk_tags: ['contract'] })), '3 approvers = base 1 + contract risk 2');
+});
+
 test('gatePredicate: the count binds where one person holds two roles on a contract step', () => {
   // The role rule is SATISFIED here: alice is both owner and reviewer (the roster gives a person every
   // role they hold), and carol covers the one touched domain. Two people, though — and a contract step
@@ -1644,7 +1652,7 @@ test('gatePredicate: the count binds where one person holds two roles on a contr
   // No role line is missing — the count is the only thing holding this gate.
   assert.ok(!p.missing.some((m) => /owner|reviewer/.test(m)), `role rule should be satisfied: ${p.missing.join(' | ')}`);
   // Arithmetic, not a bare number (rule 6 — never go quiet about what is being asked for).
-  assert.ok(p.missing.some((m) => /1 more approver/.test(m) && /base 1 \+ contract risk 2/.test(m)), p.missing.join(' | '));
+  assert.ok(p.missing.some((m) => m === '1 more approver — this step needs 3 approvers = base 1 + contract risk 2; 2 approved'), p.missing.join(' | '));
 
   // A third human clears it, whatever role they hold.
   approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'reviewer', artifactHash: 'sha256:C' });

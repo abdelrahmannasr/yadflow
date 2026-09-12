@@ -53,6 +53,14 @@ export function gateRuleFor(step, { base = GATE_BASE } = {}) {
   return { base, riskStep, needed: base + riskStep, risk };
 }
 
+// The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
+// the rule, because four surfaces print it (the predicate's `missing` line, `gate sync`, `gate status`
+// and the generated review-PR body) and four copies of the arithmetic would eventually disagree.
+export const gateRuleSum = (rule) => {
+  const people = `${rule.needed} approver${rule.needed === 1 ? '' : 's'}`;
+  return rule.riskStep ? `${people} = base ${rule.base} + ${rule.risk} risk ${rule.riskStep}` : `${people} = base ${rule.base}`;
+};
+
 // Epic ids are EP-<slug> with [a-z0-9-] only — anything else (uppercase, dots, slashes) is
 // rejected before it can become a path segment under epics/.
 export const isValidEpicId = (epic) => /^EP-[a-z0-9-]+$/.test(epic || '');
@@ -656,10 +664,7 @@ export function gatePredicate({
     // people a small team has; saying where it comes from is what lets a human argue with it.
     if (approvers < gateRule.needed) {
       const short = gateRule.needed - approvers;
-      const sum = gateRule.riskStep
-        ? `${gateRule.needed} = base ${gateRule.base} + ${gateRule.risk} risk ${gateRule.riskStep}`
-        : `${gateRule.needed} = base ${gateRule.base}`;
-      missing.push(`${short} more approver(s) — this step needs ${sum}, and ${approvers} person/people approved`);
+      missing.push(`${short} more approver${short === 1 ? '' : 's'} — this step needs ${gateRuleSum(gateRule)}; ${approvers} approved`);
     }
   }
   const approvalsSatisfied = missing.length === 0;

@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
-  advanceState, markInReview, isEscalated, gateRuleFor, parseReviewBranch, artifactFromBase,
+  advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, writeState, routeLacksStep,
 } from './epic-state.mjs';
@@ -423,7 +423,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // Say the arithmetic, not just the verdict (rule 6): the roster-era rule label, then E7's count and
     // what it is counting. A reviewer who sees `2 of 3 approvers (base 1 + contract 2)` can tell a gate
     // that is waiting from a gate that is asking for more people than the team has.
-    log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${pred.have} of ${pred.needed} approver(s)${pred.riskStep ? ` — base ${pred.base} + ${pred.risk} risk ${pred.riskStep}` : ''})`)}`);
+    log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${pred.have} approved, needs ${gateRuleSum(pred)})`)}`);
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
       // next step, and moving it back to in_review would un-ship work already built on it. What this
@@ -712,10 +712,9 @@ export async function gateStatus(root, { epic } = {}) {
     // from the approval count beside it — two approvals from one person are one approver. Printed even
     // in solo mode, where the requirement is waived: the line above says so once, and a reader who
     // later switches to team mode should be able to see what each gate will then ask for.
-    const rule = gateRuleFor(s);
     const people = new Set(live.map((a) => a.approver)).size;
-    const need = `, ${people} of ${rule.needed} approver(s)${rule.riskStep ? ` (base ${rule.base} + ${rule.risk} risk ${rule.riskStep})` : ''}`;
-    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s)${need}${tags}`)}`);
+    const from = `from ${people} ${people === 1 ? 'person' : 'people'}`;
+    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}; needs ${gateRuleSum(gateRuleFor(s))}`)}`);
   }
 }
 
@@ -985,7 +984,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     // for them to discover when it refuses to advance (rule 6). The number is E7's count of distinct
     // approvers; the roster-era rule may ask for specific roles on top of it, which is what the
     // `escalate` note on the risk-tags checklist item below refers to.
-    `- **Approvals needed:** ${rule.needed} approver(s)${rule.riskStep ? ` — base ${rule.base} + ${rule.risk} risk ${rule.riskStep}` : ''}`,
+    `- **Approvals needed:** ${gateRuleSum(rule)}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
