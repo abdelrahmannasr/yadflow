@@ -1814,6 +1814,43 @@ test('runNext: the phase line marks where the epic is, and shows the two planned
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('runNext: the phase line marks a phase a short lane never enters, and only on a RECORDED route (E40)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  const shortChain = {
+    epicId: 'EP-c', profile: 'chore', currentStep: 'epic',
+    steps: [S('epic', 'author', 'in_progress', 'epic.md'), S('epic-review', 'review+approve', 'blocked', 'epic.md'),
+      S('stories', 'author', 'blocked', 'stories/'), S('stories-review', 'review+approve', 'blocked', 'stories/')],
+  };
+  seedEpic(T, 'EP-c', shortChain);
+  const s = await grab(() => runNext(T, { epic: 'EP-c' }));
+  // A chore epic has no architecture or UI-design step, so it never sees Design. Printed exactly like
+  // a classic epic's, that phase reads as one already passed rather than one never visited.
+  assert.match(s, /Design \(not on this route\)/);
+  assert.doesNotMatch(s, /Plan \(not on this route\)/, 'stories IS on the lane, so Plan is real');
+  // Build is never marked: every feature route ends there, and its steps live per story in
+  // `build-state/` rather than in this chain, so their absence here means nothing.
+  assert.doesNotMatch(s, /Build \(not on this route\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+
+  // AND NEVER FROM A GUESS. A truncated chain with no recorded route is the normal shape of every
+  // hand-written and pre-shape-6 ledger; matching it would read `[epic, epic-review]` as the chore
+  // lane and grey out two phases the epic is going to walk — then flip back the moment a gate write
+  // stamped `classic` on the same file. No key, no claim.
+  const T2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase4-'));
+  fs.mkdirSync(path.join(T2, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T2, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T2, 'EP-legacy', {
+    epicId: 'EP-legacy', currentStep: 'epic',
+    steps: [S('epic', 'author', 'in_progress', 'epic.md'), S('epic-review', 'review+approve', 'blocked', 'epic.md')],
+  });
+  const s2 = await grab(() => runNext(T2, { epic: 'EP-legacy' }));
+  assert.doesNotMatch(s2, /not on this route/, 'an epic that records no route gets no claim about one');
+  assert.match(s2, /phase: Discover · Design · Plan · Build/);
+  fs.rmSync(T2, { recursive: true, force: true });
+});
+
 test('runNext: an epic in Build is marked Build, from the `ready-for-build` marker', async () => {
   // Review found this: `nextAction` never reports a concrete build step id at the epic level — the
   // real ones live per story per repo in build-state — so `currentStep` is `ready-for-build` for the
@@ -10701,6 +10738,27 @@ test('doctor profile: an epic on the route it records says nothing', async () =>
   assert.deepEqual(await profileChecksOn({
     'EP-x': { fm: 'kind: feature', state: routed('classic', CLASSIC_CHAIN.slice(0, 4)) },
   }), []);
+});
+
+test('doctor profile: a short-lane epic is clean, and a truncated classic chain is now reported (E40)', async () => {
+  const CHORE = ['epic', 'epic-review', 'stories', 'stories-review']
+    .map((id) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', status: 'blocked' }));
+  const SPIKE = ['analysis', 'analysis-review', ...['epic', 'epic-review', 'stories', 'stories-review']]
+    .map((id) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', status: 'blocked' }));
+
+  // A seeded short lane records the route its chain is on, so the health check has nothing to say.
+  // Asserted because the two lanes are the first routes whose chain is a strict subset of another's —
+  // exactly the shape a naive `profile:disagree` would fire on.
+  assert.deepEqual(await profileChecksOn({ 'EP-a': { fm: 'kind: chore', state: routed('chore', CHORE) } }), []);
+  assert.deepEqual(await profileChecksOn({ 'EP-b': { fm: 'kind: feature', state: routed('spike', SPIKE) } }), []);
+
+  // And the consequence the lanes DO have, named rather than left to be discovered: a chain trimmed
+  // down to the chore steps but still labelled `classic` now reads as a stale label. The finding is
+  // the intended remedy — the engine reports it and changes nothing, because the recorded route is
+  // what decides what the epic may skip and an upgrade must not silently re-decide that.
+  const stale = await profileChecksOn({ 'EP-c': { fm: 'kind: feature', state: routed('classic', CHORE) } });
+  assert.deepEqual(stale.map((c) => [c.id, c.status]), [['profile:disagree', 'warn']]);
+  assert.match(stale[0].message, /records `classic`, its chain is `chore`/);
 });
 
 test('doctor profile: no `profile` key at all is silent — nothing to compare', async () => {

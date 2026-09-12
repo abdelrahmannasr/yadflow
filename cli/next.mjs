@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
-import { dedupeConsecutive, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, PHASES, DISCOVERY_EPIC } from './epic-state.mjs';
+import { dedupeConsecutive, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, DISCOVERY_EPIC } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -56,10 +56,25 @@ function listEpics(root) {
 // `bindings` is passed in for the same reason `lin` is: every loop below renders many epics, and the
 // project's skill bindings are ONE file for all of them. The default keeps the single-epic callers a
 // one-liner; a loop reads the file once and hands the same object to every row.
-const actionFor = (root, id, lin = epicLineage(root, id), bindings = loadSkillBindings(root)) => ({
-  ...nextAction(loadLedger(epicRoot(root, id)), { epic: id, bindings }),
-  lineageKind: lin.type,
-});
+const actionFor = (root, id, lin = epicLineage(root, id), bindings = loadSkillBindings(root)) => {
+  const ledger = loadLedger(epicRoot(root, id));
+  return {
+    ...nextAction(ledger, { epic: id, bindings }),
+    lineageKind: lin.type,
+    // Which ROUTE this epic RECORDED, carried so `phaseLine` can mark a phase that route never enters
+    // (E40). The recorded key ONLY — never matched from the chain, which is the one place in this file
+    // that deliberately asks less than `epicProfileId` does.
+    //
+    // A chain is allowed to be short without its route being short: every hand-written and pre-shape-6
+    // ledger is a truncated `classic`, and matching would read `[epic, epic-review]` as the chore lane
+    // and grey out two phases the epic is going to walk. Matching is the right fallback where the
+    // answer only has to be the best available one — what a step may skip, what `yad doctor` reports.
+    // Here it would be a visible claim about an epic's future, made from a guess, and it would flip
+    // the moment the next gate write stamped `classic` on the same file. An epic that never says
+    // which route it is on simply gets the line it got before the short lanes existed.
+    route: lifecycleProfile(ledger?.state?.profile) ? ledger.state.profile : null,
+  };
+};
 
 // One `epic.md` read, both things that come out of it: the action to print and the tag to print
 // beside it. Every printed path in this file goes through here.
@@ -221,9 +236,24 @@ function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
 function phaseLine(a) {
   const here = phaseOf(a.step, { discovery: a.epicId === DISCOVERY_EPIC });
   if (!here) return;
-  const rendered = PHASES.map((p) => (
-    p.id === here.id ? c.bold(p.name) : c.dim(p.built ? p.name : `${p.name} (planned)`)
-  ));
+  // A phase this epic's ROUTE never enters is marked, not hidden (E40). A `chore` epic has no
+  // architecture or UI-design step, so it never sees Design — and printing Design exactly as a
+  // `classic` epic prints it makes a lane that will never go there look like one that has already
+  // been. Marked rather than dropped for the same reason the two unbuilt phases are: a person reading
+  // this needs the whole shape, with their own position in it, not an edited version of the lifecycle.
+  // Build is never marked: it is where every feature route ends up, and the Build steps live per story
+  // in `build-state/` rather than in this chain, so their absence here means nothing.
+  const onRoute = a.route ? profileSteps(a.route) : null;
+  const covered = onRoute?.length
+    ? new Set(PHASES.filter((p) => p.id === 'build'
+        || onRoute.some((id) => stepPhase(id) === p.id)).map((p) => p.id))
+    : null;
+  const rendered = PHASES.map((p) => {
+    if (p.id === here.id) return c.bold(p.name);
+    if (!p.built) return c.dim(`${p.name} (planned)`);
+    if (covered && !covered.has(p.id)) return c.dim(`${p.name} (not on this route)`);
+    return c.dim(p.name);
+  });
   // Coloured PER SEGMENT, never nested: `paint` closes with a full reset (\x1b[0m), so a bold word
   // inside a dim string ends the dim for everything after it and the rest of the line reads bright.
   // The current phase is named in WORDS as well as marked in bold, because bold is not always there:
@@ -310,7 +340,16 @@ function checkPrecondition(root, epic, stepId) {
 //   { version, ok: false, error }                            bad epic id / no state.json
 //
 // Exit codes are unchanged from the prose path — only the rendering differs.
-const emitJSON = (payload) => log(JSON.stringify({ version: VERSION, ...payload }, null, 2));
+// `route` is a RENDERING input, not part of the answer: `phaseLine` uses it to mark a phase this
+// epic's route never enters, and a script reading `yad next --json` gets the route from `state.json`'s
+// own `profile` key, which is the record. Stripped here rather than
+// threaded past the JSON path, because one strip is easier to keep right than three call sites — and
+// `--json` is a machine contract, so a field added by accident is a field somebody starts depending on.
+const forJSON = (a) => Object.fromEntries(Object.entries(a).filter(([k]) => k !== 'route'));
+const emitJSON = (payload) => log(JSON.stringify({
+  version: VERSION, ...payload,
+  ...(payload.actions ? { actions: payload.actions.map(forJSON) } : {}),
+}, null, 2));
 
 // A JSON error still leaves stdout parseable: a caller that pipes us into a parser gets an object
 // explaining the failure, never half a document or a bare ANSI line.

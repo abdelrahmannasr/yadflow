@@ -1092,10 +1092,13 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
 // is the whole point: a list computed from `LIFECYCLE_PROFILES` would grow every time a route is
 // added, and then it would not be frozen. `stampProfile` explains what breaks without this.
 //
-// Adding a route NEVER belongs here. A new lane is seeded with its `profile` key already written
-// (`seedState`), so it has nothing to stamp; and an epic old enough to need stamping cannot have been
-// on a route that did not exist when it was seeded. The only edit this list ever takes is a future
-// shape adding its OWN frozen list beside it — never a line appended to this one.
+// Adding a route NEVER belongs here, and the reason is NOT that nothing new can reach the stamper —
+// `writeState` runs it on every save, so a chain hand-written today with no `profile` key is stamped
+// the same as one from before the field existed. It is that shape 6 is a fixed question with a fixed
+// answer: "which of the routes that existed when this shape landed is this chain on". A chain that is
+// really on a newer route and says nothing gets the closest OLD answer, and `yad doctor` reports the
+// disagreement — which is a label to correct, not a migration to rewrite. The only edit this list ever
+// takes is a future shape adding its OWN frozen list beside it, never a line appended to this one.
 export const SHAPE_6_ROUTE_IDS = ['classic', 'analysis-first', 'discovery'];
 
 // Filtered rather than rebuilt, so the frozen set carries each route's REAL rows. Writing the three
@@ -1123,9 +1126,12 @@ export const shape6Routes = (profiles = LIFECYCLE_PROFILES) =>
 //
 // IT IS A FACT ABOUT THE ROUTE, NOT ABOUT THE ENGINE. Until E35 this was one module-level set, the
 // union of every route's `optional` marks, and it answered the same for every epic in the project.
-// That is wrong the moment two routes disagree: E40's chore lane can drop steps a `classic` epic must
-// walk, and a union would have let a `classic` epic skip them too — silently, because the union never
-// says which route its answer came from.
+// That is wrong the moment two routes disagree, and E40 made them disagree in the sharper of the two
+// possible ways. A union across routes answers with every route's marks pooled, so the moment ANY
+// route marked a step optional, every epic in the project could skip it — silently, because a union
+// never says which route its answer came from. The short lanes are the opposite case and still break
+// it: they mark nothing, so pooling would hand a `chore` epic `classic`'s optional `ui-design` and let
+// it skip a step its chain does not even contain.
 //
 // The union is gone. `optionalStepsFor(state)` asks THIS epic's route and nothing else.
 
@@ -1640,7 +1646,19 @@ export function preconditionsMet(state, stepId) {
         : `${stepId} is not runnable — this is a stub (backfill pending); run yad-backfill then promote, or thread a change with yad-change` };
   }
   const i = state.steps.findIndex((s) => s.id === stepId);
-  if (i === -1) return { ok: false, blockedBy: null, reason: `unknown step '${stepId}'` };
+  // TWO WAYS A STEP IS NOT IN THE CHAIN, and they read very differently to a person. Before E40 the
+  // only one was a typo or an id from a newer release, so "unknown step" covered it. A short lane
+  // makes the other one ordinary: `architecture` is a step the catalogue knows perfectly well and this
+  // epic's ROUTE does not carry. Telling someone their step is unknown when `yad skill list` shows it
+  // sends them looking for a misspelling that is not there.
+  if (i === -1) {
+    const known = !!stepDef(stepId);
+    const route = epicProfileId(state);
+    return { ok: false, blockedBy: null,
+      reason: known
+        ? `${stepId} is not on this epic's route${route ? ` (\`${route}\`)` : ''} — the step exists, this chain does not carry it`
+        : `unknown step '${stepId}'` };
+  }
   if (state.steps[i].status === 'done') return { ok: false, blockedBy: null, reason: `${stepId} is already done` };
   const blocker = state.steps.slice(0, i).find((s) => s.status !== 'done');
   if (blocker) return { ok: false, blockedBy: blocker.id, reason: `${blocker.id} has not passed yet` };
