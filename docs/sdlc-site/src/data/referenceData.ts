@@ -32,9 +32,15 @@ export const DECISION_TREE: DecisionBranch[] = [
     visibleTo: ALL,
   },
   {
+    condition: 'Every review, on top of the rule above',
+    result: 'base + risk step distinct approvers',
+    detail: 'A second rule that names no person, role or step: base is 1 (one human who is not the author), plus 2 when the step is tagged contract or 1 when it is tagged auth/payments — the highest tag, never the sum. It counts people, so one person holding two roles is one approver. Both rules must hold.',
+    visibleTo: ALL,
+  },
+  {
     condition: 'risk_tags include contract / auth / payments',
     result: 'escalate to domain owners',
-    detail: 'Architecture+contract escalates: base rule PLUS a domain owner for every repo in epic.repos. The contract-surface hash must still match contract-lock.json.',
+    detail: 'Architecture+contract escalates: base rule PLUS a domain owner for every repo in epic.repos, and 3 distinct approvers (1 + 2). The contract-surface hash must still match contract-lock.json.',
     visibleTo: ALL,
   },
   {

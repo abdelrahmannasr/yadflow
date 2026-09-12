@@ -64,7 +64,8 @@ Print, in this order:
      stories → …`; the review gate never needs approvals.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required
-     domains), or **per-repo** for `stories-review` (list each repo needing sign-off),
+     domains), or **per-repo** for `stories-review` (list each repo needing sign-off), **and** the
+     per-step approver count (below), which applies on top of whichever of those is in force,
    - approvals **recorded so far** (from `approvals.json`), and
    - approvals **still required** to pass the gate (name the missing domains/repos).
    Do not advance — just state whether the gate would pass right now.
@@ -77,6 +78,11 @@ Print, in this order:
    - **Escalated pass** (step `risk_tags` ∩ `{contract, auth, payments}` ≠ ∅): base pass AND, for
      every touched domain, `|domainOwners[domain]| >= 1`. Touched domains = `epic.repos` for
      `architecture-review`; the union of every story's `repos` for `stories-review`.
+   - **The count, on every step as well** (both rules must hold): the step needs `base + risk step`
+     **distinct approvers** — base `1`, plus `2` when the step's `risk_tags` carry `contract` or `1`
+     when they carry `auth`/`payments` (the highest tag, never the sum). It reads no role, so one
+     person holding two roles is one approver. `yad gate status` prints the sum (`needs 3 approvers =
+     base 1 + contract risk 2`) — prefer reading it from there to recomputing it.
    - Approvals are **stale** (gate fails) if the artifact was edited after the newest `approved`
      record. For `architecture-review`, also flag staleness if the contract-surface hash no longer
      matches `.sdlc/contract-lock.json`.

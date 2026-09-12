@@ -701,7 +701,9 @@ export async function gateStatus(root, { epic } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
-  const solo = isSolo(loadProduct(root).hub);
+  const { hub } = loadProduct(root);
+  const solo = isSolo(hub);
+  const reqEng = requireEngagement(hub);
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const cur = artifactHash(epicDir, s.artifact);
@@ -712,8 +714,16 @@ export async function gateStatus(root, { epic } = {}) {
     // from the approval count beside it — two approvals from one person are one approver. Printed even
     // in solo mode, where the requirement is waived: the line above says so once, and a reader who
     // later switches to team mode should be able to see what each gate will then ask for.
-    const people = new Set(live.map((a) => a.approver)).size;
-    const from = `from ${people} ${people === 1 ? 'person' : 'people'}`;
+    //
+    // COUNTED THE WAY THE GATE COUNTS. With `requireEngagement` on, the predicate drops an approval
+    // with no verified engagement signal BEFORE counting people, so a status line built from every live
+    // approval would report a head count the gate does not recognise — and this is the one surface that
+    // exists to say what the gate is asking for. The dropped ones are named rather than hidden, because
+    // "two people approved and neither counts" is the fact a reader needs.
+    const counted = reqEng ? live.filter((a) => a.engagement === 'verified') : live;
+    const unengaged = live.length - counted.length;
+    const people = new Set(counted.map((a) => a.approver)).size;
+    const from = `from ${people} ${people === 1 ? 'person' : 'people'}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
     log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}; needs ${gateRuleSum(gateRuleFor(s))}`)}`);
   }
 }

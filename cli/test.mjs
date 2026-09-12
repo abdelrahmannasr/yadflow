@@ -3909,6 +3909,39 @@ test('gate status counts only non-stale approvals after an artifact change', asy
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate status says what the gate will ask for, and counts it the way the gate counts', async () => {
+  const { T, ep } = scaffoldEpic();
+  const reviews = { ok: true, state: 'opened', merged: false, headOid: 'a',
+    reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bo', state: 'APPROVED' }], threads: [] };
+  await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => reviews });
+
+  const statusLines = async () => {
+    const lines = [];
+    const orig = console.log;
+    console.log = (x = '') => lines.push(String(x));
+    try { await gateStatus(T, { epic: 'EP-test' }); } finally { console.log = orig; }
+    // `approval` excludes the header line, which names the same step as `currentStep`.
+    return lines.find((l) => l.includes('architecture-review') && l.includes('approval'));
+  };
+
+  // The contract step's rule, stated as arithmetic — the roster rule alone would never print a number.
+  const line = await statusLines();
+  assert.match(line, /needs 3 approvers = base 1 \+ contract risk 2/);
+  assert.match(line, /from 2 people/);
+
+  // With requireEngagement on, the predicate drops a bare approval BEFORE counting people. The status
+  // line has to drop it too, or this surface reports a head count the gate does not recognise.
+  const hubPath = path.join(T, '.sdlc/hub.json');
+  const hub = JSON.parse(fs.readFileSync(hubPath, 'utf8'));
+  fs.writeFileSync(hubPath, JSON.stringify({ ...hub, review: { requireEngagement: true } }));
+  const strict = await statusLines();
+  assert.match(strict, /from 0 people/);
+  assert.match(strict, /2 not engagement-verified \(not counted\)/);
+  assert.match(strict, /2 approval\(s\)/, 'the approvals are still reported — they exist, they just do not count');
+  fs.rmSync(ep, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------------------------------------
 // `yad repo list` — staleness as a human-visible flag
 // ---------------------------------------------------------------------------------------------

@@ -13,7 +13,7 @@ const TERM_GROUPS = [
   {
     phase: 'Gates & roles',
     steps: [
-      'Review gate — the reusable owner + 1 reviewer approval, escalating on contract/auth/payments.',
+      'Review gate — the reusable owner + 1 reviewer approval plus a per-step approver count, escalating on contract/auth/payments.',
       'Domain owner — the engineer who owns a repo; a required reviewer when their repo is touched.',
       'Engineer review — the human merge gate; advisory AI first-pass, never the authority. Permanently human.',
       'Lens — the role a step is authored through (analyst, pm, architect, ux, dev, tester, reviewer, engineer).',
