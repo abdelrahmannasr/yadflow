@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -275,7 +275,6 @@ export function projectChecks(checks, root) {
   // inside the `project` block. The renderer prints a header every time the section CHANGES, so a
   // `project` check added after the `shape` section prints the word "project" a second time.
   skillBindingChecks(checks, root);
-  skipChecks(checks, root);
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
   let registry = { repos: [] };
@@ -1090,7 +1089,7 @@ export function profileChecks(checks, root) {
     check(
       checks, 'profile:disagree', 'shape', 'warn',
       `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
-      'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
+      'the chain is what `yad next` walks step by step, and the recorded name is the label on top of it — so a stale label misleads whoever reads the record instead of the steps. It is not only cosmetic: the recorded name is what decides which steps this epic may SKIP (E35), deliberately, because a chain carrying a step from a newer release fits no route here and must not lose its optional steps for it. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
     );
   }
 }
@@ -1120,10 +1119,19 @@ export function skipChecks(checks, root) {
     if (!isValidEpicId(e)) continue;
     const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
+    // Silent on an epic `profile:disagree` already names. Both findings come from the same stale
+    // label, and that check's remedy — correct `profile` to the route the chain shows — clears this
+    // one too. Naming one fault twice with two remedies is what this file forbids itself elsewhere.
+    if (recordedRouteDisagrees(state)) continue;
     const optional = optionalStepsFor(state);
+    const skipped = new Set(state.steps.filter((x) => x?.skipped && typeof x.id === 'string').map((x) => x.id));
     for (const step of state.steps) {
-      if (!step?.skipped || typeof step.id !== 'string') continue;
+      if (!skipped.has(step.id)) continue;
       if (isSkippableStep(step.id, optional)) continue;
+      // AUTHOR STEPS ONLY, when the pair is both marked. One `yad skip` stamps a step and its gate, so
+      // listing both reads as two faults for one action — and the remedy below takes the author step's
+      // id. A gate marked on its own is a different, real fault and is still reported.
+      if (step.id.endsWith('-review') && skipped.has(step.id.replace(/-review$/, ''))) continue;
       bad.push(`${e}/${step.id}`);
     }
   }
@@ -1132,7 +1140,7 @@ export function skipChecks(checks, root) {
     check(
       checks, 'skip:not-optional', 'shape', 'warn',
       `${bad.length} skipped step(s) their epic's route does not mark optional: ${some(bad, 3)}`,
-      'the gate stops short-circuiting these, so it asks for approvals nobody gave. Either the chain is on the wrong route (see `step:off-route` / `profile:disagree`) or the skip was written by hand — `yad skip <epic> <step> --undo` puts the step back in the chain',
+      'nothing breaks today — the step is already `done`, so `yad gate sync` reports that the rule no longer holds and changes nothing. What is lost is the justification: the gate stops treating the skip as the reason the step passed. Either the epic is on the wrong route (`step:off-route`), or the skip was written by hand — `yad skip <epic> <step> --undo` puts the step back in the chain',
     );
   }
 }
@@ -1343,6 +1351,7 @@ export function collectDoctor(root) {
   themeChecks(checks, root);
   catalogueChecks(checks, root);
   profileChecks(checks, root);
+  skipChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

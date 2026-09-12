@@ -255,7 +255,7 @@ is a project setting, not a fact about the lifecycle, and it lives in a file: se
 rewritten. A project may run a chain the tool does not know, and leaving a step out is normal — not
 every epic has screens, so many have no `ui-design`. `yad doctor` says what it noticed and stops there.
 
-**Five things it can now notice**, all warnings in the `shape` section:
+**Six things it can now notice**, all warnings in the `shape` section:
 
 | Check | What it means |
 |---|---|
@@ -264,7 +264,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `step:kind` | A step is on the wrong side of the author / review line. An author step is run by a skill and a review step by `yad gate`, so on the wrong side nothing drives it. |
 | `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. Nothing then tells anyone to write the artifact being reviewed, and for a folder artifact the gate has nothing to bind an approval to. |
 | `step:off-route` | The chain matches no lifecycle profile. See the section above: leaving a step out is fine, a step no route has or two in the wrong order is not. |
-| `skip:not-optional` | A step is marked N/A but this epic's route does not mark it optional. The gate stops short-circuiting it, so it asks for approvals nobody gave. Either the chain is on the wrong route, or the skip was written by hand. |
+| `skip:not-optional` | A step is marked N/A but this epic's route does not mark it optional. Nothing breaks today: the step is already done, so a gate sync reports that the rule no longer holds and changes nothing. What is lost is the justification — the gate stops treating the skip as the reason the step passed. Silent when `profile:disagree` already names the epic, because correcting that clears this too. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 
@@ -305,9 +305,16 @@ recorded, visible in the chain, reversible with `--undo`. The engine keeps **no 
 asks the route the epic is on, so a shorter route that drops a step does not make that step skippable
 for every other epic in the project. Today every route marks the same one step, `ui-design`.
 
-An epic whose chain is on **no** route has nothing optional, and the refusal says so. Guessing a route
-to answer the question would let a step be skipped on the strength of a route nobody chose — fix the
-`step:off-route` finding first.
+**The recorded route is the answer, even when the chain disagrees with it.** An epic records its route
+in `state.json`, and that is what the engine reads. Working it out from the steps instead would guess,
+and a chain written by a **newer** release carries steps this one has never heard of — reading that as
+"no route" would strip an epic of its optional steps and make a skip it already recorded start failing
+its gate. `yad doctor` reports the disagreement (`profile:disagree`, `step:off-route`); it does not
+decide the question.
+
+An epic with **no** route — it records none this release knows, and its steps match none — has nothing
+optional, and the refusal says so. Inventing a route to answer the question would let a step be skipped
+on the strength of a route nobody chose.
 
 ## Choosing the skill for a step
 

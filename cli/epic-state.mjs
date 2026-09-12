@@ -630,7 +630,7 @@ export function advanceState(state, step) {
 // `gatePredicate` skip short-circuit so a corrupted/hand-edited `skipped: true` on a step this epic's
 // route requires cannot bypass its real approvals.
 export function isSkippableStep(id, optional = []) {
-  return [...optional].includes(String(id || '').replace(/-review$/, ''));
+  return [...(optional || [])].includes(String(id || '').replace(/-review$/, ''));
 }
 
 // The message every refusal to skip shares. An epic whose chain is on no route has NO optional steps —
@@ -642,7 +642,7 @@ const notOptional = (stepId, optional) => err(
   `step '${stepId}' is not optional on this epic's route`,
   optional.length
     ? `only these steps may be skipped here: ${optional.join(', ')}`
-    : 'this epic\'s chain is on no lifecycle route, so nothing on it is optional — run `yad doctor` and look for `step:off-route`',
+    : 'this epic is on no lifecycle route this release knows — it records none, and its chain matches none — so nothing on it is optional. Run `yad doctor` and look for `step:off-route`',
 );
 
 // Strip the skip-provenance fields off a step — the inverse of the stamp `skipStep` applies.
@@ -712,9 +712,13 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
 // If every earlier step is done, the restored author step becomes the active step again (and a
 // downstream that the skip auto-opened is pushed back to `blocked` behind it); otherwise it just
 // returns to `blocked`. Throws if the step is not skipped or it is too late.
-export function unskipStep(state, stepId, { profiles = LIFECYCLE_PROFILES } = {}) {
-  const optional = optionalStepsFor(state, profiles);
-  if (!optional.includes(stepId)) throw notOptional(stepId, optional);
+export function unskipStep(state, stepId) {
+  // NO ROUTE GUARD HERE, and that asymmetry with `skipStep` is deliberate. Skipping needs the route's
+  // permission because it makes a gate pass without approvals. Un-skipping only puts a step BACK in
+  // the chain — it can never let anything through, so refusing it has no safety value and one real
+  // cost: `yad doctor`'s `skip:not-optional` names exactly the epics whose skip the route does not
+  // allow, and its remedy is this command. With the guard, the one command the finding recommends was
+  // the one command guaranteed to throw in the state that produced the finding.
   const ai = state.steps.findIndex((s) => s.id === stepId);
   if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to un-skip');
   if (!state.steps[ai].skipped) throw err('YAD-STATE-004', `${stepId} is not skipped`, 'nothing to un-skip');
@@ -990,15 +994,25 @@ export const optionalStepsOf = (profileId, profiles = LIFECYCLE_PROFILES) => {
 
 // WHICH route an epic is on, for the purpose of asking what it may skip.
 //
-// The RECORDED key wins when it names a route this release carries. That is what shape 6 exists for:
-// before it, the route could only be guessed from the steps, and `matchLifecycleProfile` picks the
-// shortest fitting route — so a `classic` epic that legitimately dropped a step can read as a shorter
-// lane, and E40 adds two shorter lanes. Guessing is the fallback for an epic seeded before the key
-// existed, not the first answer.
+// The RECORDED key wins whenever it names a route this release carries — including when the CHAIN no
+// longer fits that route. Two separate reasons, and the second is the load-bearing one:
 //
-// Neither resolving means NO route, never a default one. Stamping `classic` on an unrecognisable chain
-// would let a step be skipped on the strength of a route nobody chose, and it would do it quietly —
-// the same reason `stampProfile` declines to invent the key in the first place.
+//   * Guessing is worse. `matchLifecycleProfile` picks the shortest fitting route, so a `classic` epic
+//     that legitimately dropped a step can read as a shorter lane; E40 adds two shorter lanes. Shape 6
+//     exists precisely so the route stops being guessed. Matching is the fallback for an epic seeded
+//     before the key existed, not the first answer.
+//   * A chain this release cannot place is not a broken chain. Rule 3: the file wins. An epic written
+//     by a NEWER yadflow carries a step this one has never heard of, so it fits no route HERE — and
+//     reading that as "no route" would strip its optional steps, which means an already-skipped
+//     `ui-design` stops short-circuiting and its gate starts asking for approvals nobody gave. An
+//     older CLI silently downgrading a newer project is exactly what rule 3 forbids.
+//
+// A recorded route the chain contradicts is `profile:disagree`, and `yad doctor` reports it. Reporting
+// is the remedy; refusing to answer is not.
+//
+// When NEITHER resolves there is NO route, never a default one. Stamping `classic` on an epic that
+// records nothing and matches nothing would let a step be skipped on the strength of a route nobody
+// chose, quietly — the same reason `stampProfile` declines to invent the key in the first place.
 export const epicProfileId = (state, profiles = LIFECYCLE_PROFILES) => {
   const recorded = String(state?.profile || '');
   if (profiles.some((p) => p.id === recorded)) return recorded;
@@ -1008,6 +1022,24 @@ export const epicProfileId = (state, profiles = LIFECYCLE_PROFILES) => {
 // The author steps THIS epic may skip. The one answer every skip guard asks.
 export const optionalStepsFor = (state, profiles = LIFECYCLE_PROFILES) =>
   optionalStepsOf(epicProfileId(state, profiles), profiles);
+
+// Does the route an epic RECORDS disagree with the route its chain is on?
+//
+// One rule, two readers, so they cannot drift apart: `yad doctor` reports it as `profile:disagree`,
+// and `skip:not-optional` stays SILENT on an epic this already names. Both findings come from the same
+// stale label, and the file's own discipline is that one fault is named once — two messages with two
+// different remedies, one of which does not address the cause, is how people learn to stop reading
+// warnings.
+//
+// False for an epic that records nothing (there is no label to be stale) and for one whose chain fits
+// no route (`step:off-route` owns that), so it fires only where the two answers genuinely differ.
+export const recordedRouteDisagrees = (state, profiles = LIFECYCLE_PROFILES) => {
+  if (!isPlainObject(state) || !('profile' in state)) return false;
+  const recorded = String(state.profile || '');
+  if (!profiles.some((p) => p.id === recorded)) return false;
+  const matched = matchLifecycleProfile(state.steps, profiles);
+  return !!matched && matched !== recorded;
+};
 
 // ---- seeding a chain FROM a profile (E17) --------------------------------------------------------
 //

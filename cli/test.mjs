@@ -4917,13 +4917,28 @@ test('which steps are optional comes from the epic\'s own route, not from the en
   assert.deepEqual(optionalStepsFor({ profile: 'analysis-first' }), ['ui-design']);
   assert.deepEqual(optionalStepsFor({ profile: 'discovery' }), []);
 
-  // Against the REAL routes, an unrecognisable chain still has nothing optional. This is the assertion
-  // that a `|| 'classic'` fallback fails: with the synthetic routes above, a fallback to a route they
-  // do not carry gives an empty list too, so it could hide there.
+  // Against the REAL routes, an epic that records NOTHING and matches nothing has nothing optional.
+  // This is the assertion a `|| 'classic'` fallback fails: with the synthetic routes above, a fallback
+  // to a route they do not carry gives an empty list too, so it could hide there.
   assert.deepEqual(optionalStepsFor({ steps: [{ id: 'stories' }, { id: 'epic' }] }), [],
     'an off-route chain was given some route\'s optional steps');
   assert.deepEqual(optionalStepsFor({ profile: 'made-up', steps: [{ id: 'stories' }, { id: 'epic' }] }), []);
   assert.deepEqual(optionalStepsFor({}), [], 'a state with no chain and no route');
+
+  // A RECORDED route survives a chain that contradicts it, and that is deliberate. Rule 3: the file
+  // wins. An epic written by a newer yadflow carries a step this release has never heard of, so it
+  // fits no route HERE — and reading that as "no route" would make its already-skipped `ui-design`
+  // stop short-circuiting and its gate start asking for approvals nobody gave. An older CLI silently
+  // downgrading a newer project is the thing rule 3 exists to prevent. `yad doctor` reports the
+  // disagreement (`profile:disagree` / `step:off-route`); it does not decide the question.
+  assert.deepEqual(optionalStepsFor({ profile: 'classic', steps: [{ id: 'epic' }, { id: 'release-notes' }, { id: 'ui-design' }] }), ['ui-design'],
+    'a step from a newer release stripped this epic of its optional steps');
+  assert.deepEqual(optionalStepsFor({ profile: 'classic', steps: [{ id: 'stories' }, { id: 'epic' }] }), ['ui-design']);
+  // …and the recorded route beats a chain that cleanly fits a DIFFERENT one, which is the case
+  // `profile:disagree` reports. On the synthetic routes the two answers differ, so this can be seen.
+  assert.deepEqual(optionalStepsFor({ profile: 'long', steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'stories' }, { id: 'stories-review' }] }, ROUTES), ['ui-design'],
+    'the chain out-voted the route the epic records');
+  assert.deepEqual(optionalStepsFor({ profile: 'short', steps: [{ id: 'epic' }, { id: 'ui-design' }, { id: 'ui-design-review' }] }, ROUTES), ['stories']);
 });
 
 test('skipStep: at the ui-design step marks both ui steps N/A (done) and advances currentStep to stories', () => {
@@ -5051,7 +5066,17 @@ test('skipStep / unskipStep refuse a step this epic\'s route does not mark optio
     () => skipStep(chain('short'), 'ui-design', { reason: 'no UI', profiles: ROUTES }),
     (e) => e.code === 'YAD-STATE-004' && /not optional on this epic's route/.test(e.message),
   );
-  assert.throws(() => unskipStep(chain('short'), 'ui-design', { profiles: ROUTES }), /not optional/);
+  // UN-skipping asks no route. The asymmetry is deliberate: a skip makes a gate pass with no
+  // approvals, so it needs the route's permission; putting a step BACK in the chain can never let
+  // anything through. And it is the remedy `yad doctor`'s `skip:not-optional` recommends, so a guard
+  // here made the one command that finding names the one command guaranteed to throw.
+  const stuck = skipStep(chain('long'), 'ui-design', { reason: 'no UI', profiles: ROUTES });
+  stuck.profile = 'short';
+  assert.throws(() => skipStep(stuck, 'ui-design', { reason: 'x', profiles: ROUTES }), /not optional/,
+    'the route still guards a NEW skip');
+  const freed = unskipStep(stuck, 'ui-design');
+  assert.equal(freed.steps[2].skipped, undefined, 'un-skip was refused on a route that forbids skipping');
+  assert.equal(freed.steps[3].skipped, undefined);
 
   // A chain on NO route has nothing optional, and the refusal says so rather than claiming the step
   // is simply required — guessing a route would let it be skipped on a route nobody chose.
@@ -5100,6 +5125,9 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
   // NOT merged and NOT approved: only the skip short-circuit can make this gate pass.
   const pr = { ok: true, state: 'OPEN', merged: false, headOid: 'abc', reviews: [], threads: [] };
 
+  // The two cases below put the step at `in_review` so the difference shows in the CHAIN. `skipStep`
+  // never writes that combination — it always stamps `done` — so this is proof the route reaches the
+  // predicate, not a claim about what a real ledger looks like. The realistic shape is at the end.
   const good = build('classic');
   try {
     await gateSync(good.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr });
@@ -5117,6 +5145,34 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
     assert.equal(state.steps.find((x) => x.id === 'ui-design-review').status, 'in_review');
     assert.equal(state.currentStep, 'ui-design-review');
   } finally { fs.rmSync(bad.T, { recursive: true, force: true }); }
+
+  // …and the REAL shape a skip leaves behind: the step is already `done`. `gateSync` takes its
+  // already-done branch, so nothing is un-advanced either way — what changes is the verdict it
+  // reports. That is the whole observable effect of failing closed on a live project, and the doctor
+  // finding's wording has to match it.
+  const done = (profile) => {
+    const { T, ep } = build(profile);
+    const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+    for (const x of st.steps) if (x.skipped) x.status = 'done';
+    st.currentStep = 'stories';
+    fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(st));
+    return { T, ep };
+  };
+  const allowed = done('classic');
+  try {
+    const out = await grab(() => gateSync(allowed.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr }));
+    assert.match(out, /already done/);
+    assert.match(out, /the rule still holds/);
+  } finally { fs.rmSync(allowed.T, { recursive: true, force: true }); }
+
+  const refused = done('discovery');
+  try {
+    const out = await grab(() => gateSync(refused.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr }));
+    assert.match(out, /the rule no longer holds/);
+    const st = JSON.parse(fs.readFileSync(path.join(refused.ep, '.sdlc/state.json')));
+    assert.equal(st.steps.find((x) => x.id === 'ui-design-review').status, 'done', 'the step was un-advanced');
+    assert.equal(st.currentStep, 'stories', 'the chain was rolled back');
+  } finally { fs.rmSync(refused.T, { recursive: true, force: true }); }
 });
 
 test('doctor reports a skip the epic\'s route does not allow, and corrects nothing', async () => {
@@ -5149,7 +5205,10 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
     assert.equal(checks.length, 1);
     assert.equal(checks[0].id, 'skip:not-optional');
     assert.equal(checks[0].status, 'warn');
-    assert.match(checks[0].message, /architecture; EP-x\/architecture-review/);
+    // One `yad skip` stamps the author step AND its gate; the finding names the author step alone, so
+    // one action reads as one fault and the id it prints is the one `yad skip … --undo` takes.
+    assert.match(checks[0].message, /^1 skipped step\(s\).*EP-x\/architecture$/);
+    assert.doesNotMatch(checks[0].message, /architecture-review/);
     assert.doesNotMatch(checks[0].message, /ui-design/, 'a skip the route allows must stay silent');
     assert.equal(fs.readFileSync(file, 'utf8'), before, 'doctor rewrote the ledger');
 
@@ -5164,9 +5223,64 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
     fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.0.0' }));
     const { collectDoctor } = await import('./doctor.mjs');
-    const wired = collectDoctor(T).checks.find((c) => c.id === 'skip:not-optional');
+    const all = collectDoctor(T).checks;
+    const wired = all.find((c) => c.id === 'skip:not-optional');
     assert.ok(wired, 'skipChecks is exported but never called');
     assert.equal(wired.section, 'shape');
+
+    // And it must sit INSIDE the `shape` block. The renderer prints a header every time the section
+    // changes as it walks the array, so a `shape` check emitted from among the `project` ones makes
+    // `yad doctor` print both words twice. Called from `projectChecks`, it did exactly that — and it
+    // was unreachable on a project that has not run `yad setup`, where `projectChecks` returns early.
+    const seen = new Set();
+    let last = null;
+    for (const { section } of all) {
+      if (section === last) continue;
+      assert.equal(seen.has(section), false, `section '${section}' is printed twice — its checks are not contiguous`);
+      seen.add(section);
+      last = section;
+    }
+
+    // The remedy the finding names has to WORK. `yad skip … --undo` is the command in the hint, and
+    // the route guard that produced the finding used to be the first thing that command ran.
+    assert.match(wired.hint, /--undo/);
+    const live = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.doesNotThrow(() => unskipStep(live, 'architecture'));
+    // …and it names AUTHOR step ids only when the pair is both marked, because one `yad skip` stamps
+    // both and `--undo` takes the author step's id. Listing the gate too would read as two faults for
+    // one action and hand the user an id the command does not take.
+    assert.match(wired.message, /EP-x\/architecture\b/);
+    assert.doesNotMatch(wired.message, /architecture-review/);
+    assert.match(wired.message, /^1 skipped step/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: skip:not-optional stays silent on an epic profile:disagree already names', async () => {
+  // One stale label, two findings. `profile:disagree`'s remedy — correct `profile` to the route the
+  // chain shows — clears this one too, so reporting both names a single fault twice with two remedies,
+  // one of which does not address the cause. That is the pattern this file forbids itself elsewhere.
+  const { skipChecks, profileChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e35-overlap-'));
+  const sk = { skipped: true, skipReason: 'why', skippedBy: null, skippedAt: null };
+  const st = (id, type, artifact, extra = {}) => ({ id, type, artifact, status: 'done', ...extra });
+  try {
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    // Records `classic`; its chain is cleanly `analysis-first`. `classic` does not carry `analysis`,
+    // so the two really are different routes and `profile:disagree` fires.
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-x', profile: 'classic', currentStep: 'stories',
+      steps: [
+        st('analysis', 'author', 'analysis.md'), st('analysis-review', 'review+approve', 'analysis.md'),
+        st('epic', 'author', 'epic.md'), st('epic-review', 'review+approve', 'epic.md'),
+        st('architecture', 'author', 'architecture.md', sk), st('architecture-review', 'review+approve', 'architecture.md', sk),
+      ],
+    }, null, 2));
+    const disagree = [];
+    profileChecks(disagree, T);
+    assert.ok(disagree.some((c) => c.id === 'profile:disagree'), 'the fixture does not produce the overlap');
+    const skips = [];
+    skipChecks(skips, T);
+    assert.deepEqual(skips, [], 'the same fault was named twice with two different remedies');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

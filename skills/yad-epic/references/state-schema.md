@@ -107,9 +107,12 @@ already seeded by hand:
 `ui-design` and its gate are the optional pair in both feature routes. **Which steps an epic may skip
 comes from the route that epic is on**, and from nowhere else (E35): there is no engine-wide list of
 skippable steps, so a route that drops a step no longer makes it skippable on every other route too.
-An epic whose chain is on **no** route has nothing optional — `yad doctor` reports that chain as
-`step:off-route`, and guessing a route to answer the question would let a step be skipped on the
-strength of a route nobody chose.
+The engine reads the route the epic **records** (`profile`, shape 6), and keeps reading it even when the
+chain no longer fits — a chain written by a newer release carries steps this one does not know, and
+treating that as "no route" would make a skip the epic already recorded start failing its gate.
+`yad doctor` reports the disagreement rather than deciding it. An epic with no route at all — none
+recorded that this release knows, and no match from its steps — has nothing optional, because inventing
+one would let a step be skipped on the strength of a route nobody chose.
 
 The parallel, non-blocking `test-cases` track is NOT recorded in the profile: `advanceState` still
 decides it from the step id, and a second copy of that rule sitting unread in the profile would be

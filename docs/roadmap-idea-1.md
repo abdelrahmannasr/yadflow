@@ -497,7 +497,7 @@ files first and you have frozen already-changed files.
 
 | ID | Task | Size | Needs |
 |---|---|---|---|
-| E35 | `required` moves into the profile; delete `SKIPPABLE_STEPS`. **Done as `optional` on the profile row, not a new `required` field** — E5 already put the mark there, and a second polarity nobody reads would fail the "no unread profile-row field" test. What E35 removed is the engine-wide UNION: `optionalStepsFor(state)` asks the epic's own route, a chain on no route has nothing optional, and `yad doctor` reports `skip:not-optional` | S | E5 |
+| E35 | `required` moves into the profile; delete `SKIPPABLE_STEPS`. **Done as `optional` on the profile row, not a new `required` field** — E5 already put the mark there, and a second polarity nobody reads would fail the "no unread profile-row field" test. What E35 removed is the engine-wide UNION: `optionalStepsFor(state)` asks the epic's own route (the RECORDED one, even when the chain disagrees — rule 3), an epic with no route at all has nothing optional, and `yad doctor` reports `skip:not-optional`. **E40 prerequisite:** it adds routes SHORTER than `classic`, and `matchLifecycleProfile` breaks ties on the shortest fit — so a pre-shape-6 epic that legitimately dropped a step would match a new short lane on its next `yad migrate`. Stamping `profile` has to reach those epics before the short lanes ship | S | E5 |
 | E38 | The full step-state model, incl. `satisfied` and `blocked` | S | E4 |
 | E36 | General `yad skip` / `yad unskip` with recorded reason | S | E35 |
 | E37 | `yad defer` | S | E36 |
@@ -846,7 +846,7 @@ Four decisions in this session **removed** work rather than adding it:
 | Decision | Effect |
 |---|---|
 | Remove earned automation | Deletes trust thresholds, earn checks, nudge reporting |
-| `required` moves to the profile | Deletes `SKIPPABLE_STEPS` |
+| `required` moves to the profile | Deletes `SKIPPABLE_STEPS`. Shipped as `optional` on the profile row (E35), not a new field |
 | Read CODEOWNERS, do not duplicate | Deletes `repos.json` `domain_owners` and its drift check |
 | **Remove the roster entirely** | Deletes `roster.mjs`, the setup section, the sync logic, and the allowlist half of `verified-commits.sh` |
 
