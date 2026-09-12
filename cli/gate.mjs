@@ -13,7 +13,7 @@ import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
-  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, writeState,
+  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, writeState, routeLacksStep,
 } from './epic-state.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -830,10 +830,11 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // CI writes nothing pre-merge. With a local ledger the local command records the PR itself (no CI will).
   const body = fillHubTemplate({
     epic, artifact, step, owner: ownerOf(epicDir), domains,
-    // Does this epic's chain have an architecture step at all? The contract checklist item is
-    // actionable only where one exists — see `fillHubTemplate`. Read off the chain rather than the
-    // recorded route, because the chain is what this gate is reviewing and it is present either way.
-    hasArchitecture: ledger.state.steps?.some((x) => x?.id === 'architecture') ?? true,
+    // Does this epic's ROUTE have an architecture step? Asked of the recorded route and never of the
+    // chain (`routeLacksStep`): a truncated legacy chain has no `architecture` row and is not on a
+    // short lane, and telling its reviewer in writing that it is would be a false claim in a record
+    // people act on. This repo's own e2e fixture is exactly that shape.
+    hasArchitecture: !routeLacksStep(ledger.state, 'architecture'),
   });
   // Assignee = whoever opens the review PR (the committer); reviewers = the Product's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked

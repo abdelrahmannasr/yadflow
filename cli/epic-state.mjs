@@ -1175,6 +1175,36 @@ export const epicProfileId = (state, profiles = LIFECYCLE_PROFILES) => {
   return matchLifecycleProfile(state?.steps, profiles);
 };
 
+// ---- "this epic's route never had that step" — ONE rule, three readers (E40) -----------------------
+//
+// Asked by `yad next`'s phase line, by the review-PR checklist, and by the thread's artifact-ownership
+// map. All three used to work it out from the CHAIN, and all three were wrong in the same way.
+//
+// A CHAIN IS ALLOWED TO BE SHORT WITHOUT ITS ROUTE BEING SHORT. Every hand-written and pre-shape-6
+// ledger is a truncated `classic` — `matchLifecycleProfile` says as much ("a chain seeded before a
+// step existed simply lacks it"), and this repo's own e2e fixtures are `[epic, epic-review]`. Reading
+// "no `architecture` row" as "this route has no architecture step" tells a `classic` epic it is on a
+// short lane, and strips a legacy epic of artifacts that are sitting on its disk. Inventing an owner
+// and losing one are the same error.
+//
+// So the answer comes from the RECORDED route and nothing else, and it is deliberately conservative:
+// FALSE unless the epic itself says which route it is on AND this release carries that route AND that
+// route has no such step. No key, an unknown key, or an unreadable ledger all mean "assume it has the
+// step", which is the answer every one of these readers gave before the short lanes existed.
+//
+// This is narrower than `epicProfileId`, on purpose. A best-available guess is right for deciding what
+// a step MAY skip — a wrong guess there is a refusal a person immediately sees. It is not right for a
+// silent claim about an epic's future or its provenance, where a wrong guess is believed.
+//
+// A SKIPPED STEP IS NOT A MISSING ONE, and asking the route rather than the chain gets that for free:
+// `ui-design` skipped on `classic` is still a step the route has, so the epic still owns the decision.
+// That is the distinction E35 exists to draw, and it needs no special case here.
+export const routeLacksStep = (state, stepId, profiles = LIFECYCLE_PROFILES) => {
+  const recorded = String(state?.profile || '');
+  const route = profiles.find((p) => p.id === recorded);
+  return !!route && !profileRows(route).some((r) => r.id === stepId);
+};
+
 // The author steps THIS epic may skip. The one answer every skip guard asks.
 export const optionalStepsFor = (state, profiles = LIFECYCLE_PROFILES) =>
   optionalStepsOf(epicProfileId(state, profiles), profiles);
@@ -2018,31 +2048,22 @@ const BASE_STEP = {
   'ui-design': 'ui-design', stories: 'stories', 'test-cases': 'test-cases',
 };
 
-// Does this epic's chain carry the step that produces this base?
-//
-// Read from `state.json`'s `steps[]`, not from the recorded `profile`: the chain is what the epic
-// actually walked, it is present on every epic including the ones seeded before shape 6, and a step
-// that is in the chain but `skipped` still counts — a skipped `ui-design` is a recorded decision by
-// THIS epic about an artifact that is genuinely its own to decide, which is the opposite of a step its
-// route never had.
-//
-// Missing, absent or unparseable `steps[]` answers TRUE — the answer this function gave before the
-// rule existed. An epic whose ledger cannot be read is not evidence that it owns nothing.
-//
-// THE THROW IS CAUGHT ON PURPOSE, which is the opposite of what a ledger WRITE does. `writeState` and
-// the gate read strictly and refuse, because a read-modify-write against a file it cannot parse
-// destroys the contents. This is a pure read feeding a provenance display, and `yad thread` is exactly
-// the command someone runs to inspect a project that is already damaged — crashing it on the corrupt
-// file would take away the tool they are holding. `yad doctor` is what reports the corruption, and it
-// still does. Before this rule the function never opened `state.json` at all, so failing closed here
-// would also be a new way for a read-only command to die on an old project.
+// Does this epic's chain carry the step that produces this base? Answered through `routeLacksStep`,
+// which is the ONE rule for "this epic's route never had that step" — see it for why the recorded
+// route is asked and the chain is not.
 const chainHasBase = (root, id, base) => {
   const step = BASE_STEP[base];
   if (!step) return true;
   let state;
+  // THE STRICT-READ THROW IS CAUGHT ON PURPOSE, which is the opposite of what a ledger WRITE does.
+  // `writeState` and the gate read strictly and refuse, because a read-modify-write against a file
+  // they cannot parse destroys the contents. This is a pure read feeding a provenance display, and
+  // `yad thread` is exactly the command someone runs to inspect a project that is already damaged —
+  // crashing it on the corrupt file takes away the tool they are holding. `yad doctor` reports the
+  // corruption, and still does. Before this rule the function never opened `state.json` at all, so
+  // failing closed here would also be a new way for a read-only command to die on an old project.
   try { state = readJSONStrict(path.join(epicRoot(root, id), '.sdlc', 'state.json'), null); } catch { return true; }
-  if (!Array.isArray(state?.steps)) return true;
-  return state.steps.some((x) => x?.id === step);
+  return !routeLacksStep(state, step);
 };
 
 // The owning epic per artifact base across a thread. REPLACE bases resolve to a single epic id (the

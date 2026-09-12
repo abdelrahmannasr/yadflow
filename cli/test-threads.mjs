@@ -11,7 +11,7 @@ import {
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
-  seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState, skipStep,
+  seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState, skipStep, routeLacksStep,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
@@ -136,6 +136,32 @@ test('resolveCurrentArtifacts: an epic never owns an artifact its ROUTE has no s
   assert.deepEqual(owner['test-cases'], []);
 });
 
+test('routeLacksStep: one rule, and it asks the RECORDED route rather than the chain (E40)', () => {
+  // Three readers share this: `yad next`'s phase line, the review-PR contract checklist, and the
+  // thread's artifact-ownership map. All three first inferred it from the chain, and all three were
+  // wrong the same way — a truncated legacy chain is not a short lane, and treating it as one both
+  // told a `classic` epic it was on one and stripped it of artifacts sitting on its disk.
+  const chore = { profile: 'chore', steps: [{ id: 'epic' }, { id: 'stories' }] };
+  assert.equal(routeLacksStep(chore, 'architecture'), true);
+  assert.equal(routeLacksStep(chore, 'epic'), false);
+
+  // A truncated `classic` chain — this repo's own e2e fixtures are exactly this — keeps every step.
+  const legacy = { profile: 'classic', steps: [{ id: 'epic' }, { id: 'epic-review' }] };
+  assert.equal(routeLacksStep(legacy, 'architecture'), false, 'the ROUTE has it; this chain merely predates it');
+  assert.equal(routeLacksStep(legacy, 'test-cases'), false);
+
+  // No key, an unknown key, and no state at all are the same conservative answer: assume it has the
+  // step. That is what every one of the three readers said before the short lanes existed, so an epic
+  // that never declares its route sees no change in behaviour.
+  assert.equal(routeLacksStep({ steps: [{ id: 'epic' }] }, 'architecture'), false);
+  assert.equal(routeLacksStep({ profile: 'moonshot' }, 'architecture'), false);
+  assert.equal(routeLacksStep(null, 'architecture'), false);
+
+  // A SKIPPED step is not a missing one, and asking the route gets that for free — no special case.
+  const skipped = { profile: 'classic', steps: [{ id: 'ui-design', skipped: true, status: 'done' }] };
+  assert.equal(routeLacksStep(skipped, 'ui-design'), false);
+});
+
 test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an unreadable chain owns everything', () => {
   // Two boundaries the rule above must not cross.
   //
@@ -166,6 +192,20 @@ test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an un
   const T3 = hub();
   writeEpic(T3, 'EP-bare', { kind: 'feature', thread: 'EP-bare' });
   assert.equal(resolveCurrentArtifacts(T3, 'EP-bare').architecture, 'EP-bare');
+
+  // AND THE CASE THE FIRST VERSION OF THIS RULE GOT WRONG. A truncated `classic` chain — seeded
+  // before later steps existed, which is the shape of this repo's own e2e fixtures — keeps every base.
+  // Losing an owner is exactly as wrong as inventing one, and `yad-change` reads this map either way.
+  const T4 = hub();
+  const d4 = writeEpic(T4, 'EP-old', { kind: 'feature', thread: 'EP-old' });
+  fs.writeFileSync(path.join(d4, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-old', profile: 'classic', currentStep: 'stories',
+    steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'architecture' }, { id: 'architecture-review' },
+      { id: 'stories' }, { id: 'stories-review' }],
+  }));
+  const old = resolveCurrentArtifacts(T4, 'EP-old');
+  assert.equal(old['ui-design'], 'EP-old', 'the route has ui-design even though this old chain lacks it');
+  assert.deepEqual(old['test-cases'], ['EP-old']);
 });
 
 test('resolveCurrentStories: composes the story set — inherited parent stories survive a defect-fix', () => {
