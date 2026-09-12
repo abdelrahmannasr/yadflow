@@ -1077,11 +1077,19 @@ test('stampProfile matches against the FROZEN shape-6 routes, never the live tab
     matchLifecycleProfile } = await import('./epic-state.mjs');
   const SHORT = ['epic', 'epic-review', 'stories', 'stories-review'];
 
-  // THE MIGRATION'S ANSWER IS PINNED, whatever the live table grows into. The other half of the pair —
-  // that the LIVE table answers `chore` for this same chain, so the two genuinely diverge — is asserted
-  // in cli/test-threads.mjs beside the matcher, where the routes themselves are spelled out.
+  // THE MIGRATION'S ANSWER IS PINNED, whatever the live table grows into — and the two answers really
+  // do diverge, asserted here rather than left to another file, because a freeze nobody can show
+  // diverging is a freeze nobody can tell has stopped working.
   assert.equal(stampProfile({ steps: chain(SHORT) }).profile, 'classic');
   assert.equal(matchLifecycleProfile(chain(SHORT), shape6Routes()), 'classic');
+  assert.notEqual(matchLifecycleProfile(chain(SHORT)), 'classic',
+    'the live table places this chain elsewhere — that gap is the whole reason for the freeze');
+
+  // The two hand-written chains in this repo's own e2e fixtures are exactly this shape, and
+  // `yad gate ci` stamps them through `writeState`. They are the live exercise of the freeze, not a
+  // hypothetical, so the claim in `stampProfile`'s comment is pinned to something a test can fail.
+  assert.equal(stampProfile({ epicId: 'EP-e2e', currentStep: 'epic-review', steps: chain(['epic', 'epic-review']) }).profile,
+    'classic', 'the e2e fixture chain keeps the route it had before the short lanes existed');
 
   // A chain that still carries `architecture` was never at risk: no short lane has that step, so it
   // matches `classic` either way. Every seed yadflow has shipped looks like this, which is why the

@@ -336,11 +336,19 @@ export function stampWorkItemType(state, epicDir) {
 // relabel such an epic, and `optionalStepsFor` would answer from the new route for good, because the
 // key just written is the one every later reader prefers over matching.
 //
-// NO CHAIN THIS REPO CAN SEE IS AFFECTED, and that is not the reason to skip the freeze. Every seed
-// yadflow has ever shipped carries `architecture`, which no short lane has, so today's epics all still
-// match `classic`. But rule 3 says a hand-written chain is allowed to be ahead of the tool reading it,
-// and a migration that is correct only because of what today's data happens to contain is one release
-// away from being wrong. The freeze makes it a property of the code.
+// NO SEED yadflow HAS EVER SHIPPED IS AFFECTED — every one of them carries `architecture`, which no
+// short lane has, so a seeded chain still matches `classic` either way. HAND-WRITTEN CHAINS ARE, and
+// this repo holds two: the `EP-e2e` and `EP-cici` fixtures in test/e2e/run.sh are `[epic, epic-review]`
+// with no `profile` key, which the live table now places on `chore`. `yad gate ci` stamps them through
+// `writeState`, so they are a live exercise of this function, and without the freeze they would come
+// out labelled `chore`. Rule 3 is the general form of the same point: a hand-written chain is allowed
+// to be ahead of the tool reading it, and a migration that is correct only because of what today's
+// data happens to contain is one release away from being wrong.
+//
+// The freeze pins the SET OF ROUTES shape 6 may choose from, not the step rows inside them. Editing
+// `classic`'s own chain would still move what fits it. That is the right scope — a route's steps are
+// its definition, and a migration reading a stale copy of them would be the drift this file spends
+// most of its comments avoiding — but it means the guarantee is against ADDED routes, not all change.
 //
 // `shape6Routes()` is the freeze and `profiles` is the seam the tests drive it through. Epics seeded
 // by `yad epic new` are unaffected either way: `seedState` writes `profile` itself, and the first line
@@ -676,12 +684,21 @@ const requireChain = (state, verb) => {
     '`.sdlc/state.json` is missing its `steps` array or does not hold an object — restore it from git, then run `yad doctor`');
 };
 
-const notOptional = (stepId, optional) => err(
+// THREE REASONS A STEP IS NOT SKIPPABLE, and they need three different sentences because the remedy
+// differs. Until E40 there were two, because every feature route marked exactly one step optional
+// (`ui-design`) — so "this epic has nothing optional" could only mean "this epic is on no route", and
+// one branch covered both. The short lanes end that: `chore` and `spike` are routes the release fully
+// recognises, on which NOTHING is optional, because they dropped the optional steps from the chain
+// rather than marking them skippable. Sending that user to `yad doctor` for a `step:off-route` finding
+// that will never fire is worse than saying nothing — it is a remedy for a fault they do not have.
+const notOptional = (stepId, optional, route) => err(
   'YAD-STATE-004',
   `step '${stepId}' is not optional on this epic's route`,
   optional.length
     ? `only these steps may be skipped here: ${optional.join(', ')}`
-    : 'this epic is on no lifecycle route this release knows — it records none, and its chain matches none — so nothing on it is optional. Run `yad doctor` and look for `step:off-route`',
+    : route
+      ? `this epic is on the \`${route}\` route, and no step on it is optional — a short lane leaves the steps it does not need OUT of the chain rather than making them skippable, so there is nothing to mark N/A. If this epic needs '${stepId}', it is on the wrong route: start it again on a route that carries the step`
+      : 'this epic is on no lifecycle route this release knows — it records none, and its chain matches none — so nothing on it is optional. Run `yad doctor` and look for `step:off-route`',
 );
 
 // Strip the skip-provenance fields off a step — the inverse of the stamp `skipStep` applies.
@@ -702,7 +719,7 @@ function withoutSkip(step) {
 export function skipStep(state, stepId, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
   const steps = requireChain(state, 'skip a step in');
   const optional = optionalStepsFor(state, profiles);
-  if (!optional.includes(stepId)) throw notOptional(stepId, optional);
+  if (!optional.includes(stepId)) throw notOptional(stepId, optional, epicProfileId(state, profiles));
   // `s?.id` throughout: a hand-edited chain can hold a null entry, and a crash on one would be the
   // same unhelpful answer `requireChain` exists to replace.
   const ai = steps.findIndex((s) => s?.id === stepId);
@@ -1085,17 +1102,22 @@ export const SHAPE_6_ROUTE_IDS = ['classic', 'analysis-first', 'discovery'];
 // chains out again here would be a second copy of `classic` free to drift from the first, and it would
 // drift silently: shape 6 would keep stamping against a chain nobody maintains.
 //
-// A route named here that this release no longer carries simply drops out. That is the honest answer —
-// a removed route is not one a chain can be matched onto — and it is why this filters the live table
-// instead of asserting the three are present.
+// A route named here that this release no longer carries simply drops out RATHER THAN THROWING: a
+// removed route is not one a chain can be matched onto, and a migration is the worst place to raise on
+// a condition the user cannot act on. The silent shrink is still a bug in the release that caused it —
+// shape 6 would quietly stop placing chains it used to place — so `cli/test-migrate.mjs` asserts every
+// id here still resolves. Tolerated at runtime, caught in CI; the two are not in tension.
 export const shape6Routes = (profiles = LIFECYCLE_PROFILES) =>
   profiles.filter((p) => SHAPE_6_ROUTE_IDS.includes(p.id));
 
 // ---- which steps an epic may skip (E35) ----------------------------------------------------------
 //
-// A step may be marked N/A ("skipped") when the epic does not need it. Only the UI-design step is
-// optional today: an epic with no user-facing surface (backend/API, data, infra) can skip it. A skip
-// carries a recorded reason and stays VISIBLE in the chain — both the author step and its review gate
+// A step may be marked N/A ("skipped") when the epic does not need it. UI-design is the only step any
+// route marks optional today, and only `classic` and `analysis-first` mark it: an epic with no
+// user-facing surface (backend/API, data, infra) can skip it. The short lanes mark NOTHING optional —
+// they left the steps they do not need out of the chain instead, which is a different mechanism with a
+// different audit trail, so "this epic has no optional steps" no longer implies its chain is broken
+// (see `notOptional`). A skip carries a recorded reason and stays VISIBLE in the chain — both the author step and its review gate
 // pre-marked `done`, short-circuited by `gatePredicate` — the auditable, reversible counterpart to
 // omitting `analysis` from the chain entirely.
 //

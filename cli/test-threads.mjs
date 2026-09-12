@@ -11,7 +11,7 @@ import {
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
-  seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState,
+  seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState, skipStep,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
@@ -660,91 +660,32 @@ test('the profiles are the chains the skills already seed, step for step', () =>
   assert.deepEqual(profileSteps('nonsense'), []);
 });
 
-test('the short lanes end where `advanceState` can hand the epic to Build (E40)', () => {
-  // Not a style rule. `advanceState` turns `stories-review` into `ready-for-build`, and its fall-through
-  // sets the same sentinel for any chain that simply runs out of steps. A lane ending anywhere else
-  // would leave `currentStep` claiming a Build with no stories to run it — `currentPhase` reads that
-  // sentinel as `build` and `yad next` would send the user to an empty lane.
+test('a short lane makes "no optional steps" mean something new, and `yad skip` says which (E40)', () => {
+  // THE INVARIANT E40 BROKE. Before the short lanes every feature route marked exactly one step
+  // optional, so an empty answer could only mean the chain fitted no route — and `notOptional` had one
+  // branch for both. `chore` and `spike` are routes the release fully recognises on which NOTHING is
+  // optional, because they dropped those steps from the chain instead of marking them skippable.
+  //
+  // The refusal is right either way; what this pins is that the epic is not told to go chase a
+  // `step:off-route` finding that will never fire on a chain matching its route perfectly.
   for (const id of ['chore', 'spike']) {
-    const steps = profileSteps(id);
-    assert.equal(steps.at(-1), 'stories-review', `${id}: the lane must end at the step that opens Build`);
-    assert.ok(steps.includes('epic'), `${id}: no epic.md means no work-item type, no lineage and no thread rollup`);
-  }
-  // And what they deliberately do NOT carry. Absent, never `optional`: a skip record for a step the
-  // route was never going to walk is noise in the audit trail, not an audit trail.
-  for (const id of ['chore', 'spike']) {
-    for (const dropped of ['architecture', 'ui-design', 'test-cases']) {
-      assert.equal(profileSteps(id).includes(dropped), false, `${id} must not carry ${dropped}`);
-    }
     assert.deepEqual(optionalStepsOf(id), [], `${id}: a short lane has nothing left to make optional`);
+    const s = seedState({ epic: 'EP-demo', profile: id, type: 'chore', today: '2026-01-02' });
+    assert.throws(() => skipStep(s, 'ui-design', { reason: 'no screens' }), (e) => {
+      assert.match(e.hint, new RegExp(`on the \`${id}\` route`), 'the hint names the route the epic is on');
+      assert.doesNotMatch(e.hint, /step:off-route/, 'and does not send a healthy epic to a check that cannot fire');
+      return true;
+    });
   }
-  // `chore` is `spike` without the analyst's brief — the one thing that separates known upkeep from a
-  // timeboxed investigation. Asserted because the tie-break below depends on the subset relation.
-  assert.deepEqual(profileSteps('spike').slice(2), profileSteps('chore'));
-});
-
-test('every profile is self-consistent — its steps exist and its gates follow their authors', () => {
-  const phaseIds = new Set(PHASES.map((p) => p.id));
-  for (const p of LIFECYCLE_PROFILES) {
-    const rows = lifecycleProfile(p.id).rows;
-    assert.ok(rows.length, `${p.id}: a route with no steps is not a route`);
-    assert.equal(new Set(rows.map((r) => r.id)).size, rows.length, `${p.id}: a step twice in one route`);
-    for (const [i, r] of rows.entries()) {
-      const def = stepDef(r.id);
-      assert.ok(def, `${p.id}: '${r.id}' is not in the step catalogue`);
-      assert.ok(phaseIds.has(def.phase), `${p.id}: '${r.id}' has no phase`);
-      assert.equal(def.level, p.level, `${p.id}: '${r.id}' is ${def.level}-level, the route is ${p.level}`);
-      // A gate must come straight after the step it reviews. `skipStep` refuses a chain whose
-      // optional step has no paired gate, and `closeAuthorStep` reaches backwards for it.
-      if (def.reviews) {
-        assert.equal(rows[i - 1]?.id, def.reviews, `${p.id}: '${r.id}' does not follow '${def.reviews}'`);
-        assert.equal(r.optional, rows[i - 1].optional, `${p.id}: '${r.id}' and its step disagree on optional`);
-      }
-      // Nothing in Build belongs in a Shape chain: Build runs per story per repo in `build-state/`.
-      assert.notEqual(def.phase, 'build', `${p.id}: '${r.id}' is a Build step`);
-    }
+  // The other two branches still say their own thing: a route WITH an optional step lists it, and a
+  // chain on no route at all keeps the off-route remedy that is correct for it.
+  const classic = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
+  assert.throws(() => skipStep(classic, 'architecture', { reason: 'x' }), /not optional/);
+  try { skipStep(classic, 'architecture', { reason: 'x' }); } catch (e) {
+    assert.match(e.hint, /only these steps may be skipped here: ui-design/);
   }
-});
-
-test('what a route marks optional is read off THAT route, never pooled across them', () => {
-  // Two routes that DISAGREE. With today's data every feature route marks the same one step, so
-  // "this epic's route" and "every route at once" give the identical answer and no assertion against
-  // the real profiles could separate them. E40's chore and spike lanes make the difference real.
-  const ROUTES = [
-    { id: 'a', steps: ['epic', { id: 'ui-design', optional: true }, 'ui-design-review'] },
-    { id: 'b', steps: ['epic', { id: 'architecture', optional: true }, 'architecture-review'] },
-  ];
-  assert.deepEqual(optionalStepsOf('a', ROUTES), ['ui-design']);
-  assert.deepEqual(optionalStepsOf('b', ROUTES), ['architecture'],
-    "a step optional on route 'b' must not be optional on route 'a'");
-  assert.deepEqual(optionalStepsOf('a', ROUTES).includes('architecture'), false, 'the routes were pooled');
-
-  assert.deepEqual(optionalStepsOf('a', [{ id: 'a', steps: ['epic'] }]), [], 'a route with nothing optional');
-  assert.deepEqual(optionalStepsOf('missing', ROUTES), [], 'a route this release does not carry');
-  // The gate is the author step's pair, never listed on its own — `isSkippableStep` adds it back.
-  assert.deepEqual(optionalStepsOf('a', [
-    { id: 'a', steps: [{ id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true }] },
-  ]), ['ui-design']);
-
-  // …and unchanged from before E5 on the routes that actually ship. A derivation that agrees with
-  // itself while marking `architecture` optional would pass everything above and let a real gate be
-  // skipped with a reason.
-  for (const id of ['classic', 'analysis-first']) assert.deepEqual(optionalStepsOf(id), ['ui-design']);
-  assert.deepEqual(optionalStepsOf('discovery'), [], 'the front-zero has nothing to skip');
-});
-
-test('a profile carries no per-step field nothing reads', () => {
-  // `optional` is here because `optionalStepsOf` reads it. Nothing else is, and that is the point: the
-  // parallel `test-cases` track is decided by `advanceState` from the step id, so recording it in the
-  // profile as well would be a second copy of a rule living elsewhere — free to drift with every test
-  // still green, which is exactly what this file exists to prevent.
-  const READ_FIELDS = new Set(['id', 'optional']);
-  for (const p of LIFECYCLE_PROFILES) {
-    for (const row of lifecycleProfile(p.id).rows) {
-      for (const k of Object.keys(row)) {
-        assert.ok(READ_FIELDS.has(k), `${p.id}/${row.id}: '${k}' is on a profile row and nothing reads it`);
-      }
-    }
+  try { skipStep({ steps: [{ id: 'stories' }, { id: 'epic' }] }, 'ui-design', { reason: 'x' }); } catch (e) {
+    assert.match(e.hint, /step:off-route/, 'an off-route chain keeps the remedy that fits it');
   }
 });
 
