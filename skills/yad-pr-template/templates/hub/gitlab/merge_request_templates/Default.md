@@ -19,7 +19,7 @@
 
 ## Checklist
 - [ ] `owner` set in the artifact frontmatter (inherited from `epic.md`)
-- [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only)
+- [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only — a short-lane epic has no architecture step and no lock, so tick this only if your route has one)
 - [ ] Risk tags reflect the real surface touched (contract/auth/payments escalate)
 - [ ] No secrets or tokens in the artifact or this description
 
