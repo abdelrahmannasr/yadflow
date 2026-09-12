@@ -136,7 +136,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "base"
+      "rule": "base",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": 2,
+      "short": 0
     },
     {
       "epic": "EP-checkout",
@@ -147,7 +155,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "escalated"
+      "rule": "escalated",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 2,
+        "needed": 3,
+        "risk": "contract"
+      },
+      "have": 4,
+      "short": 0
     },
     {
       "epic": "EP-checkout",
@@ -158,7 +174,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "base"
+      "rule": "base",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": 2,
+      "short": 0
     },
     {
       "epic": "EP-checkout",
@@ -169,7 +193,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "per-repo"
+      "rule": "per-repo",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": 4,
+      "short": 0
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -182,7 +214,15 @@
       "missing": [
         "inherited artifact drifted from EP-checkout — re-thread"
       ],
-      "rule": "inherited"
+      "rule": "inherited",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": null,
+      "short": 0
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -193,7 +233,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "inherited"
+      "rule": "inherited",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 2,
+        "needed": 3,
+        "risk": "contract"
+      },
+      "have": null,
+      "short": 0
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -204,7 +252,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "inherited"
+      "rule": "inherited",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": null,
+      "short": 0
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -215,7 +271,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "per-repo"
+      "rule": "per-repo",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": 3,
+      "short": 0
     },
     {
       "epic": "EP-checkout-queue-filter",
@@ -226,7 +290,15 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "base"
+      "rule": "base",
+      "gateRule": {
+        "base": 1,
+        "riskStep": 0,
+        "needed": 1,
+        "risk": "normal"
+      },
+      "have": 2,
+      "short": 0
     }
   ]
 }

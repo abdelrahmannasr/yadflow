@@ -32,9 +32,15 @@ export const DECISION_TREE: DecisionBranch[] = [
     visibleTo: ALL,
   },
   {
+    condition: 'Every review, reported beside the rule above',
+    result: 'asks for base + risk step distinct approvers',
+    detail: 'A count that names no person, role or step: base is 1 (one human approval, which on a platform cannot be the author since you cannot approve your own PR), plus 2 when the step is tagged contract or 1 when it is tagged auth/payments — the highest tag, never the sum. It counts people, so one person holding two roles is one approver. Advisory for now: the full rule caps it at the number of active people, and an uncapped count would make a two-person team unable to pass its architecture gate.',
+    visibleTo: ALL,
+  },
+  {
     condition: 'risk_tags include contract / auth / payments',
     result: 'escalate to domain owners',
-    detail: 'Architecture+contract escalates: base rule PLUS a domain owner for every repo in epic.repos. The contract-surface hash must still match contract-lock.json.',
+    detail: 'Architecture+contract escalates: base rule PLUS a domain owner for every repo in epic.repos. The count asks for 3 distinct approvers (1 + 2) and reports a shortfall without blocking. The contract-surface hash must still match contract-lock.json.',
     visibleTo: ALL,
   },
   {

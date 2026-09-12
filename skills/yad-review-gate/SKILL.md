@@ -39,6 +39,13 @@ step named `currentStep` if it is a review step). Read `.sdlc/approvals.json`. R
 epic's `repos` (the **touched domains**). Determine the **reviewer rule** for this step:
 - **Base rule:** `owner + 1 reviewer` — at least one `owner` approval AND at least one distinct
   non-owner `reviewer` approval.
+- **The count, reported beside the rules below but not yet holding the gate:** the step asks for
+  `base + risk step` **distinct approvers** — base 1, plus 2 when the step carries `contract` or 1 when
+  it carries `auth`/`payments` (the highest tag, never the sum). It names no role, so one person holding
+  two roles is one approver. It is ADVISORY until the capacity cap ships (E72): the roadmap's rule caps
+  it at the number of active people, and an uncapped count would deadlock a small team on a contract
+  gate. So report the shortfall; never block on it. `yad gate status` and `yad gate sync` print the
+  arithmetic — read it from there rather than recomputing it.
 - **Escalation option (risk-driven):** if the step's `risk_tags` intersect `{contract, auth,
   payments}`, ALSO require at least one `domain-owner` approval **per touched domain** (build plan §4,
   §5). For the **architecture+contract** review (`risk_tags: ["contract"]`), the touched domains are
@@ -50,7 +57,8 @@ epic's `repos` (the **touched domains**). Determine the **reviewer rule** for th
   (build plan §4 step 8). The `domain` field on each approval is the repo name.
 
 Escalation and per-repo routing are **options of this one gate**, selected by `risk_tags` and the
-touched `repos` — never a forked or copied gate.
+touched `repos` — never a forked or copied gate. The count is not an option either: it is computed for
+every step and reported every time, and it decides nothing until E72 caps it.
 
 ### Step 2 — Dispatch on `action`
 
@@ -138,6 +146,7 @@ sections, so every participant is attributable in one place:
 # Approval record — <artifact> — <YYYY-MM-DD>
 
 Reviewer rule in force: **<base | escalated | per-repo>** (<why — e.g. risk_tags / touched repos>).
+Approver count (advisory, not enforced): **<have> of <needed>** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>[, short <N> — recorded here, never blocking].
 
 ## Approved by
 - <name> — <role>[ (<domain>)] — approved <date>
@@ -179,7 +188,11 @@ gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-
 The step may advance **iff ALL hold**:
 1. the advance dial is `human` (`automation: human_approve` — it always is for Shape steps) and the required approvals exist:
    ≥1 `owner` AND ≥`review_gate.default_reviewers` (1) distinct non-owner `reviewer`, AND — if the
-   step is escalated — ≥1 `domain-owner` for each touched domain.
+   step is escalated — ≥1 `domain-owner` for each touched domain. **The approver count (Step 1) is NOT
+   a condition here** — it is advisory until the capacity cap ships (E72), so a step that is short of it
+   still advances when the three role conditions hold. Report the shortfall in the record; do not hold
+   the step on it. This matches `gatePredicate`, which returns the count as `gateRule`/`have`/`short`
+   and never puts it in `missing`.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
    newest `approved` record). If it changed, approvals are stale → return to `comment`. For the
    **architecture+contract** review, also recompute the contract-surface hash (see

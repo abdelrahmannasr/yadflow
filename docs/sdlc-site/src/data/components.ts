@@ -40,7 +40,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#1e8449",
     position: { x: 28, y: 38 },
     description:
-      "The recorded approvals ledger — owner + 1 reviewer per gate, hash-bound so a changed artifact drops them.",
+      "The recorded approvals ledger — owner + 1 reviewer per gate, reported beside the step's advisory approver count, hash-bound so a changed artifact drops them.",
   },
   {
     id: "contract-lock",

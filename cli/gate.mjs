@@ -11,9 +11,9 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
-  advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
+  advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
-  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, writeState, routeLacksStep,
+  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
 } from './epic-state.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -420,7 +420,15 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       optional: optionalStepsFor(state),
     });
 
-    log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule})`)}`);
+    // Say the arithmetic, not just the verdict (rule 6): the roster-era rule that decides this gate, then
+    // E7's count — which is advisory until E72 caps it, and labelled that way so nobody reads a number
+    // the gate is not enforcing as the reason it did or did not pass.
+    // `have: null` is a step whose approvals were never counted (inherited from a parent epic, or
+    // skipped): there is no head count to report and no requirement to report either.
+    const count = pred.have === null
+      ? 'approvals not counted here'
+      : `${pred.have} approved; count (advisory): ${gateRuleSum(pred.gateRule)}${pred.short ? ` — ${pred.short} short` : ''}`;
+    log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
       // next step, and moving it back to in_review would un-ship work already built on it. What this
@@ -698,14 +706,48 @@ export async function gateStatus(root, { epic } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
-  const solo = isSolo(loadProduct(root).hub);
+  const { hub } = loadProduct(root);
+  const solo = isSolo(hub);
+  const reqEng = requireEngagement(hub);
+  const optional = optionalStepsFor(ledger.state);   // which steps THIS epic's route allows to be skipped
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const cur = artifactHash(epicDir, s.artifact);
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !(a.artifactHash && cur && a.artifactHash !== cur));
     const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && a.artifactHash && cur && a.artifactHash !== cur).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
-    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s)${tags}`)}`);
+    // E7's count, per step, from the step's own risk tags — advisory until E72 caps it, and labelled so.
+    // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from
+    // one person are one approver. Printed in solo mode too, where approvals are waived, so a reader who
+    // later switches to team mode can see what each gate will then ask for.
+    //
+    // COUNTED THE WAY THE PREDICATE COUNTS. With `requireEngagement` on, an approval carrying no
+    // verified engagement signal is dropped BEFORE people are counted, so a line built from every live
+    // approval would report a head count the engine does not recognise. The dropped ones are named
+    // rather than hidden, because "two people approved and neither counts" is the fact a reader needs.
+    //
+    // NO COUNT ON A WAIVED STEP. An inherited step's approvals live under the parent epic and a skipped
+    // step was never reviewed, so printing what the count asks for would read as an audit failure on a
+    // step the engine deliberately waives.
+    const counted = reqEng ? live.filter((a) => a.engagement === 'verified') : live;
+    const unengaged = live.length - counted.length;
+    const people = new Set(counted.map((a) => a.approver)).size;
+    const from = `from ${people} ${people === 1 ? 'person' : 'people'}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
+    // A `skipped` flag is honoured here on exactly the terms `gatePredicate` honours it: only on a step
+    // THIS epic's route marks optional (`isSkippableStep`). Without that guard a hand-edited
+    // `skipped: true` on a required step would read as waived in `gate status` while `gate sync` fell
+    // through to the real rule — two read-only views of one ledger disagreeing, and the misleading one
+    // is the view a human checks first.
+    const waived = s.inherited
+      ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
+      : (s.skipped && isSkippableStep(s.id, optional)) ? '; skipped (N/A)' : '';
+    // The shortfall, the same number `gatePredicate` returns as `short`. Printed here because this is the
+    // surface people read when they want to know where a gate stands, and a count with no distance to it
+    // is half the fact.
+    const rule = gateRuleFor(s);
+    const short = Math.max(0, rule.needed - people);
+    const count = waived || `; count (advisory): ${gateRuleSum(rule)}${short && !solo ? ` — ${short} short` : ''}`;
+    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
   }
 }
 
@@ -882,7 +924,12 @@ function reviewBundle(root, { epic, artifact } = {}) {
     artifact: art,
     platform: hub?.platform || null,
     pr: pr ? { number: pr.number, url: pr.url } : null,
-    step: step ? { id: step.id, riskTags: step.risk_tags || [], escalated: isEscalated(step) } : null,
+    // `gateRule` is E7's per-step rule — the number of distinct approvers the count asks for and the
+    // arithmetic behind it. It is advisory until E72 caps it. `escalated` is the roster-era rule beside
+    // it (a domain owner per touched domain), which is the rule that actually holds the gate today.
+    step: step
+      ? { id: step.id, riskTags: step.risk_tags || [], escalated: isEscalated(step), gateRule: gateRuleFor(step) }
+      : null,
     artifactPath: art ? path.join(epicDir, art) : null,
     contractPath: art && base(art) === 'architecture' ? path.join(epicDir, 'contract.md') : null,
     touchedDomains: step ? touchedDomains(epicDir, step) : [],
@@ -955,6 +1002,7 @@ export async function gateTrailer(root, { epic, artifact, body, number, getBody 
 const base = (artifact) => artifactBase(artifact);
 
 export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true }) {
+  const rule = gateRuleFor(step);
   return [
     '## Artifact under review',
     `- Epic: \`${epic}\``,
@@ -965,6 +1013,11 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     '## Impact & Risk (front-half)',
     `- **Domains / repos touched:** ${domains.join(', ') || 'n/a'}`,
     `- **Risk tags:** ${(step.risk_tags || []).join(', ') || 'none'}`,
+    // What the count asks for, stated on the artifact people are about to review rather than left for
+    // them to discover later (rule 6). Advisory: the rule that holds this gate is the roster rule (an
+    // owner, a reviewer, and a domain owner per touched repo on an escalated step), and the count starts
+    // holding gates when E72 caps it. Said plainly here so nobody treats the number as the requirement.
+    `- **Approver count (advisory, not yet enforced):** ${gateRuleSum(rule)}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',

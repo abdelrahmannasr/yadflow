@@ -227,7 +227,7 @@ had already written the artifact; a chain seeded that way is still perfectly val
 it.
 
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
-owner + 1 reviewer).
+owner + 1 reviewer, and an approver count of 1).
 
 ### `ui-design` is optional (skippable)
 
@@ -307,7 +307,7 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `advance` | `human` \| `auto` | Dial 2, shape-4 name, written beside `automation`: `human`=`human_approve`, `auto`=`machine_advance`. A review step is NEVER `auto`. |
 | `locked` | `true` \| `false` | Shape steps are `true`: may NOT be set to `advance: auto` in this version. |
 | `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `blocked` = upstream step not yet approved. |
-| `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4). |
+| `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4), and sets the step's reported approver count: `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). |
 
 ## `approvals.json`
 Append-only ledger (an array). Each entry:

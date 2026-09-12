@@ -13,6 +13,75 @@ import {
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 
+// ---- the per-step gate rule (E7) -----------------------------------------------------------------
+//
+// HOW MANY HUMAN APPROVALS a step asks for, as a NUMBER derived from the step's own recorded data.
+// `needed = base + risk step` — the roadmap's tier-1 rule (docs/roadmap-idea-1.md, Part 3). There is
+// no name and no role anywhere in it, which is the whole point: a rule that names a person, a role or
+// a step goes stale the moment the team changes, and "repository access is the roster" replaces it.
+//
+// IT IS REPORTED, NOT YET ENFORCED, and that is a deliberate, temporary state. Part 3's rule is ONE
+// formula: `needed = base + risk_step`, CAPPED at `active − 1`, floor 1 in team mode. The cap needs a
+// live count of active people, which is E71, and E72 is the task that puts the two halves together.
+// Enforcing the uncapped half on its own creates exactly the deadlock the cap exists to prevent — a
+// two-person team clears today's role rule on an `architecture-review` with two people (one of them
+// holding reviewer AND domain-owner), while base 1 + contract 2 asks for three. That gate would be
+// unpassable, with no cap (E72) and no `yad gate lower --reason` (E73) to escape through, and rule 7
+// says an escape hatch always exists. So E7 computes the number and PRINTS it wherever a gate reports
+// itself (rule 6 — never go quiet; nothing writes it to disk, so the audit trail is unchanged by this
+// task), and the roster-era role rule is still the only thing that
+// holds a gate. E72 adds the cap and the `missing.push` that turns this on; `short` below is the value
+// that flip will read.
+//
+// THE RISK STEP comes from the step's risk tags — `contract` +2, `auth` / `payments` +1 (the "high"
+// tier), nothing +0. Two inferences the roadmap leaves open, recorded here so the next reader does not
+// have to guess: `auth` and `payments` ARE the high tier (they are the other two escalators, and the
+// roadmap gives the contract surface its own larger step), and a step carrying several tags takes the
+// MAXIMUM step, never the sum — a gate is one decision about the riskiest thing it touches, and summing
+// would let three tags ask for five approvals that no small team can produce.
+//
+// THE TAGS ARE READ FROM THE EPIC, not from the catalogue: `seedState` copies `risk_tags` into
+// `state.json`, and a team may add `auth` to a step by hand. Change-safety rule 3 — the file wins — so
+// the rule asks the step in front of it, exactly as `optionalStepsFor` asks the epic's recorded route.
+//
+// THE BASE IS 1: one human who is not the author. That is what Part 3 says the gate actually needs
+// ("did a human approve; was it someone other than the author; were there enough of them"), and the
+// platform already enforces the "not the author" half — on GitHub you cannot approve your own PR. The
+// roadmap never fixes the number; it is the floor here, and where it settles is a decision for whoever
+// removes the roster (E62) and lands the cap (E72), with both halves in hand.
+const GATE_BASE = 1;
+// Tag -> { step, tier }. The TIER NAME comes from the winning tag rather than from the number, so a
+// future change to a tag's step cannot make an `auth`-only gate print "contract risk".
+const RISK_TIERS = {
+  contract: { step: 2, tier: 'contract' },
+  auth: { step: 1, tier: 'high' },
+  payments: { step: 1, tier: 'high' },
+};
+
+// The gate rule for ONE step: how many distinct human approvals it asks for, and the arithmetic that
+// says why. Pure, data-only, and safe on a step from a newer yadflow — an unknown tag adds nothing, and
+// a hand-edited `risk_tags: "contract"` (a string where the shape says array) is read as no tags rather
+// than crashing the gate that was about to report on it.
+export function gateRuleFor(step) {
+  const tags = Array.isArray(step?.risk_tags) ? step.risk_tags : [];
+  let riskStep = 0;
+  let risk = 'normal';
+  for (const t of tags) {
+    const hit = RISK_TIERS[t];
+    if (hit && hit.step > riskStep) { riskStep = hit.step; risk = hit.tier; }
+  }
+  return { base: GATE_BASE, riskStep, needed: GATE_BASE + riskStep, risk };
+}
+
+// The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
+// the rule, because three surfaces print it (`gate sync`, `gate status` and the generated review-PR
+// body) and three copies of the arithmetic would eventually disagree. E72 adds a fourth when the count
+// starts holding gates and the shortfall joins `missing`.
+export const gateRuleSum = (rule) => {
+  const people = `${rule.needed} approver${rule.needed === 1 ? '' : 's'}`;
+  return rule.riskStep ? `${people} = base ${rule.base} + ${rule.risk} risk ${rule.riskStep}` : `${people} = base ${rule.base}`;
+};
+
 // Epic ids are EP-<slug> with [a-z0-9-] only — anything else (uppercase, dots, slashes) is
 // rejected before it can become a path segment under epics/.
 export const isValidEpicId = (epic) => /^EP-[a-z0-9-]+$/.test(epic || '');
@@ -455,6 +524,12 @@ export function findReviewStep(state, artifact) {
   ) || null;
 }
 
+// Does the ROSTER-ERA rule escalate this step — i.e. does it want a domain owner per touched domain?
+// The `stories-review` clause is a step NAME inside a rule, which is exactly what the people-free model
+// removes; it survives here because the per-repo rule it triggers is role-based from end to end, and
+// E62 retires both together. E7's rule (`gateRuleFor`) reads risk tags and nothing else, so the two
+// never share a reader. `touchedDomains` (cli/gate.mjs) keys off this too, for the PR labels and the
+// reviewer routing — those stay useful after the requirement goes.
 export const isEscalated = (step) =>
   (step?.risk_tags || []).some((t) => RISK_ESCALATORS.includes(t)) || step?.id === 'stories-review';
 
@@ -508,11 +583,26 @@ const uniqueBy = (arr, key) => {
 // state and the touched domains, decide whether the gate passes — and exactly what is missing.
 // `currentHash` drops any approval bound to a different hash (revoke-on-change). `merged` /
 // `threadsResolved` come from the platform; with a local ledger they default to the "advance" intent.
+//
+// TWO APPROVAL RULES ARE REPORTED HERE, and exactly ONE of them holds the gate today:
+//   * the ROSTER-ERA rule — 1 owner, `defaultReviewers` reviewers, and a domain-owner per touched
+//     domain on an escalated step. Every one of those is a ROLE, read from the roster. This is the rule
+//     that decides `passed`, unchanged by E7. E62 removes the roster and E64 stops approvals carrying a
+//     configured role, and this rule goes with them.
+//   * the E7 COUNT — `gateRuleFor(step)`: base + risk step distinct approvers, no role inspected. It is
+//     computed, returned as `gateRule`/`have`/`short` and printed wherever a gate reports itself, and it holds
+//     NOTHING until the capacity cap lands (E72). See the long note on `gateRuleFor`: the roadmap's
+//     tier-1 rule is one formula with a cap in it, and enforcing the uncapped half would make a
+//     two-person team's contract gate unpassable with no recorded way out (rule 7).
+// Keeping them separate is what lets the count be honest about a gap the role rule cannot see — one
+// person holding two roles is two roles and one approver — without failing a gate nobody could pass.
 export function gatePredicate({
   step,
   approvals,
   currentHash = null,
   touchedDomains = [],
+  // The roster-era reviewer count, NOT E7's `base` — a different rule's number (see above), which dies
+  // with the roster. Deriving either from the other would tie two rules that are being separated.
   defaultReviewers = 1,
   threadsResolved = true,
   merged = true,
@@ -536,6 +626,10 @@ export function gatePredicate({
       passed: !drift,
       missing: drift ? [`inherited artifact drifted from ${step.inheritedFrom || 'parent'} — re-thread`] : [],
       rule: 'inherited',
+      // The step's own rule is a fact about the step, so it is reported even where nothing was counted
+      // against it — here the approvals live upstream in the thread, under the parent epic. `have: null`
+      // says "not counted", which is not the same fact as zero approvals.
+      gateRule: gateRuleFor(step), have: null, short: 0,
     };
   }
 
@@ -550,6 +644,7 @@ export function gatePredicate({
     return {
       approvalsSatisfied: true, threadsResolved: true, merged: true, staleDropped: 0,
       passed: true, missing: [], rule: 'skipped',
+      gateRule: gateRuleFor(step), have: null, short: 0,   // nothing is counted on a step nobody reviewed
     };
   }
 
@@ -567,6 +662,12 @@ export function gatePredicate({
   const reviewers = uniqueBy(counted.filter((a) => a.role === 'reviewer'), 'approver');
   const domainOwners = counted.filter((a) => a.role === 'domain-owner');
 
+  // E7: how many DISTINCT humans approved, whatever role the roster gave them. One person holding two
+  // roles is one approver here, which is the difference that makes the count a real second rule rather
+  // than a restatement of the one above it.
+  const approvers = uniqueBy(counted, 'approver').length;
+  const gateRule = gateRuleFor(step);
+
   const escalate = isEscalated(step);
   const missing = [];
   // Solo mode waives the APPROVAL requirements entirely (you can't approve your own PR on GitHub) —
@@ -581,6 +682,9 @@ export function gatePredicate({
         if (!domainOwners.some((a) => a.domain === d)) missing.push(`domain-owner for ${d}`);
       }
     }
+    // The count does NOT push onto `missing` — `missing` is what holds the gate, and the count holds
+    // nothing until E72 caps it (see `gateRuleFor`). The shortfall rides out as `short` instead, which
+    // is what the surfaces print and what E72's one-line flip will turn into a `missing` entry.
   }
   const approvalsSatisfied = missing.length === 0;
   // Surface engagement-gated approvals that did not count (only when requireEngagement holds the gate).
@@ -599,7 +703,18 @@ export function gatePredicate({
     staleDropped: stale.length,
     passed: approvalsSatisfied && threadsResolved && merged,
     missing,
+    // `rule` names which ROSTER-ERA rule was applied, and is the label the CLI and the golden snapshot
+    // have always printed. `stories-review` appears here BY NAME because the per-repo rule is itself
+    // name-based — E62 removes it with the roster. E7's rule never reads a name: `gateRule.needed` below
+    // comes from the step's risk tags alone.
     rule: solo ? 'solo' : escalate ? (step.id === 'stories-review' ? 'per-repo' : 'escalated') : 'base',
+    // E7's rule and what was counted against it, NESTED so that `rule` (which roster-era rule applied)
+    // and `gateRule.base` (a number in the other rule) can never be read as one thing. `have` is the
+    // number of distinct approvers and `short` how many more the count asks for — 0 when it is
+    // satisfied, and the value E72 will enforce on.
+    gateRule,
+    have: approvers,
+    short: solo ? 0 : Math.max(0, gateRule.needed - approvers),
   };
 }
 
@@ -832,7 +947,9 @@ export function markInReview(state, step) {
 //
 // WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
-// below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); per-step gate rules are E7;
+// below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); how many approvals each step's
+// gate ASKS FOR — reported, never enforced — is `gateRuleFor` at the top of this file (E7), which reads
+// the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
 // between the two, once E50 can detect which skills are installed. Three of the five
@@ -860,8 +977,13 @@ export function markInReview(state, step) {
 //             level into Foundation; it is named here, not modelled further. This field was called
 //             `chain` when E4 landed and was renamed before any release carried it — `chain` is the
 //             word for an ordered LIST of steps, which is what a lifecycle profile holds (E5).
-//   risk_tags the DEFAULT tags a seed gives this step. `architecture-review` carries `contract`, which
-//             is what routes it through the escalated gate rule. E7 owns the rules themselves.
+//   risk_tags the DEFAULT tags a seed gives this step, copied into the epic's `state.json` where a team
+//             may add to them by hand. `architecture-review` carries `contract`, which does two separate
+//             things: it routes the step through the roster-era escalated rule (a domain owner per
+//             touched repo, `isEscalated`), and it sets the step's E7 RISK STEP — `contract` +2,
+//             `auth` / `payments` +1, nothing +0, the maximum across the tags and never their sum. The
+//             rule that turns those tags into a number of approvals is `gateRuleFor`, at the top of this
+//             file; it reads the epic's recorded tags, not this row.
 //
 // `spec` and `tasks` are two legs of the same yad-spec ceremony (run-loop.md) and share a skill; the
 // chain renderer collapses the consecutive duplicate. `ready-for-build` and the other SENTINELS are

@@ -387,8 +387,9 @@ merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "
 - **contract-locked** — where an epic has a `contract.md`, its surface hash matches
   `.sdlc/contract-lock.json` (reuse the recipe in
   `../yad-architecture/references/contract-format.md`).
-- **approvals-present** — an epic at `ready-for-build` has the approvals its gate rule requires recorded
-  in `.sdlc/approvals.json` (the same predicate `yad-review-gate` enforces).
+- **approvals-present** — an epic at `ready-for-build` has the approvals the ROLE rule requires recorded
+  in `.sdlc/approvals.json` (the same predicate `yad-review-gate` enforces; a step's advisory approver
+  count is reported beside that rule and gates nothing).
 
 These are advisory checks on the Product's own PRs (the Shape review PRs the verified ledger opens); they keep
 the Product's artifacts internally consistent. The Product never runs the code-repo `spec-link`/`build-test-lint`

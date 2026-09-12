@@ -33,7 +33,7 @@ no clone needed.
 | `yad gate open <epic> <artifact>` | Open the Shape **review PR/MR** for an artifact and mark the step `in_review` (in verified mode CI owns the ledger, so it only opens the PR). The `review/<epic>/<artifact>` branch must already be **on origin** — it does not create or push one; `yad open-pr`, run from the branch, pushes it and then delegates here. For an epic's **first** gate, cut that branch from the authoring branch (`epic/…`, `change/…`) so the PR/MR carries the `.sdlc/` **seed**: no CI path can create a ledger, so `ledger-guard` exempts a new epic's ledger there — creation, not mutation (#162) — and it lands on the default branch at merge. |
 | `yad gate sync <epic> [artifact] [--pr <n>]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. With no PR recorded in the ledger (the normal bridge case, where CI records it only at merge) it resolves the PR from the `review/<epic>/<artifact>` branch; `--pr <n>` names one outright and overrides a stale recorded pointer, after confirming the number really is that branch's PR. In **verified mode this stays advisory** — the writing recovery is `yad gate ci … --merged`. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
-| `yad gate status <epic>` | Show each review step and its recorded approvals. |
+| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, and that step's advisory approver count. |
 | `yad gate repair <epic>` | Close an authoring step left stranded behind a review gate that already passed (`YAD-STATE-005`). Writes only `state.json`. `--push` commits it to the default branch with a `chore(gate): repair…[skip ci]` audit-trail message (`--allow-branch` to override the default-branch guard, `--dry-run` to preview). |
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the Product workflow calls **at merge** (and from its scheduled reconcile — nothing fires pre-merge, where the platform PR/MR holds the review state): derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the Product default branch. The wired jobs always name a branch: they discover merged reviews through the platform API and call `--branch <ref> --pr <n> --merged` per review. With no `--branch` it falls back to a local sweep of the review PRs *already recorded in the ledger* whose step is not yet `done` — it does no platform discovery of its own, so a review the ledger never saw is only reachable by naming it. **Idempotent down to the bytes:** the ledgers are written in a canonical order, so re-syncing an already-`done` step (what the 15-minute sweep does for a week after every merge) produces a byte-identical file and commits nothing. Before the #163 fix the re-sync re-appended each step's approvals at the tail, so a sweep over N merged reviews rotated `approvals.json` and committed the reorder on every pass — an unbounded commit loop (#163). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
@@ -101,11 +101,28 @@ identical to the prose path, and the prose path itself is unchanged.
 The Shape gate now rides the **PR/MR you open per step** (`yad gate open`). Reviewers approve and
 comment on the platform; `yad gate sync` maps that state into the file ledger (`approvals.json`,
 `comments.json`, `reviews/*.md`) — which stays the source of truth — and the step **auto-advances on
-merge** once three things hold: the reviewer rule is satisfied (owner + 1 reviewer, plus a domain-owner
-per touched repo on escalated steps), every comment thread is resolved, and the review PR/MR is merged.
+merge** once three things hold: the approval rules are satisfied, every comment thread is resolved, and
+the review PR/MR is merged.
 The merge click is the human approval act, so Shape steps still never advance on their own. Approvals are
 **revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. With no
 Product platform / no `gh`/`glab`, the gate degrades to local with no error.
+
+**Two approval rules: one holds the gate, one is reported.** The rule that holds it is the roster rule —
+owner + 1 reviewer, plus a domain-owner per touched repo on an escalated step. Beside it sits a count
+that names no person, role or step: a step asks for `base + risk step` **distinct approvers**, where base
+is 1 — one human approval, which on GitHub or GitLab is necessarily not the author, since you cannot
+approve your own PR — and the risk step comes from the step's own risk tags —
+`contract` +2, `auth`/`payments` +1, nothing +0, the highest tag and never the sum. So an ordinary step
+asks for 1 approver and the architecture+contract gate asks for 3. One person holding two roles satisfies
+two roles but is one approver, which is the gap the count makes visible.
+
+The count is **advisory** until the capacity cap ships: the full rule caps it at the number of active
+people, and an uncapped count would make a two-person team's architecture gate unpassable. Three surfaces
+print the same arithmetic, each in its own sentence — `yad gate sync` (`2 approved; count (advisory): 3
+approvers = base 1 + contract risk 2 — 1 short`), `yad gate status` (the same sum after the distinct-people
+count) and the generated review-PR body (`Approver count (advisory, not yet enforced)`). `yad gate review
+--json` carries the same rule as an object under `step.gateRule`. So the number is visible long before it
+bites.
 
 **Solo mode.** A lone developer can't approve their own PR on GitHub, so an approval requirement would
 deadlock them. Opt in (`yad setup --solo`, recorded as `solo: true` in `.sdlc/hub.json`) and the gate

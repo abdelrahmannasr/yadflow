@@ -12,6 +12,47 @@ Let `A` = the set of `approved` records in `.sdlc/approvals.json` for this step.
 **Escalated pass** (step `risk_tags` ∩ `{contract, auth, payments}` ≠ ∅): base pass AND, for every
 touched `domain`, `|domainOwners[domain]| >= 1`.
 
+## The per-step count rule
+
+A second rule is computed beside the role rule above. It counts people, not roles:
+
+`needed = base + risk step`, where `base` is `1` — one human approval, which on a platform is necessarily
+not the author, since you cannot approve your own PR; on a local-only ledger nothing enforces that half —
+and the **risk step** comes from the step's own
+`risk_tags`:
+
+| Tags on the step | Risk | Risk step | `needed` |
+|---|---|---|---|
+| none | normal | +0 | 1 |
+| `auth` and/or `payments` | high | +1 | 2 |
+| `contract` | contract surface | +2 | 3 |
+
+Several tags take the **highest** step, never the sum — a gate is one decision about the riskiest thing
+it touches. `have` is the number of **distinct approvers**, so one person holding two roles is one
+approver here even though the role rule credits them twice. The tags are read from the step as the epic
+records it in `state.json`, so adding `auth` to a step by hand raises that epic's gate.
+
+**It is reported, not enforced — yet.** The role rule above is what holds a gate today. The roadmap's
+rule is one formula: `needed = base + risk step`, **capped** at the number of active people minus one,
+floor 1. The cap needs a live count of active people, which is a later task, and enforcing the uncapped
+half on its own would deadlock a small team: two people clear the role rule on an architecture review
+(one of them holding reviewer and domain-owner), while the count asks for three, and there is no cap and
+no override to escape through. So the count is computed, recorded and shown everywhere a gate speaks,
+and the shortfall is reported rather than blocking. Nothing is written to disk: the count is printed, not
+recorded. Enforcement arrives with the cap.
+
+Why have it at all: it names no person, no role and no step, which is where the engine is going — the
+roster is a stored claim that goes stale, and repository access is the real roster. It also makes a gap
+visible that the role rule cannot see, because one person holding two roles satisfies two roles.
+
+Three surfaces print the same arithmetic, each in its own sentence: `yad gate sync` (`2 approved; count
+(advisory): 3 approvers = base 1 + contract risk 2 — 1 short`), `yad gate status` (the same sum after the
+distinct-people count) and the generated review-PR body (`Approver count (advisory, not yet enforced)`).
+`yad gate review --json` carries the rule as an object under `step.gateRule` instead of a sentence.
+
+Solo mode waives the role rule, exactly as before, and reports no shortfall. The merge and the resolved
+threads still advance the step.
+
 **Engagement (the Review Companion).** Each approval carries `engagement: verified | none` —
 `verified` when it was recorded through the companion (a real trailer/cards/chat session), `none` for a
 bare UI click. By **default (soft)** both count: a bare approve still passes the gate but is recorded
@@ -26,11 +67,14 @@ artifact). Philosophy: *visible, not impossible.*
   contract surface).
 - Stories review: the touched domains are the **union of every story's `repos`** under `stories/`.
 
-So one gate, two option-shapes:
-- Epic / UI / test-cases reviews: base rule (no risk tags, no per-repo routing).
+So one gate, two option-shapes (each of them also REPORTING the count above):
+- Epic / UI / test-cases reviews: base rule (no risk tags, no per-repo routing); the count asks for 1.
 - Architecture+contract review: escalated (`risk_tags: ["contract"]`) — owner + 1 reviewer + a
-  `domain-owner` for **each** repo in `epic.repos`. (A small team may have one engineer own several
-  repos — one person can supply several `domain-owner` records with different `domain` values.)
+  `domain-owner` for **each** repo in `epic.repos`. The count asks for **3 distinct approvers**
+  (base 1 + contract 2) and reports a shortfall without blocking.
+  (A small team may have one engineer own several repos — one person can supply several `domain-owner`
+  records with different `domain` values. They are still one approver for the count, which is exactly
+  the shortfall that would deadlock them if the count were enforced before the cap exists.)
 - Stories review: per-repo routing — owner + 1 reviewer + a `domain-owner` (the repo's engineer) for
   **each** repo that appears in any story's `repos`.
 

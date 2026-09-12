@@ -336,7 +336,7 @@
         <div class="arrow-v">▼</div>
         <div class="node artifact"><strong>yad-epic</strong><small>write <code>epic.md</code> · assigns the <code>EP-&lt;slug&gt;</code> ID · seeds state</small></div>
         <div class="arrow-v">▼</div>
-        <div class="node gate">gate · epic review<small>base rule: owner + 1 reviewer</small></div>
+        <div class="node gate">gate · epic review<small>base rule: owner + 1 reviewer · advisory count 1</small></div>
         <div class="arrow-v">▼</div>
         <div class="node artifact"><strong>yad-architecture</strong><small><code>architecture.md</code> + the locked <code>contract.md</code> (hash-locked)</small></div>
         <div class="arrow-v">▼</div>
@@ -455,6 +455,7 @@ each code repo/
     <tr><th>Review</th><th>Rule</th><th>Who must approve</th></tr>
     <tr><td>Analysis / Epic / UI</td><td><strong>Base</strong></td><td>owner + 1 reviewer</td></tr>
     <tr><td>Architecture + contract</td><td><strong>Escalated</strong></td><td>owner + 1 reviewer <strong>+ a domain owner for every repo in the epic</strong>. The contract surface is hash-locked; changing it invalidates approvals.</td></tr>
+    <tr><td>Every review</td><td><strong>Approver count</strong><br><em>advisory</em></td><td>A count reported beside the rule above, naming no person or role: <strong>base 1 + the step's risk step</strong> distinct people — +2 on a <code>contract</code> tag, +1 on <code>auth</code>/<code>payments</code>, the highest tag and never the sum. So 3 on the architecture review and 1 elsewhere. It is printed wherever a gate reports itself and <strong>blocks nothing</strong>: the full rule caps it at the number of active people, and an uncapped count would leave a two-person team unable to pass its architecture gate.</td></tr>
     <tr><td>Stories</td><td><strong>Per-repo</strong></td><td>owner + 1 reviewer <strong>+ the engineer for each repo any story touches</strong></td></tr>
     <tr><td>Engineer review at ship</td><td><strong>Locked</strong></td><td>a human engineer — always, <em>never</em> automated</td></tr>
   </table>
@@ -527,6 +528,7 @@ each code repo/
   <h3>Gates &amp; review</h3>
   <div class="term"><strong>Review gate (<code>yad-review-gate</code>)</strong><span class="badge b-gate">gates</span><br>The one reusable team review loop used by every Shape review: <code>open → comment → approve → advance</code>. Commenting never advances; <code>advance</code> moves forward only when the approval rule is met — otherwise it names exactly who is still missing.</div>
   <div class="term"><strong>Base rule</strong><span class="badge b-gate">gates</span><br>The default approval requirement: the artifact’s <strong>owner + 1 reviewer</strong>. Used for the analysis, epic and UI reviews.</div>
+  <div class="term"><strong>Approver count</strong><span class="badge b-gate">gates</span><br>How many <strong>distinct people</strong> a step asks to approve: base 1 plus its risk step (+2 for <code>contract</code>, +1 for <code>auth</code>/<code>payments</code>). It names no person and no role, one person holding two roles counts once, and it is <strong>advisory</strong> — reported everywhere a gate reports itself, enforced nowhere until the capacity cap ships.</div>
   <div class="term"><strong>Escalated rule</strong><span class="badge b-gate">gates</span><br>Base rule <em>plus</em> a domain owner for every repo in the epic. Triggered by risky surfaces — the contract, auth, or payments. The architecture + contract review is always escalated.</div>
   <div class="term"><strong>Per-repo rule</strong><span class="badge b-gate">gates</span><br>Base rule <em>plus</em> the engineer (domain owner) of each repo that any story touches. Used for the stories review.</div>
   <div class="term"><strong>Owner</strong><span class="badge b-role">roles</span><br>The person responsible for an artifact, who addresses comments and can advance its gate. Others are commenters — this avoids the “everyone must approve everything” deadlock.</div>

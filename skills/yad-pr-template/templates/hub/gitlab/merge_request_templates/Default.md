@@ -30,6 +30,9 @@
 - Base: **owner + 1 reviewer**.
 - Escalated (risk tag set, or a stories MR): **plus one domain-owner per touched repo** — see the
   reviewers / `domain:<repo>` labels on this MR. Run `bash checks/hub-route.sh <this-description>` to list them.
+- Approver count (**advisory, not enforced**): base 1 + the step's risk step in **distinct people** — 3 on a
+  `contract` step, 2 on `auth`/`payments`, 1 otherwise. One person holding two roles counts once. `yad gate
+  status <epic>` prints it; being short of it never holds the gate.
 
 ## How to review (this drives the gate)
 - **Approve** this MR to record an `owner` / `reviewer` / `domain-owner` approval in the file ledger

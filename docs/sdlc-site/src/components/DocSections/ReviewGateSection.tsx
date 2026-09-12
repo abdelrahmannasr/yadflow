@@ -7,16 +7,25 @@ const REVIEWS = [
   {
     method: 'BASE',
     path: 'epic · ui-design · analysis · test-cases',
-    description: 'The default rule: the artifact owner plus one non-owner reviewer must approve.',
+    description:
+      'The default rule: the artifact owner plus one non-owner reviewer must approve. The count asks for 1 approver, which their two approvals already cover.',
     middleware: ['owner approves', '1 reviewer approves', 'advance currentStep'],
+    category: 'base',
+  },
+  {
+    method: 'COUNT',
+    path: 'every step (advisory)',
+    description:
+      'Names no person, role or step: a step asks for base + risk step distinct approvers. Base is 1 (one human approval, which on a platform cannot be the author); the risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. Reported everywhere, enforced nowhere yet: the full rule caps it at the number of active people, and an uncapped count would make a two-person team\'s architecture gate unpassable.',
+    middleware: ['asks base + risk step', 'distinct people, not roles', 'shortfall reported, not blocking'],
     category: 'base',
   },
   {
     method: 'ESCALATED',
     path: 'architecture + contract',
     description:
-      'risk_tags: ["contract"] — base rule PLUS a domain owner for every repo in epic.repos. The contract-surface hash must still match contract-lock.json.',
-    middleware: ['owner + 1 reviewer', '+ domain owner per repo', 'contract hash matches'],
+      'risk_tags: ["contract"] — base rule PLUS a domain owner for every repo in epic.repos. The count asks for 3 distinct approvers (1 + 2) and reports a shortfall. The contract-surface hash must still match contract-lock.json.',
+    middleware: ['owner + 1 reviewer', '+ domain owner per repo', 'count asks 3 (1 + 2)', 'contract hash matches'],
     category: 'escalated',
   },
   {
@@ -40,7 +49,7 @@ const REVIEWS = [
 const LEDGER = [
   { file: 'reviews/<artifact>--<date>--comments.md', note: 'reviewer comments (commenting never advances)' },
   { file: '.sdlc/approvals.json', note: 'recorded approvals — hash-bound to the artifact' },
-  { file: '.sdlc/state.json', note: 'currentStep advances only when the rule is met' },
+  { file: '.sdlc/state.json', note: 'currentStep advances when the role rule is met; risk_tags per step set the reported count' },
 ];
 
 export function ReviewGateSection() {
