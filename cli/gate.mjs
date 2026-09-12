@@ -13,7 +13,7 @@ import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
-  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, writeState, routeLacksStep,
+  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
 } from './epic-state.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -709,6 +709,7 @@ export async function gateStatus(root, { epic } = {}) {
   const { hub } = loadProduct(root);
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
+  const optional = optionalStepsFor(ledger.state);   // which steps THIS epic's route allows to be skipped
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
     const cur = artifactHash(epicDir, s.artifact);
@@ -732,8 +733,20 @@ export async function gateStatus(root, { epic } = {}) {
     const unengaged = live.length - counted.length;
     const people = new Set(counted.map((a) => a.approver)).size;
     const from = `from ${people} ${people === 1 ? 'person' : 'people'}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
-    const waived = s.inherited ? `; inherited from ${s.inheritedFrom || 'the parent epic'}` : s.skipped ? '; skipped (N/A)' : '';
-    const count = waived || `; count (advisory): ${gateRuleSum(gateRuleFor(s))}`;
+    // A `skipped` flag is honoured here on exactly the terms `gatePredicate` honours it: only on a step
+    // THIS epic's route marks optional (`isSkippableStep`). Without that guard a hand-edited
+    // `skipped: true` on a required step would read as waived in `gate status` while `gate sync` fell
+    // through to the real rule — two read-only views of one ledger disagreeing, and the misleading one
+    // is the view a human checks first.
+    const waived = s.inherited
+      ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
+      : (s.skipped && isSkippableStep(s.id, optional)) ? '; skipped (N/A)' : '';
+    // The shortfall, the same number `gatePredicate` returns as `short`. Printed here because this is the
+    // surface people read when they want to know where a gate stands, and a count with no distance to it
+    // is half the fact.
+    const rule = gateRuleFor(s);
+    const short = Math.max(0, rule.needed - people);
+    const count = waived || `; count (advisory): ${gateRuleSum(rule)}${short && !solo ? ` — ${short} short` : ''}`;
     log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
   }
 }
