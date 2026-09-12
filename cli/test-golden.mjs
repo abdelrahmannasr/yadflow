@@ -40,6 +40,9 @@ const FROZEN_SECTIONS = new Set(['epics', 'threads']);
 
 // gate.mjs hardcodes one required reviewer for every gate (`defaultReviewers`, gate.mjs). Mirrored
 // here rather than exported, so a change to that constant shows up as a snapshot diff to explain.
+// This is the ROSTER-ERA rule's number, which E62 retires with the roster. E7's per-step count has no
+// mirror here on purpose: it is derived from the step's own recorded risk tags, so the snapshot records
+// the engine's answer for each frozen step rather than this test's opinion of it.
 const DEFAULT_REVIEWERS = 1;
 
 const sha256 = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')}`;

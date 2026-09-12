@@ -1596,6 +1596,117 @@ test('gatePredicate: a SKIPPED step short-circuits — passes with zero approval
 });
 
 // ---------------------------------------------------------------------------------------------
+// The per-step gate rule (E7) — `needed = base + risk step`, counted in PEOPLE
+// ---------------------------------------------------------------------------------------------
+// Two rules decide a gate's approvals while the roster still exists, and they are ANDed (see the
+// comment on `gatePredicate`): the roster-era role rule, pinned by the tests above, and this count.
+// The cases below are the ones where the count is the rule that BINDS — each of them passes the role
+// rule and is still held. Without them the count would be invisible: every fixture in this file has
+// two distinct approvers, so a rule asking for one or two would never be the reason anything failed.
+const { gateRuleFor } = await import('./epic-state.mjs');
+
+test('gateRuleFor: the risk step is contract +2, auth/payments +1, nothing +0', () => {
+  assert.deepEqual(gateRuleFor({ id: 'epic-review', risk_tags: [] }), { base: 1, riskStep: 0, needed: 1, risk: 'normal' });
+  assert.deepEqual(gateRuleFor({ id: 'architecture-review', risk_tags: ['contract'] }), { base: 1, riskStep: 2, needed: 3, risk: 'contract' });
+  assert.deepEqual(gateRuleFor({ id: 'epic-review', risk_tags: ['auth'] }), { base: 1, riskStep: 1, needed: 2, risk: 'high' });
+  assert.deepEqual(gateRuleFor({ id: 'epic-review', risk_tags: ['payments'] }), { base: 1, riskStep: 1, needed: 2, risk: 'high' });
+});
+
+test('gateRuleFor: several tags take the MAXIMUM step, never the sum', () => {
+  // A gate is one decision about the riskiest thing it touches. Summing would ask a three-tag step for
+  // five approvals, which no small team can produce and no roadmap rule asks for.
+  assert.equal(gateRuleFor({ id: 'x', risk_tags: ['contract', 'auth', 'payments'] }).needed, 3);
+  assert.equal(gateRuleFor({ id: 'x', risk_tags: ['auth', 'payments'] }).needed, 2);
+});
+
+test('gateRuleFor: an unknown tag adds nothing, and a step with no tags at all is safe', () => {
+  // A project may hold a step from a newer yadflow carrying a tag this version has never heard of
+  // (change-safety rule 3 — the file wins). It must not crash and must not silently escalate.
+  assert.equal(gateRuleFor({ id: 'x', risk_tags: ['quantum'] }).needed, 1);
+  assert.equal(gateRuleFor({ id: 'x', risk_tags: ['quantum', 'contract'] }).needed, 3);
+  assert.equal(gateRuleFor({}).needed, 1);
+  assert.equal(gateRuleFor(null).needed, 1);
+});
+
+test('gatePredicate: the count binds where one person holds two roles on a contract step', () => {
+  // The role rule is SATISFIED here: alice is both owner and reviewer (the roster gives a person every
+  // role they hold), and carol covers the one touched domain. Two people, though — and a contract step
+  // needs three. This is the case the role rule cannot see, because it counts roles and not humans.
+  const approvals = [
+    { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
+    { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'reviewer', artifactHash: 'sha256:C' },
+    { step: 'architecture-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: 'sha256:C' },
+  ];
+  const p = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
+  assert.equal(p.passed, false, 'two people approved a step whose rule needs three');
+  assert.equal(p.have, 2);
+  assert.equal(p.needed, 3);
+  // No role line is missing — the count is the only thing holding this gate.
+  assert.ok(!p.missing.some((m) => /owner|reviewer/.test(m)), `role rule should be satisfied: ${p.missing.join(' | ')}`);
+  // Arithmetic, not a bare number (rule 6 — never go quiet about what is being asked for).
+  assert.ok(p.missing.some((m) => /1 more approver/.test(m) && /base 1 \+ contract risk 2/.test(m)), p.missing.join(' | '));
+
+  // A third human clears it, whatever role they hold.
+  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'reviewer', artifactHash: 'sha256:C' });
+  const pass = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
+  assert.equal(pass.passed, true);
+  assert.equal(pass.have, 3);
+});
+
+test('gatePredicate: a hand-added risk tag raises the count on an ordinary step', () => {
+  // The tags are read from the EPIC's recorded step, not from the catalogue — a team that marks
+  // `epic-review` as touching auth has raised its own gate, and the engine honours the file.
+  const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: ['auth'] };
+  const onePerson = [appr({ approver: 'alice', role: 'owner' }), appr({ approver: 'alice', role: 'reviewer' })];
+  const held = gatePredicate({ step, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(held.passed, false, 'one person cannot clear a high-risk gate on their own');
+  assert.equal(held.needed, 2);
+  assert.equal(held.have, 1);
+  assert.equal(held.risk, 'high');
+  // The same approvals on the same step WITHOUT the tag pass: the tag is what moved the number.
+  const untagged = gatePredicate({ step: baseStep, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(untagged.passed, true);
+  assert.equal(untagged.needed, 1);
+});
+
+test('gatePredicate: solo waives the count too, and still reports what team mode would ask', () => {
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true, solo: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.needed, 3, 'the rule is a fact about the step, reported even where it is not enforced');
+  assert.equal(p.have, 0);
+  assert.ok(!p.missing.some((m) => /approver/.test(m)));
+});
+
+test('gatePredicate: a waived path reports `have: null`, which is not the same as zero approvals', () => {
+  // Nothing is counted on an inherited or skipped step: the approvals live upstream in the thread, or
+  // there was no review at all. Reporting 0 would claim the step was counted and came up empty.
+  const inherited = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'], inherited: true, inheritedFrom: 'EP-parent', boundHash: null };
+  const i = gatePredicate({ step: inherited, approvals: [], currentHash: 'sha256:C' });
+  assert.equal(i.passed, true);
+  assert.equal(i.have, null);
+  assert.equal(i.needed, 3);
+
+  const skipped = { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', risk_tags: [], skipped: true, status: 'done' };
+  const k = gatePredicate({ step: skipped, approvals: [], merged: false, threadsResolved: false, optional: ['ui-design'] });
+  assert.equal(k.have, null);
+  assert.equal(k.needed, 1);
+});
+
+test('gatePredicate: an engagement-gated approval does not count as an approver either', () => {
+  // requireEngagement filters the approvals BEFORE anything counts them, so a bare click cannot make
+  // up the head count any more than it can fill a role.
+  const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: ['payments'] };
+  const approvals = [
+    appr({ approver: 'alice', role: 'owner', engagement: 'verified' }),
+    appr({ approver: 'bob', role: 'reviewer', engagement: 'none' }),
+  ];
+  const strict = gatePredicate({ step, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
+  assert.equal(strict.have, 1);
+  assert.equal(strict.needed, 2);
+  assert.equal(strict.passed, false);
+});
+
+// ---------------------------------------------------------------------------------------------
 // `yad next` — the driver: nextAction() + preconditionsMet() (both pure)
 // ---------------------------------------------------------------------------------------------
 // Build a single state-machine step record for the test chains below.

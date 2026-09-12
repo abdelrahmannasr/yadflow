@@ -439,9 +439,13 @@ function contractLockCheck(checks, root, epic, ledger) {
 // Two findings on a review step that is already `done`, both about the approval record behind it.
 //
 //   FAIL — it holds NO qualifying approval at all (outside solo mode). This is the state the gate
-//   exists to prevent: the step advanced without the record that justifies it. `gatePredicate` counts
-//   exactly the same thing (`status === 'approved'`, with `inherited`/`skipped` steps short-circuited
-//   before it), so a step doctor reports here is one the gate itself would refuse today.
+//   exists to prevent: the step advanced without the record that justifies it. It reads approvals the
+//   way `gatePredicate` does (`status === 'approved'`, with `inherited`/`skipped` steps short-circuited
+//   before it), so a step reported here is one the gate itself would refuse today. It is deliberately
+//   the WEAKER question: the gate asks whether enough distinct people approved for this step's rule
+//   (`gateRuleFor`, E7), and a `done` step that now holds fewer than that is history — re-auditing it
+//   against a rule that moved after it passed would flood a healthy project with findings nobody can
+//   act on. Zero approvals is the one state that was never legitimate under any rule.
 //
 //   WARN — it holds approvals, but none still bind to the artifact as it stands. The gate is
 //   deliberately one-way — nothing pulls a chain backward once work is built on it — so the only way
