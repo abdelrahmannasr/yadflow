@@ -205,7 +205,9 @@ through the gate.
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
 and that the next action is **review** via `yad-review-gate`. Note that this review **escalates**
-(risk tag `contract`): it needs owner + 1 reviewer **plus a domain owner for each touched repo**.
+(risk tag `contract`): it needs owner + 1 reviewer **plus a domain owner for each touched repo**. The
+engine also reports an approver count for the step — 3 distinct people (base 1 + contract risk 2) — which
+is advisory today: it is printed and recorded, and a shortfall never holds the gate.
 **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate
 opens a review PR on the Product (via `yad-hub-bridge`, labelled per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock

@@ -223,14 +223,16 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
   approvals (counting only the non-stale ones). The file ledger stays the source of truth; with no
   platform / no CLI it degrades to local.
 
-**The gate rule, by review.** Two rules apply to every gate and a step must satisfy both: the roster
-rule (roles) below, and the **count** — `base + risk step` distinct approvers, base 1, plus 2 for a
-`contract` tag or 1 for `auth`/`payments`. So an ordinary step needs one approver and the
-architecture+contract gate needs three; the gate prints that arithmetic whenever it reports itself.
-- **Base** (epic, UI): `owner + 1 reviewer`, and 1 approver.
+**The gate rule, by review.** The roster rule (roles) below is what holds a gate. Beside it the engine
+reports a **count** — `base + risk step` distinct approvers, base 1, plus 2 for a `contract` tag or 1 for
+`auth`/`payments` — and prints that arithmetic whenever it reports a gate. The count is advisory until
+the capacity cap ships, because an uncapped count would make a two-person team's architecture gate
+unpassable.
+- **Base** (epic, UI): `owner + 1 reviewer`; the count asks for 1.
 - **Escalated** (architecture+contract — `risk_tags: ["contract"]`): base **plus a domain owner for
-  every repo in `epic.repos`**, and **3 distinct approvers** (base 1 + contract 2). The contract-surface
-  hash must still match `.sdlc/contract-lock.json` (a changed surface invalidates approvals).
+  every repo in `epic.repos`**; the count asks for **3 distinct approvers** (base 1 + contract 2) and
+  reports a shortfall without blocking. The contract-surface hash must still match
+  `.sdlc/contract-lock.json` (a changed surface invalidates approvals).
 - **Per-repo** (stories): base **plus a domain owner (the repo's engineer) for every repo that appears
   in any story's `repos`**.
 

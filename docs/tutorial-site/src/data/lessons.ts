@@ -302,7 +302,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Run `yad-architecture` with the architect lens. It authors `architecture.md` and the **locked** `contract.md` — the shared cross-repo surface (endpoints, events, data-models) that every code repo must honor.' },
           { kind: 'p', text: 'It then hash-locks the contract surface into `.sdlc/contract-lock.json`. From here on, any code change that touches that surface must declare it and re-lock — otherwise CI fails and routes back to this gate.' },
-          { kind: 'callout', tone: 'key', text: 'The architecture review is **escalated**: it needs the base approvals plus a domain owner for every repo in the epic, and 3 distinct approvers (base 1 + contract 2). Changing the locked surface invalidates existing approvals.' },
+          { kind: 'callout', tone: 'key', text: 'The architecture review is **escalated**: it needs the base approvals plus a domain owner for every repo in the epic, and the approver count asks for 3 (base 1 + contract 2). Changing the locked surface invalidates existing approvals.' },
         ],
         commands: [{ cmd: 'run yad-architecture' }],
         produces: ['epics/EP-<slug>/architecture.md', 'epics/EP-<slug>/contract.md (locked)', '.sdlc/contract-lock.json'],
@@ -451,7 +451,7 @@ export const MODULES: Module[] = [
             '**Stories** — base, plus a domain owner for every repo any story touches.',
             '**Engineer review at ship** — a human engineer, always, never automated.',
           ] },
-          { kind: 'p', text: 'A second rule runs on every step and both must hold: the step needs **base + risk step distinct approvers**. Base is 1 (one human who is not the author), plus 2 when the step is tagged `contract` or 1 when it is tagged `auth`/`payments` — the highest tag, never the sum. It counts people rather than roles, so one person holding two roles is one approver. The architecture gate therefore needs 3.' },
+          { kind: 'p', text: 'A count is reported on every step beside the rule above: the step asks for **base + risk step distinct approvers**. Base is 1 (one human who is not the author), plus 2 when the step is tagged `contract` or 1 when it is tagged `auth`/`payments` — the highest tag, never the sum. It counts people rather than roles, so one person holding two roles is one approver, and the architecture gate asks for 3. It is advisory for now: the full rule caps it at the number of active people, and an uncapped count would leave a two-person team unable to pass that gate.' },
         ],
         quiz: [
           {

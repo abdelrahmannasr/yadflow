@@ -46,7 +46,10 @@ gate proceeds **local** (no error) and stop.
 Read `.sdlc/hub.json` for the platform and roster, `epics/<epic>/epic.md` for `repos` + `owner`, and the
 matching `review+approve` step's `risk_tags` from `.sdlc/state.json`. Compute the **required reviewers**
 with `route` (below) — the same rule `yad-review-gate` enforces: base (owner + 1 reviewer); escalated
-(`risk_tags` ∩ {contract,auth,payments}, or the stories step) adds a domain-owner per touched repo. Map
+(`risk_tags` ∩ {contract,auth,payments}, or the stories step) adds a domain-owner per touched repo. The
+step's approver count (3 on a `contract` step) is reported by the gate, not enforced, so routing the
+roles above is still what the review PR needs to reach — but on a contract step, routing fewer than 3
+distinct people leaves the count short, and it is worth requesting one more reviewer where one exists. Map
 each required domain-owner to a platform `login` via the roster (a roster `name` equal to a repo's
 `domain_owner` in `repos.json` is that repo's domain-owner).
 
