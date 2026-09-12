@@ -324,9 +324,35 @@ export function stampWorkItemType(state, epicDir) {
 // ONE of these, called from `writeState` below and from the 5 -> 6 step in cli/migrate.mjs, because
 // on a VERIFIED Product `yad migrate` never rewrites `state.json` — CI is its only writer, so the
 // gate's own write is the only path a shape change has into that file.
-export function stampProfile(state) {
+//
+// MATCHED AGAINST A FROZEN ROUTE SET, not against `LIFECYCLE_PROFILES`. A migration answers a question
+// about the PAST — "which of the routes that existed when shape 6 landed is this chain on" — and
+// reading the live table lets a route added later change that answer.
+//
+// `matchLifecycleProfile` breaks ties on the SHORTEST fitting route, and E40 adds two routes shorter
+// than `classic`. Every chain drawn only from `epic`, `epic-review`, `stories` and `stories-review`
+// therefore changes route the day the chore lane lands: a chain that stops at `epic-review`, or one
+// hand-edited down to those steps, is the shape this catches. Against the live table an upgrade would
+// relabel such an epic, and `optionalStepsFor` would answer from the new route for good, because the
+// key just written is the one every later reader prefers over matching.
+//
+// NO CHAIN THIS REPO CAN SEE IS AFFECTED, and that is not the reason to skip the freeze. Every seed
+// yadflow has ever shipped carries `architecture`, which no short lane has, so today's epics all still
+// match `classic`. But rule 3 says a hand-written chain is allowed to be ahead of the tool reading it,
+// and a migration that is correct only because of what today's data happens to contain is one release
+// away from being wrong. The freeze makes it a property of the code.
+//
+// `shape6Routes()` is the freeze and `profiles` is the seam the tests drive it through. Epics seeded
+// by `yad epic new` are unaffected either way: `seedState` writes `profile` itself, and the first line
+// here leaves any key already present alone — so a chore-lane epic keeps its own route.
+//
+// The freeze is about STAMPING, not about reading. An epic whose chain genuinely is chore-shaped and
+// which carries no key gets `classic` here, and `yad doctor` then reports `profile:disagree` against
+// the live table. That is the right split: an upgrade records what was true, and the report is what
+// tells a person the label wants correcting. The remedy is to set `profile` by hand, once.
+export function stampProfile(state, profiles = shape6Routes()) {
   if (!isPlainObject(state) || 'profile' in state) return state;
-  const profile = matchLifecycleProfile(state.steps);
+  const profile = matchLifecycleProfile(state.steps, profiles);
   if (!profile) return state;
   // Placed beside `type` at the TOP, for the same reason: `{ ...state, profile }` would leave
   // `"profile": "classic"` dangling under the `steps` array, where the eye reads it as a property of
@@ -979,6 +1005,28 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
   if (!fits.length) return null;
   return fits.sort((a, b) => orderOf(a).length - orderOf(b).length)[0].id;
 }
+
+// ---- the routes shape 6 may stamp, frozen ---------------------------------------------------------
+//
+// The three routes that existed the day shape 6 landed, written out BY ID rather than derived, which
+// is the whole point: a list computed from `LIFECYCLE_PROFILES` would grow every time a route is
+// added, and then it would not be frozen. `stampProfile` explains what breaks without this.
+//
+// Adding a route NEVER belongs here. A new lane is seeded with its `profile` key already written
+// (`seedState`), so it has nothing to stamp; and an epic old enough to need stamping cannot have been
+// on a route that did not exist when it was seeded. The only edit this list ever takes is a future
+// shape adding its OWN frozen list beside it — never a line appended to this one.
+export const SHAPE_6_ROUTE_IDS = ['classic', 'analysis-first', 'discovery'];
+
+// Filtered rather than rebuilt, so the frozen set carries each route's REAL rows. Writing the three
+// chains out again here would be a second copy of `classic` free to drift from the first, and it would
+// drift silently: shape 6 would keep stamping against a chain nobody maintains.
+//
+// A route named here that this release no longer carries simply drops out. That is the honest answer —
+// a removed route is not one a chain can be matched onto — and it is why this filters the live table
+// instead of asserting the three are present.
+export const shape6Routes = (profiles = LIFECYCLE_PROFILES) =>
+  profiles.filter((p) => SHAPE_6_ROUTE_IDS.includes(p.id));
 
 // ---- which steps an epic may skip (E35) ----------------------------------------------------------
 //

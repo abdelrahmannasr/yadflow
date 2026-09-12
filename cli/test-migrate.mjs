@@ -1067,6 +1067,42 @@ test('stampProfile: add-only, never invents, and hands back the SAME object when
   assert.equal(stampProfile(pending).profile, 'classic');
 });
 
+test('stampProfile matches against the FROZEN shape-6 routes, never the live table (E40)', async () => {
+  // The regression this pins: shape 6 answers a question about the past, and `matchLifecycleProfile`
+  // breaks ties on the shortest fitting route. E40's chore lane is shorter than `classic`, so every
+  // chain drawn only from those four steps — one that stops at `epic-review`, one hand-edited down —
+  // changes route the day the lane lands. `epicProfileId` prefers the recorded key over matching, so
+  // a stamp taken from the live table would be the permanent answer to "what may this epic skip".
+  const { stampProfile, shape6Routes, SHAPE_6_ROUTE_IDS, LIFECYCLE_PROFILES,
+    matchLifecycleProfile } = await import('./epic-state.mjs');
+  const SHORT = ['epic', 'epic-review', 'stories', 'stories-review'];
+
+  // THE MIGRATION'S ANSWER IS PINNED, whatever the live table grows into. The other half of the pair —
+  // that the LIVE table answers `chore` for this same chain, so the two genuinely diverge — is asserted
+  // in cli/test-threads.mjs beside the matcher, where the routes themselves are spelled out.
+  assert.equal(stampProfile({ steps: chain(SHORT) }).profile, 'classic');
+  assert.equal(matchLifecycleProfile(chain(SHORT), shape6Routes()), 'classic');
+
+  // A chain that still carries `architecture` was never at risk: no short lane has that step, so it
+  // matches `classic` either way. Every seed yadflow has shipped looks like this, which is why the
+  // freeze protects a SHAPE of chain rather than any epic on disk today.
+  const WITH_ARCH = ['epic', 'epic-review', 'architecture', 'architecture-review', 'stories', 'stories-review'];
+  assert.equal(matchLifecycleProfile(chain(WITH_ARCH)), 'classic');
+  assert.equal(stampProfile({ steps: chain(WITH_ARCH) }).profile, 'classic');
+
+  // The seam, driven with a route the frozen set does not carry: a caller-supplied table is used as
+  // handed in, which is what lets a future shape stamp against its own list.
+  const synthetic = [{ id: 'tiny', level: 'feature', steps: ['epic', 'epic-review'] }];
+  assert.equal(stampProfile({ steps: chain(['epic', 'epic-review']) }, synthetic).profile, 'tiny');
+
+  // The frozen list names routes this release still carries. A name that resolves to nothing would
+  // shrink the set silently, and shape 6 would stop recognising a chain it used to place.
+  for (const id of SHAPE_6_ROUTE_IDS) {
+    assert.ok(LIFECYCLE_PROFILES.some((p) => p.id === id), `frozen route '${id}' is no longer in the table`);
+  }
+  assert.equal(shape6Routes().length, SHAPE_6_ROUTE_IDS.length);
+});
+
 test('a gate write and a migration agree on the ORDER of the two shape keys, not just their values', async () => {
   // The general invariant above is checked on a fixture whose chain is off-route, so it gains `type`
   // and no `profile` — and with only one key added, running the two stampers in either order gives
