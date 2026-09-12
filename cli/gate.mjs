@@ -828,7 +828,13 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // Open the PR. In verified mode CI records the hub-prs entry (and advances) on the default branch at
   // merge — `yad gate open` never commits gate-state files (the ledger-guard check enforces that), and
   // CI writes nothing pre-merge. With a local ledger the local command records the PR itself (no CI will).
-  const body = fillHubTemplate({ epic, artifact, step, owner: ownerOf(epicDir), domains });
+  const body = fillHubTemplate({
+    epic, artifact, step, owner: ownerOf(epicDir), domains,
+    // Does this epic's chain have an architecture step at all? The contract checklist item is
+    // actionable only where one exists — see `fillHubTemplate`. Read off the chain rather than the
+    // recorded route, because the chain is what this gate is reviewing and it is present either way.
+    hasArchitecture: ledger.state.steps?.some((x) => x?.id === 'architecture') ?? true,
+  });
   // Assignee = whoever opens the review PR (the committer); reviewers = the Product's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
   // to review their own artifact). Scope is the Product plus every touched domain.
@@ -947,7 +953,7 @@ export async function gateTrailer(root, { epic, artifact, body, number, getBody 
 // ---- helpers ------------------------------------------------------------------------------------
 const base = (artifact) => artifactBase(artifact);
 
-export function fillHubTemplate({ epic, artifact, step, owner, domains }) {
+export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchitecture = true }) {
   return [
     '## Artifact under review',
     `- Epic: \`${epic}\``,
@@ -968,7 +974,16 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains }) {
     // passes on the first CI run.
     '## Checklist',
     '- [ ] `owner` set in the artifact frontmatter (inherited from `epic.md`)',
-    '- [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only)',
+    // The contract item asks about re-locking a surface. An epic on a short lane (E40) has no
+    // architecture step and therefore no `contract.md` and no lock, ever — so the box can never be
+    // ticked and never needs to be. A checklist carrying an item nobody on this route can act on
+    // teaches people to tick without reading, which costs more than the line is worth. Replaced
+    // rather than dropped, so the reviewer is told the surface is out of scope instead of finding a
+    // gap where a contract line used to be. `hasArchitecture` defaults true: every caller outside
+    // this file predates the flag, and the classic wording is the safe answer for an unknown chain.
+    hasArchitecture
+      ? '- [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only)'
+      : '- [ ] Contract surface unchanged — this epic is on a short lane with no architecture gate, so it may consume the shared surface but never change it',
     '- [ ] Risk tags reflect the real surface touched (contract/auth/payments escalate)',
     '- [ ] No secrets or tokens in the artifact or this description',
   ].join('\n');

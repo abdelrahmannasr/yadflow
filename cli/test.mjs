@@ -1192,6 +1192,39 @@ test('fillHubTemplate: the generated body passes the real pr-template hub gate (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('fillHubTemplate: a short-lane review PR does not ask for a contract re-lock it cannot do (E40)', () => {
+  const args = {
+    epic: 'EP-bump-deps', artifact: 'stories/', step: { id: 'stories-review', risk_tags: [] },
+    owner: 'alice', domains: ['backend'],
+  };
+  // A `chore` / `spike` epic has no architecture step, so no `contract.md` and no lock — ever. The
+  // classic wording asks the reviewer to confirm a re-lock that cannot exist, and an unactionable
+  // checklist item is how people learn to tick without reading.
+  const short = fillHubTemplate({ ...args, hasArchitecture: false });
+  assert.doesNotMatch(short, /Contract re-locked/);
+  assert.match(short, /may consume the shared surface but never change it/);
+
+  // The default is the classic wording, because every caller outside cli/gate.mjs predates the flag
+  // and an unknown chain must not silently lose the item.
+  assert.match(fillHubTemplate(args), /Contract re-locked/);
+  assert.match(fillHubTemplate({ ...args, hasArchitecture: true }), /Contract re-locked/);
+
+  // Both wordings still satisfy the Product's own pr-template gate, which is what makes this safe to
+  // vary: the gate requires the headings and a `Risk tags:` line, never a particular checklist item.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shortbody-'));
+  const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+  for (const body of [short, fillHubTemplate(args)]) {
+    const bodyFile = path.join(T, 'pr-body.md');
+    fs.writeFileSync(bodyFile, body);
+    const code = (() => {
+      try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-bump-deps/stories', bodyFile], { stdio: 'pipe' }); return 0; }
+      catch (e) { return e.status; }
+    })();
+    assert.equal(code, 0, 'both wordings must pass the Product gate');
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('templateBody: code-repo / hub-shape stages read the repo\'s own committed template', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
   fs.mkdirSync(path.join(T, '.github'), { recursive: true });
