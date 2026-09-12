@@ -39,6 +39,10 @@ step named `currentStep` if it is a review step). Read `.sdlc/approvals.json`. R
 epic's `repos` (the **touched domains**). Determine the **reviewer rule** for this step:
 - **Base rule:** `owner + 1 reviewer` — at least one `owner` approval AND at least one distinct
   non-owner `reviewer` approval.
+- **The count, always, beside the rules below:** the step needs `base + risk step` **distinct
+  approvers** — base 1, plus 2 when the step carries `contract` or 1 when it carries `auth`/`payments`
+  (the highest tag, never the sum). It names no role, so one person holding two roles is one approver.
+  `yad gate status` and `yad gate sync` print the arithmetic; do not recompute it by hand.
 - **Escalation option (risk-driven):** if the step's `risk_tags` intersect `{contract, auth,
   payments}`, ALSO require at least one `domain-owner` approval **per touched domain** (build plan §4,
   §5). For the **architecture+contract** review (`risk_tags: ["contract"]`), the touched domains are
@@ -50,7 +54,8 @@ epic's `repos` (the **touched domains**). Determine the **reviewer rule** for th
   (build plan §4 step 8). The `domain` field on each approval is the repo name.
 
 Escalation and per-repo routing are **options of this one gate**, selected by `risk_tags` and the
-touched `repos` — never a forked or copied gate.
+touched `repos` — never a forked or copied gate. The count is not an option: it applies to every step,
+and a gate passes only when both it and the role rule hold.
 
 ### Step 2 — Dispatch on `action`
 

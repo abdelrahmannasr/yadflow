@@ -101,11 +101,20 @@ identical to the prose path, and the prose path itself is unchanged.
 The Shape gate now rides the **PR/MR you open per step** (`yad gate open`). Reviewers approve and
 comment on the platform; `yad gate sync` maps that state into the file ledger (`approvals.json`,
 `comments.json`, `reviews/*.md`) — which stays the source of truth — and the step **auto-advances on
-merge** once three things hold: the reviewer rule is satisfied (owner + 1 reviewer, plus a domain-owner
-per touched repo on escalated steps), every comment thread is resolved, and the review PR/MR is merged.
+merge** once three things hold: the approval rules are satisfied, every comment thread is resolved, and
+the review PR/MR is merged.
 The merge click is the human approval act, so Shape steps still never advance on their own. Approvals are
 **revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. With no
 Product platform / no `gh`/`glab`, the gate degrades to local with no error.
+
+**Two approval rules, both enforced.** The first is the roster rule — owner + 1 reviewer, plus a
+domain-owner per touched repo on an escalated step. The second names no person, role or step: a step
+needs `base + risk step` **distinct approvers**, where base is 1 (one human who is not the author) and
+the risk step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the
+highest tag and never the sum. So an ordinary step needs 1 approver and the architecture+contract gate
+needs 3. Every surface that reports a gate prints the arithmetic (`2 of 3 approver(s) — base 1 + contract
+risk 2`) instead of a bare refusal, because neither rule is capped by how many people the project
+actually has yet. One person holding two roles satisfies two roles but is one approver.
 
 **Solo mode.** A lone developer can't approve their own PR on GitHub, so an approval requirement would
 deadlock them. Opt in (`yad setup --solo`, recorded as `solo: true` in `.sdlc/hub.json`) and the gate
