@@ -324,9 +324,43 @@ export function stampWorkItemType(state, epicDir) {
 // ONE of these, called from `writeState` below and from the 5 -> 6 step in cli/migrate.mjs, because
 // on a VERIFIED Product `yad migrate` never rewrites `state.json` — CI is its only writer, so the
 // gate's own write is the only path a shape change has into that file.
-export function stampProfile(state) {
+//
+// MATCHED AGAINST A FROZEN ROUTE SET, not against `LIFECYCLE_PROFILES`. A migration answers a question
+// about the PAST — "which of the routes that existed when shape 6 landed is this chain on" — and
+// reading the live table lets a route added later change that answer.
+//
+// `matchLifecycleProfile` breaks ties on the SHORTEST fitting route, and E40 adds two routes shorter
+// than `classic`. Every chain drawn only from `epic`, `epic-review`, `stories` and `stories-review`
+// therefore changes route the day the chore lane lands: a chain that stops at `epic-review`, or one
+// hand-edited down to those steps, is the shape this catches. Against the live table an upgrade would
+// relabel such an epic, and `optionalStepsFor` would answer from the new route for good, because the
+// key just written is the one every later reader prefers over matching.
+//
+// NO SEED yadflow HAS EVER SHIPPED IS AFFECTED — every one of them carries `architecture`, which no
+// short lane has, so a seeded chain still matches `classic` either way. HAND-WRITTEN CHAINS ARE, and
+// this repo holds two: the `EP-e2e` and `EP-cici` fixtures in test/e2e/run.sh are `[epic, epic-review]`
+// with no `profile` key, which the live table now places on `chore`. `yad gate ci` stamps them through
+// `writeState`, so they are a live exercise of this function, and without the freeze they would come
+// out labelled `chore`. Rule 3 is the general form of the same point: a hand-written chain is allowed
+// to be ahead of the tool reading it, and a migration that is correct only because of what today's
+// data happens to contain is one release away from being wrong.
+//
+// The freeze pins the SET OF ROUTES shape 6 may choose from, not the step rows inside them. Editing
+// `classic`'s own chain would still move what fits it. That is the right scope — a route's steps are
+// its definition, and a migration reading a stale copy of them would be the drift this file spends
+// most of its comments avoiding — but it means the guarantee is against ADDED routes, not all change.
+//
+// `shape6Routes()` is the freeze and `profiles` is the seam the tests drive it through. Epics seeded
+// by `yad epic new` are unaffected either way: `seedState` writes `profile` itself, and the first line
+// here leaves any key already present alone — so a chore-lane epic keeps its own route.
+//
+// The freeze is about STAMPING, not about reading. An epic whose chain genuinely is chore-shaped and
+// which carries no key gets `classic` here, and `yad doctor` then reports `profile:disagree` against
+// the live table. That is the right split: an upgrade records what was true, and the report is what
+// tells a person the label wants correcting. The remedy is to set `profile` by hand, once.
+export function stampProfile(state, profiles = shape6Routes()) {
   if (!isPlainObject(state) || 'profile' in state) return state;
-  const profile = matchLifecycleProfile(state.steps);
+  const profile = matchLifecycleProfile(state.steps, profiles);
   if (!profile) return state;
   // Placed beside `type` at the TOP, for the same reason: `{ ...state, profile }` would leave
   // `"profile": "classic"` dangling under the `steps` array, where the eye reads it as a property of
@@ -650,12 +684,21 @@ const requireChain = (state, verb) => {
     '`.sdlc/state.json` is missing its `steps` array or does not hold an object — restore it from git, then run `yad doctor`');
 };
 
-const notOptional = (stepId, optional) => err(
+// THREE REASONS A STEP IS NOT SKIPPABLE, and they need three different sentences because the remedy
+// differs. Until E40 there were two, because every feature route marked exactly one step optional
+// (`ui-design`) — so "this epic has nothing optional" could only mean "this epic is on no route", and
+// one branch covered both. The short lanes end that: `chore` and `spike` are routes the release fully
+// recognises, on which NOTHING is optional, because they dropped the optional steps from the chain
+// rather than marking them skippable. Sending that user to `yad doctor` for a `step:off-route` finding
+// that will never fire is worse than saying nothing — it is a remedy for a fault they do not have.
+const notOptional = (stepId, optional, route) => err(
   'YAD-STATE-004',
   `step '${stepId}' is not optional on this epic's route`,
   optional.length
     ? `only these steps may be skipped here: ${optional.join(', ')}`
-    : 'this epic is on no lifecycle route this release knows — it records none, and its chain matches none — so nothing on it is optional. Run `yad doctor` and look for `step:off-route`',
+    : route
+      ? `this epic is on the \`${route}\` route, and no step on it is optional — a short lane leaves the steps it does not need OUT of the chain rather than making them skippable, so there is nothing to mark N/A. If this epic needs '${stepId}', it is on the wrong route: start it again on a route that carries the step`
+      : 'this epic is on no lifecycle route this release knows — it records none, and its chain matches none — so nothing on it is optional. Run `yad doctor` and look for `step:off-route`',
 );
 
 // Strip the skip-provenance fields off a step — the inverse of the stamp `skipStep` applies.
@@ -676,7 +719,7 @@ function withoutSkip(step) {
 export function skipStep(state, stepId, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
   const steps = requireChain(state, 'skip a step in');
   const optional = optionalStepsFor(state, profiles);
-  if (!optional.includes(stepId)) throw notOptional(stepId, optional);
+  if (!optional.includes(stepId)) throw notOptional(stepId, optional, epicProfileId(state, profiles));
   // `s?.id` throughout: a hand-edited chain can hold a null entry, and a crash on one would be the
   // same unhelpful answer `requireChain` exists to replace.
   const ai = steps.findIndex((s) => s?.id === stepId);
@@ -864,16 +907,60 @@ export const STEPS = [
 // code, and `next.mjs` reads the other one through `setupProfileOf`. Two different things under one
 // word is a trap for whoever reads this next; two clearly different names is not.
 //
-// THESE ARE NOT NEW ROUTES. All three predate this table — they were seeded by hand, in five skill
-// files, until `yad epic new` took over the two feature ones. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
-// chain". E5 writes them down in one place and checks projects against them; it does not change what
+// THE FIRST THREE WERE NOT NEW ROUTES. They predate this table — they were seeded by hand, in five
+// skill files, until `yad epic new` took over the two feature ones. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
+// chain". E5 wrote them down in one place and checks projects against them; it did not change what
 // any epic does, and nothing here is written to disk.
 //
 //   classic         the 10-step chain, seeded by yad-epic, yad-stub and yad-change. `epic` first.
 //   analysis-first  the 12-step chain, seeded by yad-analysis, which puts `analysis` before `epic`
 //                   when a feature is shaped by the analyst before it becomes an epic.
+//   chore           the upkeep lane (E40). Four steps: `epic` then `stories`.
+//   spike           the investigation lane (E40). Six steps: `analysis` in front of the chore lane.
 //   discovery       the product front-zero (`EP-discovery`), two steps and no Build. Product-level,
 //                   not on the Epic ladder — E75 folds it into Foundation.
+//
+// THE SHORT LANES ARE NEW, and they are the first routes here that nobody has ever walked. E40 adds
+// them because the engine had exactly one shape of work: until now a dependency bump was seeded on the
+// same 10-step chain as a payments rewrite, and the way through was to skip steps — which `classic`
+// does not permit, since only `ui-design` is optional on it. Making the whole chain optional to fit
+// upkeep would have made it optional for everything. A shorter ROUTE says the same thing honestly, and
+// says it once, at seed time, where a person chooses it.
+//
+// WHAT THE TWO LANES DROP, and why each is ABSENT rather than `optional`. An optional step stays in
+// the chain, pre-marked done with a recorded reason (E35) — that is the right shape for a step the
+// route genuinely has and this epic happens not to need. A step the route never has is not that:
+// writing `ui-design` into the chore lane as optional would make every chore epic carry a skip record
+// for a screen nobody was ever going to draw, and the audit trail would fill with noise that means
+// nothing.
+//
+//   architecture / architecture-review   Both lanes drop them, and dropping the architecture gate
+//       drops the CONTRACT with it — no `contract.md`, no `contract-lock.json`. That is the point:
+//       these lanes are for work that does not move the shared cross-repo surface. Work that does move
+//       it belongs on `classic`, whatever its size. `yad doctor`'s contract-lock check is silent on an
+//       epic with no lock file, which is the normal pre-lock state and also the permanent state here.
+//       The gap this leaves in the check gates is written up on the E40 row of the roadmap.
+//   ui-design / ui-design-review         `chore` is "upkeep, no user-visible change" by the
+//       definition of the work-item type, so there is no screen; a spike's prototype is thrown away,
+//       so designing one would be work the lane exists to avoid.
+//   test-cases / test-cases-review       Neither lane introduces behaviour to pin. A chore must not
+//       change what the product does, and a spike's output is a finding, not a shipped feature. The
+//       tests that guard the code a chore touches already exist and its Build gates still run them.
+//
+// WHAT NEITHER LANE DROPS is `epic` / `epic-review` and `stories` / `stories-review`, and that is not
+// a matter of taste. `epic.md` is where the work-item type and the `parent:` lineage are authored —
+// `workItemType` reads it, `lineage-check.sh` reads it inside the user's repo, and `yad thread` skips
+// an epic that has none entirely, so a lane without it would produce work that is invisible to every
+// rollup. `stories` is what tags the repos Build runs in, and `stories-review` is the step
+// `advanceState` turns into `ready-for-build`. A lane ending anywhere else would leave `currentStep`
+// at a sentinel claiming a Build that has nothing in it.
+//
+// WHY `spike` IS `chore` PLUS `analysis`. The distinction is whether the answer is known. A chore is
+// upkeep somebody has already decided on: bump the dependency, move the CI job. A spike is a
+// timeboxed investigation — the analyst's brief is the first artifact because reducing the
+// uncertainty IS the work. Everything after that is the same short route, which is why one is a
+// strict ordered subset of the other. `matchLifecycleProfile` breaks the resulting tie on the shorter
+// route, so a chore-shaped chain reads as `chore` and not as a spike that skipped its analysis.
 //
 // WHAT IS AND IS NOT HERE. Seeding a chain from a profile is `seedState` below, driven by
 // `yad epic new` (E17, cli/epic.mjs); shape 6 is where an epic first RECORDS which profile it is on,
@@ -906,6 +993,25 @@ export const LIFECYCLE_PROFILES = [
       { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
       'stories', 'stories-review',
       'test-cases', 'test-cases-review',
+    ],
+  },
+  {
+    id: 'chore',
+    title: 'the upkeep lane',
+    level: 'feature',
+    steps: [
+      'epic', 'epic-review',
+      'stories', 'stories-review',
+    ],
+  },
+  {
+    id: 'spike',
+    title: 'the investigation lane',
+    level: 'feature',
+    steps: [
+      'analysis', 'analysis-review',
+      'epic', 'epic-review',
+      'stories', 'stories-review',
     ],
   },
   {
@@ -980,19 +1086,52 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
   return fits.sort((a, b) => orderOf(a).length - orderOf(b).length)[0].id;
 }
 
+// ---- the routes shape 6 may stamp, frozen ---------------------------------------------------------
+//
+// The three routes that existed the day shape 6 landed, written out BY ID rather than derived, which
+// is the whole point: a list computed from `LIFECYCLE_PROFILES` would grow every time a route is
+// added, and then it would not be frozen. `stampProfile` explains what breaks without this.
+//
+// Adding a route NEVER belongs here, and the reason is NOT that nothing new can reach the stamper —
+// `writeState` runs it on every save, so a chain hand-written today with no `profile` key is stamped
+// the same as one from before the field existed. It is that shape 6 is a fixed question with a fixed
+// answer: "which of the routes that existed when this shape landed is this chain on". A chain that is
+// really on a newer route and says nothing gets the closest OLD answer, and `yad doctor` reports the
+// disagreement — which is a label to correct, not a migration to rewrite. The only edit this list ever
+// takes is a future shape adding its OWN frozen list beside it, never a line appended to this one.
+export const SHAPE_6_ROUTE_IDS = ['classic', 'analysis-first', 'discovery'];
+
+// Filtered rather than rebuilt, so the frozen set carries each route's REAL rows. Writing the three
+// chains out again here would be a second copy of `classic` free to drift from the first, and it would
+// drift silently: shape 6 would keep stamping against a chain nobody maintains.
+//
+// A route named here that this release no longer carries simply drops out RATHER THAN THROWING: a
+// removed route is not one a chain can be matched onto, and a migration is the worst place to raise on
+// a condition the user cannot act on. The silent shrink is still a bug in the release that caused it —
+// shape 6 would quietly stop placing chains it used to place — so `cli/test-migrate.mjs` asserts every
+// id here still resolves. Tolerated at runtime, caught in CI; the two are not in tension.
+export const shape6Routes = (profiles = LIFECYCLE_PROFILES) =>
+  profiles.filter((p) => SHAPE_6_ROUTE_IDS.includes(p.id));
+
 // ---- which steps an epic may skip (E35) ----------------------------------------------------------
 //
-// A step may be marked N/A ("skipped") when the epic does not need it. Only the UI-design step is
-// optional today: an epic with no user-facing surface (backend/API, data, infra) can skip it. A skip
-// carries a recorded reason and stays VISIBLE in the chain — both the author step and its review gate
+// A step may be marked N/A ("skipped") when the epic does not need it. UI-design is the only step any
+// route marks optional today, and only `classic` and `analysis-first` mark it: an epic with no
+// user-facing surface (backend/API, data, infra) can skip it. The short lanes mark NOTHING optional —
+// they left the steps they do not need out of the chain instead, which is a different mechanism with a
+// different audit trail, so "this epic has no optional steps" no longer implies its chain is broken
+// (see `notOptional`). A skip carries a recorded reason and stays VISIBLE in the chain — both the author step and its review gate
 // pre-marked `done`, short-circuited by `gatePredicate` — the auditable, reversible counterpart to
 // omitting `analysis` from the chain entirely.
 //
 // IT IS A FACT ABOUT THE ROUTE, NOT ABOUT THE ENGINE. Until E35 this was one module-level set, the
 // union of every route's `optional` marks, and it answered the same for every epic in the project.
-// That is wrong the moment two routes disagree: E40's chore lane can drop steps a `classic` epic must
-// walk, and a union would have let a `classic` epic skip them too — silently, because the union never
-// says which route its answer came from.
+// That is wrong the moment two routes disagree, and E40 made them disagree in the sharper of the two
+// possible ways. A union across routes answers with every route's marks pooled, so the moment ANY
+// route marked a step optional, every epic in the project could skip it — silently, because a union
+// never says which route its answer came from. The short lanes are the opposite case and still break
+// it: they mark nothing, so pooling would hand a `chore` epic `classic`'s optional `ui-design` and let
+// it skip a step its chain does not even contain.
 //
 // The union is gone. `optionalStepsFor(state)` asks THIS epic's route and nothing else.
 
@@ -1034,6 +1173,36 @@ export const epicProfileId = (state, profiles = LIFECYCLE_PROFILES) => {
   const recorded = String(state?.profile || '');
   if (profiles.some((p) => p.id === recorded)) return recorded;
   return matchLifecycleProfile(state?.steps, profiles);
+};
+
+// ---- "this epic's route never had that step" — ONE rule, three readers (E40) -----------------------
+//
+// Asked by `yad next`'s phase line, by the review-PR checklist, and by the thread's artifact-ownership
+// map. All three used to work it out from the CHAIN, and all three were wrong in the same way.
+//
+// A CHAIN IS ALLOWED TO BE SHORT WITHOUT ITS ROUTE BEING SHORT. Every hand-written and pre-shape-6
+// ledger is a truncated `classic` — `matchLifecycleProfile` says as much ("a chain seeded before a
+// step existed simply lacks it"), and this repo's own e2e fixtures are `[epic, epic-review]`. Reading
+// "no `architecture` row" as "this route has no architecture step" tells a `classic` epic it is on a
+// short lane, and strips a legacy epic of artifacts that are sitting on its disk. Inventing an owner
+// and losing one are the same error.
+//
+// So the answer comes from the RECORDED route and nothing else, and it is deliberately conservative:
+// FALSE unless the epic itself says which route it is on AND this release carries that route AND that
+// route has no such step. No key, an unknown key, or an unreadable ledger all mean "assume it has the
+// step", which is the answer every one of these readers gave before the short lanes existed.
+//
+// This is narrower than `epicProfileId`, on purpose. A best-available guess is right for deciding what
+// a step MAY skip — a wrong guess there is a refusal a person immediately sees. It is not right for a
+// silent claim about an epic's future or its provenance, where a wrong guess is believed.
+//
+// A SKIPPED STEP IS NOT A MISSING ONE, and asking the route rather than the chain gets that for free:
+// `ui-design` skipped on `classic` is still a step the route has, so the epic still owns the decision.
+// That is the distinction E35 exists to draw, and it needs no special case here.
+export const routeLacksStep = (state, stepId, profiles = LIFECYCLE_PROFILES) => {
+  const recorded = String(state?.profile || '');
+  const route = profiles.find((p) => p.id === recorded);
+  return !!route && !profileRows(route).some((r) => r.id === stepId);
 };
 
 // The author steps THIS epic may skip. The one answer every skip guard asks.
@@ -1507,7 +1676,19 @@ export function preconditionsMet(state, stepId) {
         : `${stepId} is not runnable — this is a stub (backfill pending); run yad-backfill then promote, or thread a change with yad-change` };
   }
   const i = state.steps.findIndex((s) => s.id === stepId);
-  if (i === -1) return { ok: false, blockedBy: null, reason: `unknown step '${stepId}'` };
+  // TWO WAYS A STEP IS NOT IN THE CHAIN, and they read very differently to a person. Before E40 the
+  // only one was a typo or an id from a newer release, so "unknown step" covered it. A short lane
+  // makes the other one ordinary: `architecture` is a step the catalogue knows perfectly well and this
+  // epic's ROUTE does not carry. Telling someone their step is unknown when `yad skill list` shows it
+  // sends them looking for a misspelling that is not there.
+  if (i === -1) {
+    const known = !!stepDef(stepId);
+    const route = epicProfileId(state);
+    return { ok: false, blockedBy: null,
+      reason: known
+        ? `${stepId} is not on this epic's route${route ? ` (\`${route}\`)` : ''} — the step exists, this chain does not carry it`
+        : `unknown step '${stepId}'` };
+  }
   if (state.steps[i].status === 'done') return { ok: false, blockedBy: null, reason: `${stepId} is already done` };
   const blocker = state.steps.slice(0, i).find((s) => s.status !== 'done');
   if (blocker) return { ok: false, blockedBy: blocker.id, reason: `${blocker.id} has not passed yet` };
@@ -1853,6 +2034,38 @@ const REPLACE_BASES = ['epic', 'architecture', 'contract', 'ui-design'];
 // one epic would drop the parent's inherited stories/cases.
 const ADDITIVE_BASES = ['stories', 'test-cases'];
 
+// The catalogue step that PRODUCES each base. `contract` has no step of its own — `contract.md` is
+// authored by the architecture step, which `artifactFromBase` already says — so both map to it.
+//
+// Needed because `inherits` answers only half the question. It says "I did not re-author this", which
+// on every route that HAS the step means "I authored it myself". E40's short lanes break that: a
+// `chore` epic has no architecture step, never writes `inherits:`, and so claimed to be the
+// authoritative source for `architecture`, `contract`, `ui-design` and `test-cases` — four files that
+// will never exist. `yad thread` printed it, and `yad-change` reads exactly that map to choose what a
+// threaded defect inherits from, so the false claim became a forged `inheritedFrom`.
+const BASE_STEP = {
+  epic: 'epic', architecture: 'architecture', contract: 'architecture',
+  'ui-design': 'ui-design', stories: 'stories', 'test-cases': 'test-cases',
+};
+
+// Does this epic's chain carry the step that produces this base? Answered through `routeLacksStep`,
+// which is the ONE rule for "this epic's route never had that step" — see it for why the recorded
+// route is asked and the chain is not.
+const chainHasBase = (root, id, base) => {
+  const step = BASE_STEP[base];
+  if (!step) return true;
+  let state;
+  // THE STRICT-READ THROW IS CAUGHT ON PURPOSE, which is the opposite of what a ledger WRITE does.
+  // `writeState` and the gate read strictly and refuse, because a read-modify-write against a file
+  // they cannot parse destroys the contents. This is a pure read feeding a provenance display, and
+  // `yad thread` is exactly the command someone runs to inspect a project that is already damaged —
+  // crashing it on the corrupt file takes away the tool they are holding. `yad doctor` reports the
+  // corruption, and still does. Before this rule the function never opened `state.json` at all, so
+  // failing closed here would also be a new way for a read-only command to die on an old project.
+  try { state = readJSONStrict(path.join(epicRoot(root, id), '.sdlc', 'state.json'), null); } catch { return true; }
+  return !routeLacksStep(state, step);
+};
+
 // The owning epic per artifact base across a thread. REPLACE bases resolve to a single epic id (the
 // latest re-author); ADDITIVE bases resolve to the ordered LIST of every epic that re-authored them
 // (genesis-first) — use resolveCurrentStories for story-id-level ownership of the composed set.
@@ -1863,8 +2076,10 @@ export function resolveCurrentArtifacts(root, threadOrEpicId) {
   for (const b of ADDITIVE_BASES) out[b] = [];
   for (const id of members) {
     const { inherits } = epicLineage(root, id);
-    for (const b of REPLACE_BASES) if (!inherits.includes(b)) out[b] = id;
-    for (const b of ADDITIVE_BASES) if (!inherits.includes(b)) out[b].push(id);
+    // Two conditions, not one: this epic did not inherit the base AND its chain carries the step that
+    // produces it. An epic on a route without that step authored nothing to own.
+    for (const b of REPLACE_BASES) if (!inherits.includes(b) && chainHasBase(root, id, b)) out[b] = id;
+    for (const b of ADDITIVE_BASES) if (!inherits.includes(b) && chainHasBase(root, id, b)) out[b].push(id);
   }
   return out;
 }

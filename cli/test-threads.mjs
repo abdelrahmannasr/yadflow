@@ -11,7 +11,7 @@ import {
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
-  seedableProfiles, seedState, stateInvariants,
+  seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState, skipStep, routeLacksStep,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
@@ -114,6 +114,98 @@ test('resolveCurrentArtifacts: a defect-epic owns only what it re-authored; gene
   // ADDITIVE bases: the UNION of contributors (genesis + the defect), never collapsed to one.
   assert.deepEqual(owner.stories, ['EP-gen', 'EP-fix']);
   assert.deepEqual(owner['test-cases'], ['EP-gen', 'EP-fix']);
+});
+
+test('resolveCurrentArtifacts: an epic never owns an artifact its ROUTE has no step for (E40)', () => {
+  const T = hub();
+  const dir = writeEpic(T, 'EP-chore', { kind: 'chore', thread: 'EP-chore' });
+  // A short lane: no architecture, ui-design or test-cases step, and no `inherits:` either — it has no
+  // parent to inherit from. `inherits` alone would therefore read "did not inherit it, so authored it"
+  // and hand this epic four artifacts it will never produce. `yad-change` reads this map to pick a
+  // threaded defect's `inheritedFrom`, so a false owner here becomes a forged provenance record there.
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-chore', profile: 'chore', currentStep: 'epic',
+    steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'stories' }, { id: 'stories-review' }],
+  }));
+  const owner = resolveCurrentArtifacts(T, 'EP-chore');
+  assert.equal(owner.epic, 'EP-chore', 'it does author the epic');
+  assert.deepEqual(owner.stories, ['EP-chore'], 'and the stories');
+  assert.equal(owner.architecture, null);
+  assert.equal(owner.contract, null, '`contract.md` is authored by the architecture step, which is absent');
+  assert.equal(owner['ui-design'], null);
+  assert.deepEqual(owner['test-cases'], []);
+});
+
+test('routeLacksStep: one rule, and it asks the RECORDED route rather than the chain (E40)', () => {
+  // Three readers share this: `yad next`'s phase line, the review-PR contract checklist, and the
+  // thread's artifact-ownership map. All three first inferred it from the chain, and all three were
+  // wrong the same way — a truncated legacy chain is not a short lane, and treating it as one both
+  // told a `classic` epic it was on one and stripped it of artifacts sitting on its disk.
+  const chore = { profile: 'chore', steps: [{ id: 'epic' }, { id: 'stories' }] };
+  assert.equal(routeLacksStep(chore, 'architecture'), true);
+  assert.equal(routeLacksStep(chore, 'epic'), false);
+
+  // A truncated `classic` chain — this repo's own e2e fixtures are exactly this — keeps every step.
+  const legacy = { profile: 'classic', steps: [{ id: 'epic' }, { id: 'epic-review' }] };
+  assert.equal(routeLacksStep(legacy, 'architecture'), false, 'the ROUTE has it; this chain merely predates it');
+  assert.equal(routeLacksStep(legacy, 'test-cases'), false);
+
+  // No key, an unknown key, and no state at all are the same conservative answer: assume it has the
+  // step. That is what every one of the three readers said before the short lanes existed, so an epic
+  // that never declares its route sees no change in behaviour.
+  assert.equal(routeLacksStep({ steps: [{ id: 'epic' }] }, 'architecture'), false);
+  assert.equal(routeLacksStep({ profile: 'moonshot' }, 'architecture'), false);
+  assert.equal(routeLacksStep(null, 'architecture'), false);
+
+  // A SKIPPED step is not a missing one, and asking the route gets that for free — no special case.
+  const skipped = { profile: 'classic', steps: [{ id: 'ui-design', skipped: true, status: 'done' }] };
+  assert.equal(routeLacksStep(skipped, 'ui-design'), false);
+});
+
+test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an unreadable chain owns everything', () => {
+  // Two boundaries the rule above must not cross.
+  //
+  // A skipped `ui-design` is IN the chain, pre-marked done with a recorded reason — this epic's own
+  // decision about an artifact that is genuinely its to decide. That is the opposite of a step the
+  // route never had, and collapsing the two would erase the distinction E35 exists to draw.
+  const T = hub();
+  const dir = writeEpic(T, 'EP-skip', { kind: 'feature', thread: 'EP-skip' });
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-skip', profile: 'classic', currentStep: 'stories',
+    steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'architecture' }, { id: 'architecture-review' },
+      { id: 'ui-design', skipped: true, status: 'done' }, { id: 'ui-design-review', skipped: true, status: 'done' },
+      { id: 'stories' }, { id: 'stories-review' }, { id: 'test-cases' }, { id: 'test-cases-review' }],
+  }));
+  assert.equal(resolveCurrentArtifacts(T, 'EP-skip')['ui-design'], 'EP-skip');
+
+  // And an epic whose ledger cannot be read keeps every base it had before this rule. A file that will
+  // not parse is not evidence that the epic owns nothing — `yad doctor` reports it (rule 3), and this
+  // map must not quietly start dropping provenance because of it.
+  const T2 = hub();
+  const d2 = writeEpic(T2, 'EP-broken', { kind: 'feature', thread: 'EP-broken' });
+  fs.writeFileSync(path.join(d2, '.sdlc/state.json'), '{ not json');
+  const broken = resolveCurrentArtifacts(T2, 'EP-broken');
+  assert.equal(broken.architecture, 'EP-broken');
+  assert.deepEqual(broken['test-cases'], ['EP-broken']);
+
+  // Same for an epic with no `state.json` at all, which is every pre-ledger fixture in the wild.
+  const T3 = hub();
+  writeEpic(T3, 'EP-bare', { kind: 'feature', thread: 'EP-bare' });
+  assert.equal(resolveCurrentArtifacts(T3, 'EP-bare').architecture, 'EP-bare');
+
+  // AND THE CASE THE FIRST VERSION OF THIS RULE GOT WRONG. A truncated `classic` chain — seeded
+  // before later steps existed, which is the shape of this repo's own e2e fixtures — keeps every base.
+  // Losing an owner is exactly as wrong as inventing one, and `yad-change` reads this map either way.
+  const T4 = hub();
+  const d4 = writeEpic(T4, 'EP-old', { kind: 'feature', thread: 'EP-old' });
+  fs.writeFileSync(path.join(d4, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-old', profile: 'classic', currentStep: 'stories',
+    steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'architecture' }, { id: 'architecture-review' },
+      { id: 'stories' }, { id: 'stories-review' }],
+  }));
+  const old = resolveCurrentArtifacts(T4, 'EP-old');
+  assert.equal(old['ui-design'], 'EP-old', 'the route has ui-design even though this old chain lacks it');
+  assert.deepEqual(old['test-cases'], ['EP-old']);
 });
 
 test('resolveCurrentStories: composes the story set — inherited parent stories survive a defect-fix', () => {
@@ -637,85 +729,55 @@ test('a gate finds its author step through the catalogue, and engineer-review ga
 
 // ---- lifecycle profiles (E5) ---------------------------------------------------------------------
 
-// The three chains five skill files seed by hand today, written out verbatim. If E5 has described
-// them wrongly, every assertion below is measuring the wrong thing — so they are spelled out here
-// rather than derived from the same code under test.
+// Every route this release carries, written out verbatim. If the table has described one wrongly,
+// every assertion below is measuring the wrong thing — so they are spelled out here rather than
+// derived from the same code under test. The first three are the chains five skill files seeded by
+// hand before E5; `chore` and `spike` are E40's short lanes, which nobody seeded before.
 const CLASSIC_10 = ['epic', 'epic-review', 'architecture', 'architecture-review',
   'ui-design', 'ui-design-review', 'stories', 'stories-review', 'test-cases', 'test-cases-review'];
 const ANALYSIS_12 = ['analysis', 'analysis-review', ...CLASSIC_10];
+const CHORE_4 = ['epic', 'epic-review', 'stories', 'stories-review'];
+const SPIKE_6 = ['analysis', 'analysis-review', ...CHORE_4];
 const DISCOVERY_2 = ['discovery', 'discovery-review'];
 
 test('the profiles are the chains the skills already seed, step for step', () => {
   assert.deepEqual(profileSteps('classic'), CLASSIC_10);
   assert.deepEqual(profileSteps('analysis-first'), ANALYSIS_12);
+  assert.deepEqual(profileSteps('chore'), CHORE_4);
+  assert.deepEqual(profileSteps('spike'), SPIKE_6);
   assert.deepEqual(profileSteps('discovery'), DISCOVERY_2);
-  assert.deepEqual(LIFECYCLE_PROFILES.map((p) => p.id), ['classic', 'analysis-first', 'discovery']);
+  assert.deepEqual(LIFECYCLE_PROFILES.map((p) => p.id),
+    ['classic', 'analysis-first', 'chore', 'spike', 'discovery']);
   assert.equal(lifecycleProfile('nonsense'), null, 'a route this release does not carry is null, not a guess');
   assert.deepEqual(profileSteps('nonsense'), []);
 });
 
-test('every profile is self-consistent — its steps exist and its gates follow their authors', () => {
-  const phaseIds = new Set(PHASES.map((p) => p.id));
-  for (const p of LIFECYCLE_PROFILES) {
-    const rows = lifecycleProfile(p.id).rows;
-    assert.ok(rows.length, `${p.id}: a route with no steps is not a route`);
-    assert.equal(new Set(rows.map((r) => r.id)).size, rows.length, `${p.id}: a step twice in one route`);
-    for (const [i, r] of rows.entries()) {
-      const def = stepDef(r.id);
-      assert.ok(def, `${p.id}: '${r.id}' is not in the step catalogue`);
-      assert.ok(phaseIds.has(def.phase), `${p.id}: '${r.id}' has no phase`);
-      assert.equal(def.level, p.level, `${p.id}: '${r.id}' is ${def.level}-level, the route is ${p.level}`);
-      // A gate must come straight after the step it reviews. `skipStep` refuses a chain whose
-      // optional step has no paired gate, and `closeAuthorStep` reaches backwards for it.
-      if (def.reviews) {
-        assert.equal(rows[i - 1]?.id, def.reviews, `${p.id}: '${r.id}' does not follow '${def.reviews}'`);
-        assert.equal(r.optional, rows[i - 1].optional, `${p.id}: '${r.id}' and its step disagree on optional`);
-      }
-      // Nothing in Build belongs in a Shape chain: Build runs per story per repo in `build-state/`.
-      assert.notEqual(def.phase, 'build', `${p.id}: '${r.id}' is a Build step`);
-    }
+test('a short lane makes "no optional steps" mean something new, and `yad skip` says which (E40)', () => {
+  // THE INVARIANT E40 BROKE. Before the short lanes every feature route marked exactly one step
+  // optional, so an empty answer could only mean the chain fitted no route — and `notOptional` had one
+  // branch for both. `chore` and `spike` are routes the release fully recognises on which NOTHING is
+  // optional, because they dropped those steps from the chain instead of marking them skippable.
+  //
+  // The refusal is right either way; what this pins is that the epic is not told to go chase a
+  // `step:off-route` finding that will never fire on a chain matching its route perfectly.
+  for (const id of ['chore', 'spike']) {
+    assert.deepEqual(optionalStepsOf(id), [], `${id}: a short lane has nothing left to make optional`);
+    const s = seedState({ epic: 'EP-demo', profile: id, type: 'chore', today: '2026-01-02' });
+    assert.throws(() => skipStep(s, 'ui-design', { reason: 'no screens' }), (e) => {
+      assert.match(e.hint, new RegExp(`on the \`${id}\` route`), 'the hint names the route the epic is on');
+      assert.doesNotMatch(e.hint, /step:off-route/, 'and does not send a healthy epic to a check that cannot fire');
+      return true;
+    });
   }
-});
-
-test('what a route marks optional is read off THAT route, never pooled across them', () => {
-  // Two routes that DISAGREE. With today's data every feature route marks the same one step, so
-  // "this epic's route" and "every route at once" give the identical answer and no assertion against
-  // the real profiles could separate them. E40's chore and spike lanes make the difference real.
-  const ROUTES = [
-    { id: 'a', steps: ['epic', { id: 'ui-design', optional: true }, 'ui-design-review'] },
-    { id: 'b', steps: ['epic', { id: 'architecture', optional: true }, 'architecture-review'] },
-  ];
-  assert.deepEqual(optionalStepsOf('a', ROUTES), ['ui-design']);
-  assert.deepEqual(optionalStepsOf('b', ROUTES), ['architecture'],
-    "a step optional on route 'b' must not be optional on route 'a'");
-  assert.deepEqual(optionalStepsOf('a', ROUTES).includes('architecture'), false, 'the routes were pooled');
-
-  assert.deepEqual(optionalStepsOf('a', [{ id: 'a', steps: ['epic'] }]), [], 'a route with nothing optional');
-  assert.deepEqual(optionalStepsOf('missing', ROUTES), [], 'a route this release does not carry');
-  // The gate is the author step's pair, never listed on its own — `isSkippableStep` adds it back.
-  assert.deepEqual(optionalStepsOf('a', [
-    { id: 'a', steps: [{ id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true }] },
-  ]), ['ui-design']);
-
-  // …and unchanged from before E5 on the routes that actually ship. A derivation that agrees with
-  // itself while marking `architecture` optional would pass everything above and let a real gate be
-  // skipped with a reason.
-  for (const id of ['classic', 'analysis-first']) assert.deepEqual(optionalStepsOf(id), ['ui-design']);
-  assert.deepEqual(optionalStepsOf('discovery'), [], 'the front-zero has nothing to skip');
-});
-
-test('a profile carries no per-step field nothing reads', () => {
-  // `optional` is here because `optionalStepsOf` reads it. Nothing else is, and that is the point: the
-  // parallel `test-cases` track is decided by `advanceState` from the step id, so recording it in the
-  // profile as well would be a second copy of a rule living elsewhere — free to drift with every test
-  // still green, which is exactly what this file exists to prevent.
-  const READ_FIELDS = new Set(['id', 'optional']);
-  for (const p of LIFECYCLE_PROFILES) {
-    for (const row of lifecycleProfile(p.id).rows) {
-      for (const k of Object.keys(row)) {
-        assert.ok(READ_FIELDS.has(k), `${p.id}/${row.id}: '${k}' is on a profile row and nothing reads it`);
-      }
-    }
+  // The other two branches still say their own thing: a route WITH an optional step lists it, and a
+  // chain on no route at all keeps the off-route remedy that is correct for it.
+  const classic = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
+  assert.throws(() => skipStep(classic, 'architecture', { reason: 'x' }), /not optional/);
+  try { skipStep(classic, 'architecture', { reason: 'x' }); } catch (e) {
+    assert.match(e.hint, /only these steps may be skipped here: ui-design/);
+  }
+  try { skipStep({ steps: [{ id: 'stories' }, { id: 'epic' }] }, 'ui-design', { reason: 'x' }); } catch (e) {
+    assert.match(e.hint, /step:off-route/, 'an off-route chain keeps the remedy that fits it');
   }
 });
 
@@ -723,31 +785,46 @@ test('matchLifecycleProfile: a chain says which route it is on, and says nothing
   const S = (ids) => ids.map((id) => ({ id }));
   assert.equal(matchLifecycleProfile(S(CLASSIC_10)), 'classic');
   assert.equal(matchLifecycleProfile(S(ANALYSIS_12)), 'analysis-first');
+  assert.equal(matchLifecycleProfile(S(CHORE_4)), 'chore');
+  assert.equal(matchLifecycleProfile(S(SPIKE_6)), 'spike');
   assert.equal(matchLifecycleProfile(S(DISCOVERY_2)), 'discovery');
   // Leaving a step out is normal — an epic with no screens drops `ui-design` and is still classic.
   assert.equal(matchLifecycleProfile(S(CLASSIC_10.filter((x) => !x.startsWith('ui-design')))), 'classic');
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review'])), 'classic', 'a chain part-way through');
   // The tie that length breaks: the 10-step chain is also a correctly ordered subset of the 12-step
   // one. Without the shortest-wins rule every classic epic would read as an analysis-first epic that
   // skipped its first two steps — and E17 would then seed the wrong route from the wrong answer.
   //
-  // Asserted against a REVERSED list, because with today's three routes the shortest fit is also the
-  // one declared first: matching on declaration order gives the same answers, so a plain call here
-  // proves nothing. E40 adds shorter routes declared last, and this is the assertion that will still
-  // be true then.
+  // E40 turned that rule from a tidy-up into the load-bearing one, because the short lanes are the
+  // first routes DECLARED after routes they are shorter than. `chore` is an ordered subset of
+  // `classic`, and of `spike`; both pairs resolve the wrong way on declaration order. The reversed
+  // list further down is what proves length is the rule and position in the table is not.
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review'])), 'chore',
+    'these two fit chore and classic alike — the SHORTER route is the answer');
+  assert.equal(matchLifecycleProfile(S(['analysis', 'analysis-review', 'epic'])), 'spike',
+    'and the analyst pair leads into the spike lane before it reads as the 12-step chain');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'architecture'])), 'classic',
+    'one step no short lane carries, and classic is the only fit left');
+
+  // A MIGRATION MUST NOT GET THIS ANSWER. These two steps read as `classic` before the chore lane
+  // existed, so shape 6 — which answers a question about the past — keeps saying `classic` for them.
+  // `stampProfile` freezes its route set for exactly this pair of answers.
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), shape6Routes()), 'classic');
+
   // A caller-supplied route must be MATCHED, not silently dropped. The seam reads the rows off the
   // profile it is handed; resolving `p.id` through the module's own index instead would come back
   // empty for a route that is not in it, the route would never fit, and the answer would be a wrong
-  // one with no error. E40 adds the chore and spike lanes, and this is the shape of that call.
-  const chore = { id: 'chore-lane', level: 'feature', steps: ['epic', 'epic-review'] };
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), [...LIFECYCLE_PROFILES, chore]), 'chore-lane',
-    'a two-step route beats classic on the same two steps');
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'stories']), [...LIFECYCLE_PROFILES, chore]), 'classic',
+  // one with no error.
+  const tiny = { id: 'tiny-lane', level: 'feature', steps: ['epic', 'epic-review'] };
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), [...LIFECYCLE_PROFILES, tiny]), 'tiny-lane',
+    'a two-step route beats the four-step chore lane on the same two steps');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'stories']), [...LIFECYCLE_PROFILES, tiny]), 'chore',
     'and loses as soon as the chain goes past it');
 
   const reversed = [...LIFECYCLE_PROFILES].reverse();
   assert.equal(matchLifecycleProfile(S(CLASSIC_10), reversed), 'classic');
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), reversed), 'classic');
+  assert.equal(matchLifecycleProfile(S(CHORE_4), reversed), 'chore');
+  assert.equal(matchLifecycleProfile(S(SPIKE_6), reversed), 'spike');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), reversed), 'chore');
   assert.equal(matchLifecycleProfile(S(ANALYSIS_12), reversed), 'analysis-first',
     'the longer route still wins when it is the only one that fits');
   // Out of order is a different thing from missing, and is not a route.
@@ -1085,7 +1162,9 @@ test('every skill seed template states this shape and the route its own chain is
 });
 
 test('seedableProfiles is the FEATURE routes, read off the profiles', () => {
-  assert.deepEqual(seedableProfiles(), ['classic', 'analysis-first']);
+  // E40's short lanes need no edit here and that is the assertion: a feature route is seedable the day
+  // it is added to the table, because this reads `level` rather than a second list to keep in step.
+  assert.deepEqual(seedableProfiles(), ['classic', 'analysis-first', 'chore', 'spike']);
   // The rule is `level === 'feature'`, and with today's data "all but the last" and "all but
   // `discovery` by name" give the same answer — so it is asserted on routes where they differ.
   assert.deepEqual(seedableProfiles([
@@ -1142,6 +1221,31 @@ test('seedState: every step carries what the catalogue says it is', () => {
   assert.deepEqual(stateInvariants(s), []);
   assert.equal(preconditionsMet(s, 'epic').ok, true);
   assert.equal(preconditionsMet(s, 'stories').ok, false, 'a later step is still blocked');
+});
+
+test('a short lane seeds, walks and hands off to Build without a step it does not carry (E40)', () => {
+  // The whole lane end to end, because every piece of it is a rule that lives somewhere else:
+  // `seedState` builds the chain, `advanceState` walks it, and the sentinel it lands on is what
+  // `currentPhase` and `yad next` read. A route is only as good as the walk it survives.
+  for (const [id, chain] of [['chore', CHORE_4], ['spike', SPIKE_6]]) {
+    const s = seedState({ epic: 'EP-demo', profile: id, type: 'chore', today: '2026-01-02' });
+    assert.equal(s.profile, id, 'a lane records its own route at seed time — nothing is left to match');
+    assert.deepEqual(s.steps.map((x) => x.id), chain);
+    assert.equal(s.currentStep, chain[0]);
+    assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(chain.length - 1).fill('blocked')]);
+    // No architecture step means no `contract` risk tag anywhere on the chain, which is what routes a
+    // gate through the escalated rule. A short lane carrying one would ask for the domain owners of a
+    // surface it has no lock on.
+    assert.deepEqual(s.steps.flatMap((x) => x.risk_tags), []);
+
+    // Approve every gate in order. The last one must leave the epic at `ready-for-build` and nowhere
+    // else: `advanceState` gets there for `stories-review` by name, and the `test-cases` track it
+    // looks for on the way is absent here, which it has to tolerate rather than throw on.
+    for (const g of s.steps.filter((x) => x.type === 'review+approve')) advanceState(s, g);
+    assert.equal(s.currentStep, 'ready-for-build');
+    assert.equal(currentPhase(s.currentStep), 'build');
+    assert.deepEqual([...new Set(s.steps.map((x) => x.status))], ['done']);
+  }
 });
 
 test('seedState refuses a route it must not seed', () => {

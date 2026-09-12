@@ -33,6 +33,7 @@ demo-repos/<repo>/specs/<story-id>/
   research.md     # decisions/unknowns resolved during clarify
   data-model.md   # entities/fields THIS repo implements (quoting the shared ones from the contract)
   contracts/      # the API/event surface this repo implements (quoted from the locked contract)
+                  # OMITTED ENTIRELY on a short-lane epic — see below
   plan.md         # technical approach for this repo
   tasks.md        # numbered atomic tasks (T01…), each scoped to the files it may touch
   link.md         # back-pointer to the story in the product repo (Step A adds this; not a Spec Kit file)
@@ -54,6 +55,11 @@ comes from the story's acceptance criteria and the **locked contract surface** �
 - **`contracts/`** — the slice of the API/event surface this repo implements, **quoted from the locked
   `contract.md`** (e.g. `POST /orders` request/response). Add a one-line note that this is a quote of
   the locked surface, not a new definition.
+  **Do NOT create this folder on a short-lane epic** (`profile: chore` or `spike`). Those routes have
+  no architecture step, so there is no locked `contract.md` to quote and no lock for CI to check the
+  quote against — the gate refuses a slice under a lockless epic. A short-lane story consumes the
+  shared surface through the code it calls; it never restates it. If one already exists, a commit
+  that only DELETES it is allowed through, which is the way back out.
 - **`plan.md`** — the technical approach for this repo at story altitude (components, sequence,
   test approach). No new cross-repo surface.
 - **`tasks.md`** — numbered atomic tasks. Each task: an ID (`T01`, `T02`, …), a one-line goal, and an
@@ -69,7 +75,9 @@ epic: EP-<slug>
 repo: <repo>
 feature-id: EP-<slug>-S0N
 product-repo: <path to the product repo — absolute, or relative to THIS file's dir (specs/<story>/)>
-contract-lock: sha256:<hex copied from epics/EP-<slug>/.sdlc/contract-lock.json>
+contract-lock: sha256:<hex copied from epics/EP-<slug>/.sdlc/contract-lock.json>   # or the literal
+                 # `none` on a short-lane epic, which has no lock. Never an empty or invented hash:
+                 # CI reads an unparseable value as a broken lock and fails.
 speckit: installed | not-installed
 generated: <YYYY-MM-DD>
 ---
@@ -94,7 +102,11 @@ is `../../../<product-dir>`. A relative value that only resolves from the **repo
 (what contract-check historically did), so older `link.md` files keep gating. Write it as an
 **unquoted scalar** — `"..."` or `'...'` is taken literally, and a leading `~`/`$VAR` is never
 expanded. An unreachable path degrades the Product-reading gates to a PASS-with-note rather than failing
-them, and each one now says so in its output.
+them, and each one now says so in its output. **Reachable-but-lockless is a different case and does
+NOT degrade:** when the Product resolves and `epics/<epic>/.sdlc/` is there with no
+`contract-lock.json` in it, a claimed `Contract-Change: yes` FAILS, because nothing exists for the
+claim to be true of. That is the ordinary state of a short-lane epic, of a stub, and of a classic epic
+that has not reached its architecture gate yet.
 
 ## Do not re-invent the contract
 

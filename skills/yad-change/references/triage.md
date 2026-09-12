@@ -23,8 +23,14 @@ surface.
 
 ## The seeded `state.json` (worked shape)
 
-Same 10 steps as `yad-epic`. For a **defect-fix** that inherits epic/architecture/ui-design and
-re-authors stories+test-cases:
+Same 10 steps as `yad-epic` — **when the parent is on `classic`**. The child's chain is always the
+PARENT's chain: read `epics/EP-<parent>/.sdlc/state.json` and copy its `profile`. A parent on a short
+lane (`chore`, 4 steps; `spike`, 6) gives a short child, with no `architecture`/`ui-design` rows to
+inherit and no pointer-lock — see "Short-lane parent" in `../SKILL.md` Step 5. Inheriting a step the
+parent never walked would stamp `inherited: true` on a review that never happened.
+
+For a **defect-fix** off a `classic` parent, inheriting epic/architecture/ui-design and re-authoring
+stories+test-cases:
 
 ```json
 {

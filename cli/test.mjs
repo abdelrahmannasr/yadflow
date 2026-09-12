@@ -1192,6 +1192,39 @@ test('fillHubTemplate: the generated body passes the real pr-template hub gate (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('fillHubTemplate: a short-lane review PR does not ask for a contract re-lock it cannot do (E40)', () => {
+  const args = {
+    epic: 'EP-bump-deps', artifact: 'stories/', step: { id: 'stories-review', risk_tags: [] },
+    owner: 'alice', domains: ['backend'],
+  };
+  // A `chore` / `spike` epic has no architecture step, so no `contract.md` and no lock — ever. The
+  // classic wording asks the reviewer to confirm a re-lock that cannot exist, and an unactionable
+  // checklist item is how people learn to tick without reading.
+  const short = fillHubTemplate({ ...args, hasArchitecture: false });
+  assert.doesNotMatch(short, /Contract re-locked/);
+  assert.match(short, /may consume the shared surface but never change it/);
+
+  // The default is the classic wording, because every caller outside cli/gate.mjs predates the flag
+  // and an unknown chain must not silently lose the item.
+  assert.match(fillHubTemplate(args), /Contract re-locked/);
+  assert.match(fillHubTemplate({ ...args, hasArchitecture: true }), /Contract re-locked/);
+
+  // Both wordings still satisfy the Product's own pr-template gate, which is what makes this safe to
+  // vary: the gate requires the headings and a `Risk tags:` line, never a particular checklist item.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shortbody-'));
+  const gate = path.join(ROOT, 'skills/yad-pr-template/templates/checks/pr-template.sh');
+  for (const body of [short, fillHubTemplate(args)]) {
+    const bodyFile = path.join(T, 'pr-body.md');
+    fs.writeFileSync(bodyFile, body);
+    const code = (() => {
+      try { execFileSync('bash', [gate, '--profile', 'hub', '--head', 'review/EP-bump-deps/stories', bodyFile], { stdio: 'pipe' }); return 0; }
+      catch (e) { return e.status; }
+    })();
+    assert.equal(code, 0, 'both wordings must pass the Product gate');
+  }
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 test('templateBody: code-repo / hub-shape stages read the repo\'s own committed template', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stage-'));
   fs.mkdirSync(path.join(T, '.github'), { recursive: true });
@@ -1812,6 +1845,43 @@ test('runNext: the phase line marks where the epic is, and shows the two planned
   // file or a CI job. Without the words the line would list six phases and say nothing.
   assert.match(s, /— now: Design \(Shape part\)/);
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('runNext: the phase line marks a phase a short lane never enters, and only on a RECORDED route (E40)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase3-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  const shortChain = {
+    epicId: 'EP-c', profile: 'chore', currentStep: 'epic',
+    steps: [S('epic', 'author', 'in_progress', 'epic.md'), S('epic-review', 'review+approve', 'blocked', 'epic.md'),
+      S('stories', 'author', 'blocked', 'stories/'), S('stories-review', 'review+approve', 'blocked', 'stories/')],
+  };
+  seedEpic(T, 'EP-c', shortChain);
+  const s = await grab(() => runNext(T, { epic: 'EP-c' }));
+  // A chore epic has no architecture or UI-design step, so it never sees Design. Printed exactly like
+  // a classic epic's, that phase reads as one already passed rather than one never visited.
+  assert.match(s, /Design \(not on this route\)/);
+  assert.doesNotMatch(s, /Plan \(not on this route\)/, 'stories IS on the lane, so Plan is real');
+  // Build is never marked: every feature route ends there, and its steps live per story in
+  // `build-state/` rather than in this chain, so their absence here means nothing.
+  assert.doesNotMatch(s, /Build \(not on this route\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+
+  // AND NEVER FROM A GUESS. A truncated chain with no recorded route is the normal shape of every
+  // hand-written and pre-shape-6 ledger; matching it would read `[epic, epic-review]` as the chore
+  // lane and grey out two phases the epic is going to walk — then flip back the moment a gate write
+  // stamped `classic` on the same file. No key, no claim.
+  const T2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase4-'));
+  fs.mkdirSync(path.join(T2, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T2, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  seedEpic(T2, 'EP-legacy', {
+    epicId: 'EP-legacy', currentStep: 'epic',
+    steps: [S('epic', 'author', 'in_progress', 'epic.md'), S('epic-review', 'review+approve', 'blocked', 'epic.md')],
+  });
+  const s2 = await grab(() => runNext(T2, { epic: 'EP-legacy' }));
+  assert.doesNotMatch(s2, /not on this route/, 'an epic that records no route gets no claim about one');
+  assert.match(s2, /phase: Discover · Design · Plan · Build/);
+  fs.rmSync(T2, { recursive: true, force: true });
 });
 
 test('runNext: an epic in Build is marked Build, from the `ready-for-build` marker', async () => {
@@ -10703,6 +10773,27 @@ test('doctor profile: an epic on the route it records says nothing', async () =>
   }), []);
 });
 
+test('doctor profile: a short-lane epic is clean, and a truncated classic chain is now reported (E40)', async () => {
+  const CHORE = ['epic', 'epic-review', 'stories', 'stories-review']
+    .map((id) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', status: 'blocked' }));
+  const SPIKE = ['analysis', 'analysis-review', ...['epic', 'epic-review', 'stories', 'stories-review']]
+    .map((id) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', status: 'blocked' }));
+
+  // A seeded short lane records the route its chain is on, so the health check has nothing to say.
+  // Asserted because the two lanes are the first routes whose chain is a strict subset of another's —
+  // exactly the shape a naive `profile:disagree` would fire on.
+  assert.deepEqual(await profileChecksOn({ 'EP-a': { fm: 'kind: chore', state: routed('chore', CHORE) } }), []);
+  assert.deepEqual(await profileChecksOn({ 'EP-b': { fm: 'kind: feature', state: routed('spike', SPIKE) } }), []);
+
+  // And the consequence the lanes DO have, named rather than left to be discovered: a chain trimmed
+  // down to the chore steps but still labelled `classic` now reads as a stale label. The finding is
+  // the intended remedy — the engine reports it and changes nothing, because the recorded route is
+  // what decides what the epic may skip and an upgrade must not silently re-decide that.
+  const stale = await profileChecksOn({ 'EP-c': { fm: 'kind: feature', state: routed('classic', CHORE) } });
+  assert.deepEqual(stale.map((c) => [c.id, c.status]), [['profile:disagree', 'warn']]);
+  assert.match(stale[0].message, /records `classic`, its chain is `chore`/);
+});
+
 test('doctor profile: no `profile` key at all is silent — nothing to compare', async () => {
   // Two real cases: an epic written before shape 6 that has not been migrated, and one whose chain
   // matches no route, so `stampProfile` declined to invent one. `step:off-route` owns the second.
@@ -10712,10 +10803,12 @@ test('doctor profile: no `profile` key at all is silent — nothing to compare',
 });
 
 test('doctor profile: a recorded route nobody defined is reported', async () => {
-  const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('spike') } });
+  // A name no release has ever carried. `spike` used to stand in for one here and became a real route
+  // — a fixture that borrows a name the table might one day gain stops testing the thing it names.
+  const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('moonshot') } });
   assert.deepEqual(checks.map((c) => [c.id, c.status, c.section]), [['profile:unknown', 'warn', 'shape']]);
   assert.match(checks[0].message, /EP-x/);
-  assert.match(checks[0].hint, /classic · analysis-first · discovery/);
+  assert.match(checks[0].hint, /classic · analysis-first · chore · spike · discovery/);
   // A value that is not even a string is the same answer, not a crash.
   const nulled = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed(null) } });
   assert.deepEqual(nulled.map((c) => c.id), ['profile:unknown']);
@@ -10851,12 +10944,12 @@ test('yad epic new: an unknown type and an unknown route each say what is allowe
     assert.match(bad.out, /unknown work-item type: epic/);
     assert.match(bad.out, /feature · change · defect · hotfix · chore/);
   } finally { cleanTmp(bad.T); }
-  const route = await epicNewOn({ slug: 'x', profile: 'spike' });
+  const route = await epicNewOn({ slug: 'x', profile: 'moonshot' });
   try {
     assert.equal(route.failed, true);
-    assert.match(route.out, /unknown lifecycle profile: spike/);
+    assert.match(route.out, /unknown lifecycle profile: moonshot/);
     // The list comes from the code, so a route added later needs no edit here.
-    assert.match(route.out, /classic · analysis-first/);
+    assert.match(route.out, /classic · analysis-first · chore · spike/);
   } finally { cleanTmp(route.T); }
 });
 
@@ -10922,11 +11015,33 @@ test('yad epic new --json: the machine answer carries the chain and the skill to
     assert.equal(j.next, 'yad-epic');
     assert.equal(j.steps.length, 10);
   } finally { cleanTmp(T); }
-  const bad = await epicNewOn({ slug: 'x', profile: 'spike', json: true });
+  const bad = await epicNewOn({ slug: 'x', profile: 'moonshot', json: true });
   try {
     assert.equal(bad.failed, true);
     assert.equal(JSON.parse(bad.out).ok, false, 'a refusal is machine-readable too');
   } finally { cleanTmp(bad.T); }
+
+  // A short lane seeds through the same command and reports its own route and chain length (E40).
+  const chore = await epicNewOn({ slug: 'bump-deps', type: 'chore', profile: 'chore', json: true });
+  try {
+    const j = JSON.parse(chore.out);
+    assert.equal(chore.failed, false);
+    assert.equal(j.profile, 'chore');
+    assert.equal(j.type, 'chore');
+    assert.equal(j.steps.length, 4);
+    assert.equal(j.currentStep, 'epic');
+    assert.equal(j.next, 'yad-epic');
+  } finally { cleanTmp(chore.T); }
+  const spike = await epicNewOn({ slug: 'try-graphql', profile: 'spike', json: true });
+  try {
+    const j = JSON.parse(spike.out);
+    assert.equal(spike.failed, false);
+    assert.equal(j.profile, 'spike');
+    assert.equal(j.steps.length, 6);
+    // The lane starts with the analyst, so the skill named next is the analysis one, not `yad-epic`.
+    assert.equal(j.currentStep, 'analysis');
+    assert.equal(j.next, 'yad-analysis');
+  } finally { cleanTmp(spike.T); }
 });
 
 test('yad epic new: an epic.md already there is what says the type, not the default', async () => {

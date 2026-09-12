@@ -16,6 +16,10 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    contract upstream, it **FAILS and routes back to the architecture gate**. The shared surface is
    never widened from inside a code repo (Phase 2 contract representation: delimited block + SHA-256 lock).
    Every story whose slice the diff touches is checked, not just the first — see `references/check-gates.md`.
+   A claimed `Contract-Change` against an epic that has **no lock at all** fails too: an epic on a short
+   lane (`chore`/`spike`) has no architecture step and never locks a surface, so it may consume the
+   contract but not change it, and the change belongs to a new epic on `classic`. That failure needs the
+   epic's ledger directory to resolve — a Product that is simply not checked out still defers, as before.
 3. **build/test/lint** — standard quality stage; tests must actually exercise new behavior, not just pass.
    CI installs and runs through the package manager declared by the repo's standard
    `package.json#packageManager` field (`npm` and `pnpm` are supported; any other manager stays on

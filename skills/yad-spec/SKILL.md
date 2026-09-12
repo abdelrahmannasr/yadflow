@@ -59,7 +59,20 @@ Read `epics/<epic>/contract.md` and `epics/<epic>/.sdlc/contract-lock.json`. The
 inputs (the API shapes, data-model entities, and events the story touches) are **quoted from the
 locked surface**, not re-authored. The spec MUST stay within that surface. If the story needs surface
 the contract does not define, STOP and route back to the **architecture gate** — never extend the
-contract here.
+contract here. (On a route that HAS one; the short lanes do not — see below.)
+
+- **Short-lane-safe:** read `epics/<epic>/.sdlc/state.json`'s `profile` first (an epic seeded before
+  file shape 6 has no such key — fall back to what its `steps[]` contains). On the `chore` and
+  `spike` routes there is no architecture step, so `contract.md` and `contract-lock.json` **never
+  exist** — that is the route's design, not a missing file to chase. Write the spec from the story and
+  `epic.md` alone, record `contract-lock: none` in Step 6's frontmatter, and say in the spec that this
+  epic defines no contract surface.
+- A short lane has no architecture gate to route back to. So the rule above becomes stricter, not
+  looser: if the story turns out to need the shared cross-repo surface to CHANGE, **STOP and escalate
+  to a human** — the work belongs to a new epic on `classic`. Do not write the change into a spec on a
+  short lane. Do not create `specs/<story>/contracts/` at all on one — a short-lane story has no
+  surface to quote, and a slice folder under a lockless epic is what the CI gate refuses. (If one
+  already exists, a commit that only DELETES it is allowed through, which is the way back out.)
 
 ### Step 4 — Detect Spec Kit
 Check for `/speckit.*` slash-commands and/or `demo-repos/<repo>/.specify/`. Record the result for
@@ -83,7 +96,9 @@ to read. See `references/spec-handoff.md` for the exact file map and per-file de
 Write `demo-repos/<repo>/specs/<story>/link.md` (template in `references/spec-handoff.md`) with
 frontmatter linking the spec back to the product repo: `story`, `epic`, `repo`, `feature-id`,
 `product-repo` (path), `contract-lock` (the hash **copied** from `contract-lock.json`, NOT recomputed
-in the code repo), `speckit` (`installed | not-installed`), `generated` (date). This `link.md` plus the
+in the code repo — or the literal `none` on a short-lane epic, which has no lock; never a made-up or
+empty hash, which the CI gate reads as a broken lock and fails), `speckit`
+(`installed | not-installed`), `generated` (date). This `link.md` plus the
 spec folder is the authoritative record that this story's spec exists.
 
 ### Step 7 — Stop (Shape state untouched)

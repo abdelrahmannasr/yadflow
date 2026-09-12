@@ -19,7 +19,7 @@ const GROUPS = [
     phase: 'Shape review gate',
     color: '#ca6f1e',
     items: [
-      'yad epic new <slug> [--type feature|chore] [--profile classic|analysis-first] [--stub] — seed a new epic\'s step chain from a lifecycle profile (no epic.md, no branch, no commit); --stub mints a brownfield anchor a defect can thread off',
+      'yad epic new <slug> [--type feature|chore] [--profile classic|analysis-first|chore|spike] [--stub] — seed a new epic\'s step chain from a lifecycle profile (no epic.md, no branch, no commit); chore and spike are the short lanes, with no architecture gate and so no contract of their own; --stub mints a brownfield anchor a defect can thread off',
       'yad gate open <epic> <artifact> — open the review PR/MR (branch must be on origin), mark in_review',
       'yad gate sync <epic> [artifact] [--pr <n>] — pull approvals/threads, auto-advance on merge',
       'yad gate comments <epic> — fetch the unresolved review comments',

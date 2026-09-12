@@ -1006,11 +1006,11 @@ test('migrate 5 -> 6: a `profile` already recorded is never overwritten, whateve
   // correcting a value somebody wrote during an upgrade they ran to be safe is not this command's job.
   const T = project({ files: {
     'epics/EP-x/.sdlc/state.json': JSON.stringify(
-      { schemaVersion: 5, profile: 'spike', currentStep: 'epic', steps: chain(CLASSIC) }, null, 2) + '\n',
+      { schemaVersion: 5, profile: 'moonshot', currentStep: 'epic', steps: chain(CLASSIC) }, null, 2) + '\n',
   } });
   try {
     await runMigrate(T, { apply: true });
-    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).profile, 'spike');
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).profile, 'moonshot');
   } finally { cleanup(T); }
 });
 
@@ -1053,7 +1053,7 @@ test('migrate 5 -> 6: only an epic ledger gains a profile — no other file is t
 
 test('stampProfile: add-only, never invents, and hands back the SAME object when idle', async () => {
   const { stampProfile } = await import('./epic-state.mjs');
-  const already = { profile: 'spike', steps: chain(CLASSIC) };
+  const already = { profile: 'moonshot', steps: chain(CLASSIC) };
   assert.equal(stampProfile(already), already, 'a recorded route is untouched, object identity and all');
   const offRoute = { currentStep: 'x', steps: chain(['stories', 'epic']) };
   assert.equal(stampProfile(offRoute), offRoute, 'no route fits, so no key and no new object');
@@ -1065,6 +1065,50 @@ test('stampProfile: add-only, never invents, and hands back the SAME object when
   const pending = { currentStep: 'epic', steps: chain(CLASSIC) };
   assert.notEqual(stampProfile(pending), pending);
   assert.equal(stampProfile(pending).profile, 'classic');
+});
+
+test('stampProfile matches against the FROZEN shape-6 routes, never the live table (E40)', async () => {
+  // The regression this pins: shape 6 answers a question about the past, and `matchLifecycleProfile`
+  // breaks ties on the shortest fitting route. E40's chore lane is shorter than `classic`, so every
+  // chain drawn only from those four steps — one that stops at `epic-review`, one hand-edited down —
+  // changes route the day the lane lands. `epicProfileId` prefers the recorded key over matching, so
+  // a stamp taken from the live table would be the permanent answer to "what may this epic skip".
+  const { stampProfile, shape6Routes, SHAPE_6_ROUTE_IDS, LIFECYCLE_PROFILES,
+    matchLifecycleProfile } = await import('./epic-state.mjs');
+  const SHORT = ['epic', 'epic-review', 'stories', 'stories-review'];
+
+  // THE MIGRATION'S ANSWER IS PINNED, whatever the live table grows into — and the two answers really
+  // do diverge, asserted here rather than left to another file, because a freeze nobody can show
+  // diverging is a freeze nobody can tell has stopped working.
+  assert.equal(stampProfile({ steps: chain(SHORT) }).profile, 'classic');
+  assert.equal(matchLifecycleProfile(chain(SHORT), shape6Routes()), 'classic');
+  assert.notEqual(matchLifecycleProfile(chain(SHORT)), 'classic',
+    'the live table places this chain elsewhere — that gap is the whole reason for the freeze');
+
+  // The two hand-written chains in this repo's own e2e fixtures are exactly this shape, and
+  // `yad gate ci` stamps them through `writeState`. They are the live exercise of the freeze, not a
+  // hypothetical, so the claim in `stampProfile`'s comment is pinned to something a test can fail.
+  assert.equal(stampProfile({ epicId: 'EP-e2e', currentStep: 'epic-review', steps: chain(['epic', 'epic-review']) }).profile,
+    'classic', 'the e2e fixture chain keeps the route it had before the short lanes existed');
+
+  // A chain that still carries `architecture` was never at risk: no short lane has that step, so it
+  // matches `classic` either way. Every seed yadflow has shipped looks like this, which is why the
+  // freeze protects a SHAPE of chain rather than any epic on disk today.
+  const WITH_ARCH = ['epic', 'epic-review', 'architecture', 'architecture-review', 'stories', 'stories-review'];
+  assert.equal(matchLifecycleProfile(chain(WITH_ARCH)), 'classic');
+  assert.equal(stampProfile({ steps: chain(WITH_ARCH) }).profile, 'classic');
+
+  // The seam, driven with a route the frozen set does not carry: a caller-supplied table is used as
+  // handed in, which is what lets a future shape stamp against its own list.
+  const synthetic = [{ id: 'tiny', level: 'feature', steps: ['epic', 'epic-review'] }];
+  assert.equal(stampProfile({ steps: chain(['epic', 'epic-review']) }, synthetic).profile, 'tiny');
+
+  // The frozen list names routes this release still carries. A name that resolves to nothing would
+  // shrink the set silently, and shape 6 would stop recognising a chain it used to place.
+  for (const id of SHAPE_6_ROUTE_IDS) {
+    assert.ok(LIFECYCLE_PROFILES.some((p) => p.id === id), `frozen route '${id}' is no longer in the table`);
+  }
+  assert.equal(shape6Routes().length, SHAPE_6_ROUTE_IDS.length);
 });
 
 test('a gate write and a migration agree on the ORDER of the two shape keys, not just their values', async () => {

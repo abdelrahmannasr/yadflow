@@ -266,6 +266,87 @@ test('contract-check gate: Contract-Change with link.md matching the product loc
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('contract-check gate: a resolvable Product with NO lock for the epic fails, not defers (E40)', () => {
+  // The short-lane hole. `chore` and `spike` carry no architecture step, so `contract-lock.json` never
+  // exists on them — and a missing lock used to read the same as an unreachable one: a note, then a
+  // PASS. That made "this epic may not change the surface" a rule the gate could never enforce, for
+  // the entire life of every short-lane epic.
+  const T = scaffoldRepo();
+  // The Product resolves — it exists and holds the epic directory — but there is no lock inside it.
+  fs.mkdirSync(path.join(T, 'product', 'epics', 'EP-demo', '.sdlc'), { recursive: true });
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': 'none',
+    }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, 'a claimed Contract-Change against an epic with no lock must fail');
+  assert.match(r.out, /has no contract lock at all/);
+  assert.match(r.out, /SHORT LANE/, 'and the message names the route that causes it');
+  // All three populations that reach this failure are named, because each has a DIFFERENT fix and a
+  // message offering only one of them sends two users out of three to the wrong remedy.
+  assert.match(r.out, /STUB \/ lightly-promoted brownfield/);
+  assert.match(r.out, /CLASSIC epic that has not reached its architecture gate/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: REMOVING a slice under a lockless epic is allowed, or it could never be fixed', () => {
+  // The dead end this escapes. The gate triggers on any slice path in the diff, and `--name-only`
+  // lists a DELETED file exactly like a changed one. So once a short-lane story owns a
+  // `specs/<story>/contracts/` file: the unflagged rule fails the commit, the no-lock rule fails the
+  // flagged one, and the cleanup commit that deletes the file fails too. No diff passes, including
+  // the correct one.
+  //
+  // Deleting your own copy of a surface nothing upstream has locked cannot widen it — with no lock
+  // there is no agreed shape for the deletion to contradict.
+  const T = scaffoldRepo();
+  fs.mkdirSync(path.join(T, 'product', 'epics', 'EP-demo', '.sdlc'), { recursive: true });
+  // The slice is ALREADY on the base branch — added by some earlier merged commit. That is what makes
+  // this a trap rather than a self-correcting mistake: within one branch the add and the delete cancel
+  // out of `git diff BASE..HEAD` and the gate never sees them.
+  commit(T, 'chore: the slice a short lane should never have had\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'oops\n',
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': 'none',
+    }),
+  });
+  const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: T }).toString().trim();
+  assert.equal(runGate(CONTRACT, T).code, 1, 'while the file is being added, the failure is correct');
+
+  // The cleanup PR: it does nothing but delete the file, and before the escape hatch it failed too.
+  fs.rmSync(path.join(T, 'specs/EP-demo-S01/contracts/api.md'));
+  commit(T, 'chore: drop the slice a short lane must not carry\n\nContract-Change: yes');
+  const r = runGate(CONTRACT, T, [base]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /only REMOVES contract slice files/);
+
+  // The hatch is for the LOCKLESS case only. With a lock upstream, deleting a slice is a real surface
+  // change and every rule still applies to it — asserted here so a later tidy cannot widen the hatch.
+  seedProductLock(T, 'EP-demo', 'e'.repeat(64));
+  const locked = runGate(CONTRACT, T, [base]);
+  assert.equal(locked.code, 1, 'a deletion against a REAL lock is still a stale-pin failure');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: an UNREACHABLE Product still defers — the narrow case is unchanged', () => {
+  // The hardening above must not turn every CI job that does not check the Product out into a
+  // failure. That case proves nothing either way and has always deferred; only "resolved, and the
+  // lock is genuinely absent" is new. Asserted beside its sibling so the two cannot be merged by
+  // someone tidying later.
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../nowhere', 'contract-lock': `sha256:${'d'.repeat(64)}`,
+    }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /fidelity check deferred/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // (contract-check's product-repo forms are covered by the four-gate matrix below — an absolute path
 // was already the one form it handled, so a bespoke case here pinned nothing.)
 

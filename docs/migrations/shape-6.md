@@ -58,6 +58,30 @@ upgrade you ran to be safe would have hidden the one thing it was meant to show 
 An epic that simply **left a step out** is fine and still matches. An epic with no screens drops
 `ui-design` and is still on the `classic` route.
 
+### The three routes above are the only ones this migration ever writes
+
+Shape 6 answers a question about the past: which of the routes that existed when it landed is this
+chain on. Later releases add routes — the `chore` and `spike` short lanes arrived after this shape —
+and the migration ignores them on purpose.
+
+The reason is the matching rule. When a chain fits more than one route, the **shortest** one wins. The
+chore lane is `epic`, `epic-review`, `stories`, `stories-review` — so any chain built only from those
+steps changed route the day that lane shipped. A chain that stops at `epic-review`, or one edited down
+by hand, is the shape this affects. Every later reader trusts the recorded key over matching, so a
+stamp taken from today's routes would stick.
+
+**No chain yadflow has ever seeded is affected.** Every shipped seed carries `architecture`, which no
+short lane has, so those chains match `classic` either way. The freeze is what turns that from a fact
+about today's data into a guarantee — hand-edited chains are allowed, and the next short route may not
+be so easy to rule out.
+
+An epic seeded on a short lane never needs this migration: `yad epic new` writes its `profile` key at
+seed time, and the migration leaves any key already present alone.
+
+If a chain really is chore-shaped and carries no key, it gets `classic` here and `yad doctor` then
+reports `profile:disagree`. That is the intended split — the upgrade records what was true, and the
+report is what tells you the label wants correcting. Set `profile` by hand, once.
+
 ## The new command
 
 Shape 6 is what makes it possible for the engine, rather than a skill, to start an epic:
@@ -65,6 +89,8 @@ Shape 6 is what makes it possible for the engine, rather than a skill, to start 
 ```
 yad epic new <slug>                                 # the classic 10-step chain
 yad epic new <slug> --profile analysis-first        # the 12-step chain
+yad epic new <slug> --profile chore                 # the short upkeep lane (4 steps)
+yad epic new <slug> --profile spike                 # a timeboxed investigation (6 steps)
 yad epic new <slug> --type chore                    # upkeep, no user-visible change
 yad epic new <slug> --json                          # the same answer for a script
 ```

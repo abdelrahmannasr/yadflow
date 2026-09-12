@@ -89,9 +89,18 @@ A contract change means the diff alters the agreed cross-repo shape itself.
 
 - If the diff does **not** change the surface: proceed; no `Contract-Change` trailer.
 - If the task **requires** changing the surface: **flag and STOP**. The contract is owned upstream;
-  route back to the **architecture gate** to amend and re-lock `contract.md` first. Only then return
+  route back to the **architecture gate** to amend and re-lock `contract.md` first — on a route that
+  has one; the short lanes do not, see the bullet below. Only then return
   here, and record `Contract-Change: yes` in the commit body (the Step C contract-check will require a
   matching, already-updated contract).
+- **Short-lane epics have no contract and no architecture gate.** Read
+  `epics/<epic>/.sdlc/state.json`'s `profile` (or, on an epic seeded before file shape 6, what its
+  `steps[]` contains): on `chore` and `spike` there is no `contract.md`, so
+  there is no surface block to compare against and **no gate to route back to**. Never write
+  `Contract-Change: yes` on a short-lane task: there is no lock for the check to verify it against, so
+  the claim cannot be true of anything. Where the Product repo is reachable the gate now FAILS it
+  outright; where it is not, the check defers and nothing catches it. If the task needs the shared cross-repo surface to change, **STOP and escalate
+  to a human**: the work belongs to a new epic on `classic`.
 
 ### Step 6 — Commit on the task branch
 Stage only the declared files. Commit with the convention: a conventional subject, a short body, and a

@@ -142,8 +142,10 @@ Build by hand"** below.
   the shape this release expects, one line for the project and one per epic, and names the command to
   run if they do not.
 - **`yad epic new <slug>`** — start an epic by writing its step chain from a lifecycle profile
-  (`--profile classic|analysis-first`, `--type feature|chore`), plus its empty ledgers. It writes no
-  `epic.md`, no branch and no commit, and refuses an epic that already has a chain.
+  (`--profile classic|analysis-first|chore|spike`, `--type feature|chore`), plus its empty ledgers.
+  `chore` and `spike` are the short lanes: the epic and its stories, with the analyst's brief in front
+  for a spike. Neither has an architecture gate, so neither may move the contract surface. It writes
+  no `epic.md`, no branch and no commit, and refuses an epic that already has a chain.
 - **`yad skill list`** — which skill runs which lifecycle step, and whether that answer is your
   project's choice or the engine's default. `yad skill bind <step> <skill>` records your own in
   `.sdlc/skills.json`; pass several and they run as a chain, in order, each costing another model run.

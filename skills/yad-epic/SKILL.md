@@ -160,15 +160,31 @@ seeded the 10-step one. Go to Step 5b.)*
 **Run the engine. Do not hand-write the chain.**
 
 ```bash
-yad epic new EP-<slug>              # after Step 4: the type comes from epic.md
-yad epic new EP-<slug> --type chore # only when there is no epic.md yet
+yad epic new EP-<slug>                    # after Step 4: the type comes from epic.md
+yad epic new EP-<slug> --type chore       # only when there is no epic.md yet
+yad epic new EP-<slug> --profile chore    # the short upkeep lane — see below
 ```
 
-That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the full **10-step** `classic` chain
-(no analysis), the empty `approvals.json` and `comments.json`, and the `reviews/` directory. Every step
-is `advance: human` and locked; `epic` is open and the rest are blocked. The chain comes from the step
-catalogue and the `classic` lifecycle profile in the engine (`references/state-schema.md`), so there is
-one definition of it and no copy here to drift from it.
+That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json`, the empty `approvals.json` and
+`comments.json`, and the `reviews/` directory. Without `--profile` the chain is the full **10-step**
+`classic` route (no analysis). Every step is `advance: human` and locked; `epic` is open and the rest
+are blocked. The chain comes from the step catalogue and the lifecycle profile in the engine
+(`references/state-schema.md`), so there is one definition of it and no copy here to drift from it.
+
+**Ask which lane this work belongs on before you run it.** `classic` is the default and the right
+answer for a feature. For upkeep somebody has already decided on — a dependency bump, a CI move —
+`--profile chore` seeds a **4-step** lane instead: `epic → epic-review → stories → stories-review`,
+with no architecture, UI-design or test-case steps. `--profile spike` is the same lane with the
+analyst's brief in front, for a timeboxed question (start that one from `yad-analysis`, which owns the
+first step). Both are described in `references/state-schema.md`.
+
+A short lane has **no architecture gate, so no `contract.md` and no lock**, and no step on it is
+optional — `yad skip` is refused. **Choose the route before you seed, because the choice is final:**
+`yad epic new` refuses an epic that already has a `state.json` and there is no re-seed flag. If the
+work turns out to move the shared cross-repo surface, the short-lane epic records the finding and the
+surface change belongs to a NEW epic on `classic` — say that rather than trying to widen this one. The
+work-item type is a separate choice: `--type chore --profile classic` is right for large upkeep that
+does touch the contract.
 
 It writes no `epic.md`, no branch and no commit, and it refuses an epic that already has a
 `state.json`. Run it **after** Step 4 when `epic.md` exists, and it reads the type from that header —
