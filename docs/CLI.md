@@ -315,7 +315,9 @@ the right call for a large piece of upkeep that does touch the contract.
 re-seed flag, so pick the route before seeding. If a short-lane epic turns out to need the shared
 surface to move, it records the finding and the surface change belongs to a new epic on `classic`.
 The contract gate enforces this rather than trusting the prose: a commit claiming `Contract-Change:
-yes` fails when the epic has no lock at all.
+yes` fails when the epic has no lock at all — provided the Product repo is reachable from the build,
+which is what lets the gate tell "this epic has no lock" from "nothing is checked out here". Where it
+is not reachable the check defers, as it always has.
 
 **`yad next` marks a phase a short lane never enters.** A chore epic has no architecture or UI-design
 step, so its phase line reads `Design (not on this route)` rather than printing Design exactly as a

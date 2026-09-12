@@ -70,8 +70,9 @@ contract here. (On a route that HAS one; the short lanes do not — see below.)
 - A short lane has no architecture gate to route back to. So the rule above becomes stricter, not
   looser: if the story turns out to need the shared cross-repo surface to CHANGE, **STOP and escalate
   to a human** — the work belongs to a new epic on `classic`. Do not write the change into a spec on a
-  short lane. The CI contract gate cannot catch this for you here, because it has no lock to compare
-  against.
+  short lane. Do not create `specs/<story>/contracts/` at all on one — a short-lane story has no
+  surface to quote, and a slice folder under a lockless epic is what the CI gate refuses. (If one
+  already exists, a commit that only DELETES it is allowed through, which is the way back out.)
 
 ### Step 4 — Detect Spec Kit
 Check for `/speckit.*` slash-commands and/or `demo-repos/<repo>/.specify/`. Record the result for

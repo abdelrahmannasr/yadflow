@@ -97,8 +97,9 @@ A contract change means the diff alters the agreed cross-repo shape itself.
   `epics/<epic>/.sdlc/state.json`'s `profile` (or, on an epic seeded before file shape 6, what its
   `steps[]` contains): on `chore` and `spike` there is no `contract.md`, so
   there is no surface block to compare against and **no gate to route back to**. Never write
-  `Contract-Change: yes` on a short-lane task — the CI check has no lock to verify it against and
-  would let it through. If the task needs the shared cross-repo surface to change, **STOP and escalate
+  `Contract-Change: yes` on a short-lane task: there is no lock for the check to verify it against, so
+  the claim cannot be true of anything. Where the Product repo is reachable the gate now FAILS it
+  outright; where it is not, the check defers and nothing catches it. If the task needs the shared cross-repo surface to change, **STOP and escalate
   to a human**: the work belongs to a new epic on `classic`.
 
 ### Step 6 — Commit on the task branch
