@@ -1101,10 +1101,12 @@ export function profileChecks(checks, root) {
 // the route the epic is on, so the two can disagree — a chain edited by hand, a recorded route changed,
 // or a ledger copied from an epic on a different route.
 //
-// It matters because the gate FAILS CLOSED on it. `gatePredicate` honours `skipped: true` only for a
-// step this epic's route marks optional, so a skip the route does not allow stops short-circuiting and
-// the gate asks for the approvals nobody gave. The step is already `done`, so nothing is un-advanced —
-// `yad gate sync` reports "the rule no longer holds" and moves on. This says the same thing before the
+// WHAT IT COSTS, stated the same way the hint states it. `gatePredicate` honours `skipped: true` only
+// for a step this epic's route marks optional, so a skip the route does not allow stops
+// short-circuiting. NOTHING BREAKS: the step is already `done`, so `yad gate sync` takes its
+// already-done branch, reports that the rule no longer holds and changes nothing — no step is
+// un-advanced, no review re-opens. What is lost is the justification: the gate stops treating the skip
+// as the reason the step passed, which is the whole point of recording a skip. This says so before the
 // next sync rather than after it.
 //
 // Reported, never corrected, like everything else here: clearing the flag would erase a recorded

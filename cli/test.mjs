@@ -5175,6 +5175,27 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
   } finally { fs.rmSync(refused.T, { recursive: true, force: true }); }
 });
 
+test('yad skip answers a malformed ledger with an error, not a stack trace', () => {
+  // `yad skip` is typed by a person at a ledger that may be corrupt, and both verbs index straight
+  // into `state.steps`. Every one of these used to come back as a raw TypeError naming no file and
+  // suggesting no fix — and `unskipStep` lost the one guard that used to catch some of them when the
+  // route check was removed, so this is the replacement for it, not an extra.
+  for (const [name, st] of [
+    ['no steps key', { profile: 'classic' }],
+    ['steps is not an array', { profile: 'classic', steps: 'nope' }],
+    ['a null state', null],
+    ['steps is an object', { profile: 'classic', steps: { 0: { id: 'ui-design' } } }],
+  ]) {
+    for (const fn of [() => skipStep(st, 'ui-design', { reason: 'x' }), () => unskipStep(st, 'ui-design')]) {
+      assert.throws(fn, (e) => e.code === 'YAD-STATE-004' && /no step chain/.test(e.message) && /state\.json/.test(e.hint), name);
+    }
+  }
+  // A chain that IS an array but holds a null entry walks past the guard and is answered normally.
+  const holed = { profile: 'classic', currentStep: 'ui-design', steps: [null, { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'in_progress' }, { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'blocked' }] };
+  assert.equal(skipStep(holed, 'ui-design', { reason: 'no UI' }).steps[1].skipped, true);
+  assert.throws(() => unskipStep({ profile: 'classic', steps: [null] }, 'ui-design'), /not in this epic's chain/);
+});
+
 test('doctor reports a skip the epic\'s route does not allow, and corrects nothing', async () => {
   const { skipChecks } = await import('./doctor.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e35-doc-'));

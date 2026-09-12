@@ -637,6 +637,19 @@ export function isSkippableStep(id, optional = []) {
 // never a default set — because guessing a route here would let a step be skipped on the strength of a
 // route nobody chose. `yad doctor` already reports that chain as `step:off-route`, and this says so
 // rather than pretending the step is simply required.
+// A chain to work on, or a YadError saying there is not one.
+//
+// Both verbs below are reachable from `yad skip`, which a person types at a corrupt ledger, and both
+// index straight into `state.steps` from their second line on. Without this they answer a malformed
+// `state.json` with a raw `TypeError: Cannot read properties of undefined`, which names no file and
+// suggests no fix. `cli/skip.mjs` already refuses a MISSING ledger; this is the one that exists and
+// is wrong inside.
+const requireChain = (state, verb) => {
+  if (isPlainObject(state) && Array.isArray(state.steps)) return state.steps;
+  throw err('YAD-STATE-004', `this epic has no step chain to ${verb}`,
+    '`.sdlc/state.json` is missing its `steps` array or does not hold an object — restore it from git, then run `yad doctor`');
+};
+
 const notOptional = (stepId, optional) => err(
   'YAD-STATE-004',
   `step '${stepId}' is not optional on this epic's route`,
@@ -661,11 +674,14 @@ function withoutSkip(step) {
 // was authored, once its review gate has opened, or once its downstream `stories` has started — the
 // step is optional only up to authoring it. Throws on a non-skippable id or a malformed (unpaired) chain.
 export function skipStep(state, stepId, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
+  const steps = requireChain(state, 'skip a step in');
   const optional = optionalStepsFor(state, profiles);
   if (!optional.includes(stepId)) throw notOptional(stepId, optional);
-  const ai = state.steps.findIndex((s) => s.id === stepId);
+  // `s?.id` throughout: a hand-edited chain can hold a null entry, and a crash on one would be the
+  // same unhelpful answer `requireChain` exists to replace.
+  const ai = steps.findIndex((s) => s?.id === stepId);
   if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to skip');
-  const author = state.steps[ai];
+  const author = steps[ai];
   // Idempotent BEFORE the reason check: a repeat skip on an already-N/A step is a no-op that keeps the
   // original reason/actor, so it must not fail merely for lacking a fresh --reason.
   if (author.skipped) return state;
@@ -674,9 +690,9 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   }
   // A skippable step must carry its paired `-review` gate — the change keeps BOTH in the chain. A
   // missing gate is a malformed chain; refuse rather than half-stamp only the author step.
-  const ri = state.steps.findIndex((s) => s.id === `${stepId}-review`);
+  const ri = steps.findIndex((s) => s?.id === `${stepId}-review`);
   if (ri === -1) throw err('YAD-STATE-004', `malformed chain: ${stepId} has no ${stepId}-review gate`, 'restore state.json from git');
-  const review = state.steps[ri];
+  const review = steps[ri];
   if (author.status === 'done') {
     throw err('YAD-STATE-004', `${stepId} is already authored`, 'cannot skip a step whose artifact was already written');
   }
@@ -685,7 +701,7 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   if (review.status !== 'blocked') {
     throw err('YAD-STATE-004', `cannot skip ${stepId} — its review has already opened`, 'skip the UI step before its review begins');
   }
-  const stories = state.steps.find((s) => s.id === 'stories');
+  const stories = steps.find((s) => s?.id === 'stories');
   if (stories && stories.status !== 'blocked') {
     throw err('YAD-STATE-004', `cannot skip ${stepId} — stories have already started`, 'skip the UI step before stories begin');
   }
@@ -719,17 +735,18 @@ export function unskipStep(state, stepId) {
   // cost: `yad doctor`'s `skip:not-optional` names exactly the epics whose skip the route does not
   // allow, and its remedy is this command. With the guard, the one command the finding recommends was
   // the one command guaranteed to throw in the state that produced the finding.
-  const ai = state.steps.findIndex((s) => s.id === stepId);
+  const steps = requireChain(state, 'un-skip a step in');
+  const ai = steps.findIndex((s) => s?.id === stepId);
   if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to un-skip');
-  if (!state.steps[ai].skipped) throw err('YAD-STATE-004', `${stepId} is not skipped`, 'nothing to un-skip');
-  const storiesReview = state.steps.find((s) => s.id === 'stories-review');
+  if (!steps[ai].skipped) throw err('YAD-STATE-004', `${stepId} is not skipped`, 'nothing to un-skip');
+  const storiesReview = steps.find((s) => s?.id === 'stories-review');
   if (storiesReview && storiesReview.status !== 'blocked') {
     throw err('YAD-STATE-004', `cannot un-skip ${stepId} — the stories review has already opened`, 'un-skip before the stories review begins');
   }
-  const ri = state.steps.findIndex((s) => s.id === `${stepId}-review`);
-  const priorAllDone = state.steps.slice(0, ai).every((s) => s.status === 'done');
-  state.steps[ai] = { ...withoutSkip(state.steps[ai]), status: priorAllDone ? 'in_progress' : 'blocked' };
-  if (ri !== -1) state.steps[ri] = { ...withoutSkip(state.steps[ri]), status: 'blocked' };
+  const ri = steps.findIndex((s) => s?.id === `${stepId}-review`);
+  const priorAllDone = steps.slice(0, ai).every((s) => s?.status === 'done');
+  steps[ai] = { ...withoutSkip(steps[ai]), status: priorAllDone ? 'in_progress' : 'blocked' };
+  if (ri !== -1) steps[ri] = { ...withoutSkip(steps[ri]), status: 'blocked' };
   if (priorAllDone) {
     // The restored author step is the active step again. Push the downstream the skip auto-opened
     // back to `blocked` (it must wait behind the now-live step), and re-point currentStep here. Scan
