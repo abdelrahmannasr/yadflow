@@ -47,6 +47,21 @@ RANGE="${BASE}..HEAD"
 changed="$(git -c core.quotePath=false diff --name-only "$RANGE")"
 surface="$(printf '%s\n' "$changed" | grep -E '^specs/[^/]+/contracts/' || true)"
 
+# Slice paths this diff DELETES. `--name-only` above lists a deleted file exactly like a changed one,
+# which is right for the trailer rule — removing an agreed endpoint IS a surface change — but it
+# creates a dead end for the one epic that should never have had a slice in the first place.
+#
+# A short-lane epic has no lock and never will (E40). Once a `specs/<story>/contracts/` file exists
+# under one, the unflagged rule below fails the commit, the no-lock rule further down fails the
+# flagged one, and the cleanup commit that DELETES the file fails too — so there is no diff that
+# passes, including the correct one. An escape hatch is not optional there.
+#
+# Deleting your own copy of a surface that nothing upstream has locked cannot widen it: with no lock
+# there is no agreed shape for the deletion to contradict. So a delete-only diff is allowed through
+# the no-lock branch (and only that branch — where a lock EXISTS, a deletion is still a real surface
+# change and every rule below applies to it unchanged).
+deleted="$(git -c core.quotePath=false diff --diff-filter=D --name-only "$RANGE" | grep -E '^specs/[^/]+/contracts/' || true)"
+
 if [ -z "$surface" ]; then
   echo "PASS [contract-check]: diff does not touch the contract surface (specs/*/contracts/**)."
   exit 0
@@ -159,17 +174,32 @@ while IFS= read -r story; do
     # pass. The guard used to be prose in the authoring skills; this is the gate.
     #
     # Narrow on purpose, and the guard is the EPIC'S LEDGER DIRECTORY, not the product path — because
-    # `resolve_product` returns a path for a repo that is not there at all (it resolves a string; it
-    # does not check the disk). Requiring `epics/<epic>/.sdlc/` to exist is what separates "this epic
-    # is real and has no lock" from "nothing is checked out here". A CI job that does not check the
+    # `resolve_product` ALWAYS returns some path and never verifies that the one it picked exists. (Its
+    # own two `-d` tests only choose BETWEEN the story-relative and repo-root joins; neither rejects a
+    # miss.) Requiring `epics/<epic>/.sdlc/` to exist is what separates "this epic is real and has no
+    # lock" from "nothing is checked out here". A CI job that does not check the
     # product repo out still defers below, exactly as before — that case proves nothing either way,
     # and failing it would break every setup that has always run this way.
+    # The escape hatch described at the top: with no lock upstream there is no agreed shape for a
+    # deletion to contradict, so REMOVING a slice is always allowed here. This is what keeps a
+    # short-lane story that should never have had a `contracts/` folder from being unfixable.
+    story_surface="$(printf '%s\n' "$surface" | grep -E "^specs/${story}/contracts/" || true)"
+    story_deleted="$(printf '%s\n' "$deleted" | grep -E "^specs/${story}/contracts/" || true)"
+    if [ -n "$story_surface" ] && [ "$story_surface" = "$story_deleted" ]; then
+      echo "note [contract-check]: ${story} only REMOVES contract slice files and ${epic} has no lock —"
+      echo "  nothing upstream is being contradicted, so the removal is allowed."
+      continue
+    fi
     echo "FAIL [contract-check]: Contract-Change claimed, but ${epic} has no contract lock at all."
     echo "  Expected ${lock} — the epic's ledger directory is there and the lock file is not."
-    echo "  An epic on a short lane (chore/spike) has no architecture step and so never locks a surface:"
-    echo "  it may consume the contract but must not CHANGE it. Move the surface change to a new epic on"
-    echo "  the classic route, which has the architecture gate that locks it. If this epic IS on classic,"
-    echo "  it has not reached that gate yet — author and lock contract.md first (yad-architecture Step 5)."
+    echo "  Three ways to be here, with three different fixes:"
+    echo "   - a SHORT LANE (chore/spike): it has no architecture step and never locks a surface, so it"
+    echo "     carries no specs/<story>/contracts/ at all. DELETE the slice; a delete-only diff passes."
+    echo "     A real surface change belongs to a new epic on the classic route."
+    echo "   - a STUB / lightly-promoted brownfield epic: the feature was never documented, so there is"
+    echo "     nothing to lock yet. Run yad-backfill and promote it fully (which locks contract.md)."
+    echo "   - a CLASSIC epic that has not reached its architecture gate: author and lock contract.md"
+    echo "     first (yad-architecture Step 5)."
     rc=1
     continue
   else
