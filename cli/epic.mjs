@@ -63,7 +63,7 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   };
 
   const epic = epicIdFrom(slug);
-  if (!epic) return bail('usage: yad epic new <slug> [--type feature|chore] [--profile classic|analysis-first]');
+  if (!epic) return bail(`usage: yad epic new <slug> [--type feature|chore] [--profile ${seedableProfiles().join('|')}]`);
   // The id becomes a path segment under epics/ — reject anything but EP-<slug> outright, the same
   // guard every other epic-taking command applies.
   if (!isValidEpicId(epic)) return bail(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`);

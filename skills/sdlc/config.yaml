@@ -60,7 +60,7 @@ lifecycle:
   # field `yad migrate` fills it in by matching the chain. The chain stays the truth — `yad doctor`
   # compares the two. NOT the `hub.json` `profile`, which is the unrelated setup record
   # { codebase, repo_layout, team_size }.
-  profiles: [classic, analysis-first, discovery]
+  profiles: [classic, analysis-first, chore, spike, discovery]
   phases:
     - { id: discover, name: Discover, part: Shape, built: true,  steps: [discovery, analysis, epic] }
     - { id: design,   name: Design,   part: Shape, built: true,  steps: [architecture, ui-design] }

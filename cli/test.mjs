@@ -10717,7 +10717,7 @@ test('doctor profile: a recorded route nobody defined is reported', async () => 
   const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('moonshot') } });
   assert.deepEqual(checks.map((c) => [c.id, c.status, c.section]), [['profile:unknown', 'warn', 'shape']]);
   assert.match(checks[0].message, /EP-x/);
-  assert.match(checks[0].hint, /classic · analysis-first · discovery/);
+  assert.match(checks[0].hint, /classic · analysis-first · chore · spike · discovery/);
   // A value that is not even a string is the same answer, not a crash.
   const nulled = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed(null) } });
   assert.deepEqual(nulled.map((c) => c.id), ['profile:unknown']);
@@ -10858,7 +10858,7 @@ test('yad epic new: an unknown type and an unknown route each say what is allowe
     assert.equal(route.failed, true);
     assert.match(route.out, /unknown lifecycle profile: moonshot/);
     // The list comes from the code, so a route added later needs no edit here.
-    assert.match(route.out, /classic · analysis-first/);
+    assert.match(route.out, /classic · analysis-first · chore · spike/);
   } finally { cleanTmp(route.T); }
 });
 
@@ -10929,6 +10929,28 @@ test('yad epic new --json: the machine answer carries the chain and the skill to
     assert.equal(bad.failed, true);
     assert.equal(JSON.parse(bad.out).ok, false, 'a refusal is machine-readable too');
   } finally { cleanTmp(bad.T); }
+
+  // A short lane seeds through the same command and reports its own route and chain length (E40).
+  const chore = await epicNewOn({ slug: 'bump-deps', type: 'chore', profile: 'chore', json: true });
+  try {
+    const j = JSON.parse(chore.out);
+    assert.equal(chore.failed, false);
+    assert.equal(j.profile, 'chore');
+    assert.equal(j.type, 'chore');
+    assert.equal(j.steps.length, 4);
+    assert.equal(j.currentStep, 'epic');
+    assert.equal(j.next, 'yad-epic');
+  } finally { cleanTmp(chore.T); }
+  const spike = await epicNewOn({ slug: 'try-graphql', profile: 'spike', json: true });
+  try {
+    const j = JSON.parse(spike.out);
+    assert.equal(spike.failed, false);
+    assert.equal(j.profile, 'spike');
+    assert.equal(j.steps.length, 6);
+    // The lane starts with the analyst, so the skill named next is the analysis one, not `yad-epic`.
+    assert.equal(j.currentStep, 'analysis');
+    assert.equal(j.next, 'yad-analysis');
+  } finally { cleanTmp(spike.T); }
 });
 
 test('yad epic new: an epic.md already there is what says the type, not the default', async () => {

@@ -5,7 +5,7 @@ import { c, log, closePrompts, askYesNo } from '../cli/lib.mjs';
 import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
-import { isValidEpicId } from '../cli/epic-state.mjs';
+import { isValidEpicId, seedableProfiles } from '../cli/epic-state.mjs';
 import { runEpicNew } from '../cli/epic.mjs';
 import { runSkillBind, runSkillList, runSkillUnbind } from '../cli/skill.mjs';
 import { runCommit } from '../cli/commit.mjs';
@@ -87,7 +87,11 @@ ${c.bold('Where am I / what next')}
                                        profile, plus empty approval/comment ledgers and reviews/.
                                        --type feature|chore (default feature) — a change/defect/
                                        hotfix threads off an existing epic, so use yad-change.
-                                       --profile classic|analysis-first (default classic).
+                                       --profile ${seedableProfiles().join('|')} (default classic).
+                                       classic and analysis-first are the full chains; chore and
+                                       spike are E40's short lanes — epic + stories, with the
+                                       analyst's brief in front for a spike. Neither carries an
+                                       architecture gate, so neither may move the contract surface.
                                        --stub seeds a brownfield anchor instead: the same chain
                                        with every step blocked behind backfill-pending, so a
                                        defect can thread off a feature that shipped before the
@@ -326,7 +330,7 @@ async function main() {
       const [, action, slug] = o._;
       if (action !== 'new') {
         log(c.red(`unknown epic action: ${action ?? '(none)'} (new)`));
-        log('usage: yad epic new <slug> [--type feature|chore] [--profile classic|analysis-first]');
+        log(`usage: yad epic new <slug> [--type feature|chore] [--profile ${seedableProfiles().join('|')}]`);
         process.exitCode = 1; break;
       }
       await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, today, json: o.json });

@@ -890,16 +890,60 @@ export const STEPS = [
 // code, and `next.mjs` reads the other one through `setupProfileOf`. Two different things under one
 // word is a trap for whoever reads this next; two clearly different names is not.
 //
-// THESE ARE NOT NEW ROUTES. All three predate this table — they were seeded by hand, in five skill
-// files, until `yad epic new` took over the two feature ones. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
-// chain". E5 writes them down in one place and checks projects against them; it does not change what
+// THE FIRST THREE WERE NOT NEW ROUTES. They predate this table — they were seeded by hand, in five
+// skill files, until `yad epic new` took over the two feature ones. `yad-analysis`'s own description already calls them "the 12-step chain" and "the 10-step
+// chain". E5 wrote them down in one place and checks projects against them; it did not change what
 // any epic does, and nothing here is written to disk.
 //
 //   classic         the 10-step chain, seeded by yad-epic, yad-stub and yad-change. `epic` first.
 //   analysis-first  the 12-step chain, seeded by yad-analysis, which puts `analysis` before `epic`
 //                   when a feature is shaped by the analyst before it becomes an epic.
+//   chore           the upkeep lane (E40). Four steps: `epic` then `stories`.
+//   spike           the investigation lane (E40). Six steps: `analysis` in front of the chore lane.
 //   discovery       the product front-zero (`EP-discovery`), two steps and no Build. Product-level,
 //                   not on the Epic ladder — E75 folds it into Foundation.
+//
+// THE SHORT LANES ARE NEW, and they are the first routes here that nobody has ever walked. E40 adds
+// them because the engine had exactly one shape of work: until now a dependency bump was seeded on the
+// same 10-step chain as a payments rewrite, and the way through was to skip steps — which `classic`
+// does not permit, since only `ui-design` is optional on it. Making the whole chain optional to fit
+// upkeep would have made it optional for everything. A shorter ROUTE says the same thing honestly, and
+// says it once, at seed time, where a person chooses it.
+//
+// WHAT THE TWO LANES DROP, and why each is ABSENT rather than `optional`. An optional step stays in
+// the chain, pre-marked done with a recorded reason (E35) — that is the right shape for a step the
+// route genuinely has and this epic happens not to need. A step the route never has is not that:
+// writing `ui-design` into the chore lane as optional would make every chore epic carry a skip record
+// for a screen nobody was ever going to draw, and the audit trail would fill with noise that means
+// nothing.
+//
+//   architecture / architecture-review   Both lanes drop them, and dropping the architecture gate
+//       drops the CONTRACT with it — no `contract.md`, no `contract-lock.json`. That is the point:
+//       these lanes are for work that does not move the shared cross-repo surface. Work that does move
+//       it belongs on `classic`, whatever its size. `yad doctor`'s contract-lock check is silent on an
+//       epic with no lock file, which is the normal pre-lock state and also the permanent state here.
+//       The gap this leaves in the check gates is written up on the E40 row of the roadmap.
+//   ui-design / ui-design-review         `chore` is "upkeep, no user-visible change" by the
+//       definition of the work-item type, so there is no screen; a spike's prototype is thrown away,
+//       so designing one would be work the lane exists to avoid.
+//   test-cases / test-cases-review       Neither lane introduces behaviour to pin. A chore must not
+//       change what the product does, and a spike's output is a finding, not a shipped feature. The
+//       tests that guard the code a chore touches already exist and its Build gates still run them.
+//
+// WHAT NEITHER LANE DROPS is `epic` / `epic-review` and `stories` / `stories-review`, and that is not
+// a matter of taste. `epic.md` is where the work-item type and the `parent:` lineage are authored —
+// `workItemType` reads it, `lineage-check.sh` reads it inside the user's repo, and `yad thread` skips
+// an epic that has none entirely, so a lane without it would produce work that is invisible to every
+// rollup. `stories` is what tags the repos Build runs in, and `stories-review` is the step
+// `advanceState` turns into `ready-for-build`. A lane ending anywhere else would leave `currentStep`
+// at a sentinel claiming a Build that has nothing in it.
+//
+// WHY `spike` IS `chore` PLUS `analysis`. The distinction is whether the answer is known. A chore is
+// upkeep somebody has already decided on: bump the dependency, move the CI job. A spike is a
+// timeboxed investigation — the analyst's brief is the first artifact because reducing the
+// uncertainty IS the work. Everything after that is the same short route, which is why one is a
+// strict ordered subset of the other. `matchLifecycleProfile` breaks the resulting tie on the shorter
+// route, so a chore-shaped chain reads as `chore` and not as a spike that skipped its analysis.
 //
 // WHAT IS AND IS NOT HERE. Seeding a chain from a profile is `seedState` below, driven by
 // `yad epic new` (E17, cli/epic.mjs); shape 6 is where an epic first RECORDS which profile it is on,
@@ -932,6 +976,25 @@ export const LIFECYCLE_PROFILES = [
       { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
       'stories', 'stories-review',
       'test-cases', 'test-cases-review',
+    ],
+  },
+  {
+    id: 'chore',
+    title: 'the upkeep lane',
+    level: 'feature',
+    steps: [
+      'epic', 'epic-review',
+      'stories', 'stories-review',
+    ],
+  },
+  {
+    id: 'spike',
+    title: 'the investigation lane',
+    level: 'feature',
+    steps: [
+      'analysis', 'analysis-review',
+      'epic', 'epic-review',
+      'stories', 'stories-review',
     ],
   },
   {

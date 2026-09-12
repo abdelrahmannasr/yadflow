@@ -11,7 +11,7 @@ import {
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
-  seedableProfiles, seedState, stateInvariants,
+  seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
@@ -637,21 +637,50 @@ test('a gate finds its author step through the catalogue, and engineer-review ga
 
 // ---- lifecycle profiles (E5) ---------------------------------------------------------------------
 
-// The three chains five skill files seed by hand today, written out verbatim. If E5 has described
-// them wrongly, every assertion below is measuring the wrong thing — so they are spelled out here
-// rather than derived from the same code under test.
+// Every route this release carries, written out verbatim. If the table has described one wrongly,
+// every assertion below is measuring the wrong thing — so they are spelled out here rather than
+// derived from the same code under test. The first three are the chains five skill files seeded by
+// hand before E5; `chore` and `spike` are E40's short lanes, which nobody seeded before.
 const CLASSIC_10 = ['epic', 'epic-review', 'architecture', 'architecture-review',
   'ui-design', 'ui-design-review', 'stories', 'stories-review', 'test-cases', 'test-cases-review'];
 const ANALYSIS_12 = ['analysis', 'analysis-review', ...CLASSIC_10];
+const CHORE_4 = ['epic', 'epic-review', 'stories', 'stories-review'];
+const SPIKE_6 = ['analysis', 'analysis-review', ...CHORE_4];
 const DISCOVERY_2 = ['discovery', 'discovery-review'];
 
 test('the profiles are the chains the skills already seed, step for step', () => {
   assert.deepEqual(profileSteps('classic'), CLASSIC_10);
   assert.deepEqual(profileSteps('analysis-first'), ANALYSIS_12);
+  assert.deepEqual(profileSteps('chore'), CHORE_4);
+  assert.deepEqual(profileSteps('spike'), SPIKE_6);
   assert.deepEqual(profileSteps('discovery'), DISCOVERY_2);
-  assert.deepEqual(LIFECYCLE_PROFILES.map((p) => p.id), ['classic', 'analysis-first', 'discovery']);
+  assert.deepEqual(LIFECYCLE_PROFILES.map((p) => p.id),
+    ['classic', 'analysis-first', 'chore', 'spike', 'discovery']);
   assert.equal(lifecycleProfile('nonsense'), null, 'a route this release does not carry is null, not a guess');
   assert.deepEqual(profileSteps('nonsense'), []);
+});
+
+test('the short lanes end where `advanceState` can hand the epic to Build (E40)', () => {
+  // Not a style rule. `advanceState` turns `stories-review` into `ready-for-build`, and its fall-through
+  // sets the same sentinel for any chain that simply runs out of steps. A lane ending anywhere else
+  // would leave `currentStep` claiming a Build with no stories to run it — `currentPhase` reads that
+  // sentinel as `build` and `yad next` would send the user to an empty lane.
+  for (const id of ['chore', 'spike']) {
+    const steps = profileSteps(id);
+    assert.equal(steps.at(-1), 'stories-review', `${id}: the lane must end at the step that opens Build`);
+    assert.ok(steps.includes('epic'), `${id}: no epic.md means no work-item type, no lineage and no thread rollup`);
+  }
+  // And what they deliberately do NOT carry. Absent, never `optional`: a skip record for a step the
+  // route was never going to walk is noise in the audit trail, not an audit trail.
+  for (const id of ['chore', 'spike']) {
+    for (const dropped of ['architecture', 'ui-design', 'test-cases']) {
+      assert.equal(profileSteps(id).includes(dropped), false, `${id} must not carry ${dropped}`);
+    }
+    assert.deepEqual(optionalStepsOf(id), [], `${id}: a short lane has nothing left to make optional`);
+  }
+  // `chore` is `spike` without the analyst's brief — the one thing that separates known upkeep from a
+  // timeboxed investigation. Asserted because the tie-break below depends on the subset relation.
+  assert.deepEqual(profileSteps('spike').slice(2), profileSteps('chore'));
 });
 
 test('every profile is self-consistent — its steps exist and its gates follow their authors', () => {
@@ -723,31 +752,46 @@ test('matchLifecycleProfile: a chain says which route it is on, and says nothing
   const S = (ids) => ids.map((id) => ({ id }));
   assert.equal(matchLifecycleProfile(S(CLASSIC_10)), 'classic');
   assert.equal(matchLifecycleProfile(S(ANALYSIS_12)), 'analysis-first');
+  assert.equal(matchLifecycleProfile(S(CHORE_4)), 'chore');
+  assert.equal(matchLifecycleProfile(S(SPIKE_6)), 'spike');
   assert.equal(matchLifecycleProfile(S(DISCOVERY_2)), 'discovery');
   // Leaving a step out is normal — an epic with no screens drops `ui-design` and is still classic.
   assert.equal(matchLifecycleProfile(S(CLASSIC_10.filter((x) => !x.startsWith('ui-design')))), 'classic');
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review'])), 'classic', 'a chain part-way through');
   // The tie that length breaks: the 10-step chain is also a correctly ordered subset of the 12-step
   // one. Without the shortest-wins rule every classic epic would read as an analysis-first epic that
   // skipped its first two steps — and E17 would then seed the wrong route from the wrong answer.
   //
-  // Asserted against a REVERSED list, because with today's three routes the shortest fit is also the
-  // one declared first: matching on declaration order gives the same answers, so a plain call here
-  // proves nothing. E40 adds shorter routes declared last, and this is the assertion that will still
-  // be true then.
+  // E40 turned that rule from a tidy-up into the load-bearing one, because the short lanes are the
+  // first routes DECLARED after routes they are shorter than. `chore` is an ordered subset of
+  // `classic`, and of `spike`; both pairs resolve the wrong way on declaration order. The reversed
+  // list further down is what proves length is the rule and position in the table is not.
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review'])), 'chore',
+    'these two fit chore and classic alike — the SHORTER route is the answer');
+  assert.equal(matchLifecycleProfile(S(['analysis', 'analysis-review', 'epic'])), 'spike',
+    'and the analyst pair leads into the spike lane before it reads as the 12-step chain');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'architecture'])), 'classic',
+    'one step no short lane carries, and classic is the only fit left');
+
+  // A MIGRATION MUST NOT GET THIS ANSWER. These two steps read as `classic` before the chore lane
+  // existed, so shape 6 — which answers a question about the past — keeps saying `classic` for them.
+  // `stampProfile` freezes its route set for exactly this pair of answers.
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), shape6Routes()), 'classic');
+
   // A caller-supplied route must be MATCHED, not silently dropped. The seam reads the rows off the
   // profile it is handed; resolving `p.id` through the module's own index instead would come back
   // empty for a route that is not in it, the route would never fit, and the answer would be a wrong
-  // one with no error. E40 adds the chore and spike lanes, and this is the shape of that call.
-  const chore = { id: 'chore-lane', level: 'feature', steps: ['epic', 'epic-review'] };
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), [...LIFECYCLE_PROFILES, chore]), 'chore-lane',
-    'a two-step route beats classic on the same two steps');
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'stories']), [...LIFECYCLE_PROFILES, chore]), 'classic',
+  // one with no error.
+  const tiny = { id: 'tiny-lane', level: 'feature', steps: ['epic', 'epic-review'] };
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), [...LIFECYCLE_PROFILES, tiny]), 'tiny-lane',
+    'a two-step route beats the four-step chore lane on the same two steps');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review', 'stories']), [...LIFECYCLE_PROFILES, tiny]), 'chore',
     'and loses as soon as the chain goes past it');
 
   const reversed = [...LIFECYCLE_PROFILES].reverse();
   assert.equal(matchLifecycleProfile(S(CLASSIC_10), reversed), 'classic');
-  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), reversed), 'classic');
+  assert.equal(matchLifecycleProfile(S(CHORE_4), reversed), 'chore');
+  assert.equal(matchLifecycleProfile(S(SPIKE_6), reversed), 'spike');
+  assert.equal(matchLifecycleProfile(S(['epic', 'epic-review']), reversed), 'chore');
   assert.equal(matchLifecycleProfile(S(ANALYSIS_12), reversed), 'analysis-first',
     'the longer route still wins when it is the only one that fits');
   // Out of order is a different thing from missing, and is not a route.
@@ -1085,7 +1129,9 @@ test('every skill seed template states this shape and the route its own chain is
 });
 
 test('seedableProfiles is the FEATURE routes, read off the profiles', () => {
-  assert.deepEqual(seedableProfiles(), ['classic', 'analysis-first']);
+  // E40's short lanes need no edit here and that is the assertion: a feature route is seedable the day
+  // it is added to the table, because this reads `level` rather than a second list to keep in step.
+  assert.deepEqual(seedableProfiles(), ['classic', 'analysis-first', 'chore', 'spike']);
   // The rule is `level === 'feature'`, and with today's data "all but the last" and "all but
   // `discovery` by name" give the same answer — so it is asserted on routes where they differ.
   assert.deepEqual(seedableProfiles([
@@ -1142,6 +1188,31 @@ test('seedState: every step carries what the catalogue says it is', () => {
   assert.deepEqual(stateInvariants(s), []);
   assert.equal(preconditionsMet(s, 'epic').ok, true);
   assert.equal(preconditionsMet(s, 'stories').ok, false, 'a later step is still blocked');
+});
+
+test('a short lane seeds, walks and hands off to Build without a step it does not carry (E40)', () => {
+  // The whole lane end to end, because every piece of it is a rule that lives somewhere else:
+  // `seedState` builds the chain, `advanceState` walks it, and the sentinel it lands on is what
+  // `currentPhase` and `yad next` read. A route is only as good as the walk it survives.
+  for (const [id, chain] of [['chore', CHORE_4], ['spike', SPIKE_6]]) {
+    const s = seedState({ epic: 'EP-demo', profile: id, type: 'chore', today: '2026-01-02' });
+    assert.equal(s.profile, id, 'a lane records its own route at seed time — nothing is left to match');
+    assert.deepEqual(s.steps.map((x) => x.id), chain);
+    assert.equal(s.currentStep, chain[0]);
+    assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(chain.length - 1).fill('blocked')]);
+    // No architecture step means no `contract` risk tag anywhere on the chain, which is what routes a
+    // gate through the escalated rule. A short lane carrying one would ask for the domain owners of a
+    // surface it has no lock on.
+    assert.deepEqual(s.steps.flatMap((x) => x.risk_tags), []);
+
+    // Approve every gate in order. The last one must leave the epic at `ready-for-build` and nowhere
+    // else: `advanceState` gets there for `stories-review` by name, and the `test-cases` track it
+    // looks for on the way is absent here, which it has to tolerate rather than throw on.
+    for (const g of s.steps.filter((x) => x.type === 'review+approve')) advanceState(s, g);
+    assert.equal(s.currentStep, 'ready-for-build');
+    assert.equal(currentPhase(s.currentStep), 'build');
+    assert.deepEqual([...new Set(s.steps.map((x) => x.status))], ['done']);
+  }
 });
 
 test('seedState refuses a route it must not seed', () => {
