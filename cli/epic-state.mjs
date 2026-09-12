@@ -73,8 +73,9 @@ export function gateRuleFor(step) {
 }
 
 // The rule as one human-readable sum — `3 approvers = base 1 + contract risk 2`. Defined here, beside
-// the rule, because four surfaces print it (the predicate's `missing` line, `gate sync`, `gate status`
-// and the generated review-PR body) and four copies of the arithmetic would eventually disagree.
+// the rule, because three surfaces print it (`gate sync`, `gate status` and the generated review-PR
+// body) and three copies of the arithmetic would eventually disagree. E72 adds a fourth when the count
+// starts holding gates and the shortfall joins `missing`.
 export const gateRuleSum = (rule) => {
   const people = `${rule.needed} approver${rule.needed === 1 ? '' : 's'}`;
   return rule.riskStep ? `${people} = base ${rule.base} + ${rule.risk} risk ${rule.riskStep}` : `${people} = base ${rule.base}`;
