@@ -8,7 +8,7 @@ import { isPlainObject, readJSON, readJSONStrict, writeJSON, fileSha } from './l
 import { err } from './errors.mjs';
 import {
   ADVANCE_FROM_AUTOMATION, AUTOMATION_FROM_ADVANCE, DRIVER_FROM_ASSISTANCE, epicFiles, preferring,
-  SCHEMA_VERSION, stepAdvance,
+  PROJECT_FILES, SCHEMA_VERSION, stepAdvance,
 } from './manifest.mjs';
 
 const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
@@ -747,8 +747,10 @@ export function markInReview(state, step) {
 //
 // WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
-// below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); moving the skill binding out
-// of code is E6; per-step gate rules are E7; the fuller step-state model is E38. Three of the five
+// below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); per-step gate rules are E7;
+// the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
+// project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
+// between the two, once E50 can detect which skills are installed. Three of the five
 // skills that used to hand-write a seed now run `yad epic new` instead (E17b); the two that do not are
 // the product front-zero (E75 absorbs it) and the threaded change-epic (E42 owns inheritance).
 //
@@ -835,7 +837,9 @@ export const STEPS = [
 // `yad epic new` (E17, cli/epic.mjs); shape 6 is where an epic first RECORDS which profile it is on,
 // and an epic seeded before that field existed still has its route derived by matching its chain
 // (`matchLifecycleProfile`). `required` per step moves in here in E35 (deleting `SKIPPABLE_STEPS`),
-// the short chore and spike lanes are E40, and skill binding moves in at E51.
+// and the short chore and spike lanes are E40. A PROJECT-wide skill binding already exists (E6,
+// below); E51 adds a per-profile one between it and the catalogue default, so two routes can run
+// different skills for the same step.
 export const LIFECYCLE_PROFILES = [
   {
     id: 'classic',
@@ -1057,16 +1061,137 @@ const catalogueSkills = (inBuild) => Object.fromEntries(
 // The Shape authoring step a `yad next` action maps to — the skill the user invokes for that step.
 // Review (review+approve) steps are driven by the `yad gate` CLI, not a skill, so they are not here.
 // A VIEW of the catalogue; `cli/test-threads.mjs` deep-equals it against one.
+//
+// This is the engine's DEFAULT, not the final answer: a project can bind a different skill to a step
+// in `.sdlc/skills.json` (E6, below). Every caller that asks "which skill runs this step" goes through
+// `stepSkills`, which consults the project first and falls back to here.
 export const STEP_SKILL = catalogueSkills(false);
 
 // The skill that runs each Build (build) step — the build-state analogue of STEP_SKILL. `spec`
 // and `tasks` are the two legs of the SAME yad-spec ceremony (run-loop.md), so both map to yad-spec;
 // the chain renderer collapses the consecutive duplicate. `engineer-review` is the human merge gate.
+// Like STEP_SKILL, this is the DEFAULT a project overrides in `.sdlc/skills.json` — read it through
+// `stepSkills`, not directly, or the binding is silently ignored.
 export const BUILD_STEP_SKILL = catalogueSkills(true);
 
 // The fixed Build order. Used to derive the "remaining chain" from the active step onward even if a
 // repo's `steps` array is partial or out of order. The catalogue's own order IS this order.
 const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.id);
+
+// ---- skill binding (E6) --------------------------------------------------------------------------
+//
+// WHICH skill runs a step is a project's choice, not the engine's. The catalogue above still ships a
+// default for every step — that is what `STEP_SKILL` / `BUILD_STEP_SKILL` hold, and a project that
+// binds nothing behaves exactly as it did before. What changes here is that the default is no longer
+// the only possible answer: `.sdlc/skills.json` can name a different skill for a step, or several.
+//
+// WHY THIS IS A FILE AND THE CATALOGUE IS NOT. The catalogue says what a step IS — its phase, its
+// artifact, what reviews it — and those are facts about the lifecycle this engine implements, so they
+// stay in code where they cannot drift. WHO does the work is a different kind of fact: it depends on
+// which skills a team has installed and which harness they run. E3 deletes the BMAD personas from the
+// engine, and E11 supports harnesses other than Claude Code; neither is possible while the only
+// answer to "who authors the architecture" is a string compiled into this file.
+//
+// THE FILE WINS, AND THE DOCTOR ONLY REPORTS. Same discipline as `workItemType` and the lifecycle
+// profile: a project may bind a skill this engine has never heard of — that is the whole point, since
+// the engine cannot know what a team installed. So nothing here validates a skill NAME. `yad doctor`
+// reports a binding on a step id the catalogue does not know, and changes nothing. Detecting which
+// skills are actually installed is E50; per-profile defaults are E51.
+//
+// SEVERAL SKILLS PER STEP IS A CHAIN, NEVER A PANEL (closed decision 7). They run in the order given,
+// each one seeing what the one before it produced, and the LAST output is the artifact. A panel — run
+// three, pick one — needs a picking step, which is either a human reading three architectures or an AI
+// judge nobody should trust inside a governance tool. One skill is the default; more is opt-in, and
+// every surface that prints a chain of more than one says it costs more.
+//
+// The file, all of it optional:
+//
+//   {
+//     "schemaVersion": 6,
+//     "steps": {
+//       "architecture": "my-architecture-skill",
+//       "stories": ["shape-the-stories", "yad-stories"]
+//     }
+//   }
+//
+// A value may be one skill or a list of them; both are read back as a list, so nothing downstream has
+// to handle two shapes. The wrapper object exists so that E50 and E51 can add keys beside `steps`
+// without the file changing shape.
+
+// The catalogue's own answer for a step, Shape or Build. One lookup, because a step id belongs to
+// exactly one of the two tables (`catalogueSkills` splits them on the same `phase === 'build'` rule),
+// and a caller asking "which skill runs `implement`" should not have to know which half it is in.
+// `__proto__: null` because this is looked up by a step id read out of a project's `state.json`, and
+// on a normal object literal `Object.prototype` answers for `constructor`, `toString` and friends. A
+// chain carrying a step called `constructor` would otherwise resolve its "skill" to a function.
+const CATALOGUE_SKILL = { __proto__: null, ...STEP_SKILL, ...BUILD_STEP_SKILL };
+
+// Read a raw parsed `.sdlc/skills.json` into `{ steps: { <id>: [skill, …] } }`.
+//
+// Junk is DROPPED here rather than rejected, and that is deliberate: this runs inside `yad next`,
+// which must keep working on a project whose config file someone mistyped. An empty string, an empty
+// list, a number, a nested object — each simply leaves that step on its catalogue default, and
+// `yad doctor` is what tells the user their line did nothing. A command that refuses to say what to do
+// next because a config file has a stray comma would be the worse failure.
+// Written with `defineProperty`, not `out[id] = …`. A plain assignment of the key `__proto__` sets
+// the object's PROTOTYPE instead of adding a key, so a binding spelled that way would vanish
+// completely — unlisted by `yad skill list` and unreported by all three doctor checks, which is
+// exactly the invisible binding those checks exist to catch. The object keeps its normal prototype;
+// `stepSkills` guards the LOOKUP side with `Object.hasOwn` instead.
+//
+// Consecutive duplicates are collapsed, because running the same skill twice in a row means nothing
+// and the two surfaces would disagree about it: the rendered Build chain folds them (that is what
+// `dedupeConsecutive` has always done for spec+tasks) while the cost note counted them, so a step
+// bound to `["a", "a"]` would be billed for two runs and shown as one.
+export function normalizeBindings(raw) {
+  const out = {};
+  const steps = isPlainObject(raw) ? raw.steps : null;
+  if (isPlainObject(steps)) {
+    for (const [id, value] of Object.entries(steps)) {
+      const list = dedupeConsecutive((Array.isArray(value) ? value : [value])
+        .filter((s) => typeof s === 'string' && s.trim())
+        .map((s) => s.trim()));
+      if (list.length) Object.defineProperty(out, id, { value: list, enumerable: true, writable: true, configurable: true });
+    }
+  }
+  return { steps: out };
+}
+
+// The project's bindings, or the empty set when the file is absent or unreadable.
+export const loadSkillBindings = (root) =>
+  normalizeBindings(readJSON(path.join(root, PROJECT_FILES.skillsConfig), null));
+
+// Which skills run a step, in order. The project's binding when it has one, else the catalogue's
+// single default, else nothing at all — a Shape review gate is driven by `yad gate`, not by a skill,
+// and an unbound one honestly has none.
+//
+// `bindings` is a PARAMETER, not a read from disk, so a test can hand this function a binding that
+// disagrees with the catalogue. A resolver that opened the file itself would be untestable against
+// any project but the one the test happens to be standing in.
+export function stepSkills(stepId, bindings = null) {
+  // `Object.hasOwn`, not a bare lookup. The id comes out of a project's `state.json`, and on a plain
+  // object `Object.prototype` answers for `constructor`, `toString` and friends — so a chain carrying
+  // a step called `constructor` resolved its "skill" to a function, and `yad next` threw trying to
+  // spread it. The catalogue map below is `__proto__: null` for the same reason.
+  const steps = bindings?.steps;
+  const bound = isPlainObject(steps) && Object.hasOwn(steps, stepId) ? steps[stepId] : null;
+  if (Array.isArray(bound) && bound.length) return [...bound];
+  const fallback = CATALOGUE_SKILL[stepId];
+  return typeof fallback === 'string' ? [fallback] : [];
+}
+
+// The two keys every action object carries for its skill, from one resolved list.
+//
+// `skill` STAYS A STRING and is the first of the chain, because ~20 call sites and `yad next --json`
+// read it that way and rule 3 keeps an old name working for a whole major. `skills` is added only
+// when the chain is longer than one — NOT always-present-null like `parallel` beside it. That is a
+// deliberate departure from the neighbouring field: `cli/test-golden.mjs` deep-equals this output
+// against a frozen v3 project, and rule 6 says a frozen project's answers never change, so a key that
+// appeared on every action would break it. A project that binds nothing gets byte-identical output.
+export const skillFields = (ids) => ({
+  skill: ids[0] ?? null,
+  ...(ids.length > 1 ? { skills: ids } : {}),
+});
 
 // ---- the six phases ------------------------------------------------------------------------------
 //
@@ -1196,7 +1321,11 @@ export const phaseSteps = (phaseId) => Object.keys(STEP_PHASE).filter((s) => STE
 // yad-spec → yad-implement → yad-checks → yad-engineer-review, matching the Build mental model.
 // Folds against the last KEPT element (not the raw neighbor) so a dropped null between duplicates can't
 // reintroduce one.
-function dedupeConsecutive(skills) {
+//
+// Exported because `yad next` has to fold the SAME way to know how much of `chain` belongs to the
+// active step. A second copy of this rule there would agree until the first step bound to the same
+// skill twice, which folds to one entry in the chain and two in the step's own list.
+export function dedupeConsecutive(skills) {
   const out = [];
   for (const s of skills) if (s && s !== out[out.length - 1]) out.push(s);
   return out;
@@ -1206,7 +1335,7 @@ function dedupeConsecutive(skills) {
 // remaining chain. The active step is `currentStep`'s entry, or the first step not yet `done`. Returns
 // `shipped: true` only when there ARE steps and every one is `done`; an empty/missing steps array is
 // `unknown` (not-started), NEVER shipped — otherwise a half-seeded file would render a false "shipped ✓".
-export function buildNextForRepo(repoState = {}) {
+export function buildNextForRepo(repoState = {}, { bindings = null } = {}) {
   const steps = Array.isArray(repoState.steps) ? repoState.steps : [];
   const byId = new Map(steps.map((s) => [s.id, s]));
   // Empty/half-seeded file ⇒ unknown (not-started), NEVER shipped. Every step done ⇒ shipped.
@@ -1223,7 +1352,7 @@ export function buildNextForRepo(repoState = {}) {
   // The remaining chain: the active step + every later step in the canonical order, mapped to skills.
   const from = BUILD_STEP_ORDER.indexOf(active.id);
   const tail = from === -1 ? [active.id] : BUILD_STEP_ORDER.slice(from);
-  const chain = dedupeConsecutive(tail.map((id) => BUILD_STEP_SKILL[id] || null));
+  const chain = dedupeConsecutive(tail.flatMap((id) => stepSkills(id, bindings)));
   return {
     step: active.id,
     status: active.status || 'blocked',
@@ -1233,7 +1362,7 @@ export function buildNextForRepo(repoState = {}) {
     // that removes `automation`; until then a step carrying only `advance` still reports correctly.
     automation: AUTOMATION_FROM_ADVANCE[stepAdvance(active)] || 'human_approve',
     locked: !!active.locked,
-    skill: BUILD_STEP_SKILL[active.id] || null,
+    ...skillFields(stepSkills(active.id, bindings)),
     shipped: false,
     chain,
   };
@@ -1241,11 +1370,11 @@ export function buildNextForRepo(repoState = {}) {
 
 // PURE: map every parsed build-state object → its per-repo next sub-steps. `buildStates` is the array
 // `loadLedger` reads from build-state/*.json. Repos are sorted for a stable, machine-independent order.
-export function buildNextActions(buildStates = []) {
+export function buildNextActions(buildStates = [], { bindings = null } = {}) {
   return buildStates.map((bs) => ({
     story: bs.story || null,
     repos: Object.keys(bs.repos || {}).sort()
-      .map((repo) => ({ repo, ...buildNextForRepo(bs.repos[repo]) })),
+      .map((repo) => ({ repo, ...buildNextForRepo(bs.repos[repo], { bindings }) })),
   }));
 }
 
@@ -1330,14 +1459,15 @@ export function repairState(state) {
 // PURE next-action resolver for ONE epic's ledger — what `yad next <epic>` prints. Reads state + the
 // recorded review PRs only. kind:
 //   'new'         — no epic state yet (seed one with yad-epic)
-//   'author'      — invoke a Shape authoring skill (STEP_SKILL)
+//   'author'      — invoke a Shape authoring skill (whatever `stepSkills` resolves for the step)
 //   'review-open' — open the review PR/MR (`yad gate open`)
 //   'review-sync' — a review PR/MR is open; sync its state (`yad gate sync`)
 //   'build'       — Shape approved (ready-for-build); Build can run
-export function nextAction(ledger, { epic } = {}) {
+export function nextAction(ledger, { epic, bindings = null } = {}) {
   const state = ledger?.state;
   const epicId = epic || state?.epicId || null;
-  if (!state) return { epicId, kind: 'new', skill: 'yad-epic', why: 'no epic state yet — seed it with yad-epic' };
+  // No ledger yet: the action is to author the `epic` step, so it names whatever runs that step here.
+  if (!state) return { epicId, kind: 'new', ...skillFields(stepSkills('epic', bindings)), why: 'no epic state yet — seed it with yad-epic' };
 
   // EP-discovery ("epic zero") is the project front-zero: a 2-step author→review chain with no Build
   // part and no parallel track. Resolve its action in isolation so the feature-epic logic below never
@@ -1352,7 +1482,7 @@ export function nextAction(ledger, { epic } = {}) {
     if (!dstep) return { epicId, kind: 'discovery-done', step: 'discovery-done', why: 'discovery is done' };
     if (dstep.type === 'author') {
       return { epicId, kind: 'author', step: dstep.id, status: dstep.status,
-        skill: STEP_SKILL[dstep.id] || null, artifact: dstep.artifact,
+        ...skillFields(stepSkills(dstep.id, bindings)), artifact: dstep.artifact,
         why: `${dstep.id} is ${dstep.status} — author ${dstep.artifact}` };
     }
     const dpr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(dstep.artifact));
@@ -1386,12 +1516,14 @@ export function nextAction(ledger, { epic } = {}) {
   // The parallel test-cases track stays workable even once the epic is ready-for-build.
   const tc = state.steps.find((s) => s.id === 'test-cases');
   const tcOpen = !!tc && tc.status !== 'done' && tc.status !== 'blocked';
-  const parallel = tcOpen ? { step: 'test-cases', skill: STEP_SKILL['test-cases'], artifact: tc.artifact } : null;
+  const parallel = tcOpen
+    ? { step: 'test-cases', ...skillFields(stepSkills('test-cases', bindings)), artifact: tc.artifact }
+    : null;
 
   if (state.currentStep === 'ready-for-build') {
     // Once stories enter Build, surface each story/repo's CONCRETE next sub-step (spec →
     // implement → checks → engineer-review) from build-state, not one static "run Build" hint.
-    const builds = buildNextActions(ledger?.buildStates || []);
+    const builds = buildNextActions(ledger?.buildStates || [], { bindings });
     const lanes = builds.flatMap((b) => b.repos);
     const open = lanes.filter((r) => !r.shipped);
     if (builds.length) {
@@ -1408,14 +1540,14 @@ export function nextAction(ledger, { epic } = {}) {
   const step = state.steps.find((s) => s.id === state.currentStep)
     || state.steps.find((s) => s.status !== 'done');
   if (!step) {
-    const builds = buildNextActions(ledger?.buildStates || []);
+    const builds = buildNextActions(ledger?.buildStates || [], { bindings });
     return { epicId, kind: 'build', step: 'ready-for-build', parallel,
       builds: builds.length ? builds : undefined, why: 'all Shape steps are done' };
   }
 
   if (step.type === 'author') {
     return { epicId, kind: 'author', step: step.id, status: step.status, parallel,
-      skill: STEP_SKILL[step.id] || null, artifact: step.artifact,
+      ...skillFields(stepSkills(step.id, bindings)), artifact: step.artifact,
       why: `${step.id} is ${step.status} — author ${step.artifact}` };
   }
 

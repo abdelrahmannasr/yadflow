@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -269,6 +269,12 @@ export function projectChecks(checks, root) {
     else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in Claude Code to detect the CLI');
     else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
+
+  // skills.json: which skill runs which step, when the project does not want the engine's default.
+  // Called from HERE rather than from `collectDoctor` beside the other E6 code so its findings land
+  // inside the `project` block. The renderer prints a header every time the section CHANGES, so a
+  // `project` check added after the `shape` section prints the word "project" a second time.
+  skillBindingChecks(checks, root);
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
   let registry = { repos: [] };
@@ -1085,6 +1091,79 @@ export function profileChecks(checks, root) {
       `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
       'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
     );
+  }
+}
+
+// `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
+// default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
+//
+// REPORTS, NEVER CORRECTS, and never judges a skill NAME. The engine cannot know which skills a team
+// has installed — that is E50's job — and binding a skill this release has never heard of is the whole
+// point of the file. So the only things checked here are the ones the engine CAN know: does the file
+// parse, is a value usable, and is the step id one this engine runs at all.
+//
+// Three warnings, all of them "your line did nothing", which is the failure a config file makes easy
+// to miss. A typo in a step id is silent otherwise: the binding sits in the file, `yad next` never
+// looks it up, and the team concludes the feature does not work.
+export function skillBindingChecks(checks, root) {
+  const rel = PROJECT_FILES.skillsConfig;
+  const file = path.join(root, rel);
+  if (!exists(file)) return;
+
+  let raw;
+  try {
+    raw = readJSONStrict(file, null);
+  } catch (e) {
+    check(checks, 'skills', 'project', 'fail', `${rel} does not parse [${e.code || 'YAD-STATE-001'}]`,
+      e.hint || 'fix the JSON or restore it from git');
+    return;
+  }
+  if (!isPlainObject(raw)) {
+    check(checks, 'skills', 'project', 'fail', `${rel} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
+    return;
+  }
+  // `steps` missing entirely is fine — a file holding only `schemaVersion` is what `yad skill unbind`
+  // leaves behind when the last binding goes, and it binds nothing, correctly.
+  if (raw.steps !== undefined && !isPlainObject(raw.steps)) {
+    check(checks, 'skills', 'project', 'fail', `${rel}: \`steps\` must be a JSON object [YAD-STATE-002]`,
+      'expected `"steps": { "<step-id>": "<skill>" }`');
+    return;
+  }
+
+  const bindings = normalizeBindings(raw);
+  const bound = Object.entries(bindings.steps);
+  // Dropped by `normalizeBindings` — a number, an empty string, an empty list. The line is in the file
+  // and does nothing, which is the one thing a person editing it would never guess.
+  const unusable = Object.keys(raw.steps || {})
+    .filter((id) => !Object.hasOwn(bindings.steps, id));
+  // A step id this engine does not run. The file still wins — a project may hold a step from a newer
+  // release — so this changes nothing and only says the binding is asleep.
+  const unknown = bound.map(([id]) => id).filter((id) => !stepDef(id));
+  // A step id the engine knows but runs no skill for: a Shape review gate, driven by `yad gate`.
+  const gates = bound.map(([id]) => id).filter((id) => stepDef(id) && !stepDef(id).skill);
+
+  if (unusable.length) {
+    check(checks, 'skills', 'project', 'warn',
+      `${rel}: ${unusable.length} binding(s) name no skill and are ignored — ${unusable.join(', ')} [YAD-CFG-006]`,
+      'each value must be a skill name or a non-empty list of them');
+  }
+  if (unknown.length) {
+    check(checks, 'skills:unknown-step', 'project', 'warn',
+      `${rel} binds ${unknown.length} step(s) this yadflow does not run: ${unknown.join(', ')}`,
+      'check the spelling against `yad skill list`, or upgrade yadflow if the step is from a newer release');
+  }
+  if (gates.length) {
+    check(checks, 'skills:review-step', 'project', 'warn',
+      `${rel} binds ${gates.join(', ')}, which no skill runs — review gates are driven by \`yad gate\``,
+      'bind the author step instead (for example `architecture`, not `architecture-review`)');
+  }
+  // Its OWN id, not `skills` again. A file with one good binding and one broken line fires both, and
+  // two checks sharing an id put a green tick under the complaint in prose — and, worse, let a `--json`
+  // consumer keying by id overwrite the warning with the tick.
+  if (bound.length) {
+    const chained = bound.filter(([, list]) => list.length > 1).length;
+    check(checks, 'skills:bound', 'project', 'ok',
+      `skills: ${bound.length} step(s) bound${chained ? `, ${chained} to more than one skill` : ''}`);
   }
 }
 

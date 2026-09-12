@@ -7,6 +7,7 @@ import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 import { isValidEpicId } from '../cli/epic-state.mjs';
 import { runEpicNew } from '../cli/epic.mjs';
+import { runSkillBind, runSkillList, runSkillUnbind } from '../cli/skill.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
 import { reviewTrailer, reviewContext, reviewNudge, reviewReconcile, reviewWalkthrough } from '../cli/review.mjs';
@@ -99,6 +100,12 @@ ${c.bold('Where am I / what next')}
   yad next --all                       Every active epic's next action at once
   yad next [<epic>] --json             The same answer as a machine-readable action object (for
                                        agents/CI) — always every epic, so --all is implied
+  yad skill list [--json]              Which skill runs which step, and whether that is this
+                                       project's choice or the engine's default
+  yad skill bind <step> <skill> [<skill> ...]
+                                       Bind a step to a skill of your own. Several skills run in
+                                       the order given, one after another — each costs tokens
+  yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
   yad skip <epic> ui-design --reason <text>   Mark an optional step N/A for this epic (only
                                        ui-design today) — a backend/API/data epic with no UI.
                                        Stays visible & auditable (pre-done, gate short-circuited);
@@ -322,6 +329,16 @@ async function main() {
         process.exitCode = 1; break;
       }
       await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, today, json: o.json });
+      break;
+    }
+    case 'skill': {
+      const [, action, step, ...rest] = o._;
+      if (action === 'list' || action === undefined) { runSkillList(o.dir, { json: o.json }); break; }
+      if (action === 'bind') { runSkillBind(o.dir, { step, skills: rest }); break; }
+      if (action === 'unbind') { runSkillUnbind(o.dir, { step }); break; }
+      log(c.red(`unknown skill action: ${action} (list, bind, unbind)`));
+      log('usage: yad skill list [--json] | yad skill bind <step> <skill> [<skill> ...] | yad skill unbind <step>');
+      process.exitCode = 1;
       break;
     }
     case 'next': {

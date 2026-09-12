@@ -30,9 +30,9 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok } from './lib.mjs';
 import {
-  DISCOVERY_EPIC, epicRoot, isGenesisType, isValidEpicId, lifecycleProfile, readFrontmatter,
-  seedableProfiles, seedState, STEP_SKILL, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON,
-  writeState,
+  DISCOVERY_EPIC, epicRoot, isGenesisType, isValidEpicId, lifecycleProfile, loadSkillBindings,
+  readFrontmatter, seedableProfiles, seedState, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType,
+  writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -173,18 +173,30 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   const first = state.steps[0];
   // A stub has no runnable step — its whole chain is blocked behind the sentinel — so the skill it
   // names is the one that wakes it, not the one that would have authored its first step.
-  const skill = stub ? 'yad-backfill' : (STEP_SKILL[first.id] || null);
+  //
+  // Everything else asks the PROJECT first (E6): a team that bound its own skill to `epic` must be
+  // told to run that one, or this command would hand a brand-new epic straight to a skill their
+  // `yad next` will never name again. `yad-backfill` is the one exception, because waking a stub is
+  // the engine's own `promote` verb rather than a step on any chain.
+  const skills = stub ? ['yad-backfill'] : stepSkills(first.id, loadSkillBindings(root));
+  const skill = skills[0] || null;
+  // `nextSkills` appears only for a bound chain, the same rule `yad next --json` follows — a key that
+  // showed up on every seed would be one more always-null field for every reader to ignore.
   if (json) {
     return log(JSON.stringify({
       ok: true, epic, type, profile, stub, currentStep: state.currentStep,
       steps: state.steps.map((s) => s.id), next: skill,
+      ...(skills.length > 1 ? { nextSkills: skills } : {}),
     }, null, 2));
   }
   ok(`${epic} seeded — ${stub ? 'stub anchor' : typeNoun(type)} on the ${c.bold(profile)} route (${state.steps.length} steps)`);
   info(`chain: ${state.steps.map((s) => (!stub && s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
   hand(stub
     ? `every step is blocked behind \`${state.currentStep}\` — document the code with the ${skill} skill, then \`yad-backfill promote\` to wake the chain. Defects can thread off it now`
-    : `${first.id} is open${skill ? ` — run the ${skill} skill to author ${first.artifact}` : ''}`);
+    : `${first.id} is open${skill ? ` — run the ${skills.join(' skill, then the ')} skill to author ${first.artifact}` : ''}`);
+  // Closed decision 7: every surface that prints a chain of more than one says what the extra runs
+  // cost. This one prints a chain too.
+  if (skills.length > 1) info(`${skills.length} skills run for this step, one after another — each one costs tokens`);
   // Only worth saying when there is no header yet. When one exists it is where the type came FROM, so
   // telling its author to go and write what they already wrote reads as the command not having looked.
   if (!fs.existsSync(mdPath) && !stub) {
@@ -192,7 +204,7 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
     // `lineage-check.sh` inside the user's own repo, which is refreshed by a different command
     // (`yad update`) with no ordering against this one. A header carrying only `type:` reads to that
     // gate as an epic with no type at all.
-    info(`epic.md is authored by that skill, not by this command. Give it \`kind: ${type}\` and \`type: ${type}\` so the ledger and the header agree.`);
+    info(`epic.md is authored by ${skills.length > 1 ? 'those skills' : 'that skill'}, not by this command. Give it \`kind: ${type}\` and \`type: ${type}\` so the ledger and the header agree.`);
   }
   // Nothing was committed here, and on a verified Product the seed HAS to ride the first review PR:
   // `ledger-guard` exempts a new epic's ledger only while it is absent from the base ref (creation,

@@ -14,6 +14,7 @@ import {
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { validateLogin, rolesForScope, setScopeRoles, deleteScopeRoles } from './platform.mjs';
+import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
@@ -779,10 +780,15 @@ export async function runSetup(root, opts = {}) {
   log('');
   // Tailored fastest path to the first epic, by profile.
   log(c.bold('Next:'));
+  // Which skill authors the epic is the PROJECT's setting (E6), and `yad setup` re-runs on a project
+  // that already has one — so naming the catalogue default here would send a team to a skill their own
+  // `yad next` never mentions again. `yad-backfill` stays literal: waking a brownfield anchor is the
+  // engine's own promote verb, not a step on any chain.
+  const epicSkill = stepSkills('epic', loadSkillBindings(root))[0] || 'yad-epic';
   if (codebase === 'brownfield' && registry.repos.length) {
-    hand('capture what already exists first: run `yad-backfill`, then your first epic with `yad-epic`');
+    hand(`capture what already exists first: run \`yad-backfill\`, then your first epic with \`${epicSkill}\``);
   } else {
-    hand('author your first epic: run `yad-epic`');
+    hand(`author your first epic: run \`${epicSkill}\``);
   }
   hand('your single next action, anytime: `yad next`');
   if (!solo && !(readJSON(productPath, null)?.roster || []).length) {

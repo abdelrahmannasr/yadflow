@@ -28,6 +28,7 @@ export const CODES = {
   'YAD-CFG-003': 'testing.json names an unknown testing tool (expected one of config.yaml testing.tools, or none)',
   'YAD-CFG-004': 'learning.json names an unknown learning tool (expected one of config.yaml learning.tools, or none)',
   'YAD-CFG-005': 'hub.json sets a platform but is missing git_url (required to scope auth + open PRs)',
+  'YAD-CFG-006': 'skills.json binds a step to something that is not a skill name (expected a string, or a non-empty list of strings)',
 };
 
 export const err = (code, message, hint) => new YadError(code, message, hint);

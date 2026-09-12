@@ -508,6 +508,12 @@ surfaces (`contract`, `auth`, `payments`):
 - **Start an epic from the CLI:** `yad epic new <slug>` seeds its lifecycle — the step chain from a
   profile, plus empty approval and comment ledgers and the `reviews/` folder. `--type feature|chore`; a
   change, defect or hotfix threads off an existing epic, so `yad-change` seeds those instead.
+- **Use your own skill for a step:** the engine ships a default for every lifecycle step, and
+  `yad skill bind <step> <skill>` replaces it for this project (recorded in `.sdlc/skills.json`).
+  `yad next` names your choice from then on. Pass several skills and they run as a **chain**, in the
+  order given, each one seeing what the one before it produced — every extra one is another model run,
+  so the command tells you the cost. `yad skill list` shows what runs each step today and whose choice
+  it is; `yad skill unbind <step>` goes back to the default.
 - **Keep the install in sync with the CLI** (run from the Product):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).

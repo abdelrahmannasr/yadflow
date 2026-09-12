@@ -64,6 +64,22 @@ be missing from another.
 
 The catalogue is code. Nothing about it is written into `state.json`, so no file shape changed.
 
+**The one column a project overrides is the skill.** Which skill runs a step is not a fact about the
+lifecycle — it depends on what a team installed — so it lives in `.sdlc/skills.json`, a Product-level
+file the engine reads before it falls back to the catalogue (E6):
+
+```json
+{ "schemaVersion": 6, "steps": { "architecture": "our-arch-skill", "stories": ["shape-it", "yad-stories"] } }
+```
+
+A value may be one skill or a list; a list runs as a **chain**, in order, each skill seeing what the
+one before it produced, and the last output is the artifact. Write it with `yad skill bind <step>
+<skill>…` (`yad skill list` shows what runs each step now, `yad skill unbind <step>` drops the line).
+Nothing checks the skill NAME — the engine cannot know what you installed — but `yad doctor` reports a
+binding that will never run: a value that is not a skill name (`YAD-CFG-006`), a step id this release
+does not know (`skills:unknown-step`) and a review gate, which `yad gate` drives (`skills:review-step`).
+It never rewrites the file.
+
 **When a chain disagrees with the catalogue, the chain wins.** `yad-discovery` and `yad-change` still
 write a chain by hand, a project may run a chain from a newer release, and leaving a step out is normal
 — not every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
@@ -380,9 +396,11 @@ created when a story enters Build; all dials start `advance: human` (`automation
 `automation.default`).
 
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
-story/repo's `currentStep` into the next build sub-step (`spec`/`tasks` → `yad-spec`, `implement` →
-`yad-implement`, `checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`) and prints it with
-the remaining chain and the step's advance dial — so Build is guided, not just hinted at.
+story/repo's `currentStep` into the next build sub-step and prints it with the remaining chain and the
+step's advance dial — so Build is guided, not just hinted at. The skill it names comes from
+`.sdlc/skills.json` when the project bound one (see "The one column a project overrides is the skill"
+above); unbound, the defaults are `spec`/`tasks` → `yad-spec`, `implement` → `yad-implement`,
+`checks` → `yad-checks`, `engineer-review` → `yad-engineer-review`.
 
 ## `trust-log.json` (shard-then-fold)
 Append-only ledger, the Build analogue of `approvals.json`. **This is the evidence base** that
