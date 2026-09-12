@@ -44,7 +44,7 @@ The per-epic state machine.
 | `epicId` | The stable `EP-<slug>` ID. Never renamed. |
 | `createdAt` | ISO date the epic was created. |
 | `type` | The work-item type — `feature` \| `change` \| `defect` \| `hotfix` \| `chore` — copied from `epic.md`. Shape 5 on. **Not the same field as `steps[].type`**, which is `author` \| `review+approve`, and not the same as the top-level `kind` a stub or the discovery front-zero carries. |
-| `profile` | The lifecycle route this chain came from — `classic` \| `analysis-first` \| `discovery`. Shape 6 on. See "Lifecycle profiles" below. |
+| `profile` | The lifecycle route this chain came from — `classic` \| `analysis-first` \| `chore` \| `spike` \| `discovery`. Shape 6 on. See "Lifecycle profiles" below. |
 | `currentStep` | `id` of the step the workflow is waiting on right now. |
 | `steps[]` | Ordered list of every Shape step step. |
 
@@ -119,16 +119,23 @@ decides it from the step id, and a second copy of that rule sitting unread in th
 free to drift.
 
 **Each epic records its route in `state.json` as `profile`** (shape 6). The value is one of `classic`,
-`analysis-first` and `discovery`. `yad epic new` writes it when it seeds the chain, the seeding skills
-write it in their templates, and `yad migrate` fills it in for an epic that predates the field by
-reading the chain that epic already carries.
+`analysis-first`, `chore`, `spike` and `discovery`. `yad epic new` writes it when it seeds the chain,
+the seeding skills write it in their templates, and `yad migrate` fills it in for an epic that predates
+the field by reading the chain that epic already carries.
+
+**`yad migrate` only ever writes one of the first three.** It answers a question about the past, and
+the matching rule picks the SHORTEST route a chain fits — so a chain built only from `epic`,
+`epic-review`, `stories` and `stories-review` reads as `chore` now and read as `classic` before. No
+chain yadflow has ever seeded is affected, because every shipped seed carries `architecture` and no
+short lane has it; the freeze is what makes that a guarantee rather than a fact about today's data. An
+epic seeded on a short lane never needs the stamp: `yad epic new` writes its `profile` at seed time.
 
 The chain is still the truth. The recorded name says which route the epic was STARTED on; matching the
 chain (`matchLifecycleProfile`) says which route the steps are on NOW, and `yad doctor` compares them:
 
 | Check | Fires when |
 |---|---|
-| `profile:unknown` | `profile` holds a value that is not one of the three |
+| `profile:unknown` | `profile` holds a value no release carries |
 | `profile:disagree` | the chain is cleanly on a route, and it is not the one recorded |
 | `step:off-route` | the chain is on no route at all — a step no route has, or two out of order |
 
@@ -189,6 +196,26 @@ command runs before the artifact exists; `yad gate open` closes it when the gate
 - **Without analysis** — the `classic` route, 10 steps, and the default:
   `epic → epic-review → … → stories-review → test-cases → test-cases-review`. Seeded `currentStep` is
   `epic`, which starts `in_progress`.
+
+**The two short lanes.** Not every piece of work is the size of a feature, and before these the only
+way to make the chain shorter was to skip steps — which `classic` does not allow, since only
+`ui-design` is optional on it.
+
+- **`chore`, 4 steps:** `epic → epic-review → stories → stories-review`. Upkeep somebody has already
+  decided on: a dependency bump, a CI move.
+- **`spike`, 6 steps:** the same lane with `analysis → analysis-review` in front. A timeboxed
+  question, where finding the answer is the work.
+
+Both drop `architecture`, `ui-design` and `test-cases` with their gates, and each is **absent, not
+`optional`** — a recorded reason for skipping a step the route never had is noise in the audit trail.
+Dropping the architecture gate drops the contract with it: a short-lane epic has no `contract.md` and
+no lock, which is the point. **Work that moves the shared cross-repo surface belongs on `classic`,
+whatever its size.**
+
+Neither lane drops `epic` or `stories`, and that is not a matter of taste: `epic.md` carries the
+work-item type and the `parent:` lineage, and `stories-review` is the step that makes the epic ready
+for Build. The type and the route are chosen separately — `--type chore --profile classic` is right
+for large upkeep that does touch the contract.
 
 Both seeded values move to the review gate when `yad gate open` runs, which is also what closes the
 authoring step. Before E17b the seeds recorded the gate directly, because a skill only seeded once it

@@ -49,6 +49,13 @@ must collectively satisfy the epic's acceptance signals and stay within the cont
   marked N/A for an epic with no user-facing surface (state.json shows it `skipped`). When there is no
   UI design, proceed without UI screens; the epic's acceptance signals + contract remain the source of
   truth for the stories.
+- **Short-lane-safe:** `architecture.md` and `contract.md` may BOTH be absent, and on the `chore` and
+  `spike` routes they always are — those lanes carry no architecture step, so there is no locked
+  contract for this epic. Read `state.json`'s `profile` key first. On a short lane, write the stories
+  from `epic.md` alone and say so in each story's "Contract & design touchpoints" section. Because
+  there is no lock, a story on a short lane **must not change the shared cross-repo surface**: if the
+  work turns out to need that, stop and say so — the epic belongs on `classic`, which has the
+  architecture gate that locks the surface.
 
 ### Step 2b — Load existing-code context (make the brain code-aware)
 Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context`). For **each repo in

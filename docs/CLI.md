@@ -18,7 +18,7 @@ no clone needed.
 | Command | What it does |
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
-| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first` (default `classic`) — the `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `blocked`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script — its `next` key names the skill to run now, with a `nextSkills` array beside it when the step is bound to a chain (the same rule `yad next --json` follows: the array appears only when there is more than one). It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-discovery` and `yad-change` still write one, because the engine deliberately seeds neither. |
+| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first\|chore\|spike` (default `classic`) — `chore` and `spike` are the [short lanes](#the-short-lanes), and neither carries an architecture gate, so neither may move the contract surface. The `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `blocked`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script — its `next` key names the skill to run now, with a `nextSkills` array beside it when the step is bound to a chain (the same rule `yad next --json` follows: the array appears only when there is more than one). It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-discovery` and `yad-change` still write one, because the engine deliberately seeds neither. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
 | `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `project` (you bound it), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the default still runs). `--json` for a script. `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
@@ -271,14 +271,45 @@ A step id the catalogue does not carry is left to `phase:unknown`, which is the 
 ## Lifecycle profiles: the route an epic takes
 
 The step catalogue says what each step is. A **profile** says which steps an epic walks and in what
-order. Three exist, and all three are routes the tool already used — they were written by hand into
-five skill files, and are now written down once — in code, which is what `yad epic new` seeds from:
+order. Five exist, and they are written down once — in code, which is what `yad epic new` seeds from:
 
 | Profile | What it is | Used by |
 |---|---|---|
 | `classic` | The 10-step chain, starting at the epic | Most epics, and every change, defect and hotfix |
 | `analysis-first` | The 12-step chain, which puts the analysis before the epic | An idea shaped by the analyst before it becomes an epic |
+| `chore` | The upkeep lane: four steps, the epic then the stories | Work somebody has already decided on — a dependency bump, a CI move |
+| `spike` | The investigation lane: six steps, the analysis then the upkeep lane | A timeboxed question, where finding the answer is the work |
 | `discovery` | The product front-zero, two steps and no Build | The one `EP-discovery` item, which frames the whole product |
+
+The first three of those are routes the tool already used, written by hand into five skill files
+before the engine held them. `chore` and `spike` are new.
+
+### The short lanes
+
+Before them the engine had one shape of work: a dependency bump was seeded on the same 10-step chain
+as a payments rewrite. A shorter **route** says the difference honestly, once, where a person picks
+it — rather than letting every epic skip whatever it likes.
+
+Both lanes drop the same three pairs, and each is **absent** rather than optional. An optional step
+stays in the chain with a recorded reason for skipping it; a step the route never had needs no
+reason, and writing one would fill the audit trail with notes about screens nobody was going to draw.
+
+| Dropped | Why |
+|---|---|
+| `architecture` + its gate | No architecture gate means no `contract.md` and no lock. These lanes are for work that does not move the shared cross-repo surface. **Work that does move it belongs on `classic`, whatever its size.** |
+| `ui-design` + its gate | A chore is upkeep with no user-visible change, by the definition of the type. A spike's prototype is thrown away. |
+| `test-cases` + its gate | Neither lane introduces behaviour to pin. The tests guarding the code a chore touches already exist, and its Build gates still run them. |
+
+Neither lane drops `epic` or `stories`. `epic.md` is where the work-item type and the `parent:`
+lineage are authored, and an epic without one is invisible to `yad thread`. `stories` is what tags
+the repos Build runs in, and approving `stories-review` is what makes the epic ready for Build.
+
+**`spike` is `chore` with the analyst's brief in front.** The difference is whether the answer is
+already known. Upkeep is decided work; a spike is a question, so reducing the uncertainty is its first
+artifact. Everything after that is the same short route.
+
+The type and the route are chosen separately. `--type chore --profile classic` stays legal, and is
+the right call for a large piece of upkeep that does touch the contract.
 
 **Each epic records its route.** `epics/<epic>/.sdlc/state.json` carries a `profile` key from file
 shape 6 on, and `yad epic new` writes it when it seeds the chain. An epic created before that key
@@ -290,7 +321,7 @@ the steps says which route it is on **now**, and `yad doctor` compares the two:
 
 | Check | Fires when |
 |---|---|
-| `profile:unknown` | the recorded value is not one of the three |
+| `profile:unknown` | the recorded value is not one of the five |
 | `profile:disagree` | the chain is cleanly on a route, and it is not the one recorded |
 | `step:off-route` | the chain is on no route at all |
 

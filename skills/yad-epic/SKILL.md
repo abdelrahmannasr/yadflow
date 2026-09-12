@@ -162,10 +162,23 @@ seeded the 10-step one. Go to Step 5b.)*
 ```bash
 yad epic new EP-<slug>              # after Step 4: the type comes from epic.md
 yad epic new EP-<slug> --type chore # only when there is no epic.md yet
+yad epic new EP-<slug> --profile chore   # the short upkeep lane — see below
 ```
 
 That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the full **10-step** `classic` chain
-(no analysis), the empty `approvals.json` and `comments.json`, and the `reviews/` directory. Every step
+(no analysis), the empty `approvals.json` and `comments.json`, and the `reviews/` directory.
+
+**Ask which lane this work belongs on before you run it.** `classic` is the default and the right
+answer for a feature. For upkeep somebody has already decided on — a dependency bump, a CI move —
+`--profile chore` seeds a **4-step** lane instead: `epic → epic-review → stories → stories-review`,
+with no architecture, UI-design or test-case steps. `--profile spike` is the same lane with the
+analyst's brief in front, for a timeboxed question (start that one from `yad-analysis`, which owns the
+first step). Both are described in `references/state-schema.md`.
+
+A short lane has **no architecture gate, so no `contract.md` and no lock**. If the work turns out to
+move the shared cross-repo surface, it belongs on `classic`, whatever its size — say so and re-seed
+before any story is written. The work-item type is a separate choice: `--type chore --profile classic`
+is right for large upkeep that does touch the contract. Every step
 is `advance: human` and locked; `epic` is open and the rest are blocked. The chain comes from the step
 catalogue and the `classic` lifecycle profile in the engine (`references/state-schema.md`), so there is
 one definition of it and no copy here to drift from it.
