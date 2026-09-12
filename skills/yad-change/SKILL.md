@@ -130,7 +130,12 @@ root_cause: <tag>
 <!-- what is wrong / what must change, and why now -->
 
 ## Resolved current truth (input)
-<!-- run `yad thread <parent>`: which epic currently owns each artifact this change builds on -->
+<!-- run `yad thread <parent>`: which epic currently owns each artifact this change builds on.
+     Run `yad doctor` FIRST and resolve anything it reports about the parent's ledger. That map is
+     built from each epic's `state.json`, and a ledger the engine cannot parse falls back to "this
+     epic owns everything" — the safe answer for a read-only display, and the wrong one to copy into
+     an `inheritedFrom`, which is a provenance record. An artifact shown as `(none)` has no owner:
+     the parent's route never produced it, so there is nothing to inherit and nothing to point at. -->
 
 ## Re-authored vs inherited
 <!-- the Step 2 split, for the reviewers -->
