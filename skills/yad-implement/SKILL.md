@@ -92,6 +92,12 @@ A contract change means the diff alters the agreed cross-repo shape itself.
   route back to the **architecture gate** to amend and re-lock `contract.md` first. Only then return
   here, and record `Contract-Change: yes` in the commit body (the Step C contract-check will require a
   matching, already-updated contract).
+- **Short-lane epics have no contract and no architecture gate.** Read
+  `epics/<epic>/.sdlc/state.json`'s `profile`: on `chore` and `spike` there is no `contract.md`, so
+  there is no surface block to compare against and **no gate to route back to**. Never write
+  `Contract-Change: yes` on a short-lane task — the CI check has no lock to verify it against and
+  would let it through. If the task needs the shared cross-repo surface to change, **STOP and escalate
+  to a human**: the work belongs to a new epic on `classic`.
 
 ### Step 6 — Commit on the task branch
 Stage only the declared files. Commit with the convention: a conventional subject, a short body, and a

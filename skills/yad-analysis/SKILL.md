@@ -121,9 +121,12 @@ yad epic new EP-<slug> --profile analysis-first --type <feature|chore>
 yad epic new EP-<slug> --profile spike --type <feature|chore>   # a timeboxed investigation
 ```
 
-That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json` with the full **12-step** chain
-(`analysis` before `epic`), the empty `approvals.json` and `comments.json`, and the `reviews/`
-directory.
+That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json`, the empty `approvals.json` and
+`comments.json`, and the `reviews/` directory. With `--profile analysis-first` the chain is the full
+**12-step** route (`analysis` before `epic`). Every step is `advance: human` and locked; `analysis` is
+open and the rest are blocked. The chain comes from the step catalogue and the lifecycle profile in
+the engine (`../yad-epic/references/state-schema.md`), so there is one definition of it and no copy
+here to drift from it.
 
 **Ask whether this is a spike before you seed.** `analysis-first` is the right answer when the
 analysis is the front of a real feature. When the work IS the investigation — a timeboxed question
@@ -132,12 +135,10 @@ instead: `analysis → analysis-review → epic → epic-review → stories → 
 architecture, UI-design or test-case steps. `analysis` is still the open first step either way, so
 every step below this one is unchanged.
 
-A spike has **no architecture gate, so no `contract.md` and no lock**. If the investigation concludes
-that the shared cross-repo surface has to move, the follow-up work belongs on `classic` — the spike
-records the finding, and a new epic builds it. Every step is `advance: human` and locked; `analysis` is open and the rest are blocked. The
-chain comes from the step catalogue and the `analysis-first` lifecycle profile in the engine
-(`../yad-epic/references/state-schema.md`), so there is one definition of it and no copy here to drift
-from it.
+A spike has **no architecture gate, so no `contract.md` and no lock**, and no step on it is optional —
+`yad skip` is refused. **Choose the route before you seed, because the choice is final:** there is no
+re-seed. If the investigation concludes that the shared cross-repo surface has to move, the follow-up
+belongs on `classic` — the spike records the finding, and a NEW epic builds it.
 
 It writes no `analysis.md`, no branch and no commit, and it refuses an epic that already has a
 `state.json`. There is no `epic.md` at this point, so pass `--type` (it defaults to `feature`).

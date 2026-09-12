@@ -334,7 +334,10 @@ the order it is written: off the route, it names whatever sits next rather than 
 `yad skip <epic> <step> --reason "<why>"` marks one N/A for one epic — pre-marked done with the reason
 recorded, visible in the chain, reversible with `--undo`. The engine keeps **no list of its own**: it
 asks the route the epic is on, so a shorter route that drops a step does not make that step skippable
-for every other epic in the project. Today every route marks the same one step, `ui-design`.
+for every other epic in the project. `classic` and `analysis-first` both mark the same one step,
+`ui-design`. The short lanes mark **none** — they leave the steps they do not need out of the chain
+altogether, so there is nothing on them to mark N/A, and `yad skip` says so rather than reporting the
+chain as broken.
 
 **The recorded route is the answer, even when the chain disagrees with it.** An epic records its route
 in `state.json`, and that is what the engine reads. Working it out from the steps instead would guess,

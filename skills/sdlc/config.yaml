@@ -52,10 +52,13 @@ output_folder: "{project-root}/_bmad-output"
 lifecycle:
   parts: [Shape, Build, Run]
   # Lifecycle PROFILES (E5) — the route an epic takes through the steps, defined in code as
-  # `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`). All three are routes the skills already seeded by
-  # hand: `classic` (the 10-step chain, `epic` first — yad-epic / yad-stub / yad-change),
-  # `analysis-first` (the 12-step chain, `analysis` before `epic` — yad-analysis) and `discovery`
-  # (the product front-zero — yad-discovery). Each epic RECORDS its route as `profile` in `state.json`
+  # `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`). Three were routes the skills already seeded by hand:
+  # `classic` (the 10-step chain, `epic` first — yad-epic / yad-stub / yad-change), `analysis-first`
+  # (the 12-step chain, `analysis` before `epic` — yad-analysis) and `discovery` (the product
+  # front-zero — yad-discovery). Two are the short lanes E40 added, which nobody seeded before:
+  # `chore` (4 steps, `epic` then `stories`) and `spike` (6, the analysis in front of the chore lane).
+  # Neither short lane carries an architecture gate, so neither has a contract of its own, and neither
+  # marks any step optional. Each epic RECORDS its route as `profile` in `state.json`
   # (file shape 6); `yad epic new` writes it when it seeds the chain, and for an epic that predates the
   # field `yad migrate` fills it in by matching the chain. The chain stays the truth — `yad doctor`
   # compares the two. NOT the `hub.json` `profile`, which is the unrelated setup record

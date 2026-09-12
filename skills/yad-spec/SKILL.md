@@ -61,6 +61,17 @@ locked surface**, not re-authored. The spec MUST stay within that surface. If th
 the contract does not define, STOP and route back to the **architecture gate** — never extend the
 contract here.
 
+- **Short-lane-safe:** read `epics/<epic>/.sdlc/state.json`'s `profile` first. On the `chore` and
+  `spike` routes there is no architecture step, so `contract.md` and `contract-lock.json` **never
+  exist** — that is the route's design, not a missing file to chase. Write the spec from the story and
+  `epic.md` alone, record `contract-lock: none` in Step 6's frontmatter, and say in the spec that this
+  epic defines no contract surface.
+- A short lane has no architecture gate to route back to. So the rule above becomes stricter, not
+  looser: if the story turns out to need the shared cross-repo surface to CHANGE, **STOP and escalate
+  to a human** — the work belongs to a new epic on `classic`. Do not write the change into a spec on a
+  short lane. The CI contract gate cannot catch this for you here, because it has no lock to compare
+  against.
+
 ### Step 4 — Detect Spec Kit
 Check for `/speckit.*` slash-commands and/or `demo-repos/<repo>/.specify/`. Record the result for
 Step 6's frontmatter (`speckit: installed | not-installed`).
@@ -83,7 +94,9 @@ to read. See `references/spec-handoff.md` for the exact file map and per-file de
 Write `demo-repos/<repo>/specs/<story>/link.md` (template in `references/spec-handoff.md`) with
 frontmatter linking the spec back to the product repo: `story`, `epic`, `repo`, `feature-id`,
 `product-repo` (path), `contract-lock` (the hash **copied** from `contract-lock.json`, NOT recomputed
-in the code repo), `speckit` (`installed | not-installed`), `generated` (date). This `link.md` plus the
+in the code repo — or the literal `none` on a short-lane epic, which has no lock; never a made-up or
+empty hash, which the CI gate reads as a broken lock and fails), `speckit`
+(`installed | not-installed`), `generated` (date). This `link.md` plus the
 spec folder is the authoritative record that this story's spec exists.
 
 ### Step 7 — Stop (Shape state untouched)

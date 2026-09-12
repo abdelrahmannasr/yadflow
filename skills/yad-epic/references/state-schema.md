@@ -94,17 +94,21 @@ marked N/A that this epic's route does not mark optional. An id the catalogue do
 
 ### Lifecycle profiles
 
-A **profile** is a named, ordered chain of catalogue steps — the route an epic takes. Three are
-defined, in `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`, E5), and all three are routes the skills
-already seeded by hand:
+A **profile** is a named, ordered chain of catalogue steps — the route an epic takes. Five are
+defined, in `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`, E5). The first three are routes the skills
+already seeded by hand; the two short lanes (E40) are new:
 
 | Profile | Steps | Seeded by |
 |---|---|---|
 | `classic` | the 10-step chain, `epic` first | `yad-epic`, `yad-stub`, `yad-change` |
 | `analysis-first` | the 12-step chain, `analysis` before `epic` | `yad-analysis` |
+| `chore` | `epic` · `epic-review` · `stories` · `stories-review` | `yad-epic --profile chore` |
+| `spike` | the chore lane with `analysis` · `analysis-review` in front | `yad-analysis --profile spike` |
 | `discovery` | `discovery` · `discovery-review` | `yad-discovery` |
 
-`ui-design` and its gate are the optional pair in both feature routes. **Which steps an epic may skip
+`ui-design` and its gate are the optional pair on `classic` and `analysis-first`. The short lanes mark
+**nothing** optional — they drop the steps they do not need from the chain instead, so `yad skip` on
+one is refused outright rather than pointing at a broken chain. **Which steps an epic may skip
 comes from the route that epic is on**, and from nowhere else (E35): there is no engine-wide list of
 skippable steps, so a route that drops a step no longer makes it skippable on every other route too.
 The engine reads the route the epic **records** (`profile`, shape 6), and keeps reading it even when the
@@ -227,8 +231,9 @@ owner + 1 reviewer).
 
 ### `ui-design` is optional (skippable)
 
-Optional **on the routes that say so**, which today is every feature route — see the profiles section
-above. The step (and its `ui-design-review` gate) is optional for an epic with no
+Optional **on the routes that say so**, which today is `classic` and `analysis-first` — see the
+profiles section above. The `chore` and `spike` lanes mark nothing optional, because they drop
+`ui-design` from the chain rather than carrying it as skippable. The step (and its `ui-design-review` gate) is optional for an epic with no
 user-facing surface — a backend/API service, a data pipeline, infra work. Unlike `analysis` (which is
 optional by being **omitted** from the chain at seed time), `ui-design` is **always seeded** and then
 **marked N/A in place** so the skip stays visible and auditable. The single mechanism is

@@ -328,7 +328,11 @@ Do these in order. After each author step, the matching review opens and **waits
 Either of the first two steps can lay the track for you, or you can have the engine do it first:
 `yad epic new <slug>` writes the epic's step chain and its empty ledgers, then the skill authors the
 document against it. The chain comes from a **lifecycle profile** — `classic` is the 10-step route and
-the default, `--profile analysis-first` is the 12-step one. It writes no `epic.md`, no branch and no
+the default, `--profile analysis-first` is the 12-step one. Two short lanes exist for work that is not
+the size of a feature: `--profile chore` is 4 steps for upkeep somebody has already decided on, and
+`--profile spike` puts the analysis in front of those for a timeboxed question. Neither short lane has
+an architecture gate, so neither may change the shared contract, and the choice is final — there is no
+re-seed. It writes no `epic.md`, no branch and no
 commit, and refuses an epic that already has a chain.
 
 | # | Run this | It produces | Then approve at |

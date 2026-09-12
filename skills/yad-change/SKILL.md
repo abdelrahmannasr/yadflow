@@ -140,9 +140,11 @@ For a **contract-surface** depth, do NOT inherit `architecture` — it will be r
 by `yad-architecture` downstream.
 
 ### Step 5 — Seed `state.json` (inherited steps pre-done; only the changed steps run)
-Create `.sdlc/state.json` with the **same 10-step chain** as `yad-epic` (so `advanceState`/`nextAction`/
-`gatePredicate`/the verified ledger run unchanged) — same `schemaVersion: 6` and same
-`profile: "classic"`, which names the route the chain takes — but:
+**Read the parent's `profile` and `steps[]` first** (`epics/EP-<parent>/.sdlc/state.json`). The child's
+chain and route are the PARENT's, not a constant — see the short-lane rule below. For the ordinary case
+of a `classic` parent, create `.sdlc/state.json` with the **same 10-step chain** as `yad-epic` (so
+`advanceState`/`nextAction`/`gatePredicate`/the verified ledger run unchanged) — same
+`schemaVersion: 6` and `profile: "classic"`, which names the route the chain takes — but:
 - **Inherited** authoring steps **and their review gates**: `status: "done"`, `"inherited": true`,
   `"inheritedFrom": "<owning epic from the resolved truth>"`, `"boundHash": "<that artifact's current
   hash>"`.
@@ -178,6 +180,27 @@ this thread begins only after `yad-backfill promote` documents and locks the fea
 stub. Prefer the `defect-fix` / `behavioral-no-surface` depth against a stub — a `contract-surface`
 change against an undocumented feature should wait until the stub is promoted (backfilled + a real
 contract locked).
+
+**Short-lane parent (no architecture step ever existed).** When the parent records `profile: "chore"`
+or `"spike"`, it has no `architecture.md`, no `contract.md`, no `ui-design.md` and no lock — not
+because they are undocumented, as with a stub, but because **its route never had those steps**. So:
+
+- **Seed the PARENT's chain, not the 10-step one**, and copy the parent's `profile` verbatim. A 4-step
+  parent gives a 4-step child. Writing the 10-step chain here would mint steps stamped
+  `"inherited": true, "inheritedFrom": "EP-<parent>"` for an architecture review **that never happened
+  anywhere** — a forged provenance record, which is the one thing this whole skill exists to avoid.
+  Writing `profile: "classic"` over a short chain mislabels the epic permanently and `yad doctor`
+  reports `profile:disagree` for the life of the thread.
+- **Write NO `contract-lock.json`.** There is no parent hash to point at. A pointer-lock with a `null`
+  or invented `hash` FAILS `contract-check.sh` the first time any story in the thread touches a
+  contract slice, and a lock nobody can verify is worse than none.
+- **Record `"parentShortLane": "<the parent's profile>"` in `change.json`**, the same way a stub parent
+  records `"parentStub": true`, so it is auditable that this thread inherited from a route with no
+  locked surface.
+- **A `contract-surface` depth is not available here.** Its first runnable step is `architecture`,
+  which this chain does not have. If the change really does move the shared cross-repo surface, it is
+  not a thread off this parent — seed a **new epic on `classic`** and note the parent in its lineage.
+  Prefer `defect-fix` or `behavioral-no-surface`, exactly as against a stub.
 
 ### Step 6 — Write `.sdlc/change.json` (intake + triage record)
 Record the intake: `epicId`, `thread`, `parent`, `kind` **and `type`** (the same value under both
