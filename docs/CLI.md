@@ -264,6 +264,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `step:kind` | A step is on the wrong side of the author / review line. An author step is run by a skill and a review step by `yad gate`, so on the wrong side nothing drives it. |
 | `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. Nothing then tells anyone to write the artifact being reviewed, and for a folder artifact the gate has nothing to bind an approval to. |
 | `step:off-route` | The chain matches no lifecycle profile. See the section above: leaving a step out is fine, a step no route has or two in the wrong order is not. |
+| `skip:not-optional` | A step is marked N/A but this epic's route does not mark it optional. The gate stops short-circuiting it, so it asks for approvals nobody gave. Either the chain is on the wrong route, or the skip was written by hand. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 
@@ -297,6 +298,16 @@ the steps says which route it is on **now**, and `yad doctor` compares the two:
 still `classic`. What takes an epic off its route is a step no route has, or two steps in the wrong
 order. `yad doctor` reports that as `step:off-route`, because the guidance command reads the chain in
 the order it is written: off the route, it names whatever sits next rather than what comes next.
+
+**The route also says which steps may be skipped.** A profile marks some of its steps optional, and
+`yad skip <epic> <step> --reason "<why>"` marks one N/A for one epic — pre-marked done with the reason
+recorded, visible in the chain, reversible with `--undo`. The engine keeps **no list of its own**: it
+asks the route the epic is on, so a shorter route that drops a step does not make that step skippable
+for every other epic in the project. Today every route marks the same one step, `ui-design`.
+
+An epic whose chain is on **no** route has nothing optional, and the refusal says so. Guessing a route
+to answer the question would let a step be skipped on the strength of a route nobody chose — fix the
+`step:off-route` finding first.
 
 ## Choosing the skill for a step
 
@@ -513,7 +524,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
 | `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo. A repo *outside* the project root (a sibling, `../backend`) that is simply absent from this checkout is a **warn**, not this failure |
-| `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | only `ui-design` is optional, needs a `--reason`, and can be skipped only up to authoring it (before its review opens / before `stories` start); `--undo` before the stories review opens |
+| `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | the step must be one the epic's own [lifecycle route](#lifecycle-profiles-the-route-an-epic-takes) marks optional — `ui-design` on every route today — and needs a `--reason`; it can be skipped only up to authoring it (before its review opens / before `stories` start); `--undo` before the stories review opens. A chain on **no** route has nothing optional: fix `step:off-route` first |
 | `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-STATE-006` | a Build ledger (`build-log`/`trust-log`) is locked by another yad process writing it | every read-modify-write on these ledgers (`--retro-ship`, `yad review reconcile`, `yad tidy up`) takes an exclusive lock, so two runs can never interleave and lose an entry. Wait for the other command and re-run; a lock left by a killed process is reclaimed automatically after 30s, or delete the `.lock` directory the message names |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |

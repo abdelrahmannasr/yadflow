@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -275,6 +275,7 @@ export function projectChecks(checks, root) {
   // inside the `project` block. The renderer prints a header every time the section CHANGES, so a
   // `project` check added after the `shape` section prints the word "project" a second time.
   skillBindingChecks(checks, root);
+  skipChecks(checks, root);
 
   // repos.json: parse + every entry is a live git repo; staleness vs syncedHead
   let registry = { repos: [] };
@@ -1090,6 +1091,48 @@ export function profileChecks(checks, root) {
       checks, 'profile:disagree', 'shape', 'warn',
       `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
       'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
+    );
+  }
+}
+
+// A step marked N/A ("skipped") that the epic's own route does NOT mark optional (E35).
+//
+// This could not be reported before, because the engine kept one list of skippable steps for the whole
+// project: a step optional on any route was skippable on every epic. Now the question is answered by
+// the route the epic is on, so the two can disagree — a chain edited by hand, a recorded route changed,
+// or a ledger copied from an epic on a different route.
+//
+// It matters because the gate FAILS CLOSED on it. `gatePredicate` honours `skipped: true` only for a
+// step this epic's route marks optional, so a skip the route does not allow stops short-circuiting and
+// the gate asks for the approvals nobody gave. The step is already `done`, so nothing is un-advanced —
+// `yad gate sync` reports "the rule no longer holds" and moves on. This says the same thing before the
+// next sync rather than after it.
+//
+// Reported, never corrected, like everything else here: clearing the flag would erase a recorded
+// decision, and re-marking the step `blocked` would undo work the team may have finished.
+export function skipChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  const bad = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
+    const optional = optionalStepsFor(state);
+    for (const step of state.steps) {
+      if (!step?.skipped || typeof step.id !== 'string') continue;
+      if (isSkippableStep(step.id, optional)) continue;
+      bad.push(`${e}/${step.id}`);
+    }
+  }
+
+  if (bad.length) {
+    check(
+      checks, 'skip:not-optional', 'shape', 'warn',
+      `${bad.length} skipped step(s) their epic's route does not mark optional: ${some(bad, 3)}`,
+      'the gate stops short-circuiting these, so it asks for approvals nobody gave. Either the chain is on the wrong route (see `step:off-route` / `profile:disagree`) or the skip was written by hand — `yad skip <epic> <step> --undo` puts the step back in the chain',
     );
   }
 }

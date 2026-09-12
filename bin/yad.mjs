@@ -106,8 +106,9 @@ ${c.bold('Where am I / what next')}
                                        Bind a step to a skill of your own. Several skills run in
                                        the order given, one after another — each costs tokens
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
-  yad skip <epic> ui-design --reason <text>   Mark an optional step N/A for this epic (only
-                                       ui-design today) — a backend/API/data epic with no UI.
+  yad skip <epic> ui-design --reason <text>   Mark an optional step N/A for this epic. Which steps
+                                       those are comes from the epic's lifecycle route — on every
+                                       route today, ui-design: a backend/API/data epic with no UI.
                                        Stays visible & auditable (pre-done, gate short-circuited);
                                        --undo reverses it until the stories review opens
 

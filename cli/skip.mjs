@@ -1,6 +1,8 @@
 // `yad skip <epic> <step> --reason "<why>"` (and `--undo`) — mark an OPTIONAL Shape step N/A for one
-// epic. Today only `ui-design` is skippable: an epic with no user-facing surface (backend/API, data,
-// infra) does not need a UI-design artifact + review gate. The skip stays VISIBLE and auditable — the
+// epic. Which steps those are is a fact about the epic's ROUTE, read from the lifecycle profile it is
+// on (E35, `optionalStepsFor`), not a list this engine keeps: on every route today that is `ui-design`
+// and its gate, because an epic with no user-facing surface (backend/API, data, infra) does not need
+// a UI-design artifact. E40's shorter lanes will mark different steps, and this needs no edit for it. The skip stays VISIBLE and auditable — the
 // step is pre-marked `done` with a recorded reason (and actor/date), short-circuited at the gate — and
 // is reversible with `--undo` until the stories review opens. All state logic is the pure
 // `skipStep`/`unskipStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.

@@ -497,7 +497,7 @@ files first and you have frozen already-changed files.
 
 | ID | Task | Size | Needs |
 |---|---|---|---|
-| E35 | `required` moves into the profile; delete `SKIPPABLE_STEPS` | S | E5 |
+| E35 | `required` moves into the profile; delete `SKIPPABLE_STEPS`. **Done as `optional` on the profile row, not a new `required` field** — E5 already put the mark there, and a second polarity nobody reads would fail the "no unread profile-row field" test. What E35 removed is the engine-wide UNION: `optionalStepsFor(state)` asks the epic's own route, a chain on no route has nothing optional, and `yad doctor` reports `skip:not-optional` | S | E5 |
 | E38 | The full step-state model, incl. `satisfied` and `blocked` | S | E4 |
 | E36 | General `yad skip` / `yad unskip` with recorded reason | S | E35 |
 | E37 | `yad defer` | S | E36 |

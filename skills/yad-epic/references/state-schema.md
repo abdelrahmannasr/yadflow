@@ -88,7 +88,8 @@ the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one
 `step:no-artifact` (a step naming no file at all, the one case that stops `yad gate` outright),
 `step:kind` (a step on the wrong side of the author / review line), `step:orphan-gate` (a gate whose
 step is not in the chain, so nothing tells anyone to write what it reviews) and `step:off-route` (a
-chain matching no lifecycle profile — see below). An id the catalogue does not carry is left to
+chain matching no lifecycle profile — see below). `skip:not-optional` is reported the same way: a step
+marked N/A that this epic's route does not mark optional. An id the catalogue does not carry is left to
 `phase:unknown`.
 
 ### Lifecycle profiles
@@ -103,10 +104,16 @@ already seeded by hand:
 | `analysis-first` | the 12-step chain, `analysis` before `epic` | `yad-analysis` |
 | `discovery` | `discovery` · `discovery-review` | `yad-discovery` |
 
-`ui-design` and its gate are the optional pair in both feature routes — `SKIPPABLE_STEPS` is now a
-view of the profiles rather than a list beside them. The parallel, non-blocking `test-cases` track is
-NOT recorded in the profile: `advanceState` still decides it from the step id, and a second copy of
-that rule sitting unread in the profile would be free to drift.
+`ui-design` and its gate are the optional pair in both feature routes. **Which steps an epic may skip
+comes from the route that epic is on**, and from nowhere else (E35): there is no engine-wide list of
+skippable steps, so a route that drops a step no longer makes it skippable on every other route too.
+An epic whose chain is on **no** route has nothing optional — `yad doctor` reports that chain as
+`step:off-route`, and guessing a route to answer the question would let a step be skipped on the
+strength of a route nobody chose.
+
+The parallel, non-blocking `test-cases` track is NOT recorded in the profile: `advanceState` still
+decides it from the step id, and a second copy of that rule sitting unread in the profile would be
+free to drift.
 
 **Each epic records its route in `state.json` as `profile`** (shape 6). The value is one of `classic`,
 `analysis-first` and `discovery`. `yad epic new` writes it when it seeds the chain, the seeding skills
@@ -190,7 +197,8 @@ owner + 1 reviewer).
 
 ### `ui-design` is optional (skippable)
 
-The `ui-design` step (and its `ui-design-review` gate) is **optional** for an epic with no
+Optional **on the routes that say so**, which today is every feature route — see the profiles section
+above. The step (and its `ui-design-review` gate) is optional for an epic with no
 user-facing surface — a backend/API service, a data pipeline, infra work. Unlike `analysis` (which is
 optional by being **omitted** from the chain at seed time), `ui-design` is **always seeded** and then
 **marked N/A in place** so the skip stays visible and auditable. The single mechanism is
@@ -211,8 +219,9 @@ A skipped step gets four extra fields and is pre-marked `done`:
 Both the `ui-design` **and** `ui-design-review` entries carry these fields. `advanceState` steps over
 any `skipped` step, so approving `architecture-review` on a UI-less epic lands directly on `stories`;
 `preconditionsMet` treats the pre-`done` steps as satisfied. `unskipStep` (via `yad skip … --undo`)
-strips the fields and restores the chain, refused once `stories-review` has opened. Only `ui-design` is
-skippable today (engine `SKIPPABLE_STEPS`).
+strips the fields and restores the chain, refused once `stories-review` has opened. `ui-design` is the
+only step any route marks optional today; the engine reads that off the epic's own route
+(`optionalStepsFor`) rather than from a list of its own.
 
 ### `test-cases` is a parallel, non-blocking track
 

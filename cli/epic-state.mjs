@@ -484,6 +484,11 @@ export function gatePredicate({
   merged = true,
   solo = false,
   requireEngagement = false,
+  // Which author steps THIS epic's route marks optional — `optionalStepsFor(state)`. Empty means
+  // "no step on this chain may be skipped", and that is the right default for a gate: a caller that
+  // forgets to pass it fails closed, and a `skipped: true` nobody can justify falls through to the
+  // real approvals instead of passing on the strength of the flag alone.
+  optional = [],
 }) {
   // Phase 6: an INHERITED step (a change-epic carrying a parent artifact by reference) is satisfied
   // without re-review — its approval lives upstream in the thread, recorded as an `inherited` provenance
@@ -507,7 +512,7 @@ export function gatePredicate({
   // GUARD: only honour the flag on a genuinely skippable step (the author step or its `-review` gate).
   // A corrupted/hand-edited `skipped: true` on a non-optional step (e.g. `stories-review`) must NOT
   // bypass approvals — it falls through to the real predicate below and fails for lack of approvals.
-  if (step?.skipped && isSkippableStep(step.id)) {
+  if (step?.skipped && isSkippableStep(step.id, optional)) {
     return {
       approvalsSatisfied: true, threadsResolved: true, merged: true, staleDropped: 0,
       passed: true, missing: [], rule: 'skipped',
@@ -610,17 +615,35 @@ export function advanceState(state, step) {
   return state;
 }
 
-// The Shape steps that may be marked N/A ("skipped") are declared with the lifecycle profiles below
-// (`SKIPPABLE_STEPS`), because the set is derived from the `classic` profile and a `const` cannot be
-// read before the thing it derives from exists. The functions just below are hoisted declarations, so
-// they see it by the time anything calls them.
+// Which steps may be marked N/A ("skipped") is a fact about the epic's ROUTE, and the route is
+// declared with the lifecycle profiles below (E35). `optionalStepsFor(state)` is the one answer; every
+// function here takes it as an argument rather than reading a module-level set, so the guard is about
+// THIS epic rather than about every route at once.
+//
+// That distinction is invisible today — both feature routes mark the same pair optional, so a union
+// across the routes and this epic's own route give the identical answer — and an invisible rule is an
+// untested rule. The resolvers below take the route list as a seam so a test can pass routes that
+// disagree, the same reason `matchLifecycleProfile` takes one.
 
 // True for a genuinely skippable step id — the author step (`ui-design`) OR its paired review gate
-// (`ui-design-review`). Used to gate the `gatePredicate` skip short-circuit so a corrupted/hand-edited
-// `skipped: true` on a non-optional step cannot bypass its real approvals.
-export function isSkippableStep(id) {
-  return SKIPPABLE_STEPS.has(String(id || '').replace(/-review$/, ''));
+// (`ui-design-review`) — given the author steps this epic's route marks optional. Used to gate the
+// `gatePredicate` skip short-circuit so a corrupted/hand-edited `skipped: true` on a step this epic's
+// route requires cannot bypass its real approvals.
+export function isSkippableStep(id, optional = []) {
+  return [...optional].includes(String(id || '').replace(/-review$/, ''));
 }
+
+// The message every refusal to skip shares. An epic whose chain is on no route has NO optional steps —
+// never a default set — because guessing a route here would let a step be skipped on the strength of a
+// route nobody chose. `yad doctor` already reports that chain as `step:off-route`, and this says so
+// rather than pretending the step is simply required.
+const notOptional = (stepId, optional) => err(
+  'YAD-STATE-004',
+  `step '${stepId}' is not optional on this epic's route`,
+  optional.length
+    ? `only these steps may be skipped here: ${optional.join(', ')}`
+    : 'this epic\'s chain is on no lifecycle route, so nothing on it is optional — run `yad doctor` and look for `step:off-route`',
+);
 
 // Strip the skip-provenance fields off a step — the inverse of the stamp `skipStep` applies.
 function withoutSkip(step) {
@@ -637,10 +660,9 @@ function withoutSkip(step) {
 // past them to the next non-skipped step. Idempotent on an already-skipped step. Refuses once the step
 // was authored, once its review gate has opened, or once its downstream `stories` has started — the
 // step is optional only up to authoring it. Throws on a non-skippable id or a malformed (unpaired) chain.
-export function skipStep(state, stepId, { reason, by = null, at = null } = {}) {
-  if (!SKIPPABLE_STEPS.has(stepId)) {
-    throw err('YAD-STATE-004', `step '${stepId}' is not optional`, `only these steps may be skipped: ${[...SKIPPABLE_STEPS].join(', ')}`);
-  }
+export function skipStep(state, stepId, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
+  const optional = optionalStepsFor(state, profiles);
+  if (!optional.includes(stepId)) throw notOptional(stepId, optional);
   const ai = state.steps.findIndex((s) => s.id === stepId);
   if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to skip');
   const author = state.steps[ai];
@@ -690,10 +712,9 @@ export function skipStep(state, stepId, { reason, by = null, at = null } = {}) {
 // If every earlier step is done, the restored author step becomes the active step again (and a
 // downstream that the skip auto-opened is pushed back to `blocked` behind it); otherwise it just
 // returns to `blocked`. Throws if the step is not skipped or it is too late.
-export function unskipStep(state, stepId) {
-  if (!SKIPPABLE_STEPS.has(stepId)) {
-    throw err('YAD-STATE-004', `step '${stepId}' is not optional`, `only these steps may be skipped: ${[...SKIPPABLE_STEPS].join(', ')}`);
-  }
+export function unskipStep(state, stepId, { profiles = LIFECYCLE_PROFILES } = {}) {
+  const optional = optionalStepsFor(state, profiles);
+  if (!optional.includes(stepId)) throw notOptional(stepId, optional);
   const ai = state.steps.findIndex((s) => s.id === stepId);
   if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to un-skip');
   if (!state.steps[ai].skipped) throw err('YAD-STATE-004', `${stepId} is not skipped`, 'nothing to un-skip');
@@ -836,10 +857,10 @@ export const STEPS = [
 // WHAT IS AND IS NOT HERE. Seeding a chain from a profile is `seedState` below, driven by
 // `yad epic new` (E17, cli/epic.mjs); shape 6 is where an epic first RECORDS which profile it is on,
 // and an epic seeded before that field existed still has its route derived by matching its chain
-// (`matchLifecycleProfile`). `required` per step moves in here in E35 (deleting `SKIPPABLE_STEPS`),
-// and the short chore and spike lanes are E40. A PROJECT-wide skill binding already exists (E6,
-// below); E51 adds a per-profile one between it and the catalogue default, so two routes can run
-// different skills for the same step.
+// (`matchLifecycleProfile`). Which steps are optional per route already lives here and is read per
+// EPIC (E35, `optionalStepsFor`); the short chore and spike lanes are E40. A PROJECT-wide skill
+// binding already exists (E6, below); E51 adds a per-profile one between it and the catalogue
+// default, so two routes can run different skills for the same step.
 export const LIFECYCLE_PROFILES = [
   {
     id: 'classic',
@@ -877,11 +898,11 @@ export const LIFECYCLE_PROFILES = [
 // One profile's steps as plain rows: `{ id, optional }`, in chain order.
 //
 // `optional` is the only per-step field a profile carries today, and it is carried because something
-// READS it (`SKIPPABLE_STEPS`, below). The parallel `test-cases` track is deliberately NOT recorded
-// here: `advanceState` decides it from the step id, and a flag nothing reads would be a second copy of
-// a rule that lives somewhere else — free to drift, with every test still green. Moving that rule into
-// the profile is worth doing, and it belongs to whichever task takes it, not to a field added on
-// spec here.
+// READS it — `optionalStepsOf` below, which is what decides whether an epic on this route may skip a
+// step (E35). The parallel `test-cases` track is deliberately NOT recorded here: `advanceState`
+// decides it from the step id, and a flag nothing reads would be a second copy of a rule that lives
+// somewhere else — free to drift, with every test still green. Moving that rule into the profile is
+// worth doing, and it belongs to whichever task takes it, not to a field added on spec here.
 const profileRows = (p) => p.steps.map((x) => (typeof x === 'string' ? { id: x } : x))
   .map((x) => ({ id: x.id, optional: !!x.optional }));
 
@@ -938,30 +959,55 @@ export function matchLifecycleProfile(steps, profiles = LIFECYCLE_PROFILES) {
   return fits.sort((a, b) => orderOf(a).length - orderOf(b).length)[0].id;
 }
 
-// The Shape steps that may be marked N/A ("skipped") for an epic that does not need them. Only the
-// UI-design step is optional today: an epic with no user-facing surface (backend/API, data, infra)
-// can skip it. A skip carries a recorded reason and stays VISIBLE in the chain (both the author step
-// and its review gate pre-marked `done`, short-circuited by `gatePredicate`) — the auditable,
-// reversible counterpart to omitting `analysis` from the chain entirely.
+// ---- which steps an epic may skip (E35) ----------------------------------------------------------
 //
-// A VIEW of the lifecycle profiles (E5), not a list beside them: a step is optional because a profile
-// says so, and saying it twice is how the two drift. Taken across EVERY route, not just `classic` —
-// otherwise a route's own `optional` marks would sit there unread, which is the same drift one level
-// down. The union is `ui-design` either way today, because both feature routes mark the same pair. Author steps only — `isSkippableStep`
-// below pairs each with its gate, which is the shape every caller expects. A test deep-equals this
-// against both what `classic` says and its literal pre-E5 value.
+// A step may be marked N/A ("skipped") when the epic does not need it. Only the UI-design step is
+// optional today: an epic with no user-facing surface (backend/API, data, infra) can skip it. A skip
+// carries a recorded reason and stays VISIBLE in the chain — both the author step and its review gate
+// pre-marked `done`, short-circuited by `gatePredicate` — the auditable, reversible counterpart to
+// omitting `analysis` from the chain entirely.
 //
-// E35 moves `required` into the profile properly and deletes this set. Until then it stays exported
-// and stays authoritative for `skipStep`, because ~6 call sites and an error message read it.
-// The rule, as a function taking the routes, for the same reason `matchLifecycleProfile` takes them:
-// today every feature route marks the SAME pair optional, so "across all routes" and "from `classic`"
-// give the identical answer and no test could tell them apart. A test passes routes where they differ.
-export const optionalStepsOf = (profiles = LIFECYCLE_PROFILES) => [
-  ...new Set(profiles.flatMap((p) => profileRows(p))
-    .filter((r) => r.optional && !r.id.endsWith('-review')).map((r) => r.id)),
-];
+// IT IS A FACT ABOUT THE ROUTE, NOT ABOUT THE ENGINE. Until E35 this was one module-level set, the
+// union of every route's `optional` marks, and it answered the same for every epic in the project.
+// That is wrong the moment two routes disagree: E40's chore lane can drop steps a `classic` epic must
+// walk, and a union would have let a `classic` epic skip them too — silently, because the union never
+// says which route its answer came from.
+//
+// The union is gone. `optionalStepsFor(state)` asks THIS epic's route and nothing else.
 
-export const SKIPPABLE_STEPS = new Set(optionalStepsOf());
+// The optional AUTHOR steps of ONE route, in chain order. Author steps only — `isSkippableStep` pairs
+// each with its `-review` gate, which is the shape every caller expects. A route this release does not
+// carry has none, which is the honest answer rather than an error: the chain is what it is.
+//
+// The rows are read off the route that was HANDED IN, never by resolving its id, for the reason
+// `matchLifecycleProfile` spells out — a caller-supplied route is not in the module's own index, so
+// resolving would come back empty and every synthetic route in a test would silently have no optional
+// steps, agreeing with a broken implementation.
+export const optionalStepsOf = (profileId, profiles = LIFECYCLE_PROFILES) => {
+  const route = profiles.find((p) => p.id === String(profileId || ''));
+  return route ? profileRows(route).filter((r) => r.optional && !r.id.endsWith('-review')).map((r) => r.id) : [];
+};
+
+// WHICH route an epic is on, for the purpose of asking what it may skip.
+//
+// The RECORDED key wins when it names a route this release carries. That is what shape 6 exists for:
+// before it, the route could only be guessed from the steps, and `matchLifecycleProfile` picks the
+// shortest fitting route — so a `classic` epic that legitimately dropped a step can read as a shorter
+// lane, and E40 adds two shorter lanes. Guessing is the fallback for an epic seeded before the key
+// existed, not the first answer.
+//
+// Neither resolving means NO route, never a default one. Stamping `classic` on an unrecognisable chain
+// would let a step be skipped on the strength of a route nobody chose, and it would do it quietly —
+// the same reason `stampProfile` declines to invent the key in the first place.
+export const epicProfileId = (state, profiles = LIFECYCLE_PROFILES) => {
+  const recorded = String(state?.profile || '');
+  if (profiles.some((p) => p.id === recorded)) return recorded;
+  return matchLifecycleProfile(state?.steps, profiles);
+};
+
+// The author steps THIS epic may skip. The one answer every skip guard asks.
+export const optionalStepsFor = (state, profiles = LIFECYCLE_PROFILES) =>
+  optionalStepsOf(epicProfileId(state, profiles), profiles);
 
 // ---- seeding a chain FROM a profile (E17) --------------------------------------------------------
 //
