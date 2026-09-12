@@ -16,7 +16,7 @@ const REVIEWS = [
     method: 'COUNT',
     path: 'every step (advisory)',
     description:
-      'Names no person, role or step: a step asks for base + risk step distinct approvers. Base is 1 (one human who is not the author); the risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. Reported everywhere, enforced nowhere yet: the full rule caps it at the number of active people, and an uncapped count would make a two-person team\'s architecture gate unpassable.',
+      'Names no person, role or step: a step asks for base + risk step distinct approvers. Base is 1 (one human approval, which on a platform cannot be the author); the risk step is +2 for a contract tag and +1 for auth or payments, the highest tag and never the sum. Read from the tags the epic records. Reported everywhere, enforced nowhere yet: the full rule caps it at the number of active people, and an uncapped count would make a two-person team\'s architecture gate unpassable.',
     middleware: ['asks base + risk step', 'distinct people, not roles', 'shortfall reported, not blocking'],
     category: 'base',
   },

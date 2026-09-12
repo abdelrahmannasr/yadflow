@@ -83,8 +83,9 @@ Print, in this order:
      `auth`/`payments` (the highest tag, never the sum). It reads no role, so one person holding two
      roles is one approver. It is ADVISORY — it never decides whether the gate would pass, because the
      full rule caps it at the number of active people and that cap does not exist yet. `yad gate status`
-     prints the sum (`count (advisory): 3 approvers = base 1 + contract risk 2`) — read it from there
-     rather than recomputing it, and say "short N" rather than "blocked" when it is short.
+     prints the sum and the shortfall (`count (advisory): 3 approvers = base 1 + contract risk 2 — 1
+     short`) — read both from there rather than recomputing them, and say "short N" rather than "blocked"
+     when it is short.
    - Approvals are **stale** (gate fails) if the artifact was edited after the newest `approved`
      record. For `architecture-review`, also flag staleness if the contract-surface hash no longer
      matches `.sdlc/contract-lock.json`.

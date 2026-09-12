@@ -481,14 +481,14 @@ defects keep escaping at**, so you fix the stage, not just the symptom).
 
 The base rule is **owner + 1 reviewer**, with escalation on risky surfaces (`contract`, `auth`,
 `payments`). The engine also reports a per-step **approver count** — `base 1 + risk step`, so 3 distinct
-people on a `contract` step — which is printed wherever a gate reports itself and does not hold a gate
-until the capacity cap ships:
+people on a `contract` step — which `yad gate sync`, `yad gate status` and the generated review-PR body
+print, and which does not hold a gate until the capacity cap ships:
 
 | Review | Who must approve |
 |--------|------------------|
 | Epic | owner + 1 reviewer |
 | UI | owner + 1 reviewer |
-| **Architecture + contract** | owner + 1 reviewer **+ a domain owner for every repo in the epic**; the count asks for 3 distinct people. The contract surface is hash-locked — changing it invalidates approvals. |
+| **Architecture + contract** | owner + 1 reviewer **+ a domain owner for every repo in the epic** (the advisory count asks for 3 distinct people and blocks nothing). The contract surface is hash-locked — changing it invalidates approvals. |
 | **Stories** | owner + 1 reviewer **+ the engineer for each touched repo** |
 | **Engineer review at ship** | a human engineer — **always, never automated** |
 

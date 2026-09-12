@@ -16,8 +16,9 @@ touched `domain`, `|domainOwners[domain]| >= 1`.
 
 A second rule is computed beside the role rule above. It counts people, not roles:
 
-`needed = base + risk step`, where `base` is `1` (one human who is not the author — the platform
-enforces that half: you cannot approve your own PR) and the **risk step** comes from the step's own
+`needed = base + risk step`, where `base` is `1` — one human approval, which on a platform is necessarily
+not the author, since you cannot approve your own PR; on a local-only ledger nothing enforces that half —
+and the **risk step** comes from the step's own
 `risk_tags`:
 
 | Tags on the step | Risk | Risk step | `needed` |
@@ -37,14 +38,17 @@ floor 1. The cap needs a live count of active people, which is a later task, and
 half on its own would deadlock a small team: two people clear the role rule on an architecture review
 (one of them holding reviewer and domain-owner), while the count asks for three, and there is no cap and
 no override to escape through. So the count is computed, recorded and shown everywhere a gate speaks,
-and the shortfall is reported rather than blocking. Enforcement arrives with the cap.
+and the shortfall is reported rather than blocking. Nothing is written to disk: the count is printed, not
+recorded. Enforcement arrives with the cap.
 
 Why have it at all: it names no person, no role and no step, which is where the engine is going — the
 roster is a stored claim that goes stale, and repository access is the real roster. It also makes a gap
 visible that the role rule cannot see, because one person holding two roles satisfies two roles.
 
-Every surface prints the same sentence: `3 approved; count (advisory): 3 approvers = base 1 + contract
-risk 2`, with `— N short` when it is short.
+Three surfaces print the same arithmetic, each in its own sentence: `yad gate sync` (`2 approved; count
+(advisory): 3 approvers = base 1 + contract risk 2 — 1 short`), `yad gate status` (the same sum after the
+distinct-people count) and the generated review-PR body (`Approver count (advisory, not yet enforced)`).
+`yad gate review --json` carries the rule as an object under `step.gateRule` instead of a sentence.
 
 Solo mode waives the role rule, exactly as before, and reports no shortfall. The merge and the resolved
 threads still advance the step.

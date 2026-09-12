@@ -146,7 +146,7 @@ sections, so every participant is attributable in one place:
 # Approval record — <artifact> — <YYYY-MM-DD>
 
 Reviewer rule in force: **<base | escalated | per-repo>** (<why — e.g. risk_tags / touched repos>).
-Approver count (advisory, not enforced): **<have> of <needed>** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>.
+Approver count (advisory, not enforced): **<have> of <needed>** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>[, short <N> — recorded here, never blocking].
 
 ## Approved by
 - <name> — <role>[ (<domain>)] — approved <date>
@@ -156,7 +156,6 @@ Approver count (advisory, not enforced): **<have> of <needed>** — <the sum, e.
 
 ## Still required to pass the gate
 - <missing owner/reviewer/domain-owner, or "none">
-- <"short N approver(s) of the advisory count" when it is short — recorded, never blocking>
 
 Gate status: **<PASSED | BLOCKED>** — <reason>.
 ```

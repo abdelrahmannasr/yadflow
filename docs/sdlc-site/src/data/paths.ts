@@ -238,7 +238,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "architecture.md · contract.md · contract-lock.json" },
   },
-  gateStep("architecture", "architecture.md", "escalated: base + a domain owner per repo (contract); count asks 3", "#ca6f1e"),
+  gateStep("architecture", "architecture.md", "escalated: base + a domain owner per repo (contract); advisory count asks 3", "#ca6f1e"),
   {
     id: "ui",
     title: "Author UI Design",

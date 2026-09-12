@@ -27,8 +27,9 @@ const RISK_ESCALATORS = ['contract', 'auth', 'payments'];
 // two-person team clears today's role rule on an `architecture-review` with two people (one of them
 // holding reviewer AND domain-owner), while base 1 + contract 2 asks for three. That gate would be
 // unpassable, with no cap (E72) and no `yad gate lower --reason` (E73) to escape through, and rule 7
-// says an escape hatch always exists. So E7 computes the number, records it and shows it everywhere a
-// gate speaks (rule 6 — never go quiet), and the roster-era role rule is still the only thing that
+// says an escape hatch always exists. So E7 computes the number and PRINTS it wherever a gate reports
+// itself (rule 6 — never go quiet; nothing writes it to disk, so the audit trail is unchanged by this
+// task), and the roster-era role rule is still the only thing that
 // holds a gate. E72 adds the cap and the `missing.push` that turns this on; `short` below is the value
 // that flip will read.
 //
@@ -589,7 +590,7 @@ const uniqueBy = (arr, key) => {
 //     that decides `passed`, unchanged by E7. E62 removes the roster and E64 stops approvals carrying a
 //     configured role, and this rule goes with them.
 //   * the E7 COUNT — `gateRuleFor(step)`: base + risk step distinct approvers, no role inspected. It is
-//     computed, returned as `gateRule`/`have`/`short` and printed wherever a gate speaks, and it holds
+//     computed, returned as `gateRule`/`have`/`short` and printed wherever a gate reports itself, and it holds
 //     NOTHING until the capacity cap lands (E72). See the long note on `gateRuleFor`: the roadmap's
 //     tier-1 rule is one formula with a cap in it, and enforcing the uncapped half would make a
 //     two-person team's contract gate unpassable with no recorded way out (rule 7).
@@ -704,8 +705,8 @@ export function gatePredicate({
     missing,
     // `rule` names which ROSTER-ERA rule was applied, and is the label the CLI and the golden snapshot
     // have always printed. `stories-review` appears here BY NAME because the per-repo rule is itself
-    // name-based — E62 removes it with the roster. E7's rule never reads a name: `needed` below comes
-    // from the step's risk tags alone.
+    // name-based — E62 removes it with the roster. E7's rule never reads a name: `gateRule.needed` below
+    // comes from the step's risk tags alone.
     rule: solo ? 'solo' : escalate ? (step.id === 'stories-review' ? 'per-repo' : 'escalated') : 'base',
     // E7's rule and what was counted against it, NESTED so that `rule` (which roster-era rule applied)
     // and `gateRule.base` (a number in the other rule) can never be read as one thing. `have` is the
@@ -947,8 +948,8 @@ export function markInReview(state, step) {
 // WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
 // below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); how many approvals each step's
-// gate needs is `gateRuleFor` at the top of this file (E7), which reads the `risk_tags` a seed copies
-// from the row below into the epic's own `state.json`;
+// gate ASKS FOR — reported, never enforced — is `gateRuleFor` at the top of this file (E7), which reads
+// the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
 // between the two, once E50 can detect which skills are installed. Three of the five

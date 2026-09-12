@@ -490,7 +490,8 @@ export async function runSetup(root, opts = {}) {
     : [
       'Your hub is this repo on GitHub/GitLab; reviewers approve artifacts there.',
       `Add your ${team_size}-person roster: platform login → yad name → hub role (owner/reviewer).`,
-      'An owner + 1 reviewer is required to pass a gate (a contract review also asks 3 people to approve); skip now and add later with `yad roster add`.',
+      'An owner + 1 reviewer is required to pass a gate; skip now and add later with `yad roster add`.',
+      'A gate also reports how many people it would like: 3 on a contract review, 1 elsewhere. That number is advisory — it never blocks.',
     ]);
   const productPath = productConfigPath(root);
   if (exists(productPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
@@ -792,7 +793,7 @@ export async function runSetup(root, opts = {}) {
   }
   hand('your single next action, anytime: `yad next`');
   if (!solo && !(readJSON(productPath, null)?.roster || []).length) {
-    hand('add reviewers when ready: `yad roster add <login>` (an owner + 1 reviewer passes a gate; a contract review asks 3 people to approve)');
+    hand('add reviewers when ready: `yad roster add <login>` (an owner + 1 reviewer passes a gate; a contract review also reports an advisory count of 3, which never blocks)');
   }
   log('');
   log(c.bold('Then — AI-only steps (run in Claude Code):'));
