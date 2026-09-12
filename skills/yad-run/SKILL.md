@@ -88,8 +88,12 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    in `automation.locked_steps`. (So a kill switch or a lock always wins.)
 4. **Decide:**
    - **HALT** if the step failed — any check FAIL, a scope overrun (`yad-implement` stopped on the
-     file-boundary rule), a contract-surface touch, or any ambiguity. Set the step `status: blocked`,
-     write the `rejected` trust entry, **stop the loop**, and report what a human must resolve.
+     file-boundary rule), a contract-surface touch, or any ambiguity. Set the step `status: blocked`
+     **with a `record`** — `{ "reason": "<the halt cause>", "by": "<login or null>", "date":
+     "<YYYY-MM-DD>" }` — write the `rejected` trust entry, **stop the loop**, and report what a human
+     must resolve. The record is not decoration: since shape 7 a `blocked` step with nothing recorded
+     on it reads as `todo` ("not started"), so a halt written without one is indistinguishable from a
+     lane nobody has begun. `yad doctor` reports the difference as `step:no-record`.
    - else if effective dial is **`advance: auto`** → set the step `done`, advance `currentStep` to
      the next step, and **continue the loop** (this is the Step B auto-advance for `checks`).
    - else (**`advance: human`**) → set the step `done`/`in_review`, **stop** and report

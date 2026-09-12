@@ -225,11 +225,13 @@ export const MIGRATIONS = [
     // project. The direction that genuinely breaks is the other one — a 3.x CLI reading a MIGRATED
     // project — and docs/migrations/shape-7.md says so rather than leaving it to be discovered.
     //
-    // `build-state/<story>.json` holds the same four words and is deliberately NOT rewritten. It is
-    // hand-written by the `yad-run` skill, not by the engine, so a rewrite would be undone by the
-    // next write; `stepStatus` reads `blocked`-with-no-record as `todo` whatever shape the file is
-    // on, which makes the READER one model without touching the file. `buildNextForRepo` goes
-    // through it like every other reader.
+    // `build-state/<story>.json` holds the same words and is deliberately NOT rewritten: the
+    // `yad-run` and `yad-implement` SKILLS write it, not the engine, so a rewrite would be undone by
+    // their next write. Those two are also the one existing writer of `blocked` in the NEW sense —
+    // a halted Build lane — and they now write a `record` with the halt cause beside it, which is
+    // what keeps a halt distinguishable from a lane nobody started. A lane halted by an OLDER
+    // yad-run carries a bare `blocked` and reads as `todo` until the next run rewrites it; nothing
+    // advances past it either way. See the note on `stampStepStates` in cli/epic-state.mjs.
     //
     // `state.json` on a VERIFIED Product is `ci-owned` and is skipped by this command, the same gap
     // shapes 4, 5 and 6 had. What closes it is that the gate's own write goes through `writeState`,

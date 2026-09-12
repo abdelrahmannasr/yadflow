@@ -288,11 +288,23 @@ function loadBuildStates(dir) {
 //   passed    may the chain continue past this step, and does a later step see it as satisfied?
 //   authored  was the artifact actually WRITTEN HERE? (a skip and an inheritance are not)
 //
-// Those are not one question, and running them together is the bug this table exists to stop.
-// `preconditionsMet`'s blocker scan, `unskipStep`'s `priorAllDone` and `advanceState`'s step-over all
-// want `passed`; `stateInvariants`, `closeAuthorStep` and `yad doctor`'s gate-blind check all want
-// `authored`. Both used to be spelled `status === 'done'`, which is why a skipped step had to be
-// pre-marked `done` to get past the first group and carry a flag to be excluded from the second.
+// Those are not one question, and running them together is the bug this table exists to stop. Both
+// used to be spelled `status === 'done'`, which is why a skipped step had to be pre-marked `done` to
+// get past the first group and carry a flag to be excluded from the second. Which reader wants which:
+//
+//   isPassed     `preconditionsMet`'s blocker scan · `unskipStep`'s `priorAllDone` ·
+//                `closeAuthorStep`'s "already finished" guard (stamping `done` over a SKIPPED author
+//                step would destroy the provenance of the skip) · `gate sync`'s `alreadyDone` ·
+//                `buildNextForRepo`'s active-step scan · `artifact-status`'s "approved"
+//   isAuthored   `skipStep`'s "already authored" refusal
+//   == 'done'    `stateInvariants` on the REVIEW side and `yad doctor`'s gate-blind check — both ask
+//                "did this gate genuinely complete here", which `isAuthored` answers for an author
+//                step and this answers for a gate
+//   == 'skipped' the three step-over scans (`advanceState`, `skipStep`, `unskipStep`), which walk past
+//                a step marked N/A and must NOT walk past a hand-edited claim
+//
+// A THIRD QUESTION, and it is not either column: what the file CLAIMS about itself. `claimsSkipped` /
+// `claimsInherited` below answer that, for the readers that apply their own guard to the claim.
 //
 // THE NAME COLLISION THIS TASK HAD TO SETTLE. Every release up to shape 6 wrote `blocked` to mean
 // "waiting on an earlier step" — which is what the roadmap calls `todo`. The roadmap gives `blocked` a
@@ -387,8 +399,11 @@ export const stepRecord = ({ reason, by = null, date = null, link = null }) => (
 export function stepStatus(step) {
   if (!isPlainObject(step)) return null;
   const raw = typeof step.status === 'string' ? step.status : '';
-  // Checked in the order `gatePredicate` short-circuits them, so a step carrying both flags (which
-  // no writer produces) reads one way here and the same way there.
+  // Checked in the order `gatePredicate` short-circuits the two legacy FLAGS, so a step carrying both
+  // of those (which no writer produces) reads one way here and the same way there. The new spellings
+  // are not covered by that: `{ status: 'skipped', inherited: true }` reads `skipped` here and takes
+  // the inherited branch there. No writer produces that either, and neither reading is wrong — it is
+  // simply not a promise this function can keep across two fields that cannot both be `status`.
   if (raw === 'done' && step.inherited) return 'satisfied';
   if (raw === 'done' && step.skipped) return 'skipped';
   if (raw === 'blocked' && !isStepRecord(step.record)) return 'todo';
@@ -406,6 +421,14 @@ export function stepStatus(step) {
 //     reports the ones it does not — both need to see a claim before they can refuse it, and a
 //     half-stamped or hand-edited claim is exactly the one worth reporting.
 export const claimsSkipped = (step) => step?.skipped === true || step?.status === 'skipped';
+// ASYMMETRY WORTH NAMING: `gatePredicate` puts a ROUTE guard on the skip claim (`isSkippableStep`) and
+// none on this one, so a hand-edited `inherited` passes any gate. That is not an oversight — a skip is
+// a decision THIS epic makes about its own chain, so the route is what says whether it may; an
+// inheritance is a claim about a DIFFERENT epic, and the thing that validates it is `boundHash`
+// against the parent's live artifact, which the predicate already checks. A forged claim with no
+// hash has nothing to drift from, exactly as a stub parent's does not — the check that catches it is
+// `yad doctor`'s lineage walk, not the gate. Shape 7 widens the hand-editable surface from one
+// spelling to two and changes nothing else about that.
 export const claimsInherited = (step) => step?.inherited === true || step?.status === 'satisfied';
 
 // May the chain continue past this step — and does a step after it see it as satisfied? True for
@@ -649,11 +672,20 @@ const atEngineShape = (state) => (
 // `boundHash` is deliberately NOT folded into the record. It is evidence the gate compares against a
 // live hash (`gatePredicate`), not provenance a person reads — a record is why/who/when/where.
 //
-// WHAT THIS DOES NOT TOUCH. `build-state/<story>.json` holds the same four status words, written by
-// the `yad-run` skill rather than by the engine. It is left alone on purpose: `stepStatus` reads
-// `blocked`-with-no-record as `todo` whatever shape the file is on, so the reader is already one
-// model, and rewriting a file whose only writer would put the old word straight back is churn that
-// buys nothing. `buildNextForRepo` goes through `stepStatus` like every other reader.
+// WHAT THIS DOES NOT TOUCH, and the one place the shape-7 story is genuinely awkward.
+// `build-state/<story>.json` holds the same status words and is written by the `yad-run` and
+// `yad-implement` SKILLS, not by the engine — so a rewrite here would be undone by their next write,
+// and it is left alone. The awkward part is that those skills are the one existing writer of
+// `blocked` in the NEW sense: `yad-run` halts a lane on a failed check, a scope overrun or a contract
+// touch and marks the step `blocked`, meaning exactly "cannot proceed, not our choice". They now
+// write a `record` with the halt cause alongside it (see their step-4 HALT branch), which is what
+// keeps that halt distinguishable from a lane nobody started.
+//
+// A lane halted by an OLDER yad-run carries a bare `blocked` and therefore reads as `todo`. Nothing
+// advances past it either way — `isPassed` is false for both — so what is lost is the word, until
+// the next run rewrites the file. That is the cost of not migrating a file whose writer is a skill,
+// and it is smaller than rewriting a file the next write would undo. `buildNextForRepo` goes through
+// `stepStatus` like every other reader.
 //
 // Add-only and idempotent: a step whose `status` already IS its canonical state is returned
 // untouched, so a second `yad migrate` and every later gate write are no-ops. A status this release
@@ -672,9 +704,13 @@ export function stampStepStates(state) {
     const canonical = stepStatus(s);
     if (!canonical || canonical === s.status) return s;
     const out = { ...s, status: canonical };
-    // A record already on the step is left alone — it is the team's own sentence about the step, and
-    // an upgrade rewriting it would be this function deciding what they meant.
-    if (!isStepRecord(out.record)) {
+    // ANY record already on the step is left alone — `isPlainObject`, deliberately not `isStepRecord`.
+    // It is the team's own sentence about their own step, and an upgrade rewriting it would be this
+    // function deciding what they meant. That includes a MALFORMED one: `{ by: '@al', note: 'ticket
+    // 4412' }` has no `reason` and is not a valid record, and replacing it with a generated one would
+    // throw away the fields they did write. `yad doctor` reports it as `step:no-record` instead, which
+    // is the same split this whole file keeps — report, never correct.
+    if (!isPlainObject(out.record)) {
       if (canonical === 'skipped') {
         out.record = stepRecord({ reason: s.skipReason, by: s.skippedBy, date: s.skippedAt });
       } else if (canonical === 'satisfied') {
@@ -973,7 +1009,7 @@ export function advanceState(state, step) {
   // `ui-design`/`ui-design-review` pair). They are pre-marked `done`, so the next runnable step is the
   // first later step that is not skipped. When the whole tail is skipped, fall through to ready-for-build.
   let j = i + 1;
-  while (claimsSkipped(state.steps[j])) j++;
+  while (state.steps[j] && stepStatus(state.steps[j]) === 'skipped') j++;
   const next = state.steps[j];
   if (next) {
     next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
@@ -1078,6 +1114,14 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   if (isAuthored(author)) {
     throw err('YAD-STATE-004', `${stepId} is already authored`, 'cannot skip a step whose artifact was already written');
   }
+  // An INHERITED author step is not authored here and not skippable either — its artifact belongs to
+  // the parent epic. Without this it falls through to the review guard below and is refused for the
+  // wrong reason ("its review has already opened"), sending someone to look for a review PR that was
+  // never opened in this epic.
+  if (claimsInherited(author)) {
+    throw err('YAD-STATE-004', `${stepId} is inherited from ${author.inheritedFrom || 'the parent epic'}`,
+      'a step carried by reference is already satisfied upstream — there is nothing here to skip. Re-thread the change if it should be re-authored');
+  }
   // Once the review gate has opened (in_review / done), the UI work is effectively committed — skipping
   // then would orphan a live review PR. Refuse; the step is optional only up to authoring it.
   if (stepStatus(review) !== 'todo') {
@@ -1099,7 +1143,7 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   // If currentStep was on the pair we just skipped, move it to the next non-skipped step.
   if (state.currentStep === stepId || state.currentStep === `${stepId}-review`) {
     let j = ri + 1;
-    while (claimsSkipped(state.steps[j])) j++;
+    while (state.steps[j] && stepStatus(state.steps[j]) === 'skipped') j++;
     const next = state.steps[j];
     if (next) {
       if (stepStatus(next) === 'todo') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
@@ -1141,7 +1185,7 @@ export function unskipStep(state, stepId) {
     // past any still-skipped steps (mirrors skipStep's step-over) and reset whether it was opened as
     // an author step (`in_progress`) or a review gate (`in_review`).
     let j = (ri !== -1 ? ri : ai) + 1;
-    while (claimsSkipped(state.steps[j])) j++;
+    while (state.steps[j] && stepStatus(state.steps[j]) === 'skipped') j++;
     const after = state.steps[j];
     const afterState = stepStatus(after);
     if (afterState === 'in_progress' || afterState === 'in_review') after.status = 'todo';
@@ -1159,8 +1203,10 @@ export function markInReview(state, step) {
   // writing `in_review` over `blocked` would drop the record naming who we are waiting on while
   // changing nothing about the wait — and `gate sync` reaches here on exactly the path where the
   // gate did NOT pass. It still reports what is missing; the step keeps saying why it cannot move.
+  // `st &&` is the unknown-status case: a word this release cannot name belongs to the file (rule 3),
+  // and writing `in_review` over it would be this function deciding what a newer release meant.
   const st = stepStatus(state.steps[i]);
-  if (st !== 'blocked' && !isPassed(state.steps[i])) state.steps[i].status = 'in_review';
+  if (st && st !== 'blocked' && !isPassed(state.steps[i])) state.steps[i].status = 'in_review';
   // Opening a review gate means the artifact was authored — close the paired author step rather than
   // trusting the authoring skill to have hand-edited state.json (issue #131).
   closeAuthorStep(state, step);
@@ -1981,10 +2027,13 @@ export function buildNextForRepo(repoState = {}, { bindings = null } = {}) {
   return {
     step: active.id,
     // The CANONICAL state (E38), so a Build lane reports itself in the same vocabulary as a Shape
-    // step. `build-state/<story>.json` is written by the `yad-run` skill and is deliberately not
-    // migrated, so it still says `blocked` where it means "not started" — `stepStatus` reads that
-    // correctly, and a step with no status at all is `todo` for the same reason. A word this release
-    // cannot name falls through to itself rather than being renamed to something it is not.
+    // step. `build-state/<story>.json` is written by the `yad-run` / `yad-implement` skills and is
+    // deliberately not migrated, which cuts two ways here: a lane HALTED by those skills is `blocked`
+    // with a record and reports itself that way, while one halted by an older yad-run carries a bare
+    // `blocked` — the pre-shape-7 spelling of "not started" — and reads as `todo` until the next run
+    // rewrites it. Nothing advances past it either way (`isPassed` is false for both), so what the
+    // record buys is the word. A step with no status at all is `todo` for the same reason, and a word
+    // this release cannot name falls through to itself rather than being renamed to something it is not.
     status: stepStatus(active) || active.status || 'todo',
     // Read either spelling (old wins), then say it the OLD way. `cli/test-golden.mjs` deep-equals
     // this output against a frozen v3 snapshot, and rule 6 says a frozen project's answers never
@@ -2075,7 +2124,13 @@ export function stateInvariants(state) {
   if (!state || !Array.isArray(state.steps)) return [];
   const violations = [];
   for (const step of state.steps) {
-    if (step.type !== 'review+approve' || !isPassed(step)) continue;
+    // `=== 'done'` on the gate, `isPassed` on the author, and the asymmetry is the rule itself: only a
+    // gate that genuinely COMPLETED here implies its artifact was written. A skipped or satisfied gate
+    // pairs with a skipped or satisfied author and is no violation — and `deferred` (E37) is the one
+    // that makes this load-bearing rather than theoretical, because it is a PER-STEP state with no
+    // pairing rule. `isPassed` here would read a deferred gate above a `todo` author as a violation,
+    // and `repairState` below would then stamp that author `done` — claiming an artifact nobody wrote.
+    if (step.type !== 'review+approve' || stepStatus(step) !== 'done') continue;
     const author = authorStepFor(state, step);
     if (!author || isPassed(author)) continue;
     violations.push({
@@ -2123,6 +2178,13 @@ export function nextAction(ledger, { epic, bindings = null } = {}) {
     const dstep = state.steps.find((s) => s.id === state.currentStep)
       || state.steps.find((s) => !isPassed(s));
     if (!dstep) return { epicId, kind: 'discovery-done', step: 'discovery-done', why: 'discovery is done' };
+    // The same refusal the feature path makes below: a BLOCKED step is not a step to run, and naming
+    // its skill would tell someone to author an artifact that is waiting on somebody else.
+    if (stepStatus(dstep) === 'blocked') {
+      const reason = dstep.record?.reason;
+      return { epicId, kind: 'blocked', step: dstep.id, status: 'blocked', record: dstep.record || null,
+        why: `${dstep.id} is blocked${reason ? ` — ${reason}` : ' — no reason recorded'}` };
+    }
     if (dstep.type === 'author') {
       return { epicId, kind: 'author', step: dstep.id, status: dstep.status,
         ...skillFields(stepSkills(dstep.id, bindings)), artifact: dstep.artifact,

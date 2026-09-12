@@ -85,9 +85,14 @@ evidence the gate compares against a live hash, not provenance a person reads.
 
 ## What does NOT change
 
-- **`build-state/<story>.json` is left alone.** It holds the same four words, but the `yad-run` skill
-  writes it, not the engine — a rewrite would be undone by the next write. yadflow reads
-  `blocked`-with-no-record as `todo` in that file too, so it behaves identically either way.
+- **`build-state/<story>.json` is left alone.** It holds the same words, but the `yad-run` and
+  `yad-implement` skills write it, not the engine, so a rewrite would be undone by their next write.
+  One thing to know about it: those skills mark a **halted** Build lane `blocked` — a failed check, a
+  scope overrun, a contract touch — which is the new meaning, not the old one. From this release they
+  write a `record` naming the halt cause beside it. A lane halted by an older `yad-run` has no record,
+  so it reads as "not started" until the next run rewrites the file. Nothing advances past it either
+  way, so no work is lost; only the word is, and only until then. Run `yad update` to refresh the
+  skills in your project.
 - **No step moves, no gate re-opens, no approval changes.** This is a rename of the words a step uses
   to describe itself. Which steps have passed, and which approvals justified them, are untouched.
 - **`epic.md`, `approvals.json`, `comments.json` and every other ledger.** Not involved.

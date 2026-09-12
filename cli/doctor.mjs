@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -1134,7 +1134,11 @@ export function skipChecks(checks, root) {
     // one too. Naming one fault twice with two remedies is what this file forbids itself elsewhere.
     if (recordedRouteDisagrees(state)) continue;
     const optional = optionalStepsFor(state);
-    const skipped = new Set(state.steps.filter((x) => stepStatus(x) === 'skipped' && typeof x.id === 'string').map((x) => x.id));
+    // `claimsSkipped`, not the canonical state: this check exists to report a claim the route does not
+    // allow, so it has to see the claim before it can refuse it. A HALF-STAMPED one — `skipped: true`
+    // on a step that is not `done` — is the case most worth reporting, and reading the canonical state
+    // would let exactly that one through silently (E38).
+    const skipped = new Set(state.steps.filter((x) => claimsSkipped(x) && typeof x.id === 'string').map((x) => x.id));
     for (const step of state.steps) {
       if (!skipped.has(step.id)) continue;
       if (isSkippableStep(step.id, optional)) continue;
@@ -1150,22 +1154,11 @@ export function skipChecks(checks, root) {
     check(
       checks, 'skip:not-optional', 'shape', 'warn',
       `${bad.length} skipped step(s) their epic's route does not mark optional: ${some(bad, 3)}`,
-      'nothing breaks today — the step is already `done`, so `yad gate sync` reports that the rule no longer holds and changes nothing. What is lost is the justification: the gate stops treating the skip as the reason the step passed. Either the epic is on the wrong route (`step:off-route`), or the skip was written by hand — `yad skip <epic> <step> --undo` puts the step back in the chain',
+      'the gate fails closed on a skip the route does not allow, so it stops treating the skip as the reason the step passed. On a step already marked N/A in full nothing breaks: it reads as passed either way, and `yad gate sync` reports that the rule no longer holds and changes nothing — what is lost is the justification. A HALF-STAMPED one is different and is why this reads the claim rather than the state: `skipped: true` on a step that is not finished is a flag nothing honours, so the step is simply not done and the chain waits on it. Either the epic is on the wrong route (`step:off-route`), or the skip was written by hand — `yad skip <epic> <step> --undo` puts the step back in the chain',
     );
   }
 }
 
-// `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
-// default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
-//
-// REPORTS, NEVER CORRECTS, and never judges a skill NAME. The engine cannot know which skills a team
-// has installed — that is E50's job — and binding a skill this release has never heard of is the whole
-// point of the file. So the only things checked here are the ones the engine CAN know: does the file
-// parse, is a value usable, and is the step id one this engine runs at all.
-//
-// Three warnings, all of them "your line did nothing", which is the failure a config file makes easy
-// to miss. A typo in a step id is silent otherwise: the binding sits in the file, `yad next` never
-// looks it up, and the team concludes the feature does not work.
 // ---- the step-state model (E38) -----------------------------------------------------------------
 //
 // Two findings about a step's `status`, both REPORTED and never corrected — the same discipline as
@@ -1195,6 +1188,7 @@ export function skipChecks(checks, root) {
 //     old spelling of "not started" and there is nothing to explain. At shape 7 the stamper has
 //     already rewritten those, so one that remains was hand-written — and it still READS as `todo`,
 //     which is the surprising half and what the hint leads with.
+
 // The shape in which `blocked` stopped meaning "not started". A FIXED historical number, not
 // `SCHEMA_VERSION`: that one moves with every future shape change, and this fact does not.
 const BLOCKED_CHANGED_MEANING_AT = 7;
@@ -1238,6 +1232,17 @@ export function stepStateChecks(checks, root) {
   }
 }
 
+// `.sdlc/skills.json`: which skill runs which step, when the project does not want the engine's
+// default (E6). Absent is the normal case and says nothing — most projects run the shipped skills.
+//
+// REPORTS, NEVER CORRECTS, and never judges a skill NAME. The engine cannot know which skills a team
+// has installed — that is E50's job — and binding a skill this release has never heard of is the whole
+// point of the file. So the only things checked here are the ones the engine CAN know: does the file
+// parse, is a value usable, and is the step id one this engine runs at all.
+//
+// Three warnings, all of them "your line did nothing", which is the failure a config file makes easy
+// to miss. A typo in a step id is silent otherwise: the binding sits in the file, `yad next` never
+// looks it up, and the team concludes the feature does not work.
 export function skillBindingChecks(checks, root) {
   const rel = PROJECT_FILES.skillsConfig;
   const file = path.join(root, rel);
