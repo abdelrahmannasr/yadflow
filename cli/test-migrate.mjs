@@ -1006,11 +1006,11 @@ test('migrate 5 -> 6: a `profile` already recorded is never overwritten, whateve
   // correcting a value somebody wrote during an upgrade they ran to be safe is not this command's job.
   const T = project({ files: {
     'epics/EP-x/.sdlc/state.json': JSON.stringify(
-      { schemaVersion: 5, profile: 'spike', currentStep: 'epic', steps: chain(CLASSIC) }, null, 2) + '\n',
+      { schemaVersion: 5, profile: 'moonshot', currentStep: 'epic', steps: chain(CLASSIC) }, null, 2) + '\n',
   } });
   try {
     await runMigrate(T, { apply: true });
-    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).profile, 'spike');
+    assert.equal(read(path.join(T, 'epics/EP-x/.sdlc/state.json')).profile, 'moonshot');
   } finally { cleanup(T); }
 });
 
@@ -1053,7 +1053,7 @@ test('migrate 5 -> 6: only an epic ledger gains a profile — no other file is t
 
 test('stampProfile: add-only, never invents, and hands back the SAME object when idle', async () => {
   const { stampProfile } = await import('./epic-state.mjs');
-  const already = { profile: 'spike', steps: chain(CLASSIC) };
+  const already = { profile: 'moonshot', steps: chain(CLASSIC) };
   assert.equal(stampProfile(already), already, 'a recorded route is untouched, object identity and all');
   const offRoute = { currentStep: 'x', steps: chain(['stories', 'epic']) };
   assert.equal(stampProfile(offRoute), offRoute, 'no route fits, so no key and no new object');

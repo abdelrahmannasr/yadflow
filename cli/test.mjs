@@ -10712,7 +10712,9 @@ test('doctor profile: no `profile` key at all is silent — nothing to compare',
 });
 
 test('doctor profile: a recorded route nobody defined is reported', async () => {
-  const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('spike') } });
+  // A name no release has ever carried. `spike` used to stand in for one here and became a real route
+  // — a fixture that borrows a name the table might one day gain stops testing the thing it names.
+  const checks = await profileChecksOn({ 'EP-x': { fm: 'kind: feature', state: routed('moonshot') } });
   assert.deepEqual(checks.map((c) => [c.id, c.status, c.section]), [['profile:unknown', 'warn', 'shape']]);
   assert.match(checks[0].message, /EP-x/);
   assert.match(checks[0].hint, /classic · analysis-first · discovery/);
@@ -10851,10 +10853,10 @@ test('yad epic new: an unknown type and an unknown route each say what is allowe
     assert.match(bad.out, /unknown work-item type: epic/);
     assert.match(bad.out, /feature · change · defect · hotfix · chore/);
   } finally { cleanTmp(bad.T); }
-  const route = await epicNewOn({ slug: 'x', profile: 'spike' });
+  const route = await epicNewOn({ slug: 'x', profile: 'moonshot' });
   try {
     assert.equal(route.failed, true);
-    assert.match(route.out, /unknown lifecycle profile: spike/);
+    assert.match(route.out, /unknown lifecycle profile: moonshot/);
     // The list comes from the code, so a route added later needs no edit here.
     assert.match(route.out, /classic · analysis-first/);
   } finally { cleanTmp(route.T); }
@@ -10922,7 +10924,7 @@ test('yad epic new --json: the machine answer carries the chain and the skill to
     assert.equal(j.next, 'yad-epic');
     assert.equal(j.steps.length, 10);
   } finally { cleanTmp(T); }
-  const bad = await epicNewOn({ slug: 'x', profile: 'spike', json: true });
+  const bad = await epicNewOn({ slug: 'x', profile: 'moonshot', json: true });
   try {
     assert.equal(bad.failed, true);
     assert.equal(JSON.parse(bad.out).ok, false, 'a refusal is machine-readable too');
