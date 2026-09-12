@@ -1171,6 +1171,17 @@ test('fillHubTemplate: the generated review-PR body carries every section the Pr
   assert.match(b, /^## Impact & Risk \(front-half\)$/m);
   assert.match(b, /^## Checklist$/m);
   assert.match(b, /Risk tags:/);
+  // E7 (rule 6): the body says what the count asks of this step, labelled advisory so nobody reads it
+  // as the requirement. Pinned here because without it the line can be deleted with a green suite.
+  assert.match(b, /- \*\*Approver count \(advisory, not yet enforced\):\*\* 3 approvers = base 1 \+ contract risk 2$/m);
+});
+
+test('fillHubTemplate: an untagged step states the count too — the floor is still a number', () => {
+  const b = fillHubTemplate({
+    epic: 'EP-demo', artifact: 'epic.md', step: { id: 'epic-review', risk_tags: [] },
+    owner: 'alice', domains: ['backend'],
+  });
+  assert.match(b, /- \*\*Approver count \(advisory, not yet enforced\):\*\* 1 approver = base 1$/m);
 });
 
 test('fillHubTemplate: the generated body passes the real pr-template hub gate (#103 regression)', () => {
@@ -1598,11 +1609,12 @@ test('gatePredicate: a SKIPPED step short-circuits — passes with zero approval
 // ---------------------------------------------------------------------------------------------
 // The per-step gate rule (E7) — `needed = base + risk step`, counted in PEOPLE
 // ---------------------------------------------------------------------------------------------
-// Two rules decide a gate's approvals while the roster still exists, and they are ANDed (see the
-// comment on `gatePredicate`): the roster-era role rule, pinned by the tests above, and this count.
-// The cases below are the ones where the count is the rule that BINDS — each of them passes the role
-// rule and is still held. Without them the count would be invisible: every fixture in this file has
-// two distinct approvers, so a rule asking for one or two would never be the reason anything failed.
+// The count is REPORTED, not enforced: the roster-era role rule (pinned by the tests above) is still
+// the only thing that decides `passed`, because the roadmap's tier-1 rule includes a capacity cap that
+// does not exist until E72, and enforcing the uncapped half would make a two-person team's contract
+// gate unpassable. So these tests pin what the count SAYS — `gateRule`, `have`, `short` — and pin that
+// it changes no verdict. The case they are built around is the one the role rule cannot see: one person
+// holding two roles is two roles and one approver.
 const { gateRuleFor, gateRuleSum } = await import('./epic-state.mjs');
 
 test('gateRuleFor: the risk step is contract +2, auth/payments +1, nothing +0', () => {
@@ -1610,6 +1622,20 @@ test('gateRuleFor: the risk step is contract +2, auth/payments +1, nothing +0', 
   assert.deepEqual(gateRuleFor({ id: 'architecture-review', risk_tags: ['contract'] }), { base: 1, riskStep: 2, needed: 3, risk: 'contract' });
   assert.deepEqual(gateRuleFor({ id: 'epic-review', risk_tags: ['auth'] }), { base: 1, riskStep: 1, needed: 2, risk: 'high' });
   assert.deepEqual(gateRuleFor({ id: 'epic-review', risk_tags: ['payments'] }), { base: 1, riskStep: 1, needed: 2, risk: 'high' });
+});
+
+test('gateRuleFor: the tier NAME comes from the winning tag, not from the number', () => {
+  // If `auth` ever moves to +2, an auth-only step must not start printing "contract risk 2".
+  assert.equal(gateRuleFor({ risk_tags: ['auth'] }).risk, 'high');
+  assert.equal(gateRuleFor({ risk_tags: ['auth', 'contract'] }).risk, 'contract');
+  assert.equal(gateRuleFor({ risk_tags: ['contract', 'auth'] }).risk, 'contract', 'tag order does not decide the tier');
+});
+
+test('gateRuleFor: a hand-edited risk_tags of the wrong TYPE is read as no tags, not a crash', () => {
+  // `risk_tags: "contract"` (a string where the shape says array) is a plausible hand edit, and the gate
+  // that was about to report on the step must still report.
+  assert.deepEqual(gateRuleFor({ risk_tags: 'contract' }), { base: 1, riskStep: 0, needed: 1, risk: 'normal' });
+  assert.deepEqual(gateRuleFor({ risk_tags: { contract: true } }), { base: 1, riskStep: 0, needed: 1, risk: 'normal' });
 });
 
 test('gateRuleFor: several tags take the MAXIMUM step, never the sum', () => {
@@ -1636,53 +1662,55 @@ test('gateRuleSum: one sentence of arithmetic, shared by every surface that prin
   assert.equal(gateRuleSum(gateRuleFor({ risk_tags: ['contract'] })), '3 approvers = base 1 + contract risk 2');
 });
 
-test('gatePredicate: the count binds where one person holds two roles on a contract step', () => {
+test('gatePredicate: the count reports a shortfall the role rule cannot see, and holds nothing', () => {
   // The role rule is SATISFIED here: alice is both owner and reviewer (the roster gives a person every
-  // role they hold), and carol covers the one touched domain. Two people, though — and a contract step
-  // needs three. This is the case the role rule cannot see, because it counts roles and not humans.
+  // role they hold), and carol covers the one touched domain. Two people, though — and the count asks a
+  // contract step for three. THIS is the case that forced the count to ship advisory: a two-person team
+  // passes today and would be deadlocked by an uncapped count, with no escape until E72/E73.
   const approvals = [
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'reviewer', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: 'sha256:C' },
   ];
   const p = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
-  assert.equal(p.passed, false, 'two people approved a step whose rule needs three');
-  assert.equal(p.have, 2);
-  assert.equal(p.needed, 3);
-  // No role line is missing — the count is the only thing holding this gate.
-  assert.ok(!p.missing.some((m) => /owner|reviewer/.test(m)), `role rule should be satisfied: ${p.missing.join(' | ')}`);
-  // Arithmetic, not a bare number (rule 6 — never go quiet about what is being asked for).
-  assert.ok(p.missing.some((m) => m === '1 more approver — this step needs 3 approvers = base 1 + contract risk 2; 2 approved'), p.missing.join(' | '));
+  assert.equal(p.passed, true, 'the role rule decides the gate, and it is satisfied');
+  assert.equal(p.have, 2, 'two distinct people, though three approval records');
+  assert.equal(p.gateRule.needed, 3);
+  assert.equal(p.short, 1, 'the shortfall is reported — this is the value E72 will enforce on');
+  assert.deepEqual(p.missing, [], 'nothing the count says may hold a gate before the cap exists');
 
-  // A third human clears it, whatever role they hold.
+  // A third human clears the shortfall, whatever role they hold.
   approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'reviewer', artifactHash: 'sha256:C' });
-  const pass = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
-  assert.equal(pass.passed, true);
-  assert.equal(pass.have, 3);
+  const full = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
+  assert.equal(full.have, 3);
+  assert.equal(full.short, 0);
 });
 
-test('gatePredicate: a hand-added risk tag raises the count on an ordinary step', () => {
+test('gatePredicate: a hand-added risk tag raises what the count asks of an ordinary step', () => {
   // The tags are read from the EPIC's recorded step, not from the catalogue — a team that marks
-  // `epic-review` as touching auth has raised its own gate, and the engine honours the file.
+  // `epic-review` as touching auth has raised what the count asks for, and the engine honours the file.
   const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: ['auth'] };
   const onePerson = [appr({ approver: 'alice', role: 'owner' }), appr({ approver: 'alice', role: 'reviewer' })];
-  const held = gatePredicate({ step, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
-  assert.equal(held.passed, false, 'one person cannot clear a high-risk gate on their own');
-  assert.equal(held.needed, 2);
-  assert.equal(held.have, 1);
-  assert.equal(held.risk, 'high');
-  // The same approvals on the same step WITHOUT the tag pass: the tag is what moved the number.
+  const tagged = gatePredicate({ step, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(tagged.gateRule.needed, 2);
+  assert.equal(tagged.gateRule.risk, 'high');
+  assert.equal(tagged.have, 1);
+  assert.equal(tagged.short, 1);
+  // The same approvals on the same step WITHOUT the tag are not short: the tag is what moved the number.
   const untagged = gatePredicate({ step: baseStep, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(untagged.gateRule.needed, 1);
+  assert.equal(untagged.short, 0);
+  // Neither verdict moved — the role rule decides both, and one person holds both roles.
+  assert.equal(tagged.passed, true);
   assert.equal(untagged.passed, true);
-  assert.equal(untagged.needed, 1);
 });
 
-test('gatePredicate: solo waives the count too, and still reports what team mode would ask', () => {
+test('gatePredicate: solo reports no shortfall, and still says what team mode would ask', () => {
   const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true, solo: true });
   assert.equal(p.passed, true);
-  assert.equal(p.needed, 3, 'the rule is a fact about the step, reported even where it is not enforced');
+  assert.equal(p.gateRule.needed, 3, 'the rule is a fact about the step, reported even where approvals are waived');
   assert.equal(p.have, 0);
-  assert.ok(!p.missing.some((m) => /approver/.test(m)));
+  assert.equal(p.short, 0, 'a waived gate is not "short" of anything');
 });
 
 test('gatePredicate: a waived path reports `have: null`, which is not the same as zero approvals', () => {
@@ -1692,12 +1720,13 @@ test('gatePredicate: a waived path reports `have: null`, which is not the same a
   const i = gatePredicate({ step: inherited, approvals: [], currentHash: 'sha256:C' });
   assert.equal(i.passed, true);
   assert.equal(i.have, null);
-  assert.equal(i.needed, 3);
+  assert.equal(i.short, 0);
+  assert.equal(i.gateRule.needed, 3);
 
   const skipped = { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', risk_tags: [], skipped: true, status: 'done' };
   const k = gatePredicate({ step: skipped, approvals: [], merged: false, threadsResolved: false, optional: ['ui-design'] });
   assert.equal(k.have, null);
-  assert.equal(k.needed, 1);
+  assert.equal(k.gateRule.needed, 1);
 });
 
 test('gatePredicate: an engagement-gated approval does not count as an approver either', () => {
@@ -1710,8 +1739,11 @@ test('gatePredicate: an engagement-gated approval does not count as an approver 
   ];
   const strict = gatePredicate({ step, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
   assert.equal(strict.have, 1);
-  assert.equal(strict.needed, 2);
+  assert.equal(strict.gateRule.needed, 2);
+  assert.equal(strict.short, 1);
+  // The role rule is what fails here (bob's approval does not count as a reviewer either).
   assert.equal(strict.passed, false);
+  assert.ok(strict.missing.some((m) => /reviewer/.test(m)));
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -2681,6 +2713,16 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
   const again = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
   assert.equal(again.filter((a) => a.source === 'bridge').length, approvals.filter((a) => a.source === 'bridge').length);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: the log line says who approved and what the count asks for (E7, rule 6)', async () => {
+  const { T } = scaffoldEpic();
+  // Three logins approve the contract step, so the count is met and the role rule passes.
+  const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }));
+  assert.match(out, /rule: escalated/);
+  assert.match(out, /3 approved; count \(advisory\): 3 approvers = base 1 \+ contract risk 2/);
+  assert.ok(!/short/.test(out), `nothing is short here: ${out}`);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3924,9 +3966,10 @@ test('gate status says what the gate will ask for, and counts it the way the gat
     return lines.find((l) => l.includes('architecture-review') && l.includes('approval'));
   };
 
-  // The contract step's rule, stated as arithmetic — the roster rule alone would never print a number.
+  // The contract step's count, stated as arithmetic and labelled advisory — the roster rule alone would
+  // never print a number, and a number with no label would read as the requirement.
   const line = await statusLines();
-  assert.match(line, /needs 3 approvers = base 1 \+ contract risk 2/);
+  assert.match(line, /count \(advisory\): 3 approvers = base 1 \+ contract risk 2/);
   assert.match(line, /from 2 people/);
 
   // With requireEngagement on, the predicate drops a bare approval BEFORE counting people. The status

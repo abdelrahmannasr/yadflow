@@ -420,10 +420,15 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       optional: optionalStepsFor(state),
     });
 
-    // Say the arithmetic, not just the verdict (rule 6): the roster-era rule label, then E7's count and
-    // what it is counting. A reviewer who sees `2 of 3 approvers (base 1 + contract 2)` can tell a gate
-    // that is waiting from a gate that is asking for more people than the team has.
-    log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${pred.have} approved, needs ${gateRuleSum(pred)})`)}`);
+    // Say the arithmetic, not just the verdict (rule 6): the roster-era rule that decides this gate, then
+    // E7's count — which is advisory until E72 caps it, and labelled that way so nobody reads a number
+    // the gate is not enforcing as the reason it did or did not pass.
+    // `have: null` is a step whose approvals were never counted (inherited from a parent epic, or
+    // skipped): there is no head count to report and no requirement to report either.
+    const count = pred.have === null
+      ? 'approvals not counted here'
+      : `${pred.have} approved; count (advisory): ${gateRuleSum(pred.gateRule)}${pred.short ? ` — ${pred.short} short` : ''}`;
+    log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
       // next step, and moving it back to in_review would un-ship work already built on it. What this
@@ -710,21 +715,26 @@ export async function gateStatus(root, { epic } = {}) {
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !(a.artifactHash && cur && a.artifactHash !== cur));
     const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && a.artifactHash && cur && a.artifactHash !== cur).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
-    // E7's count, per step, from the step's own risk tags. Distinct PEOPLE, which is why it can differ
-    // from the approval count beside it — two approvals from one person are one approver. Printed even
-    // in solo mode, where the requirement is waived: the line above says so once, and a reader who
-    // later switches to team mode should be able to see what each gate will then ask for.
+    // E7's count, per step, from the step's own risk tags — advisory until E72 caps it, and labelled so.
+    // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from
+    // one person are one approver. Printed in solo mode too, where approvals are waived, so a reader who
+    // later switches to team mode can see what each gate will then ask for.
     //
-    // COUNTED THE WAY THE GATE COUNTS. With `requireEngagement` on, the predicate drops an approval
-    // with no verified engagement signal BEFORE counting people, so a status line built from every live
-    // approval would report a head count the gate does not recognise — and this is the one surface that
-    // exists to say what the gate is asking for. The dropped ones are named rather than hidden, because
-    // "two people approved and neither counts" is the fact a reader needs.
+    // COUNTED THE WAY THE PREDICATE COUNTS. With `requireEngagement` on, an approval carrying no
+    // verified engagement signal is dropped BEFORE people are counted, so a line built from every live
+    // approval would report a head count the engine does not recognise. The dropped ones are named
+    // rather than hidden, because "two people approved and neither counts" is the fact a reader needs.
+    //
+    // NO COUNT ON A WAIVED STEP. An inherited step's approvals live under the parent epic and a skipped
+    // step was never reviewed, so printing what the count asks for would read as an audit failure on a
+    // step the engine deliberately waives.
     const counted = reqEng ? live.filter((a) => a.engagement === 'verified') : live;
     const unengaged = live.length - counted.length;
     const people = new Set(counted.map((a) => a.approver)).size;
     const from = `from ${people} ${people === 1 ? 'person' : 'people'}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
-    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}; needs ${gateRuleSum(gateRuleFor(s))}`)}`);
+    const waived = s.inherited ? `; inherited from ${s.inheritedFrom || 'the parent epic'}` : s.skipped ? '; skipped (N/A)' : '';
+    const count = waived || `; count (advisory): ${gateRuleSum(gateRuleFor(s))}`;
+    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
   }
 }
 
@@ -901,9 +911,9 @@ function reviewBundle(root, { epic, artifact } = {}) {
     artifact: art,
     platform: hub?.platform || null,
     pr: pr ? { number: pr.number, url: pr.url } : null,
-    // `gateRule` is E7's per-step rule — the number of distinct approvers this gate needs and the
-    // arithmetic behind it. `escalated` is the roster-era rule beside it (a domain owner per touched
-    // domain), which E62 removes; the two are separate facts and a reader needs both while both apply.
+    // `gateRule` is E7's per-step rule — the number of distinct approvers the count asks for and the
+    // arithmetic behind it. It is advisory until E72 caps it. `escalated` is the roster-era rule beside
+    // it (a domain owner per touched domain), which is the rule that actually holds the gate today.
     step: step
       ? { id: step.id, riskTags: step.risk_tags || [], escalated: isEscalated(step), gateRule: gateRuleFor(step) }
       : null,
@@ -990,11 +1000,11 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     '## Impact & Risk (front-half)',
     `- **Domains / repos touched:** ${domains.join(', ') || 'n/a'}`,
     `- **Risk tags:** ${(step.risk_tags || []).join(', ') || 'none'}`,
-    // What this gate will ask for, stated on the artifact people are about to review rather than left
-    // for them to discover when it refuses to advance (rule 6). The number is E7's count of distinct
-    // approvers; the roster-era rule may ask for specific roles on top of it, which is what the
-    // `escalate` note on the risk-tags checklist item below refers to.
-    `- **Approvals needed:** ${gateRuleSum(rule)}`,
+    // What the count asks for, stated on the artifact people are about to review rather than left for
+    // them to discover later (rule 6). Advisory: the rule that holds this gate is the roster rule (an
+    // owner, a reviewer, and a domain owner per touched repo on an escalated step), and the count starts
+    // holding gates when E72 caps it. Said plainly here so nobody treats the number as the requirement.
+    `- **Approver count (advisory, not yet enforced):** ${gateRuleSum(rule)}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
