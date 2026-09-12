@@ -59,6 +59,8 @@ cc="$(git log "$RANGE" --format='%(trailers:key=Contract-Change,valueonly)' | se
 if ! printf '%s\n' "$cc" | grep -qx 'yes'; then
   echo "FAIL [contract-check]: contract surface changed without a 'Contract-Change: yes' trailer."
   echo "  -> Route back to the architecture gate: update + re-lock contract.md in the product repo,"
+  echo "     or, if this epic is on a short lane (chore/spike) and has no architecture gate, move the"
+  echo "     surface change to a new epic on the classic route,"
   echo "     re-run yad-spec, then implement with Contract-Change: yes. The surface is never widened"
   echo "     from inside a code repo."
   exit 1
@@ -146,6 +148,30 @@ while IFS= read -r story; do
       continue
     fi
     echo "note [contract-check]: ${link} hash matches the product lock (${current:0:12}…)."
+  elif [ -n "$prod" ] && [ -d "${prod}/epics/${epic}/.sdlc" ]; then
+    # THE PRODUCT REPO RESOLVED AND THERE IS STILL NO LOCK. That is a different fact from "not
+    # reachable", and it must not share its answer. A `Contract-Change: yes` is being claimed against
+    # an epic that has no locked surface at all, so there is nothing the claim could be true of.
+    #
+    # This is the steady state of the short lanes (E40): `chore` and `spike` carry no architecture
+    # step, so `contract.md` and `contract-lock.json` never exist on them. Deferring here meant every
+    # short-lane epic could move the shared cross-repo surface forever, with a note that reads like a
+    # pass. The guard used to be prose in the authoring skills; this is the gate.
+    #
+    # Narrow on purpose, and the guard is the EPIC'S LEDGER DIRECTORY, not the product path — because
+    # `resolve_product` returns a path for a repo that is not there at all (it resolves a string; it
+    # does not check the disk). Requiring `epics/<epic>/.sdlc/` to exist is what separates "this epic
+    # is real and has no lock" from "nothing is checked out here". A CI job that does not check the
+    # product repo out still defers below, exactly as before — that case proves nothing either way,
+    # and failing it would break every setup that has always run this way.
+    echo "FAIL [contract-check]: Contract-Change claimed, but ${epic} has no contract lock at all."
+    echo "  Expected ${lock} — the epic's ledger directory is there and the lock file is not."
+    echo "  An epic on a short lane (chore/spike) has no architecture step and so never locks a surface:"
+    echo "  it may consume the contract but must not CHANGE it. Move the surface change to a new epic on"
+    echo "  the classic route, which has the architecture gate that locks it. If this epic IS on classic,"
+    echo "  it has not reached that gate yet — author and lock contract.md first (yad-architecture Step 5)."
+    rc=1
+    continue
   else
     # Say so. A skipped fidelity check used to be indistinguishable from a passed one, which is how a
     # mis-resolved product-repo could turn a stale-pin FAIL into a silent PASS (issue #149).
@@ -156,7 +182,7 @@ $stories
 EOF
 
 if [ "$rc" != 0 ]; then
-  echo "FAIL [contract-check]: a changed slice pins a stale contract lock (see above) — the surface was not re-locked upstream for every story in this diff."
+  echo "FAIL [contract-check]: a changed slice pins a stale or absent contract lock (see above) — the surface was not re-locked upstream for every story in this diff."
   exit 1
 fi
 

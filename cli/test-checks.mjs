@@ -266,6 +266,45 @@ test('contract-check gate: Contract-Change with link.md matching the product loc
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('contract-check gate: a resolvable Product with NO lock for the epic fails, not defers (E40)', () => {
+  // The short-lane hole. `chore` and `spike` carry no architecture step, so `contract-lock.json` never
+  // exists on them — and a missing lock used to read the same as an unreachable one: a note, then a
+  // PASS. That made "this epic may not change the surface" a rule the gate could never enforce, for
+  // the entire life of every short-lane epic.
+  const T = scaffoldRepo();
+  // The Product resolves — it exists and holds the epic directory — but there is no lock inside it.
+  fs.mkdirSync(path.join(T, 'product', 'epics', 'EP-demo', '.sdlc'), { recursive: true });
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../product', 'contract-lock': 'none',
+    }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 1, 'a claimed Contract-Change against an epic with no lock must fail');
+  assert.match(r.out, /has no contract lock at all/);
+  assert.match(r.out, /short lane/, 'and the message names the route that causes it');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('contract-check gate: an UNREACHABLE Product still defers — the narrow case is unchanged', () => {
+  // The hardening above must not turn every CI job that does not check the Product out into a
+  // failure. That case proves nothing either way and has always deferred; only "resolved, and the
+  // lock is genuinely absent" is new. Asserted beside its sibling so the two cannot be merged by
+  // someone tidying later.
+  const T = scaffoldRepo();
+  commit(T, 'feat: widen API\n\nContract-Change: yes', {
+    'specs/EP-demo-S01/contracts/api.md': 'new endpoint\n',
+    'specs/EP-demo-S01/link.md': linkMd({
+      story: 'EP-demo-S01', 'product-repo': '../../nowhere', 'contract-lock': `sha256:${'d'.repeat(64)}`,
+    }),
+  });
+  const r = runGate(CONTRACT, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /fidelity check deferred/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
 // (contract-check's product-repo forms are covered by the four-gate matrix below — an absolute path
 // was already the one form it handled, so a bespoke case here pinned nothing.)
 
