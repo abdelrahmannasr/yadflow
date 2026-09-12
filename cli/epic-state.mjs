@@ -2004,6 +2004,47 @@ const REPLACE_BASES = ['epic', 'architecture', 'contract', 'ui-design'];
 // one epic would drop the parent's inherited stories/cases.
 const ADDITIVE_BASES = ['stories', 'test-cases'];
 
+// The catalogue step that PRODUCES each base. `contract` has no step of its own — `contract.md` is
+// authored by the architecture step, which `artifactFromBase` already says — so both map to it.
+//
+// Needed because `inherits` answers only half the question. It says "I did not re-author this", which
+// on every route that HAS the step means "I authored it myself". E40's short lanes break that: a
+// `chore` epic has no architecture step, never writes `inherits:`, and so claimed to be the
+// authoritative source for `architecture`, `contract`, `ui-design` and `test-cases` — four files that
+// will never exist. `yad thread` printed it, and `yad-change` reads exactly that map to choose what a
+// threaded defect inherits from, so the false claim became a forged `inheritedFrom`.
+const BASE_STEP = {
+  epic: 'epic', architecture: 'architecture', contract: 'architecture',
+  'ui-design': 'ui-design', stories: 'stories', 'test-cases': 'test-cases',
+};
+
+// Does this epic's chain carry the step that produces this base?
+//
+// Read from `state.json`'s `steps[]`, not from the recorded `profile`: the chain is what the epic
+// actually walked, it is present on every epic including the ones seeded before shape 6, and a step
+// that is in the chain but `skipped` still counts — a skipped `ui-design` is a recorded decision by
+// THIS epic about an artifact that is genuinely its own to decide, which is the opposite of a step its
+// route never had.
+//
+// Missing, absent or unparseable `steps[]` answers TRUE — the answer this function gave before the
+// rule existed. An epic whose ledger cannot be read is not evidence that it owns nothing.
+//
+// THE THROW IS CAUGHT ON PURPOSE, which is the opposite of what a ledger WRITE does. `writeState` and
+// the gate read strictly and refuse, because a read-modify-write against a file it cannot parse
+// destroys the contents. This is a pure read feeding a provenance display, and `yad thread` is exactly
+// the command someone runs to inspect a project that is already damaged — crashing it on the corrupt
+// file would take away the tool they are holding. `yad doctor` is what reports the corruption, and it
+// still does. Before this rule the function never opened `state.json` at all, so failing closed here
+// would also be a new way for a read-only command to die on an old project.
+const chainHasBase = (root, id, base) => {
+  const step = BASE_STEP[base];
+  if (!step) return true;
+  let state;
+  try { state = readJSONStrict(path.join(epicRoot(root, id), '.sdlc', 'state.json'), null); } catch { return true; }
+  if (!Array.isArray(state?.steps)) return true;
+  return state.steps.some((x) => x?.id === step);
+};
+
 // The owning epic per artifact base across a thread. REPLACE bases resolve to a single epic id (the
 // latest re-author); ADDITIVE bases resolve to the ordered LIST of every epic that re-authored them
 // (genesis-first) — use resolveCurrentStories for story-id-level ownership of the composed set.
@@ -2014,8 +2055,10 @@ export function resolveCurrentArtifacts(root, threadOrEpicId) {
   for (const b of ADDITIVE_BASES) out[b] = [];
   for (const id of members) {
     const { inherits } = epicLineage(root, id);
-    for (const b of REPLACE_BASES) if (!inherits.includes(b)) out[b] = id;
-    for (const b of ADDITIVE_BASES) if (!inherits.includes(b)) out[b].push(id);
+    // Two conditions, not one: this epic did not inherit the base AND its chain carries the step that
+    // produces it. An epic on a route without that step authored nothing to own.
+    for (const b of REPLACE_BASES) if (!inherits.includes(b) && chainHasBase(root, id, b)) out[b] = id;
+    for (const b of ADDITIVE_BASES) if (!inherits.includes(b) && chainHasBase(root, id, b)) out[b].push(id);
   }
   return out;
 }

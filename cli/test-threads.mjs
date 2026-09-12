@@ -116,6 +116,58 @@ test('resolveCurrentArtifacts: a defect-epic owns only what it re-authored; gene
   assert.deepEqual(owner['test-cases'], ['EP-gen', 'EP-fix']);
 });
 
+test('resolveCurrentArtifacts: an epic never owns an artifact its ROUTE has no step for (E40)', () => {
+  const T = hub();
+  const dir = writeEpic(T, 'EP-chore', { kind: 'chore', thread: 'EP-chore' });
+  // A short lane: no architecture, ui-design or test-cases step, and no `inherits:` either — it has no
+  // parent to inherit from. `inherits` alone would therefore read "did not inherit it, so authored it"
+  // and hand this epic four artifacts it will never produce. `yad-change` reads this map to pick a
+  // threaded defect's `inheritedFrom`, so a false owner here becomes a forged provenance record there.
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-chore', profile: 'chore', currentStep: 'epic',
+    steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'stories' }, { id: 'stories-review' }],
+  }));
+  const owner = resolveCurrentArtifacts(T, 'EP-chore');
+  assert.equal(owner.epic, 'EP-chore', 'it does author the epic');
+  assert.deepEqual(owner.stories, ['EP-chore'], 'and the stories');
+  assert.equal(owner.architecture, null);
+  assert.equal(owner.contract, null, '`contract.md` is authored by the architecture step, which is absent');
+  assert.equal(owner['ui-design'], null);
+  assert.deepEqual(owner['test-cases'], []);
+});
+
+test('resolveCurrentArtifacts: a SKIPPED step still owns its artifact, and an unreadable chain owns everything', () => {
+  // Two boundaries the rule above must not cross.
+  //
+  // A skipped `ui-design` is IN the chain, pre-marked done with a recorded reason — this epic's own
+  // decision about an artifact that is genuinely its to decide. That is the opposite of a step the
+  // route never had, and collapsing the two would erase the distinction E35 exists to draw.
+  const T = hub();
+  const dir = writeEpic(T, 'EP-skip', { kind: 'feature', thread: 'EP-skip' });
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify({
+    epicId: 'EP-skip', profile: 'classic', currentStep: 'stories',
+    steps: [{ id: 'epic' }, { id: 'epic-review' }, { id: 'architecture' }, { id: 'architecture-review' },
+      { id: 'ui-design', skipped: true, status: 'done' }, { id: 'ui-design-review', skipped: true, status: 'done' },
+      { id: 'stories' }, { id: 'stories-review' }, { id: 'test-cases' }, { id: 'test-cases-review' }],
+  }));
+  assert.equal(resolveCurrentArtifacts(T, 'EP-skip')['ui-design'], 'EP-skip');
+
+  // And an epic whose ledger cannot be read keeps every base it had before this rule. A file that will
+  // not parse is not evidence that the epic owns nothing — `yad doctor` reports it (rule 3), and this
+  // map must not quietly start dropping provenance because of it.
+  const T2 = hub();
+  const d2 = writeEpic(T2, 'EP-broken', { kind: 'feature', thread: 'EP-broken' });
+  fs.writeFileSync(path.join(d2, '.sdlc/state.json'), '{ not json');
+  const broken = resolveCurrentArtifacts(T2, 'EP-broken');
+  assert.equal(broken.architecture, 'EP-broken');
+  assert.deepEqual(broken['test-cases'], ['EP-broken']);
+
+  // Same for an epic with no `state.json` at all, which is every pre-ledger fixture in the wild.
+  const T3 = hub();
+  writeEpic(T3, 'EP-bare', { kind: 'feature', thread: 'EP-bare' });
+  assert.equal(resolveCurrentArtifacts(T3, 'EP-bare').architecture, 'EP-bare');
+});
+
 test('resolveCurrentStories: composes the story set — inherited parent stories survive a defect-fix', () => {
   const T = hub();
   writeEpic(T, 'EP-gen', { kind: 'feature', thread: 'EP-gen' }, { stories: ['shipped', 'shipped', 'shipped'] });
