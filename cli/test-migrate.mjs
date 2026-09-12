@@ -920,6 +920,80 @@ test('the gate write on a VERIFIED project equals the migration on a local one, 
   } finally { cleanup(local); cleanup(verified); }
 });
 
+// A shape-6 `state.json` carrying every encoding shape 7 translates: a legacy skip, an inherited step
+// and the old spelling of "not started". LEGACY_STATE above holds only `done` and `in_progress`, so
+// on its own it would let a shape-7 stamper that never runs pass the parity test below.
+const SHAPE6_STATE = JSON.stringify({
+  schemaVersion: 6,
+  epicId: 'EP-x',
+  createdAt: '2026-01-01',
+  type: 'defect',
+  profile: 'classic',
+  currentStep: 'stories',
+  steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: 'done', inherited: true, inheritedFrom: 'EP-root', boundHash: 'sha256:abc', risk_tags: [] },
+    { id: 'ui-design', type: 'author', artifact: 'ui-design.md', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: 'done', skipped: true, skipReason: 'backend only', skippedBy: '@al', skippedAt: '2026-07-08', risk_tags: [] },
+    { id: 'stories', type: 'author', artifact: 'stories/', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: 'in_progress', risk_tags: [] },
+    { id: 'stories-review', type: 'review+approve', artifact: 'stories/', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: 'blocked', risk_tags: [] },
+  ],
+}, null, 2) + '\n';
+const SHAPE6_FILES = {
+  'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root\nthread: EP-root'),
+  'epics/EP-x/.sdlc/state.json': SHAPE6_STATE,
+};
+
+test('migrate 6 -> 7: the step states, and the gate write produces the same bytes', async () => {
+  const { writeState } = await import('./epic-state.mjs');
+  const local = project({ files: SHAPE6_FILES });
+  const verified = project({ bridge: true, files: SHAPE6_FILES });
+  try {
+    await runMigrate(local, { apply: true });
+    const after = read(path.join(local, STATE_REL));
+    const step = (id) => after.steps.find((x) => x.id === id);
+
+    assert.equal(after.schemaVersion, ENGINE_SHAPE);
+    assert.equal(step('epic').status, 'satisfied');
+    assert.deepEqual(step('epic').record, { reason: 'carried by reference from EP-root', by: null, date: null, link: 'EP-root' });
+    assert.equal(step('epic').inherited, true, 'the legacy flag is kept — add before you remove');
+    assert.equal(step('epic').boundHash, 'sha256:abc', 'and boundHash is not folded into the record');
+    assert.equal(step('ui-design').status, 'skipped');
+    assert.deepEqual(step('ui-design').record, { reason: 'backend only', by: '@al', date: '2026-07-08' });
+    assert.equal(step('ui-design').skipReason, 'backend only');
+    assert.equal(step('stories').status, 'in_progress', 'an in-flight step is untouched');
+    assert.equal(step('stories-review').status, 'todo', 'the old spelling of "not started" is written out');
+
+    // THE PARITY THIS FILE EXISTS FOR. `yad migrate` refuses to touch `state.json` on a verified
+    // Product, so `writeState` is the only thing that will ever move it there. A shape whose stamper
+    // was added to the migration list and NOT to `writeState` leaves every verified project on a
+    // shape nobody defined, and this is the one place that would say so.
+    const vf = path.join(verified, STATE_REL);
+    await runMigrate(verified, { apply: true });
+    assert.equal(fs.readFileSync(vf, 'utf8'), SHAPE6_STATE, 'migrate really did refuse to touch it');
+    writeState(vf, read(vf));
+    assert.equal(fs.readFileSync(vf, 'utf8'), fs.readFileSync(path.join(local, STATE_REL), 'utf8'));
+  } finally { cleanup(local); cleanup(verified); }
+});
+
+test('migrate 6 -> 7 is safe to run twice, and leaves a record somebody wrote alone', async () => {
+  const mine = JSON.stringify({
+    schemaVersion: 6,
+    epicId: 'EP-x', createdAt: '2026-01-01', type: 'defect', profile: 'classic', currentStep: 'stories',
+    steps: [
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'done', skipped: true, skipReason: 'the old field', record: { reason: 'the sentence I wrote' }, risk_tags: [] },
+      { id: 'stories', type: 'author', artifact: 'stories/', status: 'in_progress', risk_tags: [] },
+    ],
+  }, null, 2) + '\n';
+  const T = project({ files: { 'epics/EP-x/epic.md': epicMd('kind: defect\nparent: EP-root'), 'epics/EP-x/.sdlc/state.json': mine } });
+  try {
+    await runMigrate(T, { apply: true });
+    const once = fs.readFileSync(path.join(T, STATE_REL), 'utf8');
+    assert.deepEqual(read(path.join(T, STATE_REL)).steps[0].record, { reason: 'the sentence I wrote' },
+      'an upgrade never rewrites the team\'s own sentence about their own step');
+    await runMigrate(T, { apply: true });
+    assert.equal(fs.readFileSync(path.join(T, STATE_REL), 'utf8'), once, 'rule 4 — safe to run twice');
+  } finally { cleanup(T); }
+});
+
 test('a gate write moves a STALE schemaVersion up to this engine, and never down', async () => {
   // 3.18.1 stamps shape 1, so every verified project on disk holds a state.json recording 1. Before
   // this, the gate write brought its FIELDS up to date and left the NUMBER at 1 for ever — `yad

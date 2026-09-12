@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -457,7 +457,10 @@ function contractLockCheck(checks, root, epic, ledger) {
 function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
   const epicDir = epicRoot(root, epic);
   for (const s of ledger.state.steps) {
-    if (s.type !== 'review+approve' || s.status !== 'done' || s.inherited || s.skipped) continue;
+    // `stepStatus(s) === 'done'` is the whole of the old three-part condition (E38): a step that
+    // passed AND was authored here. An inherited step reads `satisfied` and a skipped one `skipped`,
+    // so both drop out by name instead of by a flag check beside the status.
+    if (s.type !== 'review+approve' || stepStatus(s) !== 'done') continue;
     const forStep = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved');
     // Checked BEFORE the artifact hash below: "done holding no approval" is a claim about the ledger,
     // not about content, so it must not depend on there being something to hash. Gating it behind the
@@ -507,8 +510,8 @@ export function epicChecks(checks, root) {
         // review — so an OPEN (non-done) review PR recorded here means it was opened under an older
         // model. Merge/close it under the version that opened it before relying on the CI flow.
         const openPr = (ledger.hubPrs || []).find((p) => {
-          const st = (ledger.state.steps.find((s) => s.id === p.step) || {}).status;
-          return st && st !== 'done';
+          const step = ledger.state.steps.find((s) => s.id === p.step);
+          return !!step && !isPassed(step);
         });
         if (openPr) check(checks, `epic:${e}:migration`, 'epics', 'warn',
           `${e}: an open review PR (${openPr.artifact}${openPr.number ? ` #${openPr.number}` : ''}) is recorded on the default branch`,
@@ -1131,7 +1134,7 @@ export function skipChecks(checks, root) {
     // one too. Naming one fault twice with two remedies is what this file forbids itself elsewhere.
     if (recordedRouteDisagrees(state)) continue;
     const optional = optionalStepsFor(state);
-    const skipped = new Set(state.steps.filter((x) => x?.skipped && typeof x.id === 'string').map((x) => x.id));
+    const skipped = new Set(state.steps.filter((x) => stepStatus(x) === 'skipped' && typeof x.id === 'string').map((x) => x.id));
     for (const step of state.steps) {
       if (!skipped.has(step.id)) continue;
       if (isSkippableStep(step.id, optional)) continue;
@@ -1163,6 +1166,78 @@ export function skipChecks(checks, root) {
 // Three warnings, all of them "your line did nothing", which is the failure a config file makes easy
 // to miss. A typo in a step id is silent otherwise: the binding sits in the file, `yad next` never
 // looks it up, and the team concludes the feature does not work.
+// ---- the step-state model (E38) -----------------------------------------------------------------
+//
+// Two findings about a step's `status`, both REPORTED and never corrected — the same discipline as
+// every other check in this file. Correcting either one would mean this command deciding what
+// somebody's file meant, which is exactly what a project runs `yad doctor` to avoid.
+//
+// `step:unknown-status` — a status no word in STEP_STATES names, and no legacy spelling either.
+// This is NOT automatically a fault. A project may hold a step written by a NEWER yadflow, and for
+// this whole major the file wins (the same rule as the step catalogue and the work-item type). What
+// it costs is real and worth saying once: `stepStatus` fails closed on a word it cannot name, so
+// every reader treats the step as neither passed nor authored — the chain stops there, and
+// `yad next` will keep naming the step before it.
+//
+// `step:no-record` — a status that must say WHY and does not. Four of the eight states carry a
+// record: `skipped`, `deferred`, `satisfied` and `blocked`. A skip with no reason is the thing the
+// whole design refuses — "a recorded skip is not a hole in the audit trail, it IS the audit trail" —
+// so a recorded state with nothing recorded on it is a hole wearing the shape of a record.
+//
+// TWO DELIBERATE NARROWINGS, and each of them is what keeps this check honest rather than noisy:
+//
+//  1. It reads the `status` FIELD literally, not `stepStatus`. The legacy encodings carry their own
+//     provenance — a skipped step has `skipReason`/`skippedBy`/`skippedAt`, an inherited one has
+//     `inheritedFrom`/`boundHash` — and for this major those ARE the record. Asking a pre-shape-7
+//     project for a `record` it had no way to write would report every change-epic in the project,
+//     including the frozen one the golden test pins.
+//  2. A literal `blocked` is asked for a record only at shape 7 and above. Below it, `blocked` is the
+//     old spelling of "not started" and there is nothing to explain. At shape 7 the stamper has
+//     already rewritten those, so one that remains was hand-written — and it still READS as `todo`,
+//     which is the surprising half and what the hint leads with.
+// The shape in which `blocked` stopped meaning "not started". A FIXED historical number, not
+// `SCHEMA_VERSION`: that one moves with every future shape change, and this fact does not.
+const BLOCKED_CHANGED_MEANING_AT = 7;
+
+export function stepStateChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  const unknown = [];
+  const noRecord = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
+    // The shape as the FILE records it, by rule 1: no key means shape 1.
+    const shape = Number.isInteger(state.schemaVersion) ? state.schemaVersion : 1;
+    for (const step of state.steps) {
+      if (!isPlainObject(step) || typeof step.id !== 'string') continue;
+      if (typeof step.status !== 'string') continue; // `validateState` is what reports a missing one
+      if (!stepStatus(step)) { unknown.push(`${e}/${step.id}: \`${step.status}\``); continue; }
+      if (!RECORDED_STEP_STATES.includes(step.status)) continue;
+      if (step.status === 'blocked' && shape < BLOCKED_CHANGED_MEANING_AT) continue;
+      if (!isStepRecord(step.record)) noRecord.push(`${e}/${step.id} (${step.status})`);
+    }
+  }
+
+  if (unknown.length) {
+    check(
+      checks, 'step:unknown-status', 'shape', 'warn',
+      `${unknown.length} step(s) carry a status this release does not know: ${some(unknown, 3)}`,
+      `the states this engine knows are ${STEP_STATES.map((x) => x.id).join(' · ')}. Nothing is rewritten: a chain may legitimately come from a newer yadflow, and the file wins. But an unnamed state fails closed — the step counts as neither passed nor authored, so the chain stops there and \`yad next\` keeps naming the step in front of it. Either upgrade the CLI to the release that wrote it, or correct the value in \`.sdlc/state.json\``,
+    );
+  }
+  if (noRecord.length) {
+    check(
+      checks, 'step:no-record', 'shape', 'warn',
+      `${noRecord.length} step(s) hold a recorded state with nothing recorded: ${some(noRecord, 3)}`,
+      `${RECORDED_STEP_STATES.join(' · ')} each have to say WHY — a \`record\` of \`{ reason, by, date, link? }\` — because the reason is the audit trail the state exists to leave. A \`blocked\` with no record is the one that also changes meaning: every reader falls back to treating it as \`todo\` (not started), so the step does not read as waiting on anybody. Add the \`record\` in \`.sdlc/state.json\`, or move the step to the state that describes it`,
+    );
+  }
+}
+
 export function skillBindingChecks(checks, root) {
   const rel = PROJECT_FILES.skillsConfig;
   const file = path.join(root, rel);
@@ -1359,6 +1434,7 @@ export function collectDoctor(root) {
   catalogueChecks(checks, root);
   profileChecks(checks, root);
   skipChecks(checks, root);
+  stepStateChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

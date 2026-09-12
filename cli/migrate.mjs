@@ -24,7 +24,7 @@ import {
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
-import { isValidEpicId, stampProfile, stampWorkItemType } from './epic-state.mjs';
+import { isValidEpicId, stampProfile, stampStepStates, stampWorkItemType } from './epic-state.mjs';
 
 // ---- the migration list --------------------------------------------------------------------
 // Ordered steps, each moving a file from one shape to the next. A step is applied to a file only when
@@ -204,6 +204,37 @@ export const MIGRATIONS = [
     // shapes 4 and 5 had. What closes it is that the gate's own write goes through `writeState`,
     // which calls this same stamper.
     apply: (obj, ctx) => (isEpicStatePath(ctx?.rel) ? stampProfile(obj) : obj),
+  },
+  {
+    from: 6,
+    to: 7,
+    title: "every step's `status` is a word from the step-state model",
+    // The seven states the roadmap names (docs/roadmap-idea-1.md, Part 1, "Step states") become the
+    // values `status` actually holds. Three rewrites, all inside `stampStepStates`:
+    //
+    //   `blocked` with no `record`  ->  `todo`       the old spelling of "not started"
+    //   `skipped: true`             ->  `skipped`    + a `record` from the skip's own fields
+    //   `inherited: true`           ->  `satisfied`  + a `record` naming the parent epic
+    //
+    // THIS IS THE FIRST SHAPE THAT CHANGES A VALUE IN PLACE. Shapes 2 to 6 each added a key beside an
+    // old one, so an older CLI kept reading the file correctly and rule 3 was satisfied by the bytes
+    // alone. A value cannot be added beside itself. What holds rule 3 here instead is the READER: for
+    // this whole major `stepStatus` (cli/epic-state.mjs) still answers `todo` to a `blocked` with no
+    // record and still honours `skipped: true` / `inherited: true`, and every legacy field is kept on
+    // the step. So no yadflow that ships this shape has lost the ability to read a pre-shape-7
+    // project. The direction that genuinely breaks is the other one — a 3.x CLI reading a MIGRATED
+    // project — and docs/migrations/shape-7.md says so rather than leaving it to be discovered.
+    //
+    // `build-state/<story>.json` holds the same four words and is deliberately NOT rewritten. It is
+    // hand-written by the `yad-run` skill, not by the engine, so a rewrite would be undone by the
+    // next write; `stepStatus` reads `blocked`-with-no-record as `todo` whatever shape the file is
+    // on, which makes the READER one model without touching the file. `buildNextForRepo` goes
+    // through it like every other reader.
+    //
+    // `state.json` on a VERIFIED Product is `ci-owned` and is skipped by this command, the same gap
+    // shapes 4, 5 and 6 had. What closes it is that the gate's own write goes through `writeState`,
+    // which calls this same stamper.
+    apply: (obj, ctx) => (isEpicStatePath(ctx?.rel) ? stampStepStates(obj) : obj),
   },
 ];
 
