@@ -41,11 +41,16 @@ Print, in this order:
    absent) — followed by `epicId`, then `status` from `epic.md` frontmatter, `currentStep`, and `repos`
    (the touched domains). Example: `Defect EP-checkout-queue-filter — draft @ stories`. A bug is a defect
    (type `defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
-2. **Steps table** — for every Shape step in `steps[]` order (10, or 12 when the optional analysis step
-   was run): `id`, `type`, `status`, the two dials (`driver`/`assistance` and `advance`/`automation` — read whichever the step carries, the OLD name wins), `locked`, and `risk_tags`. Mark the
-   `currentStep` with `→`. The gating chain is `[analysis → analysis-review →] epic → epic-review →
-   architecture → architecture-review → ui-design → ui-design-review → stories → stories-review` →
-   **`ready-for-build`** (the bracketed `analysis` prefix is present only when `yad-analysis` seeded it).
+2. **Steps table** — for every Shape step in `steps[]` order, however many there are: `id`, `type`,
+   `status`, the two dials (`driver`/`assistance` and `advance`/`automation` — read whichever the step carries, the OLD name wins), `locked`, and `risk_tags`. Mark the
+   `currentStep` with `→`. **The chain length is a fact about the epic's ROUTE, never a constant** —
+   read `profile` from `state.json`: `classic` is 10 steps, `analysis-first` 12, and the short lanes
+   `chore` 4 and `spike` 6 (E40). On `classic` the gating chain is `[analysis → analysis-review →]
+   epic → epic-review → architecture → architecture-review → ui-design → ui-design-review → stories →
+   stories-review` → **`ready-for-build`** (the bracketed `analysis` prefix is present only when
+   `yad-analysis` seeded it). A short lane runs `epic → epic-review → stories → stories-review` →
+   **`ready-for-build`**, with `analysis` in front on `spike`, and has no architecture, UI-design or
+   test-case rows at all — render what `steps[]` holds and never a step it lacks.
    `test-cases → test-cases-review` is a **parallel, non-blocking track**: it opens when `stories-review`
    passes and runs alongside Build, so when `currentStep` is `ready-for-build` the `test-cases`
    step may still be `in_progress`/`in_review` — show its status, and note "parallel" so it is clear it

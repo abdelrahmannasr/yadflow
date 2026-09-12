@@ -51,7 +51,9 @@ must collectively satisfy the epic's acceptance signals and stay within the cont
   truth for the stories.
 - **Short-lane-safe:** `architecture.md` and `contract.md` may BOTH be absent, and on the `chore` and
   `spike` routes they always are — those lanes carry no architecture step, so there is no locked
-  contract for this epic. Read `state.json`'s `profile` key first. On a short lane, write the stories
+  contract for this epic. Read `state.json`'s `profile` key first — an epic seeded before file shape 6
+  has no such key, so fall back to what its `steps[]` actually contains, which is the real answer
+  either way. On a short lane, write the stories
   from `epic.md` alone and say so in each story's "Contract & design touchpoints" section. Because
   there is no lock, a story on a short lane **must not change the shared cross-repo surface**: if the
   work turns out to need that, stop and say so — the epic belongs on `classic`, which has the

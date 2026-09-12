@@ -140,7 +140,8 @@ For a **contract-surface** depth, do NOT inherit `architecture` — it will be r
 by `yad-architecture` downstream.
 
 ### Step 5 — Seed `state.json` (inherited steps pre-done; only the changed steps run)
-**Read the parent's `profile` and `steps[]` first** (`epics/EP-<parent>/.sdlc/state.json`). The child's
+**Read the parent's `profile` and `steps[]` first** (`epics/EP-<parent>/.sdlc/state.json`; a parent
+seeded before file shape 6 has no `profile`, so its `steps[]` is the answer). The child's
 chain and route are the PARENT's, not a constant — see the short-lane rule below. For the ordinary case
 of a `classic` parent, create `.sdlc/state.json` with the **same 10-step chain** as `yad-epic` (so
 `advanceState`/`nextAction`/`gatePredicate`/the verified ledger run unchanged) — same

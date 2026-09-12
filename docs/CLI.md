@@ -311,6 +311,22 @@ artifact. Everything after that is the same short route.
 The type and the route are chosen separately. `--type chore --profile classic` stays legal, and is
 the right call for a large piece of upkeep that does touch the contract.
 
+**The choice is final.** `yad epic new` refuses an epic that already has a chain and there is no
+re-seed flag, so pick the route before seeding. If a short-lane epic turns out to need the shared
+surface to move, it records the finding and the surface change belongs to a new epic on `classic`.
+The contract gate enforces this rather than trusting the prose: a commit claiming `Contract-Change:
+yes` fails when the epic has no lock at all.
+
+**`yad next` marks a phase a short lane never enters.** A chore epic has no architecture or UI-design
+step, so its phase line reads `Design (not on this route)` rather than printing Design exactly as a
+classic epic does, which would make a phase it will never visit look like one already passed. The mark
+appears only when the epic **recorded** its route: a chain that says nothing gets the line it always
+had, because greying out a phase on a guess would be wrong for every hand-written ledger.
+
+**A short lane has no optional steps**, so `yad skip` is refused on one. That is a different answer
+from "this chain is on no route", and the two now say so separately — a short-lane epic is told which
+route it is on, not sent to a health check that cannot fire for it.
+
 **Each epic records its route.** `epics/<epic>/.sdlc/state.json` carries a `profile` key from file
 shape 6 on, and `yad epic new` writes it when it seeds the chain. An epic created before that key
 existed gets it from `yad migrate`, read off the chain it already carries — see

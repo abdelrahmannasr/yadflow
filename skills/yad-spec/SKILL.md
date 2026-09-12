@@ -59,9 +59,10 @@ Read `epics/<epic>/contract.md` and `epics/<epic>/.sdlc/contract-lock.json`. The
 inputs (the API shapes, data-model entities, and events the story touches) are **quoted from the
 locked surface**, not re-authored. The spec MUST stay within that surface. If the story needs surface
 the contract does not define, STOP and route back to the **architecture gate** — never extend the
-contract here.
+contract here. (On a route that HAS one; the short lanes do not — see below.)
 
-- **Short-lane-safe:** read `epics/<epic>/.sdlc/state.json`'s `profile` first. On the `chore` and
+- **Short-lane-safe:** read `epics/<epic>/.sdlc/state.json`'s `profile` first (an epic seeded before
+  file shape 6 has no such key — fall back to what its `steps[]` contains). On the `chore` and
   `spike` routes there is no architecture step, so `contract.md` and `contract-lock.json` **never
   exist** — that is the route's design, not a missing file to chase. Write the spec from the story and
   `epic.md` alone, record `contract-lock: none` in Step 6's frontmatter, and say in the spec that this
