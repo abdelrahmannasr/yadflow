@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings } from './epic-state.mjs';
+import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -1089,7 +1089,60 @@ export function profileChecks(checks, root) {
     check(
       checks, 'profile:disagree', 'shape', 'warn',
       `${disagree.length} epic(s) record a route their chain is not on: ${some(disagree, 2)}`,
-      'the chain is the truth here — it is what `yad next` and every gate actually walk. The recorded name is a label on top of it, and a stale one misleads whoever reads the record instead of the steps. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
+      'the chain is what `yad next` walks step by step, and the recorded name is the label on top of it — so a stale label misleads whoever reads the record instead of the steps. It is not only cosmetic: the recorded name is what decides which steps this epic may SKIP (E35), deliberately, because a chain carrying a step from a newer release fits no route here and must not lose its optional steps for it. Correct `profile` in `.sdlc/state.json` to the route the chain shows',
+    );
+  }
+}
+
+// A step marked N/A ("skipped") that the epic's own route does NOT mark optional (E35).
+//
+// This could not be reported before, because the engine kept one list of skippable steps for the whole
+// project: a step optional on any route was skippable on every epic. Now the question is answered by
+// the route the epic is on, so the two can disagree — a chain edited by hand, a recorded route changed,
+// or a ledger copied from an epic on a different route.
+//
+// WHAT IT COSTS, stated the same way the hint states it. `gatePredicate` honours `skipped: true` only
+// for a step this epic's route marks optional, so a skip the route does not allow stops
+// short-circuiting. NOTHING BREAKS: the step is already `done`, so `yad gate sync` takes its
+// already-done branch, reports that the rule no longer holds and changes nothing — no step is
+// un-advanced, no review re-opens. What is lost is the justification: the gate stops treating the skip
+// as the reason the step passed, which is the whole point of recording a skip. This says so before the
+// next sync rather than after it.
+//
+// Reported, never corrected, like everything else here: clearing the flag would erase a recorded
+// decision, and re-marking the step `blocked` would undo work the team may have finished.
+export function skipChecks(checks, root) {
+  const epicsDir = path.join(root, 'epics');
+  if (!exists(epicsDir)) return;
+  const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
+  const bad = [];
+
+  for (const e of fs.readdirSync(epicsDir).sort()) {
+    if (!isValidEpicId(e)) continue;
+    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
+    // Silent on an epic `profile:disagree` already names. Both findings come from the same stale
+    // label, and that check's remedy — correct `profile` to the route the chain shows — clears this
+    // one too. Naming one fault twice with two remedies is what this file forbids itself elsewhere.
+    if (recordedRouteDisagrees(state)) continue;
+    const optional = optionalStepsFor(state);
+    const skipped = new Set(state.steps.filter((x) => x?.skipped && typeof x.id === 'string').map((x) => x.id));
+    for (const step of state.steps) {
+      if (!skipped.has(step.id)) continue;
+      if (isSkippableStep(step.id, optional)) continue;
+      // AUTHOR STEPS ONLY, when the pair is both marked. One `yad skip` stamps a step and its gate, so
+      // listing both reads as two faults for one action — and the remedy below takes the author step's
+      // id. A gate marked on its own is a different, real fault and is still reported.
+      if (step.id.endsWith('-review') && skipped.has(step.id.replace(/-review$/, ''))) continue;
+      bad.push(`${e}/${step.id}`);
+    }
+  }
+
+  if (bad.length) {
+    check(
+      checks, 'skip:not-optional', 'shape', 'warn',
+      `${bad.length} skipped step(s) their epic's route does not mark optional: ${some(bad, 3)}`,
+      'nothing breaks today — the step is already `done`, so `yad gate sync` reports that the rule no longer holds and changes nothing. What is lost is the justification: the gate stops treating the skip as the reason the step passed. Either the epic is on the wrong route (`step:off-route`), or the skip was written by hand — `yad skip <epic> <step> --undo` puts the step back in the chain',
     );
   }
 }
@@ -1300,6 +1353,7 @@ export function collectDoctor(root) {
   themeChecks(checks, root);
   catalogueChecks(checks, root);
   profileChecks(checks, root);
+  skipChecks(checks, root);
   phaseChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);

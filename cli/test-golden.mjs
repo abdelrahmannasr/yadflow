@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runNext } from './next.mjs';
 import { collectDoctor } from './doctor.mjs';
-import { loadLedger, gatePredicate, artifactHash } from './epic-state.mjs';
+import { loadLedger, gatePredicate, artifactHash, optionalStepsFor } from './epic-state.mjs';
 import { touchedDomains, loadProduct, isSolo, requireEngagement } from './gate.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -122,6 +122,10 @@ export async function collectGolden(root) {
         merged: true,
         solo,
         requireEngagement: reqEng,
+        // Which steps this epic's route marks optional (E35). Passed for the same reason every other
+        // input here is: the snapshot must record what production computes. Omitting it would freeze
+        // the fail-closed default instead, under a comment claiming this mirrors `gateSync`.
+        optional: optionalStepsFor(ledger.state),
       });
       gates.push({ epic, step: step.id, ...pred });
     }

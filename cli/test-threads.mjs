@@ -10,7 +10,7 @@ import {
   workItemType, isGenesisType, WORK_ITEM_TYPES, readFrontmatter, themeOf, themeKey,
   PHASES, stepPhase, currentPhase, phaseOf, phaseSteps, SENTINELS, STEP_SKILL, BUILD_STEP_SKILL,
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
-  LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, SKIPPABLE_STEPS, optionalStepsOf,
+  LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
   seedableProfiles, seedState, stateInvariants,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
@@ -677,28 +677,35 @@ test('every profile is self-consistent — its steps exist and its gates follow 
   }
 });
 
-test('SKIPPABLE_STEPS is a view of EVERY profile, not a list beside them', () => {
-  // Across every route, not just `classic`: a route's own `optional` marks would otherwise sit there
-  // unread, which is the same drift one level down from the one this derivation exists to stop.
-  assert.deepEqual([...SKIPPABLE_STEPS], optionalStepsOf());
-  // The assertion that actually separates "every route" from "just the first one". With today's data
-  // both rules give `['ui-design']`, so only synthetic routes that DISAGREE can tell them apart.
-  assert.deepEqual(optionalStepsOf([
+test('what a route marks optional is read off THAT route, never pooled across them', () => {
+  // Two routes that DISAGREE. With today's data every feature route marks the same one step, so
+  // "this epic's route" and "every route at once" give the identical answer and no assertion against
+  // the real profiles could separate them. E40's chore and spike lanes make the difference real.
+  const ROUTES = [
     { id: 'a', steps: ['epic', { id: 'ui-design', optional: true }, 'ui-design-review'] },
     { id: 'b', steps: ['epic', { id: 'architecture', optional: true }, 'architecture-review'] },
-  ]), ['ui-design', 'architecture'], 'a step optional in a LATER route counts too');
-  assert.deepEqual(optionalStepsOf([{ id: 'a', steps: ['epic'] }]), [], 'a route with nothing optional');
+  ];
+  assert.deepEqual(optionalStepsOf('a', ROUTES), ['ui-design']);
+  assert.deepEqual(optionalStepsOf('b', ROUTES), ['architecture'],
+    "a step optional on route 'b' must not be optional on route 'a'");
+  assert.deepEqual(optionalStepsOf('a', ROUTES).includes('architecture'), false, 'the routes were pooled');
+
+  assert.deepEqual(optionalStepsOf('a', [{ id: 'a', steps: ['epic'] }]), [], 'a route with nothing optional');
+  assert.deepEqual(optionalStepsOf('missing', ROUTES), [], 'a route this release does not carry');
   // The gate is the author step's pair, never listed on its own — `isSkippableStep` adds it back.
-  assert.deepEqual(optionalStepsOf([
+  assert.deepEqual(optionalStepsOf('a', [
     { id: 'a', steps: [{ id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true }] },
   ]), ['ui-design']);
-  // …and unchanged from before E5. A derivation that agrees with itself while marking `architecture`
-  // optional would pass the assertion above and let a real gate be skipped with a reason.
-  assert.deepEqual([...SKIPPABLE_STEPS], ['ui-design']);
+
+  // …and unchanged from before E5 on the routes that actually ship. A derivation that agrees with
+  // itself while marking `architecture` optional would pass everything above and let a real gate be
+  // skipped with a reason.
+  for (const id of ['classic', 'analysis-first']) assert.deepEqual(optionalStepsOf(id), ['ui-design']);
+  assert.deepEqual(optionalStepsOf('discovery'), [], 'the front-zero has nothing to skip');
 });
 
 test('a profile carries no per-step field nothing reads', () => {
-  // `optional` is here because `SKIPPABLE_STEPS` reads it. Nothing else is, and that is the point: the
+  // `optional` is here because `optionalStepsOf` reads it. Nothing else is, and that is the point: the
   // parallel `test-cases` track is decided by `advanceState` from the step id, so recording it in the
   // profile as well would be a second copy of a rule living elsewhere — free to drift with every test
   // still green, which is exactly what this file exists to prevent.

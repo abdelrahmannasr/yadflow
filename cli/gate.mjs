@@ -13,7 +13,7 @@ import {
   epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
-  canonicalApprovals, canonicalComments, canonicalHubPrs, writeState,
+  canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, writeState,
 } from './epic-state.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -415,6 +415,9 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const pred = gatePredicate({
       step, approvals, currentHash: curHash, touchedDomains: domains,
       defaultReviewers, threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
+      // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
+      // ledger here rather than from a module-level set that answered the same for every epic.
+      optional: optionalStepsFor(state),
     });
 
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule})`)}`);
