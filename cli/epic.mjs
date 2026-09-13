@@ -30,13 +30,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok } from './lib.mjs';
+import { c, fail, hand, info, log, ok, readJSON } from './lib.mjs';
 import {
   DISCOVERY_EPIC, epicRel, epicRoot, FOUNDATION_EPIC, FOUNDATION_SECTIONS, isGenesisType, isValidEpicId,
   lifecycleProfile, loadSkillBindings, PRODUCT_EPICS, readFrontmatter, seedableProfiles, seedFoundationState,
-  seedState, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
+  seedState, staleFoundationGuards, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
-import { epicFiles } from './manifest.mjs';
+import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 
 // The genesis types — the two a work item may be without naming a parent. A `change`, `defect` or
 // `hotfix` describes work ON something that already exists, and its chain is NOT a plain route: the
@@ -247,6 +247,14 @@ export async function runFoundationNew(root, { today, json = false } = {}) {
   if (fs.existsSync(legacy)) {
     return bail(`this product already has a product level, in its old spelling — ${path.relative(root, legacy)}`,
       `a product has ONE Foundation. On a local ledger, \`yad migrate --apply\` converts that one into ${epicRel(FOUNDATION_EPIC)}/; on a verified ledger keep using it — \`yad next ${DISCOVERY_EPIC}\``);
+  }
+  // On a verified Product the ledger is protected only by the checks committed in the repo. If they
+  // predate the Foundation, seeding one now would put its ledger where CI stops nobody from hand-editing
+  // it — so refuse, rather than seed and leave `yad doctor` to warn about it afterwards (rule 6).
+  const stale = isVerifiedLedger(readJSON(productConfigPath(root), null)) ? staleFoundationGuards(root) : [];
+  if (stale.length) {
+    return bail(`the wired checks predate the Foundation: ${stale.join(', ')} ${stale.length === 1 ? 'does' : 'do'} not know ${epicRel(FOUNDATION_EPIC)}/ — on this verified Product, CI would not protect its ledger`,
+      'run `yad update`, commit the refreshed checks, then run `yad foundation new` again');
   }
 
   const state = seedFoundationState({ today });

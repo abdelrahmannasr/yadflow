@@ -334,7 +334,7 @@ export function convertDiscoveryState(state) {
   return out;
 }
 
-export function planProductMove(root, { verified = false, migrations = MIGRATIONS } = {}) {
+export function planProductMove(root, { verified = false, ci = false, migrations = MIGRATIONS } = {}) {
   const fromRel = epicRel(DISCOVERY_EPIC);
   const from = path.join(root, fromRel);
   const ledgerOf = (dir, name) => path.join(dir, '.sdlc', name);
@@ -342,8 +342,11 @@ export function planProductMove(root, { verified = false, migrations = MIGRATION
   const base = { from: fromRel, to: FOUNDATION_DIR, backup: `${fromRel}${BACKUP_SUFFIX}`, moves: [], rewrites: [], reshape: [] };
   const refuse = (action, detail) => ({ ...base, action, detail });
 
-  if (verified) {
-    return refuse('ci-owned', 'CI owns this ledger, so it stays in the old spelling — every command still reads it as the Foundation');
+  // `ci` is the gate bot asking (cli/gate.mjs `convertProductLevel`): on a verified Product it is the one
+  // writer allowed to move the ledger, so for it — and only for it — this refusal is lifted. Every
+  // other refusal below still stands.
+  if (verified && !ci) {
+    return refuse('ci-owned', 'CI owns this ledger — the gate bot moves it to foundation/ on its next run on the default branch; until then every command reads it where it is');
   }
   const read = {};
   for (const name of LEDGER_NAMES) {
@@ -410,7 +413,9 @@ export function planProductMove(root, { verified = false, migrations = MIGRATION
 // The error is re-thrown for `runMigrate` to report.
 //
 // `copy` is a seam for the tests, which need a copy that fails or corrupts on demand.
-export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
+// `backup: false` is for the gate bot. In CI the old folder is in git history, a `.yad-orig` copy would be
+// an untracked directory on a throwaway runner, and `yad migrate` is not there to add it to .gitignore.
+export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync, backup: keepBackup = true } = {}) {
   const from = path.join(root, move.from);
   const to = path.join(root, move.to);
   const backup = path.join(root, move.backup);
@@ -424,7 +429,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
   const toExisted = exists(to);
   try {
     const before = artifactHash(from, 'discovery/');
-    copy(from, backup, { recursive: true, errorOnExist: true, force: false });
+    if (keepBackup) copy(from, backup, { recursive: true, errorOnExist: true, force: false });
     fs.mkdirSync(to, { recursive: true });
     copy(from, to, { recursive: true, errorOnExist: true, force: false });
     if (artifactHash(to, 'discovery/') !== before) {
@@ -453,7 +458,8 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
       for (const m of move.moves) fs.rmSync(path.join(root, m.to), { force: true });
       for (const d of [...made].sort((a, b) => b.length - a.length)) fs.rmSync(path.join(root, d), { recursive: true, force: true });
     }
-    fs.rmSync(backup, { recursive: true, force: true });
+    // Only a backup THIS run made. Without one, the path may still hold an earlier run's copy — the user's.
+    if (keepBackup) fs.rmSync(backup, { recursive: true, force: true });
     throw new Error(`nothing was moved — ${e.message}`, { cause: e });
   }
   fs.rmSync(from, { recursive: true, force: true });

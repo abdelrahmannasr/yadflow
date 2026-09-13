@@ -14,8 +14,9 @@ import {
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
-  isPassed, stepStatus, claimsSkipped, claimsInherited,
+  isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
+import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
@@ -496,6 +497,40 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 // CI is the SOLE writer of the ledger and only ever commits to the default branch; humans never
 // commit gate-state files (enforced by the ledger-guard check). Sweep mode (no --branch) advances
 // merged-but-stuck reviews found in the locally checked-out default-branch ledgers.
+// Shape 8 on a VERIFIED Product. `yad migrate` refuses to move `epics/EP-discovery/` there, because CI
+// owns the ledger and the ledger guard rejects a person's commit that moves it. The gate bot is the one
+// writer allowed to, so the move happens here — the same rule as every other verified-mode shape change:
+// the gate write IS the migration. Returns the paths it wrote, or null when nothing moved.
+//
+// It refuses, and moves nothing, on everything `yad migrate` refuses (an open review, two product levels,
+// a collision, an unreadable ledger) and on one thing more: checks committed in the repo that predate the
+// Foundation. Moving the ledger under those would put it where CI stops nobody from hand-editing it, so
+// the project keeps the old spelling — which every command still reads — until `yad update` lands.
+export function convertProductLevel(root, hub) {
+  if (!isVerifiedLedger(hub)) return null;
+  const move = planProductMove(root, { verified: true, ci: true });
+  if (!move) return null;
+  if (move.action !== 'move') {
+    info(`the product level stays in ${move.from}/ for now — ${move.detail}`);
+    return null;
+  }
+  const stale = staleFoundationGuards(root);
+  if (stale.length) {
+    warn(`the product level stays in ${move.from}/ — the wired checks predate the Foundation (${stale.join(', ')}); run \`yad update\` and commit the refreshed checks, and the next gate run moves it`);
+    return null;
+  }
+  try {
+    const written = applyProductMove(root, move, { backup: false });
+    ok(`the product level moved: ${move.from}/ → ${move.to}/ as ${FOUNDATION_EPIC} (shape 8)`);
+    return written;
+  } catch (e) {
+    // `applyProductMove` has already put everything back. Red, not quiet: nothing here should fail.
+    fail(`the product level was not moved — ${e.message}`);
+    process.exitCode = 1;
+    return null;
+  }
+}
+
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
@@ -531,7 +566,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
         jobs.push({ epic: e, base: base(p.artifact), artifact: p.artifact, branch: p.branch, pr: p.number });
       }
     }
-    if (!jobs.length) { info('no open review PRs to sync'); return { synced: 0 }; }
+    // No early return: a sweep with nothing to sync may still have the product level to move (below).
+    if (!jobs.length) info('no open review PRs to sync');
   }
 
   let synced = 0;
@@ -615,7 +651,11 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     if (failed) continue; // a failed epic's partial state must not be committed by this run
     touched.add(job.epic);
   }
-  if (!touched.size) return { synced };
+  // The product-level move runs AFTER the jobs, so an event for `review/EP-discovery/…` resolved and
+  // advanced its ledger in the old folder first, and only on the DEFAULT branch — a merge run or a sweep,
+  // never a review head, where CI writes nothing (Path B).
+  const moved = (merged || !branch) ? convertProductLevel(root, hub) : null;
+  if (!touched.size && !moved) return { synced };
 
   // Path B: CI never writes the ledger to the review branch. A held step that did not advance is
   // read-only here — during review the platform PR/MR is the source of truth (native approvals/
@@ -623,7 +663,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // is what stops an approval from being dismissed and required checks from stranding. Correctness is
   // unaffected: the merge phase re-reads approvals fresh from the platform (readPr).
   const advancedAny = advancedEpics.size > 0;
-  if (!merged && !advancedAny) {
+  if (!merged && !advancedAny && !moved) {
     // EVENT mode (--branch) pre-merge is read-only (Path B): the gate was evaluated with a dry sync
     // that persists nothing, so the one working-tree write is the hub-prs.json seed above (which let
     // the dry sync find the PR). Restore exactly that file per epic so the checkout stays clean —
@@ -669,13 +709,21 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     git('add', '-A', '--', path.join(epicRel(e), 'reviews'));
     for (const f of statusFiles.get(e) || []) git('add', '--', f);
   }
+  // The move: exactly the files it wrote, by name, and the old folder's removal — the same allowlist rule.
+  if (moved) {
+    for (const f of moved) git('add', '--', f);
+    git('add', '-A', '--', epicRel(DISCOVERY_EPIC));
+  }
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
   // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
-  const subject = !branch
-    ? 'chore(gate): scheduled gate sync [skip ci]' // sweep is a batch; one subject for the run
-    : `chore(gate): advance ${jobs[0].epic}/${jobs[0].base} on merge [skip ci]`;
-  const cm = git('commit', '-m', subject);
+  const MOVE_NOTE = `move the product level to ${FOUNDATION_DIR}/ (shape 8)`;
+  const subject = moved && !touched.size
+    ? `chore(gate): ${MOVE_NOTE} [skip ci]`
+    : !branch
+      ? 'chore(gate): scheduled gate sync [skip ci]' // sweep is a batch; one subject for the run
+      : `chore(gate): advance ${jobs[0].epic}/${jobs[0].base} on merge [skip ci]`;
+  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${MOVE_NOTE}.`] : []));
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced };

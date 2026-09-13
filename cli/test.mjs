@@ -12793,6 +12793,24 @@ async function foundationNewOn({ files = {}, json = false } = {}) {
   return { T, out, failed };
 }
 
+test('yad foundation new: refuses on a verified Product whose wired checks predate the Foundation (E75 follow-up)', async () => {
+  const verifiedHub = JSON.stringify({ platform: 'github', ledger: 'verified' });
+  const oldGuard = '#!/usr/bin/env bash\ncase "$f" in\n  epics/*) ;;\nesac\n';
+  const stale = await foundationNewOn({ files: { '.sdlc/hub.json': verifiedHub, 'checks/ledger-guard.sh': oldGuard } });
+  try {
+    assert.equal(stale.failed, true, stale.out);
+    assert.match(stale.out, /wired checks predate the Foundation: checks\/ledger-guard\.sh does not know foundation\//);
+    assert.match(stale.out, /yad update/);
+    assert.equal(fs.existsSync(path.join(stale.T, 'foundation')), false, 'nothing is seeded');
+  } finally { fs.rmSync(stale.T, { recursive: true, force: true }); }
+  // The same old check on a LOCAL ledger guards nothing either way, so it is not a reason to refuse.
+  const local = await foundationNewOn({ files: { '.sdlc/hub.json': JSON.stringify({ platform: 'github' }), 'checks/ledger-guard.sh': oldGuard } });
+  try { assert.equal(local.failed, false, local.out); } finally { fs.rmSync(local.T, { recursive: true, force: true }); }
+  // And a verified Product whose check knows the folder seeds as normal.
+  const fresh = await foundationNewOn({ files: { '.sdlc/hub.json': verifiedHub, 'checks/ledger-guard.sh': 'case "$f" in\n      foundation/*) ;;\nesac\n' } });
+  try { assert.equal(fresh.failed, false, fresh.out); } finally { fs.rmSync(fresh.T, { recursive: true, force: true }); }
+});
+
 test('yad foundation new: writes the Foundation ledger in foundation/, and nothing under epics/', async () => {
   const { T, out, failed } = await foundationNewOn();
   try {
@@ -12932,6 +12950,116 @@ test('doctor: a folder under epics/ that is not a valid epic id is named, not sk
     strayEpicDirChecks(none, fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-no-epics-')));
     assert.deepEqual(none, [], 'no epics/ folder, nothing to say');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: a verified Product on the old spelling is told CI moves it — or, with stale checks, what stops it (E75 follow-up)', async () => {
+  const { foundationChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-legacy-verified-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    fs.mkdirSync(path.join(T, 'epics/EP-discovery/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-discovery/.sdlc/state.json'), '{"epicId":"EP-discovery","kind":"discovery"}\n');
+    const legacy = () => { const checks = []; foundationChecks(checks, T); return checks.find((c) => c.id === 'foundation:legacy'); };
+    const fresh = legacy();
+    assert.equal(fresh.status, 'ok');
+    assert.match(fresh.message, /CI moves it to foundation\//);
+    fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'checks/pr-title.sh'), 'grep -E "^epics/"\n');
+    const stale = legacy();
+    assert.equal(stale.status, 'warn', 'something for a person to do');
+    assert.match(stale.message, /CI will not move it: checks\/pr-title\.sh predates the Foundation/);
+    assert.match(stale.hint, /yad update/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// A Product whose default branch still holds the product level in its old spelling, and a CI checkout of it.
+function scaffoldLegacyProductHub({ verified = true, checks = {} } = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ci-convert-'));
+  const origin = path.join(T, 'origin.git');
+  fs.mkdirSync(origin);
+  git(origin, 'init', '-q', '--bare');
+  git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/trunk');
+  const author = path.join(T, 'author');
+  git(T, 'clone', '-q', origin, author);
+  git(author, 'config', 'user.email', 'a@b.c');
+  git(author, 'config', 'user.name', 'x');
+  const put = (rel, body) => {
+    fs.mkdirSync(path.dirname(path.join(author, rel)), { recursive: true });
+    fs.writeFileSync(path.join(author, rel), body);
+  };
+  put('.sdlc/hub.json', JSON.stringify({
+    platform: 'github', default_branch: 'trunk', ...(verified ? { ledger: 'verified' } : {}),
+    roster: [{ login: 'al', name: 'alice', role: 'owner' }],
+  }));
+  put('epics/EP-discovery/roadmap.md', '---\nid: EP-discovery\nartifact: roadmap\nstatus: approved\n---\n# roadmap\n');
+  put('epics/EP-discovery/.sdlc/state.json', `${JSON.stringify({
+    epicId: 'EP-discovery', kind: 'discovery', profile: 'discovery', currentStep: 'discovery-done',
+    steps: [
+      { id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done', risk_tags: [] },
+      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'done', risk_tags: [] },
+    ],
+  }, null, 2)}\n`);
+  put('epics/EP-discovery/.sdlc/approvals.json', `${JSON.stringify([
+    { step: 'discovery-review', artifact: 'discovery/', status: 'approved', approver: 'al', role: 'owner' },
+  ], null, 2)}\n`);
+  for (const [rel, body] of Object.entries(checks)) put(rel, body);
+  git(author, 'add', '-A');
+  git(author, 'commit', '-q', '-m', 'seed');
+  git(author, 'branch', '-q', '-M', 'trunk');
+  git(author, 'push', '-q', 'origin', 'trunk');
+  const ci = path.join(T, 'ci');
+  git(T, 'clone', '-q', origin, ci);
+  git(ci, 'config', 'user.email', 'yad-gate-sync@noreply');
+  git(ci, 'config', 'user.name', 'yad-gate-sync');
+  return { T, origin, ci };
+}
+
+test('gate ci: on a verified Product the gate bot moves the product level to foundation/ — one commit, no backup (E75 follow-up)', async () => {
+  const { gateCi } = await import('./gate.mjs');
+  const { T, origin, ci } = scaffoldLegacyProductHub();
+  try {
+    await grab(() => gateCi(ci, { today: '2026-09-13' }));
+    const tree = git(origin, 'ls-tree', '-r', '--name-only', 'trunk').toString().split('\n');
+    assert.ok(tree.includes('foundation/.sdlc/state.json'), tree.join(' '));
+    assert.ok(tree.includes('foundation/roadmap.md'), 'the sections move with the ledger');
+    assert.equal(tree.some((f) => f.startsWith('epics/EP-discovery')), false, 'the old folder is gone from the default branch');
+    const state = JSON.parse(git(origin, 'show', 'trunk:foundation/.sdlc/state.json').toString());
+    assert.equal(state.epicId, 'EP-foundation');
+    assert.equal(state.currentStep, 'foundation-done');
+    const approvals = JSON.parse(git(origin, 'show', 'trunk:foundation/.sdlc/approvals.json').toString());
+    assert.equal(approvals[0].step, 'foundation-review', 'the approval is relabelled, so the gate keeps it');
+    assert.equal(git(origin, 'log', '-1', '--format=%s', 'trunk').toString().trim(),
+      'chore(gate): move the product level to foundation/ (shape 8) [skip ci]');
+    assert.equal(fs.existsSync(path.join(ci, 'epics/EP-discovery.yad-orig')), false, 'no backup in CI — git history is the backup');
+    assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '', 'nothing is left behind in the checkout');
+    const head = git(origin, 'rev-parse', 'trunk').toString().trim();
+    await grab(() => gateCi(ci, { today: '2026-09-13' }));
+    assert.equal(git(origin, 'rev-parse', 'trunk').toString().trim(), head, 'a second run has nothing to move and commits nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate ci: the product level stays put on stale checks, on a local ledger, and on a review head before merge (E75 follow-up)', async () => {
+  const { gateCi } = await import('./gate.mjs');
+  const cases = [
+    // A guard that knows only epics/: moving the ledger under it would leave foundation/ unguarded.
+    ['stale checks', { checks: { 'checks/ledger-guard.sh': '#!/usr/bin/env bash\ncase "$f" in\n  epics/*) ;;\nesac\n' } }, {}, /wired checks predate the Foundation.*yad update/],
+    // Not verified: a person converts it, with a backup, through `yad migrate --apply`.
+    ['a local ledger', { verified: false }, {}, null],
+    // A review head: CI writes nothing before the merge (Path B), and the move is no exception.
+    ['a review head', {}, { branch: 'review/EP-x/epic', pr: 1, merged: false }, null],
+  ];
+  for (const [name, scaffold, opts, says] of cases) {
+    const { T, origin, ci } = scaffoldLegacyProductHub(scaffold);
+    try {
+      const head = git(origin, 'rev-parse', 'trunk').toString().trim();
+      const out = await grab(() => gateCi(ci, { today: '2026-09-13', reader: () => ({ ok: false, reason: 'unused' }), ...opts }));
+      assert.equal(git(origin, 'rev-parse', 'trunk').toString().trim(), head, `${name}: nothing is pushed`);
+      assert.ok(fs.existsSync(path.join(ci, 'epics/EP-discovery/.sdlc/state.json')), `${name}: the old ledger is where it was`);
+      assert.equal(fs.existsSync(path.join(ci, 'foundation')), false, `${name}: no foundation/ is started`);
+      if (says) assert.match(out, says, name);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
+  }
 });
 
 test('gate: an incomplete Foundation is named at gate time, and its optional sections never make it incomplete (E75)', async () => {

@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -576,8 +576,17 @@ export function foundationChecks(checks, root) {
       `decide which one is real. \`yad next\` uses ${FOUNDATION_DIR}/; to keep the old one instead, move ${FOUNDATION_DIR}/ aside and run \`yad migrate --apply\``);
   } else if (hasLegacy) {
     if (isVerifiedLedger(hub)) {
-      check(checks, 'foundation:legacy', 'project', 'ok',
-        `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/) — read as the Foundation; on a verified ledger it stays there`);
+      // CI moves it (cli/gate.mjs `convertProductLevel`), but only once the committed checks know the
+      // Foundation — so the stale case is the one with something for a person to do.
+      const stale = staleFoundationGuards(root);
+      if (stale.length) {
+        check(checks, 'foundation:legacy', 'project', 'warn',
+          `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/), and CI will not move it: ${stale.join(', ')} ${stale.length === 1 ? 'predates' : 'predate'} the Foundation`,
+          `run \`yad update\` and commit the refreshed checks — the next gate run on the default branch then moves it to ${FOUNDATION_DIR}/`);
+      } else {
+        check(checks, 'foundation:legacy', 'project', 'ok',
+          `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/) — read as the Foundation; CI moves it to ${FOUNDATION_DIR}/ at its next gate run on the default branch`);
+      }
     } else {
       check(checks, 'foundation:legacy', 'project', 'warn',
         `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/)`,
@@ -595,16 +604,7 @@ export function foundationChecks(checks, root) {
 function foundationGuardChecks(checks, root, hub) {
   if (!exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) return;
   if (!isVerifiedLedger(hub)) return;
-  const ARMS = {
-    'checks/ledger-guard.sh': `      ${FOUNDATION_DIR}/*)`,
-    'checks/pr-title.sh': `^(epics|${FOUNDATION_DIR})/`,
-    'checks/pr-template.sh': `^(epics|${FOUNDATION_DIR})/`,
-  };
-  const stale = Object.keys(ARMS).filter((rel) => {
-    const file = path.join(root, rel);
-    if (!exists(file)) return false;   // not wired at all is `yad check`'s finding, not this one
-    try { return !fs.readFileSync(file, 'utf8').includes(ARMS[rel]); } catch { return false; }
-  });
+  const stale = staleFoundationGuards(root);
   if (!stale.length) return;
   check(checks, 'foundation:guard', 'project', 'warn',
     `the wired checks predate the Foundation: ${stale.join(', ')} ${stale.length === 1 ? 'does' : 'do'} not know \`${FOUNDATION_DIR}/\``,

@@ -1434,6 +1434,34 @@ test('migrate 7 -> 8 --apply: every other JSON object under .sdlc/ lands on the 
   } finally { cleanup(T); }
 });
 
+test('migrate 7 -> 8: on a verified ledger only the gate bot may move it, and it keeps no backup (E75 follow-up)', async () => {
+  const { planProductMove, applyProductMove } = await import('./migrate.mjs');
+  const { T, hash } = await legacyProductLevel({ bridge: true });
+  try {
+    assert.equal(planProductMove(T, { verified: true }).action, 'ci-owned', 'a person is still refused');
+    assert.match(planProductMove(T, { verified: true }).detail, /gate bot moves it to foundation\//);
+    const move = planProductMove(T, { verified: true, ci: true });
+    assert.equal(move.action, 'move', 'the gate bot is not');
+    applyProductMove(T, move, { backup: false });
+    assert.equal(fs.existsSync(path.join(T, LEGACY)), false);
+    assert.equal(fs.existsSync(path.join(T, `${LEGACY}.yad-orig`)), false, 'no backup in CI — git history is the backup');
+    const approvals = JSON.parse(fs.readFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), 'utf8'));
+    assert.ok(approvals.every((a) => a.step === 'foundation-review' && a.artifactHash === hash), 'the approvals survive');
+  } finally { cleanup(T); }
+
+  // Without a backup of its own, a failed move must not delete a backup that was already there — the user's.
+  const { T: U } = await legacyProductLevel({ bridge: true });
+  try {
+    const move = planProductMove(U, { verified: true, ci: true });
+    fs.mkdirSync(path.join(U, `${LEGACY}.yad-orig`), { recursive: true });
+    fs.writeFileSync(path.join(U, `${LEGACY}.yad-orig/keep.md`), '# an earlier run\'s copy\n');
+    const failing = (src, dest, opts) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); fs.cpSync(src, dest, opts); };
+    assert.throws(() => applyProductMove(U, move, { backup: false, copy: failing }), /nothing was moved/);
+    assert.ok(fs.existsSync(path.join(U, `${LEGACY}.yad-orig/keep.md`)), 'the existing backup is untouched');
+    assert.ok(fs.existsSync(path.join(U, LEGACY, '.sdlc/state.json')), 'and the original is whole');
+  } finally { cleanup(U); }
+});
+
 test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as it was', async () => {
   const { applyProductMove } = await import('./migrate.mjs');
   const failures = {
