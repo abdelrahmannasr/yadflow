@@ -46,6 +46,22 @@ const setupSteps: FlowStep[] = [
     sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md · yad repo refresh --push publishes the code-maps to the Product (chore(hub): sync code-context)" },
   },
   {
+    id: "sync-repos",
+    title: "Sync Connected Repos",
+    description:
+      "Bring every connected repo up to date in one shot: switch each repo in repos.json to its default_branch and fast-forward it from origin (local-user git, no stored tokens). A repo with local changes is skipped and reported; a diverged branch is left for you. Never a gate.",
+    actor: "system",
+    status: "synced",
+    stepState: "each repo on its default_branch",
+    trigger: "yad-sync-repos action: sync / yad repo sync",
+    handler: "yad-sync-repos",
+    activeComponents: ["repos-json", "code-repos"],
+    messages: [
+      { id: "sr-1", from: "repos-json", to: "code-repos", label: "switch to default_branch + fast-forward", type: "job", color: "#b7950b", delay: 0, duration: 800 },
+    ],
+    sideEffects: { jobs: "working tree only — never writes repos.json", notifications: "a pulled repo's pack goes stale → run yad repo refresh" },
+  },
+  {
     id: "connect-design",
     title: "Connect Design Tool",
     description:
@@ -140,12 +156,12 @@ function gateStep(
     id: `gate-${idSuffix}`,
     title: `Team Review Gate · ${artifact}`,
     description:
-      `The reusable team review + approve gate. Shares the ${artifact} for review, records comments and approvals as files, enforces ${rule}, and advances state ONLY when approval is recorded.`,
+      `The reusable team review + approve gate. Shares the ${artifact} for review, records comments and approvals as files, enforces ${rule}, and advances state ONLY when approval is recorded. When the Product is on a platform, yad-hub-bridge opens the review PR/MR and pulls its comments and approvals back into the file ledger.`,
     actor: "reviewer",
     status: "in-review",
-    stepState: "reviews/*.md · approvals.json",
+    stepState: "reviews/*.md · approvals.json · hub-prs.json",
     trigger: `yad-review-gate artifact: ${artifact}`,
-    handler: "yad-review-gate (open → comment → approve → advance)",
+    handler: "yad-review-gate (open → comment → approve → advance) · yad-hub-bridge (review PR/MR)",
     activeComponents: ["product-hub", "approvals-json", "state-json", "platform"],
     messages: [
       { id: `g${idSuffix}-1`, from: "product-hub", to: "platform", label: "open review PR/MR", type: "gate", color: "#ca6f1e", delay: 0, duration: 700 },
@@ -293,6 +309,23 @@ const frontSteps: FlowStep[] = [
     sideEffects: { jobs: "test-cases.md · test-links.json", notifications: "review never moves currentStep off ready-for-build" },
   },
   gateStep("test-cases", "test-cases.md", "owner + 1 reviewer (base rule)", "#1e8449"),
+  {
+    id: "review-companion",
+    title: "Review Companion (rides every gate)",
+    description:
+      "An optional, soft layer on any review gate (and on a Build code PR): a 60-second trailer of what changed and where the risk is, swipe-through review cards, and a grounded chat. Records an engagement signal on the approval (verified or none) and nudges a bare rubber-stamp in public. Visible, not impossible — it never holds the gate unless the Product requires engagement.",
+    actor: "reviewer",
+    status: "in-review",
+    stepState: "approvals.json engagement",
+    trigger: "yad-review-companion action: trailer|cards|chat|nudge",
+    handler: "yad-review-companion / yad gate review|trailer",
+    activeComponents: ["platform", "approvals-json", "product-hub"],
+    messages: [
+      { id: "cp-1", from: "product-hub", to: "platform", label: "post trailer + cards on the review PR/MR", type: "notification", color: "#566573", delay: 0, duration: 800 },
+      { id: "cp-2", from: "platform", to: "approvals-json", label: "record engagement: verified | none", type: "gate", color: "#ca6f1e", delay: 900, duration: 700 },
+    ],
+    sideEffects: { jobs: "trailer / cards / chat on the platform · approvals.json engagement", notifications: "companion comments carry a noblock marker — they never block the gate" },
+  },
 ];
 
 // ── Phase 3 — Build (per story, per repo) ──────────────────────────────
@@ -366,6 +399,23 @@ const buildSteps: FlowStep[] = [
       { id: "pt-2", from: "code-repos", to: "platform", label: "open task PR (roster auto-assigned)", type: "notification", color: "#566573", delay: 900, duration: 700 },
     ],
     sideEffects: { jobs: "PR/MR template · risk-route.sh · pr-title.sh · pr-template.sh" },
+  },
+  {
+    id: "pair-review",
+    title: "Pair Review (optional)",
+    description:
+      "The guided, two-way, teaching walkthrough — the fifth face of yad-review-companion. The AI walks the reviewer through the PR one stop at a time (highest risk first), explains each change, then asks a question; both keep going until both are satisfied. Soft — it never blocks the merge; real concerns become normal review comments.",
+    actor: "engineer",
+    status: "pr-ready",
+    stepState: "pair session on the PR/MR",
+    trigger: "yad-pair-review action: walkthrough",
+    handler: "yad-pair-review / yad review walkthrough",
+    activeComponents: ["platform", "code-repos"],
+    messages: [
+      { id: "pv-1", from: "code-repos", to: "platform", label: "ordered, risk-tagged stops", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "pv-2", from: "engineer", to: "platform", label: "answer + ask back until both satisfied", type: "gate", color: "#ca6f1e", delay: 800, duration: 800 },
+    ],
+    sideEffects: { jobs: "engagement signal on the review · learning/<member>--review-<pr>.md", notifications: "learning records stay local-only (gitignored, never pushed)" },
   },
   {
     id: "engineer-review",
@@ -457,6 +507,23 @@ const automationSteps: FlowStep[] = [
       { id: "ks-1", from: "engineer", to: "state-json", label: "kill → all steps advance: human", type: "cleanup", color: "#c0392b", delay: 0, duration: 800 },
     ],
     sideEffects: { jobs: "kill_switch: true | false (one line, instantly reversible)" },
+  },
+  {
+    id: "learn",
+    title: "Learn (Tutor)",
+    description:
+      "A cross-cutting learning layer: at any stage, any team member can ask to learn a concept and get tutored in the context of what the team is building. Routes to the connected tutor (DeepTutor-first) or falls back to the harness model reading the artifacts. Opt-in; never a gate.",
+    actor: "system",
+    status: "opt-in",
+    stepState: "learning/<member>--<concept>.md",
+    trigger: "yad-learn {concept} mode: explain|deep|quiz",
+    handler: "yad-learn",
+    activeComponents: ["learning-json", "learning-tool", "product-hub"],
+    messages: [
+      { id: "ln-1", from: "learning-json", to: "learning-tool", label: "route to the connected tutor", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "ln-2", from: "product-hub", to: "learning-tool", label: "ground in the project artifacts", type: "event", color: "#1e8449", delay: 800, duration: 700 },
+    ],
+    sideEffects: { jobs: "tutorial artifact · learning-records.json (LOCAL-ONLY, gitignored)", notifications: "never moves currentStep, records approvals, or touches the contract lock; yad-status rolls up the local records" },
   },
 ];
 
@@ -558,7 +625,7 @@ export const PATHS: FlowPath[] = [
     icon: "settings",
     color: "#b7950b",
     description:
-      "One-time setup: install the 38 skills, then connect code repos, design / testing / learning / docs tools, and detect the Product platform.",
+      "One-time setup: install the 38 skills, then connect code repos (and sync them to their default branch), design / testing / learning / docs tools, and detect the Product platform.",
     category: "setup",
     steps: setupSteps,
   },
@@ -578,7 +645,7 @@ export const PATHS: FlowPath[] = [
     icon: "edit_note",
     color: "#2471a3",
     description:
-      "Author the thinking once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate.",
+      "Author the thinking once per epic: analysis → epic → architecture+contract → UI → stories → test-cases — each stopping at the reusable team review gate, with the optional review companion on top.",
     category: "front",
     steps: frontSteps,
   },
@@ -588,7 +655,7 @@ export const PATHS: FlowPath[] = [
     icon: "build",
     color: "#1e8449",
     description:
-      "Turn a ready-for-build story into shipped code, per repo: spec → implement → check gates → PR template → engineer review & merge.",
+      "Turn a ready-for-build story into shipped code, per repo: spec → implement → check gates → PR template → optional pair review → engineer review & merge.",
     category: "build",
     steps: buildSteps,
   },
@@ -598,7 +665,7 @@ export const PATHS: FlowPath[] = [
     icon: "smart_toy",
     color: "#ca6f1e",
     description:
-      "The second dial made real: run Build on each step's dial, record every run in the trust log, earn `advance: auto` per step, and keep the kill switch.",
+      "The second dial made real: run Build on each step's dial, record every run in the trust log, earn `advance: auto` per step, and keep the kill switch. Beside it, the opt-in yad-learn tutor teaches any member at any stage.",
     category: "automate",
     steps: automationSteps,
   },
