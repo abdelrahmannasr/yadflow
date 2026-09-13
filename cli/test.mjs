@@ -8510,6 +8510,13 @@ test('setFrontmatterStatus is advance-only and preserves owned values', () => {
   assert.equal(setFrontmatterStatus(f, 'approved'), null);    // build-owned value untouched
   assert.equal(read(), 'shipped');
 
+  // A `$` code in another value must come through byte for byte. As a replacement STRING, `$'` pulled in
+  // the rest of the file and `$$` lost a `$` — in the gate's merge commit, on the default branch.
+  const dollars = '---\nid: EP-x\ntitle: costs $\' less, $& and $$5\nstatus: draft\n---\n# body\n';
+  fs.writeFileSync(f, dollars);
+  assert.equal(setFrontmatterStatus(f, 'approved'), 'draft');
+  assert.equal(fs.readFileSync(f, 'utf8'), dollars.replace('status: draft', 'status: approved'), 'nothing else in the file changes');
+
   fs.writeFileSync(f, '# no frontmatter\n');
   assert.equal(setFrontmatterStatus(f, 'approved'), null);    // no block -> no-op
   assert.equal(setFrontmatterStatus(path.join(T, 'missing.md'), 'approved'), null);

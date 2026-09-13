@@ -53,8 +53,11 @@ export function setFrontmatterStatus(file, status) {
   // Advance-only within the managed ladder; anything else (build-owned, roll-ups) is left as-is.
   if (PRESERVE.has(cur)) return null;
   if (!(cur in RANK) || !(status in RANK) || RANK[status] <= RANK[cur]) return null;
-  const block = fm[1].replace(/^status:\s*.*$/m, `status: ${status}`);
-  fs.writeFileSync(file, text.replace(fm[1], block));
+  // Replacement FUNCTIONS, not strings: in a replacement string `$'`, `$&` and `$$` are codes, so a
+  // frontmatter value holding one (`title: costs $' less`) rewrote the file wrongly — on the default
+  // branch, in the gate's merge commit.
+  const block = fm[1].replace(/^status:\s*.*$/m, () => `status: ${status}`);
+  fs.writeFileSync(file, text.replace(fm[1], () => block));
   return cur;
 }
 
