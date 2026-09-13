@@ -11754,13 +11754,17 @@ test('yad epic new: an unknown type and an unknown route each say what is allowe
   } finally { cleanTmp(route.T); }
 });
 
-test('yad epic new: the discovery front-zero is refused and named, not listed as a typo', async () => {
-  const { T, out, failed } = await epicNewOn({ slug: 'x', profile: 'discovery' });
-  try {
-    assert.equal(failed, true);
-    assert.match(out, /not seeded from here/);
-    assert.match(out, /yad-discovery/);
-  } finally { cleanTmp(T); }
+test('yad epic new: a product route is refused and named, not listed as a typo', async () => {
+  // Both product routes — the Foundation and its old `discovery` spelling (E75) — point at the command
+  // that seeds the Product level, rather than at the skill that only authors it.
+  for (const profile of ['discovery', 'foundation']) {
+    const { T, out, failed } = await epicNewOn({ slug: 'x', profile });
+    try {
+      assert.equal(failed, true, profile);
+      assert.match(out, /not seeded from here/);
+      assert.match(out, /yad foundation new/);
+    } finally { cleanTmp(T); }
+  }
 });
 
 test('yad epic new: the front-zero id is reserved, whatever route is asked for', async () => {
@@ -11772,8 +11776,8 @@ test('yad epic new: the front-zero id is reserved, whatever route is asked for',
     const { T, out, failed } = await epicNewOn({ slug });
     try {
       assert.equal(failed, true, slug);
-      assert.match(out, /product front-zero/);
-      assert.match(out, /yad-discovery/);
+      assert.match(out, /is the Product level/);
+      assert.match(out, /yad-discovery/, 'the skill that authors it is still named, after the seed command');
       assert.equal(fs.existsSync(path.join(T, 'epics/EP-discovery')), false, slug);
     } finally { cleanTmp(T); }
   }
@@ -12720,4 +12724,87 @@ test('doctor: a verified Product with a Foundation is warned when its wired chec
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'local' }));
     assert.deepEqual(run(), [], 'a local ledger is written by humans on purpose');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- `yad foundation new` — the engine seeds the Product level (E75) -----------------------------
+async function foundationNewOn({ files = {}, json = false } = {}) {
+  const { runFoundationNew } = await import('./epic.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e75-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+    fs.writeFileSync(path.join(T, rel), body);
+  }
+  const code = process.exitCode;
+  process.exitCode = undefined;
+  const out = await grab(() => runFoundationNew(T, { today: '2026-09-13', json }));
+  const failed = process.exitCode === 1;
+  process.exitCode = code;
+  return { T, out, failed };
+}
+
+test('yad foundation new: writes the Foundation ledger in foundation/, and nothing under epics/', async () => {
+  const { T, out, failed } = await foundationNewOn();
+  try {
+    assert.equal(failed, false, out);
+    const dir = path.join(T, 'foundation');
+    const state = JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'state.json'), 'utf8'));
+    assert.equal(state.schemaVersion, ENGINE_SHAPE, 'stamped by the one writer');
+    assert.equal(state.epicId, 'EP-foundation');
+    assert.equal(state.kind, 'foundation');
+    assert.equal(state.profile, 'foundation');
+    assert.equal('type' in state, false, 'the product level is not a work item');
+    assert.deepEqual(state.steps.map((s) => s.id), ['foundation', 'foundation-review']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'approvals.json'), 'utf8')), []);
+    assert.ok(fs.statSync(path.join(dir, 'reviews')).isDirectory());
+    assert.equal(fs.existsSync(path.join(T, 'epics')), false);
+    assert.equal(fs.readdirSync(dir).filter((f) => f.endsWith('.md')).length, 0, 'no section is written — they are authored');
+    assert.match(out, /EP-foundation seeded/);
+    assert.match(out, /run the yad-discovery skill to author foundation\//);
+    assert.match(out, /yad gate open EP-foundation foundation\//);
+  } finally { cleanTmp(T); }
+});
+
+test('yad foundation new --json names the sections, and a second run refuses', async () => {
+  const { T, out } = await foundationNewOn({ json: true });
+  try {
+    const j = JSON.parse(out);
+    assert.equal(j.ok, true);
+    assert.deepEqual(j.sections, {
+      required: ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'stack.md', 'repos.md'],
+      optional: ['market.md', 'risks.md'],
+    });
+    const { runFoundationNew } = await import('./epic.mjs');
+    const before = fs.readFileSync(path.join(T, 'foundation/.sdlc/state.json'), 'utf8');
+    const code = process.exitCode;
+    const again = await grab(() => runFoundationNew(T, { today: '2026-09-14' }));
+    assert.equal(process.exitCode, 1);
+    process.exitCode = code;
+    assert.match(again, /already has its Foundation/);
+    assert.equal(fs.readFileSync(path.join(T, 'foundation/.sdlc/state.json'), 'utf8'), before, 'nothing overwritten');
+  } finally { cleanTmp(T); }
+});
+
+test('yad foundation new refuses beside the OLD spelling — a product has one product level', async () => {
+  const { T, out, failed } = await foundationNewOn({ files: {
+    'epics/EP-discovery/.sdlc/state.json': JSON.stringify({ epicId: 'EP-discovery', kind: 'discovery', steps: [] }),
+  } });
+  try {
+    assert.equal(failed, true);
+    assert.match(out, /already has a product level, in its old spelling/);
+    assert.match(out, /yad migrate --apply/);
+    assert.equal(fs.existsSync(path.join(T, 'foundation')), false);
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new refuses both product-level ids, and sends the user to yad foundation new', async () => {
+  for (const slug of ['foundation', 'EP-foundation', 'discovery']) {
+    const { T, out, failed } = await epicNewOn({ slug });
+    try {
+      assert.equal(failed, true, slug);
+      assert.match(out, /is the Product level, not an epic on the ladder/);
+      assert.match(out, /yad foundation new/);
+      assert.equal(fs.existsSync(path.join(T, 'foundation')), false, `${slug}: nothing written into foundation/`);
+    } finally { cleanTmp(T); }
+  }
 });

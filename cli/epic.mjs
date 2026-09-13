@@ -16,12 +16,14 @@
 // carrying a chain, and their templates are gone — a test asserts no step chain comes back into those
 // files, because nothing else would notice a copy quietly drifting from the catalogue again.
 //
-// TWO DO NOT, and neither is an oversight. `yad-discovery` seeds the product front-zero, which E75
-// absorbs into Foundation. `yad-change` seeds a THREADED chain: its inherited steps are pre-marked
-// done and bound to the parent's artifact hashes, its approvals ledger carries a provenance record per
-// inherited gate, and an inherited architecture materialises a pointer contract-lock — inheritance is
-// E42's, and the depth triage that decides which steps are inherited is a design, not a flag. Both are
-// refused here by name rather than half-supported.
+// `yad-discovery` now runs `yad foundation new` (E75, below) for the Product level, which is not an epic
+// and has a command of its own.
+//
+// ONE DOES NOT, and it is not an oversight. `yad-change` seeds a THREADED chain: its inherited steps are
+// pre-marked done and bound to the parent's artifact hashes, its approvals ledger carries a provenance
+// record per inherited gate, and an inherited architecture materialises a pointer contract-lock —
+// inheritance is E42's, and the depth triage that decides which steps are inherited is a design, not a
+// flag. It is refused here by name rather than half-supported.
 //
 // The seed is still built key-by-key in the order those templates used, because the chains on disk in
 // every existing project were written that way and a re-seeded epic must not churn their bytes.
@@ -30,9 +32,9 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok } from './lib.mjs';
 import {
-  DISCOVERY_EPIC, epicRoot, isGenesisType, isValidEpicId, lifecycleProfile, loadSkillBindings,
-  readFrontmatter, seedableProfiles, seedState, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType,
-  writeJSON, writeState,
+  DISCOVERY_EPIC, epicRel, epicRoot, FOUNDATION_EPIC, FOUNDATION_SECTIONS, isGenesisType, isValidEpicId,
+  lifecycleProfile, loadSkillBindings, PRODUCT_EPICS, readFrontmatter, seedableProfiles, seedFoundationState,
+  seedState, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -67,14 +69,15 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // The id becomes a path segment under epics/ — reject anything but EP-<slug> outright, the same
   // guard every other epic-taking command applies.
   if (!isValidEpicId(epic)) return bail(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`);
-  // The front-zero's id is RESERVED, and refusing the profile is not enough to protect it: the route
-  // defaults to `classic`, so `yad epic new discovery` would have written a 10-step feature chain onto
-  // the one id a product may only ever have one of — with no `kind: "discovery"` marker, which is what
-  // every reader of the front-zero keys off. Worse, it would then be permanent: the next run refuses
-  // the id as already seeded, and `yad-discovery` would be authoring over a foreign ledger.
-  if (epic === DISCOVERY_EPIC) {
-    return bail(`${DISCOVERY_EPIC} is the product front-zero, not an epic on the ladder`,
-      'it is one per product, has no epic.md and no work-item type, and its ledger carries a `kind: "discovery"` marker this command does not write. Run the yad-discovery skill for it');
+  // The Product level's ids are RESERVED, and refusing the profile is not enough to protect them: the
+  // route defaults to `classic`, so `yad epic new discovery` would have written a 10-step feature chain
+  // onto the one id a product may only ever have one of — with no `kind` marker, which is what every
+  // reader of the product level keys off. Worse, it would then be permanent: the next run refuses the
+  // id as already seeded. `EP-foundation` is sharper still (E75): its directory is not under `epics/` —
+  // `epicRoot` sends it to `foundation/` — so a feature seed would land in the Foundation's own ledger.
+  if (PRODUCT_EPICS.includes(epic)) {
+    return bail(`${epic} is the Product level, not an epic on the ladder`,
+      'it is one per product, has no epic.md and no work-item type, and its ledger carries a `kind` marker this command does not write. Run `yad foundation new`, then the yad-discovery skill');
   }
 
   const dir = epicRoot(root, epic);
@@ -156,9 +159,10 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
     return bail(
       known ? `the '${profile}' profile is not seeded from here` : `unknown lifecycle profile: ${profile}`,
       known
-        // Today the only known-but-unseedable profile is `discovery`, and the reason is specific
-        // enough to be worth naming rather than listing the alternatives again.
-        ? `'${profile}' is the product front-zero, not an epic on the ladder: one per product, a fixed id, no epic.md and no work-item type. Run the yad-discovery skill for it`
+        // Today the only known-but-unseedable profiles are the two product routes, `discovery` and
+        // `foundation`, and the reason is specific enough to be worth naming rather than listing the
+        // alternatives again.
+        ? `'${profile}' is the Product level, not an epic on the ladder: one per product, a fixed id, no epic.md and no work-item type. Run \`yad foundation new\` for it`
         : `pick one of ${seedable.join(' · ')}`,
     );
   }
@@ -210,4 +214,62 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // `ledger-guard` exempts a new epic's ledger only while it is absent from the base ref (creation,
   // not mutation, #162). Left uncommitted until then, it lands by no path at all.
   info('commit the seed on this epic\'s authoring branch — it reaches the default branch through the first review PR/MR.');
+}
+
+// `yad foundation new` — the ENGINE seeds the Product level (E75).
+//
+// The Foundation's ledger was the last product-level chain written by hand: `yad-discovery` carried a
+// literal JSON block, the same kind of copy E17 retired from the feature skills. This writes it from
+// the `foundation` route and the catalogue instead, into `foundation/.sdlc/`, with the same two empty
+// ledgers and `reviews/` folder `yad epic new` writes.
+//
+// WHAT IT DOES NOT WRITE is the same as `yad epic new`: no section files, no branch, no commit. The
+// sections are prose authored with the user by the skill the chain names next.
+//
+// TWO REFUSALS, both about there being ONE product level:
+//   * a Foundation that already exists — nothing here overwrites a ledger, and there is no flag for it;
+//   * a product still in its OLD spelling (`epics/EP-discovery/`). Seeding beside it would make two
+//     product levels, which the roadmap calls a bug in as many words. That project converts with
+//     `yad migrate` when its ledger is local; a verified one keeps using what it has, because CI owns
+//     that ledger and cannot be asked to move it.
+export async function runFoundationNew(root, { today, json = false } = {}) {
+  const bail = (message, hint) => {
+    if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
+    else { fail(message); if (hint) hand(hint); }
+    process.exitCode = 1;
+  };
+  const files = epicFiles(epicRoot(root, FOUNDATION_EPIC));
+  if (fs.existsSync(files.state)) {
+    return bail(`this product already has its Foundation — ${path.relative(root, files.state)} exists`,
+      `run \`yad next ${FOUNDATION_EPIC}\` to see where it is. Nothing here overwrites a ledger`);
+  }
+  const legacy = epicFiles(epicRoot(root, DISCOVERY_EPIC)).state;
+  if (fs.existsSync(legacy)) {
+    return bail(`this product already has a product level, in its old spelling — ${path.relative(root, legacy)}`,
+      `a product has ONE Foundation. On a local ledger, \`yad migrate --apply\` converts that one into ${epicRel(FOUNDATION_EPIC)}/; on a verified ledger keep using it — \`yad next ${DISCOVERY_EPIC}\``);
+  }
+
+  const state = seedFoundationState({ today });
+  writeState(files.state, state);
+  for (const f of [files.approvals, files.comments]) if (!fs.existsSync(f)) writeJSON(f, []);
+  fs.mkdirSync(path.join(epicRoot(root, FOUNDATION_EPIC), 'reviews'), { recursive: true });
+
+  const skills = stepSkills(state.steps[0].id, loadSkillBindings(root));
+  const skill = skills[0] || null;
+  const required = FOUNDATION_SECTIONS.filter((s) => !s.optional).map((s) => s.file);
+  const optional = FOUNDATION_SECTIONS.filter((s) => s.optional).map((s) => s.file);
+  if (json) {
+    return log(JSON.stringify({
+      ok: true, epic: FOUNDATION_EPIC, profile: state.profile, currentStep: state.currentStep,
+      steps: state.steps.map((s) => s.id), next: skill,
+      ...(skills.length > 1 ? { nextSkills: skills } : {}),
+      sections: { required, optional },
+    }, null, 2));
+  }
+  ok(`${FOUNDATION_EPIC} seeded — the Product level, in ${epicRel(FOUNDATION_EPIC)}/ (${state.steps.length} steps)`);
+  info(`chain: ${state.steps.map((s, i) => (i === 0 ? c.bold(s.id) : s.id)).join(' → ')}`);
+  hand(`foundation is open${skill ? ` — run the ${skills.join(' skill, then the ')} skill to author ${epicRel(FOUNDATION_EPIC)}/` : ''}`);
+  info(`sections: ${required.join(', ')} ${c.dim(`(optional: ${optional.join(', ')})`)}`);
+  if (skills.length > 1) info(`${skills.length} skills run for this step, one after another — each one costs tokens`);
+  info('then `yad gate open EP-foundation foundation/`. Commit the seed on the Foundation\'s authoring branch — it reaches the default branch through the first review PR/MR.');
 }

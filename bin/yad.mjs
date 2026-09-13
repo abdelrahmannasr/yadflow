@@ -6,7 +6,7 @@ import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 import { isValidEpicId, seedableProfiles } from '../cli/epic-state.mjs';
-import { runEpicNew } from '../cli/epic.mjs';
+import { runEpicNew, runFoundationNew } from '../cli/epic.mjs';
 import { runSkillBind, runSkillList, runSkillUnbind } from '../cli/skill.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
@@ -98,6 +98,11 @@ ${c.bold('Where am I / what next')}
                                        Product existed (yad-backfill promote wakes it).
                                        Writes no epic.md, no branch and no commit: run the skill
                                        the chain names next. Refuses an epic that already has one
+  yad foundation new [--json]          Seed the Product level (E75): the Foundation's two-step chain
+                                       in foundation/.sdlc/, plus empty ledgers and reviews/. Run once
+                                       per product, before any epic — then the yad-discovery skill
+                                       authors its sections. Refuses a second one, and a product still
+                                       on the old epics/EP-discovery/ (yad migrate converts that)
   yad next                             Project-wide: the one next action to take (or run setup)
   yad next <epic>                      The single next action for one epic (skill or yad command)
   yad next <epic> --check <step>       Exit 0 if <step> is runnable now, else 1 (precondition guard)
@@ -334,6 +339,16 @@ async function main() {
         process.exitCode = 1; break;
       }
       await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, today, json: o.json });
+      break;
+    }
+    case 'foundation': {
+      const [, action] = o._;
+      if (action !== 'new') {
+        log(c.red(`unknown foundation action: ${action ?? '(none)'} (new)`));
+        log('usage: yad foundation new [--json]');
+        process.exitCode = 1; break;
+      }
+      await runFoundationNew(o.dir, { today, json: o.json });
       break;
     }
     case 'skill': {

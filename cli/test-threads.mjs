@@ -1059,7 +1059,6 @@ function templateSeed(skillFile) {
 // front-zero that E75 absorbs, and `yad-change`'s chain is threaded — inherited steps bound to a
 // parent's hashes, with provenance records beside them.
 const SEED_TEMPLATES = [
-  ['yad-discovery/SKILL.md', 'discovery'],
   ['yad-change/references/triage.md', 'classic'],
 ];
 
@@ -1071,6 +1070,8 @@ const ENGINE_SEEDED = [
   ['yad-epic/SKILL.md', 'yad epic new'],
   ['yad-analysis/SKILL.md', 'yad epic new EP-<slug> --profile analysis-first'],
   ['yad-stub/SKILL.md', 'yad epic new EP-<slug> --stub'],
+  // E75: the Product level has a command of its own, and the skill that authors it runs that.
+  ['yad-discovery/SKILL.md', 'yad foundation new'],
 ];
 
 test('the skills that call the engine carry no chain of their own to drift', () => {
@@ -1096,7 +1097,7 @@ test('the skills E17b changed instruct no ledger write at all', () => {
   // A prose heuristic over 38 files cannot be made both. So the check is narrow and exact instead: the
   // nine skills this task changed, each asserted to contain no imperative aimed at the ledger.
   const CHANGED = ['yad-epic', 'yad-analysis', 'yad-stub', 'yad-architecture', 'yad-ui',
-    'yad-stories', 'yad-test-cases', 'yad-review-gate'];
+    'yad-stories', 'yad-test-cases', 'yad-review-gate', 'yad-discovery'];
   // An imperative aimed at the ledger, in EITHER word order — and both orders are needed, because the
   // blocks this task deleted used the second one. `Create {project-root}/…/.sdlc/state.json` puts the
   // verb first; ``In `state.json`: set `architecture.status` to done`` puts the file first, and a
@@ -1145,16 +1146,18 @@ test('the skills that still write a chain by hand are named, with the reason', (
   const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
   assert.match(gate, /TRANSCRIPTION of `advanceState`/);
   for (const [skill, why] of [
-    ['yad-discovery', /front-zero/],
     ['yad-change', /threaded/],
     ['yad-backfill', /promote/],
   ]) {
     assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
     assert.match(gate, why, `the banner does not say WHY ${skill} is still one`);
   }
-  // …and each of those three really does still seed or rewrite a chain, so the banner is not naming
-  // skills that have already been converted.
-  for (const d of ['yad-discovery', 'yad-change', 'yad-backfill']) {
+  // `yad-discovery` left the list in E75, and the banner says where it went rather than dropping it
+  // silently — a reader who remembers it as a writer would otherwise go looking for the JSON block.
+  assert.match(gate, /`yad-discovery` used to be the third; since E75 it runs\s+> `yad foundation new`/);
+  // …and each of those really does still seed or rewrite a chain, so the banner is not naming skills
+  // that have already been converted.
+  for (const d of ['yad-change', 'yad-backfill']) {
     const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
     assert.match(src, /state\.json/, `${d}: no longer touches the ledger — drop it from the banner`);
   }
