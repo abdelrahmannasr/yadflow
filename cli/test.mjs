@@ -12912,6 +12912,28 @@ test('hook: with EP-discovery on base, a Foundation ledger counts as already see
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor: a folder under epics/ that is not a valid epic id is named, not skipped in silence (E75 follow-up)', async () => {
+  const { strayEpicDirChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-stray-dir-'));
+  try {
+    for (const d of ['EP-Foo', 'notes', 'EP-ok', 'EP-discovery.yad-orig', '.cache']) fs.mkdirSync(path.join(T, 'epics', d), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics', 'README.md'), '# a file, not a folder\n');
+    const checks = [];
+    strayEpicDirChecks(checks, T);
+    assert.deepEqual(checks.map((c) => c.id).sort(), ['epic-dir:EP-Foo', 'epic-dir:notes'],
+      'a valid id, a migrate backup, a dot-folder and a plain file are not named');
+    assert.ok(checks.every((c) => c.status === 'warn' && /EP-<slug>/.test(c.hint)));
+    // …and `yad doctor` actually runs it: through the epic checks, not only when called by name.
+    const { epicChecks } = await import('./doctor.mjs');
+    const viaDoctor = [];
+    epicChecks(viaDoctor, T);
+    assert.ok(viaDoctor.some((c) => c.id === 'epic-dir:EP-Foo'), 'the epic checks name it too');
+    const none = [];
+    strayEpicDirChecks(none, fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-no-epics-')));
+    assert.deepEqual(none, [], 'no epics/ folder, nothing to say');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('gate: an incomplete Foundation is named at gate time, and its optional sections never make it incomplete (E75)', async () => {
   const { warnIncompleteDiscovery } = await import('./gate.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-incomplete-'));

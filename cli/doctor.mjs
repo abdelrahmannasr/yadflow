@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -486,7 +486,23 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
   }
 }
 
+// Every walker goes through `epicIds`, which lists only VALID ids — so a folder under `epics/` whose name
+// is not one (`EP-Foo`, with a capital, which macOS happily creates) is read by nothing, and nothing
+// said so. Name it (rule 6). Two kinds are meant to be skipped and are not named: a `*.yad-orig` backup,
+// which `yad migrate` makes, and a dot-folder.
+export function strayEpicDirChecks(checks, root) {
+  const dir = path.join(root, 'epics');
+  if (!exists(dir)) return;
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name.startsWith('.') || e.name.endsWith(BACKUP_SUFFIX) || isValidEpicId(e.name)) continue;
+    check(checks, `epic-dir:${e.name}`, 'epics', 'warn',
+      `epics/${e.name}/ is not a valid epic id, so no command reads it`,
+      'rename it to `EP-<slug>` — lowercase letters, digits and dashes — or remove it if it is not an epic');
+  }
+}
+
 export function epicChecks(checks, root) {
+  strayEpicDirChecks(checks, root);
   // Read once for the whole sweep: whether approval is waived is a project fact, not a per-epic one.
   const solo = isSolo(readJSON(productConfigPath(root), null));
   // `epicIds` — every VALID epic id plus the Foundation (E75). The old listing took any directory under
