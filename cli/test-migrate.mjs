@@ -69,7 +69,9 @@ test('migrate: preview reports what would change and writes absolutely nothing',
 
   assert.equal(res.applied, false);
   assert.equal(res.ok, true);
-  assert.deepEqual(res.changed.sort(), ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/repos.json']);
+  // `.sdlc/product.json` is named although it does not exist yet: the apply CREATES it beside hub.json, so a
+  // preview without it would under-report. (This list used to leave it out, and so pinned exactly that.)
+  assert.deepEqual(res.changed.sort(), ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/product.json', '.sdlc/repos.json']);
   for (const [f, body] of before) assert.equal(fs.readFileSync(f, 'utf8'), body, `${f} was written during a preview`);
   assert.deepEqual(fs.readdirSync(path.join(T, '.sdlc')).filter((n) => n.endsWith('.yad-orig')), [],
     'a preview leaves no backups either');
@@ -1310,12 +1312,12 @@ test('migrate 7 -> 8: the preview names every file the move touches, and none at
     assert.equal(j.product.action, 'move');
     assert.ok(j.changed.includes('foundation/.sdlc/state.json'));
     assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the preview wrote nothing');
-    // The preview must not under-report the move: it names exactly the foundation/ files the apply then
-    // says it wrote — the plain copies included, not only the relabelled ledger files.
+    // The preview must not under-report: it names exactly the files the apply then says it wrote — the
+    // move's plain copies AND the product config's mirror partner, not only the rows' own files.
     const applied = JSON.parse(await grabOut(() => runMigrate(T, { apply: true, json: true })));
-    const moveFiles = (list) => list.filter((f) => f.startsWith('foundation/')).sort();
-    assert.ok(moveFiles(j.changed).includes('foundation/competitor-analysis.md'), 'a plain copy is named too');
-    assert.deepEqual(moveFiles(j.changed), moveFiles(applied.changed));
+    assert.ok(j.changed.includes('foundation/competitor-analysis.md'), 'a plain copy is named too');
+    assert.ok(j.changed.includes('.sdlc/product.json'), 'the mirror partner the apply writes is named too');
+    assert.deepEqual([...j.changed].sort(), [...applied.changed].sort());
   } finally { cleanup(T); }
 });
 

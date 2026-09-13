@@ -857,7 +857,13 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       engine: plan.engine,
       applied: apply,
       verified: plan.verified,
-      changed: apply ? written : [...(move ? productMoveFiles(move) : []), ...pending.map((r) => r.file)],
+      // The preview names each row's mirror partner too (`creates` / `rewrites`), exactly as the text
+      // report does: the apply writes the product config under BOTH names, so leaving the partner out
+      // made this list shorter than the apply's `written` — a preview that under-reports.
+      changed: apply ? written : [...new Set([
+        ...(move ? productMoveFiles(move) : []),
+        ...pending.flatMap((r) => [r.file, ...(r.creates ?? []), ...(r.rewrites ?? [])]),
+      ])],
       ...(ignored ? { gitignored: BACKUP_IGNORE_GLOB } : {}),
       rows: plan.rows,
       // The product-level move (shape 8), or null when the project has no old-spelling product level.
