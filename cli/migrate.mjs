@@ -735,6 +735,31 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   return { engine: SCHEMA_VERSION, verified, rows, product };
 }
 
+// ---- the forward floor -----------------------------------------------------------------------
+// A project written by a NEWER yadflow can hold files an older one misreads. Shape 8 is the case that
+// made this matter: it moved the product level to `foundation/`, and 3.x — which cannot be changed now —
+// simply shows no product level there. Only `yad doctor` said anything. So from this release on, every
+// command warns first, and the next shape change cannot leave that gap unannounced.
+//
+// It reads two small files rather than walking the project on every command: `yad migrate --apply` stamps
+// both, and every newer engine writes both on setup and update.
+export function projectShapeAhead(root) {
+  let top = 0;
+  for (const file of [path.join(root, PROJECT_FILES.version), productConfigPath(root)]) {
+    const v = readJSON(file, null)?.schemaVersion;
+    if (Number.isInteger(v) && v > top) top = v;
+  }
+  return top > SCHEMA_VERSION ? top : null;
+}
+
+// On stderr, so no command's stdout (and no --json contract) changes. Returns whether it warned.
+export function warnIfProjectAhead(root, { out = (s) => console.error(s) } = {}) {
+  const ahead = projectShapeAhead(root);
+  if (!ahead) return false;
+  out(c.yellow(`! this project is on file shape ${ahead}, and this yadflow (v${VERSION}) only knows shape ${SCHEMA_VERSION} — it may misread the newer files. Upgrade yadflow before relying on what it says; \`yad doctor\` lists them.`));
+  return true;
+}
+
 // ---- the report ----------------------------------------------------------------------------
 const ACTION_NOTE = {
   stamp: 'record its shape',

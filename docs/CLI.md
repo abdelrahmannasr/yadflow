@@ -605,6 +605,12 @@ The reading comes from the same code `yad migrate` previews with, so the two can
 `--json`, each shape check carries a `shape` object with the engine's version and a per-file list, so
 CI can act on the detail rather than parsing the sentence.
 
+**Every other command warns first when the project is ahead.** If `.sdlc/cli-version.json` or the product
+config says a newer file shape than this yadflow knows, each command prints one warning on stderr before
+it runs — stdout and `--json` are unchanged — telling you to upgrade before relying on what it says.
+`yad doctor` and `yad migrate` report it in their own words, and `yad hook` never prints it. This is what
+a 3.x yadflow could not do for shape 8 (docs/migrations/shape-8.md).
+
 When something is off, run `yad doctor` first — it checks the environment (git, gh/glab auth, node
 version), the project state (`.sdlc/*.json` parse and point at real repos), and every epic ledger,
 with a fix-it hint per finding. Failures carry stable, greppable codes, also printed by any failing

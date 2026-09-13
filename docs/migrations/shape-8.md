@@ -130,9 +130,22 @@ refuses to seed a Foundation, and `yad doctor` warns (`foundation:legacy` or `fo
 
 ## Do not run a 3.x yadflow against a migrated project
 
-An older yadflow looks for the product level under `epics/` and does not know `foundation/` exists. On
-a converted project it shows no product level at all, and `yad epic new` from that version would let you
-seed a second one. Nothing is damaged, but upgrade everyone on the project together.
+An older yadflow looks for the product level under `epics/` only, and does not know `foundation/` exists.
+This is what 3.18.1 does when it is run against a converted project:
+
+| In 3.18.1 | What happens on a converted project |
+|---|---|
+| `yad next` | shows no product level — only the feature epics |
+| `yad doctor` | fails the shape check ("files are newer than this yadflow") and says to upgrade; it also lists a local `epics/EP-discovery.yad-orig/` backup as if it were an epic |
+| the `yad-discovery` skill | writes a fresh `epics/EP-discovery/` ledger by hand — a second product level |
+
+Nothing is damaged, and this release catches the last one: on a verified Product the ledger guard rejects
+that second ledger, and `yad doctor` fails `foundation:two` on any Product. Still, upgrade everyone on the
+project together.
+
+A 3.x release cannot be changed now. From this release on, every command first warns when the project's
+files are on a newer shape than the yadflow reading them, so the next shape change cannot leave the same
+gap unannounced.
 
 The other direction is safe: this release reads every older project correctly, `EP-discovery` included.
 

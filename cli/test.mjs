@@ -12973,6 +12973,33 @@ test('doctor: a verified Product on the old spelling is told CI moves it — or,
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('every command warns first when the project is on a newer file shape than this yadflow (E75 follow-up)', async () => {
+  const { projectShapeAhead, warnIfProjectAhead } = await import('./migrate.mjs');
+  const { SCHEMA_VERSION } = await import('./manifest.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ahead-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    assert.equal(projectShapeAhead(T), null, 'no project files: nothing to say');
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ schemaVersion: SCHEMA_VERSION, version: '1.0.0' }));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ schemaVersion: SCHEMA_VERSION - 1, platform: 'github' }));
+    assert.equal(projectShapeAhead(T), null, 'on this shape, or behind it: nothing to say');
+    const lines = [];
+    assert.equal(warnIfProjectAhead(T, { out: (s) => lines.push(s) }), false);
+    assert.deepEqual(lines, []);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ schemaVersion: SCHEMA_VERSION + 1, platform: 'github' }));
+    assert.equal(projectShapeAhead(T), SCHEMA_VERSION + 1, 'the product config alone is enough');
+    assert.equal(warnIfProjectAhead(T, { out: (s) => lines.push(s) }), true);
+    assert.match(lines.join('\n'), new RegExp(`file shape ${SCHEMA_VERSION + 1}, and this yadflow .* only knows shape ${SCHEMA_VERSION}`));
+    // Through the CLI: on stderr, so a --json stdout stays parseable — and not from `yad migrate`, which
+    // reports the same thing in its own words.
+    const run = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/yad.mjs'), ...args], { cwd: T, encoding: 'utf8' });
+    const next = run('next', '--json');
+    assert.match(next.stderr, /this project is on file shape/, next.stderr);
+    assert.doesNotMatch(next.stdout, /this project is on file shape/);
+    assert.doesNotMatch(run('migrate', '--json').stderr, /this project is on file shape/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 // A Product whose default branch still holds the product level in its old spelling, and a CI checkout of it.
 function scaffoldLegacyProductHub({ verified = true, checks = {} } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ci-convert-'));
