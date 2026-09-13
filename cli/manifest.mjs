@@ -179,12 +179,16 @@ export const LEARNING_PRIMARY = 'deeptutor';
 //     THE FIRST SHAPE THAT CHANGES A VALUE IN PLACE rather than adding a key beside an old one — so
 //     it is the first that an older CLI cannot read correctly, which docs/migrations/shape-7.md says
 //     in as many words. Every legacy field is kept beside the new one (rule 3).
+// 8 — the Product level lives in `foundation/` as the Foundation, id `EP-foundation` (E75). On a
+//     local ledger `yad migrate` MOVES `epics/EP-discovery/` there and relabels its step ids; no field
+//     of any other file changes. A verified project keeps the old spelling, which is still read.
+//     docs/migrations/shape-8.md.
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {

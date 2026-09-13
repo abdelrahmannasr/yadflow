@@ -393,7 +393,7 @@ picks its own in `.sdlc/skills.json`:
 
 ```jsonc
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "steps": {
     "architecture": "our-architecture-skill",
     "stories": ["shape-the-stories", "yad-stories"]

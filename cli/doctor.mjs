@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -539,9 +539,45 @@ export function epicChecks(checks, root) {
 // Detected by the folder name in the script's text. The wired copy is byte-for-byte a template, and
 // every template from E75 on names `foundation/` in the arm that guards it; a copy that does not name
 // it cannot be guarding it.
-export function foundationGuardChecks(checks, root) {
+//
+// The same section reports the three ways a product can have the WRONG number of product levels:
+//   foundation:two     a Foundation AND an old `epics/EP-discovery/` ledger — fail. Two product levels
+//                      is a bug by the roadmap's own words, and only a person knows which is real.
+//   foundation:stray   an `epics/EP-foundation/` folder — fail. That id's folder is `foundation/`; this
+//                      one is never read, so anything written into it is silently lost.
+//   foundation:legacy  the old spelling alone. On a local ledger that is a warning with the command
+//                      that converts it. On a verified one there is nothing to run — CI owns the
+//                      ledger — so it is reported as fine, because a warning nobody can clear teaches
+//                      people to stop reading warnings.
+export function foundationChecks(checks, root) {
+  const hub = readJSON(productConfigPath(root), null);
+  const hasFoundation = exists(path.join(epicRoot(root, FOUNDATION_EPIC), '.sdlc', 'state.json'));
+  const hasLegacy = exists(path.join(epicRoot(root, DISCOVERY_EPIC), '.sdlc', 'state.json'));
+  if (hasFoundation && hasLegacy) {
+    check(checks, 'foundation:two', 'project', 'fail',
+      `two product levels: ${FOUNDATION_DIR}/ and epics/${DISCOVERY_EPIC}/ — a product has one Foundation`,
+      `decide which one is real. \`yad next\` uses ${FOUNDATION_DIR}/; to keep the old one instead, move ${FOUNDATION_DIR}/ aside and run \`yad migrate --apply\``);
+  } else if (hasLegacy) {
+    if (isVerifiedLedger(hub)) {
+      check(checks, 'foundation:legacy', 'project', 'ok',
+        `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/) — read as the Foundation; on a verified ledger it stays there`);
+    } else {
+      check(checks, 'foundation:legacy', 'project', 'warn',
+        `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/)`,
+        `run \`yad migrate\` to preview, then \`yad migrate --apply\` — it moves to ${FOUNDATION_DIR}/ with its files and approvals kept (docs/migrations/shape-8.md)`);
+    }
+  }
+  if (exists(path.join(root, 'epics', FOUNDATION_EPIC))) {
+    check(checks, 'foundation:stray', 'project', 'fail',
+      `epics/${FOUNDATION_EPIC}/ exists, but that id's folder is ${FOUNDATION_DIR}/ — nothing ever reads this one`,
+      `move anything real into ${FOUNDATION_DIR}/, then delete epics/${FOUNDATION_EPIC}/`);
+  }
+  foundationGuardChecks(checks, root, hub);
+}
+
+function foundationGuardChecks(checks, root, hub) {
   if (!exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) return;
-  if (!isVerifiedLedger(readJSON(productConfigPath(root), null))) return;
+  if (!isVerifiedLedger(hub)) return;
   const stale = ['checks/ledger-guard.sh', 'checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => {
     const file = path.join(root, rel);
     if (!exists(file)) return false;   // not wired at all is `yad check`'s finding, not this one
@@ -995,7 +1031,7 @@ export function catalogueChecks(checks, root) {
       // and approves perfectly is bound to the wrong file — a false statement, and the kind that
       // teaches people to stop reading warnings.
       if (def.artifact && typeof step.artifact === 'string' && step.artifact
-          && artifactBase(step.artifact) !== artifactBase(def.artifact)) {
+          && !artifactAgrees(def, step.artifact)) {
         wrongArtifact.push(`${e} \`${step.id}\`: \`${step.artifact}\`, catalogue says \`${def.artifact}\``);
       }
       // A Shape step with NO artifact at all is the one shape that crashes rather than misfires:
@@ -1434,7 +1470,7 @@ export function collectDoctor(root) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
-  foundationGuardChecks(checks, root);
+  foundationChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
   dialChecks(checks, root);

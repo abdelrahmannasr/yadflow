@@ -796,9 +796,12 @@ test('migrate 4 -> 5: an epic with no epic.md gets no type at all', async () => 
   } });
   try {
     await runMigrate(T, { apply: true });
-    const st = read(path.join(T, 'epics/EP-discovery/.sdlc/state.json'));
+    // On a local ledger shape 8 then MOVES the product level into `foundation/` (E75) — so the file is
+    // read where it lands. The point of this test survives the move: the lifecycle marker is relabelled
+    // to the Foundation's, and a work-item `type` is still never invented for it.
+    const st = read(path.join(T, 'foundation/.sdlc/state.json'));
     assert.equal('type' in st, false, 'nothing to copy, so nothing is written');
-    assert.equal(st.kind, 'discovery', 'and the lifecycle marker is left exactly as it was');
+    assert.equal(st.kind, 'foundation', 'the marker is relabelled, not turned into a type');
     assert.equal(st.schemaVersion, ENGINE_SHAPE, 'the file still moves shape — the shape is the project\'s');
   } finally { cleanup(T); }
 });
@@ -1259,3 +1262,149 @@ test('migrate: the Foundation ledger in foundation/ is on the plan, and stamped 
     assert.equal(isEpicStatePath('foundation/nested/.sdlc/state.json'), false);
   } finally { cleanup(T); }
 });
+
+// ---- shape 8: the product level moves to foundation/ (E75) ----------------------------------------
+
+const DISCOVERY_SET = ['market-research.md', 'competitor-analysis.md', 'current-state.md', 'feasibility.md', 'requirements.md', 'roadmap.md'];
+const LEGACY = 'epics/EP-discovery';
+
+// A shape-7 product level in its old spelling: the six files, an approved review with its approval
+// bound to their fingerprint, a comment round, a merged review PR and a review summary.
+async function legacyProductLevel({ bridge = false, currentStep = 'discovery-done', review = 'done', extra = {} } = {}) {
+  const { artifactHash } = await import('./epic-state.mjs');
+  const files = {};
+  for (const f of DISCOVERY_SET) files[`${LEGACY}/${f}`] = `---\nid: EP-discovery\nartifact: ${f.replace('.md', '')}\nstatus: approved\nowner: al\n---\n# ${f}\n`;
+  files[`${LEGACY}/reviews/discovery--2026-01-01--comments.md`] = '# comments\n';
+  files[`${LEGACY}/.sdlc/state.json`] = JSON.stringify({
+    schemaVersion: 7, epicId: 'EP-discovery', createdAt: '2026-01-01', kind: 'discovery', profile: 'discovery', currentStep,
+    steps: [
+      { id: 'discovery', type: 'author', artifact: 'discovery/', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: 'done', risk_tags: [] },
+      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: review, risk_tags: [] },
+    ],
+  }, null, 2) + '\n';
+  files[`${LEGACY}/.sdlc/comments.json`] = JSON.stringify([{ artifact: 'discovery/', step: 'discovery-review', commenter: 'bo', role: 'reviewer', round: 1, count: 1, date: '2026-01-01' }], null, 2) + '\n';
+  files[`${LEGACY}/.sdlc/hub-prs.json`] = JSON.stringify([{ step: 'discovery-review', artifact: 'discovery/', platform: 'github', number: 4, branch: 'review/EP-discovery/discovery' }], null, 2) + '\n';
+  const T = project({ bridge, files: { ...files, ...extra } });
+  const hash = artifactHash(path.join(T, LEGACY), 'discovery/');
+  write(path.join(T, LEGACY, '.sdlc/approvals.json'), JSON.stringify([
+    { step: 'discovery-review', artifact: 'discovery/', status: 'approved', approver: 'al', role: 'owner', artifactHash: hash },
+    { step: 'discovery-review', artifact: 'discovery/', status: 'approved', approver: 'bo', role: 'reviewer', artifactHash: hash },
+  ], null, 2) + '\n');
+  return { T, hash };
+}
+
+test('migrate 7 -> 8: the preview names every file the move touches, and none at its old path', async () => {
+  const { T } = await legacyProductLevel();
+  try {
+    const plan = planMigration(T);
+    assert.equal(plan.product.action, 'move');
+    assert.equal(plan.product.to, 'foundation');
+    const moved = plan.product.moves.map((m) => m.to);
+    for (const f of [...DISCOVERY_SET, 'reviews/discovery--2026-01-01--comments.md', '.sdlc/state.json', '.sdlc/approvals.json']) {
+      assert.ok(moved.includes(`foundation/${f}`), `the preview does not name foundation/${f}`);
+    }
+    assert.deepEqual(plan.product.rewrites, ['foundation/.sdlc/state.json', 'foundation/.sdlc/approvals.json', 'foundation/.sdlc/comments.json', 'foundation/.sdlc/hub-prs.json']);
+    assert.equal(plan.rows.some((r) => r.file.startsWith(path.join('epics', 'EP-discovery'))), false,
+      'a file that is about to move is not also a row at a path the apply will not leave');
+    const j = JSON.parse(await grabOut(() => runMigrate(T, { json: true })));
+    assert.equal(j.product.action, 'move');
+    assert.ok(j.changed.includes('foundation/.sdlc/state.json'));
+    assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the preview wrote nothing');
+  } finally { cleanup(T); }
+});
+
+test('migrate 7 -> 8 --apply: the product level becomes the Foundation, with every file and approval kept', async () => {
+  const { artifactHash, loadLedger, nextAction, epicRoot } = await import('./epic-state.mjs');
+  const { T, hash } = await legacyProductLevel();
+  const originals = Object.fromEntries(DISCOVERY_SET.map((f) => [f, fs.readFileSync(path.join(T, LEGACY, f), 'utf8')]));
+  const originalState = fs.readFileSync(path.join(T, LEGACY, '.sdlc/state.json'), 'utf8');
+  try {
+    await grabOut(() => runMigrate(T, { apply: true }));
+    assert.equal(fs.existsSync(path.join(T, LEGACY)), false, 'the old spelling is gone — not kept beside it');
+    assert.equal(fs.readFileSync(path.join(T, `${LEGACY}.yad-orig/.sdlc/state.json`), 'utf8'), originalState, 'a whole copy is kept');
+    assert.match(fs.readFileSync(path.join(T, '.gitignore'), 'utf8'), /\*\.yad-orig/, 'and it stays out of git');
+
+    const F = path.join(T, 'foundation');
+    for (const f of DISCOVERY_SET) assert.equal(fs.readFileSync(path.join(F, f), 'utf8'), originals[f], `${f} changed`);
+    assert.ok(fs.existsSync(path.join(F, 'reviews/discovery--2026-01-01--comments.md')));
+
+    const st = read(path.join(F, '.sdlc/state.json'));
+    assert.equal(st.schemaVersion, ENGINE_SHAPE);
+    assert.deepEqual([st.epicId, st.kind, st.profile, st.currentStep], ['EP-foundation', 'foundation', 'foundation', 'foundation-done']);
+    assert.deepEqual(st.steps.map((s) => [s.id, s.artifact, s.status]), [['foundation', 'discovery/', 'done'], ['foundation-review', 'discovery/', 'done']]);
+    assert.deepEqual(Object.keys(st).slice(0, 6), ['schemaVersion', 'epicId', 'createdAt', 'kind', 'profile', 'currentStep'], 'key order kept');
+
+    // THE POINT: the gate keeps an approval only when its step matches and its hash is live.
+    const approvals = read(path.join(F, '.sdlc/approvals.json'));
+    assert.deepEqual([...new Set(approvals.map((a) => a.step))], ['foundation-review']);
+    assert.equal(artifactHash(F, 'discovery/'), hash, 'the fingerprint is computed over the same names and bytes');
+    assert.ok(approvals.every((a) => a.artifactHash === hash), 'so no approval went stale');
+    assert.equal(read(path.join(F, '.sdlc/comments.json'))[0].step, 'foundation-review');
+    const pr = read(path.join(F, '.sdlc/hub-prs.json'))[0];
+    assert.equal(pr.step, 'foundation-review');
+    assert.equal(pr.branch, 'review/EP-discovery/discovery', 'the branch it really merged from is history, not relabelled');
+
+    const a = nextAction(loadLedger(epicRoot(T, 'EP-foundation')), { epic: 'EP-foundation' });
+    assert.equal(a.kind, 'foundation-done');
+
+    const { collectDoctor } = await import('./doctor.mjs');
+    const findings = collectDoctor(T).checks.filter((x) => x.status !== 'ok').map((x) => x.id);
+    for (const id of ['step:artifact', 'foundation:legacy', 'foundation:two', 'step:off-route', 'profile:disagree']) {
+      assert.equal(findings.includes(id), false, `a converted Foundation is reported as ${id}`);
+    }
+
+    const again = planMigration(T);
+    assert.equal(again.product, null, 'safe to run twice — there is nothing left to move');
+    assert.equal(again.rows.filter((r) => r.file.startsWith('foundation')).every((r) => !r.changes), true);
+  } finally { cleanup(T); }
+});
+
+test('migrate 7 -> 8 refuses, and leaves every file where it is, when the move is not safe', async () => {
+  const cases = [
+    ['a verified ledger', { bridge: true }, 'ci-owned', /CI owns this ledger/],
+    ['an open review', { currentStep: 'discovery-review', review: 'in_review' }, 'refused', /still open on branch review\/EP-discovery\/discovery/],
+    ['two product levels', { extra: { 'foundation/.sdlc/state.json': '{}\n' } }, 'refused', /two product levels/],
+    ['a file in the way', { extra: { 'foundation/roadmap.md': '# mine\n' } }, 'refused', /foundation\/ already has roadmap\.md/],
+    ['a backup in the way', { extra: { 'epics/EP-discovery.yad-orig/x.md': 'x\n' } }, 'refused', /from an earlier run is in the way/],
+    ['an unreadable ledger', { extra: { 'epics/EP-discovery/.sdlc/comments.json': 'not json' } }, 'unreadable', /comments\.json does not parse/],
+  ];
+  for (const [name, opts, action, detail] of cases) {
+    const { T } = await legacyProductLevel(opts);
+    try {
+      const p = planMigration(T).product;
+      assert.equal(p.action, action, name);
+      assert.match(p.detail, detail, name);
+      assert.deepEqual(p.moves, [], `${name}: a refusal lists nothing to move`);
+      const withoutShape = (s) => { const { schemaVersion: _v, ...rest } = JSON.parse(s); return rest; };
+      const before = fs.readFileSync(path.join(T, LEGACY, '.sdlc/state.json'), 'utf8');
+      const code = process.exitCode;
+      await grabOut(() => runMigrate(T, { apply: true }));
+      assert.equal(process.exitCode === 1, action === 'unreadable', `${name}: only an unreadable ledger fails the run`);
+      process.exitCode = code;
+      const after = fs.readFileSync(path.join(T, LEGACY, '.sdlc/state.json'), 'utf8');
+      // The move is refused, but the file is still the project's and is still stamped with the engine's
+      // shape like every other file on a local ledger. What must NOT change is anything else in it.
+      assert.deepEqual(withoutShape(after), withoutShape(before), `${name}: the old ledger was relabelled`);
+      if (action === 'ci-owned') assert.equal(after, before, `${name}: CI owns it, so not even the shape moves`);
+      assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc/approvals.json')), false, `${name}: something was moved`);
+    } finally { cleanup(T); }
+  }
+});
+
+test('migrate 7 -> 8: the relabel keeps key order and adds a missing profile where the stamper would', async () => {
+  const { convertDiscoveryState } = await import('./migrate.mjs');
+  const out = convertDiscoveryState({ epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery', steps: [{ id: 'discovery' }, { id: 'odd' }, 'x'] });
+  assert.deepEqual(Object.keys(out), ['epicId', 'kind', 'profile', 'currentStep', 'steps']);
+  assert.deepEqual(out.steps, [{ id: 'foundation' }, { id: 'odd' }, 'x'], 'an id it does not know, or a non-object, is left alone');
+  assert.equal(convertDiscoveryState({ kind: 'discovery', currentStep: 'toString', steps: [] }).currentStep, 'toString',
+    'a prototype key is not a rename');
+});
+
+// Capture what a command prints. `yad migrate` writes through console.log (cli/lib.mjs), `--json` too.
+async function grabOut(fn) {
+  const orig = console.log;
+  const out = [];
+  console.log = (...a) => out.push(a.map(String).join(' '));
+  try { await fn(); } finally { console.log = orig; }
+  return out.join('\n');
+}

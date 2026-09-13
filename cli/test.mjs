@@ -12695,9 +12695,9 @@ test('hook: the Foundation ledger is protected under its fixed id, and its base 
 });
 
 test('doctor: a verified Product with a Foundation is warned when its wired checks predate foundation/ (E75)', async () => {
-  const { foundationGuardChecks, collectDoctor } = await import('./doctor.mjs');
+  const { foundationChecks, collectDoctor } = await import('./doctor.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-guard-'));
-  const run = () => { const checks = []; foundationGuardChecks(checks, T); return checks; };
+  const run = () => { const checks = []; foundationChecks(checks, T); return checks; };
   const tpl = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   try {
     fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -12807,4 +12807,38 @@ test('yad epic new refuses both product-level ids, and sends the user to yad fou
       assert.equal(fs.existsSync(path.join(T, 'foundation')), false, `${slug}: nothing written into foundation/`);
     } finally { cleanTmp(T); }
   }
+});
+
+test('doctor: a product with the wrong number of product levels is told so (E75)', async () => {
+  const { foundationChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-count-'));
+  const run = () => { const checks = []; foundationChecks(checks, T); return checks; };
+  const ledger = (rel, kind) => {
+    fs.mkdirSync(path.join(T, rel, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, rel, '.sdlc/state.json'), JSON.stringify({ kind, steps: [] }));
+  };
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    assert.deepEqual(run(), [], 'no product level at all is a normal project');
+
+    ledger('epics/EP-discovery', 'discovery');
+    let [c] = run();
+    assert.equal(c.id, 'foundation:legacy');
+    assert.equal(c.status, 'warn', 'a local ledger can convert, so it is told how');
+    assert.match(c.hint, /yad migrate --apply/);
+
+    // On a verified ledger nothing can be run, so a warning would be one nobody can ever clear.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    [c] = run();
+    assert.equal(c.id, 'foundation:legacy');
+    assert.equal(c.status, 'ok');
+
+    ledger('foundation', 'foundation');
+    assert.equal(run().find((x) => x.id === 'foundation:two')?.status, 'fail');
+    assert.equal(run().some((x) => x.id === 'foundation:legacy'), false, 'one finding for one fault');
+
+    fs.mkdirSync(path.join(T, 'epics/EP-foundation'), { recursive: true });
+    assert.equal(run().find((x) => x.id === 'foundation:stray')?.status, 'fail');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

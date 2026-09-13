@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "epicId": "EP-checkout"
 }
 ```

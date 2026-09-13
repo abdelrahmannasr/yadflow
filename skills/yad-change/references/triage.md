@@ -34,7 +34,7 @@ stories+test-cases:
 
 ```json
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "epicId": "EP-<slug>", "createdAt": "<today>", "type": "<the same value as epic.md kind/type>",
   "profile": "classic",
   "currentStep": "stories",

@@ -307,6 +307,14 @@ export function foundationHash(dir, sections = FOUNDATION_SECTIONS) {
 export const PRODUCT_KINDS = ['foundation', 'discovery'];
 export const PRODUCT_EPICS = [FOUNDATION_EPIC, DISCOVERY_EPIC];
 export const isProductLevel = (state) => PRODUCT_KINDS.includes(state?.kind);
+
+// Does a step's recorded artifact agree with its catalogue row? The same artifact always does. One
+// other answer is right, and only for the Foundation's two steps: `discovery/`. A Foundation that
+// `yad migrate` converted from the old spelling keeps binding to the six files it was approved
+// against, so its fingerprint — and every approval on it — survives the move (shape 8). Reporting that
+// as "bound to the wrong file" would be false, and it would fire on every converted project.
+export const artifactAgrees = (def, artifact) => artifactBase(artifact) === artifactBase(def.artifact)
+  || (def.level === 'product' && artifactBase(def.artifact) === 'foundation' && artifactBase(artifact) === 'discovery');
 // The terminal sentinel of each spelling — also the `yad next` action kind that says "finished".
 export const PRODUCT_DONE = PRODUCT_KINDS.map((k) => `${k}-done`);
 
