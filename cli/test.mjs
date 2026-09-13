@@ -1820,6 +1820,31 @@ const repoBS = (currentStep, done = [], extra = {}) => ({
   })),
 });
 
+test('a halted Build lane reports itself as blocked, and only while it carries the record that says so', () => {
+  // `yad-run` marks a lane `blocked` when a check fails, a diff overruns its declared files, or it
+  // touches the contract surface. That is the NEW meaning of the word, written by a skill into a file
+  // the engine deliberately does not migrate — so the record is the only thing keeping it legible.
+  const halted = repoBS('implement', ['spec', 'tasks'], {
+    implement: { status: 'blocked' },
+  });
+  halted.steps.find((s) => s.id === 'implement').record = { reason: 'scope overrun: cli/gate.mjs', by: '@al', date: '2026-08-01' };
+  const stuck = buildNextForRepo(halted);
+  assert.equal(stuck.step, 'implement');
+  assert.equal(stuck.status, 'blocked', 'a halted lane says so');
+  assert.equal(stuck.shipped, false, 'and is certainly not shipped');
+
+  // A lane halted by an OLDER yad-run carries no record, so it reads as `todo`. Nothing advances past
+  // it either way — which is the whole reason not migrating this file is affordable — but the word is
+  // lost until the next run rewrites it.
+  const legacy = repoBS('implement', ['spec', 'tasks'], { implement: { status: 'blocked' } });
+  assert.equal(buildNextForRepo(legacy).status, 'todo');
+  assert.equal(buildNextForRepo(legacy).step, 'implement', 'and it is still the step the lane is on');
+
+  // A word this release cannot name is reported as itself rather than renamed to something it is not.
+  const odd = repoBS('checks', ['spec', 'tasks', 'implement'], { checks: { status: 'quarantined' } });
+  assert.equal(buildNextForRepo(odd).status, 'quarantined');
+});
+
 test('buildNextForRepo: spec done → next is implement (yad-implement); spec+tasks collapse to one yad-spec', () => {
   const fresh = buildNextForRepo(repoBS('spec'));
   assert.equal(fresh.skill, 'yad-spec');
@@ -2306,6 +2331,35 @@ test('runNext: no-epics non-brownfield omits the backfill hint; bad id / missing
 // Every route must emit ONE parseable document with no ANSI, and keep the prose path's exit code.
 const nextJSON = async (T, opts = {}) => JSON.parse(await grab(() => runNext(T, { ...opts, json: true })));
 const { VERSION: NEXT_JSON_VERSION } = await import('./manifest.mjs');
+
+test('runNext on a blocked step names the blocker instead of a skill, in prose and in --json', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-next-blocked-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  const withRecord = chain({ currentStep: 'architecture', architecture: 'blocked' });
+  withRecord.steps.find((s) => s.id === 'architecture').record = { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' };
+  seedEpic(T, 'EP-x', withRecord);
+
+  const s = await grab(() => runNext(T, { epic: 'EP-x' }));
+  assert.match(s, /waiting on the payments vendor/, 'the reason is what a person needs to read');
+  assert.match(s, /waiting on @al since 2026-08-01/, 'and the line names who, from the record');
+  assert.doesNotMatch(s, /invoke .*yad-architecture/, 'it must not tell anyone to author the artifact');
+
+  const j = await nextJSON(T, { epic: 'EP-x' });
+  assert.equal(j.actions[0].kind, 'blocked');
+  assert.equal(j.actions[0].step, 'architecture');
+  assert.equal(j.actions[0].skill, undefined, 'a blocked step has no skill to invoke');
+  assert.deepEqual(j.actions[0].record, { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' });
+
+  // The same step with a reason but nobody named: the fallback line, and still no skill.
+  const anon = chain({ currentStep: 'architecture', architecture: 'blocked' });
+  anon.steps.find((x) => x.id === 'architecture').record = { reason: 'the vendor contract is unsigned' };
+  seedEpic(T, 'EP-y', anon);
+  const s2 = await grab(() => runNext(T, { epic: 'EP-y' }));
+  assert.match(s2, /the vendor contract is unsigned/);
+  assert.match(s2, /waiting on something outside this workflow/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
 
 test('runNext --json: one epic emits the action object, with no ANSI to parse around', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nextjson1-'));
@@ -4052,6 +4106,13 @@ test('gate status: a waived step says where its approvals live, and an unjustifi
   const forged = await statusLine('architecture-review');
   assert.ok(!/skipped/.test(forged), `an unjustified skip is not a waiver: ${forged}`);
   assert.match(forged, /count \(advisory\): 3 approvers/);
+
+  // A status this release cannot name is printed as itself and MARKED, never renamed to something it
+  // is not — the line is the one view people read to see where a gate stands, and quietly calling an
+  // unknown word `todo` would hide the finding `yad doctor` reports as `step:unknown-status` (E38).
+  setStep({ skipped: false, status: 'quarantined' });
+  const odd = await statusLine('architecture-review');
+  assert.match(odd, /quarantined \(unknown\)/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4947,7 +5008,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 // issue #163. Sorting is only a fix if the order is TOTAL: `Array#sort` is stable, so records that tie
@@ -5182,6 +5243,61 @@ test('stateInvariants: flags YAD-STATE-005 only for an author step behind a DONE
   assert.deepEqual(stateInvariants(null), [], 'a missing chain is loadLedger\'s problem, not ours');
 });
 
+test('stateInvariants: only a gate that COMPLETED here implies its artifact was written', () => {
+  // The pairs `skipStep` and the threading seed actually write: both halves marked together. Neither
+  // is a violation, and neither was before — but they used to pass this check by being spelled `done`.
+  assert.deepEqual(stateInvariants(chainWithAuthor('skipped', 'skipped')), []);
+  assert.deepEqual(stateInvariants(chainWithAuthor('satisfied', 'satisfied')), []);
+
+  // THE ONE THAT MATTERS, and it is why the gate side asks `=== 'done'` rather than `isPassed`.
+  // `deferred` (E37) is a PER-STEP state with no pairing rule, so a deferred gate really can sit above
+  // an un-started author step. Read that as a violation and `repairState` stamps the author `done` —
+  // an upgrade claiming an artifact nobody wrote, on a chain that was never damaged.
+  const deferredGate = chainWithAuthor('todo', 'deferred');
+  assert.deepEqual(stateInvariants(deferredGate), []);
+  assert.deepEqual(repairState(deferredGate), []);
+  assert.equal(deferredGate.steps[0].status, 'todo', 'the author step was not silently closed');
+
+  // The real violation is unchanged: a gate that genuinely completed, above an author step that did not.
+  assert.equal(stateInvariants(chainWithAuthor('in_progress', 'done'))[0]?.code, 'YAD-STATE-005');
+  // …and a skipped author behind a gate that completed here IS still one — the gate says an artifact
+  // was written, and a skip says none was.
+  assert.equal(stateInvariants(chainWithAuthor('skipped', 'done')).length, 0,
+    'a skipped author is passed, so nothing is stranded and nothing needs repairing');
+});
+
+test('a hand-edited skip claim is not walked past, and yad doctor still names it', async () => {
+  // The forged flag from the `claimsSkipped` test, now against the chain readers. `skipped: true` on a
+  // step that is NOT finished is a flag nothing honours: `stepStatus` reads the step as `todo`, so the
+  // step-over scans leave it exactly where it is and the chain waits on it, as it should.
+  const state = {
+    epicId: 'EP-x', currentStep: 'architecture-review',
+    steps: [
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done' },
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review' },
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'todo', skipped: true },
+      { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'todo', skipped: true },
+      { id: 'stories', type: 'author', artifact: 'stories/', status: 'todo' },
+    ],
+  };
+  advanceState(state, byId(state, 'architecture-review'));
+  assert.equal(state.currentStep, 'ui-design', 'the forged pair is NOT stepped over');
+  assert.equal(byId(state, 'stories').status, 'todo', 'and nothing downstream was opened');
+
+  // …and the finding that makes it visible reads the CLAIM, so a half-stamped one is still reported.
+  const { skipChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e38-forged-'));
+  try {
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'),
+      JSON.stringify({ ...state, profile: 'classic', steps: state.steps.map((x) => (x.id === 'stories' ? { ...x, skipped: true } : x)) }, null, 2));
+    const checks = [];
+    skipChecks(checks, T);
+    assert.equal(checks[0]?.id, 'skip:not-optional');
+    assert.match(checks[0].message, /EP-x\/stories/, 'a claim the route forbids is named even un-stamped');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('repairState: closes stranded author steps, returns their ids, and is idempotent', () => {
   const state = chainWithAuthor('in_progress', 'done');
   assert.deepEqual(repairState(state), ['stories']);
@@ -5276,17 +5392,285 @@ test('which steps are optional comes from the epic\'s own route, not from the en
   assert.deepEqual(optionalStepsFor({ profile: 'short', steps: [{ id: 'epic' }, { id: 'ui-design' }, { id: 'ui-design-review' }] }, ROUTES), ['stories']);
 });
 
-test('skipStep: at the ui-design step marks both ui steps N/A (done) and advances currentStep to stories', () => {
+// ---------------------------------------------------------------------------------------------
+// E38 — the step-state model. Every state, pinned.
+//
+// NOTHING WRITES `deferred` OR `blocked` YET (their verbs are E37 and E36), and a rule no data
+// exercises is a rule nobody has tested. So these construct a chain carrying every row of
+// STEP_STATES plus both legacy encodings, and pin each reader against it by hand.
+// ---------------------------------------------------------------------------------------------
+const { STEP_STATES, stepStatus, stepStateDef, claimsSkipped, claimsInherited, isStepRecord, RECORDED_STEP_STATES, stampStepStates, seedState } = await import('./epic-state.mjs');
+
+const REC = { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' };
+
+test('stepStatus: every state in the model, and the three legacy encodings it translates', () => {
+  // Each of the eight rows reads back as itself when the file simply says so.
+  for (const row of STEP_STATES) {
+    const step = { id: 'x', status: row.id, ...(row.record ? { record: REC } : {}) };
+    assert.equal(stepStatus(step), row.id, `${row.id} reads back as itself`);
+  }
+
+  // The three legacy encodings. Each is a FLAG BESIDE `status: 'done'` — which is how both writers
+  // have always written them — or the old spelling of "not started".
+  assert.equal(stepStatus({ status: 'done', inherited: true }), 'satisfied');
+  assert.equal(stepStatus({ status: 'done', skipped: true }), 'skipped');
+  assert.equal(stepStatus({ status: 'blocked' }), 'todo', 'a `blocked` with no record is the pre-shape-7 spelling of `todo`');
+
+  // THE RECORD IS THE DISAMBIGUATOR. One word, two meanings, told apart by whether anything is
+  // recorded on it — and by nothing else, so no reader needs a schema version in hand.
+  assert.equal(stepStatus({ status: 'blocked', record: REC }), 'blocked');
+  assert.equal(stepStatus({ status: 'blocked', record: {} }), 'todo', 'an empty object is not a record');
+  assert.equal(stepStatus({ status: 'blocked', record: { reason: '   ' } }), 'todo', 'nor is a blank reason');
+
+  // A FLAG WITHOUT THE `done` BESIDE IT IS A HAND EDIT, and must not finish a step. This is the one
+  // a first cut of the model got wrong: read the flag alone and `skipped: true`, typed into a file by
+  // somebody with no route permission to skip anything, would unblock every step behind it.
+  assert.equal(stepStatus({ status: 'blocked', skipped: true }), 'todo');
+  assert.equal(stepStatus({ status: 'in_review', inherited: true }), 'in_review');
+
+  // Unknown reads as null — the file wins, and doctor reports it.
+  assert.equal(stepStatus({ status: 'quantum' }), null);
+  assert.equal(stepStatus({}), null);
+  assert.equal(stepStatus(null), null);
+});
+
+test('isPassed / isAuthored: the two questions the old `status === \'done\'` was answering at once', () => {
+  const expect = {
+    todo: [false, false],
+    in_progress: [false, false],
+    in_review: [false, false],
+    blocked: [false, false],
+    done: [true, true],
+    skipped: [true, false],
+    deferred: [true, false],
+    satisfied: [true, false],
+  };
+  // The table drives the test, so a row added to STEP_STATES with no answer here fails rather than
+  // passing unexamined.
+  assert.deepEqual(STEP_STATES.map((r) => r.id).sort(), Object.keys(expect).sort(),
+    'every state in the model has a pinned answer here');
+  for (const row of STEP_STATES) {
+    const step = { id: 'x', status: row.id, ...(row.record ? { record: REC } : {}) };
+    assert.deepEqual([isPassed(step), isAuthored(step)], expect[row.id], `${row.id}`);
+    assert.deepEqual([row.passed, row.authored], expect[row.id], `${row.id} — and the table agrees`);
+  }
+  // Fail closed on a word this release cannot name: an unknown state never lets a chain past it.
+  assert.deepEqual([isPassed({ status: 'quantum' }), isAuthored({ status: 'quantum' })], [false, false]);
+  // Only `done` is authored, so only `done` has an artifact to audit or a stranded author step to repair.
+  assert.deepEqual(STEP_STATES.filter((r) => r.authored).map((r) => r.id), ['done']);
+});
+
+test('claimsSkipped / claimsInherited: what the FILE says, which is not what the chain concludes', () => {
+  // The forged flag from the test above: not skipped as far as the chain is concerned, and still a
+  // claim — which is what `gatePredicate`'s route guard and `yad doctor` both need to see to refuse it.
+  const forged = { id: 'stories-review', status: 'blocked', skipped: true };
+  assert.equal(stepStatus(forged), 'todo');
+  assert.equal(isPassed(forged), false);
+  assert.equal(claimsSkipped(forged), true);
+  // Both spellings, shape 7's and the legacy one.
+  assert.equal(claimsSkipped({ status: 'skipped' }), true);
+  assert.equal(claimsSkipped({ status: 'done', skipped: true }), true);
+  assert.equal(claimsSkipped({ status: 'done' }), false);
+  assert.equal(claimsInherited({ status: 'satisfied' }), true);
+  assert.equal(claimsInherited({ status: 'done', inherited: true }), true);
+  assert.equal(claimsInherited({ status: 'done' }), false);
+});
+
+test('isStepRecord: a record has to say why, and only `reason` is required', () => {
+  assert.equal(isStepRecord({ reason: 'no UI on this epic' }), true);
+  assert.equal(isStepRecord({ reason: 'x', by: null, date: null }), true, 'attribution is best-effort');
+  assert.equal(isStepRecord({ by: '@al', date: '2026-08-01' }), false, 'who and when without why is not a record');
+  assert.equal(isStepRecord({ reason: '' }), false);
+  assert.equal(isStepRecord(null), false);
+  assert.deepEqual(RECORDED_STEP_STATES, ['skipped', 'deferred', 'satisfied', 'blocked']);
+  assert.equal(stepStateDef('deferred').passed, true, 'a deferred step does not hold the chain — that is what deferring is');
+  assert.equal(stepStateDef('nope'), null);
+});
+
+test('the chain readers walk past every passed state and stop on a blocked one', () => {
+  const chain = (...steps) => ({ epicId: 'EP-x', currentStep: steps.find((s) => !s.status.match(/done|skipped|satisfied|deferred/))?.id || 'ready-for-build', steps });
+  const S = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id}.md`, status, ...extra });
+
+  // Every finish-without-authoring state lets the chain through, so `stories` is ready.
+  const mixed = chain(
+    S('epic', 'done'),
+    S('epic-review', 'satisfied', { record: { reason: 'reviewed in the parent', by: null, date: null, link: 'EP-parent' } }),
+    S('architecture', 'skipped', { record: { reason: 'no new surface', by: '@al', date: '2026-08-01' } }),
+    S('architecture-review', 'deferred', { record: { reason: 'the diagram lands next sprint', by: '@al', date: '2026-08-01' } }),
+    S('stories', 'in_progress'),
+  );
+  assert.deepEqual(preconditionsMet(mixed, 'stories'), { ok: true, blockedBy: null, reason: 'ready' });
+
+  // A BLOCKED step is the one recorded state that stops the chain, and it is named as the blocker.
+  const stuck = chain(
+    S('epic', 'done'),
+    S('epic-review', 'blocked', { record: REC }),
+    S('architecture', 'todo'),
+  );
+  assert.deepEqual(preconditionsMet(stuck, 'architecture'),
+    { ok: false, blockedBy: 'epic-review', reason: 'epic-review has not passed yet' });
+
+  // …and `yad next` refuses to name a skill for it, printing what the record says instead.
+  const act = nextAction({ state: stuck, hubPrs: [] }, { epic: 'EP-x' });
+  assert.equal(act.kind, 'blocked');
+  assert.equal(act.step, 'epic-review');
+  assert.equal(act.skill, undefined, 'a blocked step has no skill to invoke — the blocker is not in this tool');
+  assert.match(act.why, /waiting on the payments vendor/);
+
+  // A blocked step with no record at shape 7 reads as `todo` — so `yad next` names the step, not a
+  // blocker nobody described. That surprise is exactly what `yad doctor`'s `step:no-record` reports.
+  const vague = chain(S('epic', 'done'), S('epic-review', 'blocked'), S('architecture', 'todo'));
+  assert.equal(nextAction({ state: vague, hubPrs: [] }, { epic: 'EP-x' }).kind, 'review-open');
+
+  // An unknown state fails closed: the chain stops, and the step before it is what `yad next` names.
+  const weird = chain(S('epic', 'quantum'), S('epic-review', 'todo'));
+  assert.equal(preconditionsMet(weird, 'epic-review').blockedBy, 'epic');
+});
+
+test('a blocked step survives a gate write, and loses its record only when it passes', () => {
+  const chain = () => ({
+    epicId: 'EP-x', currentStep: 'epic-review',
+    steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'blocked', record: { ...REC } },
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'todo' },
+    ],
+  });
+
+  // `gate sync` reaches `markInReview` on the path where the gate did NOT pass. Writing `in_review`
+  // there would drop the record naming who we wait on and change nothing about the wait.
+  const held = chain();
+  markInReview(held, byId(held, 'epic-review'));
+  assert.equal(byId(held, 'epic-review').status, 'blocked', 'a review does not clear a blocker');
+  assert.deepEqual(byId(held, 'epic-review').record, REC, 'and the record naming the blocker survives');
+
+  // When the gate DOES pass, the step is no longer waiting on anybody — so the record goes with the
+  // state it belonged to, rather than leaving a `done` step still explaining who it waits for.
+  const freed = chain();
+  advanceState(freed, byId(freed, 'epic-review'));
+  assert.equal(byId(freed, 'epic-review').status, 'done');
+  assert.equal(byId(freed, 'epic-review').record, undefined);
+  assert.equal(freed.currentStep, 'architecture');
+
+  // A SKIP's record is the opposite case: it is the reason the step passed, so it has to survive.
+  const skipped = { epicId: 'EP-y', currentStep: 'ui-design-review', steps: [
+    { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'skipped', skipped: true, skipReason: 'no UI', record: { reason: 'no UI', by: null, date: null } },
+    { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'skipped', skipped: true, skipReason: 'no UI', record: { reason: 'no UI', by: null, date: null } },
+  ] };
+  advanceState(skipped, byId(skipped, 'ui-design-review'));
+  assert.deepEqual(byId(skipped, 'ui-design-review').record, { reason: 'no UI', by: null, date: null });
+});
+
+test('advanceState steps over a shape-7 skip that carries no legacy flag', () => {
+  const state = {
+    epicId: 'EP-x',
+    currentStep: 'architecture-review',
+    steps: [
+      { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'done' },
+      { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'in_review' },
+      // No `skipped: true` beside it — the shape-7 spelling on its own.
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'skipped', record: { reason: 'no UI', by: null, date: null } },
+      { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'skipped', record: { reason: 'no UI', by: null, date: null } },
+      { id: 'stories', type: 'author', artifact: 'stories', status: 'todo' },
+    ],
+  };
+  advanceState(state, byId(state, 'architecture-review'));
+  assert.equal(state.currentStep, 'stories', 'the skipped pair is stepped over on the new spelling too');
+  assert.equal(byId(state, 'stories').status, 'in_progress');
+});
+
+test('gatePredicate honours a skip and an inheritance in the shape-7 spelling as well as the legacy one', () => {
+  const run = (step, optional = ['ui-design']) => gatePredicate({ step, approvals: [], optional, merged: false, threadsResolved: false });
+
+  // `satisfied` with no `inherited` flag still short-circuits, and keeps the label the golden freezes.
+  const sat = run({ id: 'ui-design-review', status: 'satisfied', inheritedFrom: 'EP-parent' });
+  assert.equal(sat.passed, true);
+  assert.equal(sat.rule, 'inherited', 'the gate label is the frozen word, not the state name');
+  assert.equal(sat.have, null, 'nothing was counted here — which is not the same fact as zero approvals');
+
+  const skip = run({ id: 'ui-design-review', status: 'skipped', record: { reason: 'no UI' } });
+  assert.equal(skip.passed, true);
+  assert.equal(skip.rule, 'skipped');
+
+  // A skip on a step THIS epic's route does not mark optional falls through to the real rule, in
+  // either spelling — the route guard is what decides, never the claim.
+  const forged = run({ id: 'stories-review', status: 'skipped' }, ['ui-design']);
+  assert.equal(forged.passed, false);
+  assert.notEqual(forged.rule, 'skipped');
+
+  // `deferred` and `blocked` get NO short-circuit: neither one says the review happened, so the gate
+  // asks for its approvals exactly as it would on a step nobody had touched.
+  for (const status of ['deferred', 'blocked']) {
+    const p = run({ id: 'ui-design-review', status, record: REC });
+    assert.equal(p.passed, false, `${status} does not waive a gate`);
+    assert.ok(p.missing.length, `${status} still reports what is missing`);
+  }
+});
+
+test('stampStepStates: shape 7 translates what the file already said, and invents nothing', () => {
+  const legacy = {
+    epicId: 'EP-x',
+    currentStep: 'stories',
+    steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', inherited: true, inheritedFrom: 'EP-parent', boundHash: 'sha256:aa' },
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'done', skipped: true, skipReason: 'backend only', skippedBy: '@al', skippedAt: '2026-07-08' },
+      { id: 'stories', type: 'author', artifact: 'stories', status: 'in_progress' },
+      { id: 'stories-review', type: 'review+approve', artifact: 'stories', status: 'blocked' },
+    ],
+  };
+  const out = stampStepStates(legacy);
+  const step = (id) => out.steps.find((s) => s.id === id);
+
+  assert.equal(step('epic').status, 'satisfied');
+  assert.deepEqual(step('epic').record, { reason: 'carried by reference from EP-parent', by: null, date: null, link: 'EP-parent' });
+  assert.equal(step('epic').inherited, true, 'the legacy flag is KEPT — add before you remove');
+  assert.equal(step('epic').boundHash, 'sha256:aa', 'and boundHash stays its own field: it is drift evidence, not provenance');
+
+  assert.equal(step('ui-design').status, 'skipped');
+  assert.deepEqual(step('ui-design').record, { reason: 'backend only', by: '@al', date: '2026-07-08' },
+    'the record is assembled from what the skip already recorded — nothing is invented');
+  assert.equal(step('ui-design').skipReason, 'backend only', 'and the four legacy fields are kept');
+
+  assert.equal(step('stories').status, 'in_progress', 'an in-flight step is untouched');
+  assert.equal(step('stories-review').status, 'todo', 'the old spelling of "not started" is written out');
+  assert.equal(step('stories-review').record, undefined, 'and gains no record — `todo` has nothing to explain');
+
+  // Idempotent, and the SAME object back when there is nothing to move — `writeJSON` short-circuits
+  // on identical bytes, and a fresh object every time would defeat that on every read-only path.
+  const twice = stampStepStates(out);
+  assert.equal(twice, out, 'a second run is a no-op, by identity');
+  assert.equal(stampStepStates({ steps: [{ id: 'x', status: 'quantum' }] }).steps[0].status, 'quantum',
+    'a status this release cannot name is left exactly as it stands — the file wins');
+  // A record the team wrote themselves is never rewritten by an upgrade.
+  const mine = stampStepStates({ steps: [{ id: 'x', status: 'done', skipped: true, skipReason: 'a', record: { reason: 'the real reason' } }] });
+  assert.deepEqual(mine.steps[0].record, { reason: 'the real reason' });
+});
+
+test('seedState writes the model\'s word for "not started"', () => {
+  const seeded = seedState({ epic: 'EP-x', profile: 'classic', type: 'feature', today: '2026-08-01' });
+  assert.equal(seeded.steps[0].status, 'in_progress', 'the first step opens');
+  assert.deepEqual([...new Set(seeded.steps.slice(1).map((s) => s.status))], ['todo'],
+    'and every step behind it is `todo`, never the old `blocked`');
+  const stub = seedState({ epic: 'EP-y', profile: 'classic', type: 'feature', today: '2026-08-01', stub: true });
+  assert.deepEqual([...new Set(stub.steps.map((s) => s.status))], ['todo'], 'a stub anchor seeds a chain nobody is running');
+});
+
+test('skipStep: at the ui-design step marks both ui steps N/A (skipped) and advances currentStep to stories', () => {
   const state = uiChain('ui-design', { ui: 'in_progress' });
   skipStep(state, 'ui-design', { reason: 'backend-only epic', by: '@me', at: '2026-07-08' });
   const ui = byId(state, 'ui-design'), uir = byId(state, 'ui-design-review');
+  // Shape 7 (E38): the step's own state says what happened, and the four legacy fields stay beside
+  // it so a reader on either vocabulary sees the same step.
+  assert.equal(ui.status, 'skipped');
   assert.equal(ui.skipped, true);
-  assert.equal(ui.status, 'done');
   assert.equal(ui.skipReason, 'backend-only epic');
   assert.equal(ui.skippedBy, '@me');
   assert.equal(ui.skippedAt, '2026-07-08');
+  assert.deepEqual(ui.record, { reason: 'backend-only epic', by: '@me', date: '2026-07-08' });
   assert.equal(uir.skipped, true);
-  assert.equal(uir.status, 'done');
+  assert.equal(uir.status, 'skipped');
+  assert.ok(isPassed(ui) && isPassed(uir), 'a skipped step is passed — the chain continues past it');
+  assert.ok(!isAuthored(ui), 'and it is NOT authored — there is no artifact to audit');
   assert.equal(state.currentStep, 'stories', 'currentStep steps past the skipped pair');
   assert.equal(byId(state, 'stories').status, 'in_progress');
 });
@@ -5326,9 +5710,10 @@ test('unskipStep: restores the ui pair and re-points currentStep back to ui-desi
   assert.equal(state.currentStep, 'stories');
   unskipStep(state, 'ui-design');
   assert.equal(byId(state, 'ui-design').skipped, undefined, 'skip fields are stripped');
+  assert.equal(byId(state, 'ui-design').record, undefined, 'and so is the skip record');
   assert.equal(byId(state, 'ui-design').status, 'in_progress', 'ui-design is the active step again');
-  assert.equal(byId(state, 'ui-design-review').status, 'blocked');
-  assert.equal(byId(state, 'stories').status, 'blocked', 'the auto-opened downstream is pushed back behind ui-design');
+  assert.equal(byId(state, 'ui-design-review').status, 'todo');
+  assert.equal(byId(state, 'stories').status, 'todo', 'the auto-opened downstream is pushed back behind ui-design');
   assert.equal(state.currentStep, 'ui-design');
 });
 
@@ -5461,13 +5846,16 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
   const pr = { ok: true, state: 'OPEN', merged: false, headOid: 'abc', reviews: [], threads: [] };
 
   // The two cases below put the step at `in_review` so the difference shows in the CHAIN. `skipStep`
-  // never writes that combination — it always stamps `done` — so this is proof the route reaches the
-  // predicate, not a claim about what a real ledger looks like. The realistic shape is at the end.
+  // never writes that combination — it always stamps the step skipped — so this is proof the route
+  // reaches the predicate, not a claim about what a real ledger looks like. The realistic shape is at
+  // the end.
   const good = build('classic');
   try {
     await gateSync(good.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr });
     const state = JSON.parse(fs.readFileSync(path.join(good.ep, '.sdlc/state.json')));
-    assert.equal(state.steps.find((x) => x.id === 'ui-design-review').status, 'done');
+    // `skipped`, not `done`: the gate advanced it, and the shape-7 stamp in `writeState` then names
+    // HOW it finished — the step still carries `skipped: true`, so the model's word for it is `skipped`.
+    assert.equal(state.steps.find((x) => x.id === 'ui-design-review').status, 'skipped');
     assert.equal(state.currentStep, 'stories', 'the skipped gate did not advance the chain');
   } finally { fs.rmSync(good.T, { recursive: true, force: true }); }
 
@@ -5505,8 +5893,11 @@ test('gate sync honours a skip only when the epic\'s route allows it', async () 
     const out = await grab(() => gateSync(refused.T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr }));
     assert.match(out, /the rule no longer holds/);
     const st = JSON.parse(fs.readFileSync(path.join(refused.ep, '.sdlc/state.json')));
-    assert.equal(st.steps.find((x) => x.id === 'ui-design-review').status, 'done', 'the step was un-advanced');
-    assert.equal(st.currentStep, 'stories', 'the chain was rolled back');
+    // Still PASSED — nothing is un-advanced, which is the whole observable effect of failing closed
+    // on a live project. The word is `skipped` rather than `done` because the shape-7 stamp in
+    // `writeState` names how the step finished; `isPassed` is the same answer either way.
+    assert.equal(st.steps.find((x) => x.id === 'ui-design-review').status, 'skipped');
+    assert.equal(st.currentStep, 'stories', 'and the chain was not rolled back');
   } finally { fs.rmSync(refused.T, { recursive: true, force: true }); }
 });
 
@@ -5611,6 +6002,92 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor reports an unknown step state and a recorded one with nothing recorded, and corrects neither', async () => {
+  const { stepStateChecks, collectDoctor } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e38-doc-'));
+  const write = (epic, state) => {
+    fs.mkdirSync(path.join(T, `epics/${epic}/.sdlc`), { recursive: true });
+    const file = path.join(T, `epics/${epic}/.sdlc/state.json`);
+    fs.writeFileSync(file, JSON.stringify(state, null, 2));
+    return file;
+  };
+  try {
+    const file = write('EP-x', {
+      schemaVersion: 7, epicId: 'EP-x', currentStep: 'stories',
+      steps: [
+        // A word from a newer release. Reported, never rewritten — the file wins for this major.
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'quantum' },
+        // Recorded states with nothing recorded on them.
+        { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'skipped' },
+        { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'blocked' },
+        // …and the same states WITH a record, which must stay silent.
+        { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'deferred', record: { reason: 'next sprint', by: null, date: null } },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'in_progress' },
+      ],
+    });
+    const before = fs.readFileSync(file, 'utf8');
+
+    const checks = [];
+    stepStateChecks(checks, T);
+    assert.deepEqual(checks.map((x) => x.id).sort(), ['step:no-record', 'step:unknown-status']);
+    assert.deepEqual([...new Set(checks.map((x) => x.status))], ['warn'], 'both report, neither corrects');
+    const unknown = checks.find((x) => x.id === 'step:unknown-status');
+    assert.match(unknown.message, /EP-x\/epic: `quantum`/);
+    const noRec = checks.find((x) => x.id === 'step:no-record');
+    assert.match(noRec.message, /2 step\(s\)/);
+    assert.match(noRec.message, /EP-x\/architecture \(skipped\)/);
+    assert.match(noRec.message, /EP-x\/ui-design \(blocked\)/);
+    assert.doesNotMatch(noRec.message, /test-cases/, 'a state that DID record why must stay silent');
+    assert.equal(fs.readFileSync(file, 'utf8'), before, 'doctor rewrote the ledger');
+
+    // THE TWO NARROWINGS, and each is what keeps the check from reporting a healthy project.
+    //
+    // 1. The LEGACY encodings carry their own provenance and are not asked for a `record`. Without
+    //    this, every change-epic in every pre-shape-7 project — the frozen golden one included —
+    //    would be reported for a field it had no way to write.
+    write('EP-y', {
+      schemaVersion: 7, epicId: 'EP-y', currentStep: 'stories',
+      steps: [
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', inherited: true, inheritedFrom: 'EP-p', boundHash: 'sha256:a' },
+        { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'done', skipped: true, skipReason: 'no UI', skippedBy: null, skippedAt: null },
+      ],
+    });
+    // 2. A literal `blocked` below shape 7 is the OLD spelling of `todo` and has nothing to explain.
+    write('EP-z', {
+      schemaVersion: 6, epicId: 'EP-z', currentStep: 'epic',
+      steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'blocked' }],
+    });
+    const narrowed = [];
+    stepStateChecks(narrowed, T);
+    for (const c of narrowed) {
+      assert.doesNotMatch(c.message, /EP-y/, 'a legacy encoding carries its own provenance');
+      assert.doesNotMatch(c.message, /EP-z/, 'a pre-shape-7 `blocked` is the old spelling of `todo`');
+    }
+
+    // A project holding only healthy steps says nothing at all, which is the normal state.
+    const healthy = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e38-ok-'));
+    fs.mkdirSync(path.join(healthy, 'epics/EP-a/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(healthy, 'epics/EP-a/.sdlc/state.json'), JSON.stringify({
+      schemaVersion: 7, epicId: 'EP-a', currentStep: 'epic',
+      steps: [{ id: 'epic', type: 'author', artifact: 'epic.md', status: 'in_progress' },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'todo' }],
+    }));
+    const quiet = [];
+    stepStateChecks(quiet, healthy);
+    assert.deepEqual(quiet, []);
+    fs.rmSync(healthy, { recursive: true, force: true });
+
+    // …and it is WIRED, not merely exported, and sits inside the `shape` block — the renderer prints
+    // a header every time the section changes as it walks the array.
+    fs.writeFileSync(file, before);
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.0.0' }));
+    const wired = collectDoctor(T).checks.find((c) => c.id === 'step:unknown-status');
+    assert.ok(wired, 'stepStateChecks is exported but never called');
+    assert.equal(wired.section, 'shape');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('doctor: skip:not-optional stays silent on an epic profile:disagree already names', async () => {
   // One stale label, two findings. `profile:disagree`'s remedy — correct `profile` to the route the
   // chain shows — clears this one too, so reporting both names a single fault twice with two remedies,
@@ -5653,14 +6130,14 @@ test('isSkippableStep: an author step and its review gate, against the route it 
   assert.equal(isSkippableStep('ui-design'), false);
 });
 
-test('unskipStep: an UPSTREAM skip un-skips back to blocked and leaves currentStep put', () => {
+test('unskipStep: an UPSTREAM skip un-skips back to todo and leaves currentStep put', () => {
   const state = uiChain('architecture-review'); // ui-design not yet the active step
   skipStep(state, 'ui-design', { reason: 'no UI' });
   assert.equal(state.currentStep, 'architecture-review', 'skip upstream left currentStep put');
   unskipStep(state, 'ui-design');
   assert.equal(byId(state, 'ui-design').skipped, undefined);
-  assert.equal(byId(state, 'ui-design').status, 'blocked', 'prior step not done → author returns to blocked');
-  assert.equal(byId(state, 'ui-design-review').status, 'blocked');
+  assert.equal(byId(state, 'ui-design').status, 'todo', 'prior step not done → author returns to not-started');
+  assert.equal(byId(state, 'ui-design-review').status, 'todo');
   assert.equal(state.currentStep, 'architecture-review', 'un-skip upstream does not move currentStep');
 });
 
@@ -11386,7 +11863,7 @@ test('yad epic new --stub: an anchor for a feature that shipped before the Produ
     const st = JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-legacy-cart/.sdlc/state.json'), 'utf8'));
     assert.equal(st.kind, 'stub');
     assert.equal(st.currentStep, 'backfill-pending');
-    assert.deepEqual([...new Set(st.steps.map((s) => s.status))], ['blocked']);
+    assert.deepEqual([...new Set(st.steps.map((s) => s.status))], ['todo']);
     assert.equal(st.profile, 'classic');
     // It names the skill that WAKES the chain, not the one that would have authored its first step —
     // no step of an anchor is runnable, so pointing at `yad-epic` would be guidance nobody can follow.
@@ -11559,7 +12036,7 @@ test('nextAction names the bound skill for every kind of action it resolves', ()
   // The parallel test-cases track resolves through the same binding, not through the catalogue.
   const par = nextActionE6(chain([
     ['architecture', 'author', 'architecture.md', 'in_progress'],
-    ['test-cases', 'author', 'test-cases.md', 'todo'],
+    ['test-cases', 'author', 'test-cases.md', 'in_progress'],
   ], 'architecture'), { epic: 'EP-x', bindings });
   assert.equal(par.parallel.skill, 'tc1');
   assert.deepEqual(par.parallel.skills, ['tc1', 'tc2']);

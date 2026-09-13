@@ -186,6 +186,12 @@ function actionLine(a, { solo, bindings = null } = {}) {
       return `invoke the ${c.bold('yad-backfill')} skill ${c.dim('(document the code, then `yad-backfill promote` — or thread bugs now with yad-change)')}`;
     case 'backfill-done':
       return `invoke the ${c.bold('yad-change')} skill ${c.dim('(documented anchor — evolve it by threading a change/defect off it)')}`;
+    // A blocked step (E38) has no command, and that is the point: the thing in the way is not in this
+    // tool. What the line CAN do is name who or what was recorded as the blocker, and where to look.
+    case 'blocked':
+      return a.record?.by
+        ? c.dim(`blocked — waiting on ${a.record.by}${a.record.date ? ` since ${a.record.date}` : ''}`)
+        : c.dim('blocked — waiting on something outside this workflow');
     default:
       return c.dim('nothing to do');
   }

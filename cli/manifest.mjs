@@ -172,12 +172,19 @@ export const LEARNING_PRIMARY = 'deeptutor';
 //     is one of LIFECYCLE_PROFILES in epic-state.mjs, and for an existing epic it is DERIVED from the
 //     chain it already carries — never defaulted, because guessing a route would tell `yad epic new`
 //     and `yad doctor` a chain is on a route nobody chose.
+// 7 — every step's `status` is one of the step-state model's words (E38, STEP_STATES in
+//     epic-state.mjs). `blocked` stops meaning "not started" and starts meaning "cannot proceed, not
+//     our choice"; the old spelling of the first is rewritten to `todo`, a skip becomes
+//     `status: skipped` and an inherited step `status: satisfied`, each with a `record` saying why.
+//     THE FIRST SHAPE THAT CHANGES A VALUE IN PLACE rather than adding a key beside an old one — so
+//     it is the first that an older CLI cannot read correctly, which docs/migrations/shape-7.md says
+//     in as many words. Every legacy field is kept beside the new one (rule 3).
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {

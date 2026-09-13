@@ -18,7 +18,7 @@ no clone needed.
 | Command | What it does |
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
-| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first\|chore\|spike` (default `classic`) — `chore` and `spike` are the [short lanes](#the-short-lanes), and neither carries an architecture gate, so neither may move the contract surface. The `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `blocked`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script — its `next` key names the skill to run now, with a `nextSkills` array beside it when the step is bound to a chain (the same rule `yad next --json` follows: the array appears only when there is more than one). It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-discovery` and `yad-change` still write one, because the engine deliberately seeds neither. |
+| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first\|chore\|spike` (default `classic`) — `chore` and `spike` are the [short lanes](#the-short-lanes), and neither carries an architecture gate, so neither may move the contract surface. The `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `todo`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script — its `next` key names the skill to run now, with a `nextSkills` array beside it when the step is bound to a chain (the same rule `yad next --json` follows: the array appears only when there is more than one). It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-discovery` and `yad-change` still write one, because the engine deliberately seeds neither. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
 | `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `project` (you bound it), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the default still runs). `--json` for a script. `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
@@ -393,7 +393,7 @@ picks its own in `.sdlc/skills.json`:
 
 ```jsonc
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "steps": {
     "architecture": "our-architecture-skill",
     "stories": ["shape-the-stories", "yad-stories"]
@@ -488,9 +488,39 @@ single-epic view and in the several-epics roll-up. `yad thread` with no argument
 theme beside its id, and `yad thread <epic>` prints it on each node and carries it in `--json`. It lives only in `epic.md` — there is
 no copy in any ledger file, so no file shape changed and there is nothing to migrate.
 
+## Where a step stands: the step states
+
+`yad next`, `yad gate status` and `yad status` all report a step by one word. There are eight, and
+`epics/<epic>/.sdlc/state.json` holds the same word in each step's `status`.
+
+| State | Meaning | The chain continues past it |
+|---|---|---|
+| `todo` | Not started | no |
+| `in_progress` | Being worked on | no |
+| `in_review` | Its review gate is open | no |
+| `done` | Completed here | yes |
+| `skipped` | You chose not to do it — `yad skip` writes this | yes |
+| `deferred` | You will do it, later | yes |
+| `satisfied` | Done elsewhere — a change-epic inheriting its parent's artifact | yes |
+| `blocked` | Cannot proceed, and **not by your choice** | no |
+
+The bottom four carry a `record` saying why: `{ "reason": …, "by": …, "date": …, "link": … }`. Only
+`reason` is required. A skip with no reason is the thing the whole design refuses — a recorded skip is
+not a hole in the audit trail, it IS the audit trail — so `yad doctor` reports a recorded state with
+nothing recorded on it.
+
+**`blocked` used to mean something else.** Up to shape 6 it was the word for "waiting on an earlier
+step", which is now `todo`. The two are told apart by the record and by nothing else: `blocked` with no
+record is the old word and reads as `todo`; `blocked` with a record is a real blocker. `yad migrate`
+rewrites the old ones. See [shape 7](migrations/shape-7.md).
+
+Nothing writes `deferred` or `blocked` for you yet. Set the status and add a record by hand and every
+command understands it — `yad next` names what you are waiting on instead of telling you to author the
+artifact, and no gate is waived by it.
+
 ## File shape: `schemaVersion`
 
-Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **6**
+Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **7**
 in this release. It records what shape the file is in, so a later release can recognise a file written
 by an older one and upgrade it rather than guess.
 

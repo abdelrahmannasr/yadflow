@@ -197,7 +197,7 @@ Notes:
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1. The catalogue sets it;
   there is nothing to type.
-- `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
+- `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — at which point the epic is already `ready-for-build`, so Build
   runs alongside the tester. They never gate `ready-for-build` (see `references/state-schema.md`).
 - Commit the seed on this step's authoring branch. It reaches the Product's default branch through the

@@ -91,7 +91,7 @@ engine keys off. Use this exact shape (see `references/discovery-schema.md`):
 
 ```json
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "epicId": "EP-discovery",
   "kind": "discovery",
   "createdAt": "<YYYY-MM-DD>",

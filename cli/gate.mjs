@@ -14,6 +14,7 @@ import {
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
+  isPassed, stepStatus, claimsSkipped, claimsInherited,
 } from './epic-state.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
@@ -362,7 +363,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // review — surface re-locked, fresh PR, fresh approvals, merged — used to hit a blanket skip here
     // and write nothing but the PR pointer. The step then read `done` while its approvals were all
     // stale: work proceeded on an audit trail saying the re-review never happened (issue #156).
-    const alreadyDone = step.status === 'done';
+    const alreadyDone = isPassed(step);
     const domains = touchedDomains(epicDir, step);
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
@@ -519,7 +520,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       if (!ledger.state) continue;
       for (const p of ledger.hubPrs || []) {
         const step = findReviewStep(ledger.state, p.artifact);
-        if (!step || step.status === 'done') continue;
+        if (!step || isPassed(step)) continue;
         jobs.push({ epic: e, base: base(p.artifact), artifact: p.artifact, branch: p.branch, pr: p.number });
       }
     }
@@ -738,16 +739,26 @@ export async function gateStatus(root, { epic } = {}) {
     // `skipped: true` on a required step would read as waived in `gate status` while `gate sync` fell
     // through to the real rule — two read-only views of one ledger disagreeing, and the misleading one
     // is the view a human checks first.
-    const waived = s.inherited
+    // `claimsInherited` / `claimsSkipped`, not the canonical state: this note mirrors what
+    // `gatePredicate` honours, and the predicate reads the claim. Reading the canonical state here
+    // instead would make `gate status` and `gate sync` disagree about a half-stamped step — two
+    // read-only views of one ledger, and a human checks this one first.
+    const state = stepStatus(s);
+    const waived = claimsInherited(s)
       ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
-      : (s.skipped && isSkippableStep(s.id, optional)) ? '; skipped (N/A)' : '';
+      : (claimsSkipped(s) && isSkippableStep(s.id, optional)) ? '; skipped (N/A)' : '';
     // The shortfall, the same number `gatePredicate` returns as `short`. Printed here because this is the
     // surface people read when they want to know where a gate stands, and a count with no distance to it
     // is half the fact.
     const rule = gateRuleFor(s);
     const short = Math.max(0, rule.needed - people);
     const count = waived || `; count (advisory): ${gateRuleSum(rule)}${short && !solo ? ` — ${short} short` : ''}`;
-    log(`    ${s.status === 'done' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${s.status}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
+    // The CANONICAL state, not the raw field: a pre-shape-7 chain says `blocked` where it means
+    // `todo`, and printing the file's word in the one view people read to see where a gate stands
+    // would make the old vocabulary outlive the model. A status this release cannot name falls back
+    // to the raw string with a mark, because inventing a name for it would hide the finding
+    // `yad doctor` reports as `step:unknown-status`.
+    log(`    ${isPassed(s) ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
   }
 }
 

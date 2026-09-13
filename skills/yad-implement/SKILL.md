@@ -77,9 +77,14 @@ declared files are wrong is a spec bug, not an implementation decision.
 
 This stop is a **scope overrun** — a halt condition that pulls in a human regardless of any automation
 dial. When this step is driven by the orchestrator (`yad-run`, Phase 4), the stop must be legible to
-it: mark the `implement` step `status: blocked` in `build-state/<story>.json` and surface
-`scope_overrun: true` so the run records a `rejected` trust entry and halts (it never advances past a
-boundary breach). The same applies to the Step 5 contract-surface stop (`contract_touch: true`).
+it: mark the `implement` step `status: blocked` in `build-state/<story>.json` — **with a `record`**,
+`{ "reason": "scope overrun: <which file>", "by": "<login or null>", "date": "<YYYY-MM-DD>" }` — and
+surface `scope_overrun: true` so the run records a `rejected` trust entry and halts (it never advances
+past a boundary breach). The same applies to the Step 5 contract-surface stop (`contract_touch: true`).
+
+The record is what makes the halt legible. Since shape 7 (E38) a `blocked` step carrying nothing
+reads as `todo` — "not started" — because that is what the word meant in every file written before
+shape 7. The record is the only thing that separates a lane that stopped from a lane nobody began.
 
 ### Step 5 — Contract-surface check (local pre-flight for Step C)
 Determine whether the diff touches the **locked contract surface** (the API/event/data-model shapes in

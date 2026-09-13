@@ -6,7 +6,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, readJSONStrict } from './lib.mjs';
-import { epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES } from './epic-state.mjs';
+import {
+  epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, isPassed, stepStatus,
+} from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
 // The Shape gate lifecycle this command manages. Forward-only: a status is only ever moved UP this
@@ -29,8 +31,11 @@ export function desiredStatus(state, base) {
   const review = findReviewStep(state, artifactFromBase(base));
   const author = state.steps.find((s) => s.type === 'author' && artifactBase(s.artifact) === base);
   if (!review && !author) return null;
-  if (review?.status === 'done') return 'approved';
-  if (review?.status === 'in_review' || author?.status === 'done') return 'in-review';
+  // `isPassed`, not `status === 'done'`: a gate that PASSED is what makes an artifact approved,
+  // however it passed. An inherited gate was approved upstream in the thread, and a skipped one has
+  // no artifact for this command to find — both used to reach here spelled `done`.
+  if (isPassed(review)) return 'approved';
+  if (stepStatus(review) === 'in_review' || isPassed(author)) return 'in-review';
   return 'draft';
 }
 

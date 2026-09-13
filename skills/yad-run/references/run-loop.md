@@ -41,7 +41,12 @@ while step is a Build step (not engineer-review):
     eff = effective_dial(step, bs, cfg)               # see "Effective dial"
 
     if result is a HALT (failed / scope overrun / contract touch / ambiguous):
-        bs.step.status = "blocked"; persist; checkpoint; STOP and report the human action needed
+        # `blocked` needs its `record` (E38) — that is what separates a halted lane from one that has
+        # simply not started. `reason` is the halt cause you already have in hand.
+        bs.step.status = "blocked"
+        bs.step.record = { reason: "<check FAIL | scope overrun | contract touch | ambiguous>",
+                           by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>" }
+        persist; checkpoint; STOP and report the human action needed
     elif eff == "auto":
         bs.step.status = "done"; advance bs.currentStep to next; persist; checkpoint; continue  # Step B advance
     else:  # "human"

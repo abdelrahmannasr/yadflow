@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "epicId": "EP-checkout"
 }
 ```
@@ -196,7 +196,7 @@ command runs before the artifact exists; `yad gate open` closes it when the gate
 - **With analysis** — the `analysis-first` route, 12 steps:
   `analysis → analysis-review → epic → epic-review → architecture → architecture-review → ui-design →
   ui-design-review → stories → stories-review → test-cases → test-cases-review`. Seeded `currentStep`
-  is `analysis`, which starts `in_progress`; everything after it starts `blocked`.
+  is `analysis`, which starts `in_progress`; everything after it starts `todo`.
 - **Without analysis** — the `classic` route, 10 steps, and the default:
   `epic → epic-review → … → stories-review → test-cases → test-cases-review`. Seeded `currentStep` is
   `epic`, which starts `in_progress`.
@@ -229,6 +229,50 @@ it.
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
 owner + 1 reviewer, and an approver count of 1).
 
+### The step states (shape 7)
+
+`status` is one of eight words. Seven are the model (`docs/roadmap-idea-1.md`, Part 1); `in_review` is
+the eighth, and is `in_progress` on a step that is a review gate.
+
+| State | Meaning | Chain continues past it | Artifact written here | Must record |
+|-------|---------|-------------------------|-----------------------|-------------|
+| `todo` | Not started | no | no | — |
+| `in_progress` | Being worked on | no | no | — |
+| `in_review` | Its review gate is open | no | no | — |
+| `done` | Completed here | yes | **yes** | the artifact |
+| `skipped` | Consciously chose not to | yes | no | reason + who + when |
+| `deferred` | Will do it, later | yes | no | reason + who waits |
+| `satisfied` | Done elsewhere | yes | no | link + who + when |
+| `blocked` | Cannot proceed, **not our choice** | no | no | who or what we wait for |
+
+Two columns, not one, and the engine reads them through `isPassed` and `isAuthored`
+(`cli/epic-state.mjs`). "The chain may continue" and "there is an artifact here to audit" are different
+questions: a `skipped` step lets `stories` start and has nothing to hash, so a gate audit skips it
+while `preconditionsMet` walks straight past it.
+
+The four states at the bottom carry a `record`:
+
+```json
+{ "reason": "backend-only epic, no user-facing surface", "by": "@al", "date": "2026-07-08" }
+```
+
+`reason` is required; `by` and `date` are best-effort and may be `null` (attribution is a nicety on the
+audit trail, never a gate). A `satisfied` record also carries `link`, naming where the work happened.
+`yad doctor` reports a recorded state with no record as `step:no-record`.
+
+**`blocked` changed meaning in shape 7.** Before it, every writer used `blocked` for "waiting on an
+earlier step" — what is now `todo`. The two are told apart by the record, not by the shape number:
+
+> `blocked` with **no** record is the old word and reads as `todo`.
+> `blocked` **with** a record is a real blocker, and the record says on whom.
+
+No release before shape 7 ever wrote a record, so that is exact. The converse matters for whoever adds
+a verb that CLEARS a blocker: it must move `status` off `blocked`, never just delete the record, or the
+step silently becomes a `todo`.
+
+A status this release does not know is left alone — the file wins — and reported as
+`step:unknown-status`. It fails closed: the step counts as neither passed nor authored.
+
 ### `ui-design` is optional (skippable)
 
 Optional **on the routes that say so**, which today is `classic` and `analysis-first` — see the
@@ -242,19 +286,27 @@ or any point **up to authoring the `ui-design` step** — the skip is refused on
 opened (the UI work is committed by then) or once `stories` has started. `--undo` is allowed until the
 `stories` review opens.
 
-A skipped step gets four extra fields and is pre-marked `done`:
+A skipped step is `status: "skipped"` with a `record`, and keeps four legacy fields beside them:
 
 | Field | Values | Meaning |
 |-------|--------|---------|
-| `skipped` | `true` | This step is N/A for this epic; pre-marked `done`, short-circuited by `gatePredicate` (`rule: "skipped"`) so no review is required. |
+| `status` | `"skipped"` | The step's own state (shape 7). Short-circuited by `gatePredicate` (`rule: "skipped"`) so no review is required. |
+| `record` | `{ reason, by, date }` | Why it was skipped, who marked it and when. |
+| `skipped` | `true` | The pre-shape-7 spelling, still written and still read (rule 3, add before you remove). |
 | `skipReason` | string | Why it was skipped (e.g. "backend-only service, no UI"). |
 | `skippedBy` | login/name or `null` | Who marked it N/A (best-effort, from the roster/git identity). |
 | `skippedAt` | `YYYY-MM-DD` or `null` | When it was marked N/A. |
 
+A pre-shape-7 file spells the same step `status: "done"` with `skipped: true` beside it, and `yad
+migrate` translates it. Either spelling reads identically: `stepStatus` treats the flag as a legacy
+encoding **only when `status` is `done`** — a `skipped: true` on an unstarted step is a hand edit, and
+reading it as finished would let anyone unblock a chain by typing one word into a file.
+
 Both the `ui-design` **and** `ui-design-review` entries carry these fields. `advanceState` steps over
-any `skipped` step, so approving `architecture-review` on a UI-less epic lands directly on `stories`;
-`preconditionsMet` treats the pre-`done` steps as satisfied. `unskipStep` (via `yad skip … --undo`)
-strips the fields and restores the chain, refused once `stories-review` has opened. `ui-design` is the
+any skipped step, so approving `architecture-review` on a UI-less epic lands directly on `stories`;
+`preconditionsMet` treats it as passed (never as authored). `unskipStep` (via `yad skip … --undo`)
+strips the fields — the record included — and restores the chain to `todo`, refused once
+`stories-review` has opened. `ui-design` is the
 only step any route marks optional today; the engine reads that off the epic's own route
 (`optionalStepsFor`) rather than from a list of its own.
 
@@ -264,7 +316,7 @@ only step any route marks optional today; the engine reads that off the epic's o
 **parallel track that does not gate Build**. When `stories-review` passes, `advanceState`:
 - sets `currentStep` to the **`ready-for-build`** sentinel — so Build (`yad-spec` → … keyed off
   `currentStep == "ready-for-build"`) can start **immediately**, and
-- opens `test-cases` (`blocked` → `in_progress`) so the tester can work **in parallel**.
+- opens `test-cases` (`todo` → `in_progress`) so the tester can work **in parallel**.
 
 The `test-cases` track is therefore driven by its own step `status`, **not** by `currentStep`:
 `yad-test-cases` proceeds when `test-cases.status == "in_progress"`, and neither it nor the
@@ -306,7 +358,8 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `automation` | `human_approve` \| `machine_advance` | Dial 2 (advance) — who moves it forward. **The name the engine reads.** |
 | `advance` | `human` \| `auto` | Dial 2, shape-4 name, written beside `automation`: `human`=`human_approve`, `auto`=`machine_advance`. A review step is NEVER `auto`. |
 | `locked` | `true` \| `false` | Shape steps are `true`: may NOT be set to `advance: auto` in this version. |
-| `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `blocked` = upstream step not yet approved. |
+| `status` | one of the **step states** below | Where the step stands. |
+| `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4), and sets the step's reported approver count: `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). |
 
 ## `approvals.json`
@@ -419,7 +472,7 @@ steps live under each repo (mirrors the per-repo shape of `build-log.json`).
         { "id": "tasks",           "automation": "human_approve", "advance": "human",  "locked": false, "status": "done" },
         { "id": "implement",       "automation": "human_approve", "advance": "human",  "locked": false, "status": "done" },
         { "id": "checks",          "automation": "machine_advance", "advance": "auto","locked": false, "status": "in_progress" },
-        { "id": "engineer-review", "automation": "human_approve", "advance": "human",  "locked": true,  "status": "blocked" }
+        { "id": "engineer-review", "automation": "human_approve", "advance": "human",  "locked": true,  "status": "todo" }
       ]
     }
   }
@@ -433,7 +486,7 @@ Each `steps[]` entry:
 | `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Build step identity (the `back_steps` from `config.yaml` + the human merge gate). |
 | `automation` / `advance` | `human_approve`/`human` \| `machine_advance`/`auto` | Dial 2, written under both names (the OLD one is read). Defaults to `human_approve`; flipped to `machine_advance` only after the trust threshold is met (and never for `locked` steps). |
 | `locked` | `true` \| `false` | `engineer-review` is `true` — it never auto-advances (build plan §E). |
-| `status` | `blocked` \| `in_progress` \| `in_review` \| `done` | Lifecycle. `yad-run` advances `done` steps and `blocked`s on a halt. |
+| `status` | the same **step states** as the Shape chain | Lifecycle. This file is **not** migrated to shape 7 — the `yad-run` / `yad-implement` skills write it, not the engine, so a rewrite would be undone by their next write. `yad-run` advances `done` steps and marks a halted lane `blocked` **with a `record`** naming the halt cause (a failed check, a scope overrun, a contract touch): that record is what separates a halted lane from one nobody started, because a bare `blocked` is the pre-shape-7 spelling of `todo` and still reads that way here. A lane halted by an older `yad-run` carries no record and reads as `todo` until the next run rewrites it — nothing advances past it either way. |
 
 `currentStep` is the `id` the orchestrator is waiting on / about to run for that repo. The file is
 created when a story enters Build; all dials start `advance: human` (`automation: human_approve`) (the `config.yaml`
@@ -586,7 +639,7 @@ A stub is a normal genesis (type `feature` under both names, `thread == id`, no 
 `stub: backfill-pending` + `verified: false` and whose `state.json` uses a **sentinel**, mirroring
 `EP-discovery` / `discovery-done`:
 - top-level `kind: "stub"` and `currentStep: "backfill-pending"`;
-- the **same 10-step Shape chain** as a normal epic, every step `status: "blocked"` (so `validateState`
+- the **same 10-step Shape chain** as a normal epic, every step `status: "todo"` (so `validateState`
   passes and `promote` can "wake" the chain into normal authoring with no re-seed);
 - empty `approvals.json` / `comments.json`; **no** `contract-lock.json` (no surface locked yet).
 
@@ -624,7 +677,7 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
 ```json
 { "id": "architecture", "type": "author", "artifact": "architecture.md",
   "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true,
-  "status": "done", "inherited": true, "inheritedFrom": "EP-checkout",
+  "status": "satisfied", "inherited": true, "inheritedFrom": "EP-checkout",
   "boundHash": "sha256:…", "risk_tags": [] }
 ```
 

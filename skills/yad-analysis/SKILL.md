@@ -151,7 +151,7 @@ Notes:
   sets that; there is nothing to type.
 - `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
   (build plan §4): the contract review needs domain owners, not just owner + 1.
-- `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `blocked` and open
+- `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — the epic is already `ready-for-build` by then, so Build
   runs alongside the tester (see `../yad-epic/references/state-schema.md`).
 - Commit the seed on the `analysis/EP-<slug>` branch, and cut `review/EP-<slug>/analysis` from it so the

@@ -1175,14 +1175,14 @@ test('seedableProfiles is the FEATURE routes, read off the profiles', () => {
   assert.deepEqual(seedableProfiles([]), []);
 });
 
-test('seedState: the first step is open, everything after it is blocked', () => {
+test('seedState: the first step is open, everything after it is todo', () => {
   const s = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02' });
   assert.deepEqual(s.steps.map((x) => x.id), CLASSIC_10);
   assert.equal(s.currentStep, 'epic');
   // The engine seeds BEFORE anything is authored, which is the opposite of what a skill records. A
   // seed that copied the skill's `done` + `in_review` would claim an artifact exists and open a gate
   // on a file nobody has written.
-  assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(9).fill('blocked')]);
+  assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(9).fill('todo')]);
   assert.equal(s.epicId, 'EP-demo');
   assert.equal(s.createdAt, '2026-01-02');
   assert.equal(s.type, 'feature');
@@ -1232,7 +1232,7 @@ test('a short lane seeds, walks and hands off to Build without a step it does no
     assert.equal(s.profile, id, 'a lane records its own route at seed time — nothing is left to match');
     assert.deepEqual(s.steps.map((x) => x.id), chain);
     assert.equal(s.currentStep, chain[0]);
-    assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(chain.length - 1).fill('blocked')]);
+    assert.deepEqual(s.steps.map((x) => x.status), ['in_progress', ...Array(chain.length - 1).fill('todo')]);
     // No architecture step means no `contract` risk tag anywhere on the chain, which is what routes a
     // gate through the escalated rule. A short lane carrying one would ask for the domain owners of a
     // surface it has no lock on.
@@ -1257,13 +1257,16 @@ test('seedState refuses a route it must not seed', () => {
     /cannot seed the 'nonsense' lifecycle profile/);
 });
 
-// A STUB is a variation of the STATUSES, not of the chain: same `classic` route, every step blocked
+// A STUB is a variation of the STATUSES, not of the chain: same `classic` route, every step `todo`
 // behind the `backfill-pending` sentinel, plus the `kind: "stub"` lifecycle marker. It replaced a
 // hand-written template, so the shape it produces is asserted field by field rather than trusted.
-test('seedState --stub: the classic chain, every step blocked behind the sentinel', () => {
+//
+// `todo`, not `blocked`, since shape 7 (E38): nobody is RUNNING a stub's chain, and nothing outside
+// the team is standing in its way — which is what `blocked` now means.
+test('seedState --stub: the classic chain, every step todo behind the sentinel', () => {
   const s = seedState({ epic: 'EP-demo', profile: 'classic', type: 'feature', today: '2026-01-02', stub: true });
   assert.deepEqual(s.steps.map((x) => x.id), CLASSIC_10, 'the same chain `promote` wakes');
-  assert.deepEqual([...new Set(s.steps.map((x) => x.status))], ['blocked'], 'nothing is runnable yet');
+  assert.deepEqual([...new Set(s.steps.map((x) => x.status))], ['todo'], 'nothing is runnable yet');
   assert.equal(s.currentStep, 'backfill-pending');
   assert.equal(s.kind, 'stub', 'the lifecycle marker the engine keys off');
   assert.equal(s.type, 'feature', '…which is a different axis from the work-item type');
