@@ -457,8 +457,13 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
     throw new Error(`nothing was moved — ${e.message}`, { cause: e });
   }
   fs.rmSync(from, { recursive: true, force: true });
-  return [...move.rewrites, ...move.moves.map((m) => m.to).filter((p) => !move.rewrites.includes(p))];
+  return productMoveFiles(move);
 }
+
+// Every path a planned move writes: the relabelled and reshaped files first, then every other file it
+// copies. ONE expression for the preview's `changed` and the apply's `written`, so the two cannot drift.
+export const productMoveFiles = (move) =>
+  [...move.rewrites, ...move.moves.map((m) => m.to).filter((p) => !move.rewrites.includes(p))];
 
 // A review step must never be told it may advance on its own. `type` is what the Shape chain uses;
 // a Build step has no `type`, and `locked: true` is how those are pinned today.
@@ -852,7 +857,7 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       engine: plan.engine,
       applied: apply,
       verified: plan.verified,
-      changed: apply ? written : [...(move ? move.rewrites : []), ...pending.map((r) => r.file)],
+      changed: apply ? written : [...(move ? productMoveFiles(move) : []), ...pending.map((r) => r.file)],
       ...(ignored ? { gitignored: BACKUP_IGNORE_GLOB } : {}),
       rows: plan.rows,
       // The product-level move (shape 8), or null when the project has no old-spelling product level.

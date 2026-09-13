@@ -231,6 +231,9 @@ If the predicate **passes**:
   `test-cases` at the same time.
 - **`test-cases-review`** is the parallel track's gate: mark it `done` but **leave `currentStep` at
   `ready-for-build`** — completing test cases must never pull the epic back from Build.
+- **`foundation-review`** (the Product level, `foundation/`) ends at its own sentinel: set
+  `currentStep: "foundation-done"`, never `ready-for-build` — the product level has no Build part. The
+  old spelling does the same: **`discovery-review`** sets `currentStep: "discovery-done"`.
 - Any **other** review step: set the next step in `steps[]` from `blocked` to `in_progress` (authoring)
   or `in_review`, and set `currentStep` to that next step.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is

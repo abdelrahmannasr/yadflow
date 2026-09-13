@@ -10,7 +10,8 @@ reads `.sdlc/` and `reviews/` and reports.
 
 ## Conventions
 - `{project-root}` resolves from the project working directory.
-- Operate on one epic: `{project-root}/epics/EP-<slug>/`.
+- Operate on one epic: `{project-root}/epics/EP-<slug>/`. The Product level is the exception:
+  `EP-foundation` lives at `{project-root}/foundation/` (its `.sdlc/` and `reviews/` are there).
 
 ## On Activation
 

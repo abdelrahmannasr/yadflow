@@ -3198,6 +3198,51 @@ test('gate sync: EP-discovery advances through the SAME gate to discovery-done (
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gate sync: EP-foundation advances through the SAME gate at foundation/ to foundation-done, and its sections flip to approved (E75)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-foundation-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+      platform: 'github', default_branch: 'main',
+      roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
+    }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    const fd = path.join(T, 'foundation');
+    fs.mkdirSync(path.join(fd, '.sdlc'), { recursive: true });
+    // Every required section, so the Foundation is reviewable (hash-bound). The optional two are absent.
+    for (const s of ['purpose', 'scope', 'mvp', 'roadmap', 'stack', 'repos']) {
+      fs.writeFileSync(path.join(fd, `${s}.md`), `---\nid: EP-foundation\nartifact: ${s}\nstatus: draft\n${s === 'purpose' ? 'owner: alice\n' : ''}---\n# ${s}\n`);
+    }
+    fs.writeFileSync(path.join(fd, '.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep: 'foundation-review',
+      steps: [
+        { id: 'foundation', type: 'author', artifact: 'foundation/', status: 'done', risk_tags: [] },
+        { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
+      ],
+    }));
+    fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+      { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
+    ]));
+    const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
+      reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }],
+      threads: [] };
+    await gateSync(T, { epic: 'EP-foundation', today: '2026-06-09', reader: () => approval });
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-foundation')), false, 'nothing is written at an epics/ path');
+    const state = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/state.json')));
+    assert.equal(state.steps.find((s) => s.id === 'foundation-review').status, 'done');
+    assert.equal(state.currentStep, 'foundation-done', 'the Foundation terminates at foundation-done, never ready-for-build');
+    const approvals = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/approvals.json')));
+    assert.ok(approvals.length > 0 && approvals.every((a) => a.step === 'foundation-review'));
+    assert.ok(!approvals.some((a) => a.role === 'domain-owner'), 'the Foundation never escalates to domain owners');
+    const prs = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/hub-prs.json')));
+    assert.notEqual(prs[0].lastSyncedAt, null, 'the PR record is written back beside the ledger');
+    // `gate ci` reconciles the frontmatter right after an advance; do the same step here.
+    const st = await syncStatuses(T, { epic: 'EP-foundation' });
+    assert.ok(st.files.includes(path.join('foundation', 'scope.md')), 'the rewritten section is reported at its foundation/ path');
+    assert.match(fs.readFileSync(path.join(fd, 'scope.md'), 'utf8'), /^status: approved$/m, 'the sections flip to approved');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('gate sync: an approval on an older commit than the merged head is stale — gate holds (revoke-on-change in code)', async () => {
   const head = 'deadbeefcafe';
   const onHead = (login) => ({ login, state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: head });
@@ -12689,7 +12734,9 @@ test('hook: the Foundation ledger is protected under its fixed id, and its base 
       if (line.includes('ls-tree')) return { ok: true, code: 0, stdout: ['epics/EP-a/.sdlc/state.json', 'foundation/.sdlc/state.json', 'foundation/scope.md'].join('\0') };
       return { ok: false, stdout: '', code: 1 };
     };
-    assert.deepEqual([...seededSlugs(T, {}, runner)].sort(), ['ep-a', 'ep-foundation']);
+    // …and, with a Foundation on base, `ep-discovery` too: a fresh old-spelling ledger would be a second
+    // product level, not a new epic.
+    assert.deepEqual([...seededSlugs(T, {}, runner)].sort(), ['ep-a', 'ep-discovery', 'ep-foundation']);
     assert.ok(calls.some((c) => / -- epics foundation$/.test(c)), `ls-tree must list foundation too: ${calls.join(' | ')}`);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
@@ -12857,6 +12904,8 @@ test('hook: with EP-discovery on base, a Foundation ledger counts as already see
     assert.ok(seededSlugs(T, {}, runner(['epics/EP-discovery/.sdlc/state.json'])).has('ep-foundation'));
     assert.equal(seededSlugs(T, {}, runner(['epics/EP-a/.sdlc/state.json'])).has('ep-foundation'), false,
       'without the old spelling, a first Foundation is still a creation');
+    assert.ok(seededSlugs(T, {}, runner(['foundation/.sdlc/state.json'])).has('ep-discovery'),
+      'the mirror: with a Foundation on base, an old-spelling ledger is a second product level, not a seed');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

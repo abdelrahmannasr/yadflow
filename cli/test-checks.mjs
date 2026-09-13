@@ -2532,3 +2532,18 @@ test('ledger-guard: a Foundation ledger added beside an on-base EP-discovery is 
     assert.doesNotMatch(r.out, /new epic, its seed is exempt/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('ledger-guard: the mirror — an EP-discovery ledger added beside an on-base Foundation is a MUTATION too (E75)', () => {
+  const T = scaffoldRepo();
+  try {
+    seedFoundationOnBase(T);
+    commit(T, 'review: discovery', {
+      'epics/EP-discovery/.sdlc/state.json': '{"epicId":"EP-discovery","kind":"discovery","currentStep":"discovery-done"}\n',
+      'epics/EP-discovery/.sdlc/approvals.json': '[{"status":"approved"}]\n',
+    });
+    const r = runGate(LEDGER_GUARD, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /epics\/EP-discovery\/\.sdlc\/state\.json/);
+    assert.doesNotMatch(r.out, /new epic, its seed is exempt/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

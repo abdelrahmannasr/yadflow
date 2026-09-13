@@ -153,6 +153,7 @@ export function seededSlugs(productRoot, hub, runner = run) {
   // One product level: with the old spelling on base, a Foundation ledger replaces a CI-owned one
   // rather than creating something new — the same rule the CI gate applies.
   if (slugs.has(fold(DISCOVERY_EPIC))) slugs.add(fold(FOUNDATION_EPIC));
+  else if (slugs.has(fold(FOUNDATION_EPIC))) slugs.add(fold(DISCOVERY_EPIC));   // the mirror
   return slugs;
 }
 

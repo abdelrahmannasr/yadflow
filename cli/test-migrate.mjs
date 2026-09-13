@@ -1310,6 +1310,12 @@ test('migrate 7 -> 8: the preview names every file the move touches, and none at
     assert.equal(j.product.action, 'move');
     assert.ok(j.changed.includes('foundation/.sdlc/state.json'));
     assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the preview wrote nothing');
+    // The preview must not under-report the move: it names exactly the foundation/ files the apply then
+    // says it wrote — the plain copies included, not only the relabelled ledger files.
+    const applied = JSON.parse(await grabOut(() => runMigrate(T, { apply: true, json: true })));
+    const moveFiles = (list) => list.filter((f) => f.startsWith('foundation/')).sort();
+    assert.ok(moveFiles(j.changed).includes('foundation/competitor-analysis.md'), 'a plain copy is named too');
+    assert.deepEqual(moveFiles(j.changed), moveFiles(applied.changed));
   } finally { cleanup(T); }
 });
 

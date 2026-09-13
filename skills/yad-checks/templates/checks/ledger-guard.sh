@@ -251,6 +251,11 @@ is_seeding() {                      # $1 = epic slug; 0 when that epic has no le
     if in_list "ep-discovery" "${base_slugs[@]}"; then
       base_slugs[${#base_slugs[@]}]="ep-foundation"
     fi
+    # …and the mirror: with a Foundation on BASE, a fresh epics/EP-discovery ledger is a second product
+    # level too, not a new epic.
+    if in_list "ep-foundation" "${base_slugs[@]}"; then
+      base_slugs[${#base_slugs[@]}]="ep-discovery"
+    fi
     base_slugs_loaded=1
   fi
   _f="$(fold "$1")"
