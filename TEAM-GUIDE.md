@@ -149,7 +149,7 @@ belongs to exactly one:
 
 | Phase | Part | The steps in it |
 |---|---|---|
-| Discover | Shape | discovery · analysis · epic, each with its gate |
+| Discover | Shape | analysis · epic, each with its gate |
 | Design | Shape | architecture, with the locked contract · ui-design, each with its gate |
 | Plan | Shape | stories · test-cases, each with its gate |
 | Build | Build | spec · tasks · implement · checks · engineer-review |
@@ -162,8 +162,15 @@ even though the tool does not run those phases yet.
 
 Once the stories gate passes, the epic is in **Build** and stays there for the rest of its life — the
 individual Build steps run per story per code repo, so the epic-level view names the phase rather than
-the step. A stub epic and the project's discovery epic show no phase line at all: neither walks this
-lifecycle.
+the step. A stub epic shows no phase line at all, because it does not walk this lifecycle.
+
+The **Foundation** is not on this list either, because it is not a feature epic. It is the **Product
+level**: it runs once per product, before any epic, in its own folder `foundation/`. It has one phase of
+its own, also called Foundation, and `yad next` prints `phase: Foundation` for it instead of the six.
+Start one with `yad foundation new`, then write it with the `yad-discovery` skill. Its approval is meant
+to come before feature work; `yad next` tells you when epics are going ahead of it, and does not block
+them. A product made before this release may still keep it in `epics/EP-discovery/` —
+[shape 8](docs/migrations/shape-8.md) explains how that converts.
 
 Phases are worked out from the step you are on. They are not written into any file, so there is
 nothing to keep in step and nothing to migrate.

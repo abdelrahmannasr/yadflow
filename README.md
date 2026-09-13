@@ -99,6 +99,11 @@ Your first `yad-epic` seeds the `epics/EP-<slug>/` ledger — state, approvals, 
 so the audit trail starts the moment you begin real work. `yad epic new <slug>` does the same seeding
 from the CLI when you would rather lay the track before the writing starts.
 
+Before any epic, you can also frame the whole product once: `yad foundation new` seeds the
+**Foundation** — the Product level, in `foundation/` — and the `yad-discovery` skill writes its
+sections (purpose, scope, MVP, roadmap, stack, repos). It is optional, and each epic reads its approved
+roadmap.
+
 ## Your first five minutes
 
 <!-- IMAGE: docs/media/artifact-waiting.png — "A generated epic waits at its gate — nothing advances until a human approves." -->

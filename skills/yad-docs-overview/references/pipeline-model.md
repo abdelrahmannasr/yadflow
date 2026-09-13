@@ -33,16 +33,18 @@ and never gates.
 | `yad-connect-docs` | `docs.json` |
 
 ### Path: Front-zero (`phase: 0-front`)
-The OPTIONAL once-per-project discovery phase, modelled as the reserved "epic zero" `EP-discovery`.
-Greenfield AND brownfield; a 2-step author→review chain whose review binds to the whole artifact set
-and terminates at `discovery-done` (no Build).
+The OPTIONAL once-per-product **Foundation** (E75) — the Product level, in its own folder `foundation/`
+under the fixed id `EP-foundation`. Greenfield AND brownfield; a 2-step author→review chain whose
+review binds to the required sections and terminates at `foundation-done` (no Build). Its approval is
+reported, not enforced, before feature work begins.
 
 | Step (skill) | Gate | Outputs / sideEffects |
 |--------------|------|------------------------|
-| `yad-discovery` *(optional)* | → `discovery-review` (base rule) | `market-research.md`, `competitor-analysis.md`, `current-state.md`, `feasibility.md`, `requirements.md`, `roadmap.md`; seeds `EP-discovery/.sdlc/state.json` |
+| `yad foundation new` then `yad-discovery` *(optional)* | → `foundation-review` (base rule) | `purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md` (+ optional `market.md`, `risks.md`); seeds `foundation/.sdlc/state.json` |
 
 `roadmap.md` is the menu of features each `yad-epic` reads (Step 2c) — reference-only, never
-auto-seeds epics.
+auto-seeds epics. A product created before E75 may still hold the old spelling, `epics/EP-discovery/`
+(six files, ending at `discovery-done`); `yad migrate --apply` converts it on a local ledger.
 
 <!-- `1-front` and `3-build` are DATA — the `phase` column in skills/sdlc/module-help.csv, which
      the overview build reads. The Shape/Build/Run rename deliberately left them alone: change-safety
@@ -127,8 +129,8 @@ The eight yadflow lenses, each to its relevant phase sections + paths:
 
 | Lens | Relevant phases / sections |
 |------|----------------------------|
-| analyst | Setup intent, project discovery (front-zero), analysis step, Shape discovery |
-| pm | project discovery (market/feasibility/roadmap), epic, stories; the Shape gates |
+| analyst | Setup intent, the Foundation (the Product level), analysis step, Shape discovery |
+| pm | the Foundation (purpose/scope/MVP/roadmap), epic, stories; the Shape gates |
 | architect | architecture + the locked contract; escalation |
 | ux | UI design, design tool connection, the design system |
 | dev | Build: spec → implement, the per-repo loop |

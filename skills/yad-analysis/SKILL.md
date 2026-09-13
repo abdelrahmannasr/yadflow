@@ -57,21 +57,27 @@ connected repo** (the epic's `repos` are not chosen yet), load the lightweight c
   stamp `code-context: stale` in the frontmatter.
 - **Traceability:** record which maps you loaded in the analysis frontmatter `code-context:` field.
 
-### Step 2c — Read the project roadmap (project context, only once discovery is APPROVED)
-Consume the project front-zero (`yad-discovery`) **only after its review gate has passed** — never a
-draft or in-review roadmap (that would bypass `discovery-review`). Gate on the **state**, not file
-existence: read `{project-root}/epics/EP-discovery/.sdlc/state.json` and proceed **only when
-`currentStep == "discovery-done"`**. When it is, read its `roadmap.md` and sibling `requirements.md`
-for the project framing: which phase (MVP / later) this feature belongs to and the requirements it
-carries — so the analysis's **Problem / Options / Recommendation** stay consistent with the approved
-roadmap. **Optional & non-blocking:** if there is no discovery, or it has not yet reached
-`discovery-done`, proceed unchanged — do not consume an unapproved roadmap.
+### Step 2c — Read the Foundation (product context, only once it is APPROVED)
+Consume the Product level (written by `yad-discovery`) **only after its review gate has passed** — never
+a draft or in-review one (that would bypass its gate). Gate on the **state**, not file existence:
+- **The Foundation:** read `{project-root}/foundation/.sdlc/state.json` and proceed **only when
+  `currentStep == "foundation-done"`**. Then read `foundation/purpose.md`, `scope.md`, `mvp.md` and
+  `roadmap.md` for the product framing.
+- **The old spelling**, only when there is no Foundation: read
+  `{project-root}/epics/EP-discovery/.sdlc/state.json` and proceed **only when
+  `currentStep == "discovery-done"`**. Then read its `roadmap.md` and sibling `requirements.md`.
+
+Use it for: which phase (MVP / later) this feature belongs to, what the product explicitly is **not**,
+and the requirements it carries — so the analysis's **Problem / Options / Recommendation** stay
+consistent with the approved product. **Optional & non-blocking:** if there is no product level, or it
+has not passed its gate yet, proceed unchanged — do not consume an unapproved one. (`yad next` reports
+feature work that goes ahead of an unapproved Foundation; it never blocks it.)
 
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand)
 *(Skip when `state.json` already exists — the id was assigned by whatever seeded the chain.)*
 Derive `EP-<slug>` where `slug` is **2–4 lowercase words joined by hyphens**, drawn from the idea
-(e.g. `EP-checkout`). Lowercase except the fixed `EP` prefix. `EP-discovery` is **reserved**
-for the project front-zero — never use it for a feature. **The ID is assigned once and
+(e.g. `EP-checkout`). Lowercase except the fixed `EP` prefix. `EP-foundation` and `EP-discovery` are
+**reserved** for the Product level — never use either for a feature. **The ID is assigned once and
 never renamed** — renaming breaks every downstream link (build plan §6b). Check
 `{project-root}/epics/` for collisions; if the slug exists, append a distinguishing word.
 
