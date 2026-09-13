@@ -86,7 +86,47 @@ export const gateRuleSum = (rule) => {
 // rejected before it can become a path segment under epics/.
 export const isValidEpicId = (epic) => /^EP-[a-z0-9-]+$/.test(epic || '');
 
-export const epicRoot = (root, epic) => path.join(root, 'epics', epic);
+// ---- the Product level: Foundation (E75) --------------------------------------------------------
+//
+// A product has ONE product-level ledger. Its id is `EP-foundation` and it lives in a folder of its
+// own at the top of the project, `foundation/` — not under `epics/`, because it is not an epic: it
+// runs once per product, has no `epic.md`, no work-item type and no Build.
+//
+// THE ID KEEPS THE `EP-` PREFIX ON PURPOSE. Everything that routes a review already matches it: the
+// review branch is `review/EP-foundation/foundation` (`parseReviewBranch`), and both gate-sync
+// workflows committed in users' repos fire on `review/EP-*`. A prefix-less id would have made every
+// Foundation review silently fail to sync on every project wired before this release.
+//
+// THE FOLDER IS THE ONE THING THAT DIFFERS, and it is answered in exactly one place: `epicRoot` below.
+// Every command that takes an epic id resolves its directory through it, so `yad gate open
+// EP-foundation foundation/` works with no special case at the call site.
+export const FOUNDATION_EPIC = 'EP-foundation';
+export const FOUNDATION_DIR = 'foundation';
+
+// The project-relative POSIX path of an epic's directory — for git pathspecs and printed paths, where
+// `epicRoot`'s absolute path is the wrong thing.
+export const epicRel = (epic) => (epic === FOUNDATION_EPIC ? FOUNDATION_DIR : `epics/${epic}`);
+export const epicRoot = (root, epic) => (epic === FOUNDATION_EPIC ? path.join(root, FOUNDATION_DIR) : path.join(root, 'epics', epic));
+
+// Every epic id that has a directory: the valid ids under `epics/`, plus `EP-foundation` once
+// `foundation/.sdlc/` exists. Sorted. The ONE enumerator a walker should use, so a sweep cannot see the
+// feature epics and miss the product level.
+//
+// Keyed on `foundation/.sdlc/`, not on `foundation/`: a product repo may well hold an unrelated folder
+// of that name (design tokens, a docs section), and reporting it as an unseeded ledger would be a false
+// finding about somebody else's files. An `epics/EP-foundation/` directory is NOT listed — that id's
+// directory is `foundation/`, so listing it would read the real Foundation twice under one id;
+// `yad doctor` reports the stray directory instead.
+export function epicIds(root) {
+  const dir = path.join(root, 'epics');
+  const ids = fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && isValidEpicId(e.name) && e.name !== FOUNDATION_EPIC)
+      .map((e) => e.name)
+    : [];
+  if (fs.existsSync(path.join(root, FOUNDATION_DIR, '.sdlc'))) ids.push(FOUNDATION_EPIC);
+  return ids.sort();
+}
 
 // epic.md -> "epic"; architecture.md -> "architecture"; stories/ -> "stories";
 // stories/EP-x-S01.md -> "stories-S01".
@@ -111,6 +151,7 @@ export function parseReviewBranch(branch = '') {
 export function artifactFromBase(base) {
   if (base === 'stories' || /^stories-S\d+$/i.test(base)) return 'stories/';
   if (base === 'discovery') return 'discovery/';
+  if (base === 'foundation') return 'foundation/';
   return `${base}.md`;
 }
 
@@ -121,6 +162,9 @@ export function artifactPaths(base) {
   if (base === 'architecture') return ['architecture.md', 'contract.md', '.sdlc/contract-lock.json'];
   if (base === 'stories') return ['stories'];
   if (base === 'discovery') return [...DISCOVERY_FILES];
+  // Every section, optional ones included: this names what a Foundation review COVERS, and a section
+  // that is absent today is still one a reviewer may be asked to look at tomorrow.
+  if (base === 'foundation') return [...FOUNDATION_FILES];
   return [`${base}.md`];
 }
 
@@ -221,6 +265,51 @@ export const DISCOVERY_FILES = [
   'roadmap.md',
 ];
 
+// The Foundation's sections, one Markdown file each, in the order the roadmap lists them (Part 1,
+// "Foundation"). Two are optional there — Market and Risks — and optional here: a Foundation without
+// them is complete and reviewable.
+//
+// Written as rows rather than two parallel lists so a section cannot be added to one and forgotten in
+// the other. The files sit directly in `foundation/`, beside its `.sdlc/` ledger, exactly as the
+// discovery set sat directly in `epics/EP-discovery/`.
+export const FOUNDATION_SECTIONS = [
+  { file: 'purpose.md' },
+  { file: 'market.md', optional: true },
+  { file: 'scope.md' },
+  { file: 'mvp.md' },
+  { file: 'roadmap.md' },
+  { file: 'stack.md' },
+  { file: 'repos.md' },
+  { file: 'risks.md', optional: true },
+];
+export const FOUNDATION_FILES = FOUNDATION_SECTIONS.map((s) => s.file);
+export const FOUNDATION_REQUIRED = FOUNDATION_SECTIONS.filter((s) => !s.optional).map((s) => s.file);
+
+// The Foundation's fingerprint. Null until every REQUIRED section exists — the same "not reviewable
+// yet" answer `discoveryHash` gives for an incomplete set. An OPTIONAL section counts once it exists,
+// so adding `risks.md` after an approval, or deleting it, revokes that approval like any other edit:
+// the reviewers approved the Foundation as it stood, and a new risk section is part of what they did
+// not see.
+export function foundationHash(dir, sections = FOUNDATION_SECTIONS) {
+  const has = (f) => fs.existsSync(path.join(dir, f));
+  if (!sections.filter((s) => !s.optional).every((s) => has(s.file))) return null;
+  const parts = sections.map((s) => s.file).filter(has).map((f) => `${f}:${fileSha(path.join(dir, f))}`);
+  return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
+}
+
+// The two spellings of the product level. `foundation` is the one this release writes; `discovery` is
+// what every release before it wrote, under `epics/EP-discovery/`, and it is still READ (rule 2) — a
+// verified project cannot be converted by `yad migrate`, because CI owns its ledger, so the old
+// spelling has to keep working for this whole major.
+//
+// ONE predicate, and every reader that used to ask `state.kind === 'discovery'` asks this instead. Two
+// spellings read by two different checks is how one of them gets forgotten.
+export const PRODUCT_KINDS = ['foundation', 'discovery'];
+export const PRODUCT_EPICS = [FOUNDATION_EPIC, DISCOVERY_EPIC];
+export const isProductLevel = (state) => PRODUCT_KINDS.includes(state?.kind);
+// The terminal sentinel of each spelling — also the `yad next` action kind that says "finished".
+export const PRODUCT_DONE = PRODUCT_KINDS.map((k) => `${k}-done`);
+
 // Deterministic fingerprint of the discovery set: hash every file in the fixed DISCOVERY_FILES order,
 // combine. The WHOLE set is the reviewable unit — if any required artifact is missing the discovery is
 // incomplete and NON-REVIEWABLE, so this returns null (no hash to bind an approval to), the same
@@ -240,6 +329,7 @@ export function artifactHash(epicDir, artifact) {
   if (b === 'architecture') return contractSurfaceHash(epicDir);
   if (b === 'stories') return storiesHash(epicDir);
   if (b === 'discovery') return discoveryHash(epicDir);
+  if (b === 'foundation') return foundationHash(epicDir);
   return fileSha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
 
@@ -998,9 +1088,14 @@ export function advanceState(state, step) {
     state.currentStep = 'ready-for-build';
     return state;
   }
-  // Discovery is the project front-zero ("epic zero"): it has no Build part, so its review terminates
-  // at a `discovery-done` sentinel rather than `ready-for-build` (which would make `yad next` claim the
-  // Build can run). The roadmap it approved is the input the real feature epics read.
+  // The product level has no Build part, so its review terminates at its own `-done` sentinel rather
+  // than `ready-for-build` (which would make `yad next` claim the Build can run). The roadmap it
+  // approved is the input the real feature epics read. Two spellings, each ending on its own word, so
+  // a legacy discovery ledger that has not been converted keeps writing what its readers expect.
+  if (step.id === 'foundation-review') {
+    state.currentStep = 'foundation-done';
+    return state;
+  }
   if (step.id === 'discovery-review') {
     state.currentStep = 'discovery-done';
     return state;
@@ -1254,9 +1349,9 @@ export function markInReview(state, step) {
 //             right — the locked human merge gate — and does have one.
 //   reviews   for a review gate, the id of the author step it gates. This replaces stripping
 //             `-review` off a string, which is what made `checks-review` look resolvable.
-//   level     'feature' (a step on the Epic ladder) or 'product' (the front-zero, `EP-discovery`,
-//             which is product-level and does not walk the feature lifecycle). E75 folds the product
-//             level into Foundation; it is named here, not modelled further. This field was called
+//   level     'feature' (a step on the Epic ladder) or 'product' (the Foundation, `EP-foundation`, and
+//             its older spelling `EP-discovery` — product-level, never on the feature lifecycle, and
+//             placed in the Foundation phase, which belongs to no Part (E75)). This field was called
 //             `chain` when E4 landed and was renamed before any release carried it — `chain` is the
 //             word for an ordered LIST of steps, which is what a lifecycle profile holds (E5).
 //   risk_tags the DEFAULT tags a seed gives this step, copied into the epic's `state.json` where a team
@@ -1271,9 +1366,16 @@ export function markInReview(state, step) {
 // chain renderer collapses the consecutive duplicate. `ready-for-build` and the other SENTINELS are
 // not steps and are not here.
 export const STEPS = [
+  // Foundation — the Product level (E75). `yad-discovery` stays the skill name: renaming a skill folder
+  // is its own change, with an install migration of its own (LEGACY_SKILLS), and it is not this one.
+  { id: 'foundation', phase: 'foundation', kind: 'author', artifact: 'foundation/', skill: 'yad-discovery', level: 'product', risk_tags: [] },
+  { id: 'foundation-review', phase: 'foundation', kind: 'review', artifact: 'foundation/', reviews: 'foundation', level: 'product', risk_tags: [] },
+  // The OLD spelling of the same level, kept for this whole major (rule 3): a project that has not
+  // converted still carries these ids, and dropping the rows would report every step of it as
+  // `phase:unknown`. They move into the Foundation phase with the level they always were.
+  { id: 'discovery', phase: 'foundation', kind: 'author', artifact: 'discovery/', skill: 'yad-discovery', level: 'product', risk_tags: [] },
+  { id: 'discovery-review', phase: 'foundation', kind: 'review', artifact: 'discovery/', reviews: 'discovery', level: 'product', risk_tags: [] },
   // Discover
-  { id: 'discovery', phase: 'discover', kind: 'author', artifact: 'discovery/', skill: 'yad-discovery', level: 'product', risk_tags: [] },
-  { id: 'discovery-review', phase: 'discover', kind: 'review', artifact: 'discovery/', reviews: 'discovery', level: 'product', risk_tags: [] },
   { id: 'analysis', phase: 'discover', kind: 'author', artifact: 'analysis.md', skill: 'yad-analysis', level: 'feature', risk_tags: [] },
   { id: 'analysis-review', phase: 'discover', kind: 'review', artifact: 'analysis.md', reviews: 'analysis', level: 'feature', risk_tags: [] },
   { id: 'epic', phase: 'discover', kind: 'author', artifact: 'epic.md', skill: 'yad-epic', level: 'feature', risk_tags: [] },
@@ -1321,8 +1423,9 @@ export const STEPS = [
 //                   when a feature is shaped by the analyst before it becomes an epic.
 //   chore           the upkeep lane (E40). Four steps: `epic` then `stories`.
 //   spike           the investigation lane (E40). Six steps: `analysis` in front of the chore lane.
-//   discovery       the product front-zero (`EP-discovery`), two steps and no Build. Product-level,
-//                   not on the Epic ladder — E75 folds it into Foundation.
+//   discovery       the product front-zero (`EP-discovery`), two steps and no Build. The OLD spelling
+//                   of the Product level, still read for this major; `yad migrate` converts it.
+//   foundation      the Product level (E75), `EP-foundation` in `foundation/`. Two steps, no Build.
 //
 // THE SHORT LANES ARE NEW, and they are the first routes here that nobody has ever walked. E40 adds
 // them because the engine had exactly one shape of work: until now a dependency bump was seeded on the
@@ -1423,6 +1526,12 @@ export const LIFECYCLE_PROFILES = [
     title: 'the product front-zero',
     level: 'product',
     steps: ['discovery', 'discovery-review'],
+  },
+  {
+    id: 'foundation',
+    title: 'the Product Foundation',
+    level: 'product',
+    steps: ['foundation', 'foundation-review'],
   },
 ];
 
@@ -1680,7 +1789,55 @@ export function seedState({ epic, profile, type, today, stub = false }) {
     throw err('YAD-STATE-007', `cannot seed the '${profile}' lifecycle profile`,
       `pick one of ${seedableProfiles().join(' · ')}`);
   }
-  const steps = p.rows.map((row, i) => {
+  const steps = seedChain(p, { stub });
+  // Key order mirrors what the stampers produce, so a seeded file and a migrated one are the same
+  // bytes. `schemaVersion` is deliberately absent: `writeJSON` stamps this engine's shape onto an
+  // object that was never read from disk (writeShape, cli/lib.mjs), and naming the number here would
+  // be a second place to forget to change.
+  // `kind` sits between `type` and `profile`, which is where the `yad-stub` template has always put it
+  // and where `stampProfile` would insert on a stub that lacked one. The two words look alike and are
+  // different axes: `kind` is the LIFECYCLE marker (`stub`, `foundation`), `type` is the work item.
+  return {
+    epicId: epic,
+    createdAt: today,
+    type,
+    ...(stub ? { kind: 'stub' } : {}),
+    profile: p.id,
+    currentStep: stub ? 'backfill-pending' : steps[0].id,
+    steps,
+  };
+}
+
+// The routes that seed the PRODUCT level. A separate predicate rather than a loosened
+// `seedableProfiles`: a product route has a fixed id, a `kind` marker and no work-item type, so letting
+// `seedState` produce one would mint a product level missing all three.
+export const productProfiles = (profiles = LIFECYCLE_PROFILES) =>
+  profiles.filter((p) => p.level === 'product').map((p) => p.id);
+
+// The Foundation's `state.json` (E75) — what `yad foundation new` writes. PURE, like `seedState`.
+//
+// Only the `foundation` route is seeded. `discovery` is a product route too, and it is the OLD
+// spelling: this release reads it and converts it, and writing a fresh one would be minting the very
+// ledger `yad migrate` exists to retire.
+//
+// No `type`: the Foundation is not a work item on the ladder, and inventing `feature` for it would put
+// a thing on the ladder nobody authored — the same reason `stampWorkItemType` leaves it alone.
+export function seedFoundationState({ today }) {
+  const steps = seedChain(lifecycleProfile('foundation'));
+  return {
+    epicId: FOUNDATION_EPIC,
+    createdAt: today,
+    kind: 'foundation',
+    profile: 'foundation',
+    currentStep: steps[0].id,
+    steps,
+  };
+}
+
+// The step rows a seed writes, off a profile and the catalogue — shared by the feature and product
+// seeds so the two cannot drift in field order, dial names or statuses.
+function seedChain(p, { stub = false } = {}) {
+  return p.rows.map((row, i) => {
     const def = stepDef(row.id);
     return {
       id: def.id,
@@ -1698,22 +1855,6 @@ export function seedState({ epic, profile, type, today, stub = false }) {
       risk_tags: [...def.risk_tags],
     };
   });
-  // Key order mirrors what the stampers produce, so a seeded file and a migrated one are the same
-  // bytes. `schemaVersion` is deliberately absent: `writeJSON` stamps this engine's shape onto an
-  // object that was never read from disk (writeShape, cli/lib.mjs), and naming the number here would
-  // be a second place to forget to change.
-  // `kind` sits between `type` and `profile`, which is where the `yad-stub` template has always put it
-  // and where `stampProfile` would insert on a stub that lacked one. The two words look alike and are
-  // different axes: `kind` is the LIFECYCLE marker (`stub`, `discovery`), `type` is the work item.
-  return {
-    epicId: epic,
-    createdAt: today,
-    type,
-    ...(stub ? { kind: 'stub' } : {}),
-    profile: p.id,
-    currentStep: stub ? 'backfill-pending' : steps[0].id,
-    steps,
-  };
 }
 
 // The catalogue keyed by id. `stepDef(id)` is null for an id this release does not know — a real
@@ -1845,11 +1986,20 @@ export function stepSkills(stepId, bindings = null) {
   // a step called `constructor` resolved its "skill" to a function, and `yad next` threw trying to
   // spread it. The catalogue map below is `__proto__: null` for the same reason.
   const steps = bindings?.steps;
-  const bound = isPlainObject(steps) && Object.hasOwn(steps, stepId) ? steps[stepId] : null;
+  const boundTo = (id) => (isPlainObject(steps) && Object.hasOwn(steps, id) ? steps[id] : null);
+  const bound = boundTo(stepId);
   if (Array.isArray(bound) && bound.length) return [...bound];
+  // A step that took over from an OLD id inherits the old id's binding until it is given one of its
+  // own (rule 3). A project that bound its own skill to `discovery` before E75 renamed the product
+  // step to `foundation` would otherwise be switched back to the default without anyone deciding it.
+  const legacy = Object.hasOwn(BINDING_SUCCEEDS, stepId) ? boundTo(BINDING_SUCCEEDS[stepId]) : null;
+  if (Array.isArray(legacy) && legacy.length) return [...legacy];
   const fallback = CATALOGUE_SKILL[stepId];
   return typeof fallback === 'string' ? [fallback] : [];
 }
+
+// new step id -> the old step id whose binding it inherits while it has none of its own.
+const BINDING_SUCCEEDS = { __proto__: null, foundation: 'discovery' };
 
 // The two keys every action object carries for its skill, from one resolved list.
 //
@@ -1903,6 +2053,15 @@ export const PHASES = [
   { id: 'operate', name: 'Operate', part: 'Run', built: false },
 ];
 
+// The PRODUCT level's phase (E75). Kept out of `PHASES` on purpose, because the roadmap's two levels
+// are two different ladders: a feature epic walks the six phases above, once per epic, and the
+// Foundation runs once per product, before any of them. It belongs to no Part — Shape, Build and Run
+// are the rhythms of FEATURE work — so it has no `part`, and a renderer printing the six-phase strip
+// for a Foundation would claim a journey it never takes.
+export const PRODUCT_PHASES = [
+  { id: 'foundation', name: 'Foundation', level: 'product', built: true },
+];
+
 // Which phase each step belongs to. Split in two on purpose, because the `-review` rule differs.
 //
 // SHAPE steps each have a review gate named `<id>-review`, and that gate belongs to the phase of the
@@ -1934,7 +2093,7 @@ const STEP_PHASE = { ...SHAPE_STEP_PHASE, ...BUILD_STEP_PHASE };
 // `currentStep` markers that are NOT steps: they never appear in `steps[]`, and no phase claims them.
 // `ready-for-build` is the one with a phase anyway — see `currentPhase` below, which is where an epic's
 // position is decided rather than a step's.
-export const SENTINELS = ['ready-for-build', 'backfill-pending', 'backfill-done', 'discovery-done'];
+export const SENTINELS = ['ready-for-build', 'backfill-pending', 'backfill-done', 'discovery-done', 'foundation-done'];
 
 // The phase a STEP id belongs to, or null for anything this engine does not recognise — a sentinel, a
 // step from a future profile, a typo. Null, never a guess: a renderer showing the wrong phase is worse
@@ -1967,22 +2126,26 @@ export function stepPhase(id) {
 //     `build-state`. So a step lookup alone can never place an epic in Build at all, which is the
 //     phase with the most steps in it. The marker means "Shape is approved, Build can run" — that is
 //     Build, and it is resolved here rather than in `stepPhase`, which stays a pure id lookup.
-//   * `EP-discovery` is the PRODUCT-level front-zero, not a work item on the feature ladder. Its whole
-//     chain is `discovery` → `discovery-review` → `discovery-done`; it never enters Design, Plan or
-//     Build. Printing the six-phase lifecycle for it claims a journey it does not take. E75 folds it
-//     into Foundation, which is a Product-level phase of its own; until then it has none.
+//   * The PRODUCT level (`EP-foundation`, or its old spelling `EP-discovery`) is not a work item on the
+//     feature ladder. It is in the Foundation phase for its whole life — while authoring, in review,
+//     and once its `-done` sentinel is reached — and it never enters Design, Plan or Build. So the
+//     answer is decided by the LEVEL, which the caller knows from the ledger's `kind`, and not by the
+//     step id: a sentinel has no phase of its own, and asking `stepPhase` would lose the Foundation the
+//     moment it was approved.
 //
 // A stub epic (`backfill-pending` / `backfill-done`) has no phase either, and needs no special case:
 // neither marker is a step.
-export function currentPhase(currentStep, { discovery = false } = {}) {
-  if (discovery) return null;
+export function currentPhase(currentStep, { product = false } = {}) {
+  if (product) return 'foundation';
   const cur = String(currentStep || '');
   if (cur === 'ready-for-build') return 'build';
   return stepPhase(cur);
 }
 
-// The phase record for an epic's current step, or null. `.name` is the word a person reads.
-export const phaseOf = (currentStep, opts) => PHASES.find((p) => p.id === currentPhase(currentStep, opts)) || null;
+// The phase record for an epic's current step, or null. `.name` is the word a person reads. Both
+// ladders are searched: a Foundation step placed by `stepPhase` alone must still name its phase.
+export const phaseOf = (currentStep, opts) =>
+  [...PHASES, ...PRODUCT_PHASES].find((p) => p.id === currentPhase(currentStep, opts)) || null;
 
 // Every step id this engine knows in a phase, in chain order. Empty for a phase nothing implements
 // yet, which is exactly what `built: false` says.
@@ -2075,7 +2238,7 @@ export function backfillAnchorKind(state) {
 // (the Phase B rail) and by the driver. No FS / network.
 export function preconditionsMet(state, stepId) {
   if (!state || !Array.isArray(state.steps)) {
-    const ok = stepId === 'epic' || stepId === 'analysis' || stepId === 'discovery';
+    const ok = stepId === 'epic' || stepId === 'analysis' || stepId === 'foundation' || stepId === 'discovery';
     return { ok, blockedBy: null, reason: ok ? 'entry step (no state seeded yet)' : `start with yad-epic — no epic state for '${stepId}'` };
   }
   // A stub anchor (backfill-pending) or a light-promoted anchor (backfill-done) has NO runnable Shape
@@ -2167,17 +2330,20 @@ export function nextAction(ledger, { epic, bindings = null } = {}) {
   // No ledger yet: the action is to author the `epic` step, so it names whatever runs that step here.
   if (!state) return { epicId, kind: 'new', ...skillFields(stepSkills('epic', bindings)), why: 'no epic state yet — seed it with yad-epic' };
 
-  // EP-discovery ("epic zero") is the project front-zero: a 2-step author→review chain with no Build
-  // part and no parallel track. Resolve its action in isolation so the feature-epic logic below never
-  // applies to it.
-  if (state.kind === 'discovery') {
-    if (state.currentStep === 'discovery-done') {
-      return { epicId, kind: 'discovery-done', step: 'discovery-done', status: 'done',
-        why: 'discovery approved — seed feature epics with yad-epic (each reads roadmap.md)' };
+  // The PRODUCT level — the Foundation, or a ledger still in its old `discovery` spelling: a 2-step
+  // author→review chain with no Build part and no parallel track. Resolve its action in isolation so
+  // the feature-epic logic below never applies to it. Each spelling reports its own `-done` kind, so a
+  // script reading `yad next --json` on an unconverted project sees exactly the word it saw before.
+  if (isProductLevel(state)) {
+    const done = `${state.kind}-done`;
+    const label = state.kind === 'foundation' ? 'Foundation' : 'discovery';
+    if (state.currentStep === done) {
+      return { epicId, kind: done, step: done, status: 'done',
+        why: `${label} approved — seed feature epics with yad-epic (each reads roadmap.md)` };
     }
     const dstep = state.steps.find((s) => s.id === state.currentStep)
       || state.steps.find((s) => !isPassed(s));
-    if (!dstep) return { epicId, kind: 'discovery-done', step: 'discovery-done', why: 'discovery is done' };
+    if (!dstep) return { epicId, kind: done, step: done, why: `${label} is done` };
     // The same refusal the feature path makes below: a BLOCKED step is not a step to run, and naming
     // its skill would tell someone to author an artifact that is waiting on somebody else.
     if (stepStatus(dstep) === 'blocked') {

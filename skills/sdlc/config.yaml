@@ -55,7 +55,8 @@ lifecycle:
   # `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`). Three were routes the skills already seeded by hand:
   # `classic` (the 10-step chain, `epic` first — yad-epic / yad-stub / yad-change), `analysis-first`
   # (the 12-step chain, `analysis` before `epic` — yad-analysis) and `discovery` (the product
-  # front-zero — yad-discovery). Two are the short lanes E40 added, which nobody seeded before:
+  # front-zero — yad-discovery, now the OLD spelling of the Product level). `foundation` is that level
+  # as E75 writes it — `yad foundation new`. Two are the short lanes E40 added, which nobody seeded before:
   # `chore` (4 steps, `epic` then `stories`) and `spike` (6, the analysis in front of the chore lane).
   # Neither short lane carries an architecture gate, so neither has a contract of its own, and neither
   # marks any step optional. Each epic RECORDS its route as `profile` in `state.json`
@@ -63,16 +64,20 @@ lifecycle:
   # field `yad migrate` fills it in by matching the chain. The chain stays the truth — `yad doctor`
   # compares the two. NOT the `hub.json` `profile`, which is the unrelated setup record
   # { codebase, repo_layout, team_size }.
-  profiles: [classic, analysis-first, chore, spike, discovery]
+  profiles: [classic, analysis-first, chore, spike, discovery, foundation]
+  # The PRODUCT level's phase (E75) — a ladder of its own, run once per product before any epic, and
+  # part of no Part. `discovery` is listed because it is the old spelling of the same level.
+  product_phases:
+    - { id: foundation, name: Foundation, level: product, built: true, steps: [foundation, discovery] }
   phases:
-    - { id: discover, name: Discover, part: Shape, built: true,  steps: [discovery, analysis, epic] }
+    - { id: discover, name: Discover, part: Shape, built: true,  steps: [analysis, epic] }
     - { id: design,   name: Design,   part: Shape, built: true,  steps: [architecture, ui-design] }
     - { id: plan,     name: Plan,     part: Shape, built: true,  steps: [stories, test-cases] }
     - { id: build,    name: Build,    part: Build, built: true,  steps: [spec, tasks, implement, checks, engineer-review] }
     - { id: release,  name: Release,  part: Run,   built: false, steps: [] }   # E32 builds it
     - { id: operate,  name: Operate,  part: Run,   built: false, steps: [] }   # E33 builds it
   # `currentStep` markers that are NOT steps: they never appear in `steps[]` and have no phase.
-  sentinels: [ready-for-build, backfill-pending, backfill-done, discovery-done]
+  sentinels: [ready-for-build, backfill-pending, backfill-done, discovery-done, foundation-done]
 
 defaults:
   # The two dials: who does the work, and who moves it forward. Renamed in shape 4; BOTH names are

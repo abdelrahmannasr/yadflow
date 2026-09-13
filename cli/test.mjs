@@ -2165,10 +2165,10 @@ test('runNext --json does NOT gain a theme key, even on a themed epic', async ()
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runNext: NO phase line for EP-discovery — it does not walk the feature lifecycle', async () => {
-  // The product-level front-zero. Its whole chain is discovery -> discovery-review -> discovery-done;
-  // it never enters Design, Plan or Build, so printing the six-phase lifecycle for it claims a
-  // journey it does not take. E75 folds it into Foundation, which is a Product-level phase of its own.
+test('runNext: the product level prints the Foundation phase, never the six-phase strip', async () => {
+  // Until E75 this asserted NO phase line at all for EP-discovery, because the Product level had no
+  // phase. It has one now, on a ladder of its own — so the line is back, and it is a different line:
+  // the feature phases (Design, Plan, Build…) must not appear, because the Foundation never walks them.
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase3-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
@@ -2178,7 +2178,8 @@ test('runNext: NO phase line for EP-discovery — it does not walk the feature l
   });
   const s = await grab(() => runNext(T, { epic: 'EP-discovery' }));
   assert.match(s, /yad-discovery/, 'the action itself is still printed');
-  assert.equal(/phase:/.test(s), false, s);
+  assert.match(s, /phase: Foundation/);
+  assert.doesNotMatch(s, /Design|Build/, 'the feature ladder is not printed for the product level');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -2273,6 +2274,63 @@ test('runNext: an open EP-discovery is surfaced (its gate action), not mixed int
   ] });
   const s = await grab(() => runNext(T, {}));
   assert.match(s, /yad gate (open|sync) EP-discovery discovery\//);
+});
+
+// The Foundation (E75): `foundation/.sdlc/state.json`, not `epics/`. Written by hand here rather than
+// through `seedEpic`, whose path is the thing that differs.
+function seedFoundation(T, state) {
+  fs.mkdirSync(path.join(T, 'foundation', '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'foundation', '.sdlc', 'state.json'), JSON.stringify(state));
+}
+const fstate = (currentStep, author, review) => ({ epicId: 'EP-foundation', kind: 'foundation', currentStep, steps: [
+  S('foundation', 'author', author, 'foundation/'), S('foundation-review', 'review+approve', review, 'foundation/'),
+] });
+
+test('runNext: an unapproved Foundation ahead of feature epics is REPORTED, never a block (E75)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-next-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    seedFoundation(T, fstate('foundation-review', 'done', 'in_review'));
+    seedEpic(T, 'EP-a', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+    const s = await grab(() => runNext(T, {}));
+    assert.match(s, /yad gate open EP-foundation foundation\//, 'the Foundation action comes first');
+    assert.match(s, /EP-foundation has not passed its gate — 1 feature epic\(s\) are going ahead of it \(reported, not enforced\)/);
+    assert.match(s, /EP-a/, 'and the feature epic is still shown — nothing is withheld');
+    // Once it passes, the report goes quiet.
+    seedFoundation(T, fstate('foundation-done', 'done', 'done'));
+    assert.doesNotMatch(await grab(() => runNext(T, {})), /going ahead of it/);
+    // `--json` lists it like every other ledger, under its own id.
+    const j = JSON.parse(await grab(() => runNext(T, { json: true })));
+    assert.deepEqual(j.actions.map((a) => a.epicId).sort(), ['EP-a', 'EP-foundation']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('runNext: two product levels — the Foundation is used and the old one is named', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-two-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    seedFoundation(T, fstate('foundation', 'in_progress', 'todo'));
+    seedEpic(T, 'EP-discovery', { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review', steps: [
+      S('discovery', 'author', 'done', 'discovery/'), S('discovery-review', 'review+approve', 'in_review', 'discovery/'),
+    ] });
+    const s = await grab(() => runNext(T, {}));
+    assert.match(s, /two product levels: foundation and epics\/EP-discovery — EP-foundation is the one used/);
+    assert.match(s, /EP-foundation/);
+    assert.doesNotMatch(s, /yad gate open EP-discovery/, 'the old one is named, not acted on');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('runNext: a project with no product level is pointed at `yad foundation new`', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-none-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    const s = await grab(() => runNext(T, {}));
+    assert.match(s, /run yad foundation new, then invoke the yad-discovery skill/);
+    assert.match(s, /start your first epic/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('runNext: a defect epic renders the "Defect" kind noun in its header', async () => {
