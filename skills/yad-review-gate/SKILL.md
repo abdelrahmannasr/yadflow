@@ -216,10 +216,10 @@ If the predicate **passes**:
 > With a platform, you do not perform them at all: `yad gate sync` (local ledger) or `yad gate ci`
 > (verified) runs the same transition from that function.
 >
-> Two other skills still write a chain by hand, and neither is an oversight: `yad-discovery` seeds the
-> product front-zero (E75 absorbs it) and `yad-change` seeds a threaded chain bound to a parent's
-> artifact hashes (E42 owns inheritance). `yad-backfill promote` rewrites one too, and needs its own
-> verb.
+> One other skill still writes a chain by hand, and it is not an oversight: `yad-change` seeds a
+> threaded chain bound to a parent's artifact hashes (E42 owns inheritance). `yad-backfill promote`
+> rewrites one too, and needs its own verb. (`yad-discovery` used to be the third; since E75 it runs
+> `yad foundation new`.)
 
 - Mark this review step `status: "done"`.
 - **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
@@ -231,6 +231,9 @@ If the predicate **passes**:
   `test-cases` at the same time.
 - **`test-cases-review`** is the parallel track's gate: mark it `done` but **leave `currentStep` at
   `ready-for-build`** — completing test cases must never pull the epic back from Build.
+- **`foundation-review`** (the Product level, `foundation/`) ends at its own sentinel: set
+  `currentStep: "foundation-done"`, never `ready-for-build` — the product level has no Build part. The
+  old spelling does the same: **`discovery-review`** sets `currentStep: "discovery-done"`.
 - Any **other** review step: set the next step in `steps[]` from `blocked` to `in_progress` (authoring)
   or `in_review`, and set `currentStep` to that next step.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is

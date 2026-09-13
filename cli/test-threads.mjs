@@ -12,6 +12,9 @@ import {
   STEPS, stepDef, artifactBase, artifactFromBase, authorStepFor,
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
   seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState, skipStep, routeLacksStep,
+  PRODUCT_PHASES, FOUNDATION_EPIC, FOUNDATION_DIR, FOUNDATION_SECTIONS, FOUNDATION_REQUIRED, epicRoot, epicRel,
+  epicIds, foundationHash, artifactHash, artifactPaths, parseReviewBranch, seedFoundationState, productProfiles,
+  isProductLevel, PRODUCT_DONE, stepSkills,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 import { sealedEpic, openDebtOnThread, threadSummary, runThread } from './thread.mjs';
@@ -629,8 +632,13 @@ test('the catalogue is self-consistent — every row answers for itself', () => 
   const ids = STEPS.map((r) => r.id);
   assert.equal(new Set(ids).size, ids.length, 'a duplicate id would make stepDef return one of two rows');
   const phaseIds = new Set(PHASES.map((p) => p.id));
+  const productPhaseIds = new Set(PRODUCT_PHASES.map((p) => p.id));
   for (const r of STEPS) {
-    assert.ok(phaseIds.has(r.phase), `${r.id}: phase '${r.phase}' is not one of the six`);
+    // Each LEVEL has its own ladder (E75): a feature step sits in one of the six phases, a product step
+    // in the Product level's own phase — and never the other way round, which would put the Foundation
+    // on the feature lifecycle or a feature step before every epic.
+    const ladder = r.level === 'product' ? productPhaseIds : phaseIds;
+    assert.ok(ladder.has(r.phase), `${r.id}: phase '${r.phase}' is not on the ${r.level} ladder`);
     assert.ok(['author', 'review'].includes(r.kind), `${r.id}: kind '${r.kind}'`);
     assert.ok(Array.isArray(r.risk_tags), `${r.id}: risk_tags must be a list`);
     assert.ok(['feature', 'product'].includes(r.level), `${r.id}: level '${r.level}'`);
@@ -683,7 +691,7 @@ test('the derived tables are views of the catalogue, not copies beside it', () =
     BUILD_STEP_SKILL,
     Object.fromEntries(STEPS.filter((r) => r.skill && r.phase === 'build').map((r) => [r.id, r.skill])),
   );
-  for (const p of PHASES) {
+  for (const p of [...PHASES, ...PRODUCT_PHASES]) {
     assert.deepEqual(
       phaseSteps(p.id),
       STEPS.filter((r) => r.phase === p.id && !r.reviews).map((r) => r.id),
@@ -691,8 +699,10 @@ test('the derived tables are views of the catalogue, not copies beside it', () =
     );
   }
   // And the values themselves are unchanged from before E4 — a derivation that agrees with itself but
-  // renamed a skill would pass everything above.
+  // renamed a skill would pass everything above. `foundation` is the one addition (E75), and it is run
+  // by the skill that already ran its old spelling.
   assert.deepEqual(STEP_SKILL, {
+    foundation: 'yad-discovery',
     discovery: 'yad-discovery', analysis: 'yad-analysis', epic: 'yad-epic',
     architecture: 'yad-architecture', 'ui-design': 'yad-ui', stories: 'yad-stories',
     'test-cases': 'yad-test-cases',
@@ -739,6 +749,7 @@ const ANALYSIS_12 = ['analysis', 'analysis-review', ...CLASSIC_10];
 const CHORE_4 = ['epic', 'epic-review', 'stories', 'stories-review'];
 const SPIKE_6 = ['analysis', 'analysis-review', ...CHORE_4];
 const DISCOVERY_2 = ['discovery', 'discovery-review'];
+const FOUNDATION_2 = ['foundation', 'foundation-review'];
 
 test('the profiles are the chains the skills already seed, step for step', () => {
   assert.deepEqual(profileSteps('classic'), CLASSIC_10);
@@ -746,8 +757,9 @@ test('the profiles are the chains the skills already seed, step for step', () =>
   assert.deepEqual(profileSteps('chore'), CHORE_4);
   assert.deepEqual(profileSteps('spike'), SPIKE_6);
   assert.deepEqual(profileSteps('discovery'), DISCOVERY_2);
+  assert.deepEqual(profileSteps('foundation'), FOUNDATION_2);
   assert.deepEqual(LIFECYCLE_PROFILES.map((p) => p.id),
-    ['classic', 'analysis-first', 'chore', 'spike', 'discovery']);
+    ['classic', 'analysis-first', 'chore', 'spike', 'discovery', 'foundation']);
   assert.equal(lifecycleProfile('nonsense'), null, 'a route this release does not carry is null, not a guess');
   assert.deepEqual(profileSteps('nonsense'), []);
 });
@@ -856,7 +868,9 @@ test('a review gate takes its phase from the artifact it reviews', () => {
   assert.equal(stepPhase('architecture-review'), 'design');
   assert.equal(stepPhase('ui-design-review'), 'design');
   assert.equal(stepPhase('test-cases-review'), 'plan');
-  assert.equal(stepPhase('discovery-review'), 'discover');
+  // The product level's gates are placed on the product ladder, old spelling and new alike (E75).
+  assert.equal(stepPhase('discovery-review'), 'foundation');
+  assert.equal(stepPhase('foundation-review'), 'foundation');
 });
 
 test('`engineer-review` is a step, not the review of a step called `engineer`', () => {
@@ -966,6 +980,15 @@ test('the phase table in skills/sdlc/config.yaml agrees with the code, row for r
   assert.deepEqual(listOf('sentinels'), SENTINELS, 'the sentinel list drifted from the code');
   assert.deepEqual(listOf('parts'), [...new Set(PHASES.map((p) => p.part))], 'the parts list drifted');
   assert.deepEqual(listOf('profiles'), LIFECYCLE_PROFILES.map((x) => x.id), 'the profile list drifted');
+  // The product ladder (E75), held the same way as the six. Its own key, so the six-row count above
+  // stays a count of the feature phases.
+  const productRows = [...block[1].matchAll(
+    /- \{ id: (\w+), name: (\w+), level: (\w+), built: (true|false), steps: \[([^\]]*)\] \}/g,
+  )].map((m) => ({ id: m[1], name: m[2], level: m[3], built: m[4] === 'true',
+    steps: m[5].split(',').map((x) => x.trim()).filter(Boolean) }));
+  assert.deepEqual(productRows.map(({ steps: _steps, ...r }) => r), PRODUCT_PHASES.map((p) => ({ ...p })),
+    'the product_phases rows drifted from PRODUCT_PHASES');
+  for (const row of productRows) assert.deepEqual(row.steps, phaseSteps(row.id), `config lists different steps for ${row.id}`);
   for (const sent of SENTINELS) assert.equal(stepPhase(sent), null, `${sent} is a sentinel but has a phase`);
 });
 
@@ -984,20 +1007,29 @@ test('an epic in Build is placed in Build, from the marker that stands in for it
   }
 });
 
-test('the discovery front-zero has no phase — it does not walk the feature lifecycle', () => {
-  // EP-discovery is PRODUCT level. Its chain is discovery -> discovery-review -> discovery-done and
-  // it never enters Design, Plan or Build, so placing it on the six-phase ladder claims a journey it
-  // does not take. E75 folds it into Foundation, a Product-level phase of its own.
-  assert.equal(currentPhase('discovery'), 'discover', 'the STEP is a Discover step…');
-  assert.equal(currentPhase('discovery', { discovery: true }), null, '…but this epic is not on the ladder');
-  assert.equal(phaseOf('discovery-review', { discovery: true }), null);
+test('the product level is in the Foundation phase for its whole life, and never on the feature ladder', () => {
+  // Until E75 this pinned the opposite — the front-zero had NO phase, because the Product level was
+  // named and not modelled. It is modelled now: a ladder of its own with one phase, Foundation.
+  //
+  // The LEVEL decides, not the step id, and the sentinel is what proves it: `foundation-done` is not a
+  // step, so a lookup by id alone would drop an approved Foundation out of its phase the moment it
+  // passed its gate.
+  for (const cur of ['foundation', 'foundation-review', 'foundation-done', 'discovery', 'discovery-done']) {
+    assert.equal(currentPhase(cur, { product: true }), 'foundation', cur);
+  }
+  assert.equal(currentPhase('foundation-done'), null, 'without the level, a sentinel is still nothing');
+  assert.equal(phaseOf('discovery-review', { product: true }).name, 'Foundation');
+  assert.equal(phaseOf('foundation', { product: true }).level, 'product');
+  // The six phases are untouched: the Foundation is not a seventh step on the feature lifecycle.
+  assert.deepEqual(PHASES.map((p) => p.id), ['discover', 'design', 'plan', 'build', 'release', 'operate']);
+  assert.equal(PHASES.some((p) => phaseSteps(p.id).includes('foundation')), false);
 });
 
 test('every step the engine can run is listed in a phase table BY NAME', () => {
   // Asserted on the tables, not through `stepPhase` — a `-review` id would satisfy a truthiness check
   // through the suffix strip without ever appearing in a table, so the looser test would pass while
   // the entry was missing.
-  const listed = new Set(PHASES.flatMap((p) => phaseSteps(p.id)));
+  const listed = new Set([...PHASES, ...PRODUCT_PHASES].flatMap((p) => phaseSteps(p.id)));
   for (const id of [...Object.keys(STEP_SKILL), ...Object.keys(BUILD_STEP_SKILL)]) {
     assert.ok(listed.has(id), `${id} has a skill but is in no phase table`);
   }
@@ -1022,12 +1054,11 @@ function templateSeed(skillFile) {
 }
 
 // What is LEFT after E17b. `yad-epic`, `yad-analysis` and `yad-stub` no longer carry one — they run
-// `yad epic new` instead, and the test below is what keeps those templates from coming back. These two
-// remain because the engine deliberately does not seed either: `yad-discovery` is the product
-// front-zero that E75 absorbs, and `yad-change`'s chain is threaded — inherited steps bound to a
-// parent's hashes, with provenance records beside them.
+// `yad epic new` instead, and `yad-discovery` runs `yad foundation new` (E75); the test below is what
+// keeps those templates from coming back. This one remains because the engine deliberately does not
+// seed it: `yad-change`'s chain is threaded — inherited steps bound to a parent's hashes, with
+// provenance records beside them.
 const SEED_TEMPLATES = [
-  ['yad-discovery/SKILL.md', 'discovery'],
   ['yad-change/references/triage.md', 'classic'],
 ];
 
@@ -1039,6 +1070,8 @@ const ENGINE_SEEDED = [
   ['yad-epic/SKILL.md', 'yad epic new'],
   ['yad-analysis/SKILL.md', 'yad epic new EP-<slug> --profile analysis-first'],
   ['yad-stub/SKILL.md', 'yad epic new EP-<slug> --stub'],
+  // E75: the Product level has a command of its own, and the skill that authors it runs that.
+  ['yad-discovery/SKILL.md', 'yad foundation new'],
 ];
 
 test('the skills that call the engine carry no chain of their own to drift', () => {
@@ -1064,7 +1097,7 @@ test('the skills E17b changed instruct no ledger write at all', () => {
   // A prose heuristic over 38 files cannot be made both. So the check is narrow and exact instead: the
   // nine skills this task changed, each asserted to contain no imperative aimed at the ledger.
   const CHANGED = ['yad-epic', 'yad-analysis', 'yad-stub', 'yad-architecture', 'yad-ui',
-    'yad-stories', 'yad-test-cases', 'yad-review-gate'];
+    'yad-stories', 'yad-test-cases', 'yad-review-gate', 'yad-discovery'];
   // An imperative aimed at the ledger, in EITHER word order — and both orders are needed, because the
   // blocks this task deleted used the second one. `Create {project-root}/…/.sdlc/state.json` puts the
   // verb first; ``In `state.json`: set `architecture.status` to done`` puts the file first, and a
@@ -1113,16 +1146,18 @@ test('the skills that still write a chain by hand are named, with the reason', (
   const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
   assert.match(gate, /TRANSCRIPTION of `advanceState`/);
   for (const [skill, why] of [
-    ['yad-discovery', /front-zero/],
     ['yad-change', /threaded/],
     ['yad-backfill', /promote/],
   ]) {
     assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
     assert.match(gate, why, `the banner does not say WHY ${skill} is still one`);
   }
-  // …and each of those three really does still seed or rewrite a chain, so the banner is not naming
-  // skills that have already been converted.
-  for (const d of ['yad-discovery', 'yad-change', 'yad-backfill']) {
+  // `yad-discovery` left the list in E75, and the banner says where it went rather than dropping it
+  // silently — a reader who remembers it as a writer would otherwise go looking for the JSON block.
+  assert.match(gate, /`yad-discovery` used to be the third; since E75 it runs\s+> `yad foundation new`/);
+  // …and each of those really does still seed or rewrite a chain, so the banner is not naming skills
+  // that have already been converted.
+  for (const d of ['yad-change', 'yad-backfill']) {
     const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
     assert.match(src, /state\.json/, `${d}: no longer touches the ledger — drop it from the banner`);
   }
@@ -1283,4 +1318,120 @@ test('seedState --stub: the classic chain, every step todo behind the sentinel',
   assert.equal('kind' in plain, false);
   assert.equal(plain.currentStep, 'epic');
   assert.equal(backfillAnchorKind(plain), null);
+});
+
+// ---- the Product level: Foundation (E75) ---------------------------------------------------------
+
+test('epicRoot is the one place that knows the Foundation lives outside epics/', () => {
+  // Every command resolves an epic's directory through this function, so pinning it here is what keeps
+  // `yad gate open EP-foundation foundation/` from needing a special case at each call site.
+  assert.equal(epicRoot('/p', FOUNDATION_EPIC), path.join('/p', FOUNDATION_DIR));
+  assert.equal(epicRoot('/p', 'EP-cart'), path.join('/p', 'epics', 'EP-cart'));
+  assert.equal(epicRel(FOUNDATION_EPIC), 'foundation');
+  assert.equal(epicRel('EP-cart'), 'epics/EP-cart');
+  // The id keeps the prefix every review router matches: parseReviewBranch here, and `review/EP-*` in
+  // both gate-sync workflows committed in users' repos.
+  assert.deepEqual(parseReviewBranch('review/EP-foundation/foundation'), { epic: FOUNDATION_EPIC, base: 'foundation' });
+  assert.equal(artifactFromBase(artifactBase('foundation/')), 'foundation/');
+});
+
+test('epicIds lists the Foundation only once its ledger folder exists, and never a stray copy under epics/', () => {
+  const T = hub();
+  try {
+    writeEpic(T, 'EP-cart', { kind: 'feature' });
+    // An unrelated `foundation/` folder — a docs section, say — is somebody else's files, not a ledger.
+    fs.mkdirSync(path.join(T, 'foundation'), { recursive: true });
+    assert.deepEqual(epicIds(T), ['EP-cart']);
+    fs.mkdirSync(path.join(T, 'foundation', '.sdlc'), { recursive: true });
+    assert.deepEqual(epicIds(T), ['EP-cart', FOUNDATION_EPIC]);
+    // `epics/EP-foundation/` resolves to `foundation/` through epicRoot, so listing it would read the
+    // real Foundation twice under one id.
+    fs.mkdirSync(path.join(T, 'epics', FOUNDATION_EPIC, '.sdlc'), { recursive: true });
+    assert.deepEqual(epicIds(T), ['EP-cart', FOUNDATION_EPIC]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('foundationHash: reviewable once every REQUIRED section exists; an optional one counts when present', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-'));
+  try {
+    const write = (f, body = `# ${f}\n`) => fs.writeFileSync(path.join(T, f), body);
+    for (const f of FOUNDATION_REQUIRED.slice(1)) write(f);
+    assert.equal(foundationHash(T), null, 'one required section missing — not reviewable');
+    write(FOUNDATION_REQUIRED[0]);
+    const without = foundationHash(T);
+    assert.match(without, /^sha256:/, 'complete without market.md and risks.md');
+    assert.equal(artifactHash(T, 'foundation/'), without, 'the gate hashes the Foundation through the same function');
+    write('risks.md');
+    assert.notEqual(foundationHash(T), without, 'adding an optional section is an edit reviewers did not see');
+    write('stray.md');
+    const withRisks = foundationHash(T);
+    assert.equal(foundationHash(T), withRisks, 'a file that is not a section is not hashed');
+    // The optional/required split is a RULE, and with the shipped sections it cannot be told apart from
+    // "hash whatever exists" on a complete Foundation. So it is shown on sections where it matters: a
+    // required file that is missing yields null, the same file marked optional does not.
+    const sections = [{ file: 'purpose.md' }, { file: 'extra.md' }];
+    assert.equal(foundationHash(T, sections), null);
+    assert.match(foundationHash(T, [{ file: 'purpose.md' }, { file: 'extra.md', optional: true }]), /^sha256:/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  assert.deepEqual(artifactPaths('foundation'), FOUNDATION_SECTIONS.map((s) => s.file));
+  assert.deepEqual(FOUNDATION_SECTIONS.filter((s) => s.optional).map((s) => s.file), ['market.md', 'risks.md']);
+});
+
+test('seedFoundationState writes the product level: fixed id, a kind marker, no work-item type', () => {
+  const s = seedFoundationState({ today: '2026-09-13' });
+  assert.deepEqual(Object.keys(s), ['epicId', 'createdAt', 'kind', 'profile', 'currentStep', 'steps']);
+  assert.equal(s.epicId, FOUNDATION_EPIC);
+  assert.equal(s.kind, 'foundation');
+  assert.equal(isProductLevel(s), true);
+  assert.deepEqual(s.steps.map((x) => [x.id, x.type, x.artifact, x.status]), [
+    ['foundation', 'author', 'foundation/', 'in_progress'],
+    ['foundation-review', 'review+approve', 'foundation/', 'todo'],
+  ]);
+  assert.equal(matchLifecycleProfile(s.steps), 'foundation');
+  assert.deepEqual(productProfiles(), ['discovery', 'foundation']);
+  // The feature seed still refuses every product route — the predicate was not loosened.
+  assert.throws(() => seedState({ epic: FOUNDATION_EPIC, profile: 'foundation', type: 'feature', today: 'x' }),
+    /cannot seed the 'foundation' lifecycle profile/);
+});
+
+test('the product level ends on its own -done word, one per spelling', () => {
+  const chain = (kind, a, r) => ({ kind, currentStep: r, steps: [
+    { id: a, type: 'author', artifact: `${kind}/`, status: 'done' },
+    { id: r, type: 'review+approve', artifact: `${kind}/`, status: 'in_review' },
+  ] });
+  const f = advanceState(chain('foundation', 'foundation', 'foundation-review'), { id: 'foundation-review' });
+  assert.equal(f.currentStep, 'foundation-done');
+  const d = advanceState(chain('discovery', 'discovery', 'discovery-review'), { id: 'discovery-review' });
+  assert.equal(d.currentStep, 'discovery-done', 'an unconverted ledger keeps writing the word its readers expect');
+  assert.deepEqual(PRODUCT_DONE, ['foundation-done', 'discovery-done']);
+  for (const w of PRODUCT_DONE) assert.ok(SENTINELS.includes(w), `${w} is a sentinel`);
+});
+
+test('nextAction walks the Foundation like the old front-zero, under its own id and words', () => {
+  const st = (currentStep, a, r) => ({ epicId: FOUNDATION_EPIC, kind: 'foundation', currentStep, steps: [
+    { id: 'foundation', type: 'author', artifact: 'foundation/', status: a },
+    { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: r },
+  ] });
+  const author = nextAction({ state: st('foundation', 'in_progress', 'todo'), hubPrs: [] }, { epic: FOUNDATION_EPIC });
+  assert.equal(author.kind, 'author');
+  assert.equal(author.skill, 'yad-discovery');
+  const open = nextAction({ state: st('foundation-review', 'done', 'in_review'), hubPrs: [] }, { epic: FOUNDATION_EPIC });
+  assert.equal(open.command, 'yad gate open EP-foundation foundation/');
+  assert.equal(open.parallel, undefined, 'no parallel track on the product level');
+  const done = nextAction({ state: st('foundation-done', 'done', 'done'), hubPrs: [] }, { epic: FOUNDATION_EPIC });
+  assert.equal(done.kind, 'foundation-done');
+  assert.match(done.why, /Foundation approved/);
+  assert.equal(preconditionsMet(null, 'foundation').ok, true, 'an entry step, like epic / analysis');
+});
+
+test('the foundation step inherits a binding made for discovery, until it has its own', () => {
+  // A project that bound its own skill to `discovery` before E75 must not be switched back to the
+  // default by a rename it did not ask for (rule 3).
+  assert.deepEqual(stepSkills('foundation', { steps: { discovery: ['ours'] } }), ['ours']);
+  assert.deepEqual(stepSkills('foundation', { steps: { discovery: ['ours'], foundation: ['mine'] } }), ['mine']);
+  assert.deepEqual(stepSkills('foundation', { steps: {} }), ['yad-discovery']);
+  // One direction only: the old step does not start reading the new step's binding.
+  assert.deepEqual(stepSkills('discovery', { steps: { foundation: ['mine'] } }), ['yad-discovery']);
+  // A hostile step id resolves through nothing on the prototype.
+  assert.deepEqual(stepSkills('constructor', { steps: {} }), []);
 });

@@ -18,7 +18,8 @@ no clone needed.
 | Command | What it does |
 |---------|--------------|
 | `npx yadflow setup` | Guided first-run wizard — a short **profile interview** (solo/team, greenfield/brownfield, monorepo/separate) then the branched steps below. Pre-answer for CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`. |
-| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first\|chore\|spike` (default `classic`) — `chore` and `spike` are the [short lanes](#the-short-lanes), and neither carries an architecture gate, so neither may move the contract surface. The `discovery` front-zero has a fixed id and no `epic.md`, so `yad-discovery` stays its author. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `todo`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script — its `next` key names the skill to run now, with a `nextSkills` array beside it when the step is bound to a chain (the same rule `yad next --json` follows: the array appears only when there is more than one). It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-discovery` and `yad-change` still write one, because the engine deliberately seeds neither. |
+| `yad epic new <slug>` | **Start an epic — the engine writes its lifecycle.** Seeds `epics/EP-<slug>/.sdlc/state.json` with the step chain of a [lifecycle profile](#lifecycle-profiles-the-route-an-epic-takes), plus an empty `approvals.json`, an empty `comments.json` and the `reviews/` directory. `--type feature\|chore` (default `feature`) — a `change`, `defect` or `hotfix` threads off an epic that already exists, so its chain inherits that epic's approved steps and the `yad-change` skill seeds it instead. `--profile classic\|analysis-first\|chore\|spike` (default `classic`) — `chore` and `spike` are the [short lanes](#the-short-lanes), and neither carries an architecture gate, so neither may move the contract surface. Both Product-level ids (`EP-foundation`, `EP-discovery`) and both product routes are refused: the Product level has a fixed id and no `epic.md`, so `yad foundation new` seeds it. `--stub` mints a brownfield **anchor** instead: the same `classic` chain with every step `todo`, the marker `kind: "stub"` and `currentStep: "backfill-pending"`, so a defect can thread off a feature that shipped before the Product existed (`yad-backfill promote` wakes it). A stub is always a `feature` and always `classic`; `--type` and `--profile` are refused with it. `--json` for a script — its `next` key names the skill to run now, with a `nextSkills` array beside it when the step is bound to a chain (the same rule `yad next --json` follows: the array appears only when there is more than one). It writes **no `epic.md`, no branch and no commit**: the epic document is prose you author with the skill the chain names next. **Refuses an epic that already has a `state.json`** — nothing here overwrites a ledger, and there is no flag for it. The skills that start an epic run this rather than writing a chain of their own; `yad-change` still writes one, because the engine deliberately does not seed a threaded chain. |
+| `yad foundation new` | **Start the Foundation — the Product level (E75).** Seeds `foundation/.sdlc/state.json` with the two-step `foundation` route (`foundation` → `foundation-review`), under the fixed id `EP-foundation`, plus an empty `approvals.json`, an empty `comments.json` and `foundation/reviews/`. Run once per product, before any epic; then the `yad-discovery` skill writes the sections — `purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md`, and the optional `market.md` and `risks.md` — and `yad gate open EP-foundation foundation/` opens its review. It writes **no section, no branch and no commit**. **Refuses a second Foundation**, and **refuses a product still on the old `epics/EP-discovery/`** — a product has one product level, and `yad migrate --apply` converts the old one on a local ledger ([shape 8](migrations/shape-8.md)). `--json` for a script: `next` names the skill to run, and `sections` lists the required and optional files. |
 | `yad next [<epic>]` | **Where am I / what next.** With no epic: project-wide orientation — the one next action (run setup, start an epic, or the single active epic's step). With an epic: that epic's exact next action (a skill to invoke or a `yad` command to run). Once the epic is `ready-for-build`, it reads each story's `build-state` and prints the next **build sub-step per repo** (`spec → tasks → implement → checks → engineer-review`) plus the remaining chain and the automation dial — so Build is guided too, not just hinted at. `yad next <epic> --check <step>` exits non-zero when a step is run out of order (the precondition guard); `yad next --all` lists every epic's next action. **`--json`** emits the same answer as a machine-readable action object instead of prose — for an agent or a CI job that would otherwise have to regex the coloured output. Exit codes are unchanged. |
 | `yad skill list` / `yad skill bind <step> <skill>…` / `yad skill unbind <step>` | **Choose which skill runs which step.** The engine ships a default for every step; a project that wants its own records it in `.sdlc/skills.json`, and `yad next` names that one from then on. `list` shows every step a skill runs — Shape review gates are excluded, since `yad gate` drives those — what runs each one, and where that answer came from: `project` (you bound it), `engine` (the default) or `ignored` (your file has a line for that step and the line names no skill, so the default still runs). `--json` for a script. `bind` takes one skill or several — several run as a **chain**, in the order given, each seeing what the one before it produced, and the last output is the artifact; every extra skill is another model run, so the command says so. A **Shape review gate** is refused (nothing would ever invoke the binding); `engineer-review` is a Build step in its own right and **is** bindable. A step this release does not know is recorded with a warning, because your file wins. `unbind` drops the line and the step goes back to the engine's default. See [choosing the skill for a step](#choosing-the-skill-for-a-step). |
 | `npx yadflow check` | Read-only report: what is **missing** / **outdated** (drifted) / **modified** (a managed file *you* edited — see [managed files](#managed-files-what-yad-owns-and-what-you-edited)) / **stale** (code-context) / **legacy** (pre-2.0 `sdlc-*` names) / **removed** (a skill dropped in a later release that still lingers in the install) vs the bundled manifest. |
@@ -69,7 +70,7 @@ every route, so a caller never branches on the output shape:
 
 ```jsonc
 // yad next --json  /  yad next <epic> --json
-{ "version": "3.13.1", "ok": true, "actions": [ /* one per epic, EP-discovery included */ ] }
+{ "version": "3.13.1", "ok": true, "actions": [ /* one per epic, the Foundation (EP-foundation) included */ ] }
 
 // yad next <epic> --check <step> --json      (exit 1 when the step is blocked, as in prose)
 { "version": "3.13.1", "ok": false, "check": { "epic": "EP-x", "step": "architecture-review", "ok": false, "reason": "…" } }
@@ -82,7 +83,7 @@ every route, so a caller never branches on the output shape:
 ```
 
 Each action carries `epicId`, `kind`
-(`new|author|review-open|review-sync|build|discovery-done|backfill-pending|backfill-done`), `step`,
+(`new|author|review-open|review-sync|build|blocked|foundation-done|discovery-done|backfill-pending|backfill-done`), `step`,
 `status`, `artifact`, `skill`, `command`, `pr`, `parallel`, `builds` (the per-story/per-repo lanes)
 `why`, and `lineageKind` — the work-item type (`feature|change|defect|hotfix|chore`). That key keeps
 its older name on purpose: the golden compatibility test deep-equals this output, and a deep-equal
@@ -236,7 +237,7 @@ every step belongs to exactly one:
 
 | Phase | Part | Steps |
 |---|---|---|
-| Discover | Shape | `discovery` · `analysis` · `epic`, each with its review gate |
+| Discover | Shape | `analysis` · `epic`, each with its review gate |
 | Design | Shape | `architecture` (with the locked contract) · `ui-design`, each with its review gate |
 | Plan | Shape | `stories` · `test-cases`, each with its review gate |
 | Build | Build | `spec` · `tasks` · `implement` · `checks` · `engineer-review` |
@@ -248,9 +249,12 @@ lifecycle does not appear to stop at merge.
 
 An epic sitting on the `ready-for-build` marker is in **Build**, and stays there for the rest of its
 life: the individual Build steps run per story per code repo, so the epic-level view names the phase
-rather than the step. No line is printed at all for a stub epic, for `EP-discovery` (which is
-product-level and does not walk this lifecycle), or for a step id this release does not recognise —
-showing the wrong phase would be worse than showing none.
+rather than the step. No line is printed at all for a stub epic, or for a step id this release does not
+recognise — showing the wrong phase would be worse than showing none.
+
+The **Foundation** (`EP-foundation`, and `EP-discovery`, its older spelling) is not on this ladder. It is
+the **Product level**, which runs once per product before any epic, and it has one phase of its own,
+**Foundation**. `yad next` prints `phase: Foundation` for it instead of the six.
 
 A phase is worked out from the step id. It is **not stored in any file**, so there is nothing to keep
 in step, nothing to migrate, and no way for it to disagree with the step it describes. `yad doctor`
@@ -288,7 +292,8 @@ A step id the catalogue does not carry is left to `phase:unknown`, which is the 
 ## Lifecycle profiles: the route an epic takes
 
 The step catalogue says what each step is. A **profile** says which steps an epic walks and in what
-order. Five exist, and they are written down once — in code, which is what `yad epic new` seeds from:
+order. Six exist, and they are written down once — in code, which is what `yad epic new` and
+`yad foundation new` seed from:
 
 | Profile | What it is | Used by |
 |---|---|---|
@@ -296,7 +301,8 @@ order. Five exist, and they are written down once — in code, which is what `ya
 | `analysis-first` | The 12-step chain, which puts the analysis before the epic | An idea shaped by the analyst before it becomes an epic |
 | `chore` | The upkeep lane: four steps, the epic then the stories | Work somebody has already decided on — a dependency bump, a CI move |
 | `spike` | The investigation lane: six steps, the analysis then the upkeep lane | A timeboxed question, where finding the answer is the work |
-| `discovery` | The product front-zero, two steps and no Build | The one `EP-discovery` item, which frames the whole product |
+| `discovery` | The OLD spelling of the Product level, two steps and no Build | A product made before E75, until `yad migrate --apply` converts it |
+| `foundation` | The Product level — the Foundation — two steps and no Build | The one `EP-foundation` item in `foundation/`, which frames the whole product (`yad foundation new`) |
 
 The first three of those are routes the tool already used, written by hand into five skill files
 before the engine held them. `chore` and `spike` are new.
@@ -393,7 +399,7 @@ picks its own in `.sdlc/skills.json`:
 
 ```jsonc
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "steps": {
     "architecture": "our-architecture-skill",
     "stories": ["shape-the-stories", "yad-stories"]

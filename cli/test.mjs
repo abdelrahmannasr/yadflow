@@ -2165,10 +2165,10 @@ test('runNext --json does NOT gain a theme key, even on a themed epic', async ()
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('runNext: NO phase line for EP-discovery — it does not walk the feature lifecycle', async () => {
-  // The product-level front-zero. Its whole chain is discovery -> discovery-review -> discovery-done;
-  // it never enters Design, Plan or Build, so printing the six-phase lifecycle for it claims a
-  // journey it does not take. E75 folds it into Foundation, which is a Product-level phase of its own.
+test('runNext: the product level prints the Foundation phase, never the six-phase strip', async () => {
+  // Until E75 this asserted NO phase line at all for EP-discovery, because the Product level had no
+  // phase. It has one now, on a ladder of its own — so the line is back, and it is a different line:
+  // the feature phases (Design, Plan, Build…) must not appear, because the Foundation never walks them.
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-phase3-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
@@ -2178,7 +2178,8 @@ test('runNext: NO phase line for EP-discovery — it does not walk the feature l
   });
   const s = await grab(() => runNext(T, { epic: 'EP-discovery' }));
   assert.match(s, /yad-discovery/, 'the action itself is still printed');
-  assert.equal(/phase:/.test(s), false, s);
+  assert.match(s, /phase: Foundation/);
+  assert.doesNotMatch(s, /Design|Build/, 'the feature ladder is not printed for the product level');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -2273,6 +2274,63 @@ test('runNext: an open EP-discovery is surfaced (its gate action), not mixed int
   ] });
   const s = await grab(() => runNext(T, {}));
   assert.match(s, /yad gate (open|sync) EP-discovery discovery\//);
+});
+
+// The Foundation (E75): `foundation/.sdlc/state.json`, not `epics/`. Written by hand here rather than
+// through `seedEpic`, whose path is the thing that differs.
+function seedFoundation(T, state) {
+  fs.mkdirSync(path.join(T, 'foundation', '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'foundation', '.sdlc', 'state.json'), JSON.stringify(state));
+}
+const fstate = (currentStep, author, review) => ({ epicId: 'EP-foundation', kind: 'foundation', currentStep, steps: [
+  S('foundation', 'author', author, 'foundation/'), S('foundation-review', 'review+approve', review, 'foundation/'),
+] });
+
+test('runNext: an unapproved Foundation ahead of feature epics is REPORTED, never a block (E75)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-next-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    seedFoundation(T, fstate('foundation-review', 'done', 'in_review'));
+    seedEpic(T, 'EP-a', chain({ currentStep: 'architecture', architecture: 'in_progress' }));
+    const s = await grab(() => runNext(T, {}));
+    assert.match(s, /yad gate open EP-foundation foundation\//, 'the Foundation action comes first');
+    assert.match(s, /EP-foundation has not passed its gate — 1 feature epic\(s\) are going ahead of it \(reported, not enforced\)/);
+    assert.match(s, /EP-a/, 'and the feature epic is still shown — nothing is withheld');
+    // Once it passes, the report goes quiet.
+    seedFoundation(T, fstate('foundation-done', 'done', 'done'));
+    assert.doesNotMatch(await grab(() => runNext(T, {})), /going ahead of it/);
+    // `--json` lists it like every other ledger, under its own id.
+    const j = JSON.parse(await grab(() => runNext(T, { json: true })));
+    assert.deepEqual(j.actions.map((a) => a.epicId).sort(), ['EP-a', 'EP-foundation']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('runNext: two product levels — the Foundation is used and the old one is named', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-two-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    seedFoundation(T, fstate('foundation', 'in_progress', 'todo'));
+    seedEpic(T, 'EP-discovery', { epicId: 'EP-discovery', kind: 'discovery', currentStep: 'discovery-review', steps: [
+      S('discovery', 'author', 'done', 'discovery/'), S('discovery-review', 'review+approve', 'in_review', 'discovery/'),
+    ] });
+    const s = await grab(() => runNext(T, {}));
+    assert.match(s, /two product levels: foundation and epics\/EP-discovery — EP-foundation is the one used/);
+    assert.match(s, /EP-foundation/);
+    assert.doesNotMatch(s, /yad gate open EP-discovery/, 'the old one is named, not acted on');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('runNext: a project with no product level is pointed at `yad foundation new`', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-none-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    const s = await grab(() => runNext(T, {}));
+    assert.match(s, /run yad foundation new, then invoke the yad-discovery skill/);
+    assert.match(s, /start your first epic/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('runNext: a defect epic renders the "Defect" kind noun in its header', async () => {
@@ -3138,6 +3196,54 @@ test('gate sync: EP-discovery advances through the SAME gate to discovery-done (
   const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
   assert.ok(!approvals.some((a) => a.role === 'domain-owner'), 'discovery never escalates to domain owners');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('gate sync: EP-foundation advances through the SAME gate at foundation/ to foundation-done, and its sections flip to approved (E75)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gate-foundation-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+      platform: 'github', default_branch: 'main',
+      roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
+    }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    const fd = path.join(T, 'foundation');
+    fs.mkdirSync(path.join(fd, '.sdlc'), { recursive: true });
+    // Every required section, so the Foundation is reviewable (hash-bound). The optional two are absent.
+    for (const s of ['purpose', 'scope', 'mvp', 'roadmap', 'stack', 'repos']) {
+      fs.writeFileSync(path.join(fd, `${s}.md`), `---\nid: EP-foundation\nartifact: ${s}\nstatus: draft\n${s === 'purpose' ? 'owner: alice\n' : ''}---\n# ${s}\n`);
+    }
+    fs.writeFileSync(path.join(fd, '.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep: 'foundation-review',
+      steps: [
+        { id: 'foundation', type: 'author', artifact: 'foundation/', status: 'done', risk_tags: [] },
+        { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
+      ],
+    }));
+    fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+      { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
+    ]));
+    const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc',
+      reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }],
+      threads: [] };
+    await gateSync(T, { epic: 'EP-foundation', today: '2026-06-09', reader: () => approval });
+    assert.equal(fs.existsSync(path.join(T, 'epics/EP-foundation')), false, 'nothing is written at an epics/ path');
+    const state = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/state.json')));
+    assert.equal(state.steps.find((s) => s.id === 'foundation-review').status, 'done');
+    assert.equal(state.currentStep, 'foundation-done', 'the Foundation terminates at foundation-done, never ready-for-build');
+    const approvals = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/approvals.json')));
+    assert.ok(approvals.length > 0 && approvals.every((a) => a.step === 'foundation-review'));
+    assert.ok(!approvals.some((a) => a.role === 'domain-owner'), 'the Foundation never escalates to domain owners');
+    const prs = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/hub-prs.json')));
+    assert.notEqual(prs[0].lastSyncedAt, null, 'the PR record is written back beside the ledger');
+    // `gate ci` reconciles the frontmatter right after an advance; do the same step here. Imported HERE,
+    // not from the file-level binding further down: Node 20 starts running tests while this file is
+    // still at that top-level await, so the binding is not initialised yet when this test runs.
+    const { syncStatuses } = await import('./artifact-status.mjs');
+    const st = await syncStatuses(T, { epic: 'EP-foundation' });
+    assert.ok(st.files.includes(path.join('foundation', 'scope.md')), 'the rewritten section is reported at its foundation/ path');
+    assert.match(fs.readFileSync(path.join(fd, 'scope.md'), 'utf8'), /^status: approved$/m, 'the sections flip to approved');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('gate sync: an approval on an older commit than the merged head is stale — gate holds (revoke-on-change in code)', async () => {
@@ -11013,7 +11119,8 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
     decide(T, 'epics/EP-seeded/.sdlc/state.json', { runner });
     const probe = runner.calls.find((c) => c.includes('ls-tree'));
     assert.ok(probe, 'the seeded set is read with ls-tree');
-    assert.match(probe, /ls-tree -r --name-only -z origin\/main -- epics$/, 'origin/<default>, hub-relative pathspec');
+    // Both ledger folders, hub-relative: `epics` and the Foundation's own `foundation` (E75).
+    assert.match(probe, /ls-tree -r --name-only -z origin\/main -- epics foundation$/, 'origin/<default>, hub-relative pathspec');
     assert.ok(!runner.calls.some((c) => c.includes('cat-file')), 'no repo-root-relative rev:path probe');
     assert.ok(!runner.calls.some((c) => / main\^\{commit\}/.test(c)), 'the local branch is never a candidate');
     // The config's default_branch is used as origin/<it>, not as a local ref.
@@ -11695,13 +11802,17 @@ test('yad epic new: an unknown type and an unknown route each say what is allowe
   } finally { cleanTmp(route.T); }
 });
 
-test('yad epic new: the discovery front-zero is refused and named, not listed as a typo', async () => {
-  const { T, out, failed } = await epicNewOn({ slug: 'x', profile: 'discovery' });
-  try {
-    assert.equal(failed, true);
-    assert.match(out, /not seeded from here/);
-    assert.match(out, /yad-discovery/);
-  } finally { cleanTmp(T); }
+test('yad epic new: a product route is refused and named, not listed as a typo', async () => {
+  // Both product routes — the Foundation and its old `discovery` spelling (E75) — point at the command
+  // that seeds the Product level, rather than at the skill that only authors it.
+  for (const profile of ['discovery', 'foundation']) {
+    const { T, out, failed } = await epicNewOn({ slug: 'x', profile });
+    try {
+      assert.equal(failed, true, profile);
+      assert.match(out, /not seeded from here/);
+      assert.match(out, /yad foundation new/);
+    } finally { cleanTmp(T); }
+  }
 });
 
 test('yad epic new: the front-zero id is reserved, whatever route is asked for', async () => {
@@ -11713,8 +11824,8 @@ test('yad epic new: the front-zero id is reserved, whatever route is asked for',
     const { T, out, failed } = await epicNewOn({ slug });
     try {
       assert.equal(failed, true, slug);
-      assert.match(out, /product front-zero/);
-      assert.match(out, /yad-discovery/);
+      assert.match(out, /is the Product level/);
+      assert.match(out, /yad-discovery/, 'the skill that authors it is still named, after the seed command');
       assert.equal(fs.existsSync(path.join(T, 'epics/EP-discovery')), false, slug);
     } finally { cleanTmp(T); }
   }
@@ -12546,5 +12657,287 @@ test('yad skill: a bind with no skill named is a usage error, not an empty bindi
     assert.equal(failed, true);
     assert.match(out, /usage: yad skill unbind/);
     assert.equal(fs.existsSync(path.join(T, '.sdlc/skills.json')), false, 'a usage error must write nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E75: every walker sees the Foundation, which lives outside epics/ ---------------------------
+
+// A project that has a Foundation and NO `epics/` directory at all — the shape every walker used to
+// return early on, before it ever looked for `foundation/`.
+function foundationOnlyProject(state) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-walk-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.0.0' }));
+  fs.mkdirSync(path.join(T, 'foundation', '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'foundation', '.sdlc', 'state.json'), JSON.stringify(state, null, 2) + '\n');
+  return T;
+}
+const FOUNDATION_STATE = (currentStep, author, review) => ({
+  epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep, steps: [
+    { id: 'foundation', type: 'author', artifact: 'foundation/', status: author, risk_tags: [] },
+    { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: review, risk_tags: [] },
+  ],
+});
+
+test('doctor: a project whose only ledger is the Foundation is still checked (E75)', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = foundationOnlyProject(FOUNDATION_STATE('foundation', 'in_progress', 'todo'));
+  try {
+    const checks = collectDoctor(T).checks;
+    const epic = checks.find((x) => x.id === 'epic:EP-foundation');
+    assert.ok(epic, `no epic check for the Foundation: ${checks.map((x) => x.id).join(', ')}`);
+    assert.equal(epic.status, 'ok');
+    // The catalogue and route checks read the same list: a Foundation chain is on its route and
+    // every step id is known, so neither reports it.
+    assert.equal(checks.some((x) => ['step:off-route', 'phase:unknown', 'profile:disagree'].includes(x.id)), false,
+      checks.filter((x) => x.status !== 'ok').map((x) => `${x.id}: ${x.message}`).join('\n'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('sync-status: Foundation sections flip with their gate, like any other artifact (E75)', async () => {
+  const { syncStatuses } = await import('./artifact-status.mjs');
+  const T = foundationOnlyProject(FOUNDATION_STATE('foundation-done', 'done', 'done'));
+  try {
+    fs.writeFileSync(path.join(T, 'foundation', 'scope.md'), '---\nartifact: scope\nstatus: draft\n---\n# scope\n');
+    fs.writeFileSync(path.join(T, 'foundation', 'notes.md'), '---\nstatus: draft\n---\n# not a section\n');
+    const res = await grab(() => syncStatuses(T, {}));
+    assert.match(fs.readFileSync(path.join(T, 'foundation', 'scope.md'), 'utf8'), /status: approved/, res);
+    assert.match(fs.readFileSync(path.join(T, 'foundation', 'notes.md'), 'utf8'), /status: draft/,
+      'a file that is not a Foundation section is not touched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('usage: a Foundation section commit counts as authoring, under the Foundation id (E75)', async () => {
+  const { isArtifactPath } = await import('./usage.mjs');
+  assert.equal(isArtifactPath('foundation/scope.md'), true);
+  assert.equal(isArtifactPath('foundation/.sdlc/state.json'), false, 'the ledger is gate machinery, not authoring');
+  assert.equal(isArtifactPath('foundation/notes.md'), false);
+  assert.equal(isArtifactPath('foundation/nested/scope.md'), false);
+  assert.equal(isArtifactPath('epics/EP-x/epic.md'), true, 'the feature paths are unchanged');
+});
+
+test('hook: the Foundation ledger is protected under its fixed id, and its base seed is recognised (E75)', async () => {
+  const { protectedLedgerPath, seededSlugs } = await import('./hook.mjs');
+  assert.deepEqual(protectedLedgerPath('foundation/.sdlc/state.json'), { epic: 'EP-foundation', rel: 'foundation/.sdlc/state.json', kind: 'state' });
+  assert.equal(protectedLedgerPath('foundation/.sdlc/hub-prs.json').kind, 'state');
+  assert.equal(protectedLedgerPath('foundation/reviews/foundation--2026-09-13--comments.md').kind, 'review');
+  assert.equal(protectedLedgerPath('foundation/scope.md'), null, 'a section is the author\'s, not CI\'s');
+  assert.equal(protectedLedgerPath('foundationx/.sdlc/state.json'), null, 'a folder that merely starts with the name');
+  // The base listing now spans both folders, and the Foundation's ledger folds to its id — so an edit to
+  // an on-base Foundation is a mutation, not a creation.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hook-foundation-'));
+  try {
+    const calls = [];
+    const runner = (cmd, args = []) => {
+      calls.push(args.join(' '));
+      const line = args.join(' ');
+      if (line.includes('symbolic-ref')) return { ok: true, stdout: 'origin/main', code: 0 };
+      if (line.includes('rev-parse --verify')) return { ok: true, stdout: '', code: 0 };
+      if (line.includes('ls-tree')) return { ok: true, code: 0, stdout: ['epics/EP-a/.sdlc/state.json', 'foundation/.sdlc/state.json', 'foundation/scope.md'].join('\0') };
+      return { ok: false, stdout: '', code: 1 };
+    };
+    // …and, with a Foundation on base, `ep-discovery` too: a fresh old-spelling ledger would be a second
+    // product level, not a new epic.
+    assert.deepEqual([...seededSlugs(T, {}, runner)].sort(), ['ep-a', 'ep-discovery', 'ep-foundation']);
+    assert.ok(calls.some((c) => / -- epics foundation$/.test(c)), `ls-tree must list foundation too: ${calls.join(' | ')}`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: a verified Product with a Foundation is warned when its wired checks predate foundation/ (E75)', async () => {
+  const { foundationChecks, collectDoctor } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-guard-'));
+  const run = () => { const checks = []; foundationChecks(checks, T); return checks; };
+  const tpl = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    // The copy a 3.18.1 Product has committed — it knows `epics/` only.
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), tpl('cli/fixtures/ledger-guard-v3.18.1.sh'));
+    fs.writeFileSync(path.join(T, 'checks/pr-title.sh'), tpl('skills/yad-pr-template/templates/checks/pr-title.sh'));
+    assert.deepEqual(run(), [], 'no Foundation — nothing to guard, nothing to say');
+
+    fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+    const [w] = run();
+    assert.equal(w?.id, 'foundation:guard');
+    assert.equal(w.status, 'warn');
+    assert.match(w.message, /checks\/ledger-guard\.sh does not know `foundation\/`/);
+    assert.doesNotMatch(w.message, /pr-title/, 'the refreshed PR gate is not named');
+    assert.match(w.hint, /yad update/);
+    assert.ok(collectDoctor(T).checks.some((x) => x.id === 'foundation:guard'), 'wired into yad doctor, not just exported');
+
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), tpl('skills/yad-checks/templates/checks/ledger-guard.sh'));
+    assert.deepEqual(run(), [], 'the current templates guard it');
+
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), tpl('cli/fixtures/ledger-guard-v3.18.1.sh'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'local' }));
+    assert.deepEqual(run(), [], 'a local ledger is written by humans on purpose');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- `yad foundation new` — the engine seeds the Product level (E75) -----------------------------
+async function foundationNewOn({ files = {}, json = false } = {}) {
+  const { runFoundationNew } = await import('./epic.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e75-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+    fs.writeFileSync(path.join(T, rel), body);
+  }
+  const code = process.exitCode;
+  process.exitCode = undefined;
+  const out = await grab(() => runFoundationNew(T, { today: '2026-09-13', json }));
+  const failed = process.exitCode === 1;
+  process.exitCode = code;
+  return { T, out, failed };
+}
+
+test('yad foundation new: writes the Foundation ledger in foundation/, and nothing under epics/', async () => {
+  const { T, out, failed } = await foundationNewOn();
+  try {
+    assert.equal(failed, false, out);
+    const dir = path.join(T, 'foundation');
+    const state = JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'state.json'), 'utf8'));
+    assert.equal(state.schemaVersion, ENGINE_SHAPE, 'stamped by the one writer');
+    assert.equal(state.epicId, 'EP-foundation');
+    assert.equal(state.kind, 'foundation');
+    assert.equal(state.profile, 'foundation');
+    assert.equal('type' in state, false, 'the product level is not a work item');
+    assert.deepEqual(state.steps.map((s) => s.id), ['foundation', 'foundation-review']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, '.sdlc', 'approvals.json'), 'utf8')), []);
+    assert.ok(fs.statSync(path.join(dir, 'reviews')).isDirectory());
+    assert.equal(fs.existsSync(path.join(T, 'epics')), false);
+    assert.equal(fs.readdirSync(dir).filter((f) => f.endsWith('.md')).length, 0, 'no section is written — they are authored');
+    assert.match(out, /EP-foundation seeded/);
+    assert.match(out, /run the yad-discovery skill to author foundation\//);
+    assert.match(out, /yad gate open EP-foundation foundation\//);
+  } finally { cleanTmp(T); }
+});
+
+test('yad foundation new --json names the sections, and a second run refuses', async () => {
+  const { T, out } = await foundationNewOn({ json: true });
+  try {
+    const j = JSON.parse(out);
+    assert.equal(j.ok, true);
+    assert.deepEqual(j.sections, {
+      required: ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'stack.md', 'repos.md'],
+      optional: ['market.md', 'risks.md'],
+    });
+    const { runFoundationNew } = await import('./epic.mjs');
+    const before = fs.readFileSync(path.join(T, 'foundation/.sdlc/state.json'), 'utf8');
+    const code = process.exitCode;
+    const again = await grab(() => runFoundationNew(T, { today: '2026-09-14' }));
+    assert.equal(process.exitCode, 1);
+    process.exitCode = code;
+    assert.match(again, /already has its Foundation/);
+    assert.equal(fs.readFileSync(path.join(T, 'foundation/.sdlc/state.json'), 'utf8'), before, 'nothing overwritten');
+  } finally { cleanTmp(T); }
+});
+
+test('yad foundation new refuses beside the OLD spelling — a product has one product level', async () => {
+  const { T, out, failed } = await foundationNewOn({ files: {
+    'epics/EP-discovery/.sdlc/state.json': JSON.stringify({ epicId: 'EP-discovery', kind: 'discovery', steps: [] }),
+  } });
+  try {
+    assert.equal(failed, true);
+    assert.match(out, /already has a product level, in its old spelling/);
+    assert.match(out, /yad migrate --apply/);
+    assert.equal(fs.existsSync(path.join(T, 'foundation')), false);
+  } finally { cleanTmp(T); }
+});
+
+test('yad epic new refuses both product-level ids, and sends the user to yad foundation new', async () => {
+  for (const slug of ['foundation', 'EP-foundation', 'discovery']) {
+    const { T, out, failed } = await epicNewOn({ slug });
+    try {
+      assert.equal(failed, true, slug);
+      assert.match(out, /is the Product level, not an epic on the ladder/);
+      assert.match(out, /yad foundation new/);
+      assert.equal(fs.existsSync(path.join(T, 'foundation')), false, `${slug}: nothing written into foundation/`);
+    } finally { cleanTmp(T); }
+  }
+});
+
+test('doctor: a product with the wrong number of product levels is told so (E75)', async () => {
+  const { foundationChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-count-'));
+  const run = () => { const checks = []; foundationChecks(checks, T); return checks; };
+  const ledger = (rel, kind) => {
+    fs.mkdirSync(path.join(T, rel, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, rel, '.sdlc/state.json'), JSON.stringify({ kind, steps: [] }));
+  };
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    assert.deepEqual(run(), [], 'no product level at all is a normal project');
+
+    ledger('epics/EP-discovery', 'discovery');
+    let [c] = run();
+    assert.equal(c.id, 'foundation:legacy');
+    assert.equal(c.status, 'warn', 'a local ledger can convert, so it is told how');
+    assert.match(c.hint, /yad migrate --apply/);
+
+    // On a verified ledger nothing can be run, so a warning would be one nobody can ever clear.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    [c] = run();
+    assert.equal(c.id, 'foundation:legacy');
+    assert.equal(c.status, 'ok');
+
+    ledger('foundation', 'foundation');
+    assert.equal(run().find((x) => x.id === 'foundation:two')?.status, 'fail');
+    assert.equal(run().some((x) => x.id === 'foundation:legacy'), false, 'one finding for one fault');
+
+    fs.mkdirSync(path.join(T, 'epics/EP-foundation'), { recursive: true });
+    assert.equal(run().find((x) => x.id === 'foundation:stray')?.status, 'fail');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('hook: with EP-discovery on base, a Foundation ledger counts as already seeded (E75)', async () => {
+  const { seededSlugs } = await import('./hook.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hook-onelevel-'));
+  const runner = (tree) => (cmd, args = []) => {
+    const line = args.join(' ');
+    if (line.includes('symbolic-ref')) return { ok: true, stdout: 'origin/main', code: 0 };
+    if (line.includes('rev-parse --verify')) return { ok: true, stdout: '', code: 0 };
+    if (line.includes('ls-tree')) return { ok: true, code: 0, stdout: tree.join('\0') };
+    return { ok: false, stdout: '', code: 1 };
+  };
+  try {
+    assert.ok(seededSlugs(T, {}, runner(['epics/EP-discovery/.sdlc/state.json'])).has('ep-foundation'));
+    assert.equal(seededSlugs(T, {}, runner(['epics/EP-a/.sdlc/state.json'])).has('ep-foundation'), false,
+      'without the old spelling, a first Foundation is still a creation');
+    assert.ok(seededSlugs(T, {}, runner(['foundation/.sdlc/state.json'])).has('ep-discovery'),
+      'the mirror: with a Foundation on base, an old-spelling ledger is a second product level, not a seed');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate: an incomplete Foundation is named at gate time, and its optional sections never make it incomplete (E75)', async () => {
+  const { warnIncompleteDiscovery } = await import('./gate.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-incomplete-'));
+  try {
+    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'repos.md']) fs.writeFileSync(path.join(T, f), `# ${f}\n`);
+    const out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
+    assert.match(out, /Foundation incomplete — missing stack\.md;/);
+    assert.doesNotMatch(out, /market|risks/);
+    fs.writeFileSync(path.join(T, 'stack.md'), '# stack\n');
+    assert.equal(await grab(() => warnIncompleteDiscovery(T, 'foundation/')), '', 'complete without the optional sections');
+    assert.equal(await grab(() => warnIncompleteDiscovery(T, 'epic.md')), '', 'not a product-level set');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: a stale guard is still stale when a comment in it merely mentions foundation/ (E75)', async () => {
+  const { foundationChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-arm-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    const old = fs.readFileSync(path.join(ROOT, 'cli/fixtures/ledger-guard-v3.18.1.sh'), 'utf8');
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), `${old}\n# note: see foundation/ in a later release\n`);
+    const checks = [];
+    foundationChecks(checks, T);
+    assert.equal(checks.find((c) => c.id === 'foundation:guard')?.status, 'warn');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

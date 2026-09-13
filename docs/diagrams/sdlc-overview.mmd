@@ -20,9 +20,9 @@ flowchart LR
 
     subgraph FRONT["A · Shape — Product · human-gated"]
       direction TB
-      disc["yad-discovery<br/>optional front-zero · once per project<br/>market · competitor · feasibility · requirements · roadmap.md"]:::artifact
-      gDisc{{"gate · discovery · base"}}:::gated
-      dd(["currentStep: discovery-done"]):::sentinel
+      disc["yad foundation new → yad-discovery<br/>Foundation · the Product level · once per product · foundation/<br/>purpose · scope · mvp · roadmap.md · stack · repos"]:::artifact
+      gDisc{{"gate · foundation · base<br/>reported, not enforced"}}:::gated
+      dd(["currentStep: foundation-done"]):::sentinel
       disc --> gDisc --> dd
       an["yad-analysis<br/>optional → analysis.md · once per epic"]:::artifact
       ep["yad-epic<br/>epic.md · assigns EP-&lt;slug&gt;"]:::artifact

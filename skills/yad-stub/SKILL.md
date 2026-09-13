@@ -44,7 +44,7 @@ not a stub case either. Confirm the brownfield-no-epic situation with the human 
 
 ### Step 2 — Derive the stub epic id (engine-assigned, never by hand)
 Derive `EP-<slug>` where `slug` is **2–4 lowercase words** from the feature name (e.g.
-`EP-legacy-billing`). `EP-discovery` is **reserved** — never use it. Check `epics/` for collisions;
+`EP-legacy-billing`). `EP-foundation` and `EP-discovery` are **reserved** (the Product level) — never use either. Check `epics/` for collisions;
 append a distinguishing word if the slug exists. **The id is assigned once and never renamed** (a rename
 breaks every downstream link) — so pick from the best-known feature name and accept it as permanent.
 

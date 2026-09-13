@@ -7,6 +7,10 @@
 #
 # Protected (gate-state, machine-written):
 #   epics/*/.sdlc/state.json, approvals.json, comments.json, product-prs.json, hub-prs.json
+#   foundation/.sdlc/… and foundation/reviews/*.md — the same files for the Product level (E75), whose
+#   ledger lives in its own top-level folder. A copy of this script from before that release does NOT
+#   guard them; `yad doctor` says so on a verified Product that has a Foundation, and `yad update`
+#   refreshes this file.
 #
 # BOTH names of the PR ledger are guarded. It was renamed `hub-prs.json` -> `product-prs.json`, and
 # the engine writes both for one major so that a copy of THIS script which predates the rename still
@@ -234,15 +238,32 @@ is_seeding() {                      # $1 = epic slug; 0 when that epic has no le
           _s="${_p#epics/}"; _s="${_s%%/*}"
           base_slugs[${#base_slugs[@]}]="$(fold "$_s")"
           ;;
+        # The Product level (E75) has ONE ledger, in `foundation/`, under the fixed id EP-foundation.
+        foundation/.sdlc/state.json)
+          base_slugs[${#base_slugs[@]}]="ep-foundation"
+          ;;
       esac
-    done < <(git -c core.quotePath=false ls-tree -r --name-only -z "${BASE}" -- epics 2>/dev/null || true)
+    done < <(git -c core.quotePath=false ls-tree -r --name-only -z "${BASE}" -- epics foundation 2>/dev/null || true)
+    # A product has ONE product level. When its OLD spelling (epics/EP-discovery) is already on BASE, a
+    # Foundation ledger is not a new product level being created — it is a second one replacing a
+    # CI-owned ledger, and on a verified Product no CI path writes one. So it counts as seeded, and a
+    # human commit adding it is a mutation like any other.
+    if in_list "ep-discovery" "${base_slugs[@]}"; then
+      base_slugs[${#base_slugs[@]}]="ep-foundation"
+    fi
+    # …and the mirror: with a Foundation on BASE, a fresh epics/EP-discovery ledger is a second product
+    # level too, not a new epic.
+    if in_list "ep-foundation" "${base_slugs[@]}"; then
+      base_slugs[${#base_slugs[@]}]="ep-discovery"
+    fi
     base_slugs_loaded=1
   fi
   _f="$(fold "$1")"
   in_list "$_f" "${base_slugs[@]}"  && return 1
   in_list "$_f" "${noted_slugs[@]}" && return 0
   noted_slugs[${#noted_slugs[@]}]="$_f"
-  echo "note [ledger-guard]: epics/$1 has no ledger on ${BASE} — new epic, its seed is exempt (creation, not mutation)."
+  if [ "$_f" = "ep-foundation" ]; then _where="foundation"; else _where="epics/$1"; fi
+  echo "note [ledger-guard]: ${_where} has no ledger on ${BASE} — new epic, its seed is exempt (creation, not mutation)."
   return 0
 }
 
@@ -261,6 +282,19 @@ for sha in $commits; do
         is_seeding "$_slug" && continue      # a new epic's seed — not a mutation of a CI-owned ledger
         touches_ledger=1
         echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+        ;;
+      # The Foundation's ledger (E75) — the same files, in the Product level's own folder, under the fixed
+      # id EP-foundation. Matched on the path BELOW `foundation/` with a leading `/` put back, so the
+      # same `*/.sdlc/<file>` test covers the ledger itself and a nested copy (the epic arms' `*` spans
+      # `/` too) without also catching a section file that merely ends in `.sdlc` or `reviews`.
+      foundation/*)
+        case "/${f#foundation/}" in
+          */.sdlc/state.json|*/.sdlc/approvals.json|*/.sdlc/comments.json|*/.sdlc/product-prs.json|*/.sdlc/hub-prs.json|*/reviews/*.md)
+            is_seeding "EP-foundation" && continue
+            touches_ledger=1
+            echo "  ${sha} (author $(git show -s --format='%an' "$sha")) → $f"
+            ;;
+        esac
         ;;
     esac
   done < <(git -c core.quotePath=false diff-tree --no-commit-id --name-only -r -z "$sha")

@@ -2,7 +2,8 @@
 # ledger-guard HARNESS HOOK — the local half of the CI gate of the same name (#171).
 #
 # The gate ledger is CI-owned in verified mode: `checks/ledger-guard.sh` rejects any non-bot commit
-# that changes `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or `epics/*/reviews/*.md`.
+# that changes `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or `epics/*/reviews/*.md`,
+# and the same files for the Foundation in `foundation/.sdlc/` and `foundation/reviews/` (E75).
 # This hook says so at the moment an agent tries the edit, instead of twenty minutes later in a
 # failed pipeline, and names the command that owns the transition (`yad gate open`).
 #

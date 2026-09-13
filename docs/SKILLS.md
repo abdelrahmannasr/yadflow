@@ -77,16 +77,19 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   never touches epic state, approvals, or the contract lock. *AI builds, the hand decides* — and now the
   hand can also learn, on demand, what it is deciding about.
 
-## Front-zero — frame the whole project (once per project, optional, human-gated)
+## Foundation — frame the whole product (the Product level: once per product, optional, human-gated)
 
-- **`yad-discovery`** — *Optional* front-zero, for **greenfield and brownfield**. With the analyst
-  and pm, run market research, a **competitor study** (both modes), a feasibility study, and — in
-  brownfield — a code-aware current-state study, then distil a **functional + non-functional
-  requirements** list and a **phased roadmap** (an explicit **MVP** phase, then later phases) under the
-  reserved `EP-discovery` ("epic zero"). It is gated by the same review gate (base rule: owner + 1
-  reviewer); on approval it terminates at `discovery-done` (no Build). Its `roadmap.md` is the menu
-  of features — each `yad-epic` reads it for project context (reference-only; discovery never
-  auto-seeds epics).
+- **`yad-discovery`** — writes the **Foundation**, for **greenfield and brownfield**. The engine seeds
+  its ledger first with `yad foundation new`; then, with the analyst and pm, the skill writes one file
+  per section into `foundation/` (the fixed id `EP-foundation`): `purpose.md`, `market.md` (optional),
+  `scope.md` — what it is **and what it is not** — `mvp.md`, `roadmap.md`, `stack.md`, `repos.md` and
+  `risks.md` (optional). In brownfield, `stack.md` and `repos.md` are based on the connected code. It is
+  gated by the same review gate (base rule: owner + 1 reviewer); on approval it terminates at
+  `foundation-done` (no Build). The roadmap puts that approval "before feature work begins" — in this
+  release that is **reported by `yad next`, not enforced**. Its `roadmap.md` is the menu of features —
+  each `yad-epic` reads it for product context (reference-only; the Foundation never auto-seeds epics).
+  A product made before E75 may still have the old spelling, `epics/EP-discovery/`; see
+  [shape 8](migrations/shape-8.md).
 
 ## Shape — author the "thinking" (once per epic, human-gated)
 

@@ -10,11 +10,10 @@
 //   yad next <epic> --check <step>   exit 0 if <step> is runnable now, else 1 (the precondition guard)
 //   yad next --all            every active epic's next action at once
 //   yad next [<epic>] --json  the same answer as an action object, for an agent or CI
-import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
-import { dedupeConsecutive, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, DISCOVERY_EPIC } from './epic-state.mjs';
+import { dedupeConsecutive, epicIds, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -30,15 +29,9 @@ const setupProfileOf = (root) => readJSON(productConfigPath(root), null)?.profil
 // Has `yad setup` run here? True once the version stamp or Product config exists.
 const isSetUp = (root) => exists(path.join(root, PROJECT_FILES.version)) || exists(productConfigPath(root));
 
-// Every epic that has a state ledger, in directory order.
+// Every epic that has a state ledger, the Foundation included, in id order.
 function listEpics(root) {
-  const dir = path.join(root, 'epics');
-  if (!exists(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && isValidEpicId(e.name))
-    .map((e) => e.name)
-    .filter((id) => exists(path.join(dir, id, '.sdlc', 'state.json')))
-    .sort();
+  return epicIds(root).filter((id) => exists(path.join(epicRoot(root, id), '.sdlc', 'state.json')));
 }
 
 // The action object for ONE epic, with its work-item type attached. The single shape both surfaces
@@ -180,6 +173,7 @@ function actionLine(a, { solo, bindings = null } = {}) {
       }
       return `${c.bold('yad-run')} ${c.dim(`(or per story: ${runs('spec', 'yad-spec')} → ${runs('implement', 'yad-implement')} → yad ship → ${runs('engineer-review', 'yad-engineer-review')})`)}`;
     }
+    case 'foundation-done':
     case 'discovery-done':
       return `invoke the ${c.bold(runs('epic', 'yad-epic'))} skill ${c.dim('(seed a feature epic from roadmap.md)')}`;
     case 'backfill-pending':
@@ -205,8 +199,8 @@ function actionLine(a, { solo, bindings = null } = {}) {
 // `epic.md` read the action's own `lineageKind` came from.
 function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
-  // says what kind of work this is. The discovery front-zero is not a feature — leave it un-prefixed.
-  const noun = a.lineageKind && a.epicId !== DISCOVERY_EPIC ? `${typeNoun(a.lineageKind)} ` : '';
+  // says what kind of work this is. The product level is not a feature — leave it un-prefixed.
+  const noun = a.lineageKind && !PRODUCT_EPICS.includes(a.epicId) ? `${typeNoun(a.lineageKind)} ` : '';
   // The free grouping tag, printed only when the epic has one — most do not, and an empty marker on
   // every line would cost more attention than it pays back.
   const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
@@ -233,15 +227,24 @@ function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
 // Where this epic sits in the lifecycle: the six phases, with the current one marked.
 //
 // `phaseOf` is given the same two facts every renderer needs — the epic's current step and whether it
-// is the discovery front-zero — so `yad next` and `yad thread` cannot answer this differently. It
-// returns null for a stub, for the discovery epic, and for any step id this release does not
-// recognise, and this line then stays away entirely: a wrong phase is worse than no phase.
+// is the product level — so `yad next` and `yad thread` cannot answer this differently. It returns
+// null for a stub and for any step id this release does not recognise, and this line then stays away
+// entirely: a wrong phase is worse than no phase.
 //
 // The two unbuilt phases are shown, greyed, rather than hidden. Someone reading this needs to see
 // that the lifecycle does not stop at merge; a list that ended at Build would say it does.
+//
+// THE PRODUCT LEVEL GETS ITS OWN LINE (E75), not the six-phase strip. The Foundation runs once per
+// product and never walks Design, Plan or Build, so printing those six with nothing marked would claim
+// a journey it does not take — which is why this line used to be absent for `EP-discovery` altogether.
+// It now has a phase of its own, on a ladder of its own, and says so in words.
 function phaseLine(a) {
-  const here = phaseOf(a.step, { discovery: a.epicId === DISCOVERY_EPIC });
+  const here = phaseOf(a.step, { product: PRODUCT_EPICS.includes(a.epicId) });
   if (!here) return;
+  if (here.level === 'product') {
+    info(`${c.dim('phase:')} ${c.bold(here.name)} ${c.dim('— the Product level, once per product, before any feature epic')}`);
+    return;
+  }
   // A phase this epic's ROUTE never enters is marked, not hidden (E40). A `chore` epic has no
   // architecture or UI-design step, so it never sees Design — and printing Design exactly as a
   // `classic` epic prints it makes a lane that will never go there look like one that has already
@@ -280,29 +283,43 @@ function generalNext(root, { all } = {}) {
   }
   const solo = isSolo(root);
   const brownfield = setupProfileOf(root)?.codebase === 'brownfield';
-  // The project front-zero (EP-discovery / "epic zero") is not a feature epic — split it out so it is
-  // surfaced on its own line and never mixed into the feature-epic roll-up.
+  // The PRODUCT level (the Foundation, or a ledger still in its old `discovery` spelling) is not a
+  // feature epic — split it out so it is surfaced on its own line and never mixed into the roll-up.
   const allEpics = listEpics(root);
   // One read of `.sdlc/skills.json` for the whole roll-up, not one per epic.
   const bindings = loadSkillBindings(root);
-  const hasDiscovery = allEpics.includes(DISCOVERY_EPIC);
-  const featureEpics = allEpics.filter((id) => id !== DISCOVERY_EPIC);
-  const discoveryRow = hasDiscovery ? rowFor(root, DISCOVERY_EPIC, bindings) : null;
-  const discoveryOpen = !!discoveryRow && discoveryRow.action.kind !== 'discovery-done';
+  // The Foundation wins when both exist. Two product levels is a fault `yad doctor` fails on; until it
+  // is fixed the new spelling is the one worth acting on, and the old one is named so it is not lost.
+  const productIds = PRODUCT_EPICS.filter((id) => allEpics.includes(id));
+  const productId = productIds[0] || null;
+  const featureEpics = allEpics.filter((id) => !PRODUCT_EPICS.includes(id));
+  const productRow = productId ? rowFor(root, productId, bindings) : null;
+  const productOpen = !!productRow && !PRODUCT_DONE.includes(productRow.action.kind);
+  if (productIds.length > 1) {
+    warn(`two product levels: ${productIds.map((id) => epicRel(id)).join(' and ')} — ${productId} is the one used`);
+    hand(`run ${c.bold('yad doctor')} ${c.dim('(a product has one Foundation; `yad migrate` converts the old one when it can)')}`);
+  }
 
   if (!featureEpics.length) {
-    if (discoveryOpen) { printAction(discoveryRow.action, { solo, bindings, ...discoveryRow }); return; }
+    if (productOpen) { printAction(productRow.action, { solo, bindings, ...productRow }); return; }
     log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
     // Both name a STEP's skill, so both ask the project. `yad-backfill` above does not: waking a
     // brownfield anchor is the engine's own promote verb, not a step on any chain.
-    if (!hasDiscovery) hand(`frame the whole project (market, feasibility, roadmap): invoke the ${c.bold(stepSkills('discovery', bindings)[0] || 'yad-discovery')} skill ${c.dim('(optional front-zero)')}`);
-    hand(`start your first epic: invoke the ${c.bold(stepSkills('epic', bindings)[0] || 'yad-epic')} skill${hasDiscovery ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
+    if (!productId) hand(`frame the whole product first (purpose, scope, MVP, roadmap, stack): run ${c.bold('yad foundation new')}, then invoke the ${c.bold(stepSkills('foundation', bindings)[0] || 'yad-discovery')} skill ${c.dim('(optional)')}`);
+    hand(`start your first epic: invoke the ${c.bold(stepSkills('epic', bindings)[0] || 'yad-epic')} skill${productId ? c.dim(' (it reads the approved roadmap.md)') : ''}`);
     return;
   }
 
   const rows = featureEpics.map((id) => rowFor(root, id, bindings));
-  if (discoveryOpen) printAction(discoveryRow.action, { solo, bindings, ...discoveryRow });   // an unfinished discovery comes first
+  if (productOpen) {
+    printAction(productRow.action, { solo, bindings, ...productRow });   // an unfinished Foundation comes first
+    // REPORTED, NOT ENFORCED (E75). The roadmap puts one approval on the Foundation "before feature
+    // work begins", and the decision for this release is to say so rather than to block on it: a
+    // project that began its epics first — every project older than this release — must keep working
+    // (rule 5), and a hard stop here would be the first thing that ever refused to show an epic.
+    info(c.dim(`${productId} has not passed its gate — ${featureEpics.length} feature epic(s) are going ahead of it (reported, not enforced)`));
+  }
 
   if (featureEpics.length === 1 || all) {
     for (const r of rows) printAction(r.action, { solo, bindings, ...r });
@@ -375,7 +392,7 @@ function jsonNext(root, { epic, check }) {
   }
   if (epic) {
     if (!exists(path.join(epicRoot(root, epic), '.sdlc', 'state.json'))) {
-      return jsonError(`no epic state at epics/${epic}/.sdlc/state.json`);
+      return jsonError(`no epic state at ${epicRel(epic)}/.sdlc/state.json`);
     }
     return emitJSON({ ok: true, actions: [actionFor(root, epic)] });
   }

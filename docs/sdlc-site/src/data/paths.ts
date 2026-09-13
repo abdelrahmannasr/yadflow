@@ -156,28 +156,28 @@ function gateStep(
   };
 }
 
-// ── Phase 2 — Front-zero · project discovery (optional, once per project) ────
+// ── Phase 2 — Foundation · the Product level (optional, once per product) ────
 
 const discoverySteps: FlowStep[] = [
   {
-    id: "discovery",
-    title: "Project Discovery (optional front-zero)",
+    id: "foundation",
+    title: "Foundation (the Product level)",
     description:
-      "Optional front-zero, once per project: with the analyst, pressure-test the product idea — market, competitor, current-state, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Greenfield AND brownfield; modelled as the reserved epic-zero EP-discovery, it terminates at discovery-done (no Build).",
+      "Once per product, before any epic: `yad foundation new` seeds the ledger, then with the analyst and pm write the Foundation into foundation/ — purpose, scope (what it is and is not), MVP, roadmap, stack, repos, and optional market and risks. roadmap.md is the feature menu each epic reads. Greenfield AND brownfield; fixed id EP-foundation; it terminates at foundation-done (no Build). Its approval is reported, not enforced, before feature work.",
     actor: "analyst",
     status: "draft",
-    stepState: "EP-discovery/ · roadmap.md",
-    trigger: "yad-discovery {idea}",
+    stepState: "foundation/ · roadmap.md",
+    trigger: "yad foundation new → yad-discovery {idea}",
     handler: "yad-discovery",
     activeComponents: ["product-hub", "state-json", "code-repos"],
     messages: [
-      { id: "di-1", from: "code-repos", to: "analyst", label: "read code-maps (brownfield)", type: "event", color: "#1e8449", delay: 0, duration: 600 },
-      { id: "di-2", from: "analyst", to: "product-hub", label: "write market / feasibility / roadmap.md", type: "write", color: "#2471a3", delay: 700, duration: 800 },
-      { id: "di-3", from: "product-hub", to: "state-json", label: "seed EP-discovery → discovery-done", type: "event", color: "#1e8449", delay: 1500, duration: 600 },
+      { id: "di-1", from: "product-hub", to: "state-json", label: "yad foundation new → seed EP-foundation", type: "event", color: "#1e8449", delay: 0, duration: 600 },
+      { id: "di-2", from: "code-repos", to: "analyst", label: "read code-maps (brownfield)", type: "event", color: "#1e8449", delay: 700, duration: 600 },
+      { id: "di-3", from: "analyst", to: "product-hub", label: "write purpose / scope / mvp / roadmap.md", type: "write", color: "#2471a3", delay: 1400, duration: 800 },
     ],
-    sideEffects: { jobs: "market-research.md · competitor-analysis.md · current-state.md · feasibility.md · requirements.md · roadmap.md", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
+    sideEffects: { jobs: "purpose.md · scope.md · mvp.md · roadmap.md · stack.md · repos.md (+ market.md · risks.md)", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
   },
-  gateStep("discovery", "discovery artifacts", "owner + 1 reviewer (base rule)", "#1e8449"),
+  gateStep("foundation", "the Foundation sections", "owner + 1 reviewer (base rule)", "#1e8449"),
 ];
 
 // ── Phase 3 — Shape (author → review gate, repeated per epic) ───────────
@@ -564,11 +564,11 @@ export const PATHS: FlowPath[] = [
   },
   {
     id: 2,
-    label: "Front-Zero · Project Discovery",
+    label: "Foundation · the Product Level",
     icon: "travel_explore",
     color: "#2471a3",
     description:
-      "Optional front-zero, once per project: pressure-test the product — market, competitor, feasibility, requirements — and write roadmap.md, the feature menu each epic reads. Modelled as the reserved epic-zero EP-discovery; terminates at discovery-done, no Build.",
+      "Optional, once per product: write the Foundation in foundation/ — purpose, scope, MVP, roadmap, stack, repos — and roadmap.md becomes the feature menu each epic reads. Fixed id EP-foundation; terminates at foundation-done, no Build.",
     category: "front",
     steps: discoverySteps,
   },

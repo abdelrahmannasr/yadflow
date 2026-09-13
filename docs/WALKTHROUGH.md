@@ -77,10 +77,11 @@ drive it deterministically with the **`yad gate`** CLI (`open → sync → … �
 the per-step PR/MR and the step **auto-advances on merge** once approvals are satisfied and all comment
 threads are resolved. Details: **"Run all of Shape by hand"** below.
 
-0. *(optional, once per project)* `yad-discovery` → the discovery set (`market-research.md`,
-   `competitor-analysis.md`, `current-state.md`, `feasibility.md`, `requirements.md`, `roadmap.md`)
-   under the reserved `EP-discovery` → review (base rule) → `currentStep: discovery-done`. The whole
-   set is required to review; its `roadmap.md` then frames each epic below (read once it is approved).
+0. *(optional, once per product)* `yad foundation new` then `yad-discovery` → the **Foundation** in
+   `foundation/` (`purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md`, plus
+   optional `market.md` and `risks.md`) under the fixed id `EP-foundation` → review (base rule) →
+   `currentStep: foundation-done`. The six required sections must exist to review; its `roadmap.md`
+   then frames each epic below (read once it is approved).
 6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (base rule).
 7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
 8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).
@@ -162,9 +163,9 @@ Build by hand"** below.
 
 ## Run all of Shape by hand
 
-Optionally preceded once per project by the **front-zero** — **`yad-discovery` → review →
-`discovery-done`** — which frames the whole product (market, competitor, feasibility, requirements,
-roadmap) under the reserved `EP-discovery`; its approved `roadmap.md` then feeds each epic. Shape itself walks **epic → review → architecture+contract → review → UI design → review → stories
+Optionally preceded once per product by the **Foundation** — **`yad foundation new` → `yad-discovery`
+→ review → `foundation-done`** — which frames the whole product (purpose, scope, MVP, roadmap, stack,
+repos) in `foundation/`; its approved `roadmap.md` then feeds each epic. Shape itself walks **epic → review → architecture+contract → review → UI design → review → stories
 → review → `ready-for-build`**, then **test cases → review** runs as a **parallel, non-blocking track**
 alongside Build. It is all files under `epics/EP-<slug>/`. The skills below guide you, but you
 can also edit the files directly — that's the point.

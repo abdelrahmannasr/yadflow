@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "epicId": "EP-checkout"
 }
 ```
@@ -44,7 +44,7 @@ The per-epic state machine.
 | `epicId` | The stable `EP-<slug>` ID. Never renamed. |
 | `createdAt` | ISO date the epic was created. |
 | `type` | The work-item type — `feature` \| `change` \| `defect` \| `hotfix` \| `chore` — copied from `epic.md`. Shape 5 on. **Not the same field as `steps[].type`**, which is `author` \| `review+approve`, and not the same as the top-level `kind` a stub or the discovery front-zero carries. |
-| `profile` | The lifecycle route this chain came from — `classic` \| `analysis-first` \| `chore` \| `spike` \| `discovery`. Shape 6 on. See "Lifecycle profiles" below. |
+| `profile` | The lifecycle route this chain came from — `classic` \| `analysis-first` \| `chore` \| `spike` \| `discovery` \| `foundation`. Shape 6 on (`foundation` from shape 8). See "Lifecycle profiles" below. |
 | `currentStep` | `id` of the step the workflow is waiting on right now. |
 | `steps[]` | Ordered list of every Shape step step. |
 
@@ -80,8 +80,8 @@ binding that will never run: a value that is not a skill name (`YAD-CFG-006`), a
 does not know (`skills:unknown-step`) and a review gate, which `yad gate` drives (`skills:review-step`).
 It never rewrites the file.
 
-**When a chain disagrees with the catalogue, the chain wins.** `yad-discovery` and `yad-change` still
-write a chain by hand, a project may run a chain from a newer release, and leaving a step out is normal
+**When a chain disagrees with the catalogue, the chain wins.** `yad-change` still writes a chain by
+hand, a project may run a chain from a newer release, and leaving a step out is normal
 — not every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
 `step:artifact` (a step naming a different file from the one the gate hashes — different spellings of
 the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one gate),
@@ -104,7 +104,8 @@ already seeded by hand; the two short lanes (E40) are new:
 | `analysis-first` | the 12-step chain, `analysis` before `epic` | `yad-analysis` |
 | `chore` | `epic` · `epic-review` · `stories` · `stories-review` | `yad-epic --profile chore` |
 | `spike` | the chore lane with `analysis` · `analysis-review` in front | `yad-analysis --profile spike` |
-| `discovery` | `discovery` · `discovery-review` | `yad-discovery` |
+| `discovery` | `discovery` · `discovery-review` | the OLD spelling of the Product level — still read; `yad migrate --apply` converts it |
+| `foundation` | `foundation` · `foundation-review` | `yad foundation new`, then `yad-discovery` authors the sections (E75) |
 
 `ui-design` and its gate are the optional pair on `classic` and `analysis-first`. The short lanes mark
 **nothing** optional — they drop the steps they do not need from the chain instead, so `yad skip` on
@@ -156,7 +157,7 @@ Every step belongs to one of six named phases, and each phase sits inside one of
 
 | Phase | Part | Steps |
 |---|---|---|
-| Discover | Shape | `discovery` · `analysis` · `epic`, each with its review gate |
+| Discover | Shape | `analysis` · `epic`, each with its review gate |
 | Design | Shape | `architecture` · `ui-design`, each with its review gate |
 | Plan | Shape | `stories` · `test-cases`, each with its review gate |
 | Build | Build | `spec` · `tasks` · `implement` · `checks` · `engineer-review` |
@@ -169,12 +170,14 @@ nothing to author, nothing to keep in step, and no way for it to disagree with t
 - A Shape review gate takes the phase of the artifact it reviews, so `epic-review` is Discover beside
   `epic`. Build steps have no such gates — `engineer-review` is a step in its own right — so
   `checks-review` is not a step and resolves to nothing.
-- The `currentStep` markers are not steps and never appear in `steps[]`. Three of them
-  (`backfill-pending`, `backfill-done`, `discovery-done`) have no phase. **`ready-for-build` is the
-  exception:** an epic sitting on it is in Build, and stays there for the rest of its life, because
-  the individual Build steps live per story per repo in `build-state/` rather than in this file.
-- `EP-discovery` has no phase at all. It is the product-level front-zero and does not walk the feature
-  lifecycle.
+- The `currentStep` markers are not steps and never appear in `steps[]`. Two of them
+  (`backfill-pending`, `backfill-done`) have no phase. **`ready-for-build` is the exception:** an epic
+  sitting on it is in Build, and stays there for the rest of its life, because the individual Build
+  steps live per story per repo in `build-state/` rather than in this file.
+- The **Product level** — `EP-foundation` in `foundation/`, or `EP-discovery`, its older spelling — is
+  not on the six-phase ladder. It has a ladder of its own with one phase, **Foundation**, and it is in
+  that phase for its whole life, `foundation-done` / `discovery-done` included: the phase is decided by
+  the ledger's `kind`, not by the step id (E75).
 
 `yad doctor` reports a step id no phase claims. That is the same table that binds a step to its skill,
 so an id with no phase is an id no skill runs.
@@ -188,9 +191,9 @@ existing `state.json` and does **not** re-seed.
 
 **The engine owns the chain.** No skill writes one by hand on these two routes any more — `yad-epic`
 runs `yad epic new EP-<slug>`, `yad-analysis` runs it with `--profile analysis-first`, and `yad-stub`
-runs it with `--stub`. Two seeds are still hand-written and neither is an oversight: `yad-discovery`
-seeds the product front-zero, and `yad-change` seeds a threaded chain whose inherited steps are bound
-to a parent's artifact hashes. A seeded chain leaves its first author step **open**, not `done` — the
+runs it with `--stub`, and `yad-discovery` runs `yad foundation new` for the Product level (E75). One
+seed is still hand-written and it is not an oversight: `yad-change` seeds a threaded chain whose
+inherited steps are bound to a parent's artifact hashes. A seeded chain leaves its first author step **open**, not `done` — the
 command runs before the artifact exists; `yad gate open` closes it when the gate opens.
 
 - **With analysis** — the `analysis-first` route, 12 steps:
@@ -343,7 +346,8 @@ The shared procedure (run once the `EP-<slug>` is known):
    separately at review time and is untouched by this step.
 
 **How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once, by hand, on the
-**entry** step's authoring branch (`analysis/…`, `epic/…`, `change/…`, `discovery/…`) — no CLI or CI
+**entry** step's authoring branch (`analysis/…`, `epic/…`, `change/…`, `foundation/…`, or `discovery/…` for
+a product level still in its old spelling) — no CLI or CI
 path creates one (`yad gate ci` only *advances* an existing chain, at merge, on the default branch).
 So for the **first** gate of an epic, cut `review/EP-<slug>/<artifact-base>` from that authoring
 branch: the review PR/MR then carries the seed alongside the artifact, and the ledger lands on the

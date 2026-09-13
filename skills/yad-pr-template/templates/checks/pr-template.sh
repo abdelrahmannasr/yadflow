@@ -49,9 +49,9 @@ case "$PROFILE" in code|hub|product) ;; *) echo "FAIL [pr-template]: unknown --p
 [ "$PROFILE" = product ] && PROFILE=hub
 
 
-# True when the PR changes a Shape artifact (anything under epics/**). Reads the --changed list
+# True when the PR changes a Shape artifact (anything under epics/** — or foundation/**, the Product level, E75). Reads the --changed list
 # of paths CI computed from the PR diff; with no list (direct caller / test) it reports false.
-artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -qE '^epics/' "$CHANGED"; }
+artifact_changed() { [ -n "$CHANGED" ] && [ -f "$CHANGED" ] && grep -qE '^(epics|foundation)/' "$CHANGED"; }
 
 BODY="${ARGS[0]:-}"
 if [ -z "$BODY" ] || [ ! -f "$BODY" ]; then
@@ -133,7 +133,7 @@ if [ "$PROFILE" = hub ]; then
       # which must go through a review/EP-* PR. Without this guard a non-review head could carry an
       # artifact change past the Shape review with only the code template.
       if artifact_changed; then
-        echo "FAIL [pr-template]: head '${HEADREF}' changes Shape artifacts (epics/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
+        echo "FAIL [pr-template]: head '${HEADREF}' changes Shape artifacts (epics/** or foundation/**) but is not a review/EP-* branch — artifact changes must go through a review PR."
         rc=1
       else
         check_code_body; KIND="hub-tooling"

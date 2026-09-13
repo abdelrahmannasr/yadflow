@@ -24,7 +24,10 @@ import {
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
-import { isValidEpicId, stampProfile, stampStepStates, stampWorkItemType } from './epic-state.mjs';
+import {
+  artifactHash, canonicalApprovals, canonicalComments, canonicalHubPrs, DISCOVERY_EPIC, epicIds, epicRel,
+  epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isPassed, stampProfile, stampStepStates, stampWorkItemType, writeState,
+} from './epic-state.mjs';
 
 // ---- the migration list --------------------------------------------------------------------
 // Ordered steps, each moving a file from one shape to the next. A step is applied to a file only when
@@ -238,7 +241,229 @@ export const MIGRATIONS = [
     // which calls this same stamper.
     apply: (obj, ctx) => (isEpicStatePath(ctx?.rel) ? stampStepStates(obj) : obj),
   },
+  {
+    from: 7,
+    to: 8,
+    title: 'the Product level lives in `foundation/`, as the Foundation',
+    // E75. The one change in this shape is not to a field in a file but to WHERE a set of files lives:
+    // the product-level ledger moves from `epics/EP-discovery/` to `foundation/` and is relabelled
+    // from the old `discovery` ids to the Foundation's. A step in this list rewrites one object at one
+    // path, so it cannot move a directory — that is done ONCE per project by `planProductMove` /
+    // `applyProductMove` below, which the preview and the apply both run. This row only moves the
+    // shape number, and it changes no field in any file.
+    //
+    // It is still a shape, and a breaking one, because an older yadflow cannot see a converted project:
+    // it looks for the product level under `epics/` and finds nothing. `docs/migrations/shape-8.md`
+    // says so.
+    //
+    // No stamper is added to `writeState`, and none is missing: there is nothing a gate write could do
+    // to a single `state.json` that this shape asks for. A VERIFIED project keeps its product level in
+    // the old spelling — CI owns that ledger, and moving it would be a human commit the ledger guard
+    // rejects — and every reader in this release still reads that spelling.
+    apply: (obj) => obj,
+  },
 ];
+
+// ---- shape 8: the Product level moves to `foundation/` (E75) ----------------------------------------
+//
+// A product has ONE product-level ledger. Before E75 it was `epics/EP-discovery/` (`kind: "discovery"`);
+// from E75 it is `foundation/` (`kind: "foundation"`, id `EP-foundation`). This converts the first
+// into the second, once, on a project that can take it.
+//
+// WHAT MOVES. Every file under `epics/EP-discovery/` is copied to the same relative path under
+// `foundation/` — the six discovery files, `.sdlc/`, `reviews/` — and the original directory is then
+// removed, leaving a full copy of it at `epics/EP-discovery.yad-orig/`. That name is not a valid epic
+// id (it has a dot), so every walker that checks epic ids skips it, and `*.yad-orig` keeps it out of git.
+// (Two walkers list every folder under `epics/` without that check — `docs.mjs` looks for a
+// `docs-site/` and `checkpoint.mjs` for Build ledgers — and the old product level never has either.)
+//
+// Other JSON objects under `.sdlc/` (a docs-build cache, a shard) move too, and are brought to the
+// engine's shape AT THEIR NEW PATH in the same run — listed in `reshape`, and in the preview.
+//
+// WHAT IS RELABELLED, in `foundation/.sdlc/`:
+//   state.json     epicId -> EP-foundation, kind -> foundation, profile -> foundation, the step ids
+//                  `discovery` / `discovery-review` -> `foundation` / `foundation-review`, and
+//                  `currentStep` likewise (`discovery-done` -> `foundation-done`).
+//   approvals.json, comments.json, product-prs.json, hub-prs.json   each record's `step` the same way.
+//   The gate keeps an approval only when its `step` matches the review step's id, so relabelling the
+//   state without the approvals would silently drop every approval the product level holds.
+//
+// WHAT DOES NOT CHANGE, deliberately: the step's `artifact` stays `discovery/`. The six files keep
+// their names, and the Foundation's fingerprint for `discovery/` is computed over exactly those names
+// and bytes — so the fingerprint every approval is bound to is identical before and after, and no
+// approval goes stale. A converted Foundation binds to the six files it was approved against; a team
+// that later rewrites it into the eight Foundation sections changes the step's artifact to
+// `foundation/` and re-reviews, which is what a rewrite deserves.
+//
+// WHEN IT REFUSES, leaving every file exactly where it is (the old spelling keeps working):
+//   ci-owned    a verified ledger — CI is its only writer and the ledger guard rejects a human move
+//   unreadable  a ledger file does not parse
+//   refused     not a `kind: "discovery"` ledger; a Foundation ledger already exists (two product
+//               levels); a review of it is still open on the platform; a file would land on top of
+//               one already in `foundation/`; or a backup from an earlier run is in the way
+const RENAME_STEP = { __proto__: null, discovery: 'foundation', 'discovery-review': 'foundation-review' };
+const RENAME_CURRENT = { __proto__: null, ...RENAME_STEP, 'discovery-done': 'foundation-done' };
+const renamed = (map, id) => (typeof id === 'string' && id in map ? map[id] : id);
+const LEDGER_NAMES = ['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json'];
+
+// Every file under `dir`, as POSIX paths relative to it, sorted — so the preview lists the same files
+// in the same order on every machine.
+function filesUnder(dir, rel = '') {
+  const out = [];
+  for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+    const r = rel ? `${rel}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...filesUnder(dir, r));
+    else out.push(r);
+  }
+  return out.sort();
+}
+
+// The relabelled product-level state. Key ORDER is kept, so the file reads the same way after; a
+// `profile` that was never recorded is added in front of `currentStep`, where `stampProfile` puts it.
+export function convertDiscoveryState(state) {
+  const out = {};
+  for (const [k, v] of Object.entries(state)) {
+    if (k === 'currentStep' && !('profile' in state)) out.profile = 'foundation';
+    if (k === 'epicId') out.epicId = FOUNDATION_EPIC;
+    else if (k === 'kind') out.kind = 'foundation';
+    else if (k === 'profile') out.profile = 'foundation';
+    else if (k === 'currentStep') out.currentStep = renamed(RENAME_CURRENT, v);
+    else if (k === 'steps' && Array.isArray(v)) out.steps = v.map((s) => (isPlainObject(s) ? { ...s, id: renamed(RENAME_STEP, s.id) } : s));
+    else out[k] = v;
+  }
+  return out;
+}
+
+export function planProductMove(root, { verified = false, migrations = MIGRATIONS } = {}) {
+  const fromRel = epicRel(DISCOVERY_EPIC);
+  const from = path.join(root, fromRel);
+  const ledgerOf = (dir, name) => path.join(dir, '.sdlc', name);
+  if (!exists(ledgerOf(from, 'state.json'))) return null;
+  const base = { from: fromRel, to: FOUNDATION_DIR, backup: `${fromRel}${BACKUP_SUFFIX}`, moves: [], rewrites: [], reshape: [] };
+  const refuse = (action, detail) => ({ ...base, action, detail });
+
+  if (verified) {
+    return refuse('ci-owned', 'CI owns this ledger, so it stays in the old spelling — every command still reads it as the Foundation');
+  }
+  const read = {};
+  for (const name of LEDGER_NAMES) {
+    if (!exists(ledgerOf(from, name))) continue;
+    const raw = readRaw(ledgerOf(from, name));
+    const wantsArray = name !== 'state.json';
+    if (!raw.ok || (wantsArray ? !Array.isArray(raw.value) : !isPlainObject(raw.value))) {
+      return refuse('unreadable', `${fromRel}/.sdlc/${name} ${raw.ok ? 'has the wrong shape' : 'does not parse'} — fix or restore it first`);
+    }
+    read[name] = raw.value;
+  }
+  const state = read['state.json'];
+  if (state.kind !== 'discovery') {
+    return refuse('refused', `${fromRel}/.sdlc/state.json has no \`kind: "discovery"\` marker, so it is not the product level — left as it is`);
+  }
+  if (exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) {
+    return refuse('refused', `${FOUNDATION_DIR}/.sdlc/ already exists — that is two product levels, and only a person can say which one is real (\`yad doctor\`)`);
+  }
+  const steps = Array.isArray(state.steps) ? state.steps : [];
+  const open = [...(read['product-prs.json'] || []), ...(read['hub-prs.json'] || [])].find((p) => {
+    const step = steps.find((s) => s?.id === p?.step);
+    return step && !isPassed(step);
+  });
+  if (open) {
+    return refuse('refused', `a review of ${open.artifact || 'it'}${open.number ? ` (#${open.number})` : ''} is still open on branch ${open.branch || '?'} — merge or close it, then migrate`);
+  }
+  const files = filesUnder(from);
+  const collide = files.filter((f) => exists(path.join(root, FOUNDATION_DIR, f)));
+  if (collide.length) {
+    return refuse('refused', `${FOUNDATION_DIR}/ already has ${collide.slice(0, 3).join(', ')}${collide.length > 3 ? ` (+${collide.length - 3} more)` : ''} — move it aside, then migrate`);
+  }
+  if (exists(path.join(root, base.backup))) {
+    return refuse('refused', `${base.backup}/ from an earlier run is in the way — delete it or move it aside, then migrate`);
+  }
+  // Every other JSON object under `.sdlc/` that the per-file steps would change, judged exactly as a
+  // per-file row would be — at the path it lands on, with the same migration list — so the plan for
+  // these files cannot differ from what `planMigration` would say about them after the move.
+  const reshape = [];
+  for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
+    const raw = readRaw(path.join(from, f));
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} does not parse — fix or restore it first`);
+    if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
+    const rel = path.join(FOUNDATION_DIR, f);
+    const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
+    if (serialize(stamped(obj, version)) !== fs.readFileSync(path.join(from, f), 'utf8')) reshape.push(`${FOUNDATION_DIR}/${f}`);
+  }
+  return {
+    ...base,
+    action: 'move',
+    detail: null,
+    moves: files.map((f) => ({ from: `${fromRel}/${f}`, to: `${FOUNDATION_DIR}/${f}` })),
+    rewrites: [...LEDGER_NAMES.filter((n) => n in read).map((n) => `${FOUNDATION_DIR}/.sdlc/${n}`), ...reshape],
+    reshape,
+  };
+}
+
+// Apply a planned move. Back up, copy, check, relabel, reshape — and only then remove the original.
+//
+// ANY FAILURE BEFORE THAT LAST STEP IS UNDONE COMPLETELY: the backup, every file copied into
+// `foundation/`, and every folder this run created there (a folder that already held something of the
+// user's is kept, with only our copies taken out of it). Leaving either behind would strand the
+// project: a stray backup makes the next run refuse ("from an earlier run is in the way") and a stray
+// `foundation/.sdlc/` reads as a second product level — both false, and neither fixable by re-running.
+// The error is re-thrown for `runMigrate` to report.
+//
+// `copy` is a seam for the tests, which need a copy that fails or corrupts on demand.
+export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
+  const from = path.join(root, move.from);
+  const to = path.join(root, move.to);
+  const backup = path.join(root, move.backup);
+  // The folders under `foundation/` the copy will create, deepest first — computed BEFORE copying.
+  const made = new Set();
+  for (const m of move.moves) {
+    for (let d = path.posix.dirname(m.to); d !== move.to && d !== '.'; d = path.posix.dirname(d)) {
+      if (!exists(path.join(root, d))) made.add(d);
+    }
+  }
+  const toExisted = exists(to);
+  try {
+    const before = artifactHash(from, 'discovery/');
+    copy(from, backup, { recursive: true, errorOnExist: true, force: false });
+    fs.mkdirSync(to, { recursive: true });
+    copy(from, to, { recursive: true, errorOnExist: true, force: false });
+    if (artifactHash(to, 'discovery/') !== before) {
+      throw new Error(`the copy in ${move.to}/ does not fingerprint like the original`);
+    }
+    const f = epicFiles(to);
+    writeState(f.state, convertDiscoveryState(JSON.parse(fs.readFileSync(f.state, 'utf8'))));
+    const relabel = (file, canonical) => {
+      if (!exists(file)) return;
+      const list = JSON.parse(fs.readFileSync(file, 'utf8'));
+      writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))));
+    };
+    relabel(f.approvals, canonicalApprovals);
+    relabel(f.comments, canonicalComments);
+    relabel(f.productPrs, canonicalHubPrs);
+    relabel(f.hubPrs, canonicalHubPrs);
+    for (const rel of move.reshape || []) {
+      const file = path.join(root, rel);
+      const { obj, version } = applyMigrations(JSON.parse(fs.readFileSync(file, 'utf8')), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
+      writeJSON(file, stamped(obj, version));
+    }
+  } catch (e) {
+    if (!toExisted) {
+      fs.rmSync(to, { recursive: true, force: true });
+    } else {
+      for (const m of move.moves) fs.rmSync(path.join(root, m.to), { force: true });
+      for (const d of [...made].sort((a, b) => b.length - a.length)) fs.rmSync(path.join(root, d), { recursive: true, force: true });
+    }
+    fs.rmSync(backup, { recursive: true, force: true });
+    throw new Error(`nothing was moved — ${e.message}`, { cause: e });
+  }
+  fs.rmSync(from, { recursive: true, force: true });
+  return productMoveFiles(move);
+}
+
+// Every path a planned move writes: the relabelled and reshaped files first, then every other file it
+// copies. ONE expression for the preview's `changed` and the apply's `written`, so the two cannot drift.
+export const productMoveFiles = (move) =>
+  [...move.rewrites, ...move.moves.map((m) => m.to).filter((p) => !move.rewrites.includes(p))];
 
 // A review step must never be told it may advance on its own. `type` is what the Shape chain uses;
 // a Build step has no `type`, and `locked: true` is how those are pinned today.
@@ -378,7 +603,9 @@ export const isMirroredPath = (rel) => MIRROR_CANONICALS.has(rel) || MIRROR_LEGA
 // `trust-log.json` is deliberately NOT here. Its `automation` field records what the dial WAS when a
 // run happened — history, not a setting. Migrating it would rewrite the evidence the trust ledger
 // exists to hold, and nothing reads those records as a live declaration.
-export const isEpicStatePath = (rel) => /^epics\/[^/]+\/\.sdlc\/state\.json$/.test(rel || '');
+// The Foundation's ledger (E75) is an epic ledger in every way that matters to a stamper — it lives in
+// `foundation/` rather than `epics/<id>/`, and that is the only difference.
+export const isEpicStatePath = (rel) => /^(?:epics\/[^/]+|foundation)\/\.sdlc\/state\.json$/.test(rel || '');
 export const isBuildStatePath = (rel) => /^epics\/[^/]+\/\.sdlc\/build-state\/[^/]+\.json$/.test(rel || '');
 const mirrorPartner = (rel) => {
   for (const m of MIRRORED_FILES) {
@@ -399,20 +626,17 @@ export function projectJsonFiles(root) {
   // The Product's own provenance record (cli/plan.mjs) — a stamped object under .sdlc/ like any other.
   files.push(path.join(root, MANAGED_LEDGER));
 
-  const epicsDir = path.join(root, 'epics');
-  if (exists(epicsDir)) {
-    for (const epic of fs.readdirSync(epicsDir).sort()) {
-      if (!isValidEpicId(epic)) continue;
-      const epicDir = path.join(epicsDir, epic);
-      if (!fs.statSync(epicDir).isDirectory()) continue;
-      const f = epicFiles(epicDir);
-      files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.hubPrs), f.contractLock,
-        f.buildLog, f.trustLog, f.change, f.reconcileDebt);
-      files.push(...shardFiles(f.buildLogDir), ...shardFiles(f.trustLogDir), ...shardFiles(f.buildStateDir));
-      // The docs-build cache (cli/docs.mjs) lives in the same directory and is written by the engine,
-      // so it moves shape with everything else rather than being quietly left behind.
-      files.push(path.join(epicDir, '.sdlc', 'docs-build.json'));
-    }
+  // `epicIds` so the Foundation's ledger is on the plan too (E75). A shape change that stamped every
+  // epic and skipped `foundation/` would leave the product level on a shape nobody defined.
+  for (const epic of epicIds(root)) {
+    const epicDir = epicRoot(root, epic);
+    const f = epicFiles(epicDir);
+    files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.hubPrs), f.contractLock,
+      f.buildLog, f.trustLog, f.change, f.reconcileDebt);
+    files.push(...shardFiles(f.buildLogDir), ...shardFiles(f.trustLogDir), ...shardFiles(f.buildStateDir));
+    // The docs-build cache (cli/docs.mjs) lives in the same directory and is written by the engine,
+    // so it moves shape with everything else rather than being quietly left behind.
+    files.push(path.join(epicDir, '.sdlc', 'docs-build.json'));
   }
   return files.filter((f) => exists(f));
 }
@@ -442,9 +666,17 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   // an object; the rest are arrays and would be skipped anyway.
   const ciOwned = new Set(['state.json', 'approvals.json', 'comments.json', 'product-prs.json', 'hub-prs.json']);
 
+  // The product-level move (shape 8) is planned first, because it decides which per-file rows exist:
+  // files that are about to MOVE are listed on the move, not also as rows at a path that will not be
+  // there after the apply. A preview naming a file the apply never writes is as untrustworthy as one
+  // that misses a file it does.
+  const product = planProductMove(root, { verified, migrations });
+  const moving = product?.action === 'move' ? `${product.from}/` : null;
+
   const rows = [];
   for (const file of projectJsonFiles(root)) {
     const rel = path.relative(root, file);
+    if (moving && rel.split(path.sep).join('/').startsWith(moving)) continue;
     const raw = readRaw(file);
     if (!raw.ok) {
       rows.push({ file: rel, from: null, to: null, action: 'unreadable', changes: false, stamped: false, detail: raw.error });
@@ -494,7 +726,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
     const rewrites = (partner && changes && !partnerMissing) ? [partner] : undefined;
     rows.push({ file: rel, from, to: version, action, changes, stamped: isStamped, ...(creates ? { creates } : {}), ...(rewrites ? { rewrites } : {}), ...(version !== from ? { steps: applied } : {}) });
   }
-  return { engine: SCHEMA_VERSION, verified, rows };
+  return { engine: SCHEMA_VERSION, verified, rows, product };
 }
 
 // ---- the report ----------------------------------------------------------------------------
@@ -524,6 +756,23 @@ function printRows(rows) {
   }
 }
 
+// The product-level move, printed below the per-file rows. Every file it would move is named — the
+// same promise the rows make: nothing an apply writes goes unmentioned in the preview.
+function printProductMove(p, { apply }) {
+  log('');
+  log(c.bold('  the product level (shape 8)'));
+  if (p.action !== 'move') {
+    const line = `  ${p.from}/  stays where it is — ${p.detail}`;
+    if (p.action === 'unreadable') fail(line.trim());
+    else if (p.action === 'ci-owned') log(`${line}`);
+    else warn(line.trim());
+    return;
+  }
+  log(`  ${p.from}/  →  ${p.to}/   ${c.dim(`${apply ? 'moved' : 'moves'} as ${FOUNDATION_EPIC}; step ids relabelled, approvals kept`)}`);
+  for (const m of p.moves) log(`    ${c.dim(m.from)} → ${m.to}${p.rewrites.includes(m.to) ? c.dim('  (relabelled)') : ''}`);
+  log(`    ${c.dim(`a full copy stays at ${p.backup}/`)}`);
+}
+
 // ---- the command ---------------------------------------------------------------------------
 // `.sdlc/cli-version.json` is migrated as an ordinary row, like every other project file — it is in
 // PROJECT_FILES, so it is previewed, backed up and stamped along with the rest. Nothing here writes it
@@ -531,7 +780,7 @@ function printRows(rows) {
 // which means no backup, no row in the report, and a preview that under-reports what an apply does. It
 // would also be free to overwrite the one file the same run had just declared corrupt or newer than
 // this engine. What shape a file is in is recorded in that file, which is the whole point of rule 1.
-export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS } = {}) {
+export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
   if (!exists(path.join(root, PROJECT_FILES.version)) && !exists(productConfigPath(root))) {
     const message = 'no yad project here (.sdlc/ not initialised)';
     if (json) { log(JSON.stringify({ version: VERSION, ok: false, error: message }, null, 2)); }
@@ -541,15 +790,31 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
   }
 
   const plan = planMigration(root, { migrations });
+  const move = plan.product?.action === 'move' ? plan.product : null;
   const pending = plan.rows.filter((r) => r.changes);
   const blocked = plan.rows.filter((r) => r.action === 'ahead' || r.action === 'unreadable');
+  // An unreadable product-level ledger blocks like an unreadable file. The other refusals do not: the
+  // project stays on the old spelling, which this release reads correctly, so nothing is broken.
+  const productBlocked = plan.product?.action === 'unreadable';
   const written = [];
 
   let ignored = false;
   if (apply) {
     // Before the first backup exists, not after — otherwise a gate advance racing this run could stage
     // one. A no-op when the line is already there.
-    if (pending.length) ignored = ensureBackupsIgnored(root);
+    if (pending.length || move) ignored = ensureBackupsIgnored(root);
+    if (move) {
+      // Reported through `fail`, never as a stack trace, and before any per-file write: a move that did
+      // not happen leaves the project exactly as it was, so the rest of this run must not half-proceed.
+      try {
+        written.push(...applyProductMove(root, move, { migrations, copy }));
+      } catch (e) {
+        if (json) log(JSON.stringify({ version: VERSION, ok: false, error: `the product level was not moved: ${e.message}` }, null, 2));
+        else { fail(`the product level was not moved: ${e.message}`); hand('every file is where it was — fix the cause, then run `yad migrate --apply` again'); }
+        process.exitCode = 1;
+        return { ok: false, rows: plan.rows, written: [] };
+      }
+    }
     for (const row of pending) {
       const file = path.join(root, row.file);
       const raw = readRaw(file);
@@ -588,29 +853,33 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
   if (json) {
     log(JSON.stringify({
       version: VERSION,
-      ok: blocked.length === 0,
+      ok: blocked.length === 0 && !productBlocked,
       engine: plan.engine,
       applied: apply,
       verified: plan.verified,
-      changed: apply ? written : pending.map((r) => r.file),
+      changed: apply ? written : [...(move ? productMoveFiles(move) : []), ...pending.map((r) => r.file)],
       ...(ignored ? { gitignored: BACKUP_IGNORE_GLOB } : {}),
       rows: plan.rows,
+      // The product-level move (shape 8), or null when the project has no old-spelling product level.
+      product: plan.product,
     }, null, 2));
   } else {
     log(c.bold(`\nyad migrate  ${c.dim(`shape ${plan.engine}`)}`));
     log(c.dim(`target: ${root}\n`));
     printRows(plan.rows);
+    if (plan.product) printProductMove(plan.product, { apply });
     log('');
-    if (!pending.length) {
+    if (!pending.length && !move) {
       ok(`nothing to do — this project is already on shape ${plan.engine}`);
     } else if (apply) {
+      if (move) ok(`the product level moved to ${move.to}/ as ${FOUNDATION_EPIC} — the original is kept whole at ${move.backup}/`);
       ok(`${written.length} file(s) updated — a copy of each is beside it as <file>${BACKUP_SUFFIX}`);
       info('re-run `yad migrate` to confirm there is nothing left to do');
       // These land inside the tracked .sdlc/ tree, so a `git add -A` would sweep them into the commit
       // alongside the migration itself. Say so rather than editing a .gitignore the project owns.
       info(`the ${BACKUP_SUFFIX} copies are yours to keep or delete${ignored ? ` — .gitignore now excludes ${BACKUP_IGNORE_GLOB}, so they stay out of the ledger commit` : ''}`);
     } else {
-      info(`${pending.length} file(s) would change — nothing has been written`);
+      info(`${pending.length + (move ? move.moves.length : 0)} file(s) would change — nothing has been written`);
       hand('run `yad migrate --apply` to make the change (each file is backed up first)');
     }
     if (plan.verified && plan.rows.some((r) => r.action === 'ci-owned')) {
@@ -623,6 +892,6 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
     if (blocked.length) warn('some files were left untouched — see above');
   }
 
-  if (blocked.length) process.exitCode = 1;
+  if (blocked.length || productBlocked) process.exitCode = 1;
   return { ok: blocked.length === 0, rows: plan.rows, written };
 }

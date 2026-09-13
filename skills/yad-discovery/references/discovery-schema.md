@@ -1,4 +1,16 @@
-# Discovery schema — artifacts + the front-zero state shape
+# Discovery schema — the OLD spelling of the Product level
+
+> **Since E75 this is the older spelling.** New products get a Foundation in `{project-root}/foundation/`
+> — see `foundation-schema.md`, seeded by `yad foundation new`. This page stays because a product that
+> already has an `EP-discovery` keeps working exactly as described here: the engine still reads it, gates
+> it, and ends its review at `discovery-done`.
+>
+> **Converting it.** On a **local** ledger, `yad migrate --apply` moves `epics/EP-discovery/` into
+> `foundation/`: the six files keep their names (so their fingerprint, and every approval bound to it,
+> is unchanged), the ledger is re-labelled to the Foundation's ids, and the step keeps `artifact:
+> "discovery/"` so the gate still hashes those six files. On a **verified** ledger CI owns the files and
+> the move cannot be made by a human commit, so the old spelling stays until a later release converts it
+> from CI. A product has ONE product level: never seed a Foundation beside an `EP-discovery`.
 
 The project discovery phase ("epic zero") lives under `{project-root}/epics/EP-discovery/`. It reuses
 the per-epic ledger files (`.sdlc/state.json`, `approvals.json`, `comments.json`, `reviews/`,

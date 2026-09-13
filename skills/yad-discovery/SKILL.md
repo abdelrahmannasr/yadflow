@@ -1,140 +1,136 @@
 ---
 name: yad-discovery
-description: 'Optional front-zero of the gated SDLC — the once-per-project discovery phase. With the field-expert lenses (analyst + pm), run market research, a competitor study, a feasibility study, and (brownfield) a current-state study, then distil a functional + non-functional requirements list and a phased roadmap (MVP and beyond) into the reserved EP-discovery. Greenfield AND brownfield. Its roadmap.md becomes the menu of features each yad-epic reads. Seeds the EP-discovery state and hands off to the team review gate; never auto-advances. Use when the user says "start the project", "do discovery", "market research / feasibility / roadmap", or "what should we build first".'
+description: 'The Foundation step of the gated SDLC — the Product level, run once per product before any feature epic. With the field-expert lenses (analyst + pm), frame the product and write the Foundation sections into foundation/ — purpose, market (optional), scope (what it is AND what it is not), MVP, roadmap, stack, repos, risks (optional). Greenfield AND brownfield (brownfield reads the connected code). The engine seeds the ledger with `yad foundation new`; this skill authors the sections, then hands off to the team review gate and never auto-advances. Its roadmap.md is the menu of features each yad-epic reads. Use when the user says "start the project", "write the Foundation", "do discovery", "market research / feasibility / roadmap", or "what should we build first".'
 ---
 
-# SDLC — Project Discovery (optional front-zero, "epic zero")
+# SDLC — Foundation (the Product level)
 
-**Goal:** Produce a human-authored, AI-assisted **project-level discovery set** — the field expert's
-requirement-gathering for the whole product — under the reserved `EP-discovery` ("epic zero"), then
-hand off to `yad-review-gate`. The output `roadmap.md` is the menu of features; each feature is later
-taken into the normal `yad-epic` flow, which reads the roadmap for project context.
+**Goal:** Produce a human-authored, AI-assisted **Foundation** for the whole product under
+`{project-root}/foundation/`, then hand off to `yad-review-gate`. The Foundation says why the product
+exists, what it is and is not, the smallest thing worth shipping, and the rough order after that. Its
+`roadmap.md` is the menu of features; each feature is later taken into the normal `yad-epic` flow,
+which reads it for project context.
 
-This is a **Shape step**: human-authored with AI assist and **never auto-advances**. It runs **once
-per project** and is **optional** — a team that already knows what to build can skip it and start at
-`yad-epic`. It supports **both greenfield and brownfield**, and produces a **competitor study in both**.
+**What the Foundation is.** The roadmap (`docs/roadmap-idea-1.md`, Part 1) has two levels. The
+**Product** level runs once per product and holds the Foundation. The **Feature** level runs once per
+epic and walks the six phases. The Foundation has its own gate: one approval before feature work
+begins. That approval is **reported, not enforced** in this release — `yad next` says when feature
+epics are going ahead of an unapproved Foundation, and nothing is blocked.
 
-This skill enforces the build plan's core rules: all state lives in files; IDs are engine-assigned
-(the reserved `EP-discovery`, never a typed feature slug); Shape steps are locked to `advance: human`.
+This is a **Shape step**: human-authored with AI assist and **never auto-advances**. It is
+**optional** — a team that already knows what to build can start at `yad-epic`. It supports **both
+greenfield and brownfield**.
+
+The skill keeps its old name, `yad-discovery`. Before E75 it wrote a different set of files under the
+reserved `EP-discovery` epic; that older spelling is still read (see Step 1).
 
 ## Conventions
 
 - `{project-root}` resolves from the project working directory.
-- Discovery artifacts live under `{project-root}/epics/EP-discovery/` (the reserved "epic zero").
+- The Foundation lives in `{project-root}/foundation/`: its sections directly inside it, its ledger in
+  `foundation/.sdlc/`, and its review summaries in `foundation/reviews/`. Its fixed id is
+  `EP-foundation` — every `yad` command takes that id.
 - Speak in the configured `communication_language`; write documents in `document_output_language`.
 
 ## On Activation
 
-### Step 1 — Entry guard (runs once per project)
-The id is the reserved `EP-discovery` — never a feature slug. Discovery seeds its state exactly once:
-if `{project-root}/epics/EP-discovery/.sdlc/state.json` already exists, **STOP** and point the user at
-`yad next EP-discovery` (the phase is in review or done; edit the artifacts in place, don't re-seed).
-When no `state.json` exists yet, proceed and seed state in Step 5.
+### Step 1 — Entry guard (one Foundation per product)
+- If `{project-root}/foundation/.sdlc/state.json` already exists, **STOP** and point the user at
+  `yad next EP-foundation`. The Foundation is already seeded; edit its sections in place.
+- If `{project-root}/epics/EP-discovery/.sdlc/state.json` exists, this product already has its Product
+  level **in the old spelling**. A product has ONE Foundation, so do not seed a second. **STOP** and tell
+  the user:
+  - on a **local** ledger, `yad migrate` (preview) then `yad migrate --apply` converts it into
+    `foundation/`, keeping its files and approvals;
+  - on a **verified** ledger CI owns that ledger and it cannot be moved by hand — keep working in
+    `epics/EP-discovery/`, and review it with `yad gate open EP-discovery discovery/`.
 
 Detect the project mode from `{project-root}/.sdlc/hub.json` `profile.codebase`
 (`greenfield` | `brownfield`, set by `yad setup`). If absent, ask the user; default `greenfield`.
 
 ### Step 2 — Shape with the field-expert lenses (assist: analyst + pm)
-Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) and the **pm** lens (`bmad-agent-pm`) to gather
-requirements as a domain expert would. Drive the existing BMAD research skills as the assist — they
-already exist in this project:
+Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) and the **pm** lens (`bmad-agent-pm`) to frame
+the product as a domain expert would. Drive the existing research skills as the assist:
 - `bmad-market-research` — market size, segments, demand, trends, positioning.
 - `bmad-domain-research` — the problem domain, regulations, and constraints of the field.
 - `bmad-product-brief` — personas, value proposition, success metrics.
 
-Pressure-test: who are the users, what problem, what is the market, **who are the competitors and how
-do we differ** (required in BOTH modes), what is feasible, what is the smallest valuable slice (MVP),
-and what sequences after it.
+Pressure-test: who is this for and why does it exist, what does success look like, who else does this
+and why us, **what it is and explicitly what it is not**, what the smallest valuable slice is, what
+sequences after it, what it is built with, and what could kill it.
 
-### Step 2b — Brownfield current-state (make discovery code-aware)
+### Step 2b — Brownfield: read what already exists
 Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context`). For **every
 connected repo**, load the lightweight code-map `{project-root}/.sdlc/code-context/<repo>/code-map.md`
-and base `current-state.md` on **what already exists** — modules, endpoints, data, gaps — so the
-roadmap extends the real system rather than re-proposing it.
+and base `stack.md` and `repos.md` on **what already exists** — languages, frameworks, modules,
+endpoints, data — so the Foundation describes the real system rather than re-proposing it.
 
-- **Greenfield-safe:** if `repos.json` is absent/empty (greenfield), `current-state.md` is a short
-  "clean slate / assumptions & non-goals" note, and you proceed.
+- **Greenfield-safe:** if `repos.json` is absent or empty, `stack.md` and `repos.md` record the
+  intended choices and why.
 - **Staleness:** if a repo's current HEAD (`git -C <path> rev-parse HEAD`) ≠ its registry `syncedHead`,
   warn and suggest `yad repo refresh <repo>` (a human decision — flag, never auto-refresh).
 - **Backfill pointer:** for an existing codebase, point the user at `yad-backfill` to capture specs for
-  already-built features; discovery frames the *forward* roadmap, backfill captures the *current* one.
+  already-built features; the Foundation frames the *product*, backfill captures the *features*.
 
 ### Step 3 — Open the authoring branch
-Open the discovery authoring branch `discovery/EP-discovery` per the shared procedure
+Open the Foundation authoring branch `foundation/EP-foundation` per the shared procedure
 (`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if
 `{project-root}` is not a git work tree), check out the branch if it exists, else create it from the
-Product's default branch. Author and commit the discovery set on it. Distinct from the verified ledger's
-`review/EP-discovery/discovery` branch.
+Product's default branch. Author and commit the Foundation on it. Distinct from the verified ledger's
+`review/EP-foundation/foundation` branch.
 
-### Step 4 — Write the discovery set
-Write these files under `{project-root}/epics/EP-discovery/`. Each is a normal Markdown artifact; the
-gate binds to the **whole set** (editing any one revokes approvals). `roadmap.md` summarises and links
-the others and is the spine of the review.
+### Step 4 — Seed the ledger with the engine
+Run:
 
-- `market-research.md` — market, segments, demand, trends (assist: `bmad-market-research`).
-- `competitor-analysis.md` — competitors, capabilities, gaps, our differentiation (**both modes**).
-- `current-state.md` — brownfield: what exists today (Step 2b); greenfield: clean-slate assumptions.
-- `feasibility.md` — technical/operational/economic feasibility, risks, viability, go/no-go.
-- `requirements.md` — the consolidated requirements list, **functional AND non-functional**, as a
-  table (see `references/discovery-schema.md`). Functional rows are candidate features (registration,
-  login, …); non-functional rows are cross-cutting (performance, security, accessibility, i18n …).
-- `roadmap.md` — the phased plan with an explicit **MVP** phase, then later phases. Each feature row
-  carries a proposed `EP-<slug>` id, its target phase, and a `status:` of `planned`
-  (see `references/discovery-schema.md` for the exact templates).
+```
+yad foundation new
+```
+
+That writes `foundation/.sdlc/state.json` with the Foundation's two-step chain (`foundation` →
+`foundation-review`), an empty `approvals.json` and `comments.json`, and the `foundation/reviews/`
+folder. The engine owns that file: do not write or edit it by hand. The command refuses a second
+Foundation and a product still on the old spelling (Step 1 already stopped for both).
+
+### Step 5 — Write the Foundation sections
+Write these files directly in `{project-root}/foundation/`, one per section, using the templates in
+`references/foundation-schema.md`. The gate binds to the **whole set**: editing any section revokes
+approvals.
+
+| File | Section | Required? |
+|---|---|---|
+| `purpose.md` | Why this exists, who it is for, what success looks like | required |
+| `market.md` | Who else does this, and why us | optional |
+| `scope.md` | What it is — **and explicitly what it is not** | required |
+| `mvp.md` | The smallest thing worth shipping | required |
+| `roadmap.md` | The rough order after the MVP — the menu of feature epics | required |
+| `stack.md` | Languages, frameworks, hosting, databases | required |
+| `repos.md` | How many repos, what each does, monorepo or separate | required |
+| `risks.md` | What could kill this | optional |
+
+**All six required sections must exist to review.** Until they do, the Foundation has no fingerprint to
+bind an approval to, and `yad gate open` warns. An optional section counts once it exists — adding or
+removing one after an approval revokes it, like any other edit.
 
 Leave `owner` for the user to set in each frontmatter. Fill the bodies with the user.
 
-### Step 5 — Seed the state machine
-Create `{project-root}/epics/EP-discovery/.sdlc/state.json` describing the **2-step** front-zero
-sequence, both steps `automation: human_approve` / `advance: human` and `locked`, with the `kind: "discovery"` marker the
-engine keys off. Use this exact shape (see `references/discovery-schema.md`):
+### Step 6 — Stop at the gate (do NOT advance)
+Report the path to the Foundation, and that the next action is **review** via `yad-review-gate`:
 
-```json
-{
-  "schemaVersion": 7,
-  "epicId": "EP-discovery",
-  "kind": "discovery",
-  "createdAt": "<YYYY-MM-DD>",
-  "profile": "discovery",
-  "currentStep": "discovery-review",
-  "steps": [
-    { "id": "discovery",        "type": "author",         "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "done",      "risk_tags": [] },
-    { "id": "discovery-review", "type": "review+approve", "artifact": "discovery/", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "in_review", "risk_tags": [] }
-  ]
-}
+```
+yad gate open EP-foundation foundation/
 ```
 
-Notes:
-- `profile: "discovery"` names the **route** this chain takes — the product front-zero, two steps and
-  no Build. `yad doctor` reads it back and reports an epic whose chain is not on the route it records.
-  `yad epic new` deliberately refuses this route: the front-zero has a fixed id, no `epic.md` and no
-  work-item type, so this skill stays its author.
-- The review step's artifact is the virtual base `discovery/` — the gate fingerprints the whole
-  discovery file set (`market-research`, `competitor-analysis`, `current-state`, `feasibility`,
-  `requirements`, `roadmap`), so editing any of them revokes prior approvals (mirrors `stories/`).
-  **All six must exist to review:** if any is missing the set is incomplete and non-reviewable (the
-  hash is `null`) and `yad gate open`/`sync` warn — so write all six (Step 4) before the gate.
-- `discovery-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer); discovery
-  never escalates to domain owners (no contract surface is touched yet).
-- Also create an empty approvals ledger `.sdlc/approvals.json` and comments ledger
-  `.sdlc/comments.json`, each containing `[]`, and the `reviews/` directory.
-- Commit the seed on the `discovery/EP-discovery` branch, and cut `review/EP-discovery/discovery` from
-  it so the **first** review PR/MR carries the ledger to the default branch. In verified mode
-  `ledger-guard` exempts a new epic's ledger (creation, not mutation, #162); every later change to it
-  is CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
-
-### Step 6 — Stop at the gate (do NOT advance)
-Report: the path to the discovery set, and that the next action is **review** via `yad-review-gate`
-(base rule: owner + 1 reviewer) on the virtual artifact `discovery/`. **Never mark discovery-review
-approved here** — only real reviewers do that through the gate. When the discovery gate passes, the
-state moves to the `discovery-done` sentinel (not `ready-for-build` — discovery has no Build); the
-roadmap is now the input that each `yad-epic` reads (its "Step 2c — read the roadmap"). When the Product
-has a platform, the gate opens a review PR on the Product (via `yad-hub-bridge`) and
-`yad-review-gate action: sync` pulls platform approvals/comments into the ledger; otherwise the review
-is recorded local.
+**Never mark `foundation-review` approved here** — only real reviewers do that through the gate. When
+the gate passes, the ledger moves to the `foundation-done` sentinel (not `ready-for-build` — the
+Foundation has no Build). From then on `foundation/roadmap.md` and `foundation/scope.md` are the inputs
+each `yad-epic` reads (its "Step 2c"). When the Product has a platform, the gate opens a review PR on the
+Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals and comments
+into the ledger; otherwise the review is recorded locally.
 
 ## Reference
-- Discovery artifact templates + the 2-step state shape: `references/discovery-schema.md`.
+- Foundation section templates: `references/foundation-schema.md`.
+- The older spelling of the Product level (`EP-discovery`, its six files, and how it converts):
+  `references/discovery-schema.md`.
 - State schema, chain shapes, and the authoring-branch procedure:
   `../yad-epic/references/state-schema.md`.
 - The epic step that consumes `roadmap.md`: `../yad-epic/SKILL.md` (Step 2c).

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, readJSON, exists } from './lib.mjs';
 import { readShips } from './ledger.mjs';
 import {
-  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun, currentPhase,
+  epicRoot, isValidEpicId, epicLineage, readFrontmatter, isStubEpic, typeNoun, currentPhase, isProductLevel,
   resolveThread, threadEpics, resolveCurrentArtifacts, resolveCurrentStories, THREAD_ARTIFACT_BASES,
 } from './epic-state.mjs';
 
@@ -62,9 +62,10 @@ export function threadSummary(root, threadOrEpic) {
       theme: lin.theme,
       currentStep: state?.currentStep || 'unseeded',
       // Which of the six phases this epic is in — the same answer `yad next` prints, from the same
-      // function. Null is a real answer, not a gap: a stub, the discovery front-zero, and any step id
-      // this release does not recognise all have no phase, and none of them is guessed at.
-      phase: currentPhase(state?.currentStep, { discovery: state?.kind === 'discovery' }),
+      // function. Null is a real answer, not a gap: a stub and any step id this release does not
+      // recognise have no phase, and neither is guessed at. (The product level never reaches here —
+      // a thread is built from epics with an `epic.md` — but the same predicate is asked anyway.)
+      phase: currentPhase(state?.currentStep, { product: isProductLevel(state) }),
       sealed: sealedEpic(root, id),
       stub: isStubEpic(root, id),
       depth: change?.depth || null,

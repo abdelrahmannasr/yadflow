@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -487,15 +487,15 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
 }
 
 export function epicChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   // Read once for the whole sweep: whether approval is waived is a project fact, not a per-epic one.
   const solo = isSolo(readJSON(productConfigPath(root), null));
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+  // `epicIds` — every VALID epic id plus the Foundation (E75). The old listing took any directory under
+  // `epics/`, so a folder that is not an epic got an "epic not seeded" warning it could never satisfy.
+  for (const e of epicIds(root)) {
     try {
       const ledger = loadLedger(epicRoot(root, e));
-      if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`, 'author it via yad-epic, or remove the directory');
+      if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`,
+        e === FOUNDATION_EPIC ? `seed it with \`yad foundation new\`, or remove ${FOUNDATION_DIR}/.sdlc/` : 'author it via yad-epic, or remove the directory');
       else {
         check(checks, `epic:${e}`, 'epics', 'ok', `${e}: currentStep ${ledger.state.currentStep}`);
         // Chain consistency: a passed review gate whose author step was never closed. currentStep alone
@@ -525,6 +525,76 @@ export function epicChecks(checks, root) {
   }
 }
 
+// ---- the Foundation is guarded only once the wired checks know its folder (E75) ------------------
+// On a VERIFIED Product, CI is the only writer of the ledger, and what enforces that is
+// `checks/ledger-guard.sh` — committed in the user's own repo and refreshed by `yad update`, which is a
+// separate act from upgrading the CLI or running `yad migrate`. A copy from before E75 guards `epics/`
+// only. So a Product that has a Foundation and has not refreshed its checks has a ledger nobody
+// guards: a human can hand-edit `foundation/.sdlc/approvals.json` and the review PR goes green. The
+// two PR gates have the same gap for a Foundation section riding a non-review branch.
+//
+// Rule 6 says the engine never goes quiet about what is unprotected, so this is a WARNING that names
+// the consequence and the one command that fixes it. It never fires without a Foundation — there is
+// nothing to guard — nor on a local ledger, where humans write the ledger by design.
+//
+// Detected by the ARM that does the guarding, not by the folder name anywhere in the text: a comment
+// that merely mentions `foundation/` must not make an outdated script read as current. The wired copy
+// is byte-for-byte a template, so each template's arm is a fixed string.
+//
+// The same section reports the three ways a product can have the WRONG number of product levels:
+//   foundation:two     a Foundation AND an old `epics/EP-discovery/` ledger — fail. Two product levels
+//                      is a bug by the roadmap's own words, and only a person knows which is real.
+//   foundation:stray   an `epics/EP-foundation/` folder — fail. That id's folder is `foundation/`; this
+//                      one is never read, so anything written into it is silently lost.
+//   foundation:legacy  the old spelling alone. On a local ledger that is a warning with the command
+//                      that converts it. On a verified one there is nothing to run — CI owns the
+//                      ledger — so it is reported as fine, because a warning nobody can clear teaches
+//                      people to stop reading warnings.
+export function foundationChecks(checks, root) {
+  const hub = readJSON(productConfigPath(root), null);
+  const hasFoundation = exists(path.join(epicRoot(root, FOUNDATION_EPIC), '.sdlc', 'state.json'));
+  const hasLegacy = exists(path.join(epicRoot(root, DISCOVERY_EPIC), '.sdlc', 'state.json'));
+  if (hasFoundation && hasLegacy) {
+    check(checks, 'foundation:two', 'project', 'fail',
+      `two product levels: ${FOUNDATION_DIR}/ and epics/${DISCOVERY_EPIC}/ — a product has one Foundation`,
+      `decide which one is real. \`yad next\` uses ${FOUNDATION_DIR}/; to keep the old one instead, move ${FOUNDATION_DIR}/ aside and run \`yad migrate --apply\``);
+  } else if (hasLegacy) {
+    if (isVerifiedLedger(hub)) {
+      check(checks, 'foundation:legacy', 'project', 'ok',
+        `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/) — read as the Foundation; on a verified ledger it stays there`);
+    } else {
+      check(checks, 'foundation:legacy', 'project', 'warn',
+        `the product level is in its old spelling (epics/${DISCOVERY_EPIC}/)`,
+        `run \`yad migrate\` to preview, then \`yad migrate --apply\` — it moves to ${FOUNDATION_DIR}/ with its files and approvals kept (docs/migrations/shape-8.md)`);
+    }
+  }
+  if (exists(path.join(root, 'epics', FOUNDATION_EPIC))) {
+    check(checks, 'foundation:stray', 'project', 'fail',
+      `epics/${FOUNDATION_EPIC}/ exists, but that id's folder is ${FOUNDATION_DIR}/ — nothing ever reads this one`,
+      `move anything real into ${FOUNDATION_DIR}/, then delete epics/${FOUNDATION_EPIC}/`);
+  }
+  foundationGuardChecks(checks, root, hub);
+}
+
+function foundationGuardChecks(checks, root, hub) {
+  if (!exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) return;
+  if (!isVerifiedLedger(hub)) return;
+  const ARMS = {
+    'checks/ledger-guard.sh': `      ${FOUNDATION_DIR}/*)`,
+    'checks/pr-title.sh': `^(epics|${FOUNDATION_DIR})/`,
+    'checks/pr-template.sh': `^(epics|${FOUNDATION_DIR})/`,
+  };
+  const stale = Object.keys(ARMS).filter((rel) => {
+    const file = path.join(root, rel);
+    if (!exists(file)) return false;   // not wired at all is `yad check`'s finding, not this one
+    try { return !fs.readFileSync(file, 'utf8').includes(ARMS[rel]); } catch { return false; }
+  });
+  if (!stale.length) return;
+  check(checks, 'foundation:guard', 'project', 'warn',
+    `the wired checks predate the Foundation: ${stale.join(', ')} ${stale.length === 1 ? 'does' : 'do'} not know \`${FOUNDATION_DIR}/\``,
+    `run \`yad update\` and commit the refreshed checks — until then CI does not stop a hand-edit of ${FOUNDATION_DIR}/.sdlc/ or a Foundation change on a non-review branch`);
+}
+
 // ---- file shape (schemaVersion) -------------------------------------------------------------
 // What shape this project's files are in, against the shape this engine writes. The stamp itself is
 // silent by design (cli/lib.mjs), and `yad migrate` only speaks when you run it — so without this
@@ -541,6 +611,7 @@ export function epicChecks(checks, root) {
 //         so the fix is to upgrade the CLI, not to touch the file
 const scopeOf = (rel) => {
   const parts = rel.split(path.sep);
+  if (parts[0] === FOUNDATION_DIR && parts.length > 1) return FOUNDATION_EPIC;   // E75
   return parts[0] === 'epics' && parts.length > 1 ? parts[1] : null;
 };
 
@@ -611,17 +682,11 @@ export function mirrorChecks(checks, root) {
   const pairs = [...MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy }))];
   // The per-epic PR ledger is renamed the same way, so it drifts the same way. It is not in
   // MIRRORED_FILES because that list is project-relative and this one exists once per epic.
-  const epicsDir = path.join(root, 'epics');
-  if (exists(epicsDir)) {
-    for (const e of fs.readdirSync(epicsDir).sort()) {
-      // `statSync` follows symlinks and throws on a dangling one, so guard the whole entry rather
-      // than letting one broken link take the entire health check down.
-      try {
-        if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
-      } catch { continue; }
-      const f = epicFiles(path.join('epics', e));
-      pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
-    }
+  // `epicIds` reads with `withFileTypes`, so a dangling symlink is simply not a directory — it cannot
+  // throw here and take the whole health check down, which is what the old `statSync` guard was for.
+  for (const e of epicIds(root)) {
+    const f = epicFiles(epicRel(e));
+    pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
   }
   for (const { canonical, legacy } of pairs) {
     const a = path.join(root, canonical);
@@ -675,8 +740,6 @@ export function mirrorChecks(checks, root) {
 // Scoped to the per-step dials only. `trust-log.json` records what a dial WAS on a past run and is
 // not a live setting, so a mismatch there is history, not drift.
 export function dialChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const disagree = [];
   const reviewAuto = [];
   const newOnly = [];
@@ -712,11 +775,8 @@ export function dialChecks(checks, root) {
     }
   };
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    try {
-      if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
-    } catch { continue; }
-    const f = epicFiles(path.join('epics', e));
+  for (const e of epicIds(root)) {
+    const f = epicFiles(epicRel(e));
     const state = readJSON(path.join(root, f.state), null);
     if (state) inspect(f.state, '', state.steps);
     const bsDir = path.join(root, f.buildStateDir);
@@ -773,7 +833,7 @@ export function dialChecks(checks, root) {
 //   A TYPE NOBODY DEFINED   a value outside the five. It reads as a non-genesis type, so the lineage
 //             gate gets stricter rather than looser — a warning, not a failure.
 //
-// `state.json`'s own top-level `kind` is NOT looked at here. That is the `stub` / `discovery`
+// `state.json`'s own top-level `kind` is NOT looked at here. That is the `stub` / `foundation` / `discovery`
 // lifecycle marker, a different axis, and a stub legitimately carries both at once.
 export function typeChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
@@ -933,17 +993,14 @@ export function themeChecks(checks, root) {
 // screens is a normal thing to do, and a check that nagged about it would train people to ignore the
 // section that also carries the two below, which are real breakage.
 export function catalogueChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const wrongArtifact = [];
   const noArtifact = [];
   const wrongKind = [];
   const orphanGate = [];
   const offRoute = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     const present = new Set(state.steps.map((s) => s?.id).filter((x) => typeof x === 'string'));
 
@@ -980,7 +1037,7 @@ export function catalogueChecks(checks, root) {
       // and approves perfectly is bound to the wrong file — a false statement, and the kind that
       // teaches people to stop reading warnings.
       if (def.artifact && typeof step.artifact === 'string' && step.artifact
-          && artifactBase(step.artifact) !== artifactBase(def.artifact)) {
+          && !artifactAgrees(def, step.artifact)) {
         wrongArtifact.push(`${e} \`${step.id}\`: \`${step.artifact}\`, catalogue says \`${def.artifact}\``);
       }
       // A Shape step with NO artifact at all is the one shape that crashes rather than misfires:
@@ -1063,14 +1120,11 @@ export function catalogueChecks(checks, root) {
 // "the recorded route disagrees" would name the same fault twice with two different remedies, so this
 // check speaks only when the chain fits a route CLEANLY and it is a different one from the record.
 export function profileChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const unknown = [];
   const disagree = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     // No key at all is the normal state for a chain that matches no route: `stampProfile` declines to
     // invent one, and `step:off-route` is what reports that chain. Nothing to say here.
     if (!isPlainObject(state) || !('profile' in state)) continue;
@@ -1120,14 +1174,11 @@ export function profileChecks(checks, root) {
 // Reported, never corrected, like everything else here: clearing the flag would erase a recorded
 // decision, and re-marking the step `blocked` would undo work the team may have finished.
 export function skipChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
   const bad = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     // Silent on an epic `profile:disagree` already names. Both findings come from the same stale
     // label, and that check's remedy — correct `profile` to the route the chain shows — clears this
@@ -1194,15 +1245,12 @@ export function skipChecks(checks, root) {
 const BLOCKED_CHANGED_MEANING_AT = 7;
 
 export function stepStateChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
   const unknown = [];
   const noRecord = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     // The shape as the FILE records it, by rule 1: no key means shape 1.
     const shape = Number.isInteger(state.schemaVersion) ? state.schemaVersion : 1;
@@ -1321,8 +1369,6 @@ export function skillBindingChecks(checks, root) {
 //     twelve known step ids have no reader on this path at all.
 // The four `currentStep` sentinels are markers rather than steps and are skipped by name.
 export function phaseChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const unplaced = [];
   // One report per unknown id per epic. `currentStep` usually names a step that is also in `steps[]`,
   // so a single typo would otherwise be listed twice and push a genuinely different one out of the
@@ -1338,15 +1384,14 @@ export function phaseChecks(checks, root) {
     if (!Array.isArray(steps)) return;
     for (const s of steps) if (isPlainObject(s)) consider(where, s.id);
   };
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
+  for (const e of epicIds(root)) {
     seen = new Set();
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (isPlainObject(state)) {
       considerSteps(e, state.steps);
       consider(`${e} (currentStep)`, state.currentStep);
     }
-    const bsDir = path.join(epicsDir, e, '.sdlc', 'build-state');
+    const bsDir = path.join(epicRoot(root, e), '.sdlc', 'build-state');
     if (!exists(bsDir)) continue;
     let names;
     try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
@@ -1431,6 +1476,7 @@ export function collectDoctor(root) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
+  foundationChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
   dialChecks(checks, root);

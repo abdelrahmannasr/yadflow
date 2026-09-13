@@ -10,12 +10,24 @@ methodology: gated-team-multirepo-sdlc
 product_root: "{project-root}"
 epics_folder: "{project-root}/epics"
 
-# Project discovery (yad-discovery) — the OPTIONAL front-zero, run once per project (greenfield AND
-# brownfield). It is modelled as the reserved "epic zero" `EP-discovery` so the entire review gate +
-# PR/MR bridge + CI sync + `yad next` operate on it unchanged. A 2-step author→review chain whose
-# review binds to the whole artifact set; on approval it terminates at `discovery-done` (no Build).
-# Output: a phased roadmap (incl. MVP) that each feature epic reads (yad-epic Step 2c) — reference-only,
-# never auto-seeds epics.
+# The Foundation (E75) — the Product level, run once per product before any feature epic (greenfield AND
+# brownfield). Its own folder, `foundation/`, under the fixed id `EP-foundation`: the id keeps the `EP-`
+# prefix so the review gate, the PR/MR bridge, CI sync and `yad next` all operate on it unchanged.
+# `yad foundation new` seeds the ledger; `yad-discovery` authors the sections. A 2-step author→review
+# chain whose review binds to the required sections; on approval it terminates at `foundation-done` (no
+# Build). Its approval is REPORTED, not enforced, before feature work begins. roadmap.md is the menu of
+# features each epic reads (yad-epic / yad-analysis Step 2c) — reference-only, never auto-seeds epics.
+foundation:
+  epic_id: "EP-foundation"                             # reserved id; yad-epic/yad-analysis never pick it
+  location: "{project-root}/foundation/"               # the sections + .sdlc/ ledger + reviews/ live here
+  optional: true                                       # a team that knows what to build starts at yad-epic
+  modes: [greenfield, brownfield]                       # stack.md / repos.md are code-aware in brownfield
+  sections: [purpose.md, scope.md, mvp.md, roadmap.md, stack.md, repos.md]
+  optional_sections: [market.md, risks.md]
+
+# The OLD spelling of the Product level — the "epic zero" every release before E75 wrote. Still READ for
+# this whole major. `yad migrate --apply` converts it into `foundation/` on a local ledger; a verified
+# ledger keeps it (CI owns that ledger). A product has ONE product level: never both.
 discovery:
   epic_id: "EP-discovery"                              # reserved id; yad-epic/yad-analysis never pick it
   location: "{project-root}/epics/EP-discovery/"       # discovery artifacts + ledger live here
@@ -55,7 +67,8 @@ lifecycle:
   # `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`). Three were routes the skills already seeded by hand:
   # `classic` (the 10-step chain, `epic` first — yad-epic / yad-stub / yad-change), `analysis-first`
   # (the 12-step chain, `analysis` before `epic` — yad-analysis) and `discovery` (the product
-  # front-zero — yad-discovery). Two are the short lanes E40 added, which nobody seeded before:
+  # front-zero — yad-discovery, now the OLD spelling of the Product level). `foundation` is that level
+  # as E75 writes it — `yad foundation new`. Two are the short lanes E40 added, which nobody seeded before:
   # `chore` (4 steps, `epic` then `stories`) and `spike` (6, the analysis in front of the chore lane).
   # Neither short lane carries an architecture gate, so neither has a contract of its own, and neither
   # marks any step optional. Each epic RECORDS its route as `profile` in `state.json`
@@ -63,16 +76,20 @@ lifecycle:
   # field `yad migrate` fills it in by matching the chain. The chain stays the truth — `yad doctor`
   # compares the two. NOT the `hub.json` `profile`, which is the unrelated setup record
   # { codebase, repo_layout, team_size }.
-  profiles: [classic, analysis-first, chore, spike, discovery]
+  profiles: [classic, analysis-first, chore, spike, discovery, foundation]
+  # The PRODUCT level's phase (E75) — a ladder of its own, run once per product before any epic, and
+  # part of no Part. `discovery` is listed because it is the old spelling of the same level.
+  product_phases:
+    - { id: foundation, name: Foundation, level: product, built: true, steps: [foundation, discovery] }
   phases:
-    - { id: discover, name: Discover, part: Shape, built: true,  steps: [discovery, analysis, epic] }
+    - { id: discover, name: Discover, part: Shape, built: true,  steps: [analysis, epic] }
     - { id: design,   name: Design,   part: Shape, built: true,  steps: [architecture, ui-design] }
     - { id: plan,     name: Plan,     part: Shape, built: true,  steps: [stories, test-cases] }
     - { id: build,    name: Build,    part: Build, built: true,  steps: [spec, tasks, implement, checks, engineer-review] }
     - { id: release,  name: Release,  part: Run,   built: false, steps: [] }   # E32 builds it
     - { id: operate,  name: Operate,  part: Run,   built: false, steps: [] }   # E33 builds it
   # `currentStep` markers that are NOT steps: they never appear in `steps[]` and have no phase.
-  sentinels: [ready-for-build, backfill-pending, backfill-done, discovery-done]
+  sentinels: [ready-for-build, backfill-pending, backfill-done, discovery-done, foundation-done]
 
 defaults:
   # The two dials: who does the work, and who moves it forward. Renamed in shape 4; BOTH names are
@@ -82,7 +99,7 @@ defaults:
   driver: pair                # human | pair | agent          (new name, shape 4)
   automation: human_approve   # human_approve | machine_advance  (old name — still authoritative)
   advance: human              # human | auto                  (new name, shape 4)
-  # Shape steps (discovery [optional front-zero], analysis [optional], epic, architecture,
+  # Shape steps (foundation [optional, the Product level — discovery is its old spelling], analysis [optional], epic, architecture,
   # ui-design [optional — skippable N/A for UI-less epics via `yad skip <epic> ui-design --reason "<why>"`],
   # stories, test-cases) are locked to `advance: human` and may NOT be set to `advance: auto` in this
   # version (build plan §1, §8.7).

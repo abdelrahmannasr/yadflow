@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger , productConfigPath } from './manifest.mjs';
+import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -38,14 +39,22 @@ const LEDGER_FILES = new Set(['state.json', 'approvals.json', 'comments.json', '
 // `epics/EP-a/nested/.sdlc/state.json`. Requiring exactly four segments here would have let a path
 // through locally that CI blocks, in a guard whose whole claim is that its scope is the gate's.
 // The slug is the second segment either way (the gate's `${f#epics/}` / `${_slug%%/*}`).
+//
+// The Foundation (E75) is the same rule in its own folder: `foundation/.sdlc/<ledger>.json` and
+// `foundation/reviews/*.md`, under the fixed id `EP-foundation`. The gate's arms for it are globs of the
+// same depth-blind kind, so the same depth-blind match is used here.
 export function protectedLedgerPath(rel) {
+  const ledgers = [...LEDGER_FILES].map((f) => f.replace('.', '\\.')).join('|');
+  const classify = (epic) => {
+    if (new RegExp(`/\\.sdlc/(?:${ledgers})$`).test(rel)) return { epic, rel, kind: 'state' };
+    if (/\/reviews\/.*\.md$/.test(rel)) return { epic, rel, kind: 'review' };
+    return null;
+  };
+  if (rel.startsWith(`${FOUNDATION_DIR}/`)) return classify(FOUNDATION_EPIC);
   if (!rel.startsWith('epics/')) return null;
   const epic = rel.slice('epics/'.length).split('/')[0];
   if (!epic || epic === '.' || epic === '..') return null;
-  const ledgers = [...LEDGER_FILES].map((f) => f.replace('.', '\\.')).join('|');
-  if (new RegExp(`/\\.sdlc/(?:${ledgers})$`).test(rel)) return { epic, rel, kind: 'state' };
-  if (/\/reviews\/.*\.md$/.test(rel)) return { epic, rel, kind: 'review' };
-  return null;
+  return classify(epic);
 }
 
 // Every path a tool call would write. Covers the shapes harnesses actually send: a single
@@ -132,14 +141,19 @@ export function seededSlugs(productRoot, hub, runner = run) {
   const base = resolveHookBase(productRoot, hub, runner);
   if (!base) return null;
   const tree = runner('git', [
-    '-C', productRoot, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', base, '--', 'epics',
+    '-C', productRoot, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', base, '--', 'epics', FOUNDATION_DIR,
   ]);
   if (!tree.ok) return null;
   const slugs = new Set();
   for (const p of tree.stdout.split('\0')) {
     const m = /^epics\/([^/]+)\/\.sdlc\/state\.json$/.exec(p);
     if (m) slugs.add(fold(m[1]));
+    if (p === `${FOUNDATION_DIR}/.sdlc/state.json`) slugs.add(fold(FOUNDATION_EPIC));   // E75
   }
+  // One product level: with the old spelling on base, a Foundation ledger replaces a CI-owned one
+  // rather than creating something new — the same rule the CI gate applies.
+  if (slugs.has(fold(DISCOVERY_EPIC))) slugs.add(fold(FOUNDATION_EPIC));
+  else if (slugs.has(fold(FOUNDATION_EPIC))) slugs.add(fold(DISCOVERY_EPIC));   // the mirror
   return slugs;
 }
 
