@@ -2427,3 +2427,89 @@ test('lineage-check: a chore with no parent PASSES, a defect with no parent FAIL
     fs.rmSync(hub, { recursive: true, force: true });
   }
 });
+
+// ---------- E75: the Foundation's ledger lives in foundation/, and is guarded the same way ----------
+
+// The Product level's ledger on `main`, so the branch that follows MUTATES it rather than seeding it.
+const seedFoundationOnBase = (T) => {
+  git(T, 'checkout', '-q', 'main');
+  enableVerified(T);
+  commit(T, 'seed foundation ledger', {
+    'foundation/scope.md': '# scope\n',
+    'foundation/.sdlc/state.json': '{"epicId":"EP-foundation","kind":"foundation"}\n',
+    'foundation/.sdlc/approvals.json': '[]\n',
+  });
+  git(T, 'checkout', '-q', '-B', 'feature');
+};
+
+test('ledger-guard: a non-bot commit mutating the Foundation ledger FAILS (E75)', () => {
+  for (const file of ['foundation/.sdlc/approvals.json', 'foundation/.sdlc/state.json', 'foundation/reviews/foundation.md', 'foundation/sub/.sdlc/state.json']) {
+    const T = scaffoldRepo();
+    try {
+      seedFoundationOnBase(T);
+      commit(T, 'sneaky', { [file]: '[{"status":"approved"}]\n' });
+      const r = runGate(LEDGER_GUARD, T);
+      assert.equal(r.code, 1, `${file}\n${r.out}`);
+      assert.match(r.out, new RegExp(file.replace(/[.]/g, '\\.')));
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('ledger-guard: seeding a NEW Foundation PASSES, and its sections are the author\'s to edit (E75)', () => {
+  const T = scaffoldRepo();
+  try {
+    enableVerified(T);
+    commit(T, 'enable verified', {});
+    commit(T, 'review: foundation', {
+      'foundation/purpose.md': '# purpose\n',
+      'foundation/.sdlc/state.json': '{"epicId":"EP-foundation","kind":"foundation"}\n',
+      'foundation/.sdlc/approvals.json': '[]\n',
+    });
+    const r = runGate(LEDGER_GUARD, T);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /foundation has no ledger on main — new epic/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  const S = scaffoldRepo();
+  try {
+    seedFoundationOnBase(S);
+    // A section, and a file whose NAME merely ends like a guarded folder: neither is the ledger.
+    commit(S, 'review: foundation', { 'foundation/scope.md': '# a better scope\n', 'foundation/notes.sdlc': 'x\n' });
+    const r = runGate(LEDGER_GUARD, S);
+    assert.equal(r.code, 0, r.out);
+  } finally { fs.rmSync(S, { recursive: true, force: true }); }
+});
+
+test('ledger-guard: the 3.18.1 copy committed in a user\'s repo does NOT guard foundation/ — the gap `yad update` closes', () => {
+  // Pinned rather than hidden. A verified Product that upgrades the CLI but has not refreshed its wired
+  // checks runs this copy, which only knows `epics/`. `yad doctor` warns about exactly that state; this
+  // test is what keeps the warning honest — if the old script ever started guarding the folder, the
+  // warning would be wrong.
+  const T = scaffoldRepo();
+  const prev = path.join(T, 'ledger-guard-v3.sh');
+  try {
+    fs.writeFileSync(prev, fs.readFileSync(path.join(ROOT, 'cli/fixtures/ledger-guard-v3.18.1.sh')), { mode: 0o755 });
+    seedFoundationOnBase(T);
+    commit(T, 'sneaky', { 'foundation/.sdlc/approvals.json': '[{"status":"approved"}]\n' });
+    assert.equal(runGate(prev, T).code, 0, 'the old guard lets a Foundation ledger edit through');
+    assert.equal(runGate(LEDGER_GUARD, T).code, 1, 'the current one does not');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('pr-title / pr-template gates: a Foundation change on a non-review head is an artifact change too (E75)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prt-foundation-'));
+  try {
+    const changed = path.join(T, 'changed.txt');
+    fs.writeFileSync(changed, 'foundation/scope.md\n');
+    const title = runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, 'chore: sneak in a scope']);
+    assert.equal(title.code, 1, title.out);
+    assert.match(title.out, /foundation\/\*\*/);
+    const body = path.join(T, 'body.md');
+    fs.writeFileSync(body, '## Summary\nx\n');
+    const tpl = runGate(PR_TEMPLATE, T, ['--profile', 'hub', '--head', 'chore/sneak', '--changed', changed, body]);
+    assert.equal(tpl.code, 1, tpl.out);
+    assert.match(tpl.out, /Shape artifacts/);
+    // The legitimate path is unchanged: a review/EP-* head carries it.
+    assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-foundation/foundation', '--changed', changed, 'review: foundation/ (EP-foundation)']).code, 0);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

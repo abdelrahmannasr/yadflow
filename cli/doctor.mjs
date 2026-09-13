@@ -524,6 +524,35 @@ export function epicChecks(checks, root) {
   }
 }
 
+// ---- the Foundation is guarded only once the wired checks know its folder (E75) ------------------
+// On a VERIFIED Product, CI is the only writer of the ledger, and what enforces that is
+// `checks/ledger-guard.sh` — committed in the user's own repo and refreshed by `yad update`, which is a
+// separate act from upgrading the CLI or running `yad migrate`. A copy from before E75 guards `epics/`
+// only. So a Product that has a Foundation and has not refreshed its checks has a ledger nobody
+// guards: a human can hand-edit `foundation/.sdlc/approvals.json` and the review PR goes green. The
+// two PR gates have the same gap for a Foundation section riding a non-review branch.
+//
+// Rule 6 says the engine never goes quiet about what is unprotected, so this is a WARNING that names
+// the consequence and the one command that fixes it. It never fires without a Foundation — there is
+// nothing to guard — nor on a local ledger, where humans write the ledger by design.
+//
+// Detected by the folder name in the script's text. The wired copy is byte-for-byte a template, and
+// every template from E75 on names `foundation/` in the arm that guards it; a copy that does not name
+// it cannot be guarding it.
+export function foundationGuardChecks(checks, root) {
+  if (!exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) return;
+  if (!isVerifiedLedger(readJSON(productConfigPath(root), null))) return;
+  const stale = ['checks/ledger-guard.sh', 'checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => {
+    const file = path.join(root, rel);
+    if (!exists(file)) return false;   // not wired at all is `yad check`'s finding, not this one
+    try { return !fs.readFileSync(file, 'utf8').includes(`${FOUNDATION_DIR}/`); } catch { return false; }
+  });
+  if (!stale.length) return;
+  check(checks, 'foundation:guard', 'project', 'warn',
+    `the wired checks predate the Foundation: ${stale.join(', ')} ${stale.length === 1 ? 'does' : 'do'} not know \`${FOUNDATION_DIR}/\``,
+    `run \`yad update\` and commit the refreshed checks — until then CI does not stop a hand-edit of ${FOUNDATION_DIR}/.sdlc/ or a Foundation change on a non-review branch`);
+}
+
 // ---- file shape (schemaVersion) -------------------------------------------------------------
 // What shape this project's files are in, against the shape this engine writes. The stamp itself is
 // silent by design (cli/lib.mjs), and `yad migrate` only speaks when you run it — so without this
@@ -1405,6 +1434,7 @@ export function collectDoctor(root) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
+  foundationGuardChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
   dialChecks(checks, root);

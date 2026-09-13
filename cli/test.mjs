@@ -11071,7 +11071,8 @@ test('ledger hook reads the seeded set from origin/<default>, hub-relative — n
     decide(T, 'epics/EP-seeded/.sdlc/state.json', { runner });
     const probe = runner.calls.find((c) => c.includes('ls-tree'));
     assert.ok(probe, 'the seeded set is read with ls-tree');
-    assert.match(probe, /ls-tree -r --name-only -z origin\/main -- epics$/, 'origin/<default>, hub-relative pathspec');
+    // Both ledger folders, hub-relative: `epics` and the Foundation's own `foundation` (E75).
+    assert.match(probe, /ls-tree -r --name-only -z origin\/main -- epics foundation$/, 'origin/<default>, hub-relative pathspec');
     assert.ok(!runner.calls.some((c) => c.includes('cat-file')), 'no repo-root-relative rev:path probe');
     assert.ok(!runner.calls.some((c) => / main\^\{commit\}/.test(c)), 'the local branch is never a candidate');
     // The config's default_branch is used as origin/<it>, not as a local ref.
@@ -12662,4 +12663,61 @@ test('usage: a Foundation section commit counts as authoring, under the Foundati
   assert.equal(isArtifactPath('foundation/notes.md'), false);
   assert.equal(isArtifactPath('foundation/nested/scope.md'), false);
   assert.equal(isArtifactPath('epics/EP-x/epic.md'), true, 'the feature paths are unchanged');
+});
+
+test('hook: the Foundation ledger is protected under its fixed id, and its base seed is recognised (E75)', async () => {
+  const { protectedLedgerPath, seededSlugs } = await import('./hook.mjs');
+  assert.deepEqual(protectedLedgerPath('foundation/.sdlc/state.json'), { epic: 'EP-foundation', rel: 'foundation/.sdlc/state.json', kind: 'state' });
+  assert.equal(protectedLedgerPath('foundation/.sdlc/hub-prs.json').kind, 'state');
+  assert.equal(protectedLedgerPath('foundation/reviews/foundation--2026-09-13--comments.md').kind, 'review');
+  assert.equal(protectedLedgerPath('foundation/scope.md'), null, 'a section is the author\'s, not CI\'s');
+  assert.equal(protectedLedgerPath('foundationx/.sdlc/state.json'), null, 'a folder that merely starts with the name');
+  // The base listing now spans both folders, and the Foundation's ledger folds to its id — so an edit to
+  // an on-base Foundation is a mutation, not a creation.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hook-foundation-'));
+  try {
+    const calls = [];
+    const runner = (cmd, args = []) => {
+      calls.push(args.join(' '));
+      const line = args.join(' ');
+      if (line.includes('symbolic-ref')) return { ok: true, stdout: 'origin/main', code: 0 };
+      if (line.includes('rev-parse --verify')) return { ok: true, stdout: '', code: 0 };
+      if (line.includes('ls-tree')) return { ok: true, code: 0, stdout: ['epics/EP-a/.sdlc/state.json', 'foundation/.sdlc/state.json', 'foundation/scope.md'].join('\0') };
+      return { ok: false, stdout: '', code: 1 };
+    };
+    assert.deepEqual([...seededSlugs(T, {}, runner)].sort(), ['ep-a', 'ep-foundation']);
+    assert.ok(calls.some((c) => / -- epics foundation$/.test(c)), `ls-tree must list foundation too: ${calls.join(' | ')}`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: a verified Product with a Foundation is warned when its wired checks predate foundation/ (E75)', async () => {
+  const { foundationGuardChecks, collectDoctor } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-guard-'));
+  const run = () => { const checks = []; foundationGuardChecks(checks, T); return checks; };
+  const tpl = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    // The copy a 3.18.1 Product has committed — it knows `epics/` only.
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), tpl('cli/fixtures/ledger-guard-v3.18.1.sh'));
+    fs.writeFileSync(path.join(T, 'checks/pr-title.sh'), tpl('skills/yad-pr-template/templates/checks/pr-title.sh'));
+    assert.deepEqual(run(), [], 'no Foundation — nothing to guard, nothing to say');
+
+    fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+    const [w] = run();
+    assert.equal(w?.id, 'foundation:guard');
+    assert.equal(w.status, 'warn');
+    assert.match(w.message, /checks\/ledger-guard\.sh does not know `foundation\/`/);
+    assert.doesNotMatch(w.message, /pr-title/, 'the refreshed PR gate is not named');
+    assert.match(w.hint, /yad update/);
+    assert.ok(collectDoctor(T).checks.some((x) => x.id === 'foundation:guard'), 'wired into yad doctor, not just exported');
+
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), tpl('skills/yad-checks/templates/checks/ledger-guard.sh'));
+    assert.deepEqual(run(), [], 'the current templates guard it');
+
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), tpl('cli/fixtures/ledger-guard-v3.18.1.sh'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'local' }));
+    assert.deepEqual(run(), [], 'a local ledger is written by humans on purpose');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
