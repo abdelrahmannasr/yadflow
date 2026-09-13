@@ -10,7 +10,7 @@ import {
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
-  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -421,7 +421,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     }
 
     const pred = gatePredicate({
-      step, approvals, currentHash: curHash, touchedDomains: domains,
+      step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact), touchedDomains: domains,
       defaultReviewers, threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
       // ledger here rather than from a module-level set that answered the same for every epic.
@@ -812,9 +812,9 @@ export async function gateStatus(root, { epic } = {}) {
   const optional = optionalStepsFor(ledger.state);   // which steps THIS epic's route allows to be skipped
   log(`\n  ${c.bold(epic)}  ${c.dim(`currentStep: ${ledger.state.currentStep}${solo ? ' — solo mode (approval waived; merge still required)' : ''}`)}`);
   for (const s of ledger.state.steps.filter((x) => x.type === 'review+approve')) {
-    const cur = artifactHash(epicDir, s.artifact);
-    const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !(a.artifactHash && cur && a.artifactHash !== cur));
-    const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && a.artifactHash && cur && a.artifactHash !== cur).length;
+    const accepted = acceptedHashes(epicDir, s.artifact);
+    const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
+    const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && isStaleHash(a.artifactHash, accepted)).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
     // E7's count, per step, from the step's own risk tags — advisory until E72 caps it, and labelled so.
     // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from

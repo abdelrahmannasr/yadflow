@@ -130,7 +130,7 @@ the line, so a comment becomes part of the value and the gates stop recognising 
   `yad next` and `yad thread` PRINT the tag as `#checkout-revamp`, but the `#` is decoration on the
   screen, and anything from a `#` onward is kept as part of the value, so the epic then groups only
   with epics carrying that exact text. Any language is fine. Set it NOW, while the epic
-  is being written: the epic review gate is bound to a hash of the whole file, so adding a theme after
+  is being written: the epic review gate is bound to a hash of the file (all of it except the `status:` line), so adding a theme after
   that gate is approved drops the approval as stale and the step has to be approved again.
 
 ```markdown

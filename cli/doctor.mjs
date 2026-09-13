@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -476,9 +476,9 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
         'the step advanced without the record the gate exists to keep — re-open the review (a fresh PR/MR) and re-approve, or run `yad gate sync` if the approvals are on the PR but never reached the ledger');
       continue;
     }
-    const cur = artifactHash(epicDir, s.artifact);
-    if (!cur) continue; // nothing to bind to (no locked surface / incomplete set) — not a staleness claim
-    const live = forStep.filter((a) => !a.artifactHash || a.artifactHash === cur);
+    const accepted = acceptedHashes(epicDir, s.artifact);
+    if (!accepted.length) continue; // nothing to bind to (no locked surface / incomplete set) — not a staleness claim
+    const live = forStep.filter((a) => !isStaleHash(a.artifactHash, accepted));
     if (live.length) continue;
     check(checks, `epic:${epic}:${s.id}:stale`, 'epics', 'warn',
       `${epic}: ${s.id} is done, but all ${forStep.length} approval(s) are bound to an older ${s.artifact}`,

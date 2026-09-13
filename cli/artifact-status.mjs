@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, readJSONStrict } from './lib.mjs';
 import {
-  epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus,
+  epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus, FRONTMATTER_BLOCK,
 } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -46,7 +46,7 @@ export function desiredStatus(state, base) {
 export function setFrontmatterStatus(file, status) {
   if (!fs.existsSync(file)) return null;
   const text = fs.readFileSync(file, 'utf8');
-  const fm = text.match(/^---\n([\s\S]*?)\n---/);
+  const fm = text.match(FRONTMATTER_BLOCK);
   if (!fm) return null;
   const cur = (fm[1].match(/^status:\s*(.*)$/m) || [])[1]?.trim();
   if (cur === undefined) return null;
@@ -109,7 +109,7 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
         // Peek without writing so --dry-run reports exactly what would change. Scope the match to the
         // frontmatter block so a `status:` line in the Markdown body can't be mistaken for the value.
         const text = fs.readFileSync(file, 'utf8');
-        const fm = text.match(/^---\n([\s\S]*?)\n---/);
+        const fm = text.match(FRONTMATTER_BLOCK);
         const cur = (fm?.[1].match(/^status:\s*(.*)$/m) || [])[1]?.trim();
         if (cur && !PRESERVE.has(cur) && cur in RANK && RANK[want] > RANK[cur]) {
           log(`  ${c.dim('• would update')} ${path.relative(root, file)}: ${cur} → ${want}`);

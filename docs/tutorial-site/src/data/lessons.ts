@@ -399,7 +399,7 @@ export const MODULES: Module[] = [
             'approve — a reviewer approves with name + role, recorded in approvals.json.',
             'advance — moves forward only if the rule is satisfied; otherwise it names who is still missing.',
           ] },
-          { kind: 'callout', tone: 'warn', text: 'Approvals are revoked when the reviewed artifact actually changes (it is re-hashed) — so a late edit gives reviewers a fresh pass instead of sneaking through.' },
+          { kind: 'callout', tone: 'warn', text: 'Approvals are revoked when the reviewed artifact actually changes (it is re-hashed) — so a late edit gives reviewers a fresh pass instead of sneaking through. The status line at the top of the file does not count: yadflow changes it itself after the review.' },
         ],
         commands: [
           { cmd: 'yad-review-gate action: open' },

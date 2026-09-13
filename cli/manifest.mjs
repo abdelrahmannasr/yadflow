@@ -184,12 +184,18 @@ export const LEARNING_PRIMARY = 'deeptutor';
 //     of any other file changes. On a verified project the gate bot makes the same
 //     move (`yad gate ci`); until it lands, the old spelling is still read.
 //     docs/migrations/shape-8.md.
+// 9 — an approval's fingerprint leaves out the artifact's frontmatter `status:` line (`reviewedSha` in
+//     epic-state.mjs). No field is added, renamed or moved, and no file is rewritten: what changes is
+//     the VALUE the gate writes into `artifactHash` on a new approval. It is still a shape, and a
+//     breaking one, because an older yadflow reads that value as stale — so it has to see a newer
+//     shape and say so. This release reads both the new value and every form older ones recorded.
+//     docs/migrations/shape-9.md.
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {
