@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { MIGRATIONS, planMigration, projectJsonFiles, runMigrate } from './migrate.mjs';
+import { isEpicStatePath, MIGRATIONS, planMigration, projectJsonFiles, runMigrate } from './migrate.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 
 const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -1240,5 +1240,22 @@ test('a gate write lands `type` in front of `profile` even when it arrives long 
     assert.equal(now.type, 'chore');
     assert.deepEqual(Object.keys(now).slice(0, 6),
       ['schemaVersion', 'epicId', 'createdAt', 'type', 'profile', 'currentStep']);
+  } finally { cleanup(T); }
+});
+
+test('migrate: the Foundation ledger in foundation/ is on the plan, and stamped like an epic ledger (E75)', () => {
+  // `foundation/` sits outside `epics/`, so a plan built by listing `epics/` would leave the product
+  // level on a shape nobody defined — and `yad doctor` reads the same plan, so it would not say so.
+  const T = project({ files: {
+    'foundation/.sdlc/state.json': JSON.stringify({ epicId: 'EP-foundation', kind: 'foundation', currentStep: 'foundation',
+      steps: [{ id: 'foundation', type: 'author', artifact: 'foundation/', assistance: 'review', automation: 'human_approve', status: 'in_progress' }] }, null, 2) + '\n',
+  } });
+  try {
+    const row = planMigration(T).rows.find((r) => r.file === path.join('foundation', '.sdlc', 'state.json'));
+    assert.ok(row, 'no row for the Foundation ledger');
+    assert.equal(row.action, 'migrate');
+    // The dial stamper keys off the path; a Foundation ledger is an epic ledger to it.
+    assert.equal(isEpicStatePath('foundation/.sdlc/state.json'), true);
+    assert.equal(isEpicStatePath('foundation/nested/.sdlc/state.json'), false);
   } finally { cleanup(T); }
 });

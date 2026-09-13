@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, readJSONStrict } from './lib.mjs';
 import {
-  epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, isPassed, stepStatus,
+  epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus,
 } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -60,10 +60,10 @@ export function setFrontmatterStatus(file, status) {
 
 // Sweep one epic (or every epic under epics/) and reconcile artifact frontmatter with state.json.
 export async function syncStatuses(root, { epic, dryRun = false } = {}) {
-  const epicsDir = path.join(root, 'epics');
-  const epics = epic
-    ? [epic]
-    : (fs.existsSync(epicsDir) ? fs.readdirSync(epicsDir).filter((e) => fs.statSync(path.join(epicsDir, e)).isDirectory()).sort() : []);
+  // `epicIds` — the Foundation included (E75), and only VALID ids: a backup directory or any other
+  // folder left under `epics/` is not an epic, and rewriting frontmatter inside it would be a write to
+  // files nobody asked this command to touch.
+  const epics = epic ? [epic] : epicIds(root);
   if (!epics.length) { info('no epics found — nothing to sync'); return { changed: 0, files: [] }; }
 
   let changed = 0;
@@ -90,6 +90,12 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
     // discovery-review step pair, so they reconcile together (mirrors the stories/ set above).
     for (const f of DISCOVERY_FILES) {
       if (fs.existsSync(path.join(dir, f))) files.push({ base: 'discovery', file: path.join(dir, f) });
+    }
+    // The Foundation's sections key to its one foundation / foundation-review pair the same way. Both
+    // spellings are offered; `desiredStatus` answers null for the base the chain does not carry, so
+    // a converted Foundation holding the six old files still reconciles them under `discovery`.
+    for (const f of FOUNDATION_FILES) {
+      if (fs.existsSync(path.join(dir, f))) files.push({ base: 'foundation', file: path.join(dir, f) });
     }
 
     for (const { base, file } of files) {

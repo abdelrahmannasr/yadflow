@@ -16,6 +16,7 @@ import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
 import { PROJECT_FILES, epicFiles , productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
+import { epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
 import { rolesForScope } from './platform.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -80,14 +81,19 @@ function makeResolver(roster) {
 
 // ---- epic enumeration --------------------------------------------------------------------------
 
+// The Foundation (E75) is appended when its ledger folder exists: approving or commenting on it is
+// contribution like any other gate, and a report that left it out would under-count exactly the
+// people who framed the product. The case-insensitive match on `epics/` is this report's own, older
+// rule and is kept as it was.
 function listEpics(root) {
   const dir = path.join(root, 'epics');
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && /^EP-[a-z0-9-]+$/i.test(e.name))
-    .map((e) => e.name)
-    .sort();
+  const ids = fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^EP-[a-z0-9-]+$/i.test(e.name) && e.name !== FOUNDATION_EPIC)
+      .map((e) => e.name)
+    : [];
+  if (fs.existsSync(path.join(root, FOUNDATION_DIR, '.sdlc'))) ids.push(FOUNDATION_EPIC);
+  return ids.sort();
 }
 
 const inWindow = (date, since, until) => !!date && (!since || date >= since) && (!until || date <= until);
@@ -97,7 +103,7 @@ const inWindow = (date, since, until) => !!date && (!since || date >= since) && 
 // Ledger-sourced events for one epic: approvals, comments, and ship engineer-reviews. Each carries the
 // roster `name` already, so attribution is direct.
 function ledgerEvents(root, epic, resolver) {
-  const f = epicFiles(path.join(root, 'epics', epic));
+  const f = epicFiles(epicRoot(root, epic));
   const events = [];
   const emit = (rawName, action, date, extra = {}) => {
     if (!rawName || !date) return;
@@ -106,15 +112,17 @@ function ledgerEvents(root, epic, resolver) {
   };
   for (const a of readLedger(f.approvals, []) || []) emit(a.approver, 'approved', a.date, { artifact: a.artifact, role: a.role });
   for (const cm of readLedger(f.comments, []) || []) emit(cm.commenter, 'commented', cm.date, { artifact: cm.artifact, role: cm.role });
-  for (const s of readShips(path.join(root, 'epics', epic))) {
+  for (const s of readShips(epicRoot(root, epic))) {
     for (const er of s.engineer_review || []) emit(er.approver, 'shipped', s.shippedAt, { story: s.story, task: s.task, repo: s.repo, risk: s.risk });
   }
   return events;
 }
 
-// True for `epics/<EP>/<artifact>.md` or `epics/<EP>/stories/<file>.md`.
-function isArtifactPath(rel) {
+// True for `epics/<EP>/<artifact>.md`, `epics/<EP>/stories/<file>.md`, or a Foundation section
+// `foundation/<section>.md` (E75).
+export function isArtifactPath(rel) {
   const parts = rel.split('/');
+  if (parts[0] === FOUNDATION_DIR) return parts.length === 2 && FOUNDATION_FILES.includes(parts[1]);
   if (parts[0] !== 'epics' || parts.length < 3) return false;
   if (parts[2] === 'stories') return parts.length >= 4 && parts[3].endsWith('.md');
   return parts.length === 3 && ARTIFACT_FILES.has(parts[2]);
@@ -142,7 +150,7 @@ const GIT_PRETTY = '--pretty=format:\x01%an%x00%ae%x00%ad';
 // git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the Product
 // is not a git repo (e.g. a test fixture dir), so the command never depends on git being present.
 function gitAuthoredEvents(root, resolver) {
-  const r = run('git', ['-C', root, 'log', '--no-merges', '--date=short', GIT_PRETTY, '--name-only', '--', 'epics']);
+  const r = run('git', ['-C', root, 'log', '--no-merges', '--date=short', GIT_PRETTY, '--name-only', '--', 'epics', FOUNDATION_DIR]);
   if (!r.ok || !r.stdout) return [];
   const events = [];
   for (const cm of parseGitLog(r.stdout)) {
@@ -151,7 +159,8 @@ function gitAuthoredEvents(root, resolver) {
       if (!isArtifactPath(rel)) continue;
       events.push({
         ts: cm.ad, actor: m ? m.name || m.login : cm.an, login: m ? m.login || null : null, rostered: !!m,
-        action: 'authored', epic: rel.split('/')[1], artifact: rel.split('/').pop().replace(/\.md$/, ''),
+        action: 'authored', epic: rel.startsWith(`${FOUNDATION_DIR}/`) ? FOUNDATION_EPIC : rel.split('/')[1],
+        artifact: rel.split('/').pop().replace(/\.md$/, ''),
       });
     }
   }
@@ -251,7 +260,7 @@ function memberFlags(m) {
 export function shipHygiene(root, { since, until } = {}) {
   const items = [];
   for (const epic of listEpics(root)) {
-    for (const s of readShips(path.join(root, 'epics', epic))) {
+    for (const s of readShips(epicRoot(root, epic))) {
       if (!inWindow(s.shippedAt, since, until)) continue;
       if (s.retroactive) continue;
       if (!Array.isArray(s.engineer_review) || s.engineer_review.length === 0) {

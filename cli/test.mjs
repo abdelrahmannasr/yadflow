@@ -12606,3 +12606,60 @@ test('yad skill: a bind with no skill named is a usage error, not an empty bindi
     assert.equal(fs.existsSync(path.join(T, '.sdlc/skills.json')), false, 'a usage error must write nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E75: every walker sees the Foundation, which lives outside epics/ ---------------------------
+
+// A project that has a Foundation and NO `epics/` directory at all — the shape every walker used to
+// return early on, before it ever looked for `foundation/`.
+function foundationOnlyProject(state) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-walk-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+  fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.0.0' }));
+  fs.mkdirSync(path.join(T, 'foundation', '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, 'foundation', '.sdlc', 'state.json'), JSON.stringify(state, null, 2) + '\n');
+  return T;
+}
+const FOUNDATION_STATE = (currentStep, author, review) => ({
+  epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep, steps: [
+    { id: 'foundation', type: 'author', artifact: 'foundation/', status: author, risk_tags: [] },
+    { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: review, risk_tags: [] },
+  ],
+});
+
+test('doctor: a project whose only ledger is the Foundation is still checked (E75)', async () => {
+  const { collectDoctor } = await import('./doctor.mjs');
+  const T = foundationOnlyProject(FOUNDATION_STATE('foundation', 'in_progress', 'todo'));
+  try {
+    const checks = collectDoctor(T).checks;
+    const epic = checks.find((x) => x.id === 'epic:EP-foundation');
+    assert.ok(epic, `no epic check for the Foundation: ${checks.map((x) => x.id).join(', ')}`);
+    assert.equal(epic.status, 'ok');
+    // The catalogue and route checks read the same list: a Foundation chain is on its route and
+    // every step id is known, so neither reports it.
+    assert.equal(checks.some((x) => ['step:off-route', 'phase:unknown', 'profile:disagree'].includes(x.id)), false,
+      checks.filter((x) => x.status !== 'ok').map((x) => `${x.id}: ${x.message}`).join('\n'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('sync-status: Foundation sections flip with their gate, like any other artifact (E75)', async () => {
+  const { syncStatuses } = await import('./artifact-status.mjs');
+  const T = foundationOnlyProject(FOUNDATION_STATE('foundation-done', 'done', 'done'));
+  try {
+    fs.writeFileSync(path.join(T, 'foundation', 'scope.md'), '---\nartifact: scope\nstatus: draft\n---\n# scope\n');
+    fs.writeFileSync(path.join(T, 'foundation', 'notes.md'), '---\nstatus: draft\n---\n# not a section\n');
+    const res = await grab(() => syncStatuses(T, {}));
+    assert.match(fs.readFileSync(path.join(T, 'foundation', 'scope.md'), 'utf8'), /status: approved/, res);
+    assert.match(fs.readFileSync(path.join(T, 'foundation', 'notes.md'), 'utf8'), /status: draft/,
+      'a file that is not a Foundation section is not touched');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('usage: a Foundation section commit counts as authoring, under the Foundation id (E75)', async () => {
+  const { isArtifactPath } = await import('./usage.mjs');
+  assert.equal(isArtifactPath('foundation/scope.md'), true);
+  assert.equal(isArtifactPath('foundation/.sdlc/state.json'), false, 'the ledger is gate machinery, not authoring');
+  assert.equal(isArtifactPath('foundation/notes.md'), false);
+  assert.equal(isArtifactPath('foundation/nested/scope.md'), false);
+  assert.equal(isArtifactPath('epics/EP-x/epic.md'), true, 'the feature paths are unchanged');
+});

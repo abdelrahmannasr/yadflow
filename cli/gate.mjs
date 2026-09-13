@@ -10,7 +10,7 @@ import {
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
-  epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
+  epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
@@ -505,8 +505,9 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0 }; }
     jobs.push({ epic: parsed.epic, base: parsed.base, artifact: artifactFromBase(parsed.base), branch, pr });
   } else {
-    const epicsDir = path.join(root, 'epics');
-    for (const e of fs.existsSync(epicsDir) ? fs.readdirSync(epicsDir).sort() : []) {
+    // `epicIds`, not a listing of `epics/`: the Foundation's ledger lives in `foundation/` (E75), and a
+    // sweep that missed it would leave a merged Foundation review stranded, un-advanced, for ever.
+    for (const e of epicIds(root)) {
       // Sweep mode isolates per-epic failures: one corrupt ledger must not block the other epics'
       // syncs in an unattended CI run. The run still exits non-zero so the bad file gets fixed.
       let ledger;
@@ -635,7 +636,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // exists to prevent.
     for (const e of touched) {
       for (const name of ['product-prs.json', 'hub-prs.json']) {
-        const hp = path.join('epics', e, '.sdlc', name);
+        const hp = path.join(epicRel(e), '.sdlc', name);
         git('checkout', '-q', '--', hp); // restore it if it was tracked
         git('clean', '-fq', '--', hp);   // remove it if the event first-seeded it (untracked)
       }
@@ -658,8 +659,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // straight to the default branch under a `chore(gate)` subject with [skip ci] — unreviewed, and
   // contradicting the "CI commits only the ledger" contract every doc in this repo states.
   for (const e of touched) {
-    git('add', '-A', '--', path.join('epics', e, '.sdlc'));
-    git('add', '-A', '--', path.join('epics', e, 'reviews'));
+    git('add', '-A', '--', path.join(epicRel(e), '.sdlc'));
+    git('add', '-A', '--', path.join(epicRel(e), 'reviews'));
     for (const f of statusFiles.get(e) || []) git('add', '--', f);
   }
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }

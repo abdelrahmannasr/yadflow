@@ -24,7 +24,7 @@ import {
   VERSION,
 } from './manifest.mjs';
 import { backupPathFor } from './plan.mjs';
-import { isValidEpicId, stampProfile, stampStepStates, stampWorkItemType } from './epic-state.mjs';
+import { epicIds, epicRoot, stampProfile, stampStepStates, stampWorkItemType } from './epic-state.mjs';
 
 // ---- the migration list --------------------------------------------------------------------
 // Ordered steps, each moving a file from one shape to the next. A step is applied to a file only when
@@ -378,7 +378,9 @@ export const isMirroredPath = (rel) => MIRROR_CANONICALS.has(rel) || MIRROR_LEGA
 // `trust-log.json` is deliberately NOT here. Its `automation` field records what the dial WAS when a
 // run happened — history, not a setting. Migrating it would rewrite the evidence the trust ledger
 // exists to hold, and nothing reads those records as a live declaration.
-export const isEpicStatePath = (rel) => /^epics\/[^/]+\/\.sdlc\/state\.json$/.test(rel || '');
+// The Foundation's ledger (E75) is an epic ledger in every way that matters to a stamper — it lives in
+// `foundation/` rather than `epics/<id>/`, and that is the only difference.
+export const isEpicStatePath = (rel) => /^(?:epics\/[^/]+|foundation)\/\.sdlc\/state\.json$/.test(rel || '');
 export const isBuildStatePath = (rel) => /^epics\/[^/]+\/\.sdlc\/build-state\/[^/]+\.json$/.test(rel || '');
 const mirrorPartner = (rel) => {
   for (const m of MIRRORED_FILES) {
@@ -399,20 +401,17 @@ export function projectJsonFiles(root) {
   // The Product's own provenance record (cli/plan.mjs) — a stamped object under .sdlc/ like any other.
   files.push(path.join(root, MANAGED_LEDGER));
 
-  const epicsDir = path.join(root, 'epics');
-  if (exists(epicsDir)) {
-    for (const epic of fs.readdirSync(epicsDir).sort()) {
-      if (!isValidEpicId(epic)) continue;
-      const epicDir = path.join(epicsDir, epic);
-      if (!fs.statSync(epicDir).isDirectory()) continue;
-      const f = epicFiles(epicDir);
-      files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.hubPrs), f.contractLock,
-        f.buildLog, f.trustLog, f.change, f.reconcileDebt);
-      files.push(...shardFiles(f.buildLogDir), ...shardFiles(f.trustLogDir), ...shardFiles(f.buildStateDir));
-      // The docs-build cache (cli/docs.mjs) lives in the same directory and is written by the engine,
-      // so it moves shape with everything else rather than being quietly left behind.
-      files.push(path.join(epicDir, '.sdlc', 'docs-build.json'));
-    }
+  // `epicIds` so the Foundation's ledger is on the plan too (E75). A shape change that stamped every
+  // epic and skipped `foundation/` would leave the product level on a shape nobody defined.
+  for (const epic of epicIds(root)) {
+    const epicDir = epicRoot(root, epic);
+    const f = epicFiles(epicDir);
+    files.push(f.state, f.approvals, f.comments, preferring(f.productPrs, f.hubPrs), f.contractLock,
+      f.buildLog, f.trustLog, f.change, f.reconcileDebt);
+    files.push(...shardFiles(f.buildLogDir), ...shardFiles(f.trustLogDir), ...shardFiles(f.buildStateDir));
+    // The docs-build cache (cli/docs.mjs) lives in the same directory and is written by the engine,
+    // so it moves shape with everything else rather than being quietly left behind.
+    files.push(path.join(epicDir, '.sdlc', 'docs-build.json'));
   }
   return files.filter((f) => exists(f));
 }

@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicRoot, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, artifactHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, artifactBase, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -487,12 +487,11 @@ function staleGateCheck(checks, root, epic, ledger, { solo = false } = {}) {
 }
 
 export function epicChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   // Read once for the whole sweep: whether approval is waived is a project fact, not a per-epic one.
   const solo = isSolo(readJSON(productConfigPath(root), null));
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
+  // `epicIds` — every VALID epic id plus the Foundation (E75). The old listing took any directory under
+  // `epics/`, so a folder that is not an epic got an "epic not seeded" warning it could never satisfy.
+  for (const e of epicIds(root)) {
     try {
       const ledger = loadLedger(epicRoot(root, e));
       if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`, 'author it via yad-epic, or remove the directory');
@@ -541,6 +540,7 @@ export function epicChecks(checks, root) {
 //         so the fix is to upgrade the CLI, not to touch the file
 const scopeOf = (rel) => {
   const parts = rel.split(path.sep);
+  if (parts[0] === FOUNDATION_DIR && parts.length > 1) return FOUNDATION_EPIC;   // E75
   return parts[0] === 'epics' && parts.length > 1 ? parts[1] : null;
 };
 
@@ -611,17 +611,11 @@ export function mirrorChecks(checks, root) {
   const pairs = [...MIRRORED_FILES.map(({ canonical, legacy }) => ({ canonical, legacy }))];
   // The per-epic PR ledger is renamed the same way, so it drifts the same way. It is not in
   // MIRRORED_FILES because that list is project-relative and this one exists once per epic.
-  const epicsDir = path.join(root, 'epics');
-  if (exists(epicsDir)) {
-    for (const e of fs.readdirSync(epicsDir).sort()) {
-      // `statSync` follows symlinks and throws on a dangling one, so guard the whole entry rather
-      // than letting one broken link take the entire health check down.
-      try {
-        if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
-      } catch { continue; }
-      const f = epicFiles(path.join('epics', e));
-      pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
-    }
+  // `epicIds` reads with `withFileTypes`, so a dangling symlink is simply not a directory — it cannot
+  // throw here and take the whole health check down, which is what the old `statSync` guard was for.
+  for (const e of epicIds(root)) {
+    const f = epicFiles(epicRel(e));
+    pairs.push({ canonical: f.productPrs, legacy: f.hubPrs });
   }
   for (const { canonical, legacy } of pairs) {
     const a = path.join(root, canonical);
@@ -675,8 +669,6 @@ export function mirrorChecks(checks, root) {
 // Scoped to the per-step dials only. `trust-log.json` records what a dial WAS on a past run and is
 // not a live setting, so a mismatch there is history, not drift.
 export function dialChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const disagree = [];
   const reviewAuto = [];
   const newOnly = [];
@@ -712,11 +704,8 @@ export function dialChecks(checks, root) {
     }
   };
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    try {
-      if (!fs.statSync(path.join(epicsDir, e)).isDirectory()) continue;
-    } catch { continue; }
-    const f = epicFiles(path.join('epics', e));
+  for (const e of epicIds(root)) {
+    const f = epicFiles(epicRel(e));
     const state = readJSON(path.join(root, f.state), null);
     if (state) inspect(f.state, '', state.steps);
     const bsDir = path.join(root, f.buildStateDir);
@@ -933,17 +922,14 @@ export function themeChecks(checks, root) {
 // screens is a normal thing to do, and a check that nagged about it would train people to ignore the
 // section that also carries the two below, which are real breakage.
 export function catalogueChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const wrongArtifact = [];
   const noArtifact = [];
   const wrongKind = [];
   const orphanGate = [];
   const offRoute = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     const present = new Set(state.steps.map((s) => s?.id).filter((x) => typeof x === 'string'));
 
@@ -1063,14 +1049,11 @@ export function catalogueChecks(checks, root) {
 // "the recorded route disagrees" would name the same fault twice with two different remedies, so this
 // check speaks only when the chain fits a route CLEANLY and it is a different one from the record.
 export function profileChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const unknown = [];
   const disagree = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     // No key at all is the normal state for a chain that matches no route: `stampProfile` declines to
     // invent one, and `step:off-route` is what reports that chain. Nothing to say here.
     if (!isPlainObject(state) || !('profile' in state)) continue;
@@ -1120,14 +1103,11 @@ export function profileChecks(checks, root) {
 // Reported, never corrected, like everything else here: clearing the flag would erase a recorded
 // decision, and re-marking the step `blocked` would undo work the team may have finished.
 export function skipChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
   const bad = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     // Silent on an epic `profile:disagree` already names. Both findings come from the same stale
     // label, and that check's remedy — correct `profile` to the route the chain shows — clears this
@@ -1194,15 +1174,12 @@ export function skipChecks(checks, root) {
 const BLOCKED_CHANGED_MEANING_AT = 7;
 
 export function stepStateChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
   const unknown = [];
   const noRecord = [];
 
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+  for (const e of epicIds(root)) {
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     // The shape as the FILE records it, by rule 1: no key means shape 1.
     const shape = Number.isInteger(state.schemaVersion) ? state.schemaVersion : 1;
@@ -1321,8 +1298,6 @@ export function skillBindingChecks(checks, root) {
 //     twelve known step ids have no reader on this path at all.
 // The four `currentStep` sentinels are markers rather than steps and are skipped by name.
 export function phaseChecks(checks, root) {
-  const epicsDir = path.join(root, 'epics');
-  if (!exists(epicsDir)) return;
   const unplaced = [];
   // One report per unknown id per epic. `currentStep` usually names a step that is also in `steps[]`,
   // so a single typo would otherwise be listed twice and push a genuinely different one out of the
@@ -1338,15 +1313,14 @@ export function phaseChecks(checks, root) {
     if (!Array.isArray(steps)) return;
     for (const s of steps) if (isPlainObject(s)) consider(where, s.id);
   };
-  for (const e of fs.readdirSync(epicsDir).sort()) {
-    if (!isValidEpicId(e)) continue;
+  for (const e of epicIds(root)) {
     seen = new Set();
-    const state = readJSON(path.join(epicsDir, e, '.sdlc', 'state.json'), null);
+    const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (isPlainObject(state)) {
       considerSteps(e, state.steps);
       consider(`${e} (currentStep)`, state.currentStep);
     }
-    const bsDir = path.join(epicsDir, e, '.sdlc', 'build-state');
+    const bsDir = path.join(epicRoot(root, e), '.sdlc', 'build-state');
     if (!exists(bsDir)) continue;
     let names;
     try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
