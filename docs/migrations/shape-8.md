@@ -95,9 +95,10 @@ It leaves every file where it is, says why, and the old spelling keeps working:
 ledger guard rejects a commit by a person that moves it. So `yad migrate` reports the product level as
 `CI owns this ledger` and leaves it where it is.
 
-The gate bot moves it instead. The next time `yad gate ci` runs on your default branch — when a review
-PR merges, or on the scheduled sweep — it makes the same move `yad migrate --apply` makes on a local
-ledger, and commits it on its own: `chore(gate): move the product level to foundation/ (shape 8) [skip ci]`.
+The gate bot moves it instead. The next time the gate workflow handles a merged review — of any epic —
+`yad gate ci` makes the same move `yad migrate --apply` makes on a local ledger, on your default branch.
+Its commit is titled `chore(gate): move the product level to foundation/ (shape 8) [skip ci]`; if that
+run also advanced a review, the commit body names it.
 
 - The files move from `epics/EP-discovery/` to `foundation/` with the same names and bytes, so every
   approval stays valid.
@@ -110,9 +111,11 @@ It waits, and moves nothing, when:
 | Why it waits | What to do |
 |---|---|
 | the checks committed in your repo predate the Foundation (see below) | run `yad update`, and commit the refreshed checks |
-| a review of the product level is still open | merge or close that review PR |
+| the product level's own review has not passed (`currentStep` is not `discovery-done`) | finish that review — the move comes after it merges |
+| no review has merged since the workflow runs this release | it moves with the next merged review |
+| a person ran `yad gate ci` by hand on a checkout with uncommitted changes under `epics/EP-discovery/` or `foundation/`, or not on the default branch | commit or discard them, and run it on the default branch — CI's own checkout is never affected |
 | `foundation/.sdlc/` already exists, a file would collide, or a ledger file does not parse | the same fixes as for a local ledger, above |
-| the gate workflow still runs a yadflow older than this release | run `yad update`, which re-stamps the version the workflow runs, or set the `YAD_VERSION` variable |
+| the gate workflow still runs a yadflow older than this release | move the version it runs: `yad update` re-stamps `.sdlc/cli-version.json`, but a `gate_sync_version` in `.sdlc/hub.json` is read first, so change that too if you set one — or set the `YAD_VERSION` variable |
 
 Until it moves, nothing is broken. This release reads the old spelling everywhere: `yad next`,
 `yad gate`, `yad doctor` and CI all treat `EP-discovery` as the product level, and its review still ends

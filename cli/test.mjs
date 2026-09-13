@@ -13001,7 +13001,7 @@ test('every command warns first when the project is on a newer file shape than t
 });
 
 // A Product whose default branch still holds the product level in its old spelling, and a CI checkout of it.
-function scaffoldLegacyProductHub({ verified = true, checks = {} } = {}) {
+function scaffoldLegacyProductHub({ verified = true, checks = {}, reviewed = true } = {}) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ci-convert-'));
   const origin = path.join(T, 'origin.git');
   fs.mkdirSync(origin);
@@ -13021,10 +13021,10 @@ function scaffoldLegacyProductHub({ verified = true, checks = {} } = {}) {
   }));
   put('epics/EP-discovery/roadmap.md', '---\nid: EP-discovery\nartifact: roadmap\nstatus: approved\n---\n# roadmap\n');
   put('epics/EP-discovery/.sdlc/state.json', `${JSON.stringify({
-    epicId: 'EP-discovery', kind: 'discovery', profile: 'discovery', currentStep: 'discovery-done',
+    epicId: 'EP-discovery', kind: 'discovery', profile: 'discovery', currentStep: reviewed ? 'discovery-done' : 'discovery-review',
     steps: [
       { id: 'discovery', type: 'author', artifact: 'discovery/', status: 'done', risk_tags: [] },
-      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: 'done', risk_tags: [] },
+      { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', status: reviewed ? 'done' : 'in_review', risk_tags: [] },
     ],
   }, null, 2)}\n`);
   put('epics/EP-discovery/.sdlc/approvals.json', `${JSON.stringify([
@@ -13075,10 +13075,25 @@ test('gate ci: the product level stays put on stale checks, on a local ledger, a
     ['a local ledger', { verified: false }, {}, null],
     // A review head: CI writes nothing before the merge (Path B), and the move is no exception.
     ['a review head', {}, { branch: 'review/EP-x/epic', pr: 1, merged: false }, null],
+    // Its own review has not passed. On a verified Product no review PR is recorded before its merge, so
+    // nothing else would see that review is open — and a move under it would strand its merge.
+    ['an unpassed review', { reviewed: false }, {}, /review has not passed yet/],
+    // A person's manual run on a dirty checkout: the move copies what is on disk, so it would push it.
+    ['a dirty checkout', {}, {}, /uncommitted changes/, (ci) => fs.writeFileSync(path.join(ci, 'epics/EP-discovery/private-notes.md'), '# mine\n')],
+    // A person's manual sweep from a feature branch with work of its own: the push goes to the default
+    // branch, so that work would land there unreviewed. (A branch sitting exactly at the default branch's
+    // tip carries nothing extra, and is allowed — it is how a detached CI checkout looks.)
+    ['a feature branch', {}, {}, /not on trunk/, (ci) => {
+      git(ci, 'checkout', '-q', '-b', 'feature');
+      fs.writeFileSync(path.join(ci, 'wip.md'), '# unreviewed\n');
+      git(ci, 'add', 'wip.md');
+      git(ci, 'commit', '-q', '-m', 'wip');
+    }],
   ];
-  for (const [name, scaffold, opts, says] of cases) {
+  for (const [name, scaffold, opts, says, prep] of cases) {
     const { T, origin, ci } = scaffoldLegacyProductHub(scaffold);
     try {
+      if (prep) prep(ci);
       const head = git(origin, 'rev-parse', 'trunk').toString().trim();
       const out = await grab(() => gateCi(ci, { today: '2026-09-13', reader: () => ({ ok: false, reason: 'unused' }), ...opts }));
       assert.equal(git(origin, 'rev-parse', 'trunk').toString().trim(), head, `${name}: nothing is pushed`);
@@ -13087,6 +13102,29 @@ test('gate ci: the product level stays put on stale checks, on a local ledger, a
       if (says) assert.match(out, says, name);
     } finally { fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
   }
+});
+
+test('gate ci: a merge of review/EP-discovery/* after the move is read from foundation/, and a merge with no ledger anywhere is red (E75 follow-up)', async () => {
+  const { gateCi } = await import('./gate.mjs');
+  const { T, ci } = scaffoldLegacyProductHub();
+  const prev = process.exitCode;
+  try {
+    await grab(() => gateCi(ci, { today: '2026-09-13' }));
+    assert.ok(fs.existsSync(path.join(ci, 'foundation/.sdlc/state.json')), 'the move happened');
+    const calls = [];
+    process.exitCode = 0;
+    const out = await grab(() => gateCi(ci, {
+      branch: 'review/EP-discovery/discovery', pr: 4, merged: true, push: false, today: '2026-09-13',
+      reader: (_platform, number) => { calls.push(number); return { ok: false, reason: 'offline in this test' }; },
+    }));
+    assert.doesNotMatch(out, /no epic state/, 'the old-spelling branch resolves to the moved ledger');
+    assert.deepEqual(calls, [4], 'and its merge is read from the platform, not dropped');
+
+    process.exitCode = 0;
+    const gone = await grab(() => gateCi(ci, { branch: 'review/EP-gone/epic', pr: 9, merged: true, push: false, today: '2026-09-13', reader: () => ({ ok: false, reason: 'unused' }) }));
+    assert.match(gone, /no epic state/);
+    assert.equal(process.exitCode, 1, 'a merged review with no ledger anywhere ends red, not as a green no-op');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('gate: an incomplete Foundation is named at gate time, and its optional sections never make it incomplete (E75)', async () => {

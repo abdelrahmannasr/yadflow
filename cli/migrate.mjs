@@ -373,6 +373,17 @@ export function planProductMove(root, { verified = false, ci = false, migrations
   if (open) {
     return refuse('refused', `a review of ${open.artifact || 'it'}${open.number ? ` (#${open.number})` : ''} is still open on branch ${open.branch || '?'} — merge or close it, then migrate`);
   }
+  // The gate bot cannot rely on that check. On a verified Product no review PR is recorded before its
+  // merge (Path B), so an OPEN review of the product level leaves nothing above to find — and moving the
+  // folder under it would strand that review's merge, which then finds no ledger at the old path. So for
+  // the bot the rule is stricter: move only a product level whose review has PASSED. An unreviewed one,
+  // and one an author is still writing, stays in the old spelling, which every command still reads.
+  if (ci) {
+    const review = steps.find((s) => s?.type === 'review+approve');
+    if (!review || !isPassed(review)) {
+      return refuse('refused', `its review has not passed yet (${review ? `${review.id} is ${review.status || 'unset'}` : 'no review step'}) — the gate bot moves the product level only after that review merges`);
+    }
+  }
   const files = filesUnder(from);
   const collide = files.filter((f) => exists(path.join(root, FOUNDATION_DIR, f)));
   if (collide.length) {

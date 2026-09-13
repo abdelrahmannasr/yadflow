@@ -1462,6 +1462,20 @@ test('migrate 7 -> 8: on a verified ledger only the gate bot may move it, and it
   } finally { cleanup(U); }
 });
 
+test('migrate 7 -> 8: the gate bot moves only a product level whose review has passed (E75 follow-up)', async () => {
+  const { planProductMove } = await import('./migrate.mjs');
+  for (const [review, currentStep] of [['in_review', 'discovery-review'], ['pending', 'discovery']]) {
+    // No review PR is recorded (the verified-mode shape before a merge), so only this rule can see it.
+    const { T } = await legacyProductLevel({ bridge: true, review, currentStep });
+    try {
+      fs.rmSync(path.join(T, LEGACY, '.sdlc/hub-prs.json'), { force: true });
+      const move = planProductMove(T, { verified: true, ci: true });
+      assert.equal(move.action, 'refused', review);
+      assert.match(move.detail, new RegExp(`review has not passed yet \\(discovery-review is ${review}\\)`));
+    } finally { cleanup(T); }
+  }
+});
+
 test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as it was', async () => {
   const { applyProductMove } = await import('./migrate.mjs');
   const failures = {
