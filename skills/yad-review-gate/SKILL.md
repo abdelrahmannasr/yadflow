@@ -18,7 +18,8 @@ trigger is a parameter, not a hardcoded human.
 
 ## Conventions
 - `{project-root}` resolves from the project working directory.
-- Operate on one epic: `{project-root}/epics/EP-<slug>/`.
+- Operate on one epic: `{project-root}/epics/EP-<slug>/`. The Product level is the exception:
+  `EP-foundation` lives at `{project-root}/foundation/` (its `.sdlc/` and `reviews/` are there).
 - State files: `.sdlc/state.json`, `.sdlc/approvals.json`, `.sdlc/comments.json`, and (when the verified ledger is
   used) `.sdlc/hub-prs.json`. Review records: `reviews/`.
 - The artifact base name drops the extension (`epic.md` → `epic`; story `stories/...S01.md` → `stories-S01`).

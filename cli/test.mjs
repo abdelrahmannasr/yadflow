@@ -13017,9 +13017,13 @@ function scaffoldLegacyProductHub({ verified = true, checks = {}, reviewed = tru
   };
   put('.sdlc/hub.json', JSON.stringify({
     platform: 'github', default_branch: 'trunk', ...(verified ? { ledger: 'verified' } : {}),
-    roster: [{ login: 'al', name: 'alice', role: 'owner' }],
+    roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
   }));
-  put('epics/EP-discovery/roadmap.md', '---\nid: EP-discovery\nartifact: roadmap\nstatus: approved\n---\n# roadmap\n');
+  // All six files of the old set: the gate fingerprints `discovery/` only once every one exists, so with
+  // fewer an approval records no hash at all and nothing could show the binding survives the move.
+  for (const f of ['roadmap', 'requirements', 'market-research', 'competitor-analysis', 'current-state', 'feasibility']) {
+    put(`epics/EP-discovery/${f}.md`, `---\nid: EP-discovery\nartifact: ${f}\nstatus: ${reviewed ? 'approved' : 'draft'}\n${f === 'roadmap' ? 'owner: alice\n' : ''}---\n# ${f}\n`);
+  }
   put('epics/EP-discovery/.sdlc/state.json', `${JSON.stringify({
     epicId: 'EP-discovery', kind: 'discovery', profile: 'discovery', currentStep: reviewed ? 'discovery-done' : 'discovery-review',
     steps: [
@@ -13102,6 +13106,42 @@ test('gate ci: the product level stays put on stale checks, on a local ledger, a
       if (says) assert.match(out, says, name);
     } finally { fs.rmSync(T, { recursive: true, force: true }); process.exitCode = 0; }
   }
+});
+
+test('gate ci: the product level\'s own review merges — the same run advances it in the old folder, then moves it (E75 follow-up)', async () => {
+  // The common real-world order on a verified Product: the discovery review is open, so no move yet; its
+  // merge event advances it where it is, flips the section's status, and only then does the move run —
+  // four stagers on paths that vanish mid-run. Everything must land on the default branch as one commit.
+  const { gateCi } = await import('./gate.mjs');
+  const { T, origin, ci } = scaffoldLegacyProductHub({ reviewed: false });
+  const prev = process.exitCode;
+  try {
+    process.exitCode = 0;
+    const approval = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', threads: [],
+      reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-13T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-09-13T00:00:00Z' }] };
+    const { artifactHash } = await import('./epic-state.mjs');
+    const reviewedHash = artifactHash(path.join(ci, 'epics/EP-discovery'), 'discovery/');
+    const out = await grab(() => gateCi(ci, { branch: 'review/EP-discovery/discovery', pr: 4, merged: true, today: '2026-09-13', reader: () => approval }));
+    assert.equal(process.exitCode, 0, out);
+    const tree = git(origin, 'ls-tree', '-r', '--name-only', 'trunk').toString().split('\n');
+    assert.equal(tree.some((f) => f.startsWith('epics/EP-discovery')), false, `nothing is left under the old folder: ${tree.join(' ')}`);
+    const state = JSON.parse(git(origin, 'show', 'trunk:foundation/.sdlc/state.json').toString());
+    assert.equal(state.epicId, 'EP-foundation');
+    assert.equal(state.currentStep, 'foundation-done', 'advanced, then relabelled');
+    const approvals = JSON.parse(git(origin, 'show', 'trunk:foundation/.sdlc/approvals.json').toString());
+    assert.ok(approvals.length > 0 && approvals.every((a) => a.step === 'foundation-review'), JSON.stringify(approvals));
+    // The approvals this merge recorded are bound to the content that was REVIEWED — the six files as they
+    // stood before this run — and the move carries that binding across unchanged. (Compared with the
+    // pre-run fingerprint, not the files now: the same run flips each section's `status:` line to
+    // approved after recording, which changes their bytes on every epic, moved or not.)
+    const recorded = approvals.filter((a) => a.source === 'bridge');
+    assert.ok(reviewedHash, 'the six files make the reviewed content fingerprintable');
+    assert.ok(recorded.length >= 2 && recorded.every((a) => a.artifactHash === reviewedHash), JSON.stringify(recorded));
+    assert.match(git(origin, 'show', 'trunk:foundation/roadmap.md').toString(), /^status: approved$/m, 'the status flip moved with the file');
+    assert.equal(git(origin, 'log', '-1', '--format=%s', 'trunk').toString().trim(), 'chore(gate): move the product level to foundation/ (shape 8) [skip ci]');
+    assert.match(git(origin, 'log', '-1', '--format=%b', 'trunk').toString(), /Also: advance EP-discovery\/discovery on merge\./);
+    assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '', 'nothing is left behind in the checkout');
+  } finally { process.exitCode = prev; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('gate ci: a merge of review/EP-discovery/* after the move is read from foundation/, and a merge with no ledger anywhere is red (E75 follow-up)', async () => {
