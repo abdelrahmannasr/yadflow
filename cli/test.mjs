@@ -3236,7 +3236,10 @@ test('gate sync: EP-foundation advances through the SAME gate at foundation/ to 
     assert.ok(!approvals.some((a) => a.role === 'domain-owner'), 'the Foundation never escalates to domain owners');
     const prs = JSON.parse(fs.readFileSync(path.join(fd, '.sdlc/hub-prs.json')));
     assert.notEqual(prs[0].lastSyncedAt, null, 'the PR record is written back beside the ledger');
-    // `gate ci` reconciles the frontmatter right after an advance; do the same step here.
+    // `gate ci` reconciles the frontmatter right after an advance; do the same step here. Imported HERE,
+    // not from the file-level binding further down: Node 20 starts running tests while this file is
+    // still at that top-level await, so the binding is not initialised yet when this test runs.
+    const { syncStatuses } = await import('./artifact-status.mjs');
     const st = await syncStatuses(T, { epic: 'EP-foundation' });
     assert.ok(st.files.includes(path.join('foundation', 'scope.md')), 'the rewritten section is reported at its foundation/ path');
     assert.match(fs.readFileSync(path.join(fd, 'scope.md'), 'utf8'), /^status: approved$/m, 'the sections flip to approved');
