@@ -1375,7 +1375,7 @@ test('migrate 7 -> 8 refuses, and leaves every file where it is, when the move i
       assert.equal(p.action, action, name);
       assert.match(p.detail, detail, name);
       assert.deepEqual(p.moves, [], `${name}: a refusal lists nothing to move`);
-      const withoutShape = (s) => { const { schemaVersion: _v, ...rest } = JSON.parse(s); return rest; };
+      const withoutShape = (s) => { const o = JSON.parse(s); delete o.schemaVersion; return o; };
       const before = fs.readFileSync(path.join(T, LEGACY, '.sdlc/state.json'), 'utf8');
       const code = process.exitCode;
       await grabOut(() => runMigrate(T, { apply: true }));

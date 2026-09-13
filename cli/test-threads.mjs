@@ -1054,10 +1054,10 @@ function templateSeed(skillFile) {
 }
 
 // What is LEFT after E17b. `yad-epic`, `yad-analysis` and `yad-stub` no longer carry one — they run
-// `yad epic new` instead, and the test below is what keeps those templates from coming back. These two
-// remain because the engine deliberately does not seed either: `yad-discovery` is the product
-// front-zero that E75 absorbs, and `yad-change`'s chain is threaded — inherited steps bound to a
-// parent's hashes, with provenance records beside them.
+// `yad epic new` instead, and `yad-discovery` runs `yad foundation new` (E75); the test below is what
+// keeps those templates from coming back. This one remains because the engine deliberately does not
+// seed it: `yad-change`'s chain is threaded — inherited steps bound to a parent's hashes, with
+// provenance records beside them.
 const SEED_TEMPLATES = [
   ['yad-change/references/triage.md', 'classic'],
 ];

@@ -249,8 +249,9 @@ export function storiesHash(epicDir) {
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
-// The reserved id of the project front-zero ("epic zero"). yad-discovery seeds it; yad-epic /
-// yad-analysis must never pick this slug for a feature.
+// The reserved id of the Product level in its OLD spelling ("epic zero", `epics/EP-discovery/`), written
+// by every release before E75 and still read. yad-epic / yad-analysis must never pick this slug — or
+// `EP-foundation` — for a feature.
 export const DISCOVERY_EPIC = 'EP-discovery';
 
 // The project-discovery artifact set (EP-discovery / "epic zero"). The `discovery-review` step binds
@@ -1338,8 +1339,9 @@ export function markInReview(state, step) {
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
 // between the two, once E50 can detect which skills are installed. Three of the five
-// skills that used to hand-write a seed now run `yad epic new` instead (E17b); the two that do not are
-// the product front-zero (E75 absorbs it) and the threaded change-epic (E42 owns inheritance).
+// skills that used to hand-write a seed now run `yad epic new` instead (E17b), and `yad-discovery` runs
+// `yad foundation new` (E75); the one that still does not is the threaded change-epic (E42 owns
+// inheritance).
 //
 // IT IS CODE, NOT A FILE. Nothing here is written to disk, so no file shape changes and there is
 // nothing to migrate. When a project's `state.json` disagrees with the catalogue, THE FILE WINS for
@@ -1754,11 +1756,11 @@ export const recordedRouteDisagrees = (state, profiles = LIFECYCLE_PROFILES) => 
 // out again — a route added to `LIFECYCLE_PROFILES` is seedable the day it lands, and E40's chore and
 // spike lanes need no edit here.
 //
-// `discovery` is excluded because it is not a work item on the Epic ladder. Its ledger carries a
-// top-level `kind: "discovery"` marker the engine keys off, its id is fixed (`EP-discovery`), it has
-// no `epic.md` and therefore no work-item type, and E75 folds the whole level into Foundation. A
-// seed that produced its chain without those would be a broken front-zero, not a plain one — so the
-// command refuses it and sends the user to `yad-discovery`, which is still its author.
+// The two PRODUCT routes, `foundation` and its old spelling `discovery`, are excluded because the
+// Product level is not a work item on the Epic ladder. Its ledger carries a top-level `kind` marker the
+// engine keys off, its id is fixed, and it has no `epic.md` and therefore no work-item type. A seed that
+// produced its chain without those would be a broken product level, not a plain one — so the command
+// refuses both and sends the user to `yad foundation new` (`seedFoundationState`, below).
 export const seedableProfiles = (profiles = LIFECYCLE_PROFILES) =>
   profiles.filter((p) => p.level === 'feature').map((p) => p.id);
 

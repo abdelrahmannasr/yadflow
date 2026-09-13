@@ -57,8 +57,9 @@ export function touchedDomains(epicDir, step) {
   return frontmatter(path.join(epicDir, 'epic.md')).repos || [];
 }
 
-// The artifact owner shown in the review PR/MR body. Feature epics carry it in epic.md; the discovery
-// front-zero (EP-discovery) has no epic.md, so fall back to roadmap.md's frontmatter owner.
+// The artifact owner shown in the review PR/MR body. Feature epics carry it in epic.md; the Product
+// level has no epic.md, so fall back to roadmap.md's frontmatter owner — a section the Foundation and
+// its old `EP-discovery` spelling both have, under that same name, in their own folder.
 const ownerOf = (epicDir) =>
   frontmatter(path.join(epicDir, 'epic.md')).owner
   || frontmatter(path.join(epicDir, 'roadmap.md')).owner
