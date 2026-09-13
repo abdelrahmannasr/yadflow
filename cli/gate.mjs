@@ -14,8 +14,9 @@ import {
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
-  isPassed, stepStatus, claimsSkipped, claimsInherited,
+  isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
+import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
   readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
@@ -496,6 +497,58 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 // CI is the SOLE writer of the ledger and only ever commits to the default branch; humans never
 // commit gate-state files (enforced by the ledger-guard check). Sweep mode (no --branch) advances
 // merged-but-stuck reviews found in the locally checked-out default-branch ledgers.
+// Shape 8 on a VERIFIED Product. `yad migrate` refuses to move `epics/EP-discovery/` there, because CI
+// owns the ledger and the ledger guard rejects a person's commit that moves it. The gate bot is the one
+// writer allowed to, so the move happens here — the same rule as every other verified-mode shape change:
+// the gate write IS the migration. Returns the paths it wrote, or null when nothing moved.
+//
+// It refuses, and moves nothing, on everything `yad migrate` refuses (an open review, two product levels,
+// a collision, an unreadable ledger) and on one thing more: checks committed in the repo that predate the
+// Foundation. Moving the ledger under those would put it where CI stops nobody from hand-editing it, so
+// the project keeps the old spelling — which every command still reads — until `yad update` lands.
+//
+// Two refusals are about the CHECKOUT, not the project, and exist for the documented manual recovery
+// (`yad gate ci … --merged` run by a person), since CI's own checkout is always fresh and on the default
+// branch: `dirty` — uncommitted or untracked files under either folder BEFORE this run began (the move
+// copies what is on disk, so they would be committed and pushed to the default branch), and a HEAD that
+// is not the default branch (the push goes to the default branch whatever is checked out).
+export function convertProductLevel(root, hub, { git = (...a) => run('git', a, { cwd: root }), defaultBranch = 'main', dirty = false } = {}) {
+  if (!isVerifiedLedger(hub)) return null;
+  const move = planProductMove(root, { verified: true, ci: true });
+  if (!move) return null;
+  const out = (r) => (r?.ok ? String(r.stdout || '').trim() : '');
+  const head = out(git('rev-parse', 'HEAD'));
+  const onDefault = out(git('rev-parse', '--abbrev-ref', 'HEAD')) === defaultBranch
+    || (!!head && head === out(git('rev-parse', '--verify', '-q', `origin/${defaultBranch}`)));
+  if (!onDefault) {
+    info(`the product level stays in ${move.from}/ — this checkout is not on ${defaultBranch}, and the move is only ever made there`);
+    return null;
+  }
+  if (dirty) {
+    warn(`the product level stays in ${move.from}/ — this checkout has uncommitted changes under ${move.from}/ or ${move.to}/, and the move would commit them; commit or discard them first`);
+    return null;
+  }
+  if (move.action !== 'move') {
+    info(`the product level stays in ${move.from}/ for now — ${move.detail}`);
+    return null;
+  }
+  const stale = staleFoundationGuards(root);
+  if (stale.length) {
+    warn(`the product level stays in ${move.from}/ — the wired checks predate the Foundation (${stale.join(', ')}); run \`yad update\` and commit the refreshed checks, and the next gate run moves it`);
+    return null;
+  }
+  try {
+    const written = applyProductMove(root, move, { backup: false });
+    ok(`the product level moved: ${move.from}/ → ${move.to}/ as ${FOUNDATION_EPIC} (shape 8)`);
+    return written;
+  } catch (e) {
+    // `applyProductMove` has already put everything back. Red, not quiet: nothing here should fail.
+    fail(`the product level was not moved — ${e.message}`);
+    process.exitCode = 1;
+    return null;
+  }
+}
+
 export async function gateCi(root, { branch, pr, merged = false, today, push = true, reader = readPr } = {}) {
   const { hub } = loadProduct(root);
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — nothing to sync'); return { synced: 0 }; }
@@ -504,12 +557,29 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // Push is decided AFTER the sync, once we know whether any step advanced: a held step (no advance,
   // not merged) is read-only and pushes nothing; an advance lands on the default branch (see below).
 
+  // Whether the old product-level folder (or foundation/) held a person's uncommitted work BEFORE this
+  // run writes anything — read now, because the sync below legitimately modifies that ledger. Only asked
+  // when a move could happen at all; an unreadable status counts as dirty (refuse rather than guess).
+  const legacyDirtyBefore = (merged || !branch) && isVerifiedLedger(hub)
+    && fs.existsSync(path.join(epicRoot(root, DISCOVERY_EPIC), '.sdlc', 'state.json'))
+    ? (() => {
+      const st = git('status', '--porcelain', '--untracked-files=all', '--', epicRel(DISCOVERY_EPIC), FOUNDATION_DIR);
+      return !st.ok || String(st.stdout || '').trim() !== '';
+    })()
+    : false;
+
   // Build the work list: one job per (epic, artifact) — from the event branch, or a full sweep.
   const jobs = [];
   if (branch) {
     const parsed = parseReviewBranch(branch);
     if (!parsed) { warn(`${branch} is not a review/EP-*/<artifact> branch — nothing to sync`); return { synced: 0 }; }
-    jobs.push({ epic: parsed.epic, base: parsed.base, artifact: artifactFromBase(parsed.base), branch, pr });
+    // A review branch named for the OLD spelling whose ledger has already moved (shape 8) is the
+    // Foundation's review: its steps keep `artifact: "discovery/"`, so the job resolves to them there.
+    // Without this, that merge finds no ledger at `epics/EP-discovery/` and is dropped.
+    const moved8 = parsed.epic === DISCOVERY_EPIC
+      && !fs.existsSync(path.join(epicRoot(root, DISCOVERY_EPIC), '.sdlc', 'state.json'))
+      && fs.existsSync(path.join(epicRoot(root, FOUNDATION_EPIC), '.sdlc', 'state.json'));
+    jobs.push({ epic: moved8 ? FOUNDATION_EPIC : parsed.epic, base: parsed.base, artifact: artifactFromBase(parsed.base), branch, pr });
   } else {
     // `epicIds`, not a listing of `epics/`: the Foundation's ledger lives in `foundation/` (E75), and a
     // sweep that missed it would leave a merged Foundation review stranded, un-advanced, for ever.
@@ -531,7 +601,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
         jobs.push({ epic: e, base: base(p.artifact), artifact: p.artifact, branch: p.branch, pr: p.number });
       }
     }
-    if (!jobs.length) { info('no open review PRs to sync'); return { synced: 0 }; }
+    // No early return: a sweep with nothing to sync may still have the product level to move (below).
+    if (!jobs.length) info('no open review PRs to sync');
   }
 
   let synced = 0;
@@ -552,6 +623,9 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     }
     if (!ledger.state) {
       warn(`${job.epic}: no epic state on the checked-out branch — the review branch is cut from the default branch, so it should carry it`);
+      // Red on a named merge: that review's approval would otherwise be dropped by a run that ends green,
+      // and the scheduled reconcile would repeat the same silent no-op for as long as it looks back.
+      if (branch && merged) process.exitCode = 1;
       continue;
     }
     const step = findReviewStep(ledger.state, job.artifact);
@@ -615,7 +689,13 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     if (failed) continue; // a failed epic's partial state must not be committed by this run
     touched.add(job.epic);
   }
-  if (!touched.size) return { synced };
+  // The product-level move runs AFTER the jobs, so an event for `review/EP-discovery/…` resolved and
+  // advanced its ledger in the old folder first, and only on the DEFAULT branch — a merge run or a sweep,
+  // never a review head, where CI writes nothing (Path B).
+  const moved = (merged || !branch)
+    ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
+    : null;
+  if (!touched.size && !moved) return { synced };
 
   // Path B: CI never writes the ledger to the review branch. A held step that did not advance is
   // read-only here — during review the platform PR/MR is the source of truth (native approvals/
@@ -623,7 +703,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // is what stops an approval from being dismissed and required checks from stranding. Correctness is
   // unaffected: the merge phase re-reads approvals fresh from the platform (readPr).
   const advancedAny = advancedEpics.size > 0;
-  if (!merged && !advancedAny) {
+  if (!merged && !advancedAny && !moved) {
     // EVENT mode (--branch) pre-merge is read-only (Path B): the gate was evaluated with a dry sync
     // that persists nothing, so the one working-tree write is the hub-prs.json seed above (which let
     // the dry sync find the PR). Restore exactly that file per epic so the checkout stays clean —
@@ -636,6 +716,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     // and reviews/*.md may be modified and are deliberately left alone: reverting a sync that genuinely
     // ran would discard platform state the run just recorded. A bare `yad gate ci` that advances
     // nothing therefore leaves those files dirty for the operator to inspect and commit (or discard).
+    // (A sweep that MOVES the product level does not come here: it commits, and those sync writes are
+    // recorded with the move rather than left behind.)
     // BOTH names of the PR ledger. It is written under its new name and its old one (see
     // MIRRORED_FILES, cli/manifest.mjs), so restoring only one leaves the other behind as an
     // untracked file — a read-only run that dirties the checkout, which is exactly what this block
@@ -669,13 +751,23 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     git('add', '-A', '--', path.join(epicRel(e), 'reviews'));
     for (const f of statusFiles.get(e) || []) git('add', '--', f);
   }
+  // The move: exactly the files it wrote, by name, and the old folder's removal — the same allowlist rule.
+  if (moved) {
+    for (const f of moved) git('add', '--', f);
+    git('add', '-A', '--', epicRel(DISCOVERY_EPIC));
+  }
   if (git('diff', '--cached', '--quiet').ok) { info('ledger unchanged — nothing to commit'); return { synced }; }
   // [skip ci]: the advance lands on the default branch (no PR trigger) but keeps the marker to guard
   // sibling workflows. CI never pushes the review branch (Path B), so there is no synchronize loop.
-  const subject = !branch
-    ? 'chore(gate): scheduled gate sync [skip ci]' // sweep is a batch; one subject for the run
-    : `chore(gate): advance ${jobs[0].epic}/${jobs[0].base} on merge [skip ci]`;
-  const cm = git('commit', '-m', subject);
+  const sync = !branch
+    ? 'scheduled gate sync' // sweep is a batch; one subject for the run
+    : `advance ${jobs[0].epic}/${jobs[0].base} on merge`;
+  // The move, when there is one, is the subject: it is the change a reader of the default branch most
+  // needs to find, and a sync subject would name a folder the same commit deletes. The sync goes in the body.
+  const subject = moved
+    ? `chore(gate): move the product level to ${FOUNDATION_DIR}/ (shape 8) [skip ci]`
+    : `chore(gate): ${sync} [skip ci]`;
+  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []));
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced };

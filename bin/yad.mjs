@@ -18,7 +18,7 @@ import { runRepo } from '../cli/repo.mjs';
 import { runRoster } from '../cli/roster.mjs';
 import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
-import { runMigrate } from '../cli/migrate.mjs';
+import { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 import { runNext } from '../cli/next.mjs';
 import { runSkip } from '../cli/skip.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
@@ -282,6 +282,10 @@ async function main() {
   const cmd = o._[0];
   if (o.version) return log(VERSION);
   if (o.help || !cmd) return log(HELP);
+  // A project written by a newer yadflow is warned about before any command reads it (docs/migrations/
+  // shape-8.md). Not on `hook` — its stderr is the channel a block reason reaches a model on — and not
+  // where the command reports the same thing itself (doctor, migrate) or runs before a project exists.
+  if (!['hook', 'doctor', 'migrate', 'setup', 'report'].includes(cmd)) warnIfProjectAhead(o.dir || process.cwd());
 
   const today = new Date().toISOString().slice(0, 10);
   switch (cmd) {

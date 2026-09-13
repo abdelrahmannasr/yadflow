@@ -128,6 +128,26 @@ export function epicIds(root) {
   return ids.sort();
 }
 
+// The wired checks that protect `foundation/`, and the line each one needs to know the folder. They are
+// committed in the user's repo and refreshed by `yad update` — not by `yad migrate` — so a copy older
+// than E75 guards `epics/` only. One list for every place that asks, so `yad doctor`, `yad foundation
+// new` and the CI conversion can never disagree about whether a Foundation would land unguarded.
+const FOUNDATION_GUARD_ARMS = {
+  'checks/ledger-guard.sh': `      ${FOUNDATION_DIR}/*)`,
+  'checks/pr-title.sh': `^(epics|${FOUNDATION_DIR})/`,
+  'checks/pr-template.sh': `^(epics|${FOUNDATION_DIR})/`,
+};
+
+// The wired checks that are present but predate the Foundation. A check that is not wired at all is not
+// listed: that is `yad check`'s finding, and a Product with no checks has nothing to refresh.
+export function staleFoundationGuards(root) {
+  return Object.keys(FOUNDATION_GUARD_ARMS).filter((rel) => {
+    const file = path.join(root, rel);
+    if (!fs.existsSync(file)) return false;
+    try { return !fs.readFileSync(file, 'utf8').includes(FOUNDATION_GUARD_ARMS[rel]); } catch { return false; }
+  });
+}
+
 // epic.md -> "epic"; architecture.md -> "architecture"; stories/ -> "stories";
 // stories/EP-x-S01.md -> "stories-S01".
 export function artifactBase(artifact) {

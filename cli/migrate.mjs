@@ -334,7 +334,7 @@ export function convertDiscoveryState(state) {
   return out;
 }
 
-export function planProductMove(root, { verified = false, migrations = MIGRATIONS } = {}) {
+export function planProductMove(root, { verified = false, ci = false, migrations = MIGRATIONS } = {}) {
   const fromRel = epicRel(DISCOVERY_EPIC);
   const from = path.join(root, fromRel);
   const ledgerOf = (dir, name) => path.join(dir, '.sdlc', name);
@@ -342,8 +342,11 @@ export function planProductMove(root, { verified = false, migrations = MIGRATION
   const base = { from: fromRel, to: FOUNDATION_DIR, backup: `${fromRel}${BACKUP_SUFFIX}`, moves: [], rewrites: [], reshape: [] };
   const refuse = (action, detail) => ({ ...base, action, detail });
 
-  if (verified) {
-    return refuse('ci-owned', 'CI owns this ledger, so it stays in the old spelling — every command still reads it as the Foundation');
+  // `ci` is the gate bot asking (cli/gate.mjs `convertProductLevel`): on a verified Product it is the one
+  // writer allowed to move the ledger, so for it — and only for it — this refusal is lifted. Every
+  // other refusal below still stands.
+  if (verified && !ci) {
+    return refuse('ci-owned', 'CI owns this ledger — the gate bot moves it to foundation/ on its next run on the default branch; until then every command reads it where it is');
   }
   const read = {};
   for (const name of LEDGER_NAMES) {
@@ -369,6 +372,17 @@ export function planProductMove(root, { verified = false, migrations = MIGRATION
   });
   if (open) {
     return refuse('refused', `a review of ${open.artifact || 'it'}${open.number ? ` (#${open.number})` : ''} is still open on branch ${open.branch || '?'} — merge or close it, then migrate`);
+  }
+  // The gate bot cannot rely on that check. On a verified Product no review PR is recorded before its
+  // merge (Path B), so an OPEN review of the product level leaves nothing above to find — and moving the
+  // folder under it would strand that review's merge, which then finds no ledger at the old path. So for
+  // the bot the rule is stricter: move only a product level whose review has PASSED. An unreviewed one,
+  // and one an author is still writing, stays in the old spelling, which every command still reads.
+  if (ci) {
+    const review = steps.find((s) => s?.type === 'review+approve');
+    if (!review || !isPassed(review)) {
+      return refuse('refused', `its review has not passed yet (${review ? `${review.id} is ${review.status || 'unset'}` : 'no review step'}) — the gate bot moves the product level only after that review merges`);
+    }
   }
   const files = filesUnder(from);
   const collide = files.filter((f) => exists(path.join(root, FOUNDATION_DIR, f)));
@@ -410,7 +424,9 @@ export function planProductMove(root, { verified = false, migrations = MIGRATION
 // The error is re-thrown for `runMigrate` to report.
 //
 // `copy` is a seam for the tests, which need a copy that fails or corrupts on demand.
-export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
+// `backup: false` is for the gate bot. In CI the old folder is in git history, a `.yad-orig` copy would be
+// an untracked directory on a throwaway runner, and `yad migrate` is not there to add it to .gitignore.
+export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync, backup: keepBackup = true } = {}) {
   const from = path.join(root, move.from);
   const to = path.join(root, move.to);
   const backup = path.join(root, move.backup);
@@ -424,7 +440,7 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
   const toExisted = exists(to);
   try {
     const before = artifactHash(from, 'discovery/');
-    copy(from, backup, { recursive: true, errorOnExist: true, force: false });
+    if (keepBackup) copy(from, backup, { recursive: true, errorOnExist: true, force: false });
     fs.mkdirSync(to, { recursive: true });
     copy(from, to, { recursive: true, errorOnExist: true, force: false });
     if (artifactHash(to, 'discovery/') !== before) {
@@ -453,7 +469,8 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
       for (const m of move.moves) fs.rmSync(path.join(root, m.to), { force: true });
       for (const d of [...made].sort((a, b) => b.length - a.length)) fs.rmSync(path.join(root, d), { recursive: true, force: true });
     }
-    fs.rmSync(backup, { recursive: true, force: true });
+    // Only a backup THIS run made. Without one, the path may still hold an earlier run's copy — the user's.
+    if (keepBackup) fs.rmSync(backup, { recursive: true, force: true });
     throw new Error(`nothing was moved — ${e.message}`, { cause: e });
   }
   fs.rmSync(from, { recursive: true, force: true });
@@ -729,6 +746,31 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   return { engine: SCHEMA_VERSION, verified, rows, product };
 }
 
+// ---- the forward floor -----------------------------------------------------------------------
+// A project written by a NEWER yadflow can hold files an older one misreads. Shape 8 is the case that
+// made this matter: it moved the product level to `foundation/`, and 3.x — which cannot be changed now —
+// simply shows no product level there. Only `yad doctor` said anything. So from this release on, every
+// command warns first, and the next shape change cannot leave that gap unannounced.
+//
+// It reads two small files rather than walking the project on every command: `yad migrate --apply` stamps
+// both, and every newer engine writes both on setup and update.
+export function projectShapeAhead(root) {
+  let top = 0;
+  for (const file of [path.join(root, PROJECT_FILES.version), productConfigPath(root)]) {
+    const v = readJSON(file, null)?.schemaVersion;
+    if (Number.isInteger(v) && v > top) top = v;
+  }
+  return top > SCHEMA_VERSION ? top : null;
+}
+
+// On stderr, so no command's stdout (and no --json contract) changes. Returns whether it warned.
+export function warnIfProjectAhead(root, { out = (s) => console.error(s) } = {}) {
+  const ahead = projectShapeAhead(root);
+  if (!ahead) return false;
+  out(c.yellow(`! this project is on file shape ${ahead}, and this yadflow (v${VERSION}) only knows shape ${SCHEMA_VERSION} — it may misread the newer files. Upgrade yadflow before relying on what it says; \`yad doctor\` lists them.`));
+  return true;
+}
+
 // ---- the report ----------------------------------------------------------------------------
 const ACTION_NOTE = {
   stamp: 'record its shape',
@@ -857,7 +899,13 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
       engine: plan.engine,
       applied: apply,
       verified: plan.verified,
-      changed: apply ? written : [...(move ? productMoveFiles(move) : []), ...pending.map((r) => r.file)],
+      // The preview names each row's mirror partner too (`creates` / `rewrites`), exactly as the text
+      // report does: the apply writes the product config under BOTH names, so leaving the partner out
+      // made this list shorter than the apply's `written` — a preview that under-reports.
+      changed: apply ? written : [...new Set([
+        ...(move ? productMoveFiles(move) : []),
+        ...pending.flatMap((r) => [r.file, ...(r.creates ?? []), ...(r.rewrites ?? [])]),
+      ])],
       ...(ignored ? { gitignored: BACKUP_IGNORE_GLOB } : {}),
       rows: plan.rows,
       // The product-level move (shape 8), or null when the project has no old-spelling product level.

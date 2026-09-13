@@ -69,7 +69,9 @@ test('migrate: preview reports what would change and writes absolutely nothing',
 
   assert.equal(res.applied, false);
   assert.equal(res.ok, true);
-  assert.deepEqual(res.changed.sort(), ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/repos.json']);
+  // `.sdlc/product.json` is named although it does not exist yet: the apply CREATES it beside hub.json, so a
+  // preview without it would under-report. (This list used to leave it out, and so pinned exactly that.)
+  assert.deepEqual(res.changed.sort(), ['.sdlc/cli-version.json', '.sdlc/hub.json', '.sdlc/product.json', '.sdlc/repos.json']);
   for (const [f, body] of before) assert.equal(fs.readFileSync(f, 'utf8'), body, `${f} was written during a preview`);
   assert.deepEqual(fs.readdirSync(path.join(T, '.sdlc')).filter((n) => n.endsWith('.yad-orig')), [],
     'a preview leaves no backups either');
@@ -1310,12 +1312,12 @@ test('migrate 7 -> 8: the preview names every file the move touches, and none at
     assert.equal(j.product.action, 'move');
     assert.ok(j.changed.includes('foundation/.sdlc/state.json'));
     assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), 'the preview wrote nothing');
-    // The preview must not under-report the move: it names exactly the foundation/ files the apply then
-    // says it wrote — the plain copies included, not only the relabelled ledger files.
+    // The preview must not under-report: it names exactly the files the apply then says it wrote — the
+    // move's plain copies AND the product config's mirror partner, not only the rows' own files.
     const applied = JSON.parse(await grabOut(() => runMigrate(T, { apply: true, json: true })));
-    const moveFiles = (list) => list.filter((f) => f.startsWith('foundation/')).sort();
-    assert.ok(moveFiles(j.changed).includes('foundation/competitor-analysis.md'), 'a plain copy is named too');
-    assert.deepEqual(moveFiles(j.changed), moveFiles(applied.changed));
+    assert.ok(j.changed.includes('foundation/competitor-analysis.md'), 'a plain copy is named too');
+    assert.ok(j.changed.includes('.sdlc/product.json'), 'the mirror partner the apply writes is named too');
+    assert.deepEqual([...j.changed].sort(), [...applied.changed].sort());
   } finally { cleanup(T); }
 });
 
@@ -1430,6 +1432,48 @@ test('migrate 7 -> 8 --apply: every other JSON object under .sdlc/ lands on the 
     const again = planMigration(T);
     assert.deepEqual(again.rows.filter((r) => r.changes).map((r) => r.file), [], 'nothing left for a second run');
   } finally { cleanup(T); }
+});
+
+test('migrate 7 -> 8: on a verified ledger only the gate bot may move it, and it keeps no backup (E75 follow-up)', async () => {
+  const { planProductMove, applyProductMove } = await import('./migrate.mjs');
+  const { T, hash } = await legacyProductLevel({ bridge: true });
+  try {
+    assert.equal(planProductMove(T, { verified: true }).action, 'ci-owned', 'a person is still refused');
+    assert.match(planProductMove(T, { verified: true }).detail, /gate bot moves it to foundation\//);
+    const move = planProductMove(T, { verified: true, ci: true });
+    assert.equal(move.action, 'move', 'the gate bot is not');
+    applyProductMove(T, move, { backup: false });
+    assert.equal(fs.existsSync(path.join(T, LEGACY)), false);
+    assert.equal(fs.existsSync(path.join(T, `${LEGACY}.yad-orig`)), false, 'no backup in CI — git history is the backup');
+    const approvals = JSON.parse(fs.readFileSync(path.join(T, 'foundation/.sdlc/approvals.json'), 'utf8'));
+    assert.ok(approvals.every((a) => a.step === 'foundation-review' && a.artifactHash === hash), 'the approvals survive');
+  } finally { cleanup(T); }
+
+  // Without a backup of its own, a failed move must not delete a backup that was already there — the user's.
+  const { T: U } = await legacyProductLevel({ bridge: true });
+  try {
+    const move = planProductMove(U, { verified: true, ci: true });
+    fs.mkdirSync(path.join(U, `${LEGACY}.yad-orig`), { recursive: true });
+    fs.writeFileSync(path.join(U, `${LEGACY}.yad-orig/keep.md`), '# an earlier run\'s copy\n');
+    const failing = (src, dest, opts) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); fs.cpSync(src, dest, opts); };
+    assert.throws(() => applyProductMove(U, move, { backup: false, copy: failing }), /nothing was moved/);
+    assert.ok(fs.existsSync(path.join(U, `${LEGACY}.yad-orig/keep.md`)), 'the existing backup is untouched');
+    assert.ok(fs.existsSync(path.join(U, LEGACY, '.sdlc/state.json')), 'and the original is whole');
+  } finally { cleanup(U); }
+});
+
+test('migrate 7 -> 8: the gate bot moves only a product level whose review has passed (E75 follow-up)', async () => {
+  const { planProductMove } = await import('./migrate.mjs');
+  for (const [review, currentStep] of [['in_review', 'discovery-review'], ['pending', 'discovery']]) {
+    // No review PR is recorded (the verified-mode shape before a merge), so only this rule can see it.
+    const { T } = await legacyProductLevel({ bridge: true, review, currentStep });
+    try {
+      fs.rmSync(path.join(T, LEGACY, '.sdlc/hub-prs.json'), { force: true });
+      const move = planProductMove(T, { verified: true, ci: true });
+      assert.equal(move.action, 'refused', review);
+      assert.match(move.detail, new RegExp(`review has not passed yet \\(discovery-review is ${review}\\)`));
+    } finally { cleanup(T); }
+  }
 });
 
 test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as it was', async () => {

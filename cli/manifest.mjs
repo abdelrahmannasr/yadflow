@@ -181,7 +181,8 @@ export const LEARNING_PRIMARY = 'deeptutor';
 //     in as many words. Every legacy field is kept beside the new one (rule 3).
 // 8 — the Product level lives in `foundation/` as the Foundation, id `EP-foundation` (E75). On a
 //     local ledger `yad migrate` MOVES `epics/EP-discovery/` there and relabels its step ids; no field
-//     of any other file changes. A verified project keeps the old spelling, which is still read.
+//     of any other file changes. On a verified project the gate bot makes the same
+//     move (`yad gate ci`); until it lands, the old spelling is still read.
 //     docs/migrations/shape-8.md.
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are

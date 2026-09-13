@@ -9,8 +9,9 @@
 > `foundation/`: the six files keep their names (so their fingerprint, and every approval bound to it,
 > is unchanged), the ledger is re-labelled to the Foundation's ids, and the step keeps `artifact:
 > "discovery/"` so the gate still hashes those six files. On a **verified** ledger CI owns the files and
-> the move cannot be made by a human commit, so the old spelling stays until a later release converts it
-> from CI. A product has ONE product level: never seed a Foundation beside an `EP-discovery`.
+> the move cannot be made by a human commit, so the gate bot makes it: `yad gate ci` moves the folder at
+> the next merged review it handles, once the product level's own review has passed and the checks
+> committed in the repo know `foundation/`. A product has ONE product level: never seed a Foundation beside an `EP-discovery`.
 
 The project discovery phase ("epic zero") lives under `{project-root}/epics/EP-discovery/`. It reuses
 the per-epic ledger files (`.sdlc/state.json`, `approvals.json`, `comments.json`, `reviews/`,

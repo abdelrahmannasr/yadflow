@@ -91,26 +91,64 @@ It leaves every file where it is, says why, and the old spelling keeps working:
 
 ## What changes — verified ledger
 
-**Nothing moves.** In verified mode CI is the only writer of the ledger, and the ledger guard rejects a
-commit by a person that moves it. So `yad migrate` reports the product level as `CI owns this ledger`
-and leaves it in `epics/EP-discovery/`.
+**A person cannot move it, so CI does.** In verified mode CI is the only writer of the ledger, and the
+ledger guard rejects a commit by a person that moves it. So `yad migrate` reports the product level as
+`CI owns this ledger` and leaves it where it is.
 
-That is safe. This release reads the old spelling everywhere: `yad next`, `yad gate`, `yad doctor` and
-CI all treat `EP-discovery` as the product level, and its review still ends at `discovery-done`. A
-later release converts it from CI.
+The gate bot moves it instead. The next time the gate workflow handles a merged review — of any epic —
+`yad gate ci` makes the same move `yad migrate --apply` makes on a local ledger, on your default branch.
+Its commit is titled `chore(gate): move the product level to foundation/ (shape 8) [skip ci]`; if that
+run also advanced a review, the commit body names it.
+
+- The files move from `epics/EP-discovery/` to `foundation/` with the same names and bytes, so every
+  approval stays valid.
+- The ledger is relabelled exactly as in the table above.
+- **No `epics/EP-discovery.yad-orig/` copy is made.** The old folder is in your git history, and CI runs
+  on a throwaway checkout.
+
+It waits, and moves nothing, when:
+
+| Why it waits | What to do |
+|---|---|
+| the checks committed in your repo predate the Foundation (see below) | run `yad update`, and commit the refreshed checks |
+| the product level's own review has not passed (`currentStep` is not `discovery-done`) | finish that review — the move comes after it merges |
+| no review has merged since the workflow runs this release | it moves with the next merged review |
+| a person ran `yad gate ci` by hand on a checkout with uncommitted changes under `epics/EP-discovery/` or `foundation/`, or not on the default branch | commit or discard them, and run it on the default branch — CI's own checkout is never affected |
+| `foundation/.sdlc/` already exists, a file would collide, or a ledger file does not parse | the same fixes as for a local ledger, above |
+| the gate workflow still runs a yadflow older than this release | move the version it runs: `yad update` re-stamps `.sdlc/cli-version.json`, but a `gate_sync_version` in `.sdlc/hub.json` is read first, so change that too if you set one — or set the `YAD_VERSION` variable |
+
+Until it moves, nothing is broken. This release reads the old spelling everywhere: `yad next`,
+`yad gate`, `yad doctor` and CI all treat `EP-discovery` as the product level, and its review still ends
+at `discovery-done`.
+
+**A branch that edits `epics/EP-discovery/` when the move lands** needs a rebase: those files now live
+in `foundation/`.
 
 **One thing to do on a verified Product: run `yad update`.** The Foundation's ledger folder,
 `foundation/.sdlc/`, is protected only by a `checks/ledger-guard.sh` from this release or later —
 that script is committed in your repo, and `yad update` is what refreshes it. The same is true for
 `checks/pr-title.sh` and `checks/pr-template.sh`, which stop a Foundation section being changed on a
-branch that is not a review branch. If you have a Foundation and the old checks, `yad doctor` warns
-(`foundation:guard`) until you do.
+branch that is not a review branch. Until you do, CI does not move an `EP-discovery` (above), `yad foundation new`
+refuses to seed a Foundation, and `yad doctor` warns (`foundation:legacy` or `foundation:guard`).
 
 ## Do not run a 3.x yadflow against a migrated project
 
-An older yadflow looks for the product level under `epics/` and does not know `foundation/` exists. On
-a converted project it shows no product level at all, and `yad epic new` from that version would let you
-seed a second one. Nothing is damaged, but upgrade everyone on the project together.
+An older yadflow looks for the product level under `epics/` only, and does not know `foundation/` exists.
+This is what 3.18.1 does when it is run against a converted project:
+
+| In 3.18.1 | What happens on a converted project |
+|---|---|
+| `yad next` | shows no product level — only the feature epics |
+| `yad doctor` | fails the shape check ("files are newer than this yadflow") and says to upgrade; it also lists a local `epics/EP-discovery.yad-orig/` backup as if it were an epic |
+| the `yad-discovery` skill | writes a fresh `epics/EP-discovery/` ledger by hand — a second product level |
+
+Nothing is damaged, and this release catches the last one: on a verified Product the ledger guard rejects
+that second ledger, and `yad doctor` fails `foundation:two` on any Product. Still, upgrade everyone on the
+project together.
+
+A 3.x release cannot be changed now. From this release on, every command first warns when the project's
+files are on a newer shape than the yadflow reading them, so the next shape change cannot leave the same
+gap unannounced.
 
 The other direction is safe: this release reads every older project correctly, `EP-discovery` included.
 
@@ -137,7 +175,8 @@ It refuses if the project already has a Foundation, or still has an `epics/EP-di
 | It says | What it means | What to do |
 |---|---|---|
 | `the product level is in its old spelling` (warning) | a local ledger that has not been converted | `yad migrate`, then `yad migrate --apply` |
-| `the product level is in its old spelling` (ok) | a verified ledger — it stays there | nothing |
+| `the product level is in its old spelling` (ok) | a verified ledger — CI moves it at its next gate run on the default branch | nothing |
+| `the product level is in its old spelling, and CI will not move it` (warning) | a verified ledger whose committed checks predate the Foundation | `yad update`, then commit the refreshed checks |
 | `two product levels` | both `foundation/` and `epics/EP-discovery/` have a ledger | decide which is real. `yad next` uses `foundation/`. To keep the old one instead, move `foundation/` aside and run `yad migrate --apply` |
 | `epics/EP-foundation/ exists` | a folder no command ever reads — that id's folder is `foundation/` | move anything real into `foundation/`, then delete it |
 | `the wired checks predate the Foundation` | a verified Product with a Foundation and old checks | `yad update`, then commit the refreshed checks |

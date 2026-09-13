@@ -13,7 +13,7 @@ export interface RoleConfig {
 
 // The yadflow LENSES. Each lens points at the doc sections + phase paths that
 // matter to it. sectionIds are a subset of DOC_SECTIONS (docSections.ts);
-// relevantPathIds index PATHS (1 setup · 2 front · 3 build · 4 automation).
+// relevantPathIds index PATHS (1 setup · 2 foundation · 3 shape · 4 build · 5 automation · 6 change).
 // Sorted by stable slug for determinism.
 export const ROLES: RoleConfig[] = [
   {
@@ -24,7 +24,7 @@ export const ROLES: RoleConfig[] = [
     color: '#2471a3',
     description: 'Pressure-tests the idea into analysis.md, seeds the .sdlc state, and hands off to the review gate.',
     sectionIds: ['executive-summary', 'gated-flow', 'review-gate', 'glossary'],
-    relevantPathIds: [1, 2],
+    relevantPathIds: [1, 2, 3, 6],
   },
   {
     slug: 'architect',
@@ -34,7 +34,7 @@ export const ROLES: RoleConfig[] = [
     color: '#566573',
     description: 'Authors architecture.md + the locked contract.md and hash-locks the cross-repo CONTRACT-SURFACE.',
     sectionIds: ['contract-lock', 'gated-flow', 'review-gate', 'connectors', 'glossary'],
-    relevantPathIds: [2, 3],
+    relevantPathIds: [3, 4, 6],
   },
   {
     slug: 'dev',
@@ -44,7 +44,7 @@ export const ROLES: RoleConfig[] = [
     color: '#1e8449',
     description: 'Specs a story, implements one atomic task per branch, and runs the check gates before the PR.',
     sectionIds: ['gated-flow', 'check-gates', 'contract-lock', 'cli-reference', 'glossary'],
-    relevantPathIds: [3, 4],
+    relevantPathIds: [4, 5],
   },
   {
     slug: 'engineer',
@@ -54,7 +54,7 @@ export const ROLES: RoleConfig[] = [
     color: '#ca6f1e',
     description: 'Owns the human merge gate: advisory AI first-pass, engineer review, and the trust-log evidence for earned automation.',
     sectionIds: ['executive-summary', 'gated-flow', 'two-dials', 'check-gates', 'cli-reference', 'glossary'],
-    relevantPathIds: [3, 4],
+    relevantPathIds: [4, 5],
   },
   {
     slug: 'maintainer',
@@ -64,7 +64,7 @@ export const ROLES: RoleConfig[] = [
     color: '#7d3c98',
     description: 'Operates yadflow itself: the connectors, the two dials, the CLI surface, and the kill switch.',
     sectionIds: ['executive-summary', 'connectors', 'two-dials', 'cli-reference', 'glossary'],
-    relevantPathIds: [1, 4],
+    relevantPathIds: [1, 5],
   },
   {
     slug: 'pm',
@@ -74,7 +74,7 @@ export const ROLES: RoleConfig[] = [
     color: '#b7950b',
     description: 'Authors the epic and the repo-tagged stories, then takes each through the team review gate.',
     sectionIds: ['executive-summary', 'gated-flow', 'review-gate', 'glossary'],
-    relevantPathIds: [2],
+    relevantPathIds: [2, 3, 6],
   },
   {
     slug: 'reviewer',
@@ -84,7 +84,7 @@ export const ROLES: RoleConfig[] = [
     color: '#ca6f1e',
     description: 'Comments and approves at every gate — owner + 1 reviewer, escalating to domain owners on contract/auth/payments.',
     sectionIds: ['review-gate', 'gated-flow', 'contract-lock', 'glossary'],
-    relevantPathIds: [2, 3],
+    relevantPathIds: [3, 4],
   },
   {
     slug: 'tester',
@@ -94,7 +94,7 @@ export const ROLES: RoleConfig[] = [
     color: '#1e8449',
     description: 'Runs the parallel test-cases track: authors test-cases.md and implements automation in the connected testing tool.',
     sectionIds: ['gated-flow', 'check-gates', 'connectors', 'glossary'],
-    relevantPathIds: [2, 3],
+    relevantPathIds: [3, 4],
   },
   {
     slug: 'ux-designer',
@@ -104,7 +104,7 @@ export const ROLES: RoleConfig[] = [
     color: '#ca6f1e',
     description: 'Authors ui-design.md + DESIGN.md and materializes the feature screens in the connected design tool.',
     sectionIds: ['gated-flow', 'review-gate', 'connectors', 'glossary'],
-    relevantPathIds: [2],
+    relevantPathIds: [3],
   },
 ];
 
