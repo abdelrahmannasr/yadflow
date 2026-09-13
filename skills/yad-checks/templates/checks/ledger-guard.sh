@@ -244,6 +244,13 @@ is_seeding() {                      # $1 = epic slug; 0 when that epic has no le
           ;;
       esac
     done < <(git -c core.quotePath=false ls-tree -r --name-only -z "${BASE}" -- epics foundation 2>/dev/null || true)
+    # A product has ONE product level. When its OLD spelling (epics/EP-discovery) is already on BASE, a
+    # Foundation ledger is not a new product level being created — it is a second one replacing a
+    # CI-owned ledger, and on a verified Product no CI path writes one. So it counts as seeded, and a
+    # human commit adding it is a mutation like any other.
+    if in_list "ep-discovery" "${base_slugs[@]}"; then
+      base_slugs[${#base_slugs[@]}]="ep-foundation"
+    fi
     base_slugs_loaded=1
   fi
   _f="$(fold "$1")"

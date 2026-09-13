@@ -1408,3 +1408,60 @@ async function grabOut(fn) {
   try { await fn(); } finally { console.log = orig; }
   return out.join('\n');
 }
+
+test('migrate 7 -> 8 --apply: every other JSON object under .sdlc/ lands on the engine shape too', async () => {
+  // A review finding: the move copied a docs-build cache as it was, so a second run still found work
+  // and the preview under-counted. It is judged at its NEW path, like a per-file row.
+  const { T } = await legacyProductLevel({ extra: {
+    'epics/EP-discovery/.sdlc/docs-build.json': JSON.stringify({ schemaVersion: 6, builtAt: '2026-01-01' }, null, 2) + '\n',
+  } });
+  try {
+    const p = planMigration(T).product;
+    assert.deepEqual(p.reshape, ['foundation/.sdlc/docs-build.json']);
+    assert.ok(p.rewrites.includes('foundation/.sdlc/docs-build.json'), 'the preview names it');
+    await grabOut(() => runMigrate(T, { apply: true }));
+    assert.equal(read(path.join(T, 'foundation/.sdlc/docs-build.json')).schemaVersion, ENGINE_SHAPE);
+    const again = planMigration(T);
+    assert.deepEqual(again.rows.filter((r) => r.changes).map((r) => r.file), [], 'nothing left for a second run');
+  } finally { cleanup(T); }
+});
+
+test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as it was', async () => {
+  const { applyProductMove } = await import('./migrate.mjs');
+  const failures = {
+    // The copy into foundation/ fails (a read-only folder, a full disk).
+    'a copy that fails': (calls) => (src, dest, opts) => { if (++calls.n === 2) throw new Error('EACCES'); fs.cpSync(src, dest, opts); },
+    // The copy completes but a file comes out different.
+    'a copy that corrupts': (calls) => (src, dest, opts) => {
+      fs.cpSync(src, dest, opts);
+      if (++calls.n === 2) fs.appendFileSync(path.join(dest, 'roadmap.md'), 'x');
+    },
+  };
+  for (const [name, make] of Object.entries(failures)) {
+    const { T } = await legacyProductLevel({ extra: { 'foundation/notes/keep.md': '# the user\'s own\n' } });
+    try {
+      const move = planMigration(T).product;
+      assert.equal(move.action, 'move', name);
+      assert.throws(() => applyProductMove(T, move, { copy: make({ n: 0 }) }), /nothing was moved/, name);
+      assert.ok(fs.existsSync(path.join(T, LEGACY, '.sdlc/state.json')), `${name}: the original is whole`);
+      assert.equal(fs.existsSync(path.join(T, `${LEGACY}.yad-orig`)), false, `${name}: no stray backup`);
+      assert.equal(fs.existsSync(path.join(T, 'foundation/.sdlc')), false, `${name}: no stray ledger folder`);
+      assert.equal(fs.existsSync(path.join(T, 'foundation/roadmap.md')), false, `${name}: no stray copy`);
+      assert.ok(fs.existsSync(path.join(T, 'foundation/notes/keep.md')), `${name}: the user's own file is kept`);
+      assert.equal(planMigration(T).product.action, 'move', `${name}: so a re-run can simply try again`);
+    } finally { cleanup(T); }
+  }
+
+  // Through the command: a failure is a message and an exit code, never a stack trace, and no per-file
+  // write happens after it.
+  const { T } = await legacyProductLevel();
+  try {
+    const code = process.exitCode;
+    const out = await grabOut(() => runMigrate(T, { apply: true }, { copy: (src, dest, opts) => { if (dest.endsWith('foundation')) throw new Error('EACCES'); fs.cpSync(src, dest, opts); } }));
+    assert.equal(process.exitCode, 1);
+    process.exitCode = code;
+    assert.match(out, /the product level was not moved: nothing was moved — EACCES/);
+    assert.match(out, /every file is where it was/);
+    assert.equal(read(path.join(T, '.sdlc/hub.json')).schemaVersion, undefined, 'no per-file row was written after the failure');
+  } finally { cleanup(T); }
+});

@@ -2513,3 +2513,22 @@ test('pr-title / pr-template gates: a Foundation change on a non-review head is 
     assert.equal(runGate(PR_TITLE, T, ['--profile', 'hub', '--head', 'review/EP-foundation/foundation', '--changed', changed, 'review: foundation/ (EP-foundation)']).code, 0);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('ledger-guard: a Foundation ledger added beside an on-base EP-discovery is a MUTATION, not a seed (E75)', () => {
+  // The review finding this pins. A verified Product still on the old spelling cannot be converted by
+  // `yad migrate`, so a human commit is the only way a Foundation appears there — and before this rule
+  // the carve-out waved it through as "new epic", after which `yad next` read that hand-written ledger
+  // as the product level.
+  const T = scaffoldRepo();
+  try {
+    seedLedgerOnBase(T, 'EP-discovery');
+    commit(T, 'review: foundation', {
+      'foundation/.sdlc/state.json': '{"epicId":"EP-foundation","kind":"foundation","currentStep":"foundation-done"}\n',
+      'foundation/.sdlc/approvals.json': '[{"status":"approved"}]\n',
+    });
+    const r = runGate(LEDGER_GUARD, T);
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /foundation\/\.sdlc\/state\.json/);
+    assert.doesNotMatch(r.out, /new epic, its seed is exempt/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

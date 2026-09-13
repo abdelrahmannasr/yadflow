@@ -392,7 +392,7 @@ function jsonNext(root, { epic, check }) {
   }
   if (epic) {
     if (!exists(path.join(epicRoot(root, epic), '.sdlc', 'state.json'))) {
-      return jsonError(`no epic state at epics/${epic}/.sdlc/state.json`);
+      return jsonError(`no epic state at ${epicRel(epic)}/.sdlc/state.json`);
     }
     return emitJSON({ ok: true, actions: [actionFor(root, epic)] });
   }

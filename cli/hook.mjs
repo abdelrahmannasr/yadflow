@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger , productConfigPath } from './manifest.mjs';
-import { FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
+import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
 // (artifact-side: the architect commits it with the architecture) and NOT `change.json` — both are a
@@ -150,6 +150,9 @@ export function seededSlugs(productRoot, hub, runner = run) {
     if (m) slugs.add(fold(m[1]));
     if (p === `${FOUNDATION_DIR}/.sdlc/state.json`) slugs.add(fold(FOUNDATION_EPIC));   // E75
   }
+  // One product level: with the old spelling on base, a Foundation ledger replaces a CI-owned one
+  // rather than creating something new — the same rule the CI gate applies.
+  if (slugs.has(fold(DISCOVERY_EPIC))) slugs.add(fold(FOUNDATION_EPIC));
   return slugs;
 }
 

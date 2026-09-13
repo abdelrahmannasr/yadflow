@@ -12,7 +12,7 @@ import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, gatePredicate,
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
-  upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES,
+  upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited,
 } from './epic-state.mjs';
@@ -76,14 +76,19 @@ function warnUnlockedContract(epicDir, artifact) {
   }
 }
 
-// A null discovery hash means the discovery set is incomplete (a required artifact is missing), so the
-// review is not yet reviewable and an approval would not be hash-bound. Name the missing files so the
-// owner can complete the set before the gate is opened/advanced (mirrors warnUnlockedContract).
-function warnIncompleteDiscovery(epicDir, artifact) {
-  if (artifactBase(artifact) !== 'discovery') return;
+// A null hash on a product-level set means it is incomplete (a required file is missing), so the review
+// is not yet reviewable and an approval would not be hash-bound. Name the missing files so the owner can
+// complete the set before the gate is opened/advanced (mirrors warnUnlockedContract). Two sets: the
+// Foundation's required sections (E75 — its optional ones never make it incomplete) and the six files
+// of the old `discovery` spelling.
+export function warnIncompleteDiscovery(epicDir, artifact) {
+  const b = artifactBase(artifact);
+  const required = b === 'foundation' ? FOUNDATION_REQUIRED : b === 'discovery' ? DISCOVERY_FILES : null;
+  if (!required) return;
   if (artifactHash(epicDir, artifact) !== null) return;
-  const missing = DISCOVERY_FILES.filter((f) => !fs.existsSync(path.join(epicDir, f)));
-  warn(`discovery set incomplete — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
+  const missing = required.filter((f) => !fs.existsSync(path.join(epicDir, f)));
+  const label = b === 'foundation' ? 'Foundation incomplete' : 'discovery set incomplete';
+  warn(`${label} — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
 }
 
 // Fail fast on a corrupt or wrong-shape Product config: a silently-defaulted hub.json would degrade

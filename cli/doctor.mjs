@@ -494,7 +494,8 @@ export function epicChecks(checks, root) {
   for (const e of epicIds(root)) {
     try {
       const ledger = loadLedger(epicRoot(root, e));
-      if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`, 'author it via yad-epic, or remove the directory');
+      if (!ledger.state) check(checks, `epic:${e}`, 'epics', 'warn', `${e}: no state.json — epic not seeded`,
+        e === FOUNDATION_EPIC ? `seed it with \`yad foundation new\`, or remove ${FOUNDATION_DIR}/.sdlc/` : 'author it via yad-epic, or remove the directory');
       else {
         check(checks, `epic:${e}`, 'epics', 'ok', `${e}: currentStep ${ledger.state.currentStep}`);
         // Chain consistency: a passed review gate whose author step was never closed. currentStep alone
@@ -536,9 +537,9 @@ export function epicChecks(checks, root) {
 // the consequence and the one command that fixes it. It never fires without a Foundation — there is
 // nothing to guard — nor on a local ledger, where humans write the ledger by design.
 //
-// Detected by the folder name in the script's text. The wired copy is byte-for-byte a template, and
-// every template from E75 on names `foundation/` in the arm that guards it; a copy that does not name
-// it cannot be guarding it.
+// Detected by the ARM that does the guarding, not by the folder name anywhere in the text: a comment
+// that merely mentions `foundation/` must not make an outdated script read as current. The wired copy
+// is byte-for-byte a template, so each template's arm is a fixed string.
 //
 // The same section reports the three ways a product can have the WRONG number of product levels:
 //   foundation:two     a Foundation AND an old `epics/EP-discovery/` ledger — fail. Two product levels
@@ -578,10 +579,15 @@ export function foundationChecks(checks, root) {
 function foundationGuardChecks(checks, root, hub) {
   if (!exists(path.join(root, FOUNDATION_DIR, '.sdlc'))) return;
   if (!isVerifiedLedger(hub)) return;
-  const stale = ['checks/ledger-guard.sh', 'checks/pr-title.sh', 'checks/pr-template.sh'].filter((rel) => {
+  const ARMS = {
+    'checks/ledger-guard.sh': `      ${FOUNDATION_DIR}/*)`,
+    'checks/pr-title.sh': `^(epics|${FOUNDATION_DIR})/`,
+    'checks/pr-template.sh': `^(epics|${FOUNDATION_DIR})/`,
+  };
+  const stale = Object.keys(ARMS).filter((rel) => {
     const file = path.join(root, rel);
     if (!exists(file)) return false;   // not wired at all is `yad check`'s finding, not this one
-    try { return !fs.readFileSync(file, 'utf8').includes(`${FOUNDATION_DIR}/`); } catch { return false; }
+    try { return !fs.readFileSync(file, 'utf8').includes(ARMS[rel]); } catch { return false; }
   });
   if (!stale.length) return;
   check(checks, 'foundation:guard', 'project', 'warn',
@@ -827,7 +833,7 @@ export function dialChecks(checks, root) {
 //   A TYPE NOBODY DEFINED   a value outside the five. It reads as a non-genesis type, so the lineage
 //             gate gets stricter rather than looser — a warning, not a failure.
 //
-// `state.json`'s own top-level `kind` is NOT looked at here. That is the `stub` / `discovery`
+// `state.json`'s own top-level `kind` is NOT looked at here. That is the `stub` / `foundation` / `discovery`
 // lifecycle marker, a different axis, and a stub legitimately carries both at once.
 export function typeChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');

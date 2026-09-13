@@ -273,7 +273,12 @@ export const MIGRATIONS = [
 // WHAT MOVES. Every file under `epics/EP-discovery/` is copied to the same relative path under
 // `foundation/` — the six discovery files, `.sdlc/`, `reviews/` — and the original directory is then
 // removed, leaving a full copy of it at `epics/EP-discovery.yad-orig/`. That name is not a valid epic
-// id (it has a dot), so no walker ever reads the backup as an epic, and `*.yad-orig` keeps it out of git.
+// id (it has a dot), so every walker that checks epic ids skips it, and `*.yad-orig` keeps it out of git.
+// (Two walkers list every folder under `epics/` without that check — `docs.mjs` looks for a
+// `docs-site/` and `checkpoint.mjs` for Build ledgers — and the old product level never has either.)
+//
+// Other JSON objects under `.sdlc/` (a docs-build cache, a shard) move too, and are brought to the
+// engine's shape AT THEIR NEW PATH in the same run — listed in `reshape`, and in the preview.
 //
 // WHAT IS RELABELLED, in `foundation/.sdlc/`:
 //   state.json     epicId -> EP-foundation, kind -> foundation, profile -> foundation, the step ids
@@ -329,12 +334,12 @@ export function convertDiscoveryState(state) {
   return out;
 }
 
-export function planProductMove(root, { verified = false } = {}) {
+export function planProductMove(root, { verified = false, migrations = MIGRATIONS } = {}) {
   const fromRel = epicRel(DISCOVERY_EPIC);
   const from = path.join(root, fromRel);
   const ledgerOf = (dir, name) => path.join(dir, '.sdlc', name);
   if (!exists(ledgerOf(from, 'state.json'))) return null;
-  const base = { from: fromRel, to: FOUNDATION_DIR, backup: `${fromRel}${BACKUP_SUFFIX}`, moves: [], rewrites: [] };
+  const base = { from: fromRel, to: FOUNDATION_DIR, backup: `${fromRel}${BACKUP_SUFFIX}`, moves: [], rewrites: [], reshape: [] };
   const refuse = (action, detail) => ({ ...base, action, detail });
 
   if (verified) {
@@ -373,39 +378,84 @@ export function planProductMove(root, { verified = false } = {}) {
   if (exists(path.join(root, base.backup))) {
     return refuse('refused', `${base.backup}/ from an earlier run is in the way — delete it or move it aside, then migrate`);
   }
+  // Every other JSON object under `.sdlc/` that the per-file steps would change, judged exactly as a
+  // per-file row would be — at the path it lands on, with the same migration list — so the plan for
+  // these files cannot differ from what `planMigration` would say about them after the move.
+  const reshape = [];
+  for (const f of files.filter((x) => x.startsWith('.sdlc/') && x.endsWith('.json') && !LEDGER_NAMES.includes(x.slice('.sdlc/'.length)))) {
+    const raw = readRaw(path.join(from, f));
+    if (!raw.ok) return refuse('unreadable', `${fromRel}/${f} does not parse — fix or restore it first`);
+    if (!isPlainObject(raw.value) || shapeOf(raw.value) > SCHEMA_VERSION) continue;
+    const rel = path.join(FOUNDATION_DIR, f);
+    const { obj, version } = applyMigrations(raw.value, migrations, { base: path.basename(f), rel, root });
+    if (serialize(stamped(obj, version)) !== fs.readFileSync(path.join(from, f), 'utf8')) reshape.push(`${FOUNDATION_DIR}/${f}`);
+  }
   return {
     ...base,
     action: 'move',
     detail: null,
     moves: files.map((f) => ({ from: `${fromRel}/${f}`, to: `${FOUNDATION_DIR}/${f}` })),
-    rewrites: LEDGER_NAMES.filter((n) => n in read).map((n) => `${FOUNDATION_DIR}/.sdlc/${n}`),
+    rewrites: [...LEDGER_NAMES.filter((n) => n in read).map((n) => `${FOUNDATION_DIR}/.sdlc/${n}`), ...reshape],
+    reshape,
   };
 }
 
-// Apply a planned move. Copy, check, relabel, then remove — so a failure part-way leaves the original
-// directory whole, and only the files this run copied are cleaned up out of `foundation/`.
-export function applyProductMove(root, move) {
+// Apply a planned move. Back up, copy, check, relabel, reshape — and only then remove the original.
+//
+// ANY FAILURE BEFORE THAT LAST STEP IS UNDONE COMPLETELY: the backup, every file copied into
+// `foundation/`, and every folder this run created there (a folder that already held something of the
+// user's is kept, with only our copies taken out of it). Leaving either behind would strand the
+// project: a stray backup makes the next run refuse ("from an earlier run is in the way") and a stray
+// `foundation/.sdlc/` reads as a second product level — both false, and neither fixable by re-running.
+// The error is re-thrown for `runMigrate` to report.
+//
+// `copy` is a seam for the tests, which need a copy that fails or corrupts on demand.
+export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
   const from = path.join(root, move.from);
   const to = path.join(root, move.to);
-  const before = artifactHash(from, 'discovery/');
-  fs.cpSync(from, path.join(root, move.backup), { recursive: true, errorOnExist: true, force: false });
-  fs.mkdirSync(to, { recursive: true });
-  fs.cpSync(from, to, { recursive: true, errorOnExist: true, force: false });
-  if (artifactHash(to, 'discovery/') !== before) {
-    for (const m of move.moves) fs.rmSync(path.join(root, m.to), { force: true });
-    throw new Error(`the copy in ${move.to}/ does not fingerprint like the original — nothing was converted`);
+  const backup = path.join(root, move.backup);
+  // The folders under `foundation/` the copy will create, deepest first — computed BEFORE copying.
+  const made = new Set();
+  for (const m of move.moves) {
+    for (let d = path.posix.dirname(m.to); d !== move.to && d !== '.'; d = path.posix.dirname(d)) {
+      if (!exists(path.join(root, d))) made.add(d);
+    }
   }
-  const f = epicFiles(to);
-  writeState(f.state, convertDiscoveryState(JSON.parse(fs.readFileSync(f.state, 'utf8'))));
-  const relabel = (file, canonical) => {
-    if (!exists(file)) return;
-    const list = JSON.parse(fs.readFileSync(file, 'utf8'));
-    writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))));
-  };
-  relabel(f.approvals, canonicalApprovals);
-  relabel(f.comments, canonicalComments);
-  relabel(f.productPrs, canonicalHubPrs);
-  relabel(f.hubPrs, canonicalHubPrs);
+  const toExisted = exists(to);
+  try {
+    const before = artifactHash(from, 'discovery/');
+    copy(from, backup, { recursive: true, errorOnExist: true, force: false });
+    fs.mkdirSync(to, { recursive: true });
+    copy(from, to, { recursive: true, errorOnExist: true, force: false });
+    if (artifactHash(to, 'discovery/') !== before) {
+      throw new Error(`the copy in ${move.to}/ does not fingerprint like the original`);
+    }
+    const f = epicFiles(to);
+    writeState(f.state, convertDiscoveryState(JSON.parse(fs.readFileSync(f.state, 'utf8'))));
+    const relabel = (file, canonical) => {
+      if (!exists(file)) return;
+      const list = JSON.parse(fs.readFileSync(file, 'utf8'));
+      writeJSON(file, canonical(list.map((r) => (isPlainObject(r) ? { ...r, step: renamed(RENAME_STEP, r.step) } : r))));
+    };
+    relabel(f.approvals, canonicalApprovals);
+    relabel(f.comments, canonicalComments);
+    relabel(f.productPrs, canonicalHubPrs);
+    relabel(f.hubPrs, canonicalHubPrs);
+    for (const rel of move.reshape || []) {
+      const file = path.join(root, rel);
+      const { obj, version } = applyMigrations(JSON.parse(fs.readFileSync(file, 'utf8')), migrations, { base: path.basename(file), rel: path.join(...rel.split('/')), root });
+      writeJSON(file, stamped(obj, version));
+    }
+  } catch (e) {
+    if (!toExisted) {
+      fs.rmSync(to, { recursive: true, force: true });
+    } else {
+      for (const m of move.moves) fs.rmSync(path.join(root, m.to), { force: true });
+      for (const d of [...made].sort((a, b) => b.length - a.length)) fs.rmSync(path.join(root, d), { recursive: true, force: true });
+    }
+    fs.rmSync(backup, { recursive: true, force: true });
+    throw new Error(`nothing was moved — ${e.message}`, { cause: e });
+  }
   fs.rmSync(from, { recursive: true, force: true });
   return [...move.rewrites, ...move.moves.map((m) => m.to).filter((p) => !move.rewrites.includes(p))];
 }
@@ -615,7 +665,7 @@ export function planMigration(root, { migrations = MIGRATIONS } = {}) {
   // files that are about to MOVE are listed on the move, not also as rows at a path that will not be
   // there after the apply. A preview naming a file the apply never writes is as untrustworthy as one
   // that misses a file it does.
-  const product = planProductMove(root, { verified });
+  const product = planProductMove(root, { verified, migrations });
   const moving = product?.action === 'move' ? `${product.from}/` : null;
 
   const rows = [];
@@ -725,7 +775,7 @@ function printProductMove(p, { apply }) {
 // which means no backup, no row in the report, and a preview that under-reports what an apply does. It
 // would also be free to overwrite the one file the same run had just declared corrupt or newer than
 // this engine. What shape a file is in is recorded in that file, which is the whole point of rule 1.
-export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS } = {}) {
+export async function runMigrate(root, { apply = false, json = false } = {}, { migrations = MIGRATIONS, copy = fs.cpSync } = {}) {
   if (!exists(path.join(root, PROJECT_FILES.version)) && !exists(productConfigPath(root))) {
     const message = 'no yad project here (.sdlc/ not initialised)';
     if (json) { log(JSON.stringify({ version: VERSION, ok: false, error: message }, null, 2)); }
@@ -748,7 +798,18 @@ export async function runMigrate(root, { apply = false, json = false } = {}, { m
     // Before the first backup exists, not after — otherwise a gate advance racing this run could stage
     // one. A no-op when the line is already there.
     if (pending.length || move) ignored = ensureBackupsIgnored(root);
-    if (move) written.push(...applyProductMove(root, move));
+    if (move) {
+      // Reported through `fail`, never as a stack trace, and before any per-file write: a move that did
+      // not happen leaves the project exactly as it was, so the rest of this run must not half-proceed.
+      try {
+        written.push(...applyProductMove(root, move, { migrations, copy }));
+      } catch (e) {
+        if (json) log(JSON.stringify({ version: VERSION, ok: false, error: `the product level was not moved: ${e.message}` }, null, 2));
+        else { fail(`the product level was not moved: ${e.message}`); hand('every file is where it was — fix the cause, then run `yad migrate --apply` again'); }
+        process.exitCode = 1;
+        return { ok: false, rows: plan.rows, written: [] };
+      }
+    }
     for (const row of pending) {
       const file = path.join(root, row.file);
       const raw = readRaw(file);

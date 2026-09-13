@@ -12842,3 +12842,50 @@ test('doctor: a product with the wrong number of product levels is told so (E75)
     assert.equal(run().find((x) => x.id === 'foundation:stray')?.status, 'fail');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('hook: with EP-discovery on base, a Foundation ledger counts as already seeded (E75)', async () => {
+  const { seededSlugs } = await import('./hook.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hook-onelevel-'));
+  const runner = (tree) => (cmd, args = []) => {
+    const line = args.join(' ');
+    if (line.includes('symbolic-ref')) return { ok: true, stdout: 'origin/main', code: 0 };
+    if (line.includes('rev-parse --verify')) return { ok: true, stdout: '', code: 0 };
+    if (line.includes('ls-tree')) return { ok: true, code: 0, stdout: tree.join('\0') };
+    return { ok: false, stdout: '', code: 1 };
+  };
+  try {
+    assert.ok(seededSlugs(T, {}, runner(['epics/EP-discovery/.sdlc/state.json'])).has('ep-foundation'));
+    assert.equal(seededSlugs(T, {}, runner(['epics/EP-a/.sdlc/state.json'])).has('ep-foundation'), false,
+      'without the old spelling, a first Foundation is still a creation');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate: an incomplete Foundation is named at gate time, and its optional sections never make it incomplete (E75)', async () => {
+  const { warnIncompleteDiscovery } = await import('./gate.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-incomplete-'));
+  try {
+    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'repos.md']) fs.writeFileSync(path.join(T, f), `# ${f}\n`);
+    const out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
+    assert.match(out, /Foundation incomplete — missing stack\.md;/);
+    assert.doesNotMatch(out, /market|risks/);
+    fs.writeFileSync(path.join(T, 'stack.md'), '# stack\n');
+    assert.equal(await grab(() => warnIncompleteDiscovery(T, 'foundation/')), '', 'complete without the optional sections');
+    assert.equal(await grab(() => warnIncompleteDiscovery(T, 'epic.md')), '', 'not a product-level set');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: a stale guard is still stale when a comment in it merely mentions foundation/ (E75)', async () => {
+  const { foundationChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-arm-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    const old = fs.readFileSync(path.join(ROOT, 'cli/fixtures/ledger-guard-v3.18.1.sh'), 'utf8');
+    fs.writeFileSync(path.join(T, 'checks/ledger-guard.sh'), `${old}\n# note: see foundation/ in a later release\n`);
+    const checks = [];
+    foundationChecks(checks, T);
+    assert.equal(checks.find((c) => c.id === 'foundation:guard')?.status, 'warn');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
