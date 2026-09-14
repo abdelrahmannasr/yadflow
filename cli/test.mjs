@@ -14075,7 +14075,13 @@ test('roadmapFeatures: reads every feature table by its Proposed epic id column,
 });
 
 test('featureStatus: planned, in-shape, in-build and shipped come from the ledger, through the reader yad next uses (E76 follow-up)', async () => {
-  const { featureStatus } = await import('./epic-state.mjs');
+  const { featureStatus, FEATURE_STATUSES } = await import('./epic-state.mjs');
+  // The vocabulary is a promise to scripts reading `--json`, written in two places: the constant and the
+  // CLI reference. Nothing else ties them, so a word added to one and not the other would drift silently.
+  const cliRow = fs.readFileSync(path.join(ROOT, 'docs/CLI.md'), 'utf8').split('\n').find((l) => l.startsWith('| `yad foundation status'));
+  assert.deepEqual(FEATURE_STATUSES.filter((w) => cliRow.includes(`\`${w}\` (`)), FEATURE_STATUSES, 'docs/CLI.md explains every status the engine can report');
+  assert.deepEqual([...cliRow.matchAll(/`([a-z-]+)` \(/g)].map((m) => m[1]).filter((w) => /^(planned|in-|shipped)/.test(w)), FEATURE_STATUSES,
+    'and names no other, in the same order');
   const step = (id, type, status) => ({ id, type, artifact: `${id}.md`, status, risk_tags: [] });
   const shape = { epicId: 'EP-a', currentStep: 'architecture', steps: [step('epic', 'author', 'done'), step('epic-review', 'review+approve', 'done'), step('architecture', 'author', 'in_progress')] };
   const built = { epicId: 'EP-a', currentStep: 'ready-for-build', steps: [step('epic', 'author', 'done'), step('epic-review', 'review+approve', 'done')] };
@@ -14090,6 +14096,56 @@ test('featureStatus: planned, in-shape, in-build and shipped come from the ledge
   assert.equal(featureStatus(L(built, [{ story: 'EP-a-S01', repos: { api: lane(true) } }, { story: 'EP-a-S02', repos: { web: lane(true) } }])), 'shipped');
   const stub = { epicId: 'EP-old', kind: 'stub', currentStep: 'backfill-pending', steps: [step('epic', 'author', 'todo')] };
   assert.equal(featureStatus(L(stub)), 'shipped', 'a brownfield anchor is a feature that shipped before the Product');
+});
+
+test('roadmapFeatures: fences, a heading that ends a table, escaped pipes and loose spelling (E76 follow-up review)', async () => {
+  const { roadmapFeatures } = await import('./epic-state.mjs');
+  const text = [
+    '## Phase 1 — MVP',
+    '### Must have',
+    '| Feature | Proposed  Epic  ID | Status |', '|---|---|---|',
+    '| Split \\| share | **EP-split** | planned |',
+    '## Phase 2 | later',
+    '| Feature | Proposed epic id |', '|---|---|',
+    '| Receipts | EP-receipts |',
+    '```markdown',
+    '| Feature | Proposed epic id | Status |', '|---|---|---|',
+    '| Example | EP-example | planned |',
+    '```',
+    '~~~',
+    '| Feature | Proposed epic id |', '|---|---|', '| Tilde | EP-tilde |',
+    '~~~',
+  ].join('\n');
+  assert.deepEqual(roadmapFeatures(text), [
+    { phase: 'Phase 1 — MVP', feature: 'Split | share', epicId: 'EP-split', written: 'planned' },
+    { phase: 'Phase 2 | later', feature: 'Receipts', epicId: 'EP-receipts', written: null },
+  ], 'a ### groups inside its phase; an escaped pipe stays in its cell; a heading with a pipe ends the table above it; a fenced table is an example');
+});
+
+test('featureStatus: shipped needs every story the epic has, and every repo each story declares (E76 follow-up review)', async () => {
+  const { featureStatus, epicStories } = await import('./epic-state.mjs');
+  const built = { epicId: 'EP-a', currentStep: 'ready-for-build', steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
+  const done = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
+  const L = (buildStates) => ({ state: built, approvals: [], comments: [], hubPrs: [], buildStates });
+  const onlyS01 = L([{ story: 'EP-a-S01', repos: { api: done } }]);
+  const stories = [{ id: 'EP-a-S01', repos: ['api'] }, { id: 'EP-a-S02', repos: ['web'] }];
+  assert.equal(featureStatus(onlyS01), 'shipped', 'with no stories to compare, the lanes on disk are all there is');
+  assert.equal(featureStatus(onlyS01, { stories }), 'in-build', 'S02 has not started Build — its build-state does not exist yet');
+  assert.equal(featureStatus(onlyS01, { stories: [{ id: 'EP-a-S01', repos: ['api', 'web'] }] }), 'in-build', 'S01 declares web, which has no lane yet');
+  assert.equal(featureStatus(L([{ story: 'EP-a-S01', repos: { api: done } }, { story: 'EP-a-S02', repos: { web: done } }]), { stories }), 'shipped');
+
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-epic-stories-'));
+  try {
+    assert.deepEqual(epicStories(T), [], 'no stories/ folder');
+    fs.mkdirSync(path.join(T, 'stories'));
+    fs.writeFileSync(path.join(T, 'stories/EP-a-S02.md'), '---\nepic: EP-a\nrepos: web\n---\n');
+    fs.writeFileSync(path.join(T, 'stories/EP-a-S01.md'), '---\nid: EP-a-S01\nrepos: [api, web]\n---\n');
+    fs.writeFileSync(path.join(T, 'stories/notes.txt'), 'not a story');
+    assert.deepEqual(epicStories(T), [{ id: 'EP-a-S01', repos: ['api', 'web'] }, { id: 'EP-a-S02', repos: ['web'] }],
+      'sorted; the file name stands in for a missing id; a single repo reads as a list');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 async function foundationStatusOn(files, { json = false } = {}) {
@@ -14179,6 +14235,56 @@ test('yad foundation status: each roadmap feature is read from its epic ledger, 
     assert.match(t.out, /next planned feature: Invites — seed it with the yad-epic skill \(proposed id EP-planned\)/);
     assert.doesNotMatch(t.out, /still a draft/);
   } finally { cleanTmp(t.T); }
+});
+
+test('yad foundation status: stories that have not started, a broken ledger, what counts as unlisted, two product levels (E76 follow-up review)', async () => {
+  const lane = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
+  const files = {
+    ...productLedger('foundation', 'foundation', 'foundation-done'),
+    ...productLedger('epics/EP-discovery', 'discovery', 'discovery-done'),
+    'foundation/roadmap.md': '## Phase 1\n| Feature | Proposed epic id |\n|---|---|\n| Partial | EP-partial |\n| Whole | EP-whole |\n| Broken | EP-broken |\n',
+    ...builtLedger('EP-partial'),
+    'epics/EP-partial/stories/EP-partial-S01.md': '---\nid: EP-partial-S01\nrepos: [api]\n---\n',
+    'epics/EP-partial/stories/EP-partial-S02.md': '---\nid: EP-partial-S02\nrepos: [api]\n---\n',
+    'epics/EP-partial/.sdlc/build-state/EP-partial-S01.json': { story: 'EP-partial-S01', repos: { api: lane } },
+    ...builtLedger('EP-whole'),
+    'epics/EP-whole/stories/EP-whole-S01.md': '---\nid: EP-whole-S01\nrepos: [api]\n---\n',
+    'epics/EP-whole/.sdlc/build-state/EP-whole-S01.json': { story: 'EP-whole-S01', repos: { api: lane } },
+    'epics/EP-broken/.sdlc/state.json': '{ not json',
+    // Not listed: a chore seeded with no epic.md yet, and a folder with no ledger. Listed: a feature with no epic.md.
+    'epics/EP-chore/.sdlc/state.json': { epicId: 'EP-chore', type: 'chore', currentStep: 'epic', steps: [statusStep('epic', 'author', 'in_progress')] },
+    'epics/EP-empty/README.md': 'nothing here',
+    'epics/EP-bare/.sdlc/state.json': { epicId: 'EP-bare', type: 'feature', currentStep: 'epic', steps: [statusStep('epic', 'author', 'in_progress')] },
+  };
+  const j = await foundationStatusOn(files, { json: true });
+  try {
+    assert.equal(j.failed, false, j.out);
+    const r = JSON.parse(j.out);
+    assert.equal(r.epic, 'EP-foundation', 'the Foundation wins, as in yad next');
+    assert.match(r.warnings[0], /two product levels: foundation\/ and epics\/EP-discovery\/ — reading EP-foundation/);
+    assert.deepEqual(r.features.map((f) => [f.epicId, f.status]), [['EP-partial', 'in-build'], ['EP-whole', 'shipped'], ['EP-broken', null]]);
+    assert.match(r.features[2].problem, /its ledger does not load/);
+    assert.deepEqual(r.unlisted, ['EP-bare']);
+  } finally { cleanTmp(j.T); }
+  const t = await foundationStatusOn(files);
+  try {
+    assert.match(t.out, /two product levels/);
+    assert.match(t.out, /Partial\s+EP-partial\s+in-build/);
+  } finally { cleanTmp(t.T); }
+
+  const one = await foundationStatusOn({ ...productLedger('foundation', 'foundation', 'foundation-done'), 'foundation/roadmap.md': '## P\n| Feature | Proposed epic id |\n|---|---|\n| A | EP-a |\n' }, { json: true });
+  try { assert.equal('warnings' in JSON.parse(one.out), false, 'no warnings key when there is nothing to warn about'); } finally { cleanTmp(one.T); }
+
+  // `yad next` on an approved Foundation points at this view.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roadmap-next-'));
+  try {
+    for (const [rel, body] of Object.entries(productLedger('foundation', 'foundation', 'foundation-done'))) {
+      fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(T, rel), typeof body === 'string' ? body : JSON.stringify(body));
+    }
+    // In-process, not through `yadRun`: coverage counts only code run inside the test process.
+    assert.match(await grab(() => import('./next.mjs').then((m) => m.runNext(T, { epic: 'EP-foundation' }))), /yad foundation status/);
+  } finally { cleanTmp(T); }
 });
 
 test('yad foundation status: a draft Foundation, the old spelling, and the refusals (E76 follow-up)', async () => {

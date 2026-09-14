@@ -246,10 +246,10 @@ feature has got from the epic ledgers:
 
 | Status | Meaning |
 |---|---|
-| `planned` | No epic with the proposed id exists yet |
+| `planned` | No epic ledger with the proposed id exists yet |
 | `in-shape` | The epic is seeded and still in Shape (epic, architecture, UI, stories) |
 | `in-build` | Shape is done, and Build has not shipped every story in every repo |
-| `shipped` | Every Build lane of every story is shipped (or the epic is a brownfield anchor) |
+| `shipped` | Every story in the epic has a Build state, every repo each story declares has a lane, and every lane is shipped (or the epic is a brownfield anchor) |
 
 It also names feature epics that no row proposes — `yad-epic` may give an epic a different id from the
 one proposed. Write `planned` when you first add a row; an older Foundation that says `epic-started` or

@@ -79,7 +79,9 @@ Derive `EP-<slug>` where `slug` is **2–4 lowercase words joined by hyphens**, 
 (e.g. `EP-checkout`). Lowercase except the fixed `EP` prefix. `EP-foundation` and `EP-discovery` are
 **reserved** for the Product level — never use either for a feature. **The ID is assigned once and
 never renamed** — renaming breaks every downstream link (build plan §6b). Check
-`{project-root}/epics/` for collisions; if the slug exists, append a distinguishing word.
+`{project-root}/epics/` for collisions; if the slug exists, append a distinguishing word. When the
+Foundation's `roadmap.md` has a row for this feature, prefer that row's **proposed epic id**, so
+`yad foundation status` can match the feature to its epic.
 
 ### Step 4 — Open the authoring branch
 Open the analysis authoring branch `analysis/EP-<slug>` per the shared procedure
