@@ -5839,7 +5839,8 @@ test('skipStep: rejects a non-optional step, a missing reason, and skipping afte
   assert.throws(() => skipStep(uiChain('ui-design', { ui: 'in_progress' }), 'ui-design', { reason: '  ' }), /reason/);
   // stories under way while ui-design is not itself done → the stories guard (not the done guard) fires.
   const started = uiChain('stories', { ui: 'in_progress', uiReview: 'blocked', stories: 'in_progress' });
-  assert.throws(() => skipStep(started, 'ui-design', { reason: 'too late' }), /stories have already started/);
+  assert.throws(() => skipStep(started, 'ui-design', { reason: 'too late' }), (e) =>
+    /stories is already 'in_progress'/.test(e.message) && /before stories begins/.test(e.hint));
 });
 
 test('unskipStep: restores the ui pair and re-points currentStep back to ui-design (before stories authoring)', () => {
@@ -5860,7 +5861,178 @@ test('unskipStep: rejects un-skipping a step that is not skipped and once the st
   const state = uiChain('architecture-review');
   skipStep(state, 'ui-design', { reason: 'no UI' });
   byId(state, 'stories-review').status = 'in_review'; // stories authored & now under review
-  assert.throws(() => unskipStep(state, 'ui-design'), /stories review has already opened/);
+  assert.throws(() => unskipStep(state, 'ui-design'), /stories-review is already 'in_review'/);
+});
+
+test('skip / un-skip measure "too late" against the step after the pair, never a step they name (E36)', () => {
+  // Every shipped route marks only `ui-design` optional, and `stories` follows it — so a guard that
+  // NAMED `stories` and one that asks the chain gave the same answer on every real epic, and no test
+  // could tell them apart. This route also marks `architecture` optional, so the step after that pair
+  // is `ui-design`, and the two readings differ.
+  const ROUTES = [{ id: 'wide', level: 'feature', steps: ['epic', 'epic-review',
+    { id: 'architecture', optional: true }, { id: 'architecture-review', optional: true },
+    { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
+    'stories', 'stories-review'] }];
+  const ids = ['epic', 'epic-review', 'architecture', 'architecture-review', 'ui-design', 'ui-design-review', 'stories', 'stories-review'];
+  const chain = (currentStep, status = {}) => ({ epicId: 'EP-x', profile: 'wide', currentStep,
+    steps: ids.map((id, i) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author',
+      artifact: `${id.replace(/-review$/, '')}.md`, status: status[id] || (i < 2 ? 'done' : 'todo') })) });
+  const opts = { reason: 'reused the platform design', profiles: ROUTES };
+
+  // UN-SKIP, the case a person reaches without editing anything: skip architecture, let the skip open
+  // ui-design, author it and open its review. Putting architecture back now would re-open a step
+  // ui-design was already built on. The old literal looked at `stories-review`, still `todo`, and let
+  // it through — pointing currentStep at architecture with a ui-design review in flight.
+  const built = skipStep(chain('architecture', { architecture: 'in_progress' }), 'architecture', opts);
+  assert.equal(built.currentStep, 'ui-design');
+  assert.equal(byId(built, 'ui-design').status, 'in_progress', 'the skip opened the step after the pair');
+  byId(built, 'ui-design').status = 'done';
+  byId(built, 'ui-design-review').status = 'in_review';
+  // The refusal names the FIRST reason it meets: ui-design itself is finished — written on the
+  // assumption architecture did not apply — before its review is even asked about.
+  assert.throws(() => unskipStep(built, 'architecture'), (e) =>
+    e.code === 'YAD-STATE-004' && /ui-design is already 'done'/.test(e.message) && /before ui-design is finished/.test(e.hint));
+  assert.equal(byId(built, 'architecture').status, 'skipped', 'a refused un-skip changes nothing');
+
+  // …while the step after the pair is merely under way, un-skipping is allowed and pushes it back.
+  const early = skipStep(chain('architecture', { architecture: 'in_progress' }), 'architecture', opts);
+  unskipStep(early, 'architecture');
+  assert.equal(byId(early, 'architecture').status, 'in_progress');
+  assert.equal(byId(early, 'ui-design').status, 'todo');
+  assert.equal(early.currentStep, 'architecture');
+
+  // SKIP: the step after the architecture pair is `ui-design`. Under way (a hand-moved chain — nothing
+  // opens it while architecture is unpassed), it makes the skip too late; `stories` is still `todo`,
+  // which is all the literal ever asked.
+  assert.throws(
+    () => skipStep(chain('architecture', { architecture: 'in_progress', 'ui-design': 'in_progress' }), 'architecture', opts),
+    (e) => /ui-design is already 'in_progress'/.test(e.message) && /before ui-design begins/.test(e.hint),
+  );
+
+  // Two skipped pairs in a row: the step after the pair is the first one NOT skipped. Skipping
+  // architecture with ui-design already N/A lands on stories, and un-skipping it pushes stories back
+  // while ui-design stays skipped.
+  const both = chain('architecture', { architecture: 'in_progress' });
+  skipStep(both, 'ui-design', opts);
+  assert.equal(both.currentStep, 'architecture', 'a skip upstream of currentStep leaves it put');
+  skipStep(both, 'architecture', opts);
+  assert.equal(both.currentStep, 'stories');
+  assert.equal(byId(both, 'stories').status, 'in_progress');
+  unskipStep(both, 'architecture');
+  assert.equal(both.currentStep, 'architecture');
+  assert.equal(byId(both, 'stories').status, 'todo');
+  assert.equal(byId(both, 'ui-design').status, 'skipped');
+});
+
+test('un-skipping a pair at the END of the chain never pulls an epic out of Build', () => {
+  // With nothing after the pair there is no later step to make it too late, so the only thing in the
+  // way is `currentStep`. At `ready-for-build`, a step put back runs beside Build as `test-cases` does
+  // — `markInReview`'s rule. No shipped route marks `test-cases` optional, so the route is passed in.
+  const ROUTES = [{ id: 'tail', level: 'feature', steps: ['stories', 'stories-review',
+    { id: 'test-cases', optional: true }, { id: 'test-cases-review', optional: true }] }];
+  const state = { epicId: 'EP-x', profile: 'tail', currentStep: 'ready-for-build', steps: [
+    { id: 'stories', type: 'author', artifact: 'stories/', status: 'done' },
+    { id: 'stories-review', type: 'review+approve', artifact: 'stories/', status: 'done' },
+    { id: 'test-cases', type: 'author', artifact: 'test-cases.md', status: 'in_progress' },
+    { id: 'test-cases-review', type: 'review+approve', artifact: 'test-cases.md', status: 'todo' },
+  ] };
+  skipStep(state, 'test-cases', { reason: 'covered by the contract suite', profiles: ROUTES });
+  assert.equal(state.currentStep, 'ready-for-build');
+  assert.equal(byId(state, 'test-cases').status, 'skipped');
+  unskipStep(state, 'test-cases');
+  assert.equal(byId(state, 'test-cases').status, 'in_progress');
+  assert.equal(state.currentStep, 'ready-for-build', 'the epic stays in Build');
+
+  // …but only because `stories-review` passed a real review first. On a chore lane `stories` IS the
+  // last pair: skipped by hand, the epic reads `ready-for-build` with no approved stories at all, and
+  // `yad doctor`'s remedy for that skip is this command. Keeping the sentinel would leave "Build can
+  // run" standing over stories nobody reviewed.
+  const r = (id, status) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status });
+  const skippedPair = (id) => ({ ...r(id, 'skipped'), skipped: true, skipReason: 'typed by hand', record: { reason: 'typed by hand' } });
+  const chore = { epicId: 'EP-c', profile: 'chore', currentStep: 'ready-for-build', steps: [
+    r('epic', 'done'), r('epic-review', 'done'), skippedPair('stories'), skippedPair('stories-review'),
+  ] };
+  unskipStep(chore, 'stories');
+  assert.equal(byId(chore, 'stories').status, 'in_progress');
+  assert.equal(chore.currentStep, 'stories', 'an epic that reached Build only by skipping leaves it');
+  // `nextAction` takes a LEDGER: handed the bare state it answers `new` whatever the chain says.
+  assert.equal(nextAction({ state: chore }).kind, 'author');
+  assert.equal(nextAction({ state: chore }).step, 'stories');
+
+  // A stories review carried from the parent epic was reviewed there, so Build was earned.
+  const change = { epicId: 'EP-d', profile: 'classic', currentStep: 'ready-for-build', steps: [
+    r('epic', 'done'), r('epic-review', 'done'),
+    { ...r('stories', 'done'), inherited: true, inheritedFrom: 'EP-p' }, { ...r('stories-review', 'done'), inherited: true, inheritedFrom: 'EP-p' },
+    skippedPair('test-cases'), skippedPair('test-cases-review'),
+  ] };
+  unskipStep(change, 'test-cases');
+  assert.equal(byId(change, 'test-cases').status, 'in_progress');
+  assert.equal(change.currentStep, 'ready-for-build', 'an inherited stories review is a reviewed one');
+});
+
+test('skip / un-skip: only work done in this chain makes them too late — not an inherited, blocked or deferred step', () => {
+  const r = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status, ...extra });
+  const rec = { reason: 'waiting on the vendor', by: '@ops', date: '2026-09-14' };
+  const classic = (tail) => ({ epicId: 'EP-x', profile: 'classic', currentStep: 'stories', steps: [
+    r('epic', 'done'), r('epic-review', 'done'), r('architecture', 'done'), r('architecture-review', 'done'),
+    r('ui-design', 'skipped', { skipped: true, record: { reason: 'no UI' } }), r('ui-design-review', 'skipped', { skipped: true, record: { reason: 'no UI' } }),
+    r('stories', 'in_progress'), ...tail,
+  ] });
+  // A test-cases pair carried from the parent (the legacy spelling: `done` beside `inherited: true`)
+  // and a stories review blocked on a third party are not work built on the skip.
+  for (const [name, tail] of [
+    ['inherited test-cases', [r('stories-review', 'todo'), r('test-cases', 'done', { inherited: true, inheritedFrom: 'EP-p' }), r('test-cases-review', 'done', { inherited: true, inheritedFrom: 'EP-p' })]],
+    ['blocked stories-review', [r('stories-review', 'blocked', { record: rec }), r('test-cases', 'todo'), r('test-cases-review', 'todo')]],
+    ['deferred test-cases', [r('stories-review', 'todo'), r('test-cases', 'deferred', { record: rec }), r('test-cases-review', 'deferred', { record: rec })]],
+  ]) {
+    const s = classic(tail);
+    assert.doesNotThrow(() => unskipStep(s, 'ui-design'), name);
+    assert.equal(byId(s, 'ui-design').status, 'in_progress', name);
+  }
+  // A word this release cannot name counts as started — refusing is the safe reading of a newer file.
+  assert.throws(() => unskipStep(classic([r('stories-review', 'parked'), r('test-cases', 'todo'), r('test-cases-review', 'todo')]), 'ui-design'),
+    /stories-review is already 'parked'/);
+  // A step with no status at all is refused too, and says so in words rather than `undefined`.
+  assert.throws(() => unskipStep(classic([r('stories-review', undefined), r('test-cases', 'todo'), r('test-cases-review', 'todo')]), 'ui-design'),
+    /stories-review is already '\(no status\)'/);
+  // The step after the pair may be under way, never FINISHED. Stories written with no UI, their review
+  // then blocked: the old literal refused this (the review was not `todo`), and a first cut that looked
+  // only past `stories` let it through — putting ui-design back behind stories that count as done.
+  for (const review of [r('stories-review', 'blocked', { record: rec }), r('stories-review', 'todo')]) {
+    const s = classic([review, r('test-cases', 'todo'), r('test-cases-review', 'todo')]);
+    byId(s, 'stories').status = 'done';
+    assert.throws(() => unskipStep(s, 'ui-design'), (e) => /stories is already 'done'/.test(e.message) && /is finished/.test(e.hint), review.status);
+    assert.equal(byId(s, 'ui-design').status, 'skipped', 'a refused un-skip changes nothing');
+  }
+
+  // The skip side reads the same rule: an inherited step later in the chain does not refuse it…
+  const fresh = { epicId: 'EP-x', profile: 'classic', currentStep: 'ui-design', steps: [
+    r('epic', 'done'), r('epic-review', 'done'), r('ui-design', 'in_progress'), r('ui-design-review', 'todo'),
+    r('stories', 'todo'), r('stories-review', 'todo'), r('test-cases', 'done', { inherited: true }), r('test-cases-review', 'done', { inherited: true }),
+  ] };
+  assert.doesNotThrow(() => skipStep(fresh, 'ui-design', { reason: 'no UI' }));
+  // …and any later step with work on it does, not only the one right after the pair: here `stories`
+  // (a hand-moved chain) is still `todo` while its review is open.
+  const deep = { epicId: 'EP-x', profile: 'classic', currentStep: 'ui-design', steps: [
+    r('epic', 'done'), r('epic-review', 'done'), r('ui-design', 'in_progress'), r('ui-design-review', 'todo'),
+    r('stories', 'todo'), r('stories-review', 'in_review'),
+  ] };
+  assert.throws(() => skipStep(deep, 'ui-design', { reason: 'no UI' }), /stories-review is already 'in_review'/);
+});
+
+test('skip / un-skip refuse a hole after the pair rather than read it either way', () => {
+  const r = (id, status) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status });
+  // A null right after the pair used to stop the walk there: `skipStep` read "nothing started" and let
+  // the skip through with stories under way, while `unskipStep` read the same chain the other way.
+  const skipHole = { epicId: 'EP-x', profile: 'classic', currentStep: 'ui-design', steps: [
+    r('epic', 'done'), r('epic-review', 'done'), r('ui-design', 'in_progress'), r('ui-design-review', 'todo'), null, r('stories', 'in_progress'), r('stories-review', 'todo'),
+  ] };
+  assert.throws(() => skipStep(skipHole, 'ui-design', { reason: 'no UI' }), (e) => e.code === 'YAD-STATE-004' && /malformed chain/.test(e.message));
+  assert.equal(skipHole.steps[2].status, 'in_progress', 'a refused skip changes nothing');
+  const unskipHole = { ...skipHole, steps: [...skipHole.steps] };
+  unskipHole.steps[2] = { ...r('ui-design', 'skipped'), skipped: true, record: { reason: 'no UI' } };
+  unskipHole.steps[3] = { ...r('ui-design-review', 'skipped'), skipped: true, record: { reason: 'no UI' } };
+  assert.throws(() => unskipStep(unskipHole, 'ui-design'), /malformed chain/);
 });
 
 test('skipStep: refuses once the ui-design review has opened (would orphan a live review PR)', () => {
@@ -6126,9 +6298,11 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
       last = section;
     }
 
-    // The remedy the finding names has to WORK. `yad skip … --undo` is the command in the hint, and
-    // the route guard that produced the finding used to be the first thing that command ran.
-    assert.match(wired.hint, /--undo/);
+    // The remedy the finding names has to WORK. `yad unskip` is the command in the hint, and the
+    // route guard that produced the finding used to be the first thing that command ran.
+    assert.match(wired.hint, /yad unskip <epic> <step>/);
+    // …and it says when that command will refuse, rather than promising a fix it cannot always make.
+    assert.match(wired.hint, /refuses, naming the step, once work has started past the step that follows/);
     const live = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.doesNotThrow(() => unskipStep(live, 'architecture'));
     // …and it names AUTHOR step ids only when the pair is both marked, because one `yad skip` stamps
@@ -6328,6 +6502,31 @@ test('runSkip: a guard violation propagates as a YadError (to bin\'s top-level c
     () => runSkip(T, { epic: 'EP-x', step: 'architecture', reason: 'x' }),
     (e) => e.code === 'YAD-STATE-004',
   );
+});
+
+test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as the way back', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-unskip-cli-'));
+  try {
+    seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+    const skip = yadRun(T, 'skip', 'EP-x', 'ui-design', '--reason', 'backend only');
+    assert.equal(skip.code, 0, skip.out);
+    assert.match(skip.out, /yad unskip EP-x ui-design/);
+    const un = yadRun(T, 'unskip', 'EP-x', 'ui-design', '--reason', 'changed our mind');
+    assert.equal(un.code, 0, un.out);
+    assert.match(un.out, /un-skipped/);
+    assert.match(un.out, /--reason is not used when un-skipping/, 'a reason nobody records is not accepted in silence');
+    assert.equal(readUiState(T).currentStep, 'ui-design');
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').record, undefined);
+    // `skip --undo` is the spelling that shipped first, and it still works.
+    yadRun(T, 'skip', 'EP-x', 'ui-design', '--reason', 'backend only');
+    assert.equal(yadRun(T, 'skip', 'EP-x', 'ui-design', '--undo').code, 0);
+    assert.equal(readUiState(T).currentStep, 'ui-design');
+    const noStep = yadRun(T, 'unskip', 'EP-x');
+    assert.equal(noStep.code, 1);
+    assert.match(noStep.out, /usage: yad unskip <epic> <step>/);
+    assert.equal(yadRun(T, 'unskip', '../etc', 'ui-design').code, 1, 'the epic id is validated like every other verb');
+    assert.match(yadRun(T, '--help').out, /yad unskip <epic> <step>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('upsertHubPr replaces by artifact, never duplicates', () => {

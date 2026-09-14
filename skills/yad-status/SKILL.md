@@ -56,12 +56,13 @@ Print, in this order:
    passes and runs alongside Build, so when `currentStep` is `ready-for-build` the `test-cases`
    step may still be `in_progress`/`in_review` — show its status, and note "parallel" so it is clear it
    does not gate the build. Always render exactly the steps present in `steps[]`.
-   - **Skipped (N/A) steps:** the optional `ui-design` step may be marked N/A for an epic with no
-     user-facing surface. **Both** the `ui-design` author step **and** its `ui-design-review` gate stay
-     in `steps[]`, each carrying `skipped: true`, `status: "done"`, and a `skipReason`. Render **each**
-     as `<id> — SKIPPED (N/A: <skipReason>)` (with `skippedBy`/`skippedAt` if present) instead of the
-     plain status, so the deliberate skip and its reason are visible and the gate does not appear to
-     vanish. The chain then reads `… architecture-review → ui-design (N/A) → ui-design-review (N/A) →
+   - **Skipped (N/A) steps:** a step the epic's route marks optional — `ui-design`, on the routes that
+     ship — may be marked N/A with `yad skip`. **Both** the author step **and** its `-review` gate stay
+     in `steps[]`, each with `status: "skipped"` and a `record` (`{ reason, by, date }`). A file from
+     before shape 7 spells the same thing `status: "done"` with `skipped: true` and a `skipReason`
+     beside it; read either. Render **each** as `<id> — SKIPPED (N/A: <reason>)` (with who and when if
+     present) instead of the plain status, so the deliberate skip and its reason are visible and the
+     gate does not appear to vanish. The chain then reads `… architecture-review → ui-design (N/A) → ui-design-review (N/A) →
      stories → …`; the review gate never needs approvals.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required

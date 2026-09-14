@@ -115,11 +115,14 @@ ${c.bold('Where am I / what next')}
                                        Bind a step to a skill of your own. Several skills run in
                                        the order given, one after another — each costs tokens
   yad skill unbind <step>              Drop the binding; the step goes back to the engine's default
-  yad skip <epic> ui-design --reason <text>   Mark an optional step N/A for this epic. Which steps
-                                       those are comes from the epic's lifecycle route — on every
-                                       route today, ui-design: a backend/API/data epic with no UI.
-                                       Stays visible & auditable (pre-done, gate short-circuited);
-                                       --undo reverses it until the stories review opens
+  yad skip <epic> <step> --reason <text>   Mark an optional step N/A for this epic. Which steps
+                                       those are comes from the epic's lifecycle route — on classic
+                                       and analysis-first, ui-design: a backend/API/data epic with no
+                                       UI. Stays visible & auditable (reason recorded, gate
+                                       short-circuited); refused once any later step has started
+  yad unskip <epic> <step>             Put a skipped step back in the chain (\`skip --undo\` does the
+                                       same), until the step that follows it is finished or work
+                                       past it starts — on classic, until stories are done
 
 ${c.bold('Review gate (Shape)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
@@ -372,10 +375,12 @@ async function main() {
       await runNext(o.dir, { epic, check: typeof o.check === 'string' ? o.check : undefined, all: o.all, json: o.json });
       break;
     }
-    case 'skip': {
-      const [, epic, step] = o._;
+    case 'skip':
+    case 'unskip': {
+      const [verb, epic, step] = o._;
       if (!epic || !isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      await runSkip(o.dir, { epic, step, reason: o.reason, undo: o.undo, today });
+      // `unskip` is the verb E36 named; `skip --undo` is the spelling that shipped first and stays.
+      await runSkip(o.dir, { epic, step, reason: o.reason, undo: verb === 'unskip' || o.undo, today });
       break;
     }
     case 'gate': {

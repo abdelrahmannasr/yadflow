@@ -284,10 +284,30 @@ profiles section above. The `chore` and `spike` lanes mark nothing optional, bec
 user-facing surface — a backend/API service, a data pipeline, infra work. Unlike `analysis` (which is
 optional by being **omitted** from the chain at seed time), `ui-design` is **always seeded** and then
 **marked N/A in place** so the skip stays visible and auditable. The single mechanism is
-`yad skip EP-<slug> ui-design --reason "<why>"` (reverse with `--undo`), usable at epic-authoring time
-or any point **up to authoring the `ui-design` step** — the skip is refused once its review gate has
-opened (the UI work is committed by then) or once `stories` has started. `--undo` is allowed until the
-`stories` review opens.
+`yad skip EP-<slug> ui-design --reason "<why>"` (reverse with `yad unskip EP-<slug> ui-design`, or the
+older spelling `yad skip … --undo`), usable at epic-authoring time or any point **up to authoring the
+`ui-design` step**.
+
+When each verb is too late is a rule about the chain, not about `ui-design` (E36):
+
+- **A skip** is refused once the step's review gate has opened (the work is committed by then), or once
+  work has started on **any later step**.
+- **An un-skip** is refused once work has started on any step **past the step after the pair**. "The
+  step after the pair" is the first later step that is not itself skipped — the step the skip opened.
+  It may still be under way, and un-skipping pushes it back to `todo` — but not finished: a `done` step
+  was written on the assumption the skipped step did not apply, so that refuses too.
+- **"Work has started"** means the step is `in_progress`, `in_review` or `done` in this chain. `skipped`,
+  `satisfied`, `deferred` and `blocked` are not work done here and never count. A status this release
+  cannot name counts as started. A non-step entry after the pair is refused as a malformed chain.
+
+On `classic` and `analysis-first` the step after the `ui-design` pair is `stories`: a skip is refused
+once `stories` starts, and an un-skip once `stories` is finished or its review opens.
+
+**`currentStep` on an un-skip.** The restored author step becomes `currentStep` again when every earlier
+step has passed — unless the epic **earned** `ready-for-build`: its `stories-review` is `done` (or `satisfied`, reviewed
+in the parent epic) and comes before the restored step. That step then runs beside Build, as `test-cases` does, and `currentStep` stays
+put. An epic that reached `ready-for-build` only by skipping (a `chore` whose stories pair was skipped by
+hand) is moved back to the restored step.
 
 A skipped step is `status: "skipped"` with a `record`, and keeps four legacy fields beside them:
 
@@ -307,9 +327,9 @@ reading it as finished would let anyone unblock a chain by typing one word into 
 
 Both the `ui-design` **and** `ui-design-review` entries carry these fields. `advanceState` steps over
 any skipped step, so approving `architecture-review` on a UI-less epic lands directly on `stories`;
-`preconditionsMet` treats it as passed (never as authored). `unskipStep` (via `yad skip … --undo`)
-strips the fields — the record included — and restores the chain to `todo`, refused once
-`stories-review` has opened. `ui-design` is the
+`preconditionsMet` treats it as passed (never as authored). `unskipStep` (via `yad unskip`, or
+`yad skip … --undo`) strips the fields — the record included — and restores the chain to `todo`,
+refused once the step after the pair is finished or a step past it has started (on `classic`, once `stories` is done or `stories-review` opens). `ui-design` is the
 only step any route marks optional today; the engine reads that off the epic's own route
 (`optionalStepsFor`) rather than from a list of its own.
 
