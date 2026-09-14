@@ -59,8 +59,10 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional".
 - **Will have screens, just not yet:** if the epic does need a UI but the team wants to design it later,
   offer `yad defer EP-<slug> ui-design --reason "<why, and who is waiting for it>"` instead of a skip.
-  It passes the step for now and keeps it visibly owed. It can be picked back up with
-  `yad undefer EP-<slug> ui-design` until the stories are finished.
+  It passes the step for now and keeps it visibly owed. If the team is setting it aside under pressure
+  and owes it back, add `--debt`: `yad next` and `yad doctor` then remind them until its review passes.
+  It can be picked back up with `yad undefer EP-<slug> ui-design` at any time — after the stories are
+  finished, the UI re-opens beside them and the stories stay done.
 
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure

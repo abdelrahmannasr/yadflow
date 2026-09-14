@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "epicId": "EP-checkout"
 }
 ```
@@ -357,7 +357,8 @@ A deferral follows the skip rules above:
   deferred step (`isPassed`) with no approvals on its review. The review is not waived, though:
   `gatePredicate` gives a deferred step no short-circuit (E38), so it still reports what is missing, and
   `yad gate status` prints the step as "deferred (still owed)".
-- **Same windows.** `yad defer` is refused where `yad skip` is, and `yad undefer` where `yad unskip` is.
+- **Same window to set aside.** `yad defer` is refused where `yad skip` is. Putting it back is
+  different — see "Picking a deferral up late" below.
 - **Same walk.** `advanceState` and the shared skip/defer code (`setAsideStep`, `restoreStep`) step over
   `skipped` **and** `deferred` steps (`isSetAside`). `yad gate open` refuses a set-aside step, and
   `yad sync-status` leaves its artifact's `status:` line alone. A `deferred` status typed by hand onto a
@@ -366,11 +367,59 @@ A deferral follows the skip rules above:
 - **Not interchangeable.** Deferring a skipped step, or skipping a deferred one, is refused with the
   command that puts it back first, so neither record is lost.
 
+### Picking a deferral up late (E41)
+
 For a skip, the un-skip window is the meaning: work finished without the step was built on it not
-applying. For a deferral it is a limit of the machinery. The team expected later work to finish first,
-but the chain cannot yet re-open a step behind finished work without re-opening that work too
-(`preconditionsMet` would name the step as a blocker, and `advanceState` would re-open the step after
-it). That re-opening ships with debt payback (E41).
+applying, so `yad unskip` is still refused once the step after the pair is finished. A deferral promised
+to come back, so `yad undefer` has **no closing window**. Before later work has finished it behaves like
+`yad unskip`. After it has finished, it **re-opens** the pair behind that work:
+
+| Field | After a late `yad undefer` |
+|-------|----------------------------|
+| author step `status` | `in_progress` (or `todo` if an earlier step has not passed); `record` removed |
+| `-review` gate `status` | `todo`; `record` removed |
+| every later step | unchanged |
+| `currentStep` | unchanged |
+| `debt` | kept, if the deferral carried it |
+
+**A re-opened step is read off the chain, never off a flag:** an unfinished step with a later step
+**completed here** (`status: "done"`, not inherited, not skipped) that is not its own `-review` gate.
+Such a step runs beside the chain, like `test-cases`:
+
+- `preconditionsMet` does not name it the blocker of a step past that finished work. It still blocks
+  the steps between itself and that work, its own gate included.
+- `markInReview` moves `currentStep` only forward, so opening its review does not pull the chain back.
+- `advanceState`, for a gate that passed behind the chain (`currentStep` past it, or `ready-for-build`),
+  closes the gate and changes nothing else. In the forward case it now opens only a `todo` next step.
+- `yad next` lists it under `reopened` (JSON) and prints `re-opened lane: …`.
+
+Only `done` counts as finished work. A skipped, deferred or `satisfied` step after an unfinished step is
+not work built here, so it never turns that step into a lane.
+
+### Debt on a deferral (`debt: true`, E41)
+
+`yad defer EP-<slug> <step> --reason "<why>" --debt` writes the deferral with one more key on both steps
+of the pair:
+
+```json
+{ "id": "ui-design", "type": "author", "artifact": "ui-design.md",
+  "status": "deferred", "debt": true,
+  "record": { "reason": "launch date; @design is waiting on it", "by": "@al", "date": "2026-09-14" } }
+```
+
+| Rule | Detail |
+|------|--------|
+| What it means | owed back — set aside under pressure, and reminded until paid |
+| Where it may sit | a `deferred` pair only; `yad skip --debt` is refused, since a skip owes nothing |
+| What it changes | nothing about the state: a debt is exactly as passed, and as unauthored, as any deferral |
+| Adding it later | `yad defer … --debt` on a step already deferred adds the flag and keeps the record |
+| Paying it back | `yad undefer`, early or late; the flag stays on while the step is worked on |
+| When it clears | `advanceState` removes it from both steps when the `-review` gate passes — nothing else does |
+| Reminders | `yad next` (a warning per debt, a count in the all-epics list, `debt` in JSON), `yad doctor` (`step:debt`, a warn), `yad gate status` ("deferred (still owed, as debt)") |
+
+Step debt is **not** `reconcile-debt.json`. That file is a hotfix's whole change owed back to a feature
+thread and is enforced by the `reconcile-debt` CI gate. Step debt is one step of one epic, and it is a
+reminder, never a gate.
 
 ### `test-cases` is a parallel, non-blocking track
 

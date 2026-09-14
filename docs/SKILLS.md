@@ -109,7 +109,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   screen→frame map in `design-links.json`; degrades to markdown-only otherwise. Reads epic + architecture.
   **Optional** — an epic with no user-facing surface (backend/API, data, infra) skips it, keeping the
   step visible and auditable, with `yad skip <epic> ui-design --reason "<why>"` (reverse with `yad unskip <epic> ui-design`
-  until the stories review opens). An epic that will have screens later can `yad defer` the step instead.
+  until the stories review opens). An epic that will have screens later can `yad defer` the step instead — with `--debt` when it is owed back — and `yad undefer` picks it up again at any time, even after the stories are done.
 - **`yad-stories`** — Shape step 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI.

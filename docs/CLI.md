@@ -288,6 +288,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. Nothing then tells anyone to write the artifact being reviewed, and for a folder artifact the gate has nothing to bind an approval to. |
 | `step:off-route` | The chain matches no lifecycle profile. See the section above: leaving a step out is fine, a step no route has or two in the wrong order is not. |
 | `skip:not-optional` | A step is marked N/A or deferred, but this epic's route does not mark it optional. Nothing breaks today: the step is already done, so a gate sync reports that the rule no longer holds and changes nothing. What is lost is the justification — the gate stops treating the skip as the reason the step passed. A `deferred` status on a required step is reported the same way, and `yad undefer` puts it back. Silent when `profile:disagree` already names the epic, because correcting that clears this too. |
+| `step:debt` | A step is still owed as debt (`yad defer --debt`). A reminder, not a fault: it repeats on every run until the step's review passes. `yad undefer <epic> <step>` starts paying it back — after later work has finished, the step re-opens beside that work, which stays done. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 
@@ -414,8 +415,7 @@ puts it back. Everything else works the way a skip does:
 
 - only a step the epic's route marks optional can be deferred, because the chain carries on past a
   deferred step before anyone has approved its review, and a required review may never be left behind;
-- the same refusals and the same window apply, so `yad undefer` works until the step that follows is
-  finished or work past it starts;
+- the same refusals apply when you defer;
 - the chain walks past a deferred step, `yad gate open` refuses to open a review on one, and the
   artifact's `status:` line is left alone rather than marked approved.
 
@@ -426,9 +426,36 @@ opened before the deferral says the review is still owed rather than "already do
 A step cannot be both: `yad defer` refuses a skipped step and `yad skip` a deferred one, and each names
 the command that puts the step back first.
 
-**Picking a deferred step up after later work has finished is not possible yet.** Stories finished
-while the UI waited are expected, but the chain cannot yet re-open a step behind finished work without
-re-opening that work too. That arrives with debt payback, which needs the same thing.
+**Picking a deferred step up late: `yad undefer` works at any time.** Before later work has finished,
+it puts the step back in the chain the way `yad unskip` does. After later work has finished — say the
+stories were written and approved while the UI waited — it **re-opens** the step beside that work:
+
+| What | After a late `yad undefer` |
+|---|---|
+| the deferred step | `in_progress` (or `todo`, if an earlier step has not passed) |
+| its review gate | `todo` |
+| the work already finished after it | unchanged — still done |
+| `currentStep` | unchanged — for example still `ready-for-build` |
+
+The re-opened step then runs beside the chain, like the `test-cases` track. It does not block the
+finished work, opening its review does not move `currentStep` back, and passing that review re-opens
+nothing after it. `yad next` shows it on its own line, `re-opened lane: …`. yadflow recognises such a step
+from the chain itself — an unfinished step with work completed here after it — and never from a flag
+in the file. `yad unskip` does not do this: a skip says the step does not apply, so work finished after
+it was built without it, and putting it back after that is still refused.
+
+**Debt: `yad defer <epic> <step> --reason "<why>" --debt`.** A **debt** is a deferral the team owes
+back — work set aside under pressure. It writes `"debt": true` beside `deferred` on both steps of the
+pair. `--debt` on a step that is already deferred adds the flag and keeps the record.
+
+- **Reminders, on every run, until it is paid:** a warning line in `yad next <epic>`, a count on the
+  epic's row when `yad next` lists every epic, a `step:debt` finding in `yad doctor`, and "deferred
+  (still owed, as debt)" in `yad gate status`.
+- **Paying it back** is `yad undefer`, early or late. The flag stays on while the step is worked on.
+- **It clears** when the step's review passes, and nothing else removes it.
+- **Only a deferral can carry debt.** `yad skip --debt` is refused, because a skip means nothing is owed.
+- It is a reminder, never a gate, and it is not the hotfix `reconcile-debt.json`, which is a whole
+  change owed to a feature thread and is enforced by CI.
 
 **The recorded route is the answer, even when the chain disagrees with it.** An epic records its route
 in `state.json`, and that is what the engine reads. Working it out from the steps instead would guess,
@@ -449,7 +476,7 @@ picks its own in `.sdlc/skills.json`:
 
 ```jsonc
 {
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "steps": {
     "architecture": "our-architecture-skill",
     "stories": ["shape-the-stories", "yad-stories"]
@@ -565,6 +592,10 @@ The bottom four carry a `record` saying why: `{ "reason": …, "by": …, "date"
 not a hole in the audit trail, it IS the audit trail — so `yad doctor` reports a recorded state with
 nothing recorded on it.
 
+A `deferred` step can also carry `"debt": true`, a flag beside the state rather than a ninth state: it
+marks the deferral as owed back, and changes nothing about whether the chain continues. See `yad defer
+--debt` above.
+
 **`blocked` used to mean something else.** Up to shape 6 it was the word for "waiting on an earlier
 step", which is now `todo`. The two are told apart by the record and by nothing else: `blocked` with no
 record is the old word and reads as `todo`; `blocked` with a record is a real blocker. `yad migrate`
@@ -587,7 +618,7 @@ the blocker first.
 
 ## File shape: `schemaVersion`
 
-Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **7**
+Every JSON **object** `yad` writes under a `.sdlc/` directory starts with a `"schemaVersion"` — **10**
 in this release. It records what shape the file is in, so a later release can recognise a file written
 by an older one and upgrade it rather than guess.
 
