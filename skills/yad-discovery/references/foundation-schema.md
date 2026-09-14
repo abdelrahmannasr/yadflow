@@ -50,7 +50,7 @@ The engine checks this, and only ever **warns**:
 
 So write every example into a comment, never as a table row: a filled row is read as your content.
 
-## Section templates
+## Section templates and what goes in them
 
 Every section carries the same frontmatter block:
 
@@ -63,6 +63,16 @@ owner:
 ---
 ```
 
+Each section below has four parts:
+
+- **The template** — the file to start from. Keep its headings; reviewers look for them.
+- **Ask** — the questions to put to the user. Ask them one at a time and write down the user's answer,
+  not your own guess.
+- **A good answer** — what the section holds when it is done.
+- **The reviewer checks** — what a reviewer holds it against at the gate.
+
+The examples use one made-up product, **Tally**: an app for flatmates to split shared bills.
+
 ### `purpose.md`
 
 ```markdown
@@ -70,6 +80,33 @@ owner:
 ## Who it is for
 ## What success looks like
 <!-- measurable where possible -->
+```
+
+**Ask:**
+- What problem does this solve, and what do people do about it today?
+- Who has the problem most? Name one kind of person, not "everyone".
+- A year after launch, what number would tell you this worked?
+
+**A good answer:** one short paragraph per heading. The problem is stated from the user's side, not as a
+feature. There is one main user group, with others named as secondary. Success is two or three
+measurable signals, each with a number or a clear yes/no.
+
+**The reviewer checks:** could someone outside the team say who this is for and why after one read? Is
+every success signal something you could actually measure?
+
+**Example (Tally):**
+
+```markdown
+## Why this exists
+Flatmates split rent, bills and shopping. Today they use a shared spreadsheet or a group chat, and
+someone always ends up owed money they are too awkward to ask for.
+
+## Who it is for
+People aged 20–35 sharing a flat with two to five others. Secondary: couples who share bills.
+
+## What success looks like
+- 40% of flats that add a second member are still logging expenses 8 weeks later.
+- A flat settles up (everyone at zero) at least once a month.
 ```
 
 ### `market.md` *(optional)*
@@ -81,6 +118,30 @@ owner:
 ## Why us
 ```
 
+**Ask:**
+- Who does this already, including "a spreadsheet" or "nobody bothers"?
+- For each one: why would your user still not be happy with it?
+- What can you do that they cannot, or will not?
+
+**A good answer:** three to five real alternatives, each with one honest line on where it falls short.
+"Why us" names an advantage the team really has, not a wish.
+
+**The reviewer checks:** is any obvious alternative missing? Does "why us" follow from the gaps in the
+table, or is it unrelated to them?
+
+**Example (Tally):**
+
+```markdown
+## Who else does this
+| Competitor | What they do | Where they fall short |
+|---|---|---|
+| Splitwise | Tracks shared expenses for any group | Built for trips; recurring rent and bills are clumsy |
+| A shared spreadsheet | Free and flexible | Nobody updates it; no reminders |
+
+## Why us
+We only do flats, so recurring bills and a monthly settle-up are the default, not an add-on.
+```
+
 ### `scope.md`
 
 ```markdown
@@ -89,11 +150,59 @@ owner:
 <!-- explicit non-goals — the list a reviewer checks each feature epic against -->
 ```
 
+**Ask:**
+- In one sentence, what is this product?
+- What will people expect it to do that it will **not** do? Keep asking until the user has named at
+  least three things.
+- Which of those are "not now" and which are "never"?
+
+**A good answer:** "What it is" is one or two sentences. "What it is NOT" is a list of concrete
+non-goals, each one a thing a real person might ask for. Mark each one *not now* or *never*.
+
+**The reviewer checks:** every later feature epic is compared with this list, so each non-goal must be
+specific enough to say yes or no to. "Not a bank" is useful; "not bloated" is not.
+
+**Example (Tally):**
+
+```markdown
+## What it is
+A shared ledger for one flat: log what each person paid, see who owes whom, settle up.
+
+## What it is NOT
+- Not a payment app — it never moves money (never).
+- Not for trips or one-off groups (not now).
+- Not a budgeting tool for one person (never).
+```
+
 ### `mvp.md`
 
 ```markdown
 ## The smallest thing worth shipping
 ## What is deliberately left out of it, and why
+```
+
+**Ask:**
+- What is the least a first user needs to get the value in `purpose.md`?
+- Walk through one user's first week. Which steps must work for that week to succeed?
+- What did you want to include but can live without at first?
+
+**A good answer:** a short list of capabilities — not screens, not technical tasks — that together
+deliver the first success signal. The "left out" list names each thing and one line on why it can wait.
+
+**The reviewer checks:** is every item really needed for the first success signal? Does anything here
+contradict `scope.md`'s non-goals?
+
+**Example (Tally):**
+
+```markdown
+## The smallest thing worth shipping
+- Create a flat and invite flatmates by link.
+- Log an expense and who it is split between.
+- See each person's balance, and mark a settle-up.
+
+## What is deliberately left out of it, and why
+- Recurring bills — people can log rent by hand for the first months; we learn the real patterns first.
+- Receipts and photos — nice, but nobody leaves over it.
 ```
 
 ### `roadmap.md` (the spine of the review)
@@ -115,9 +224,48 @@ owner:
 <!-- explicitly deferred, with why -->
 ```
 
+**Ask:**
+- What does the MVP break down into, as features a team could build one at a time?
+- After the MVP, what comes next, and what has to be true before it starts?
+- What have you decided to park, and why?
+
+**A good answer:** Phase 1 holds exactly the MVP from `mvp.md`, one row per feature. Later phases are
+ordered by a stated reason (what they depend on, or what they unlock). Parked items are listed with why.
+Each proposed epic id follows `EP-<2–4 lowercase words>`.
+
+**The reviewer checks:** does Phase 1 match `mvp.md`, no more and no less? Is anything in a later phase
+a non-goal in `scope.md`?
+
 Per-feature `status:` (set by hand): `planned` → `epic-started` (a feature epic has been seeded with
 `yad-epic`) → `shipped`. The proposed ids are suggestions — `yad-epic` still assigns the id, and never
 picks the reserved `EP-foundation` or `EP-discovery`.
+
+> **Known limit.** The status column is part of what reviewers approved, so changing a row's status
+> after the Foundation's review has passed changes its fingerprint, and `yad doctor` then reports the
+> Foundation's approvals as stale. Only the frontmatter `status:` line is left out of the fingerprint.
+> This is recorded in the E76 row of the roadmap and is not yet decided.
+
+**Example (Tally):**
+
+```markdown
+## Summary
+Flatmates should never have to chase money. Tally is the shared ledger for one flat.
+
+## Phase 1 — MVP
+| Feature | Proposed epic id | Status |
+|---------|------------------|--------|
+| Flats and invites | EP-flat-invites | planned |
+| Log and split an expense | EP-log-expense | planned |
+| Balances and settle-up | EP-settle-up | planned |
+
+## Phase 2 — Recurring bills
+| Feature | Proposed epic id | Status |
+|---------|------------------|--------|
+| Recurring bills | EP-recurring-bills | planned |
+
+## Later / parked
+- Receipt photos — parked until people ask for it.
+```
 
 ### `stack.md`
 
@@ -126,6 +274,33 @@ picks the reserved `EP-foundation` or `EP-discovery`.
 ## Hosting and runtime
 ## Data stores
 <!-- brownfield: what the connected repos actually use, from their code-maps -->
+```
+
+**Ask (greenfield — nothing is built yet):**
+- What does the team already know well? A stack nobody knows is a risk, not a choice.
+- What does the product need that narrows the choice (offline use, a phone app, heavy data, a region
+  the data must stay in)?
+- For each choice: what else did you consider, and why not that?
+
+**A good answer:** for each heading, the **decision**, the **alternatives rejected** and **why**, in a
+line or two each. Say what would make you change the choice later. On a greenfield product this records
+intended choices; nothing has to exist yet.
+
+**The reviewer checks:** does every choice have a reason tied to this product or this team? Is anything
+chosen that `mvp.md` does not need yet?
+
+**Example (Tally):**
+
+```markdown
+## Languages and frameworks
+TypeScript everywhere. Web app in React; no native app for the MVP (a phone browser is enough).
+Rejected: a native app first — two codebases before we know people want it.
+
+## Hosting and runtime
+One Node service on a managed platform in the EU. Rejected: running our own servers — no one to run them.
+
+## Data stores
+PostgreSQL. Balances must add up exactly, so we want transactions. Rejected: a document store.
 ```
 
 ### `repos.md`
@@ -137,9 +312,53 @@ picks the reserved `EP-foundation` or `EP-discovery`.
 |------|--------------|
 ```
 
+**Ask (greenfield):**
+- How many deployable parts does the MVP have?
+- Will different people or teams own different parts?
+- Do the parts release together, or on their own schedules?
+
+**A good answer:** the layout decision (one repo, or several) with the reason, and a table with one row
+per repo. Each row says what the repo does in one line. On a greenfield product the repos may not exist
+yet — list what you intend to create.
+
+**The reviewer checks:** does every part in `stack.md` have a home here? Is the reason for the layout
+about how the team works, not just taste?
+
+**Example (Tally):**
+
+```markdown
+## Layout
+One repo for now. One small team owns everything and it all releases together; we split when a second
+team joins.
+
+| Repo | What it does |
+|------|--------------|
+| tally | The web app, the API and the database migrations |
+```
+
 ### `risks.md` *(optional)*
 
 ```markdown
 | Risk | Why it could kill this | What we do about it |
 |------|------------------------|---------------------|
+```
+
+**Ask:**
+- What would make this fail even if it is built well?
+- What are you assuming about users, the market, or the law that might be wrong?
+- For each risk: what is the cheapest way to find out early?
+
+**A good answer:** three to six risks, each with a concrete action — a test, a limit, or a decision
+point — not "monitor closely".
+
+**The reviewer checks:** is the biggest risk the team talks about in private written here? Does each
+action happen before the risk would hurt?
+
+**Example (Tally):**
+
+```markdown
+| Risk | Why it could kill this | What we do about it |
+|------|------------------------|---------------------|
+| Only one flatmate uses it | The ledger is useless if others do not log | Measure second-member activity from week 1; stop if under 20% |
+| People want it to move money | "Not a payment app" loses them | Ask the first 20 flats; revisit scope.md at 8 weeks |
 ```

@@ -90,7 +90,10 @@ signals** stay consistent with the approved product. **Optional & non-blocking:*
 level, or it has not passed its gate yet (absent / still draft / in-review), proceed unchanged — do not
 consume an unapproved one. (`yad next` reports feature work that goes ahead of an unapproved Foundation;
 it never blocks it.) After seeding the epic, the matching roadmap row's `status:` can be bumped
-`planned → epic-started` by hand (a human edit; the Foundation never auto-seeds epics).
+`planned → epic-started` by hand (a human edit; the Foundation never auto-seeds epics). **Know what that
+edit does:** the roadmap table is part of what the Foundation's reviewers approved, so changing it after
+the review has passed makes `yad doctor` report the Foundation's approvals as stale. Only the frontmatter
+`status:` line is left out of the fingerprint. Tell the user before making it.
 
 ### Step 3 — Generate the Epic ID (engine-assigned, never by hand) — analysis-skipped only
 *(Skip when `state.json` already exists — the ID was assigned by whatever seeded the chain.)*

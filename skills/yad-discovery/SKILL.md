@@ -59,14 +59,40 @@ Pressure-test: who is this for and why does it exist, what does success look lik
 and why us, **what it is and explicitly what it is not**, what the smallest valuable slice is, what
 sequences after it, what it is built with, and what could kill it.
 
+### Step 2a — Greenfield: write the Foundation with the user, one section at a time
+On a **greenfield** product nothing is built yet, so every section comes from the user's answers. For
+each section, `references/foundation-schema.md` gives the template, the questions to **Ask**, what **a
+good answer** holds, what **the reviewer checks**, and a short example.
+
+Work in this order, because each section is the input to the next:
+
+1. `purpose.md` — why it exists, who for, how success is measured.
+2. `scope.md` — what it is, and at least three things it is **not**.
+3. `mvp.md` — the smallest set of capabilities that reaches the first success signal.
+4. `roadmap.md` — Phase 1 is exactly the MVP, one row per feature; later phases in a stated order.
+5. `stack.md` — for each choice: the decision, the alternatives rejected, and why.
+6. `repos.md` — the layout and one row per intended repo; they need not exist yet.
+7. `market.md` and `risks.md` — only if the user wants them. Both are optional.
+
+For each section:
+- Ask the questions **one at a time**. Write down the user's answer, not your own guess. When an answer is
+  vague ("everyone", "fast", "not bloated"), ask again for something concrete.
+- Write the section, show it to the user, and change it until they agree. Then move to the next one.
+- Check it against the sections before it: the MVP must not contradict a non-goal in `scope.md`, and
+  Phase 1 of the roadmap must match `mvp.md`.
+
+Keep examples inside `<!-- comments -->`. A section holding only its headings, comments and an empty table
+is **not written**, and the gate warns about it (Step 5) — but a filled example row counts as content.
+
 ### Step 2b — Brownfield: read what already exists
 Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context`). For **every
 connected repo**, load the lightweight code-map `{project-root}/.sdlc/code-context/<repo>/code-map.md`
 and base `stack.md` and `repos.md` on **what already exists** — languages, frameworks, modules,
 endpoints, data — so the Foundation describes the real system rather than re-proposing it.
 
-- **Greenfield-safe:** if `repos.json` is absent or empty, `stack.md` and `repos.md` record the
-  intended choices and why.
+- **Greenfield-safe:** if `repos.json` is absent or empty, there is nothing to read — write every
+  section with the user as in Step 2a, where `stack.md` and `repos.md` record the intended choices, the
+  alternatives rejected, and why.
 - **Staleness:** if a repo's current HEAD (`git -C <path> rev-parse HEAD`) ≠ its registry `syncedHead`,
   warn and suggest `yad repo refresh <repo>` (a human decision — flag, never auto-refresh).
 - **Backfill pointer:** for an existing codebase, point the user at `yad-backfill` to capture specs for
@@ -110,6 +136,11 @@ approvals. (The frontmatter `status:` line does not count — the gate rewrites 
 **All six required sections must exist to review.** Until they do, the Foundation has no fingerprint to
 bind an approval to, and `yad gate open` warns. An optional section counts once it exists — adding or
 removing one after an approval revokes it, like any other edit.
+
+**Every section that exists must also be written.** A section that still holds only its template — the
+frontmatter, headings, comments and an empty table — makes `yad gate open` and `yad gate sync` warn
+`Foundation not written yet`, and once the review has opened `yad doctor` reports it as
+`foundation:unwritten`. These are warnings, not refusals: finish the section before asking for review.
 
 Leave `owner` for the user to set in each frontmatter. Fill the bodies with the user.
 
