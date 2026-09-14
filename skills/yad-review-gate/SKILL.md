@@ -235,12 +235,21 @@ If the predicate **passes**:
 - **`foundation-review`** (the Product level, `foundation/`) ends at its own sentinel: set
   `currentStep: "foundation-done"`, never `ready-for-build` — the product level has no Build part. The
   old spelling does the same: **`discovery-review`** sets `currentStep: "discovery-done"`.
-- Any **other** review step: find the next step in `steps[]` that is not `skipped` or `deferred`, set
-  it to `in_progress` (authoring) or `in_review`, and set `currentStep` to it. A skipped step was marked
-  N/A with `yad skip`, and a deferred one set aside for later with `yad defer`; both stay as they are.
+- **On any review step that passes**, remove `"debt": true` from it, and from its author step once that
+  step is `done` — passing the review is what pays a debt back (E41), and nothing else clears the flag.
+- A review step that passed **behind the chain** — a step re-opened with a late `yad undefer`, where
+  `currentStep` is already past it or is `ready-for-build` — changes nothing else: do not open the step
+  after it (that work is already finished) and do not move `currentStep`.
+- Any **other** review step: find the next step in `steps[]` that has not already passed — not `skipped`,
+  `deferred`, `satisfied` (inherited from a parent epic) or `done` — set
+  it to `in_progress` (authoring) or `in_review` **only if it is `todo`**, and set `currentStep` to it. A
+  skipped step was marked N/A with `yad skip`, and a deferred one set aside for later with `yad defer`;
+  both stay as they are. A step already started or finished keeps its status.
   If every later step is skipped or deferred, set `currentStep: "ready-for-build"`. A step waiting its turn is `todo` from shape 7 on. An older file may still say
   `blocked` with no `record` on it, which means the same thing; a `blocked` step **with** a `record` is
   waiting on someone outside the workflow, so leave it as it is.
+- When a gate **opens** (the review starts), move `currentStep` to it only if it is not already past it:
+  opening the review of a re-opened step never pulls the chain back.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is
   now `ready-for-build`, with `test-cases` running in parallel).
 

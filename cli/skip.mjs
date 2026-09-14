@@ -1,7 +1,8 @@
 // `yad skip <epic> <step> --reason "<why>"` / `yad unskip <epic> <step>` (E35, E36) and
 // `yad defer <epic> <step> --reason "<why>"` / `yad undefer <epic> <step>` (E37) — set an OPTIONAL Shape
 // step aside for one epic, or put it back. A skip says the step does not apply; a deferral says it does,
-// later. `yad skip … --undo` and `yad defer … --undo` are the same as the undo verbs.
+// later. `yad skip … --undo` and `yad defer … --undo` are the same as the undo verbs. `yad defer --debt`
+// (E41) marks the deferral owed back, and `yad undefer` re-opens a deferral even after later work finished.
 // Which steps qualify is a fact about the epic's ROUTE, read from the lifecycle profile it is on (E35,
 // `optionalStepsFor`), not a list this engine keeps: on `classic` and `analysis-first` that is
 // `ui-design` and its gate. E40's short lanes mark NOTHING optional — they drop the steps they do not
@@ -15,7 +16,7 @@
 // actor/date), short-circuited at the gate. All state logic is the pure `skipStep` / `unskipStep` /
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import { ok, info, hand, fail, run } from './lib.mjs';
-import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState } from './epic-state.mjs';
+import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
@@ -33,18 +34,18 @@ function recordActor(root) {
 // What differs between the two verbs, as a person reads it.
 const VERBS = {
   skip: {
-    set: skipStep, restore: unskipStep, undo: 'unskip', done: 'marked N/A', undone: 'un-skipped',
+    set: skipStep, restore: unskipStep, undo: 'unskip', done: 'marked N/A', undone: 'un-skipped', state: 'skipped',
     gate: 'its review gate is short-circuited',
     reasonNote: '--reason is not used when un-skipping: the skip record is removed with the skip',
   },
   defer: {
-    set: deferStep, restore: undeferStep, undo: 'undefer', done: 'deferred', undone: 'un-deferred',
+    set: deferStep, restore: undeferStep, undo: 'undefer', done: 'deferred', undone: 'un-deferred', state: 'deferred',
     gate: 'the chain continues past it; its review is still owed',
     reasonNote: '--reason is not used when un-deferring: the record is removed with the deferral',
   },
 };
 
-async function runSetAside(root, verb, { epic, step, reason, undo = false, today } = {}) {
+async function runSetAside(root, verb, { epic, step, reason, debt = false, undo = false, today } = {}) {
   const V = VERBS[verb];
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -62,16 +63,39 @@ async function runSetAside(root, verb, { epic, step, reason, undo = false, today
     // Putting a step back deletes its record, so a reason given here would be recorded nowhere. Say so
     // rather than accept it in silence.
     if (reason != null && reason !== true) info(V.reasonNote);
+    // The same for `--debt`: putting a step back is how a debt is PAID, so the flag means nothing here (E41).
+    if (debt === true) info('--debt is not used when putting a step back: a debt is set with `yad defer --debt`, and putting the step back starts paying it');
     writeState(ledger.files.state, ledger.state);
+    // A deferral put back after later work finished RE-OPENS beside that work (E41), and `currentStep`
+    // stays where the chain is — so "back in the chain" and a currentStep line would both mislead.
+    if (isReopenedStep(ledger.state, step)) {
+      ok(`${step} ${V.undone} — re-opened beside the work already finished after it, which stays done`);
+      hand(`currentStep stays ${ledger.state.currentStep}; see the re-opened lane with: yad next ${epic}`);
+      return;
+    }
     ok(`${step} ${V.undone} — back in the chain`);
     hand(`currentStep is now ${ledger.state.currentStep}`);
     return;
   }
 
   const by = recordActor(root);
-  V.set(ledger.state, step, { reason, by, at: today });
+  // A repeat on a step already set aside this way changes nothing but, with `--debt`, the flag — and keeps
+  // the ORIGINAL record. Printing this run's actor, date and reason would misstate who set it aside and why.
+  const steps = Array.isArray(ledger.state.steps) ? ledger.state.steps : [];
+  const before = steps.find((s) => s?.id === step);
+  const already = stepStatus(before) === V.state;
+  const owedBefore = before?.debt === true;
+  V.set(ledger.state, step, { reason, by, at: today, debt: debt === true });
   writeState(ledger.files.state, ledger.state);
-  ok(`${step} ${V.done}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
+  const after = ledger.state.steps.find((s) => s?.id === step);
+  const owed = after?.debt === true;
+  if (already) {
+    const r = after?.record || {};
+    ok(`${step} was already ${V.done}${r.by ? ` by ${r.by}` : ''}${r.date ? ` on ${r.date}` : ''}${owed && !owedBefore ? ' — now marked as debt' : ' — nothing changed'}`);
+    if (r.reason) info(`reason: ${r.reason}`);
+    return;
+  }
+  ok(`${step} ${V.done}${owed ? ' as debt' : ''}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`${V.gate}; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad ${V.undo} ${epic} ${step}\`)`);
 }

@@ -123,11 +123,14 @@ ${c.bold('Where am I / what next')}
   yad unskip <epic> <step>             Put a skipped step back in the chain (\`skip --undo\` does the
                                        same), until the step that follows it is finished or work
                                        past it starts — on classic, until stories are done
-  yad defer <epic> <step> --reason <text>  Set an optional step aside to do LATER: marks it deferred.
+  yad defer <epic> <step> --reason <text> [--debt]
+                                       Set an optional step aside to do LATER: marks it deferred.
                                        Say who is waiting for it in the reason. Same steps and same
-                                       refusals as skip; the chain goes on, its review is still owed
-  yad undefer <epic> <step>            Put a deferred step back, until the step that follows it is
-                                       finished or work past it starts
+                                       refusals as skip; the chain goes on, its review is still owed.
+                                       --debt marks it owed back: yad next and yad doctor remind
+                                       you until its review passes
+  yad undefer <epic> <step>            Put a deferred step back, at any time. After later work has
+                                       finished, the step re-opens beside that work, which stays done
   yad unblock <epic> <step>            Clear a recorded blocker once the wait is over: moves the
                                        step off blocked and removes its record in one write
 
@@ -253,6 +256,7 @@ function parseArgs(argv) {
     else if (a === '--check') { const v = argv[i + 1]; o.check = (o._[0] === 'next' && v !== undefined && !v.startsWith('-')) ? argv[++i] : true; }
     else if (a === '--all') o.all = true;
     else if (a === '--undo') o.undo = true;
+    else if (a === '--debt') o.debt = true;
     else if (a === '--stub') o.stub = true;
     // setup profile flags (pre-answer the Step 0 interview, for CI/scripts)
     else if (a === '--solo') o.solo = true;
@@ -390,7 +394,7 @@ async function main() {
       if (!epic || !isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
       // `unskip` / `undefer` are the verbs E36 / E37 named; `--undo` is the spelling that shipped first and stays.
       const runVerb = verb === 'defer' || verb === 'undefer' ? runDefer : runSkip;
-      await runVerb(o.dir, { epic, step, reason: o.reason, undo: verb.startsWith('un') || o.undo, today });
+      await runVerb(o.dir, { epic, step, reason: o.reason, debt: o.debt, undo: verb.startsWith('un') || o.undo, today });
       break;
     }
     case 'unblock': {

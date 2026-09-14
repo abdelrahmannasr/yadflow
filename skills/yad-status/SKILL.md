@@ -68,6 +68,15 @@ Print, in this order:
      step and its `-review` gate carry `status: "deferred"` and a `record`. Render each as
      `<id> — DEFERRED (later: <reason>)`, with who and when if present. A deferred step is still owed:
      never render it as done or as N/A.
+   - **Debt:** a step carrying `"debt": true` (written by `yad defer … --debt`) is owed back and must be
+     reminded until paid. Add `· DEBT` to its line, and list every debt in a short **Owed** block under
+     the chain with the command that pays it: `yad undefer <epic> <id>` while it is still `deferred`, or
+     "being paid back — clears when `<id>-review` passes" once it is back in progress. The flag is
+     removed only when that review passes. `yad doctor` reports the same list as `step:debt`.
+   - **Re-opened steps:** an unfinished step with a later step `done` (not its own `-review` gate) was
+     put back after the chain built past it — a late `yad undefer`. Render it as
+     `<id> — RE-OPENED (beside finished work)`: it does not block the finished steps after it, and
+     `currentStep` stays where it is. `yad next <epic>` prints it as a `re-opened lane`.
    - **Blocked steps:** a step with `status: "blocked"` **and** a `record` is waiting on someone outside
      the workflow. Render it as `<id> — BLOCKED (<reason>)`, with who recorded it and when, and say it is
      cleared with `yad unblock <epic> <id>` once the wait is over. A `blocked` with no record is the older

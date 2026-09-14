@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -1267,12 +1267,14 @@ export function stepStateChecks(checks, root) {
   const some = (list, n) => `${list.slice(0, n).join('; ')}${list.length > n ? ` (+${list.length - n} more)` : ''}`;
   const unknown = [];
   const noRecord = [];
+  const owed = [];
 
   for (const e of epicIds(root)) {
     const state = readJSON(path.join(epicRoot(root, e), '.sdlc', 'state.json'), null);
     if (!isPlainObject(state) || !Array.isArray(state.steps)) continue;
     // The shape as the FILE records it, by rule 1: no key means shape 1.
     const shape = Number.isInteger(state.schemaVersion) ? state.schemaVersion : 1;
+    for (const d of owedSteps(state)) owed.push(`${e}/${d.id.replace(/-review$/, '')} (${stepStatus(d) ?? d.status})`);
     for (const step of state.steps) {
       if (!isPlainObject(step) || typeof step.id !== 'string') continue;
       if (typeof step.status !== 'string') continue; // `validateState` is what reports a missing one
@@ -1288,6 +1290,15 @@ export function stepStateChecks(checks, root) {
       checks, 'step:unknown-status', 'shape', 'warn',
       `${unknown.length} step(s) carry a status this release does not know: ${some(unknown, 3)}`,
       `the states this engine knows are ${STEP_STATES.map((x) => x.id).join(' · ')}. Nothing is rewritten: a chain may legitimately come from a newer yadflow, and the file wins. But an unnamed state fails closed — the step counts as neither passed nor authored, so the chain stops there and \`yad next\` keeps naming the step in front of it. Either upgrade the CLI to the release that wrote it, or correct the value in \`.sdlc/state.json\``,
+    );
+  }
+  // `step:debt` (E41) — a reminder, not a fault: the team chose to owe the work (`yad defer --debt`), and
+  // this repeats on every run until the step's review passes, which is what clears the flag.
+  if (owed.length) {
+    check(
+      checks, 'step:debt', 'shape', 'warn',
+      `${owed.length} step(s) still owed as debt: ${some(owed, 3)}`,
+      'a debt is a step deferred with `--debt`: owed back, and reminded until paid. `yad undefer <epic> <step>` starts paying it — after later work has finished, the step re-opens beside that work, which stays done — and the debt clears when the step\'s review passes',
     );
   }
   if (noRecord.length) {

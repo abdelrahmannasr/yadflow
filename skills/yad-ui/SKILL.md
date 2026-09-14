@@ -59,8 +59,10 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional".
 - **Will have screens, just not yet:** if the epic does need a UI but the team wants to design it later,
   offer `yad defer EP-<slug> ui-design --reason "<why, and who is waiting for it>"` instead of a skip.
-  It passes the step for now and keeps it visibly owed. It can be picked back up with
-  `yad undefer EP-<slug> ui-design` until the stories are finished.
+  It passes the step for now and keeps it visibly owed. If the team is setting it aside under pressure
+  and owes it back, add `--debt`: `yad next` and `yad doctor` then remind them until its review passes.
+  It can be picked back up with `yad undefer EP-<slug> ui-design` at any time — after the stories are
+  finished, the UI re-opens beside them and the stories stay done.
 
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure
@@ -192,7 +194,8 @@ design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) �
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> ui-design.md` marks `ui-design-review` `in_review`, closes `ui-design` as `done`, and moves `currentStep` to the gate
-— the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+— unless the chain is already past it: a `ui-design` re-opened with a late `yad undefer` runs beside the
+finished stories, and opening its review leaves `currentStep` where it is — the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
