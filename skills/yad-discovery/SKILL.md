@@ -94,7 +94,7 @@ Foundation and a product still on the old spelling (Step 1 already stopped for b
 ### Step 5 — Write the Foundation sections
 Write these files directly in `{project-root}/foundation/`, one per section, using the templates in
 `references/foundation-schema.md`. The gate binds to the **whole set**: editing any section revokes
-approvals.
+approvals. (The frontmatter `status:` line does not count — the gate rewrites it after the review.)
 
 | File | Section | Required? |
 |---|---|---|

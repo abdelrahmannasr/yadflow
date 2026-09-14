@@ -105,7 +105,9 @@ comment on the platform; `yad gate sync` maps that state into the file ledger (`
 merge** once three things hold: the approval rules are satisfied, every comment thread is resolved, and
 the review PR/MR is merged.
 The merge click is the human approval act, so Shape steps still never advance on their own. Approvals are
-**revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. With no
+**revoked when the reviewed artifact actually changes** (re-hash), giving reviewers a fresh pass. The
+frontmatter `status:` line is not part of that hash: the gate flips it to `approved` at merge and Build
+flips a story to `in-build`, and neither is an edit ([shape 9](migrations/shape-9.md)). With no
 Product platform / no `gh`/`glab`, the gate degrades to local with no error.
 
 **Two approval rules: one holds the gate, one is reported.** The rule that holds it is the roster rule —
@@ -399,7 +401,7 @@ picks its own in `.sdlc/skills.json`:
 
 ```jsonc
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "steps": {
     "architecture": "our-architecture-skill",
     "stories": ["shape-the-stories", "yad-stories"]
@@ -480,8 +482,8 @@ Four things are worth knowing:
 - **Spelling is the grouping.** `checkout-revamp` and `Checkout Revamp` are two themes, not one.
   `yad doctor` reports a theme spelled more than one way (`theme:variants`) so it does not split a
   group in silence. Copy the spelling from an epic already in the group.
-- **Set it when you write the epic.** The epic review gate is bound to a hash of the whole `epic.md`
-  file, so editing any frontmatter key — the theme included — after the gate has been approved drops
+- **Set it when you write the epic.** The epic review gate is bound to a hash of `epic.md` without its
+  `status:` line, so editing any other frontmatter key — the theme included — after the gate has been approved drops
   that approval as stale and the step has to be approved again. This is not new to themes; it is how
   every edit to an approved artifact behaves. Before the gate, edit freely.
 - **A child gets a copy, not a link.** When `yad-change` opens a change or defect epic off a parent, it

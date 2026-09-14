@@ -262,6 +262,27 @@ export const MIGRATIONS = [
     // rejects — and every reader in this release still reads that spelling.
     apply: (obj) => obj,
   },
+  {
+    from: 8,
+    to: 9,
+    title: "an approval's fingerprint leaves out the frontmatter `status:` line",
+    // The change is to what the gate WRITES into a new approval's `artifactHash`: a fingerprint of the
+    // reviewed content without the `status:` line, which the gate's own merge run and Build rewrite
+    // after the review (see `reviewedSha` in cli/epic-state.mjs). This row only moves the shape number.
+    //
+    // Nothing on disk can be converted. An old fingerprint is a hash of bytes that are gone once the
+    // status flipped, so it cannot be recomputed — and it does not need to be: `acceptedHashes` reads
+    // every form an older release recorded, for this whole major (rule 2). That also repairs, without a
+    // write, the approvals older releases already reported stale after a merge.
+    //
+    // It is a breaking shape because the other direction does not hold: an older yadflow hashes the
+    // whole file, so it reads every approval this release records as stale. Moving the number is what
+    // makes it warn instead (the newer-shape warning), and docs/migrations/shape-9.md says so.
+    //
+    // No stamper is added to `writeState`, and none is missing: a gate write already brings the
+    // number up (`atEngineShape`), and there is no field to stamp.
+    apply: (obj) => obj,
+  },
 ];
 
 // ---- shape 8: the Product level moves to `foundation/` (E75) ----------------------------------------

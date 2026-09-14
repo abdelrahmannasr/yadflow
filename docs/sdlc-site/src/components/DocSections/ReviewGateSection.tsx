@@ -68,7 +68,7 @@ export function ReviewGateSection() {
           Shape steps still never advance on their own. <strong className="text-white">CI is the sole writer of the
           ledger</strong>, and writes only at merge, on the default branch: during review the platform PR/MR is
           the source of truth and CI never touches the review branch; humans never commit the gate files.
-          Approvals are revoked when the artifact changes (re-hash), re-checked when CI reads the platform at merge.
+          Approvals are revoked when the artifact changes (re-hash; the frontmatter status line does not count), re-checked when CI reads the platform at merge.
         </p>
       </div>
 

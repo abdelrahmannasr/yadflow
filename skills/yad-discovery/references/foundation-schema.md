@@ -23,7 +23,8 @@ steps        foundation (author, artifact foundation/) · foundation-review (rev
 ```
 
 - `artifact: "foundation/"` is a **virtual** base: the gate fingerprints the Foundation sections together
-  (`foundationHash` in `cli/epic-state.mjs`). An edit to any section revokes prior approvals.
+  (`foundationHash` in `cli/epic-state.mjs`). An edit to any section revokes prior approvals. The
+  frontmatter `status:` line is not part of the fingerprint, so the gate flipping it is not an edit.
 - The six **required** sections must all exist before the Foundation is reviewable. The two
   **optional** ones (`market.md`, `risks.md`) count once they exist.
 - On approval the gate sets `currentStep: "foundation-done"`. The Foundation has no Build, so it never

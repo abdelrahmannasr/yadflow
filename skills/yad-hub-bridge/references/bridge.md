@@ -152,7 +152,10 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
     advancing on approvals whose freshness cannot be proven (re-run `yad gate sync` to recover).
     CHANGES_REQUESTED is still honored, so a degraded read can only ever *hold* the gate.
   The `artifactHash` stamp still binds architecture approvals to the locked contract surface (see
-  "Contract re-lock" above).
+  "Contract re-lock" above). For every other artifact it covers the file WITHOUT its frontmatter
+  `status:` line, so the merge run's own `draft` → `approved` flip (and Build's `in-build` / `shipped`)
+  never revokes the approvals it just recorded (shape 9). An approval recorded before shape 9 hashed the
+  whole file, and is still read.
 - **Known limitation — protect the Product default branch.** The advance hashes the artifact from the
   default branch as it stands when CI runs, while approvals are SHA-bound to the reviewed PR/MR head.
   Those can differ if the artifact changes on the **base** outside this review while the PR/MR is open

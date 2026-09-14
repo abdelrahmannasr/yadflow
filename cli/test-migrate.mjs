@@ -1515,3 +1515,29 @@ test('migrate 7 -> 8: a move that fails part-way leaves the project exactly as i
     assert.equal(read(path.join(T, '.sdlc/hub.json')).schemaVersion, undefined, 'no per-file row was written after the failure');
   } finally { cleanup(T); }
 });
+
+// ---- shape 9: an approval's fingerprint leaves out the frontmatter status line ---------------------
+
+test('migrate 8 -> 9: moves the number and nothing else — no field changes, approvals.json is untouched', async () => {
+  const approvals = JSON.stringify([
+    { step: 'epic-review', artifact: 'epic.md', status: 'approved', approver: 'al', role: 'owner', artifactHash: 'sha256:recorded-by-an-older-release' },
+  ], null, 2) + '\n';
+  const state = { schemaVersion: 8, epicId: 'EP-x', createdAt: '2026-01-01', type: 'feature', profile: 'classic', currentStep: 'architecture',
+    steps: [{ id: 'epic-review', type: 'review+approve', artifact: 'epic.md', assistance: 'review', driver: 'pair', automation: 'human_approve', advance: 'human', locked: true, status: 'done', risk_tags: [] }] };
+  const T = project({ files: {
+    'epics/EP-x/epic.md': '---\nid: EP-x\nkind: feature\ntype: feature\nstatus: approved\n---\n# x\n',
+    'epics/EP-x/.sdlc/state.json': JSON.stringify(state, null, 2) + '\n',
+    'epics/EP-x/.sdlc/approvals.json': approvals,
+  } });
+  try {
+    const row = MIGRATIONS.find((m) => m.from === 8);
+    assert.equal(row.to, 9);
+    assert.deepEqual(row.apply({ a: 1 }, { rel: 'epics/EP-x/.sdlc/state.json' }), { a: 1 }, 'the row edits no field');
+    await runMigrate(T, { apply: true });
+    const after = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+    assert.equal(after.schemaVersion, ENGINE_SHAPE);
+    assert.deepEqual({ ...after, schemaVersion: 8 }, state, 'every other field is exactly as it was');
+    assert.equal(fs.readFileSync(path.join(T, 'epics/EP-x/.sdlc/approvals.json'), 'utf8'), approvals,
+      'an old fingerprint cannot be recomputed, and is not rewritten — the reader accepts it');
+  } finally { cleanup(T); }
+});

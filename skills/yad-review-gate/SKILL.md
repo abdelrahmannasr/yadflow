@@ -277,7 +277,8 @@ write path.
   approved, fully-resolved review PR — there is no machine-driven advance. A step `locked: true` may not
   be switched to `advance: auto`; refuse such a request.
 - **Approvals are revoked when the reviewed artifact changes.** `sync` re-hashes the artifact (the locked
-  contract surface for architecture) and drops any approval bound to a stale hash, so a reviewer must
+  contract surface for architecture; every other file without its frontmatter `status:` line, which the
+  gate and Build rewrite after review) and drops any approval bound to a stale hash, so a reviewer must
   re-approve the new content. Unresolved comments / `CHANGES_REQUESTED` hold the gate `in_review`.
 - The gate talks only through `.sdlc/` and `reviews/` files — never hidden state.
 - **The platform is an input path only.** `open`/`sync` use the local user's own `gh`/`glab` (no stored

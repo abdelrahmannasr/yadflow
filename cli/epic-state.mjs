@@ -258,13 +258,71 @@ export function contractSurfaceHash(epicDir) {
   return 'sha256:' + createHash('sha256').update(body.join('\n') + '\n').digest('hex');
 }
 
+// ---- what an approval's fingerprint covers (shape 9) ---------------------------------------------
+//
+// An approval is bound to a fingerprint of what the reviewers read. The frontmatter `status:` line is
+// NOT part of that. It is lifecycle bookkeeping that the engine and the skills rewrite ON PURPOSE after
+// the review: the gate's own merge run flips `draft` to `approved` (`syncStatuses`,
+// cli/artifact-status.mjs) straight after it records the approvals, and Build flips a story to
+// `in-build` / `shipped` (the yad-engineer-review skill). Hashing the whole file made every one of
+// those writes revoke the approvals it was reporting on — `yad gate status` printed "stale (revoked)",
+// `yad doctor` warned, and the sweep said the rule no longer held, on every epic, right after a clean
+// merge. The contract surface already hashed only what was reviewed; this does the same for the rest.
+//
+// The block is found with the regex `setFrontmatterStatus` uses, shared from here, so the line the
+// fingerprint leaves out is the line that writer changes. The line itself is matched up to its newline
+// — never across it — so an empty `status:` cannot swallow the key below it.
+export const FRONTMATTER_BLOCK = /^---\n([\s\S]*?)\n---/;
+const STATUS_LINE = /^status:[^\n]*(?:\n|$)/m;
+
+// The file's text with its frontmatter `status:` line rewritten by `edit`, or null when there is no such
+// line (then the bytes are used as they are, so a file without one keeps its old fingerprint exactly).
+function withStatusLine(text, edit) {
+  const fm = text.match(FRONTMATTER_BLOCK);
+  if (!fm || !STATUS_LINE.test(fm[1])) return null;
+  return `---\n${fm[1].replace(STATUS_LINE, edit)}${text.slice(4 + fm[1].length)}`;
+}
+
+const shaOf = (data) => 'sha256:' + createHash('sha256').update(data).digest('hex');
+
+// The fingerprint of one file as reviewed: its bytes without the frontmatter `status:` line.
+export function reviewedSha(p) {
+  if (!fs.existsSync(p)) return null;
+  const bytes = fs.readFileSync(p);
+  const stripped = withStatusLine(bytes.toString('utf8'), '');
+  return shaOf(stripped === null ? bytes : stripped);
+}
+
+// The fingerprints releases before shape 9 recorded, for reading only (rule 2 — read old, write new).
+// They hashed the whole file, so an approval recorded then matches one of these:
+//   - the file's bytes as they are, when nothing has flipped since; or
+//   - the bytes with `status:` set back to what it said when the approval was recorded. That is exact,
+//     not a guess: the gate flips only FROM `draft` or `in-review` (the ladder in artifact-status.mjs),
+//     a re-opened review is approved over `approved` — or, for stories, over Build's `in-build` /
+//     `shipped` — and one run flips a whole set to one value. The line is rebuilt the way
+//     `setFrontmatterStatus` writes it (`status: <value>`), keeping the original line ending, `\r` included.
+// Without the second kind, an approval that is already reported stale today would stay stale for ever,
+// and this fix would help only reviews merged after it. A set whose files had DIFFERENT statuses when it
+// was approved is not rebuilt (every combination is too many), and docs/migrations/shape-9.md says so.
+const LEGACY_STATUSES = ['draft', 'in-review', 'approved', 'in-build', 'shipped'];
+const LEGACY_FORMS = [
+  fileSha,
+  ...LEGACY_STATUSES.map((value) => (p) => {
+    if (!fs.existsSync(p)) return null;
+    const bytes = fs.readFileSync(p);
+    const text = withStatusLine(bytes.toString('utf8'), (line) => `status: ${value}${line.match(/\r?\n?$/)[0]}`);
+    return shaOf(text === null ? bytes : text);
+  }),
+];
+
 // Deterministic fingerprint of the whole stories/ set: hash each story file, sort, combine. Lets an
 // edit to any story revoke prior stories-review approvals (the escalated, per-repo gate).
-export function storiesHash(epicDir) {
+// `sha` is how one file is fingerprinted — `reviewedSha` for the record, a legacy form for reading.
+export function storiesHash(epicDir, sha = reviewedSha) {
   const dir = path.join(epicDir, 'stories');
   if (!fs.existsSync(dir)) return null;
   const parts = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort()
-    .map((f) => `${f}:${fileSha(path.join(dir, f))}`);
+    .map((f) => `${f}:${sha(path.join(dir, f))}`);
   if (!parts.length) return null;
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
@@ -311,10 +369,10 @@ export const FOUNDATION_REQUIRED = FOUNDATION_SECTIONS.filter((s) => !s.optional
 // so adding `risks.md` after an approval, or deleting it, revokes that approval like any other edit:
 // the reviewers approved the Foundation as it stood, and a new risk section is part of what they did
 // not see.
-export function foundationHash(dir, sections = FOUNDATION_SECTIONS) {
+export function foundationHash(dir, sections = FOUNDATION_SECTIONS, sha = reviewedSha) {
   const has = (f) => fs.existsSync(path.join(dir, f));
   if (!sections.filter((s) => !s.optional).every((s) => has(s.file))) return null;
-  const parts = sections.map((s) => s.file).filter(has).map((f) => `${f}:${fileSha(path.join(dir, f))}`);
+  const parts = sections.map((s) => s.file).filter(has).map((f) => `${f}:${sha(path.join(dir, f))}`);
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
@@ -344,23 +402,38 @@ export const PRODUCT_DONE = PRODUCT_KINDS.map((k) => `${k}-done`);
 // incomplete and NON-REVIEWABLE, so this returns null (no hash to bind an approval to), the same
 // "nothing to lock" signal storiesHash/contractSurfaceHash give for an absent/malformed surface. Once
 // the full set exists, an edit (or deletion) of any file changes the hash and revokes prior approvals.
-export function discoveryHash(epicDir) {
+export function discoveryHash(epicDir, sha = reviewedSha) {
   if (!DISCOVERY_FILES.every((f) => fs.existsSync(path.join(epicDir, f)))) return null;
-  const parts = DISCOVERY_FILES.map((f) => `${f}:${fileSha(path.join(epicDir, f))}`);
+  const parts = DISCOVERY_FILES.map((f) => `${f}:${sha(path.join(epicDir, f))}`);
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
 // The content fingerprint an approval is bound to. For architecture the fingerprint is the locked
 // contract surface (a re-lock => stale); for stories it is the whole stories/ set; for discovery it is
-// the whole discovery file set; for every other artifact it is the file's bytes.
-export function artifactHash(epicDir, artifact) {
+// the whole discovery file set; for every other artifact it is the file. Every file is fingerprinted
+// without its frontmatter `status:` line (see `reviewedSha`). `sha` swaps that for a legacy form —
+// only `acceptedHashes` passes one.
+export function artifactHash(epicDir, artifact, sha = reviewedSha) {
   const b = artifactBase(artifact);
   if (b === 'architecture') return contractSurfaceHash(epicDir);
-  if (b === 'stories') return storiesHash(epicDir);
-  if (b === 'discovery') return discoveryHash(epicDir);
-  if (b === 'foundation') return foundationHash(epicDir);
-  return fileSha(path.join(epicDir, artifact.replace(/\/$/, '')));
+  if (b === 'stories') return storiesHash(epicDir, sha);
+  if (b === 'discovery') return discoveryHash(epicDir, sha);
+  if (b === 'foundation') return foundationHash(epicDir, FOUNDATION_SECTIONS, sha);
+  return sha(path.join(epicDir, artifact.replace(/\/$/, '')));
 }
+
+// Every fingerprint that still means "the content these reviewers approved": today's first, then the
+// legacy forms (see LEGACY_FORMS). Empty when there is nothing to fingerprint — the same "no claim"
+// answer a null `artifactHash` gives. What is WRITTEN is always `artifactHash`; this is for reading.
+export function acceptedHashes(epicDir, artifact) {
+  const current = artifactHash(epicDir, artifact);
+  if (current === null) return [];
+  return [...new Set([current, ...LEGACY_FORMS.map((sha) => artifactHash(epicDir, artifact, sha))].filter(Boolean))];
+}
+
+// Is a recorded fingerprint stale against the accepted ones? Never when nothing was recorded (a manual
+// approval with no hash) or nothing can be fingerprinted — both are "no claim", as they always were.
+export const isStaleHash = (recorded, accepted) => !!recorded && accepted.length > 0 && !accepted.includes(recorded);
 
 // Shape checks for the ledger files. Fail fast with the exact file named — a wrong-shape ledger
 // silently treated as a default would be rewritten by the next sync, destroying the real data.
@@ -969,6 +1042,10 @@ export function gatePredicate({
   step,
   approvals,
   currentHash = null,
+  // Every fingerprint that still counts as the reviewed content — `acceptedHashes(epicDir, artifact)`,
+  // which puts `currentHash` first and adds the forms older releases recorded. A caller that passes only
+  // `currentHash` gets exactly the old comparison against that one value.
+  acceptedHashes = null,
   touchedDomains = [],
   // The roster-era reviewer count, NOT E7's `base` — a different rule's number (see above), which dies
   // with the roster. Deriving either from the other would tie two rules that are being separated.
@@ -988,8 +1065,9 @@ export function gatePredicate({
   // entry. It is pre-marked `done` in state.json, so the gate is normally never invoked on it; this
   // short-circuit makes a direct call safe and surfaces a corrupted boundHash (a referenced artifact
   // cannot change under the child, so a mismatch is corruption — re-thread, do not silently pass).
+  const accepted = acceptedHashes ?? (currentHash ? [currentHash] : []);
   if (claimsInherited(step)) {
-    const drift = step.boundHash && currentHash && step.boundHash !== currentHash;
+    const drift = isStaleHash(step.boundHash, accepted);
     return {
       approvalsSatisfied: true, threadsResolved: true, merged: true, staleDropped: 0,
       passed: !drift,
@@ -1019,7 +1097,7 @@ export function gatePredicate({
 
   const forStep = approvals.filter((a) => a.step === step.id && a.status === 'approved');
   // Revoke-on-change: an approval bound to a stale content hash no longer counts.
-  const stale = forStep.filter((a) => a.artifactHash && currentHash && a.artifactHash !== currentHash);
+  const stale = forStep.filter((a) => isStaleHash(a.artifactHash, accepted));
   const live = forStep.filter((a) => !stale.includes(a));
 
   // requireEngagement (config `hub.review.requireEngagement`, soft-off by default): only an approval

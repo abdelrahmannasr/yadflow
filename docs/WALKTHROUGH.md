@@ -219,7 +219,7 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 - `yad gate sync <epic> [artifact]` — pull approvals + comment threads into the **same** ledger (your
   own `gh`/`glab`, no stored tokens) and **auto-advance on merge** once the rule is met and every thread
   is resolved. Approvals are **revoked when the reviewed artifact changes** (re-hash), so reviewers get
-  a fresh pass. Unresolved comments hold the step `in_review`.
+  a fresh pass. A change to the frontmatter `status:` line alone is not an edit. Unresolved comments hold the step `in_review`.
 - `yad gate comments <epic>` fetches the open threads to address; `yad gate status <epic>` shows
   approvals (counting only the non-stale ones). The file ledger stays the source of truth; with no
   platform / no CLI it degrades to local.

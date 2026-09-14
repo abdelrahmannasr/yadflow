@@ -8510,6 +8510,13 @@ test('setFrontmatterStatus is advance-only and preserves owned values', () => {
   assert.equal(setFrontmatterStatus(f, 'approved'), null);    // build-owned value untouched
   assert.equal(read(), 'shipped');
 
+  // A `$` code in another value must come through byte for byte. As a replacement STRING, `$'` pulled in
+  // the rest of the file and `$$` lost a `$` — in the gate's merge commit, on the default branch.
+  const dollars = '---\nid: EP-x\ntitle: costs $\' less, $& and $$5\nstatus: draft\n---\n# body\n';
+  fs.writeFileSync(f, dollars);
+  assert.equal(setFrontmatterStatus(f, 'approved'), 'draft');
+  assert.equal(fs.readFileSync(f, 'utf8'), dollars.replace('status: draft', 'status: approved'), 'nothing else in the file changes');
+
   fs.writeFileSync(f, '# no frontmatter\n');
   assert.equal(setFrontmatterStatus(f, 'approved'), null);    // no block -> no-op
   assert.equal(setFrontmatterStatus(path.join(T, 'missing.md'), 'approved'), null);
@@ -8573,6 +8580,224 @@ test('syncStatuses reconciles the discovery set: draft → approved once discove
   assert.equal((await syncStatuses(T, {})).changed, 0, 'second run is a no-op');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---- an approval's fingerprint leaves out the frontmatter status line (shape 9) ----------------
+//
+// The gate's merge run records approvals and then flips each artifact's `status:` to `approved`; Build
+// flips a story to `in-build`. Both are writes made ON PURPOSE after the review, and before shape 9 each
+// one revoked the approvals — `gate status` said "stale (revoked)", `doctor` warned, the sweep said the
+// rule no longer held. These pin the fix from every side: the flip does not move the fingerprint, a real
+// edit still does, and approvals an older release recorded (a whole-file hash) are still read as live.
+{
+  const { artifactHash, acceptedHashes, isStaleHash, FOUNDATION_REQUIRED } = await import('./epic-state.mjs');
+  const { fileSha } = await import('./lib.mjs');
+  const fmFile = (id, status, body = '# body\n') => `---\nid: ${id}\nstatus: ${status}\nowner: al\n---\n${body}`;
+  const flip = (f, to) => fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(/^status: .*$/m, `status: ${to}`));
+
+  // One directory per kind of fingerprint, every file `draft`. Returns the file(s) each kind covers.
+  function fingerprintKinds(T) {
+    const kinds = [];
+    const ep = path.join(T, 'epics/EP-x');
+    fs.mkdirSync(path.join(ep, 'stories'), { recursive: true });
+    fs.writeFileSync(path.join(ep, 'epic.md'), fmFile('EP-x', 'draft'));
+    kinds.push({ dir: ep, artifact: 'epic.md', files: [path.join(ep, 'epic.md')] });
+    for (const s of ['S01', 'S02']) fs.writeFileSync(path.join(ep, `stories/EP-x-${s}.md`), fmFile(`EP-x-${s}`, 'draft'));
+    kinds.push({ dir: ep, artifact: 'stories/', files: ['S01', 'S02'].map((s) => path.join(ep, `stories/EP-x-${s}.md`)) });
+    const disc = path.join(T, 'epics/EP-discovery');
+    fs.mkdirSync(disc, { recursive: true });
+    for (const f of DISCOVERY_FILES) fs.writeFileSync(path.join(disc, f), fmFile('EP-discovery', 'draft'));
+    kinds.push({ dir: disc, artifact: 'discovery/', files: DISCOVERY_FILES.map((f) => path.join(disc, f)) });
+    const fd = path.join(T, 'foundation');
+    fs.mkdirSync(fd, { recursive: true });
+    for (const f of FOUNDATION_REQUIRED) fs.writeFileSync(path.join(fd, f), fmFile('EP-foundation', 'draft'));
+    kinds.push({ dir: fd, artifact: 'foundation/', files: FOUNDATION_REQUIRED.map((f) => path.join(fd, f)) });
+    return kinds;
+  }
+
+  test('fingerprint: a status flip leaves every kind of fingerprint unchanged, and an edit still changes it (shape 9)', () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-'));
+    try {
+      for (const { dir, artifact, files } of fingerprintKinds(T)) {
+        const before = artifactHash(dir, artifact);
+        assert.ok(before, `${artifact} is fingerprinted`);
+        for (const f of files) assert.equal(setFrontmatterStatus(f, 'approved'), 'draft', 'the gate flip really writes');
+        assert.equal(artifactHash(dir, artifact), before, `${artifact}: the merge run's draft → approved flip is not an edit`);
+        flip(files[0], 'in-build');
+        assert.equal(artifactHash(dir, artifact), before, `${artifact}: Build's approved → in-build flip is not an edit`);
+        fs.appendFileSync(files[0], 'a sentence the reviewers never saw\n');
+        assert.notEqual(artifactHash(dir, artifact), before, `${artifact}: an edit to the body still revokes`);
+      }
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+
+  test('fingerprint: only the FRONTMATTER status line is left out — one in the body, or any other key, still counts', () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-'));
+    try {
+      const f = path.join(T, 'epic.md');
+      fs.writeFileSync(f, fmFile('EP-x', 'draft', '# body\nstatus: part of the text\n'));
+      const h = artifactHash(T, 'epic.md');
+      fs.writeFileSync(f, fmFile('EP-x', 'draft', '# body\nstatus: changed text\n'));
+      assert.notEqual(artifactHash(T, 'epic.md'), h, 'a `status:` line in the body is content');
+      fs.writeFileSync(f, fmFile('EP-x', 'draft').replace('owner: al', 'owner: bo'));
+      const h2 = artifactHash(T, 'epic.md');
+      fs.writeFileSync(f, fmFile('EP-x', 'draft'));
+      assert.notEqual(artifactHash(T, 'epic.md'), h2, 'another frontmatter key is content');
+      // A file with no status line keeps the fingerprint it had before shape 9, byte for byte.
+      fs.writeFileSync(f, '# no frontmatter\n');
+      assert.equal(artifactHash(T, 'epic.md'), fileSha(f));
+      // An empty `status:` is left out as one line — it must not swallow the key below it.
+      fs.writeFileSync(f, '---\nid: EP-x\nstatus:\nowner: al\n---\n# body\n');
+      const h3 = artifactHash(T, 'epic.md');
+      fs.writeFileSync(f, '---\nid: EP-x\nstatus:\nowner: bo\n---\n# body\n');
+      assert.notEqual(artifactHash(T, 'epic.md'), h3, 'the key under an empty status line is still fingerprinted');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+
+  test('fingerprint: an approval an OLDER release recorded (whole-file hash) is read as live after the flip, and stale after an edit', () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-'));
+    try {
+      for (const { dir, artifact, files } of fingerprintKinds(T)) {
+        // What a release before shape 9 recorded: the whole bytes, while every file said `draft`.
+        const legacy = artifactHash(dir, artifact, fileSha);
+        assert.notEqual(legacy, artifactHash(dir, artifact), `${artifact}: the two forms differ, so this test can tell them apart`);
+        assert.equal(isStaleHash(legacy, acceptedHashes(dir, artifact)), false, `${artifact}: nothing flipped yet`);
+        for (const f of files) setFrontmatterStatus(f, 'approved');
+        flip(files[files.length - 1], 'shipped');
+        assert.equal(isStaleHash(legacy, acceptedHashes(dir, artifact)), false, `${artifact}: flipped since it was recorded — still the reviewed content`);
+        fs.appendFileSync(files[0], 'an edit\n');
+        assert.equal(isStaleHash(legacy, acceptedHashes(dir, artifact)), true, `${artifact}: a real edit revokes an old-form approval too`);
+      }
+      // A status line ending in `\r\n` keeps its `\r` through the flip, so the rebuild must keep it too.
+      const crlf = path.join(T, 'crlf');
+      fs.mkdirSync(crlf);
+      fs.writeFileSync(path.join(crlf, 'epic.md'), '---\nid: EP-x\r\nstatus: draft\r\nowner: al\r\n---\n# body\r\n');
+      const crlfLegacy = artifactHash(crlf, 'epic.md', fileSha);
+      setFrontmatterStatus(path.join(crlf, 'epic.md'), 'approved');
+      assert.match(fs.readFileSync(path.join(crlf, 'epic.md'), 'utf8'), /status: approved\r\n/, 'the flip keeps the \\r');
+      assert.equal(isStaleHash(crlfLegacy, acceptedHashes(crlf, 'epic.md')), false, 'a CRLF status line is rebuilt exactly');
+      // "No claim" stays no claim: no recorded hash, or nothing to fingerprint.
+      assert.equal(isStaleHash(undefined, ['sha256:a']), false);
+      assert.equal(isStaleHash('sha256:a', []), false);
+      assert.deepEqual(acceptedHashes(path.join(T, 'nowhere'), 'discovery/'), []);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+
+  test('fingerprint: an inherited step bound to its parent\'s old whole-file hash does not read as drift after the status flip', () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-'));
+    try {
+      const f = path.join(T, 'epic.md');
+      fs.writeFileSync(f, fmFile('EP-x', 'draft'));
+      const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'satisfied', inherited: true, boundHash: fileSha(f), risk_tags: [] };
+      setFrontmatterStatus(f, 'approved');
+      const args = { step, approvals: [], currentHash: artifactHash(T, 'epic.md'), acceptedHashes: acceptedHashes(T, 'epic.md') };
+      assert.equal(gatePredicate(args).passed, true, 'the flip is not drift');
+      fs.appendFileSync(f, 'an edit\n');
+      assert.equal(gatePredicate({ ...args, currentHash: artifactHash(T, 'epic.md'), acceptedHashes: acceptedHashes(T, 'epic.md') }).passed, false, 'an edit is');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+
+  test('fingerprint: approvals an older release recorded are read live by EVERY reader — gate status, doctor and the sweep', async () => {
+    // Recorded in each old form, by hand, the way a pre-shape-9 release wrote them: the whole-file hash,
+    // taken while the files said `draft`, `in-review`, `approved` (and `locked` for one never flipped).
+    // Each reader must accept every one. A strict compare against today's hash passes none of them —
+    // which is what the merge test above cannot tell apart, because it records today's form.
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-legacy-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+        platform: 'github', default_branch: 'main',
+        roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
+      }));
+      fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+      const ep = path.join(T, 'epics/EP-legacy');
+      fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+      // [review step, artifact, file, status when approved, status it was flipped to after]
+      const cases = [
+        ['epic-review', 'epic.md', 'epic.md', 'draft', 'approved'],
+        ['ui-design-review', 'ui-design.md', 'ui-design.md', 'in-review', 'approved'],
+        ['test-cases-review', 'test-cases.md', 'test-cases.md', 'approved', 'shipped'],
+        ['analysis-review', 'analysis.md', 'analysis.md', 'locked', null],       // never flipped, and not a value the rebuild tries: only the plain whole-file form matches
+      ];
+      const steps = [];
+      const approvals = [];
+      const hubPrs = [];
+      cases.forEach(([review, artifact, file, at], i) => {
+        fs.writeFileSync(path.join(ep, file), fmFile('EP-legacy', at));
+        const hash = artifactHash(ep, artifact, fileSha);
+        assert.notEqual(hash, artifactHash(ep, artifact), `${artifact}: the old form differs from today's`);
+        steps.push({ id: review.replace('-review', ''), type: 'author', artifact, status: 'done', risk_tags: [] },
+          { id: review, type: 'review+approve', artifact, status: 'done', risk_tags: [] });
+        for (const [approver, role] of [['alice', 'owner'], ['bob', 'reviewer']]) {
+          approvals.push({ artifact, step: review, approver, role, status: 'approved', date: '2026-06-09', source: 'bridge',
+            artifactHash: hash, approvedAt: '2026-06-09T00:00:00Z', pr: 10 + i, engagement: 'none' });
+        }
+        hubPrs.push({ step: review, artifact, platform: 'github', number: 10 + i, url: `http://x/${10 + i}`, branch: `review/EP-legacy/${artifact.replace('.md', '')}`, lastSyncedAt: '2026-06-09' });
+      });
+      for (const [, , file, , to] of cases) if (to) flip(path.join(ep, file), to);
+      fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-legacy', currentStep: 'ready-for-build', steps }));
+      fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(approvals));
+      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify(hubPrs));
+
+      const status = await grab(() => gateStatus(T, { epic: 'EP-legacy' }));
+      for (const [review] of cases) {
+        const line = status.split('\n').find((l) => l.includes(`${review} —`));
+        assert.match(line, /2 approval\(s\) from 2 people/, `gate status counts ${review}'s old-form approvals`);
+        assert.doesNotMatch(line, /stale/, `gate status: ${review}`);
+      }
+      const { collectDoctor } = await import('./doctor.mjs');
+      const stale = collectDoctor(T).checks.filter((c) => /:stale$/.test(c.id)).map((c) => c.id);
+      assert.deepEqual(stale, [], 'doctor warns about none of them');
+      for (const [review, artifact] of cases) {
+        const i = cases.findIndex((c) => c[0] === review);
+        const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', threads: [],
+          reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }] };
+        const sweep = await grab(() => gateSync(T, { epic: 'EP-legacy', artifact, today: '2026-06-10', reader: (_p, n) => (n === 10 + i ? merged : { ok: false, reason: 'not this one' }) }));
+        assert.match(sweep, /the rule still holds/, `the sweep re-reads ${review} and still counts its approvals`);
+      }
+      const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+      assert.deepEqual(after.map((a) => a.artifactHash).sort(), approvals.map((a) => a.artifactHash).sort(), 'the sweep keeps the recorded fingerprints, never re-binds them');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+
+  test('fingerprint: the merge run records approvals and flips the Foundation to approved — gate status, doctor and the sweep all read them live (regression)', async () => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fp-merge-'));
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
+        platform: 'github', default_branch: 'main',
+        roster: [{ login: 'al', name: 'alice', role: 'owner' }, { login: 'bo', name: 'bob', role: 'reviewer' }],
+      }));
+      fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+      const fd = path.join(T, 'foundation');
+      fs.mkdirSync(path.join(fd, '.sdlc'), { recursive: true });
+      for (const f of FOUNDATION_REQUIRED) fs.writeFileSync(path.join(fd, f), fmFile('EP-foundation', 'draft'));
+      fs.writeFileSync(path.join(fd, '.sdlc/state.json'), JSON.stringify({
+        epicId: 'EP-foundation', kind: 'foundation', profile: 'foundation', currentStep: 'foundation-review',
+        steps: [
+          { id: 'foundation', type: 'author', artifact: 'foundation/', status: 'done', risk_tags: [] },
+          { id: 'foundation-review', type: 'review+approve', artifact: 'foundation/', status: 'in_review', risk_tags: [] },
+        ],
+      }));
+      fs.writeFileSync(path.join(fd, '.sdlc/hub-prs.json'), JSON.stringify([
+        { step: 'foundation-review', artifact: 'foundation/', platform: 'github', number: 5, url: 'http://x/5', branch: 'review/EP-foundation/foundation', lastSyncedAt: null },
+      ]));
+      const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', threads: [],
+        reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }] };
+
+      await grab(() => gateSync(T, { epic: 'EP-foundation', today: '2026-06-09', reader: () => merged }));
+      const st = await grab(() => syncStatuses(T, { epic: 'EP-foundation' }));
+      assert.match(st, /updated 6 artifact status/, 'the sections really flipped');
+
+      const status = (await grab(() => gateStatus(T, { epic: 'EP-foundation' }))).split('\n').find((l) => l.includes('foundation-review'));
+      assert.match(status, /2 approval\(s\) from 2 people/);
+      assert.doesNotMatch(status, /stale/);
+      const { collectDoctor } = await import('./doctor.mjs');
+      assert.equal(collectDoctor(T).checks.find((c) => c.id === 'epic:EP-foundation:foundation-review:stale'), undefined, 'doctor has nothing to warn about');
+      const sweep = await grab(() => gateSync(T, { epic: 'EP-foundation', today: '2026-06-10', reader: () => merged }));
+      assert.match(sweep, /the rule still holds/);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  });
+}
 
 // ---- yad report (self issue reporter) ----------------------------------------------------------
 const { scrub, sanitizeArgv, sanitizeContext, buildBody, buildTitle, runReport } = await import('./report.mjs');

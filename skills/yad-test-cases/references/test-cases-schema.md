@@ -60,7 +60,7 @@ Written by `yad-test-cases` Step 4b. Absent when the step ran artifacts-only (`t
 - **Prefer the lowest useful level.** unit > integration > E2E when a case can be verified lower.
 - **`repos` is a subset of `epic.repos`.** Automation cannot target a repo the epic does not declare.
 - **Single-file, not a folder.** `test-cases.md` resolves through the gate's default content-hash path
-  (the file's bytes), so the review gate, revoke-on-change, and review-PR machinery work unchanged.
+  (the file without its frontmatter `status:` line), so the review gate, revoke-on-change, and review-PR machinery work unchanged.
 - **Automation is additive.** When no testing tool is connected, the step still produces a complete
   `test-cases.md`; `testing: none` and no `test-links.json`.
 

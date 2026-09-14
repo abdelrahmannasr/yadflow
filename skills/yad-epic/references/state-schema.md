@@ -18,7 +18,7 @@ nothing to flip.
 
 ```json
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "epicId": "EP-checkout"
 }
 ```
@@ -381,7 +381,7 @@ rather than *who approved*:
 
 | Field | Meaning |
 |-------|---------|
-| `artifactHash` | the content fingerprint the approval is bound to (`sha256:…`). The gate drops any approval whose hash ≠ the artifact's current one — this is revoke-on-change. For architecture it is the locked contract surface, for stories the whole `stories/` set. |
+| `artifactHash` | the content fingerprint the approval is bound to (`sha256:…`). The gate drops any approval whose hash ≠ the artifact's current one — this is revoke-on-change. For architecture it is the locked contract surface, for stories the whole `stories/` set. Every file is fingerprinted without its frontmatter `status:` line, which the gate and Build rewrite after review (shape 9); a hash an older release recorded over the whole file is still accepted. |
 | `approvedAt` | when the platform says the review was submitted. Used to tell a genuine re-approval from the same review read again; **absent on GitLab**, which exposes no per-approval timestamp. |
 | `pr` | the PR/MR number the approval arrived on. The second proof of a genuine re-approval, and the only one available on GitLab: a re-opened review is always a new PR, so an approval on a different number cannot be the old one re-read. Records written before this field existed are stamped once, from the `hub-prs.json` pointer they were recorded against. |
 | `engagement` | `verified` when the approval carried the companion's engagement marker, else `none`. Advisory unless `hub.review.requireEngagement` is on. |
@@ -688,7 +688,8 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
 - `inherited` — `true` when this step's artifact is taken by reference from the thread (not authored here).
 - `inheritedFrom` — the epic in the thread that owns the referenced artifact.
 - `boundHash` — the artifact's hash at inherit time (contract surface hash for `architecture`; the
-  `storiesHash`/file hash for others). The gate predicate short-circuits an `inherited` step as
+  `storiesHash`/file hash for others — without the frontmatter `status:` line from shape 9, and an older
+  whole-file hash is still accepted). The gate predicate short-circuits an `inherited` step as
   **satisfied** iff `boundHash` still equals the thread's current hash for that artifact — always true,
   since the artifact lives in the parent and can't be edited from the child, so inherited steps never
   block and are never re-reviewed.

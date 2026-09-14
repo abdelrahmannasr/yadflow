@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, info, readJSONStrict } from './lib.mjs';
 import {
-  epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus,
+  epicIds, epicRoot, artifactBase, artifactFromBase, findReviewStep, DISCOVERY_FILES, FOUNDATION_FILES, isPassed, stepStatus, FRONTMATTER_BLOCK,
 } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 
@@ -46,15 +46,18 @@ export function desiredStatus(state, base) {
 export function setFrontmatterStatus(file, status) {
   if (!fs.existsSync(file)) return null;
   const text = fs.readFileSync(file, 'utf8');
-  const fm = text.match(/^---\n([\s\S]*?)\n---/);
+  const fm = text.match(FRONTMATTER_BLOCK);
   if (!fm) return null;
   const cur = (fm[1].match(/^status:\s*(.*)$/m) || [])[1]?.trim();
   if (cur === undefined) return null;
   // Advance-only within the managed ladder; anything else (build-owned, roll-ups) is left as-is.
   if (PRESERVE.has(cur)) return null;
   if (!(cur in RANK) || !(status in RANK) || RANK[status] <= RANK[cur]) return null;
-  const block = fm[1].replace(/^status:\s*.*$/m, `status: ${status}`);
-  fs.writeFileSync(file, text.replace(fm[1], block));
+  // Replacement FUNCTIONS, not strings: in a replacement string `$'`, `$&` and `$$` are codes, so a
+  // frontmatter value holding one (`title: costs $' less`) rewrote the file wrongly — on the default
+  // branch, in the gate's merge commit.
+  const block = fm[1].replace(/^status:\s*.*$/m, () => `status: ${status}`);
+  fs.writeFileSync(file, text.replace(fm[1], () => block));
   return cur;
 }
 
@@ -106,7 +109,7 @@ export async function syncStatuses(root, { epic, dryRun = false } = {}) {
         // Peek without writing so --dry-run reports exactly what would change. Scope the match to the
         // frontmatter block so a `status:` line in the Markdown body can't be mistaken for the value.
         const text = fs.readFileSync(file, 'utf8');
-        const fm = text.match(/^---\n([\s\S]*?)\n---/);
+        const fm = text.match(FRONTMATTER_BLOCK);
         const cur = (fm?.[1].match(/^status:\s*(.*)$/m) || [])[1]?.trim();
         if (cur && !PRESERVE.has(cur) && cur in RANK && RANK[want] > RANK[cur]) {
           log(`  ${c.dim('• would update')} ${path.relative(root, file)}: ${cur} → ${want}`);

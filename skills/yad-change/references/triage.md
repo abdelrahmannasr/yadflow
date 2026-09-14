@@ -34,7 +34,7 @@ stories+test-cases:
 
 ```json
 {
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "epicId": "EP-<slug>", "createdAt": "<today>", "type": "<the same value as epic.md kind/type>",
   "profile": "classic",
   "currentStep": "stories",
@@ -55,7 +55,8 @@ stories+test-cases:
 
 `boundHash` is the inherited artifact's **current** hash from the owning epic — the same hashes
 `cli/epic-state.mjs` computes: `contractSurfaceHash` for `architecture`, `storiesHash` for `stories`,
-the file bytes otherwise. The gate predicate treats an `inherited` step as satisfied (never re-reviewed)
+the file otherwise — every file without its frontmatter `status:` line (`reviewedSha`, shape 9). A
+`boundHash` computed over the whole file by an older release is still accepted. The gate predicate treats an `inherited` step as satisfied (never re-reviewed)
 as long as `boundHash` matches the thread's current hash for that artifact — which it always does,
 because the artifact lives in the parent and cannot be edited from the child.
 

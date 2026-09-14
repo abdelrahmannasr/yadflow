@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runNext } from './next.mjs';
 import { collectDoctor } from './doctor.mjs';
-import { loadLedger, gatePredicate, artifactHash, optionalStepsFor } from './epic-state.mjs';
+import { loadLedger, gatePredicate, artifactHash, acceptedHashes, optionalStepsFor } from './epic-state.mjs';
 import { touchedDomains, loadProduct, isSolo, requireEngagement } from './gate.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -119,6 +119,7 @@ export async function collectGolden(root) {
         step,
         approvals: ledger.approvals,
         currentHash: artifactHash(epicDir, step.artifact),
+        acceptedHashes: acceptedHashes(epicDir, step.artifact),
         touchedDomains: touchedDomains(epicDir, step),
         defaultReviewers: DEFAULT_REVIEWERS,
         threadsResolved: true,
