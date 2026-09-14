@@ -53,14 +53,17 @@ subject — they follow one rule.)
   / capitalized subject.)
 - **Proper nouns, acronyms, and identifiers keep their natural case** — only the *first word* is
   forced lowercase.
-- Use `!` after the type/scope (or a `BREAKING CHANGE:` footer) for a breaking change.
+- **A breaking change needs a `BREAKING CHANGE:` footer** — that is what semantic-release reads as a
+  major. Add `!` after the type/scope as well, for the reader, but never on its own: this repo's release
+  preset (`angular`) reads a `feat!:` subject with no footer as **no release at all**, and
+  `BREAKING-CHANGE:` with a hyphen as a minor. `scripts/release-type.mjs` asks the real analyzer.
 
 ```
 ✅ feat: add retry to the login flow
 ✅ fix: handle null user in session guard
 ✅ docs: merge Phase 5 plan               # "merge" lowercase; "Phase 5" is a proper noun
 ✅ fix: refresh OAuth token before expiry # acronym keeps its case
-✅ feat(yad-run)!: change the dial schema
+✅ feat(yad-run)!: change the dial schema   # plus a footer: BREAKING CHANGE: <what breaks>
 
 ❌ feat: Add retry to the login flow      # capital "Add" (sentence-case)
 ❌ fix: Handle null user.                  # capital + trailing period

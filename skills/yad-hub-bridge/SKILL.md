@@ -111,7 +111,9 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
      owned by `yad-checks`) so review PRs accept only signed commits from roster-known authors
    - the wired job runs an **exact** version, resolved at run time from the repo: the `YAD_VERSION`
      variable, else `hub.json` `gate_sync_version`, else the `.sdlc/cli-version.json` stamp, else the
-     floating `3`. It stopped floating on the major because that let a release change a scheduled job's
+     floating major the fragment ships with (`YAD_MAJOR`, `4` in this release) — a committed pin is used
+     only when it is an exact release of that major, so `yad update` moves the fragment and the stamp
+     to a new major together. It stopped floating on the major because that let a release change a scheduled job's
      behaviour unattended — how #163's churn reached Products that never opted in. So upgrading is now a
      deliberate act (`yad update`); if the resolved pin predates 3.15.3, upgrade or disable the
      schedule. Never edit a version into the wired file — `yad check --fix` rewrites it byte-for-byte

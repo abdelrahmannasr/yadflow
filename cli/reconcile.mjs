@@ -132,6 +132,26 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   for (const m of modified) {
     warn(`${m.scope}/${m.item} is locally modified — it matches neither the shipped template nor the copy yad wrote`);
   }
+  // A gate-sync fragment is kept like any other edited file — but it also decides which yadflow CI runs.
+  // It trusts a committed version only from its own major (`YAD_MAJOR`), and the version stamp is
+  // re-written below whatever happens to the fragment. So an edited fragment left on an older major
+  // rejects the stamp this update writes, and CI silently floats on that older engine against a project
+  // on a newer file shape. The generic "locally modified" line does not say that; this does.
+  const pinMajorOf = (file) => {
+    try {
+      const text = fs.readFileSync(file, 'utf8');
+      // `YAD_MAJOR=<n>` from this release on; before it, the major was written into the check itself.
+      const found = text.match(/^\s*YAD_MAJOR=(\d+)\s*$/m) || text.match(/grep -Eq ['"]\^(\d+)\\\./);
+      return found ? Number(found[1]) : null;
+    } catch { return null; }
+  };
+  for (const m of modified.filter((a) => a.managed && /yad-gate-sync\.ya?ml$/.test(a.item))) {
+    const kept = pinMajorOf(m.managed.dest);
+    const ships = pinMajorOf(m.managed.src);
+    if (kept === null || ships === null || kept === ships) continue;
+    warn(`${m.scope}/${m.item} trusts only yadflow ${kept}.x pins, but this release's fragment trusts ${ships}.x — kept as it is, CI will skip the new version stamp and run yadflow@${kept}`);
+    hand(`re-apply your edit on top of the new fragment, or replace it with \`yad update --overwrite-local\` (your copy is saved beside it as ${path.basename(m.managed.dest)}${BACKUP_SUFFIX})`);
+  }
   if (modified.length && !overwriteLocal) {
     hand(`keep the edits (reported as \`modified\` on every check), or replace them with \`yad update --overwrite-local\` — each previous version is saved beside the file as <file>${BACKUP_SUFFIX}`);
   }

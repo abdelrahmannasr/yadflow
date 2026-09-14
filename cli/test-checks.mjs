@@ -2093,32 +2093,143 @@ test('gate-sync pin: every wired fragment carries the same resolver, and none fl
   }
 });
 
+// The major a fragment ships with: the one `YAD_MAJOR=<n>` literal in its pin block. Read from the
+// block, never written into these tests, so they hold at every major rather than being edited at each.
+const pinMajor = (block) => {
+  const found = block.match(/^YAD_MAJOR=(\d+)$/m);
+  assert.ok(found, 'the pin block names its major in one `YAD_MAJOR=<n>` line');
+  return Number(found[1]);
+};
+
+test('gate-sync pin: every copy of the resolver ships ONE major, and uses it in all three places', () => {
+  const blocks = [...pinBlocks(GATE_SYNC_GITHUB), ...pinBlocks(GATE_SYNC_GITLAB)];
+  const majors = new Set(blocks.map(pinMajor));
+  assert.equal(majors.size, 1, `the fragments disagree about their major: ${[...majors].join(', ')}`);
+  for (const block of blocks) {
+    // A literal major anywhere else in the CODE is the drift this line exists to stop — the 3 that
+    // stayed behind for 4.0. Comments may name versions; code reads `$YAD_MAJOR`.
+    const code = block.replace(/^\s*#.*$/gm, '');
+    assert.equal((code.match(/YAD_MAJOR=\d+/g) || []).length, 1, 'one literal');
+    assert.doesNotMatch(code, /\^\d+\\\./, 'the check reads $YAD_MAJOR, not a number');
+    assert.doesNotMatch(code, /:-\d+\}/, 'the fallback reads $YAD_MAJOR, not a number');
+  }
+  // What the release publishes is the other half — scripts/pin-major-check.sh, tested below.
+});
+
+// The guard a release runs: the fragments must ship the major that release publishes. Run against a
+// throwaway git repo per case, because the answer comes from tags and commit messages.
+test('pin-major-check: the fragments must carry the major the release will publish', () => {
+  const run = ({ tag, commits, major }) => {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-pin-major-'));
+    try {
+      const git = (...a) => execFileSync('git', a, { cwd: T, env: GIT_ENV, stdio: 'pipe' });
+      git('init', '-q');
+      // A throwaway repo: never sign with the developer's key, and a signed-tag setting would turn a
+      // plain `git tag` into an annotated one that demands a message.
+      for (const [k, v] of [['user.name', 'alice'], ['user.email', 'alice@corp.io'], ['commit.gpgsign', 'false'], ['tag.gpgsign', 'false']]) git('config', k, v);
+      releaseToolsInto(T);
+      fs.copyFileSync(path.join(ROOT, 'scripts/pin-major-check.sh'), path.join(T, 'scripts/pin-major-check.sh'));
+      for (const rel of ['skills/yad-hub-bridge/templates/github/yad-gate-sync.yml', 'skills/yad-hub-bridge/templates/gitlab/yad-gate-sync.gitlab-ci.yml']) {
+        fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+        fs.writeFileSync(path.join(T, rel), `steps:\n  - run: |\n      # >>> yad-pin\n      YAD_MAJOR=${major}\n      # <<< yad-pin\n`);
+      }
+      fs.writeFileSync(path.join(T, '.gitignore'), 'node_modules\n');
+      git('add', '-A');
+      git('commit', '-qm', 'chore: base');
+      if (tag) git('tag', tag);
+      for (const msg of commits) git('commit', '-q', '--allow-empty', '-m', msg);
+      const r = spawnSync('bash', ['scripts/pin-major-check.sh'], { cwd: T, env: GIT_ENV });
+      return { code: r.status, out: r.stdout.toString() + r.stderr.toString() };
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  };
+  // What counts as breaking is semantic-release's call (the `angular` preset here), not a pattern of
+  // ours: a footer is a major, and so is an indented one; a `feat!:` subject on its own is no release.
+  const breaking = ['feat(x): a shape change\n\nBREAKING CHANGE: the files move'];
+  const footer = ['feat(x): a change\n\n  BREAKING CHANGE: an indented footer counts too'];
+  const bangOnly = ['feat(x)!: a subject the preset does not read as breaking'];
+  assert.equal(run({ tag: 'v3.18.1', commits: bangOnly, major: 3 }).code, 0, 'no major, so the fragments stay on 3');
+  assert.equal(run({ tag: 'v3.18.1', commits: bangOnly, major: 4 }).code, 1, 'and 4 would reject every 3.x stamp');
+
+  // A breaking change on top of a stable or a minor prerelease publishes the NEXT major.
+  assert.equal(run({ tag: 'v3.18.1', commits: breaking, major: 4 }).code, 0);
+  assert.equal(run({ tag: 'v3.19.0-next.2', commits: footer, major: 4 }).code, 0);
+  const stale = run({ tag: 'v3.19.0-next.2', commits: breaking, major: 3 });
+  assert.equal(stale.code, 1, 'the 3 left behind for 4.0 — the bug this guard exists for');
+  assert.match(stale.out, /publishes 4\.x.*carry YAD_MAJOR=3/s);
+  // A major prerelease already IS the bump: another breaking commit on `next` is 4.0.0-next.N+1, not 5.
+  assert.equal(run({ tag: 'v4.0.0-next.1', commits: breaking, major: 4 }).code, 0);
+  assert.equal(run({ tag: 'v4.0.0-next.1', commits: breaking, major: 5 }).code, 1);
+  // No breaking change: the major stays.
+  assert.equal(run({ tag: 'v3.18.1', commits: ['fix(x): a fix'], major: 3 }).code, 0);
+  assert.equal(run({ tag: 'v3.18.1', commits: ['fix(x): a fix'], major: 4 }).code, 1);
+  // No tag yet: nothing to compare against.
+  assert.equal(run({ tag: null, commits: breaking, major: 4 }).code, 0);
+});
+
+// Both behaviour tests below run twice: on the block as shipped, and on the same block with its
+// `YAD_MAJOR` rewritten to 9 — a major no release uses. A major written into the block as a literal
+// anywhere (a fallback of `"4"`, a message saying `4.x`) then fails here, whatever its spelling, rather
+// than only the patterns a test happened to think of.
+const pinVariants = () => {
+  const [shipped] = pinBlocks(GATE_SYNC_GITLAB);
+  return [shipped, shipped.replace(/^YAD_MAJOR=\d+$/m, 'YAD_MAJOR=9')];
+};
+
 test('gate-sync pin: resolves in precedence order, and refuses a pin it cannot trust', () => {
-  const [block] = pinBlocks(GATE_SYNC_GITLAB);
+  for (const block of pinVariants()) {
+  const M = pinMajor(block);
   const hub = (v) => ({ '.sdlc/hub.json': `{"gate_sync_version":"${v}"}` });
   const stamp = (v) => ({ '.sdlc/cli-version.json': `{"version":"${v}"}` });
 
-  // 4. nothing committed to read → the floating major, exactly today's behaviour
-  assert.equal(resolvePin(block), '3');
+  // 4. nothing committed to read → the floating major
+  assert.equal(resolvePin(block), String(M));
   // 3. the version that wired the Product
-  assert.equal(resolvePin(block, stamp('3.15.3')), '3.15.3');
+  assert.equal(resolvePin(block, stamp(`${M}.15.3`)), `${M}.15.3`);
   // 2. the explicit Product pin outranks it
-  assert.equal(resolvePin(block, { ...stamp('3.15.3'), ...hub('3.14.0') }), '3.14.0');
+  assert.equal(resolvePin(block, { ...stamp(`${M}.15.3`), ...hub(`${M}.14.0`) }), `${M}.14.0`);
   // 1. the platform variable outranks both, verbatim — the operator's escape hatch, including
   //    downgrading across majors, which the file sources are not allowed to do.
-  assert.equal(resolvePin(block, hub('3.14.0'), { YAD_VERSION: '2.1.0' }), '2.1.0');
+  assert.equal(resolvePin(block, hub(`${M}.14.0`), { YAD_VERSION: '2.1.0' }), '2.1.0');
 
   // A stamp from a different major is the realistic failure: `.sdlc/cli-version.json` is written by
   // whichever CLI last ran `yad check --fix`, and a long-untouched project can still say 1.0.2 — a
   // version with no `yad gate ci` at all. Skip it, do not run it.
-  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp('3.15.3') }), '3.15.3');
-  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp('1.0.2') }), '3');
+  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp(`${M}.15.3`) }), `${M}.15.3`);
+  assert.equal(resolvePin(block, { ...hub('1.0.2'), ...stamp('1.0.2') }), String(M));
+  // The previous major is the case a new major creates: a Product pinned `gate_sync_version` to a 3.x
+  // before `yad update` brought it a 4.x fragment. Running that 3.x against a project on a newer file
+  // shape is exactly what the check is for — skip it for the stamp `yad update` wrote beside it.
+  assert.equal(resolvePin(block, { ...hub(`${M - 1}.19.0`), ...stamp(`${M}.0.0`) }), `${M}.0.0`);
+  assert.equal(resolvePin(block, { ...hub(`${M + 1}.0.0`), ...stamp(`${M}.0.0`) }), `${M}.0.0`, 'nor a newer major');
   // Not a version at all → never reaches `npx -p "yadflow@$V"` on a runner holding a push token.
-  assert.equal(resolvePin(block, hub('3.1.0;curl evil')), '3');
-  assert.equal(resolvePin(block, hub('latest')), '3');
-  // Prereleases are legitimate exact versions; a key split across lines still reads (the #161 idiom).
-  assert.equal(resolvePin(block, hub('3.16.0-rc.1')), '3.16.0-rc.1');
-  assert.equal(resolvePin(block, { '.sdlc/hub.json': '{\n "gate_sync_version":\n  "3.15.9"\n}' }), '3.15.9');
+  assert.equal(resolvePin(block, hub(`${M}.1.0;curl evil`)), String(M));
+  assert.equal(resolvePin(block, hub('latest')), String(M));
+  // Prereleases are legitimate exact versions — a `next`-channel Product's stamp is one; a key split
+  // across lines still reads (the #161 idiom).
+  assert.equal(resolvePin(block, stamp(`${M}.0.0-next.1`)), `${M}.0.0-next.1`);
+  assert.equal(resolvePin(block, hub(`${M}.16.0-rc.1`)), `${M}.16.0-rc.1`);
+  assert.equal(resolvePin(block, { '.sdlc/hub.json': `{\n "gate_sync_version":\n  "${M}.15.9"\n}` }), `${M}.15.9`);
+  }
+});
+
+test('gate-sync pin: a skipped pin and a floating major both say so on stderr, and nothing in the message runs', () => {
+  for (const block of pinVariants()) {
+  const M = pinMajor(block);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-pin-msg-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.mkdirSync(path.join(T, 'bin'));
+    // A `yad` on PATH that leaves a mark: a message that command-substitutes it would run it.
+    fs.writeFileSync(path.join(T, 'bin/yad'), `#!/bin/sh\ntouch "${path.join(T, 'RAN')}"\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), `{"gate_sync_version":"${M - 1}.19.0"}`);
+    fs.writeFileSync(path.join(T, 'pin.sh'), `${block}\n`);
+    const r = spawnSync('sh', ['pin.sh'], { cwd: T, env: { ...GIT_ENV, PATH: `${path.join(T, 'bin')}:${process.env.PATH}` } });
+    const err = r.stderr.toString();
+    assert.match(err, new RegExp(`ignoring pin '${M - 1}\\.19\\.0' — not an exact ${M}\\.x release`));
+    assert.match(err, new RegExp(`no exact pin resolved — floating on yadflow@${M}`));
+    assert.equal(fs.existsSync(path.join(T, 'RAN')), false, 'the message printed a command; it did not run one');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
 });
 
 // ---------- hooks/ledger-guard.sh (the harness adapter) ----------
@@ -2221,10 +2332,18 @@ const SHAPE_GUIDE = path.join(ROOT, 'scripts/shape-guide-check.sh');
 // `breaking` says how the change after the tag is committed, because that is what semantic-release
 // reads to decide major vs minor: 'footer' = a BREAKING CHANGE: trailer, 'subject' = a `feat!:`
 // subject, false = an ordinary commit that would cut a minor.
+// The script asks semantic-release's own analyzer (scripts/release-type.mjs), so the scratch repo gets
+// that helper and this repo's installed node_modules beside it.
+function releaseToolsInto(T) {
+  fs.mkdirSync(path.join(T, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'scripts/release-type.mjs'), path.join(T, 'scripts/release-type.mjs'));
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(T, 'node_modules'), 'dir');
+  fs.writeFileSync(path.join(T, '.gitignore'), 'node_modules\n');
+}
 function shapeRepo({ tagged, current, guides = [], breaking = 'footer' }) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-guide-'));
   fs.mkdirSync(path.join(T, 'cli'), { recursive: true });
-  fs.mkdirSync(path.join(T, 'scripts'), { recursive: true });
+  releaseToolsInto(T);
   fs.copyFileSync(SHAPE_GUIDE, path.join(T, 'scripts/shape-guide-check.sh'));
   const manifest = (v) => (v === null
     ? 'export const VERSION = "0.0.0";\n'            // pre-E13: no SCHEMA_VERSION at all
@@ -2290,11 +2409,16 @@ test('shape guide: a moved shape with NO declared breaking change blocks the rel
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('shape guide: a `feat!:` subject declares the break just as well as a footer', () => {
+// This test used to say the opposite — "a `feat!:` subject declares the break just as well as a
+// footer" — and it was checking the script against itself. This repo's semantic-release uses the
+// `angular` preset, which reads a `feat!:` subject on its own as NO release at all. So a shape moved in
+// a commit like that shipped as a minor with this check green. The script now asks the real analyzer.
+test('shape guide: a `feat!:` subject ALONE is not a major to semantic-release, so it blocks the release', () => {
   const T = shapeRepo({ tagged: 1, current: 2, guides: ['shape-2.md'], breaking: 'subject' });
   const r = runShapeGuide(T);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /breaking change declared/);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /reads the commits since v1\.0\.0 as a none release/);
+  assert.match(r.stderr, /`feat!:` subject on its own does NOT count/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

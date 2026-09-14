@@ -121,9 +121,15 @@ Safe to run twice.
    that.
 3. Make sure the gate workflow runs this release. The workflow picks its yadflow version in this order:
    the `YAD_VERSION` variable, then `gate_sync_version` in `.sdlc/hub.json`, then the version in
-   `.sdlc/cli-version.json`. **It accepts a pin from those two files only when it is an exact 3.x
-   version** (such as `3.19.0`). If this release is not a 3.x version, set the `YAD_VERSION` variable:
-   it is the only setting that can move CI to it.
+   `.sdlc/cli-version.json`. **It accepts a pin from those two files only when it is an exact release of
+   the workflow's own major version** — the `YAD_MAJOR` line in the workflow file.
+   - `yad update` rewrites the workflow and re-stamps `.sdlc/cli-version.json` in the same run, so both
+     move to this release's major together. Commit both.
+   - A `gate_sync_version` pin from an older major (such as `3.19.0`) is skipped by the new workflow.
+     Update it or remove it.
+   - If your team edited the workflow file, `yad update` keeps your edit and warns when it still trusts
+     the old major. Re-apply the edit on the new file, or run `yad update --overwrite-local`.
+   - The `YAD_VERSION` variable overrides both files, for any major.
 
 ## If `yad doctor` says something
 
