@@ -224,6 +224,9 @@ function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
     const note = costNote(a.parallel);
     if (note) info(c.dim(note));
   }
+  // A step re-opened behind finished work (E41) is a lane of its own beside the chain, like the
+  // test-cases track above: it gets its own line, with the same words a chain step would get.
+  for (const lane of a.reopened || []) hand(`re-opened lane: ${actionLine({ ...lane, epicId: a.epicId }, { solo, bindings })}`);
   phaseLine(a);
 }
 

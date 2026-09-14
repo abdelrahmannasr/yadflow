@@ -1,7 +1,8 @@
 // `yad skip <epic> <step> --reason "<why>"` / `yad unskip <epic> <step>` (E35, E36) and
 // `yad defer <epic> <step> --reason "<why>"` / `yad undefer <epic> <step>` (E37) — set an OPTIONAL Shape
 // step aside for one epic, or put it back. A skip says the step does not apply; a deferral says it does,
-// later. `yad skip … --undo` and `yad defer … --undo` are the same as the undo verbs.
+// later. `yad skip … --undo` and `yad defer … --undo` are the same as the undo verbs. `yad undefer` (E41)
+// re-opens a deferral even after later work has finished.
 // Which steps qualify is a fact about the epic's ROUTE, read from the lifecycle profile it is on (E35,
 // `optionalStepsFor`), not a list this engine keeps: on `classic` and `analysis-first` that is
 // `ui-design` and its gate. E40's short lanes mark NOTHING optional — they drop the steps they do not
@@ -15,7 +16,7 @@
 // actor/date), short-circuited at the gate. All state logic is the pure `skipStep` / `unskipStep` /
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import { ok, info, hand, fail, run } from './lib.mjs';
-import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState } from './epic-state.mjs';
+import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep } from './epic-state.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
@@ -63,6 +64,13 @@ async function runSetAside(root, verb, { epic, step, reason, undo = false, today
     // rather than accept it in silence.
     if (reason != null && reason !== true) info(V.reasonNote);
     writeState(ledger.files.state, ledger.state);
+    // A deferral put back after later work finished RE-OPENS beside that work (E41), and `currentStep`
+    // stays where the chain is — so "back in the chain" and a currentStep line would both mislead.
+    if (isReopenedStep(ledger.state, step)) {
+      ok(`${step} ${V.undone} — re-opened beside the work already finished after it, which stays done`);
+      hand(`currentStep stays ${ledger.state.currentStep}; see the re-opened lane with: yad next ${epic}`);
+      return;
+    }
     ok(`${step} ${V.undone} — back in the chain`);
     hand(`currentStep is now ${ledger.state.currentStep}`);
     return;

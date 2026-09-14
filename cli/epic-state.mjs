@@ -1222,16 +1222,21 @@ export function advanceState(state, step) {
   // `yad undefer`. Opening one here would write `in_progress` over the deferral and lose its record
   // (E37). The next runnable step is the first later step not set aside; when the whole tail is set
   // aside, fall through to ready-for-build.
+  // A GATE THAT PASSED BEHIND THE CHAIN — a step re-opened after later work finished (E41), whose
+  // `currentStep` is already past it or at `ready-for-build` — opens nothing and moves nothing. The step
+  // after it is finished work: re-opening it would undo that work, and pointing `currentStep` back at it
+  // would pull the epic out of Build.
+  const cur = state.steps.findIndex((s) => s?.id === state.currentStep);
+  if (state.currentStep === 'ready-for-build' || cur > i) return state;
   let j = i + 1;
   while (state.steps[j] && isSetAside(state.steps[j])) j++;
   const next = state.steps[j];
   if (next) {
-    // A BLOCKED next step is not opened. A gate passing is not somebody saying the wait is over, and
-    // writing `in_progress` over it kept the record while hiding the block: `yad next` then said to
-    // author the step, and `yad unblock` refused a step that read as in progress (E37). `currentStep`
-    // still moves there, so `yad next` shows the blocker and how to clear it — `markInReview` already
-    // leaves a blocked step alone the same way.
-    if (stepStatus(next) !== 'blocked') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
+    // Only a `todo` step is opened. A BLOCKED one is not: a gate passing is not somebody saying the wait
+    // is over, and writing `in_progress` over it kept the record while hiding the block (E37). Nor is one
+    // already started or finished, or in a state this release cannot name (the file wins). `currentStep`
+    // still moves there, so `yad next` shows where the chain stands.
+    if (stepStatus(next) === 'todo') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
     state.currentStep = next.id;
   } else {
     state.currentStep = 'ready-for-build';
@@ -1337,6 +1342,24 @@ const firstLiveAfter = (steps, index) => {
 const hasStarted = (step) => {
   const st = stepStatus(step);
   return st === null || st === 'in_progress' || st === 'in_review' || st === 'done';
+};
+
+// RE-OPENED BEHIND FINISHED WORK (E41): is the step at `index` unfinished while a later step, before
+// `end`, was COMPLETED HERE? That is what a deferral resumed late looks like — `ui-design` open again
+// after `stories` is done — and such a step runs BESIDE the chain, the way `test-cases` does: it must
+// not block the finished work in front of it, and passing its gate must not re-open that work.
+//
+// READ OFF THE CHAIN, NEVER A FLAG. A `reopened: true` that `preconditionsMet` honoured would be one
+// hand-typed word that unblocks a chain — the exact hole E38 closed for `skipped: true`.
+//
+// `done` only, not `isPassed`: a later step that was skipped, deferred or carried from a parent epic
+// (`satisfied`) is not work built here, and counting it would let an unfinished `architecture` stop
+// blocking `stories` just because `ui-design` between them was skipped. The step's OWN review gate does
+// not count either: a `done` gate over an unwritten author step is the damage `stateInvariants` reports
+// (#131), not a re-open.
+const behindFinishedWork = (steps, index, end = steps.length) => {
+  const ownGate = `${steps[index]?.id}-review`;
+  return steps.slice(index + 1, end).some((s) => isPlainObject(s) && s.id !== ownGate && stepStatus(s) === 'done');
 };
 
 // A hole in the chain after the pair makes "has the chain moved on?" unanswerable either way — reading
@@ -1477,13 +1500,13 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, profile
 // downstream that was auto-opened is pushed back to `todo` behind it); otherwise it just returns to
 // `todo`. Throws if the step is not set aside this way, or it is too late.
 //
-// FOR A DEFERRAL, THE WINDOW IS A LIMIT OF THE MACHINERY, NOT OF THE MEANING (E37). For a skip it is
-// the meaning: stories finished on the assumption that there is no UI were built without one. A
-// deferral promised to come back, so stories finished before the UI are expected. What stops the late
-// resume is that the chain cannot carry it yet — `preconditionsMet` would name the restored step as the
-// blocker of stories already done, and `advanceState` would re-open those stories when the restored
-// review passed. Re-opening a step after the chain has built past it is one piece of machinery, and it
-// ships once, in E41, for a deferral and for debt alike.
+// FOR A DEFERRAL THERE IS NO CLOSING WINDOW (E41). For a skip the window is the meaning: stories finished
+// on the assumption that there is no UI were built without one, so an un-skip after that is refused. A
+// deferral promised to come back, so stories finished before the UI are expected. Once the chain has
+// built past a deferred pair, `yad undefer` RE-OPENS it behind that work instead of refusing: the author
+// step opens (or waits, if an earlier step has not passed), its gate goes to `todo`, and nothing after the
+// pair and nothing about `currentStep` moves. The re-opened step then runs beside the chain — see
+// `behindFinishedWork` for how `preconditionsMet`, `advanceState`, `markInReview` and `yad next` tell.
 function restoreStep(state, stepId, as) {
   // NO ROUTE GUARD HERE, and that asymmetry with `setAsideStep` is deliberate. Setting a step aside needs
   // the route's permission because it makes a gate pass without approvals. Putting it back only returns
@@ -1512,11 +1535,17 @@ function restoreStep(state, stepId, as) {
   const j = firstLiveAfter(steps, tail);
   const after = steps[j];
   const beyond = (stepStatus(after) === 'done' ? after : null) || steps.slice(j + 1).find(hasStarted);
+  const priorAllDone = steps.slice(0, ai).every((s) => isPassed(s));
+  if (beyond && as === 'deferred') {
+    // LATE RESUME (E41): re-open the pair behind the work built past it.
+    steps[ai] = { ...withoutSetAside(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };
+    if (ri !== -1) steps[ri] = { ...withoutSetAside(steps[ri]), status: 'todo' };
+    return state;
+  }
   if (beyond) {
     throw err('YAD-STATE-004', `cannot ${V.undo} ${stepId} — ${beyond.id} is already '${beyond.status ?? '(no status)'}'`,
       `${V.undo} before ${beyond.id} ${beyond === after ? 'is finished' : 'begins'} — the chain has built on the ${V.noun} since`);
   }
-  const priorAllDone = steps.slice(0, ai).every((s) => isPassed(s));
   steps[ai] = { ...withoutSetAside(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };
   if (ri !== -1) steps[ri] = { ...withoutSetAside(steps[ri]), status: 'todo' };
   if (priorAllDone) {
@@ -1599,7 +1628,10 @@ export function markInReview(state, step) {
   // Opening a review gate means the artifact was authored — close the paired author step rather than
   // trusting the authoring skill to have hand-edited state.json (issue #131).
   closeAuthorStep(state, step);
-  if (state.currentStep !== 'ready-for-build') state.currentStep = step.id;
+  // `currentStep` only moves FORWARD. Opening the review of a step re-opened behind finished work (E41)
+  // must not point the chain back at it, just as the parallel `test-cases` track must not.
+  const cur = state.steps.findIndex((s) => s?.id === state.currentStep);
+  if (state.currentStep !== 'ready-for-build' && cur <= i) state.currentStep = step.id;
   return state;
 }
 
@@ -2566,7 +2598,9 @@ export function preconditionsMet(state, stepId) {
   // Name the state that finished it. `yad next --check ui-design` answering "already done" for a deferred
   // step would tell somebody the UI exists (E37).
   if (isPassed(state.steps[i])) return { ok: false, blockedBy: null, reason: `${stepId} is already ${stepStatus(state.steps[i])}` };
-  const blocker = state.steps.slice(0, i).find((s) => !isPassed(s));
+  // A step re-opened BEHIND finished work (E41) is not a blocker of anything past that work: it runs
+  // beside the chain. It still blocks the steps between it and that work, its own gate included.
+  const blocker = state.steps.slice(0, i).find((s, b) => !isPassed(s) && !behindFinishedWork(state.steps, b, i));
   if (blocker) return { ok: false, blockedBy: blocker.id, reason: `${blocker.id} has not passed yet` };
   return { ok: true, blockedBy: null, reason: 'ready' };
 }
@@ -2621,7 +2655,41 @@ export function repairState(state) {
 //   'review-open' — open the review PR/MR (`yad gate open`)
 //   'review-sync' — a review PR/MR is open; sync its state (`yad gate sync`)
 //   'build'       — Shape approved (ready-for-build); Build can run
-export function nextAction(ledger, { epic, bindings = null } = {}) {
+//
+// One key is added only when it has something in it, so an epic without one prints exactly the JSON it
+// printed before (the golden test deep-equals it):
+//   reopened — a lane per step re-opened behind finished work (E41), each shaped like an action
+export function nextAction(ledger, opts = {}) {
+  const a = shapeNextAction(ledger, opts);
+  const state = ledger?.state;
+  if (!state || !Array.isArray(state.steps) || isProductLevel(state) || backfillAnchorKind(state)) return a;
+  const lanes = reopenedLanes(ledger, { epicId: a.epicId, currentStep: state.currentStep, bindings: opts.bindings ?? null });
+  return { ...a, ...(lanes.length ? { reopened: lanes } : {}) };
+}
+
+// Is this step open again BEHIND finished work (E41)? For the words a command prints after `yad undefer`.
+export function isReopenedStep(state, stepId) {
+  const steps = Array.isArray(state?.steps) ? state.steps : [];
+  const i = steps.findIndex((s) => s?.id === stepId);
+  return i !== -1 && !isPassed(steps[i]) && behindFinishedWork(steps, i);
+}
+
+// A lane for each step re-opened behind finished work (E41) that can be worked on now — the same three
+// actions a chain step gets (author it, open its review, sync its review) or the blocker it waits on.
+function reopenedLanes(ledger, { epicId, currentStep, bindings }) {
+  const { steps } = ledger.state;
+  return steps.filter((s, b) => isPlainObject(s) && s.id !== currentStep && !isPassed(s)
+      && behindFinishedWork(steps, b) && preconditionsMet(ledger.state, s.id).ok)
+    .map((s) => {
+      if (stepStatus(s) === 'blocked') return { step: s.id, kind: 'blocked', status: 'blocked', record: s.record || null };
+      if (s.type === 'author') return { step: s.id, kind: 'author', status: s.status, ...skillFields(stepSkills(s.id, bindings)), artifact: s.artifact };
+      const pr = (ledger.hubPrs || []).find((p) => artifactBase(p.artifact) === artifactBase(s.artifact));
+      return { step: s.id, kind: pr ? 'review-sync' : 'review-open', status: s.status, artifact: s.artifact, pr: pr ? pr.number : null,
+        command: `yad gate ${pr ? 'sync' : 'open'} ${epicId} ${s.artifact}` };
+    });
+}
+
+function shapeNextAction(ledger, { epic, bindings = null } = {}) {
   const state = ledger?.state;
   const epicId = epic || state?.epicId || null;
   // No ledger yet: the action is to author the `epic` step, so it names whatever runs that step here.

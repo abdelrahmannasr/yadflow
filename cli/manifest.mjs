@@ -190,12 +190,16 @@ export const LEARNING_PRIMARY = 'deeptutor';
 //     breaking one, because an older yadflow reads that value as stale — so it has to see a newer
 //     shape and say so. This release reads both the new value and every form older ones recorded.
 //     docs/migrations/shape-9.md.
+// 10 — a deferred step can be put back after the chain has built past it (E41). No field is added and
+//     nothing on disk is rewritten. It is a breaking shape because an older yadflow cannot read a
+//     step re-opened behind finished work: it names that step the blocker of the work, and passing its
+//     review re-opens the step after it. docs/migrations/shape-10.md.
 //
 // Deliberately NOT the same thing as `VERSION` above. That is which release of the CLI you are
 // running and moves on every publish; this is what the files on disk look like and moves only when
 // their shape actually changes.
 
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 // Project-level files setup produces (used by `check` to spot missing setup).
 export const PROJECT_FILES = {

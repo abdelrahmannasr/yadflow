@@ -126,8 +126,8 @@ ${c.bold('Where am I / what next')}
   yad defer <epic> <step> --reason <text>  Set an optional step aside to do LATER: marks it deferred.
                                        Say who is waiting for it in the reason. Same steps and same
                                        refusals as skip; the chain goes on, its review is still owed
-  yad undefer <epic> <step>            Put a deferred step back, until the step that follows it is
-                                       finished or work past it starts
+  yad undefer <epic> <step>            Put a deferred step back, at any time. After later work has
+                                       finished, the step re-opens beside that work, which stays done
   yad unblock <epic> <step>            Clear a recorded blocker once the wait is over: moves the
                                        step off blocked and removes its record in one write
 

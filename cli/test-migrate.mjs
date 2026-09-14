@@ -1541,3 +1541,23 @@ test('migrate 8 -> 9: moves the number and nothing else — no field changes, ap
       'an old fingerprint cannot be recomputed, and is not rewritten — the reader accepts it');
   } finally { cleanup(T); }
 });
+
+// ---- shape 10: a deferred step can be re-opened behind finished work ------------------------------
+
+test('migrate 9 -> 10: moves the number and nothing else', async () => {
+  const state = { schemaVersion: 9, epicId: 'EP-x', createdAt: '2026-01-01', type: 'feature', profile: 'classic', currentStep: 'stories',
+    steps: [
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'deferred', record: { reason: 'later', by: null, date: null } },
+      { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'deferred', record: { reason: 'later', by: null, date: null } },
+    ] };
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': JSON.stringify(state, null, 2) + '\n' } });
+  try {
+    const row = MIGRATIONS.find((m) => m.from === 9);
+    assert.equal(row.to, 10);
+    assert.deepEqual(row.apply({ a: 1 }, { rel: 'epics/EP-x/.sdlc/state.json' }), { a: 1 }, 'the row edits no field');
+    await runMigrate(T, { apply: true });
+    const after = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
+    assert.equal(after.schemaVersion, ENGINE_SHAPE);
+    assert.deepEqual({ ...after, schemaVersion: 9 }, state, 'every other field is exactly as it was');
+  } finally { cleanup(T); }
+});
