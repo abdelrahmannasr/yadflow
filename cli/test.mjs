@@ -6125,11 +6125,17 @@ test('markInReview and advanceState only move currentStep forward, and open only
   advanceState(plain, byId(plain, 'architecture-review'));
   assert.equal(plain.currentStep, 'ui-design');
   assert.equal(byId(plain, 'ui-design').status, 'in_progress');
-  // …but a next step already finished is never written over, even when currentStep is on the gate.
+  // …a next step that has already passed is walked past, onto the first one still to do…
   const done = uiChain('architecture-review', { ui: 'done', uiReview: 'todo', stories: 'todo' });
   advanceState(done, byId(done, 'architecture-review'));
   assert.equal(byId(done, 'ui-design').status, 'done');
-  assert.equal(done.currentStep, 'ui-design');
+  assert.equal(done.currentStep, 'ui-design-review');
+  assert.equal(byId(done, 'ui-design-review').status, 'in_review');
+  // …and a next step in a state this release cannot name is never written over: the file wins.
+  const unknown = uiChain('architecture-review', { ui: 'quantum', uiReview: 'todo', stories: 'todo' });
+  advanceState(unknown, byId(unknown, 'architecture-review'));
+  assert.equal(byId(unknown, 'ui-design').status, 'quantum');
+  assert.equal(unknown.currentStep, 'ui-design');
 });
 
 test('preconditionsMet: only work COMPLETED here after an unfinished step makes it a re-opened lane (E41)', () => {
@@ -6185,6 +6191,54 @@ test('debt: `yad defer --debt` marks the pair owed, the reminder lasts until the
   assert.equal(byId(owed, 'ui-design-review').debt, undefined);
   assert.deepEqual(owedSteps(owed), []);
   assert.equal(nextAction({ state: owed, hubPrs: [] }).debt, undefined);
+});
+
+test('E41 review: a debt cannot be skipped, a late re-open can be deferred again, the late path needs FINISHED work, and a gate walks past inherited steps', () => {
+  // (1) A debt put back early cannot then be skipped: a skipped gate reads as passed, so nothing would
+  // ever clear the flag. Deferring it again is allowed, and keeps the debt.
+  const owed = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(owed, 'ui-design', { reason: 'launch', debt: true });
+  undeferStep(owed, 'ui-design');
+  assert.throws(() => skipStep(owed, 'ui-design', { reason: 'no UI after all' }),
+    (e) => /ui-design is owed as debt/.test(e.message) && /yad defer <epic> ui-design/.test(e.hint));
+  deferStep(owed, 'ui-design', { reason: 'again' });
+  assert.equal(stepStatus(byId(owed, 'ui-design')), 'deferred');
+  assert.equal(byId(owed, 'ui-design').debt, true, 'a plain re-defer does not drop a debt');
+
+  // (2) A late undefer can be undone by deferring again. A skip there stays refused.
+  const late = builtPastDeferral({ storiesReview: 'done' });
+  undeferStep(late, 'ui-design');
+  assert.throws(() => skipStep(late, 'ui-design', { reason: 'x' }), /cannot skip ui-design — stories is already 'done'/);
+  deferStep(late, 'ui-design', { reason: 'not yet after all' });
+  assert.equal(stepStatus(byId(late, 'ui-design')), 'deferred');
+  assert.equal(stepStatus(byId(late, 'ui-design-review')), 'deferred');
+  assert.equal(late.currentStep, 'ready-for-build');
+  assert.equal(byId(late, 'stories').status, 'done');
+
+  // (3) Later work that has only STARTED, or holds a status this release cannot name, is not finished
+  // work: the late re-open refuses, as before E41.
+  for (const reviewState of ['in_review', 'awaiting-merge']) {
+    const started = uiChain('ui-design', { ui: 'in_progress' });
+    deferStep(started, 'ui-design', { reason: 'later' });
+    byId(started, 'stories-review').status = reviewState;
+    assert.throws(() => undeferStep(started, 'ui-design'),
+      (e) => e.message.includes(`stories-review is already '${reviewState}'`) && /the chain has built on the deferral since/.test(e.hint), reviewState);
+    assert.equal(stepStatus(byId(started, 'ui-design')), 'deferred', reviewState);
+  }
+
+  // (4) A passing gate walks past a change-epic's inherited steps instead of parking currentStep on one.
+  const change = { epicId: 'EP-c', currentStep: 'epic-review', steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done' },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review' },
+    { id: 'architecture', type: 'author', artifact: 'architecture.md', status: 'satisfied', record: { reason: 'carried from EP-p' } },
+    { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', status: 'done', inherited: true },
+    { id: 'stories', type: 'author', artifact: 'stories', status: 'todo' },
+  ] };
+  advanceState(change, byId(change, 'epic-review'));
+  assert.equal(change.currentStep, 'stories');
+  assert.equal(byId(change, 'stories').status, 'in_progress');
+  assert.equal(stepStatus(byId(change, 'architecture')), 'satisfied', 'an inherited step is not written over');
+  assert.equal(nextAction({ state: change, hubPrs: [] }).step, 'stories');
 });
 
 test('the shared walk steps over a deferred pair when a skip, un-skip or un-defer moves currentStep (E37)', () => {
@@ -6509,6 +6563,8 @@ test('a re-opened review goes through `yad gate open` and `yad gate sync` beside
     let after = read();
     assert.equal(after.steps.find((x) => x.id === 'ui-design-review').status, 'in_review');
     assert.equal(after.currentStep, 'ready-for-build', 'opening the lane review does not pull the epic out of Build');
+    // A debt being paid back is no longer `deferred`, so `gate status` names it on the open review.
+    assert.match(await grab(() => gateStatus(T, { epic: 'EP-x' })), /ui-design-review .*owed as debt — being paid back/);
 
     fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
       { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 9, url: 'http://x/9', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
@@ -6918,8 +6974,14 @@ test('runDefer --debt and a late undefer: the words, the file, and the reminders
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e41-'));
   try {
     seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
-    const set = await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'launch date; @design waits', debt: true, today: '2026-09-14' }));
-    assert.match(set, /ui-design deferred as debt/);
+    const set = await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'launch date; @design waits', today: '2026-09-14' }));
+    assert.match(set, /ui-design deferred(?! as debt)/);
+    // Adding the flag to a deferral already made keeps the ORIGINAL record, so the words must too.
+    const marked = await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', debt: true, today: '2026-09-20' }));
+    assert.match(marked, /ui-design was already deferred .*on 2026-09-14 — now marked as debt/);
+    assert.match(marked, /reason: launch date; @design waits/);
+    assert.doesNotMatch(marked, /2026-09-20|undefined/);
+    assert.match(await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', debt: true, today: '2026-09-20' })), /— nothing changed/);
     assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design-review').debt, true);
     // A skip refuses the flag, through the wrapper too.
     await assert.rejects(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'x', debt: true }), /skip cannot carry debt/);

@@ -16,7 +16,7 @@
 // actor/date), short-circuited at the gate. All state logic is the pure `skipStep` / `unskipStep` /
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import { ok, info, hand, fail, run } from './lib.mjs';
-import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep } from './epic-state.mjs';
+import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
@@ -34,12 +34,12 @@ function recordActor(root) {
 // What differs between the two verbs, as a person reads it.
 const VERBS = {
   skip: {
-    set: skipStep, restore: unskipStep, undo: 'unskip', done: 'marked N/A', undone: 'un-skipped',
+    set: skipStep, restore: unskipStep, undo: 'unskip', done: 'marked N/A', undone: 'un-skipped', state: 'skipped',
     gate: 'its review gate is short-circuited',
     reasonNote: '--reason is not used when un-skipping: the skip record is removed with the skip',
   },
   defer: {
-    set: deferStep, restore: undeferStep, undo: 'undefer', done: 'deferred', undone: 'un-deferred',
+    set: deferStep, restore: undeferStep, undo: 'undefer', done: 'deferred', undone: 'un-deferred', state: 'deferred',
     gate: 'the chain continues past it; its review is still owed',
     reasonNote: '--reason is not used when un-deferring: the record is removed with the deferral',
   },
@@ -79,9 +79,22 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
   }
 
   const by = recordActor(root);
+  // A repeat on a step already set aside this way changes nothing but, with `--debt`, the flag — and keeps
+  // the ORIGINAL record. Printing this run's actor, date and reason would misstate who set it aside and why.
+  const steps = Array.isArray(ledger.state.steps) ? ledger.state.steps : [];
+  const before = steps.find((s) => s?.id === step);
+  const already = stepStatus(before) === V.state;
+  const owedBefore = before?.debt === true;
   V.set(ledger.state, step, { reason, by, at: today, debt: debt === true });
   writeState(ledger.files.state, ledger.state);
-  const owed = ledger.state.steps.find((s) => s?.id === step)?.debt === true;
+  const after = ledger.state.steps.find((s) => s?.id === step);
+  const owed = after?.debt === true;
+  if (already) {
+    const r = after?.record || {};
+    ok(`${step} was already ${V.done}${r.by ? ` by ${r.by}` : ''}${r.date ? ` on ${r.date}` : ''}${owed && !owedBefore ? ' — now marked as debt' : ' — nothing changed'}`);
+    if (r.reason) info(`reason: ${r.reason}`);
+    return;
+  }
   ok(`${step} ${V.done}${owed ? ' as debt' : ''}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`${V.gate}; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad ${V.undo} ${epic} ${step}\`)`);

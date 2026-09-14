@@ -240,7 +240,8 @@ If the predicate **passes**:
 - A review step that passed **behind the chain** — a step re-opened with a late `yad undefer`, where
   `currentStep` is already past it or is `ready-for-build` — changes nothing else: do not open the step
   after it (that work is already finished) and do not move `currentStep`.
-- Any **other** review step: find the next step in `steps[]` that is not `skipped` or `deferred`, set
+- Any **other** review step: find the next step in `steps[]` that has not already passed — not `skipped`,
+  `deferred`, `satisfied` (inherited from a parent epic) or `done` — set
   it to `in_progress` (authoring) or `in_review` **only if it is `todo`**, and set `currentStep` to it. A
   skipped step was marked N/A with `yad skip`, and a deferred one set aside for later with `yad defer`;
   both stay as they are. A step already started or finished keeps its status.

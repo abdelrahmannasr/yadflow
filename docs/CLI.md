@@ -437,6 +437,9 @@ stories were written and approved while the UI waited — it **re-opens** the st
 | the work already finished after it | unchanged — still done |
 | `currentStep` | unchanged — for example still `ready-for-build` |
 
+This needs later work that is **finished**; if it has only started, `yad undefer` is refused as before.
+A re-opened step can be deferred again with `yad defer`, so a late undefer can be undone.
+
 The re-opened step then runs beside the chain, like the `test-cases` track. It does not block the
 finished work, opening its review does not move `currentStep` back, and passing that review re-opens
 nothing after it. `yad next` shows it on its own line, `re-opened lane: …`. yadflow recognises such a step
@@ -452,6 +455,7 @@ pair. `--debt` on a step that is already deferred adds the flag and keeps the re
   epic's row when `yad next` lists every epic, a `step:debt` finding in `yad doctor`, and "deferred
   (still owed, as debt)" in `yad gate status`.
 - **Paying it back** is `yad undefer`, early or late. The flag stays on while the step is worked on.
+  Deferring the step again keeps the flag, and `yad skip` refuses a step owed as debt.
 - **It clears** when the step's review passes, and nothing else removes it.
 - **Only a deferral can carry debt.** `yad skip --debt` is refused, because a skip means nothing is owed.
 - It is a reminder, never a gate, and it is not the hotfix `reconcile-debt.json`, which is a whole

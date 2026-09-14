@@ -1238,8 +1238,12 @@ export function advanceState(state, step) {
   // would pull the epic out of Build.
   const cur = state.steps.findIndex((s) => s?.id === state.currentStep);
   if (state.currentStep === 'ready-for-build' || cur > i) return state;
+  // Step over every step that has already PASSED — not only a skipped or deferred pair. A change-epic's
+  // inherited (`satisfied`) steps are passed too, and landing `currentStep` on one made `yad next` say to
+  // author an artifact the parent epic owns (found in the E41 review; older releases wrote `in_progress`
+  // over it instead, which was worse).
   let j = i + 1;
-  while (state.steps[j] && isSetAside(state.steps[j])) j++;
+  while (state.steps[j] && isPassed(state.steps[j])) j++;
   const next = state.steps[j];
   if (next) {
     // Only a `todo` step is opened. A BLOCKED one is not: a gate passing is not somebody saying the wait
@@ -1465,6 +1469,13 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, debt = 
     throw err('YAD-STATE-004', `${blockedStep.id} is blocked — ${blockedStep.record?.reason || 'no reason recorded'}`,
       `clear the blocker first with \`yad unblock <epic> ${blockedStep.id}\`, then ${V.verb} ${stepId} — setting it aside now would lose the record of who it waits on`);
   }
+  // A step OWED AS DEBT cannot be skipped (E41). A skip says nothing is owed, and a skipped gate reads as
+  // passed, so its review would never run again and nothing could ever clear the flag. Only a passing
+  // review pays a debt. Deferring it again is allowed, and keeps the debt.
+  if (as === 'skipped' && [author, steps.find((s) => s?.id === `${stepId}-review`)].some((s) => s?.debt === true)) {
+    throw err('YAD-STATE-004', `${stepId} is owed as debt`,
+      `a skip says nothing is owed, so it cannot close a debt — only passing ${stepId}-review does. Put it aside again with \`yad defer <epic> ${stepId} --reason "<why>"\`, which keeps the debt`);
+  }
   if (!reason || !String(reason).trim()) {
     throw err('YAD-STATE-004', V.needsReason, `${V.reasonHint}, e.g. \`yad ${V.verb} <epic> ${stepId} --reason "<why>"\``);
   }
@@ -1495,7 +1506,10 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, debt = 
   // would let the skip through with ui-design already under way (E36).
   refuseHoleAfter(steps, ri, V.verb);
   const started = steps.slice(ri + 1).find(hasStarted);
-  if (started) {
+  // A step RE-OPENED behind finished work (a late `yad undefer`, E41) may be deferred again: later work
+  // is expected to have started — that is what re-opened it — and without this a mistaken late undefer
+  // could not be undone. A skip stays refused there: the finished work was built without the step.
+  if (started && !(as === 'deferred' && behindFinishedWork(steps, ai))) {
     throw err('YAD-STATE-004', `cannot ${V.verb} ${stepId} — ${started.id} is already '${started.status ?? '(no status)'}'`,
       `${V.verb} ${stepId} before ${started.id} begins`);
   }
@@ -1560,7 +1574,9 @@ function restoreStep(state, stepId, as) {
   const after = steps[j];
   const beyond = (stepStatus(after) === 'done' ? after : null) || steps.slice(j + 1).find(hasStarted);
   const priorAllDone = steps.slice(0, ai).every((s) => isPassed(s));
-  if (beyond && as === 'deferred') {
+  // Only when later work is FINISHED here (`behindFinishedWork`). Work that has merely started, or a status
+  // this release cannot name, is not something to re-open beside — refuse, as before E41.
+  if (beyond && as === 'deferred' && behindFinishedWork(steps, ai)) {
     // LATE RESUME (E41): re-open the pair behind the work built past it. `withoutSetAside` keeps `debt`,
     // which is still owed until the review passes.
     steps[ai] = { ...withoutSetAside(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };

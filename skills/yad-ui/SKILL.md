@@ -194,7 +194,8 @@ design tool was used, `.sdlc/design-links.json`** (artifact-side, not ledger) �
 
 **Otherwise — local, or a platform with no gate-sync CI — the engine makes this edit, not you.**
 `yad gate open <epic> ui-design.md` marks `ui-design-review` `in_review`, closes `ui-design` as `done`, and moves `currentStep` to the gate
-— the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
+— unless the chain is already past it: a `ui-design` re-opened with a late `yad undefer` runs beside the
+finished stories, and opening its review leaves `currentStep` where it is — the same transition, from the one function that owns it (`markInReview`, `cli/epic-state.mjs`).
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.

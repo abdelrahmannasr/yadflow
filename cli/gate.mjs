@@ -869,7 +869,10 @@ export async function gateStatus(root, { epic } = {}) {
     // `yad doctor` reports as `step:unknown-status`.
     // A deferred step lets the chain continue, but nobody has reviewed it: a green tick beside "still
     // owed" would read as reviewed, so it keeps the open-step mark (E37).
-    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
+    // A debt being paid back (E41) is no longer `deferred`, so the tag above does not show; say it here,
+    // until the review passes and clears the flag.
+    const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
+    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
   }
 }
 

@@ -382,6 +382,11 @@ to come back, so `yad undefer` has **no closing window**. Before later work has 
 | `currentStep` | unchanged |
 | `debt` | kept, if the deferral carried it |
 
+A late re-open needs later work that is **finished** here. If later work has only started, or holds a
+status this release cannot name, `yad undefer` is refused as before. A re-opened step can be deferred
+again with `yad defer` (not skipped: the finished work was built without it), so a late undefer is not
+a one-way door.
+
 **A re-opened step is read off the chain, never off a flag:** an unfinished step with a later step
 **completed here** (`status: "done"`, not inherited, not skipped) that is not its own `-review` gate.
 Such a step runs beside the chain, like `test-cases`:
@@ -390,7 +395,8 @@ Such a step runs beside the chain, like `test-cases`:
   the steps between itself and that work, its own gate included.
 - `markInReview` moves `currentStep` only forward, so opening its review does not pull the chain back.
 - `advanceState`, for a gate that passed behind the chain (`currentStep` past it, or `ready-for-build`),
-  closes the gate and changes nothing else. In the forward case it now opens only a `todo` next step.
+  closes the gate and changes nothing else. In the forward case it walks past every step that has already
+  passed — skipped, deferred, inherited (`satisfied`) or `done` — and opens the next one only if it is `todo`.
 - `yad next` lists it under `reopened` (JSON) and prints `re-opened lane: …`.
 
 Only `done` counts as finished work. A skipped, deferred or `satisfied` step after an unfinished step is
@@ -414,6 +420,7 @@ of the pair:
 | What it changes | nothing about the state: a debt is exactly as passed, and as unauthored, as any deferral |
 | Adding it later | `yad defer … --debt` on a step already deferred adds the flag and keeps the record |
 | Paying it back | `yad undefer`, early or late; the flag stays on while the step is worked on |
+| Setting it aside again | `yad defer` again keeps the flag; `yad skip` is refused on a step owed as debt, because a skip owes nothing and its review would never run again |
 | When it clears | `advanceState` removes it from both steps when the `-review` gate passes — nothing else does |
 | Reminders | `yad next` (a warning per debt, a count in the all-epics list, `debt` in JSON), `yad doctor` (`step:debt`, a warn), `yad gate status` ("deferred (still owed, as debt)") |
 
