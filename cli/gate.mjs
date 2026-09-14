@@ -99,7 +99,10 @@ export function warnIncompleteDiscovery(epicDir, artifact) {
   if (b !== 'foundation') return;
   const empty = unwrittenSections(epicDir);
   if (empty.length) {
-    warn(`Foundation not written yet — ${empty.join(', ')} ${empty.length === 1 ? 'holds' : 'hold'} only template headings; an approval now would approve ${empty.length === 1 ? 'an empty section' : 'empty sections'}`);
+    // Worded for both callers: `gate open` before any approval, and `gate sync` on a review that may
+    // already have passed — so it says what an approval of this content means, not that one is coming.
+    const one = empty.length === 1;
+    warn(`Foundation not written yet — ${empty.join(', ')} ${one ? 'holds nothing but its' : 'hold nothing but their'} template, so an approval of ${one ? 'it approves an empty section' : 'them approves empty sections'}`);
   }
 }
 

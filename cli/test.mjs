@@ -14395,6 +14395,24 @@ test('isUnwrittenSection: every shipped Foundation template reads as unwritten, 
   assert.equal(isUnwrittenSection('---\nid: EP-foundation\nowner: sam\n---\n## Why\n<!-- one\ntwo -->\n'), true);
   assert.equal(isUnwrittenSection('## Why\n- one bullet\n'), false, 'a list item is writing');
   assert.equal(isUnwrittenSection(''), true);
+  // The E76 review: a bare `---` divider is not a table rule, so the line above it is not a header row.
+  assert.equal(isUnwrittenSection('- Flatmates split rent.\n---\n'), false, 'a list item above a divider');
+  assert.equal(isUnwrittenSection(`${table}| tally | web |\n---\n`), false, 'a filled row above a divider');
+  assert.equal(isUnwrittenSection('Flatmates split rent.\n:---:\n'), false, 'a sentence above a pipe-less rule');
+  assert.equal(isUnwrittenSection('Flatmates split rent.\n|---|---|\n'), false, 'a header row needs a pipe of its own — a sentence above a rule is not one');
+  assert.equal(isUnwrittenSection('## Why\n---\n'), true, 'a divider on its own is still template');
+  assert.equal(isUnwrittenSection('## Languages\n### TypeScript and React\n'), false, 'a ### sub-heading is an answer');
+  assert.equal(isUnwrittenSection(`\uFEFF${tpl['purpose.md']}`), true, 'a byte-order mark does not turn the frontmatter into content');
+});
+
+test('isUnwrittenSection: every worked example in the Foundation schema reads as written (E76)', async () => {
+  const { isUnwrittenSection, FOUNDATION_FILES } = await import('./epic-state.mjs');
+  const src = fs.readFileSync(path.join(ROOT, 'skills/yad-discovery/references/foundation-schema.md'), 'utf8');
+  // The other direction from the templates: real content, in the shapes the skill teaches, must never be
+  // warned about. `risks.md` is the sharpest — a filled table and no prose at all.
+  const examples = [...src.matchAll(/^### `([a-z]+\.md)`[\s\S]*?\*\*Example \(Tally\):\*\*\n\n```markdown\n([\s\S]*?)\n```/gm)];
+  assert.deepEqual(examples.map((m) => m[1]), FOUNDATION_FILES, 'one example per section, in section order');
+  for (const [, file, body] of examples) assert.equal(isUnwrittenSection(body), false, `${file}: the worked example must read as written`);
 });
 
 test('gate: a complete Foundation whose sections are still templates is named as not written, and missing is named first (E76)', async () => {
@@ -14408,13 +14426,13 @@ test('gate: a complete Foundation whose sections are still templates is named as
     write('risks.md');
     let out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
     assert.match(out, /Foundation incomplete — missing stack\.md;/, 'a missing section is still named');
-    assert.match(out, /Foundation not written yet — risks\.md holds only template headings; an approval now would approve an empty section/,
+    assert.match(out, /Foundation not written yet — risks\.md holds nothing but its template, so an approval of it approves an empty section/,
       'an OPTIONAL section that exists is part of what is reviewed, so it is asked too');
 
     write('stack.md');
     out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
     assert.doesNotMatch(out, /incomplete/);
-    assert.match(out, /stack\.md, risks\.md hold only template headings; an approval now would approve empty sections/, 'section order, plural');
+    assert.match(out, /stack\.md, risks\.md hold nothing but their template, so an approval of them approves empty sections/, 'section order, plural');
     assert.deepEqual(unwrittenSections(T), ['stack.md', 'risks.md']);
 
     write('stack.md', 'TypeScript.\n');
@@ -14452,7 +14470,7 @@ test('doctor: foundation:unwritten fires only once the review has opened or pass
     let [w] = run();
     assert.equal(w?.id, 'foundation:unwritten');
     assert.equal(w.status, 'warn');
-    assert.match(w.message, /purpose\.md, scope\.md, mvp\.md, roadmap\.md, stack\.md, repos\.md hold only template headings, and its review has opened/);
+    assert.match(w.message, /purpose\.md, scope\.md, mvp\.md, roadmap\.md, stack\.md, repos\.md hold nothing but their template, and its review has opened/);
     assert.match(w.hint, /before the review is approved/);
     assert.ok(collectDoctor(T).checks.some((x) => x.id === 'foundation:unwritten'), 'wired into yad doctor, not just exported');
 
@@ -14469,6 +14487,10 @@ test('doctor: foundation:unwritten fires only once the review has opened or pass
     for (const s of state.steps) s.artifact = 'discovery/';
     writeState(stateFile, state);
     assert.deepEqual(run(), [], 'a Foundation converted from the old spelling binds discovery/, which is never read this way');
+
+    delete review().artifact;
+    writeState(stateFile, state);
+    assert.deepEqual(run(), [], 'a review with no artifact is catalogueChecks\' finding — this check must not crash doctor first');
 
     fs.writeFileSync(stateFile, '{ not json');
     assert.deepEqual(run(), [], 'an unreadable ledger is left to the epic checks');

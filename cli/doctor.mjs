@@ -616,13 +616,15 @@ export function foundationSectionChecks(checks, root) {
   try { state = loadLedger(dir).state; } catch { return; }
   if (!state) return;                                        // no state.json — no Foundation to read
   const review = state.steps.find((s) => s.id === 'foundation-review');
-  if (!review || artifactBase(review.artifact) !== 'foundation') return;
+  // `validateState` does not require `artifact`, and `artifactBase` throws without one: a hand-edited
+  // step missing it is `catalogueChecks`' finding to report, so this check must not crash doctor first.
+  if (!review || typeof review.artifact !== 'string' || artifactBase(review.artifact) !== 'foundation') return;
   const status = stepStatus(review);
   if (status !== 'in_review' && status !== 'done') return;
   const empty = unwrittenSections(dir);
   if (!empty.length) return;
   check(checks, 'foundation:unwritten', 'project', 'warn',
-    `${FOUNDATION_EPIC}: ${empty.join(', ')} ${empty.length === 1 ? 'holds' : 'hold'} only template headings, and its review has ${status === 'done' ? 'passed' : 'opened'}`,
+    `${FOUNDATION_EPIC}: ${empty.join(', ')} ${empty.length === 1 ? 'holds nothing but its' : 'hold nothing but their'} template, and its review has ${status === 'done' ? 'passed' : 'opened'}`,
     status === 'done'
       ? 'write the section, then re-open the review (a fresh PR/MR) — the approval on record approved an empty section'
       : 'write the section before the review is approved — the yad-discovery skill says what each section needs');

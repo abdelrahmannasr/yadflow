@@ -383,19 +383,29 @@ export function foundationHash(dir, sections = FOUNDATION_SECTIONS, sha = review
 // What does NOT count as writing is exactly what the templates in
 // `skills/yad-discovery/references/foundation-schema.md` are made of, and a test reads those templates
 // to keep the two in step: the frontmatter, headings, HTML comments, blank lines, and an empty table —
-// its header row, its `|---|` rule and rows whose cells are all empty. Anything else is a person's words.
+// its header row, its `|---|` rule and rows whose cells are all empty). Anything else is a person's words.
+//
+// "Headings" means `#` and `##` only — the level the templates use. A `### TypeScript and React` under
+// `## Languages and frameworks` is an answer, not a template line.
+//
+// A table rule and a header row must each carry a `|`. Without that, a bare `---` divider matched the
+// rule, and the line above it — a real sentence, or a filled table row — was read as a header, so real
+// content came out unwritten (the E76 review). A divider on its own is ignored, and marks nothing else.
 //
 // A heuristic, and it errs one way on purpose: a single real sentence makes a section written. It is
 // only ever used to WARN (`yad gate open`, `yad gate sync`, `yad doctor`), never to refuse, so a false
 // "written" costs a missing reminder and a false "unwritten" would cost a wrong one.
 const TABLE_RULE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
+const isTableRule = (l) => l.includes('|') && TABLE_RULE.test(l);
+const DIVIDER = /^(-{3,}|\*{3,}|_{3,})$/;
 export function isUnwrittenSection(text) {
-  const lines = text.replace(/\r\n?/g, '\n').replace(FRONTMATTER_BLOCK, '').replace(/<!--[\s\S]*?-->/g, '')
-    .split('\n').map((l) => l.trim());
+  const lines = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(FRONTMATTER_BLOCK, '')
+    .replace(/<!--[\s\S]*?-->/g, '').split('\n').map((l) => l.trim());
   return lines.every((l, i) => !l
-    || /^#{1,6}(\s|$)/.test(l)
-    || TABLE_RULE.test(l)
-    || TABLE_RULE.test(lines[i + 1] ?? '')                        // a table's header row
+    || /^#{1,2}(\s|$)/.test(l)
+    || DIVIDER.test(l)
+    || isTableRule(l)
+    || (l.includes('|') && isTableRule(lines[i + 1] ?? ''))       // a table's header row
     || (l.startsWith('|') && l.split('|').every((cell) => !cell.trim())));
 }
 

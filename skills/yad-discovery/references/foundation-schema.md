@@ -37,14 +37,14 @@ steps        foundation (author, artifact foundation/) · foundation-review (rev
 ## When a section counts as written (E76)
 
 A section that still holds **only its template** is not written. "Only its template" means nothing but
-the frontmatter, headings, `<!-- comments -->`, blank lines, and an empty table (its header row, its
-`|---|` rule, and rows whose cells are all empty). One real sentence or one filled table row makes it
-written.
+the frontmatter, `#` and `##` headings, `<!-- comments -->`, blank lines, `---` dividers, and an empty table
+(its header row, its `|---|` rule, and rows whose cells are all empty). One real sentence, one filled
+table row, or one `###` sub-heading makes it written.
 
 The engine checks this, and only ever **warns**:
 
-- `yad gate open` and `yad gate sync` print `Foundation not written yet — <files> hold only template
-  headings` when a section that exists is still empty.
+- `yad gate open` and `yad gate sync` print `Foundation not written yet — <files> hold nothing but their
+  template` when a section that exists is still empty.
 - `yad doctor` reports `foundation:unwritten` once the review has **opened or passed** with an empty
   section. While the Foundation is still being written, an empty section is just work not done yet.
 

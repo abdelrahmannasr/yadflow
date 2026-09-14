@@ -77,7 +77,9 @@ Work in this order, because each section is the input to the next:
 For each section:
 - Ask the questions **one at a time**. Write down the user's answer, not your own guess. When an answer is
   vague ("everyone", "fast", "not bloated"), ask again for something concrete.
-- Write the section, show it to the user, and change it until they agree. Then move to the next one.
+- Draft the section's text, show it to the user, and change it until they agree. Then move to the next
+  one. The agreed text is written into `foundation/` in Step 5, once the authoring branch (Step 3) and the
+  ledger (Step 4) exist — never onto whatever branch happens to be checked out.
 - Check it against the sections before it: the MVP must not contradict a non-goal in `scope.md`, and
   Phase 1 of the roadmap must match `mvp.md`.
 
@@ -119,7 +121,9 @@ Foundation and a product still on the old spelling (Step 1 already stopped for b
 
 ### Step 5 — Write the Foundation sections
 Write these files directly in `{project-root}/foundation/`, one per section, using the templates in
-`references/foundation-schema.md`. The gate binds to the **whole set**: editing any section revokes
+`references/foundation-schema.md` for their headings. The bodies are the text already agreed with the
+user — on greenfield, the sections drafted in Step 2a; on brownfield, what Step 2b read from the
+code-maps. Do not start a section over from its blank template. The gate binds to the **whole set**: editing any section revokes
 approvals. (The frontmatter `status:` line does not count — the gate rewrites it after the review.)
 
 | File | Section | Required? |
@@ -138,8 +142,8 @@ bind an approval to, and `yad gate open` warns. An optional section counts once 
 removing one after an approval revokes it, like any other edit.
 
 **Every section that exists must also be written.** A section that still holds only its template — the
-frontmatter, headings, comments and an empty table — makes `yad gate open` and `yad gate sync` warn
-`Foundation not written yet`, and once the review has opened `yad doctor` reports it as
+frontmatter, `#` and `##` headings, comments, `---` dividers and an empty table — makes `yad gate open` and `yad gate sync` warn
+`Foundation not written yet`, and once the review has opened or passed `yad doctor` reports it as
 `foundation:unwritten`. These are warnings, not refusals: finish the section before asking for review.
 
 Leave `owner` for the user to set in each frontmatter. Fill the bodies with the user.

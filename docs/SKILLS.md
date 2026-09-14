@@ -86,9 +86,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   `risks.md` (optional). In greenfield it writes them with the user one section at a time, in that
   order, from the questions its schema gives for each section (what to ask, what a good answer holds,
   what the reviewer checks). In brownfield, `stack.md` and `repos.md` are based on the connected code. A
-  section still holding only its template makes `yad gate open` warn "Foundation not written yet", and
-  `yad doctor` reports it (`foundation:unwritten`) once the review has opened — a warning, never a
-  refusal. It is
+  section still holding only its template makes `yad gate open` and `yad gate sync` warn "Foundation not
+  written yet", and `yad doctor` reports it (`foundation:unwritten`) once the review has opened or
+  passed — a warning, never a refusal. It is
   gated by the same review gate (base rule: owner + 1 reviewer); on approval it terminates at
   `foundation-done` (no Build). The roadmap puts that approval "before feature work begins" — in this
   release that is **reported by `yad next`, not enforced**. Its `roadmap.md` is the menu of features —
