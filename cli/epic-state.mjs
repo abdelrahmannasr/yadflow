@@ -1288,11 +1288,41 @@ function withoutSkip(step) {
   return rest;
 }
 
+// The index of the first step after `index` that is not itself skipped: the step a skip opens. Past
+// the end of the chain when the whole rest of it is skipped. Both verbs below refuse a hole after the
+// pair (`refuseHoleAfter`) before they ask this, so it never has to decide what a null entry means.
+const firstUnskippedAfter = (steps, index) => {
+  let j = index + 1;
+  while (steps[j] && stepStatus(steps[j]) === 'skipped') j++;
+  return j;
+};
+
+// Has work begun on this step IN THIS CHAIN — is it open (`in_progress` / `in_review`) or completed
+// here (`done`)? That is the only thing that makes a skip or an un-skip too late, because it is the only
+// thing built on the skip. The recorded states are not work done here: `skipped`, `satisfied` (carried
+// from a parent epic), `deferred` and `blocked` all describe a step nobody worked on in this chain, so
+// counting them would refuse an un-skip because a later step was inherited. A status word this release
+// cannot name counts as started: refusing is the safe reading of a file a newer release wrote.
+const hasStarted = (step) => {
+  const st = stepStatus(step);
+  return st === null || st === 'in_progress' || st === 'in_review' || st === 'done';
+};
+
+// A hole in the chain after the pair makes "has the chain moved on?" unanswerable either way — reading
+// it as `todo` would let a skip through past a started step, reading it as started would refuse for a
+// step that does not exist. Refuse it, the way a pair with no `-review` gate is refused.
+const refuseHoleAfter = (steps, index, verb) => {
+  if (steps.slice(index + 1).some((s) => !isPlainObject(s))) {
+    throw err('YAD-STATE-004', `malformed chain: an entry after the step to ${verb} is not a step`, 'restore state.json from git, then run `yad doctor`');
+  }
+};
+
 // PURE. Mark a skippable step (its author step + paired `<id>-review` gate) N/A for this epic: pre-mark
-// both `done` with a recorded reason, and — if currentStep is sitting on the pair — advance currentStep
-// past them to the next non-skipped step. Idempotent on an already-skipped step. Refuses once the step
-// was authored, once its review gate has opened, or once its downstream `stories` has started — the
-// step is optional only up to authoring it. Throws on a non-skippable id or a malformed (unpaired) chain.
+// both `skipped` with a recorded reason, and — if currentStep is sitting on the pair — advance
+// currentStep past them to the next non-skipped step. Idempotent on an already-skipped step. Refuses once
+// the step was authored, once its review gate has opened, or once work has started on any later step —
+// the step is optional only up to authoring it. Throws on a non-skippable id or a malformed (unpaired)
+// chain. Which step ids qualify is the epic's route (`optionalStepsFor`), and nothing below names one.
 export function skipStep(state, stepId, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
   const steps = requireChain(state, 'skip a step in');
   const optional = optionalStepsFor(state, profiles);
@@ -1306,7 +1336,7 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   // original reason/actor, so it must not fail merely for lacking a fresh --reason.
   if (claimsSkipped(author)) return state;
   if (!reason || !String(reason).trim()) {
-    throw err('YAD-STATE-004', 'a skip needs a reason', 'pass a reason, e.g. "backend-only epic, no UI"');
+    throw err('YAD-STATE-004', 'a skip needs a reason', `say why the step does not apply, e.g. \`yad skip <epic> ${stepId} --reason "<why>"\``);
   }
   // A skippable step must carry its paired `-review` gate — the change keeps BOTH in the chain. A
   // missing gate is a malformed chain; refuse rather than half-stamp only the author step.
@@ -1324,14 +1354,20 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
     throw err('YAD-STATE-004', `${stepId} is inherited from ${author.inheritedFrom || 'the parent epic'}`,
       'a step carried by reference is already satisfied upstream — there is nothing here to skip. Re-thread the change if it should be re-authored');
   }
-  // Once the review gate has opened (in_review / done), the UI work is effectively committed — skipping
+  // Once the review gate has opened (in_review / done), the work is effectively committed — skipping
   // then would orphan a live review PR. Refuse; the step is optional only up to authoring it.
   if (stepStatus(review) !== 'todo') {
-    throw err('YAD-STATE-004', `cannot skip ${stepId} — its review has already opened`, 'skip the UI step before its review begins');
+    throw err('YAD-STATE-004', `cannot skip ${stepId} — its review has already opened`, `skip ${stepId} before its review begins`);
   }
-  const stories = steps.find((s) => s?.id === 'stories');
-  if (stories && stepStatus(stories) !== 'todo') {
-    throw err('YAD-STATE-004', `cannot skip ${stepId} — stories have already started`, 'skip the UI step before stories begin');
+  // No step past the pair may have started. This used to name `stories`, which was right only because
+  // `ui-design` was the one step any route marked optional and `stories` is what follows it. On a route
+  // that marks `architecture` optional, the step after the pair is `ui-design`, and a literal `stories`
+  // would let the skip through with ui-design already under way (E36).
+  refuseHoleAfter(steps, ri, 'skip');
+  const started = steps.slice(ri + 1).find(hasStarted);
+  if (started) {
+    throw err('YAD-STATE-004', `cannot skip ${stepId} — ${started.id} is already '${started.status ?? '(no status)'}'`,
+      `skip ${stepId} before ${started.id} begins`);
   }
   // `status: 'skipped'` is the step's own state from shape 7 on (E38), and the four legacy fields
   // stay beside it — rule 3, add before you remove. `skipped: true` is what a 3.x reader keys on and
@@ -1344,9 +1380,7 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   state.steps[ri] = { ...review, ...stamp };
   // If currentStep was on the pair we just skipped, move it to the next non-skipped step.
   if (state.currentStep === stepId || state.currentStep === `${stepId}-review`) {
-    let j = ri + 1;
-    while (state.steps[j] && stepStatus(state.steps[j]) === 'skipped') j++;
-    const next = state.steps[j];
+    const next = state.steps[firstUnskippedAfter(state.steps, ri)];
     if (next) {
       if (stepStatus(next) === 'todo') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
       state.currentStep = next.id;
@@ -1357,11 +1391,13 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   return state;
 }
 
-// PURE. Reverse a skip: clear the N/A stamp on the pair and restore the chain. Allowed only while the
-// downstream `stories-review` has not opened (state-only signal for "stories authoring is under way").
-// If every earlier step is done, the restored author step becomes the active step again (and a
-// downstream that the skip auto-opened is pushed back to `blocked` behind it); otherwise it just
-// returns to `blocked`. Throws if the step is not skipped or it is too late.
+// PURE. Reverse a skip: clear the N/A stamp on the pair and restore the chain. Allowed while the step
+// after the pair — the one the skip opened — is at most under way: once it is finished, or anything PAST
+// it has started (on `classic`, once `stories` is done or `stories-review` opens), the chain has built on
+// the skip, and it is too late.
+// If every earlier step has passed, the restored author step becomes the active step again (and the
+// downstream the skip auto-opened is pushed back to `todo` behind it); otherwise it just returns to
+// `todo`. Throws if the step is not skipped or it is too late.
 export function unskipStep(state, stepId) {
   // NO ROUTE GUARD HERE, and that asymmetry with `skipStep` is deliberate. Skipping needs the route's
   // permission because it makes a gate pass without approvals. Un-skipping only puts a step BACK in
@@ -1373,25 +1409,40 @@ export function unskipStep(state, stepId) {
   const ai = steps.findIndex((s) => s?.id === stepId);
   if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to un-skip');
   if (!claimsSkipped(steps[ai])) throw err('YAD-STATE-004', `${stepId} is not skipped`, 'nothing to un-skip');
-  const storiesReview = steps.find((s) => s?.id === 'stories-review');
-  if (storiesReview && stepStatus(storiesReview) !== 'todo') {
-    throw err('YAD-STATE-004', `cannot un-skip ${stepId} — the stories review has already opened`, 'un-skip before the stories review begins');
-  }
   const ri = steps.findIndex((s) => s?.id === `${stepId}-review`);
+  // The step after the pair may be under way — the skip itself opened it, and un-skipping pushes it
+  // back — but not FINISHED: a `done` step was authored on the assumption that the skipped step did not
+  // apply (stories written with no UI), and putting that step back would leave the work built without it
+  // standing as complete. Work started on anything BEYOND it means the same. This used to be a literal
+  // `stories-review` — the same rule read off the one route shape that existed (E36) — and asking only
+  // past the step after the pair missed a finished `stories` whose review was then blocked.
+  const tail = ri !== -1 ? ri : ai;
+  refuseHoleAfter(steps, tail, 'un-skip');
+  const j = firstUnskippedAfter(steps, tail);
+  const after = steps[j];
+  const beyond = (stepStatus(after) === 'done' ? after : null) || steps.slice(j + 1).find(hasStarted);
+  if (beyond) {
+    throw err('YAD-STATE-004', `cannot un-skip ${stepId} — ${beyond.id} is already '${beyond.status ?? '(no status)'}'`,
+      `un-skip before ${beyond.id} ${beyond === after ? 'is finished' : 'begins'} — the chain has built on the skip since`);
+  }
   const priorAllDone = steps.slice(0, ai).every((s) => isPassed(s));
   steps[ai] = { ...withoutSkip(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };
   if (ri !== -1) steps[ri] = { ...withoutSkip(steps[ri]), status: 'todo' };
   if (priorAllDone) {
     // The restored author step is the active step again. Push the downstream the skip auto-opened
-    // back to `todo` (it must wait behind the now-live step), and re-point currentStep here. Scan
-    // past any still-skipped steps (mirrors skipStep's step-over) and reset whether it was opened as
-    // an author step (`in_progress`) or a review gate (`in_review`).
-    let j = (ri !== -1 ? ri : ai) + 1;
-    while (state.steps[j] && stepStatus(state.steps[j]) === 'skipped') j++;
-    const after = state.steps[j];
+    // back to `todo` (it must wait behind the now-live step), whether it was opened as an author step
+    // (`in_progress`) or a review gate (`in_review`).
     const afterState = stepStatus(after);
     if (afterState === 'in_progress' || afterState === 'in_review') after.status = 'todo';
-    state.currentStep = stepId;
+    // Re-point currentStep here — EXCEPT when the epic EARNED `ready-for-build`: its `stories-review`
+    // passed a review — `done` here, or `satisfied`, reviewed in the parent epic — and sits before this step. A step restored after that gate runs
+    // beside Build the way `test-cases` does, and must not pull the epic out of Build (`markInReview`
+    // keeps the same rule; `advanceState` names the same gate). Anywhere else `ready-for-build` was
+    // reached by skipping, and restoring the step takes the claim back with it: on a chore lane whose
+    // stories pair was skipped by hand, keeping it would leave "Build can run" over unapproved stories.
+    const gate = steps.findIndex((s) => s?.id === 'stories-review');
+    const earnedBuild = state.currentStep === 'ready-for-build' && gate !== -1 && gate < ai && ['done', 'satisfied'].includes(stepStatus(steps[gate]));
+    if (!earnedBuild) state.currentStep = stepId;
   }
   return state;
 }

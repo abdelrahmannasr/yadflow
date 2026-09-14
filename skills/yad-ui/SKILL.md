@@ -51,9 +51,9 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   `yad next EP-<slug>` (the next step is `stories`).
 - **Should be skipped:** if you reach this step and the epic clearly produces no screens, do **not**
   invent a hollow UI artifact. Offer to mark it N/A instead:
-  `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That pre-marks both the
-  `ui-design` and `ui-design-review` steps `done` (recorded reason + actor), short-circuits the review
-  gate, and advances to `stories`. It is reversible with `yad skip EP-<slug> ui-design --undo` until the
+  `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That marks both the
+  `ui-design` and `ui-design-review` steps `skipped` (recorded reason + actor), short-circuits the review
+  gate, and advances to `stories`. It is reversible with `yad unskip EP-<slug> ui-design` until the
   stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional".
 
 ### Step 1b — Open the authoring branch

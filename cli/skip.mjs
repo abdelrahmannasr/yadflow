@@ -1,16 +1,19 @@
-// `yad skip <epic> <step> --reason "<why>"` (and `--undo`) — mark an OPTIONAL Shape step N/A for one
-// epic. Which steps those are is a fact about the epic's ROUTE, read from the lifecycle profile it is
-// on (E35, `optionalStepsFor`), not a list this engine keeps: on `classic` and `analysis-first` that is
-// `ui-design` and its gate, because an epic with no user-facing surface (backend/API, data, infra) does
-// not need a UI-design artifact. E40's short lanes mark NOTHING optional — they drop the steps they do
-// not need from the chain instead — so a skip is refused outright on one, and `notOptional` says which
-// of the two reasons applies rather than reporting every empty answer as a broken chain.
-// `--undo` asks no route at all: restoring a step to the chain can never let a gate pass, and it is
+// `yad skip <epic> <step> --reason "<why>"` and `yad unskip <epic> <step>` (`yad skip … --undo` is the
+// same verb) — mark an OPTIONAL Shape step N/A for one epic, or put it back. Which steps those are is a
+// fact about the epic's ROUTE, read from the lifecycle profile it is on (E35, `optionalStepsFor`), not
+// a list this engine keeps: on `classic` and `analysis-first` that is `ui-design` and its gate, because
+// an epic with no user-facing surface (backend/API, data, infra) does not need a UI-design artifact.
+// E40's short lanes mark NOTHING optional — they drop the steps they do not need from the chain
+// instead — so a skip is refused outright on one, and `notOptional` says which of the two reasons
+// applies rather than reporting every empty answer as a broken chain.
+// The too-late checks name no step (E36): a route that marks another step optional gets the same verb
+// with the same guards, measured against whatever steps follow the pair on that route.
+// Un-skipping asks no route at all: restoring a step to the chain can never let a gate pass, and it is
 // the remedy `yad doctor`'s `skip:not-optional` recommends on an epic whose route forbids the skip.
-// The skip stays VISIBLE and auditable — the step is pre-marked `done` with a recorded reason (and
-// actor/date), short-circuited at the gate — and is reversible until the stories review opens. All
-// state logic is the pure `skipStep`/`unskipStep` in epic-state.mjs; this is the thin file-load/save
-// + attribution wrapper.
+// The skip stays VISIBLE and auditable — the step is marked `skipped` with a recorded reason (and
+// actor/date), short-circuited at the gate — and is reversible until the chain past it has moved on.
+// All state logic is the pure `skipStep`/`unskipStep` in epic-state.mjs; this is the thin
+// file-load/save + attribution wrapper.
 import { ok, info, hand, fail, run } from './lib.mjs';
 import { epicRoot, loadLedger, skipStep, unskipStep, writeState } from './epic-state.mjs';
 import { loadProduct } from './gate.mjs';
@@ -31,12 +34,19 @@ export async function runSkip(root, { epic, step, reason, undo = false, today } 
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir} — seed the epic first with yad-epic`); process.exitCode = 1; return; }
-  if (!step) { fail('usage: yad skip <epic> <step> --reason "<why>"   (or: yad skip <epic> <step> --undo)'); process.exitCode = 1; return; }
+  if (!step) {
+    fail(undo ? 'usage: yad unskip <epic> <step>' : 'usage: yad skip <epic> <step> --reason "<why>"   (undo it with: yad unskip <epic> <step>)');
+    process.exitCode = 1;
+    return;
+  }
 
   // Guard violations throw a YadError (YAD-STATE-004) with a hint — the top-level catch in bin/yad.mjs
   // renders those. Here we only handle the happy path + the two plain-arg checks above.
   if (undo) {
     unskipStep(ledger.state, step);
+    // Un-skipping deletes the skip's record, so a reason given here would be recorded nowhere. Say so
+    // rather than accept it in silence.
+    if (reason != null && reason !== true) info('--reason is not used when un-skipping: the skip record is removed with the skip');
     writeState(ledger.files.state, ledger.state);
     ok(`${step} un-skipped — back in the chain`);
     hand(`currentStep is now ${ledger.state.currentStep}`);
@@ -48,5 +58,5 @@ export async function runSkip(root, { epic, step, reason, undo = false, today } 
   writeState(ledger.files.state, ledger.state);
   ok(`${step} marked N/A${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
-  hand(`its review gate is short-circuited; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad skip ${epic} ${step} --undo\`)`);
+  hand(`its review gate is short-circuited; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad unskip ${epic} ${step}\`)`);
 }

@@ -374,13 +374,38 @@ order. `yad doctor` reports that as `step:off-route`, because the guidance comma
 the order it is written: off the route, it names whatever sits next rather than what comes next.
 
 **The route also says which steps may be skipped.** A profile marks some of its steps optional, and
-`yad skip <epic> <step> --reason "<why>"` marks one N/A for one epic — pre-marked done with the reason
-recorded, visible in the chain, reversible with `--undo`. The engine keeps **no list of its own**: it
+`yad skip <epic> <step> --reason "<why>"` marks one N/A for one epic — the step and its review gate are
+both marked `skipped` with the reason recorded, visible in the chain, and `yad unskip <epic> <step>`
+puts them back (`yad skip <epic> <step> --undo` does the same). The engine keeps **no list of its own**: it
 asks the route the epic is on, so a shorter route that drops a step does not make that step skippable
 for every other epic in the project. `classic` and `analysis-first` both mark the same one step,
 `ui-design`. The short lanes mark **none** — they leave the steps they do not need out of the chain
 altogether, so there is nothing on them to mark N/A, and `yad skip` says so rather than reporting the
 chain as broken.
+
+**When a skip is too late, or an un-skip is.** Neither command names a step. Both look at the steps
+that come **after** the skipped pair. "The step after the pair" means the first later step that is not
+itself skipped — the step the skip opens.
+
+| Command | Refused once |
+|---|---|
+| `yad skip` | the step was authored, its review opened, or any later step has started |
+| `yad unskip` | the step after the pair is finished (`done`), or any step **past** it has started |
+
+"Started" means work happened on the step **in this epic**: it is open (`in_progress`, `in_review`) or
+`done`. A step that is `skipped`, `satisfied` (carried from a parent epic), `deferred` or `blocked` has
+had no work done on it here, so it never makes either command too late. A status word this release does
+not know counts as started, and a gap in the chain (an entry that is not a step) is refused as a broken
+chain.
+
+On `classic` the step after the `ui-design` pair is `stories`, so a skip is refused once stories start,
+and an un-skip once stories are finished or their review opens. On a route that marked `architecture` optional, the same
+rules would read `ui-design` and its review instead.
+
+**Un-skipping never leaves a false "Build can run".** When the epic is at `ready-for-build` because its
+stories review really passed (here, or in the parent epic it inherits from), a step put back after that review runs beside Build, the way `test-cases`
+does, and the epic stays in Build. When the epic only reached `ready-for-build` by skipping — a `chore`
+epic whose stories pair was skipped by hand — un-skipping moves it back to the restored step.
 
 **The recorded route is the answer, even when the chain disagrees with it.** An epic records its route
 in `state.json`, and that is what the engine reads. Working it out from the steps instead would guess,
@@ -644,7 +669,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
 | `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo. A repo *outside* the project root (a sibling, `../backend`) that is simply absent from this checkout is a **warn**, not this failure |
-| `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | the step must be one the epic's own [lifecycle route](#lifecycle-profiles-the-route-an-epic-takes) marks optional — `ui-design` on every route today — and needs a `--reason`; it can be skipped only up to authoring it (before its review opens / before `stories` start); `--undo` before the stories review opens. A chain on **no** route has nothing optional: fix `step:off-route` first |
+| `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | the step must be one the epic's own [lifecycle route](#lifecycle-profiles-the-route-an-epic-takes) marks optional — `ui-design` on `classic` and `analysis-first` — and needs a `--reason`; it can be skipped only up to authoring it (before its review opens / before the step after it starts — `stories`, on `classic`); `yad unskip` works until a step past that one starts (the stories review, on `classic`). A chain on **no** route has nothing optional: fix `step:off-route` first |
 | `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-STATE-006` | a Build ledger (`build-log`/`trust-log`) is locked by another yad process writing it | every read-modify-write on these ledgers (`--retro-ship`, `yad review reconcile`, `yad tidy up`) takes an exclusive lock, so two runs can never interleave and lose an entry. Wait for the other command and re-run; a lock left by a killed process is reclaimed automatically after 30s, or delete the `.lock` directory the message names |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |
