@@ -19,11 +19,12 @@
 // `yad-discovery` now runs `yad foundation new` (E75, below) for the Product level, which is not an epic
 // and has a command of its own.
 //
-// ONE DOES NOT, and it is not an oversight. `yad-change` seeds a THREADED chain: its inherited steps are
-// pre-marked done and bound to the parent's artifact hashes, its approvals ledger carries a provenance
-// record per inherited gate, and an inherited architecture materialises a pointer contract-lock —
-// inheritance is E42's, and the depth triage that decides which steps are inherited is a design, not a
-// flag. It is refused here by name rather than half-supported.
+// A THREADED CHAIN IS SEEDED HERE TOO, since E42. `yad-change` seeds a change, defect or hotfix with
+// `--parent` and `--inherits`: its inherited steps are `satisfied` and bound to the owning epic's artifact
+// hashes, its approvals ledger carries a provenance record per inherited gate, and an inherited
+// architecture writes a pointer contract-lock. What stays in the skill is the depth triage that DECIDES
+// which bases are inherited — a judgement made with a person, not a flag's default. A threaded type with
+// no parent is still refused, and so is a genesis type with one.
 //
 // The seed is still built key-by-key in the order those templates used, because the chains on disk in
 // every existing project were written that way and a re-seeded epic must not churn their bytes.
@@ -34,19 +35,10 @@ import { c, fail, hand, info, log, ok, readJSON, warn } from './lib.mjs';
 import {
   DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
   isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
-  readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
+  planThreadedSeed, readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
   seedState, staleFoundationGuards, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
-
-// The genesis types — the two a work item may be without naming a parent. A `change`, `defect` or
-// `hotfix` describes work ON something that already exists, and its chain is NOT a plain route: the
-// inherited steps are pre-marked done and bound to the parent's artifact hashes, `approvals.json` is
-// seeded with one provenance record per inherited gate, and an inherited architecture materialises a
-// pointer contract-lock (yad-change, Step 5). Seeding a bare profile for one of those would produce an
-// epic that looks threaded and re-reviews everything its parent already approved — wrong, not merely
-// incomplete. So this command refuses them and sends the user to the skill that does it properly.
-const SEEDABLE_TYPES = WORK_ITEM_TYPES.filter(isGenesisType);
 
 // `foo`, `EP-foo` and `epics/EP-foo` all name the same epic. Accepting only one spelling would make the
 // command reject the id the user just read out of `yad next`.
@@ -58,7 +50,7 @@ export function epicIdFrom(slug) {
 
 // `type` defaults to null rather than `feature` so an explicit `--type` is distinguishable from no
 // flag at all — which is what lets an existing `epic.md` supply the answer without overriding the user.
-export async function runEpicNew(root, { slug, type = null, profile = 'classic', stub = false, today, json = false } = {}) {
+export async function runEpicNew(root, { slug, type = null, profile = null, stub = false, parent = null, inherits = null, today, json = false } = {}) {
   const bail = (message, hint) => {
     if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
     else { fail(message); if (hint) hand(hint); }
@@ -66,7 +58,7 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   };
 
   const epic = epicIdFrom(slug);
-  if (!epic) return bail(`usage: yad epic new <slug> [--type feature|chore] [--profile ${seedableProfiles().join('|')}]`);
+  if (!epic) return bail(`usage: yad epic new <slug> [--type ${WORK_ITEM_TYPES.join('|')}] [--profile ${seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
   // The id becomes a path segment under epics/ — reject anything but EP-<slug> outright, the same
   // guard every other epic-taking command applies.
   if (!isValidEpicId(epic)) return bail(`invalid epic id: ${epic} (expected EP-<slug>, [a-z0-9-] only)`);
@@ -109,8 +101,8 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // not contain. So the raw keys decide whether there is anything to clash WITH, and `workItemType`
   // still decides what it says: the OLD name (`kind:`) wins there, the same tie-break the stamper uses.
   const mdPath = path.join(dir, 'epic.md');
+  const fm = fs.existsSync(mdPath) ? readFrontmatter(mdPath) : {};
   if (fs.existsSync(mdPath)) {
-    const fm = readFrontmatter(mdPath);
     const declares = typeof fm.kind === 'string' && fm.kind.trim()
       || typeof fm.type === 'string' && fm.type.trim();
     if (declares) {
@@ -124,17 +116,52 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   }
   type = type || 'feature';
 
-  if (!SEEDABLE_TYPES.includes(type)) {
-    const known = WORK_ITEM_TYPES.includes(type);
-    return bail(
-      known
-        ? `a ${type} epic cannot be seeded from a plain profile`
-        : `unknown work-item type: ${type}`,
-      known
-        ? `a ${type} threads off an epic that already exists, so its chain inherits that epic's approved steps rather than re-running them. Run the yad-change skill, which seeds the inheritance and the provenance records too`
-        : `a work item is one of ${WORK_ITEM_TYPES.join(' · ')}; this command seeds ${SEEDABLE_TYPES.join(' and ')}`,
-    );
+  if (!WORK_ITEM_TYPES.includes(type)) {
+    return bail(`unknown work-item type: ${type}`, `a work item is one of ${WORK_ITEM_TYPES.join(' · ')}`);
   }
+
+  // THE PARENT AND WHAT IT CARRIES (E42) are authored in epic.md as well — `parent:` and `inherits:` —
+  // and the same rule as the type holds: the header's word wins over no flag, and a flag that
+  // contradicts it is refused. `yad thread` and the owner map read the header, so a ledger seeded from
+  // a flag the header disagrees with would describe a thread nobody can see.
+  const declaredParent = typeof fm.parent === 'string' && fm.parent.trim() ? fm.parent.trim() : null;
+  if (parent && declaredParent && parent !== declaredParent) {
+    return bail(`${epic}: epic.md says \`parent: ${declaredParent}\`, --parent says \`${parent}\``,
+      'drop the flag to take the header\'s answer, or fix the header first — nothing here rewrites epic.md');
+  }
+  parent = parent || declaredParent;
+  const flagInherits = inherits == null ? null : listOf(inherits);
+  const declaredInherits = 'inherits' in fm ? listOf(fm.inherits) : null;
+  if (flagInherits && declaredInherits
+    && [...new Set(flagInherits)].sort().join() !== [...new Set(declaredInherits)].sort().join()) {
+    return bail(`${epic}: epic.md inherits [${declaredInherits.join(', ')}], --inherits says [${flagInherits.join(', ')}]`,
+      'drop the flag to take the header\'s answer, or fix the header first — nothing here rewrites epic.md');
+  }
+
+  // Checked before the type rules, so `--stub --type defect --parent …` is told what is actually wrong
+  // rather than seeded as a threaded epic with the flag silently dropped.
+  if (stub && parent) {
+    return bail('a stub has no parent — it anchors a feature that shipped before it had an epic',
+      'drop --stub to thread a change off the parent, or drop --parent to mint the anchor');
+  }
+  if (isGenesisType(type) && parent) {
+    return bail(`a ${type} has no parent — it starts a thread`,
+      `a change on ${parent} is \`--type change\` (or defect / hotfix). Drop --parent to start a new ${type}`);
+  }
+  if (!isGenesisType(type) && !parent) {
+    return bail(`a ${type} epic cannot be seeded without its parent`,
+      `a ${type} threads off an epic that already exists and inherits what it does not change. Run the yad-change skill — it triages which steps are inherited and then runs \`yad epic new <slug> --type ${type} --parent EP-<parent> --inherits <bases>\``);
+  }
+  if (!parent && flagInherits) {
+    return bail('--inherits needs a parent', 'only a change, defect or hotfix carries steps by reference, from the epic named by --parent');
+  }
+  if (parent) {
+    return seedThreaded(root, {
+      epic, dir, files, mdPath, fm, type, parent, profile,
+      inherits: flagInherits ?? declaredInherits ?? [], headerLists: declaredInherits !== null, today, json, bail,
+    });
+  }
+  profile = profile || 'classic';
 
   // A STUB anchors a feature that was built before the Product existed, so a defect can thread off it
   // today. Two restrictions, both from what a stub IS rather than from anything technical:
@@ -214,6 +241,69 @@ export async function runEpicNew(root, { slug, type = null, profile = 'classic',
   // Nothing was committed here, and on a verified Product the seed HAS to ride the first review PR:
   // `ledger-guard` exempts a new epic's ledger only while it is absent from the base ref (creation,
   // not mutation, #162). Left uncommitted until then, it lands by no path at all.
+  info('commit the seed on this epic\'s authoring branch — it reaches the default branch through the first review PR/MR.');
+}
+
+// `a,b`, `a b` and `[a, b]` all name the same list — the flag is typed, the header is YAML-ish.
+const listOf = (v) => (Array.isArray(v) ? v : String(v ?? '').replace(/^\s*\[|\]\s*$/g, '').split(/[\s,]+/))
+  .map((x) => String(x).trim()).filter(Boolean);
+
+// The threaded half of `yad epic new` (E42): a change, defect or hotfix off an epic that exists. The
+// engine plans the chain from the parent (`planThreadedSeed`) and this writes it — the ledger, one
+// provenance record per inherited gate, and the pointer-lock when the contract is carried.
+function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profile, inherits, headerLists, today, json, bail }) {
+  const plan = planThreadedSeed(root, { epic, parent, inherits, type, today });
+  if (!plan.ok) return bail(plan.message, plan.hint);
+  // The route is the parent's. A flag naming the same one is harmless; a different one is refused
+  // rather than obeyed, because a child on another route would inherit steps its route does not have.
+  if (profile && profile !== plan.profile) {
+    return bail(`a change takes its parent's route — ${parent} is on '${plan.profile}', --profile says '${profile}'`,
+      'drop --profile. To change the route, start a new epic instead of threading one');
+  }
+  const declaredThread = typeof fm.thread === 'string' && fm.thread.trim() ? fm.thread.trim() : null;
+  if (declaredThread && declaredThread !== plan.thread) {
+    return bail(`${epic}: epic.md says \`thread: ${declaredThread}\`, but ${parent}'s thread starts at ${plan.thread}`,
+      `set \`thread: ${plan.thread}\` in epic.md — the thread is the genesis of the parent's line`);
+  }
+  // Refuse before writing anything. An existing lock is somebody's record, and nothing here overwrites one.
+  if (plan.lock && fs.existsSync(files.contractLock)) {
+    return bail(`${epic} already has a contract-lock.json`,
+      'nothing here overwrites a lock. Remove it only if it is left over from a mistake, then run this again');
+  }
+
+  writeState(files.state, plan.state);
+  writeJSON(files.approvals, plan.approvals);
+  if (!fs.existsSync(files.comments)) writeJSON(files.comments, []);
+  fs.mkdirSync(path.join(dir, 'reviews'), { recursive: true });
+  if (plan.lock) writeJSON(files.contractLock, plan.lock);
+
+  const { state } = plan;
+  const first = state.steps.find((s) => s.id === state.currentStep);
+  const skills = stepSkills(first.id, loadSkillBindings(root));
+  const carried = state.steps.filter((s) => s.inherited);
+  if (json) {
+    return log(JSON.stringify({
+      ok: true, epic, type, profile: plan.profile, stub: false, parent, thread: plan.thread,
+      inherits, inheritedFrom: plan.owners, pointerLock: plan.lock ? plan.lock.ref : null, anchor: plan.anchor,
+      currentStep: state.currentStep, steps: state.steps.map((s) => s.id), next: skills[0] || null,
+      ...(skills.length > 1 ? { nextSkills: skills } : {}),
+    }, null, 2));
+  }
+  ok(`${epic} seeded — ${typeNoun(type)} threaded off ${parent}, on its ${c.bold(plan.profile)} route (${state.steps.length} steps, ${carried.length} carried by reference)`);
+  info(`chain: ${state.steps.map((s) => (s.inherited ? c.dim(`${s.id}←${s.inheritedFrom}`) : s.id === first.id ? c.bold(s.id) : s.id)).join(' → ')}`);
+  if (plan.lock) {
+    info(`contract-lock.json points at ${plan.lock.inheritedFrom}'s lock (${plan.lock.hash.slice(0, 19)}…) — there is no contract.md here, so the surface cannot drift`);
+  } else if (state.steps.some((s) => s.id === 'architecture' && !s.inherited)) {
+    info('architecture is authored here — the change re-locks the contract, and its review is escalated');
+  }
+  if (plan.anchor) warn('a base is carried from a brownfield anchor — no hash and no contract lock yet; protection starts when the anchor is promoted');
+  if (!carried.length) info('nothing is carried by reference — every step runs on this epic');
+  hand(`${first.id} is open${skills.length ? ` — run the ${skills.join(' skill, then the ')} skill to author ${first.artifact}` : ''}`);
+  if (!fs.existsSync(mdPath)) {
+    info(`epic.md is authored by the yad-change skill, not by this command. Give it \`kind: ${type}\`, \`type: ${type}\`, \`parent: ${parent}\`, \`thread: ${plan.thread}\` and \`inherits: [${inherits.join(', ')}]\` so the header and the ledger agree.`);
+  } else if (!headerLists && inherits.length) {
+    warn(`epic.md lists no \`inherits:\` — add \`inherits: [${inherits.join(', ')}]\`. \`yad thread\` reads the header, and without it this epic reads as the owner of what it carries`);
+  }
   info('commit the seed on this epic\'s authoring branch — it reaches the default branch through the first review PR/MR.');
 }
 

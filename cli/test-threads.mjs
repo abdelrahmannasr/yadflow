@@ -13,7 +13,7 @@ import {
   LIFECYCLE_PROFILES, lifecycleProfile, profileSteps, matchLifecycleProfile, optionalStepsOf,
   seedableProfiles, seedState, stateInvariants, shape6Routes, advanceState, skipStep, routeLacksStep,
   PRODUCT_PHASES, FOUNDATION_EPIC, FOUNDATION_DIR, FOUNDATION_SECTIONS, FOUNDATION_REQUIRED, epicRoot, epicRel,
-  epicIds, foundationHash, artifactHash, artifactPaths, parseReviewBranch, seedFoundationState, productProfiles,
+  epicIds, foundationHash, artifactHash, artifactPaths, parseReviewBranch, seedFoundationState, productProfiles, contractSurfaceHash,
   isProductLevel, PRODUCT_DONE, stepSkills,
 } from './epic-state.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
@@ -1055,9 +1055,9 @@ function templateSeed(skillFile) {
 
 // What is LEFT after E17b. `yad-epic`, `yad-analysis` and `yad-stub` no longer carry one — they run
 // `yad epic new` instead, and `yad-discovery` runs `yad foundation new` (E75); the test below is what
-// keeps those templates from coming back. This one remains because the engine deliberately does not
-// seed it: `yad-change`'s chain is threaded — inherited steps bound to a parent's hashes, with
-// provenance records beside them.
+// keeps those templates from coming back. This one remains as a WORKED EXAMPLE, not an instruction:
+// since E42 `yad-change` runs `yad epic new --parent`, and a test further down keeps this example equal
+// to what the engine writes, so a reviewer reading it is not reading a shape that no longer exists.
 const SEED_TEMPLATES = [
   ['yad-change/references/triage.md', 'classic'],
 ];
@@ -1072,6 +1072,8 @@ const ENGINE_SEEDED = [
   ['yad-stub/SKILL.md', 'yad epic new EP-<slug> --stub'],
   // E75: the Product level has a command of its own, and the skill that authors it runs that.
   ['yad-discovery/SKILL.md', 'yad foundation new'],
+  // E42: the threaded chain — inherited steps, provenance records and the pointer-lock.
+  ['yad-change/SKILL.md', 'yad epic new EP-<slug> --type <change|defect|hotfix> --parent <EP-parent> --inherits <bases>'],
 ];
 
 test('the skills that call the engine carry no chain of their own to drift', () => {
@@ -1097,7 +1099,7 @@ test('the skills E17b changed instruct no ledger write at all', () => {
   // A prose heuristic over 38 files cannot be made both. So the check is narrow and exact instead: the
   // nine skills this task changed, each asserted to contain no imperative aimed at the ledger.
   const CHANGED = ['yad-epic', 'yad-analysis', 'yad-stub', 'yad-architecture', 'yad-ui',
-    'yad-stories', 'yad-test-cases', 'yad-review-gate', 'yad-discovery'];
+    'yad-stories', 'yad-test-cases', 'yad-review-gate', 'yad-discovery', 'yad-change'];
   // An imperative aimed at the ledger, in EITHER word order — and both orders are needed, because the
   // blocks this task deleted used the second one. `Create {project-root}/…/.sdlc/state.json` puts the
   // verb first; ``In `state.json`: set `architecture.status` to done`` puts the file first, and a
@@ -1146,7 +1148,6 @@ test('the skills that still write a chain by hand are named, with the reason', (
   const gate = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
   assert.match(gate, /TRANSCRIPTION of `advanceState`/);
   for (const [skill, why] of [
-    ['yad-change', /threaded/],
     ['yad-backfill', /promote/],
   ]) {
     assert.match(gate, new RegExp(skill), `the banner does not name ${skill} as a remaining writer`);
@@ -1154,10 +1155,12 @@ test('the skills that still write a chain by hand are named, with the reason', (
   }
   // `yad-discovery` left the list in E75, and the banner says where it went rather than dropping it
   // silently — a reader who remembers it as a writer would otherwise go looking for the JSON block.
-  assert.match(gate, /`yad-discovery` used to be the third; since E75 it runs\s+> `yad foundation new`/);
+  assert.match(gate, /`yad-discovery` used to be one; since E75 it runs\s+> `yad foundation new`/);
+  // `yad-change` left in E42, and the banner says where it went for the same reason.
+  assert.match(gate, /`yad-change` used to seed a threaded chain by hand; since E42 it runs\s+> `yad epic new --parent`/);
   // …and each of those really does still seed or rewrite a chain, so the banner is not naming skills
   // that have already been converted.
-  for (const d of ['yad-change', 'yad-backfill']) {
+  for (const d of ['yad-backfill']) {
     const src = fs.readFileSync(new URL(`../skills/${d}/SKILL.md`, import.meta.url), 'utf8');
     assert.match(src, /state\.json/, `${d}: no longer touches the ledger — drop it from the banner`);
   }
@@ -1434,4 +1437,367 @@ test('the foundation step inherits a binding made for discovery, until it has it
   assert.deepEqual(stepSkills('discovery', { steps: { foundation: ['mine'] } }), ['yad-discovery']);
   // A hostile step id resolves through nothing on the prototype.
   assert.deepEqual(stepSkills('constructor', { steps: {} }), []);
+});
+
+// ---- `yad epic new --parent` — the engine seeds a threaded change-epic (E42) ----------------------
+async function seedOn(T, opts) {
+  const { runEpicNew } = await import('./epic.mjs');
+  const code = process.exitCode;
+  process.exitCode = undefined;
+  const out = await grab(() => runEpicNew(T, { today: '2026-02-02', ...opts }));
+  const failed = process.exitCode === 1;
+  process.exitCode = code;
+  return { out, failed };
+}
+const sdlcOf = (T, id, f) => JSON.parse(fs.readFileSync(path.join(epicRoot(T, id), '.sdlc', f), 'utf8'));
+const seeded = (T, id) => fs.existsSync(path.join(epicRoot(T, id), '.sdlc', 'state.json'));
+const SURFACE = '# Contract\n<!-- CONTRACT-SURFACE:BEGIN -->\nGET /orders\n<!-- CONTRACT-SURFACE:END -->\n';
+
+// An epic whose whole Shape part is approved: every artifact on disk, every step `done`, the surface
+// locked. `fm` overrides the lineage, so the same builder makes a genesis and a change.
+function approvedEpic(T, id, { profile = 'classic', fm = {}, lock = true } = {}) {
+  const dir = writeEpic(T, id, { kind: 'feature', type: 'feature', thread: id, ...fm });
+  for (const f of ['analysis.md', 'architecture.md', 'ui-design.md']) fs.writeFileSync(path.join(dir, f), `---\nstatus: approved\n---\n# ${f}\n`);
+  fs.writeFileSync(path.join(dir, 'contract.md'), SURFACE);
+  const state = seedState({ epic: id, profile, type: fm.type || 'feature', today: '2026-01-01' });
+  for (const s of state.steps) s.status = 'done';
+  state.currentStep = 'ready-for-build';
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(state));
+  fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), '[]');
+  if (lock) fs.writeFileSync(path.join(dir, '.sdlc/contract-lock.json'), JSON.stringify({ artifact: 'contract.md', hash: contractSurfaceHash(dir) }));
+  return dir;
+}
+const setSteps = (dir, edit) => {
+  const f = path.join(dir, '.sdlc/state.json');
+  const state = JSON.parse(fs.readFileSync(f, 'utf8'));
+  for (const s of state.steps) edit(s);
+  fs.writeFileSync(f, JSON.stringify(state));
+};
+
+test('yad epic new --parent: a defect carries what it inherits by reference, and the contract by pointer (E42)', async () => {
+  const { loadLedger } = await import('./epic-state.mjs');
+  const { epicChecks } = await import('./doctor.mjs');
+  const T = hub();
+  const P = approvedEpic(T, 'EP-checkout');
+  const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-checkout', inherits: 'epic,architecture,contract,ui-design' });
+  try {
+    assert.equal(failed, false, out);
+    const state = sdlcOf(T, 'EP-fix', 'state.json');
+    assert.equal(state.type, 'defect');
+    assert.equal(state.profile, 'classic', 'the route is the parent\'s');
+    assert.equal(state.currentStep, 'stories', 'the first step this epic writes');
+    const by = Object.fromEntries(state.steps.map((s) => [s.id, s]));
+    for (const id of ['epic', 'epic-review', 'architecture', 'architecture-review', 'ui-design', 'ui-design-review']) {
+      const s = by[id];
+      assert.equal(s.status, 'satisfied', id);
+      assert.equal(s.inherited, true, `${id}: the legacy flag is still written (rule 3)`);
+      assert.equal(s.inheritedFrom, 'EP-checkout', id);
+      assert.equal(s.boundHash, artifactHash(P, s.artifact), `${id}: bound to the owner's live hash`);
+      assert.deepEqual(s.record, { reason: 'carried by reference from EP-checkout', by: null, date: '2026-02-02', link: 'EP-checkout' });
+    }
+    assert.equal(by.architecture.boundHash, contractSurfaceHash(P), 'architecture binds to the contract surface');
+    assert.deepEqual(by['architecture-review'].risk_tags, ['contract'], 'the catalogue\'s risk tags survive the overlay');
+    assert.equal(by.stories.status, 'in_progress');
+    for (const id of ['stories-review', 'test-cases', 'test-cases-review']) assert.equal(by[id].status, 'todo', id);
+
+    // One provenance record per carried GATE — not per step, and never an approval the predicate counts.
+    const approvals = sdlcOf(T, 'EP-fix', 'approvals.json');
+    assert.deepEqual(approvals.map((a) => a.step), ['architecture-review', 'epic-review', 'ui-design-review']);
+    assert.ok(approvals.every((a) => a.status === 'inherited' && a.from === 'EP-checkout' && a.date === '2026-02-02'));
+    assert.equal(approvals.find((a) => a.step === 'epic-review').boundHash, by.epic.boundHash);
+
+    // The pointer-lock: the owner's hash verbatim, and where it came from.
+    const lock = sdlcOf(T, 'EP-fix', 'contract-lock.json');
+    assert.equal(lock.hash, sdlcOf(T, 'EP-checkout', 'contract-lock.json').hash);
+    assert.equal(lock.inheritedFrom, 'EP-checkout');
+    assert.equal(lock.ref, '../../EP-checkout/.sdlc/contract-lock.json');
+    assert.equal(fs.existsSync(path.join(epicRoot(T, 'EP-fix'), 'contract.md')), false, 'no second contract');
+    assert.match(out, /points at EP-checkout's lock/);
+
+    // What reads it back agrees: yad next opens stories, the gate passes a carried review against the
+    // owner's artifact, and doctor verifies the pointer.
+    const ledger = loadLedger(epicRoot(T, 'EP-fix'));
+    assert.equal(nextAction(ledger, { epic: 'EP-fix' }).step, 'stories');
+    const gate = gatePredicate({ step: by['architecture-review'], approvals: [], acceptedHashes: [contractSurfaceHash(P)] });
+    assert.equal(gate.passed, true);
+    assert.equal(gate.rule, 'inherited');
+    const checks = [];
+    epicChecks(checks, T);
+    assert.equal(checks.find((c) => c.id === 'epic:EP-fix:contract-lock')?.status, 'ok');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: a change that re-authors the epic carries only the contract', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-checkout');
+  const { out, failed } = await seedOn(T, { slug: 'beh', type: 'change', parent: 'EP-checkout', inherits: 'architecture contract', json: true });
+  try {
+    assert.equal(failed, false, out);
+    const res = JSON.parse(out);
+    assert.equal(res.currentStep, 'epic');
+    assert.equal(res.next, 'yad-epic');
+    assert.deepEqual(res.inheritedFrom, { architecture: 'EP-checkout', contract: 'EP-checkout' });
+    assert.equal(res.pointerLock, '../../EP-checkout/.sdlc/contract-lock.json');
+    assert.equal(res.anchor, false);
+    const by = Object.fromEntries(sdlcOf(T, 'EP-beh', 'state.json').steps.map((s) => [s.id, s.status]));
+    assert.deepEqual(by, {
+      epic: 'in_progress', 'epic-review': 'todo', architecture: 'satisfied', 'architecture-review': 'satisfied',
+      'ui-design': 'todo', 'ui-design-review': 'todo', stories: 'todo', 'stories-review': 'todo', 'test-cases': 'todo', 'test-cases-review': 'todo',
+    });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: nothing carried is a full chain on the parent\'s route, with no lock', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-checkout');
+  const { out, failed } = await seedOn(T, { slug: 'grow', type: 'change', parent: 'EP-checkout' });
+  try {
+    assert.equal(failed, false, out);
+    const state = sdlcOf(T, 'EP-grow', 'state.json');
+    assert.equal(state.currentStep, 'epic');
+    assert.equal(state.steps.some((s) => s.inherited), false);
+    assert.deepEqual(sdlcOf(T, 'EP-grow', 'approvals.json'), []);
+    assert.equal(fs.existsSync(path.join(epicRoot(T, 'EP-grow'), '.sdlc/contract-lock.json')), false);
+    assert.match(out, /nothing is carried by reference/);
+    assert.match(out, /architecture is authored here/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: analysis rides with the epic it was written for', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-big', { profile: 'analysis-first' });
+  const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-big', inherits: ['epic'] });
+  try {
+    assert.equal(failed, false, out);
+    const state = sdlcOf(T, 'EP-fix', 'state.json');
+    assert.equal(state.profile, 'analysis-first');
+    const by = Object.fromEntries(state.steps.map((s) => [s.id, s]));
+    assert.equal(by.analysis.status, 'satisfied');
+    assert.equal(by['analysis-review'].boundHash, artifactHash(epicRoot(T, 'EP-big'), 'analysis.md'));
+    assert.equal(state.currentStep, 'architecture');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: the owner is found along the PARENT\'s line, not anywhere in the thread', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-g');
+  // A middle change that re-authored the epic and carried the contract from the genesis.
+  writeEpic(T, 'EP-mid', { kind: 'change', type: 'change', parent: 'EP-g', thread: 'EP-g', inherits: ['architecture', 'contract'] });
+  const mid = await seedOn(T, { slug: 'mid', type: 'change' });
+  // A sibling off the same genesis that re-authored everything. In the whole-thread map it is the
+  // latest owner of architecture — and it is not something EP-mid's children build on.
+  approvedEpic(T, 'EP-sib', { fm: { kind: 'change', type: 'change', parent: 'EP-g', thread: 'EP-g' } });
+  try {
+    assert.equal(mid.failed, false, mid.out);
+    setSteps(epicRoot(T, 'EP-mid'), (s) => { if (!s.inherited) s.status = 'done'; });
+    assert.equal(resolveCurrentArtifacts(T, 'EP-g').architecture, 'EP-sib', 'the whole-thread map does name the sibling');
+
+    const { out, failed } = await seedOn(T, { slug: 'leaf', type: 'defect', parent: 'EP-mid', inherits: 'epic,architecture,contract' });
+    assert.equal(failed, false, out);
+    const by = Object.fromEntries(sdlcOf(T, 'EP-leaf', 'state.json').steps.map((s) => [s.id, s]));
+    assert.equal(by.epic.inheritedFrom, 'EP-mid', 'the epic was re-authored in the middle');
+    assert.equal(by.architecture.inheritedFrom, 'EP-g', 'the contract still lives in the genesis');
+    const lock = sdlcOf(T, 'EP-leaf', 'contract-lock.json');
+    assert.equal(lock.ref, '../../EP-g/.sdlc/contract-lock.json', 'the pointer names the real lock, not the middle pointer');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: a short-lane parent gives a short child, with nothing to point a lock at', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-bump', { profile: 'chore', fm: { kind: 'chore', type: 'chore' }, lock: false });
+  try {
+    for (const inherits of ['ui-design', 'architecture,contract']) {
+      const r = await seedOn(T, { slug: 'r', type: 'change', parent: 'EP-bump', inherits });
+      assert.equal(r.failed, true, inherits);
+      assert.match(r.out, /chore route has no (ui-design|architecture) step/);
+      assert.equal(seeded(T, 'EP-r'), false);
+    }
+    const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-bump', inherits: 'epic' });
+    assert.equal(failed, false, out);
+    const state = sdlcOf(T, 'EP-fix', 'state.json');
+    assert.equal(state.profile, 'chore');
+    assert.deepEqual(state.steps.map((s) => s.id), ['epic', 'epic-review', 'stories', 'stories-review']);
+    assert.equal(fs.existsSync(path.join(epicRoot(T, 'EP-fix'), '.sdlc/contract-lock.json')), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: off a brownfield anchor, bases carry no hash and no lock is written', async () => {
+  const T = hub();
+  const dir = writeEpic(T, 'EP-legacy', { kind: 'feature', type: 'feature', thread: 'EP-legacy', stub: 'backfill-pending', verified: false });
+  fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(seedState({ epic: 'EP-legacy', profile: 'classic', type: 'feature', today: '2026-01-01', stub: true })));
+  const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-legacy', inherits: 'epic,architecture,contract,ui-design', json: true });
+  try {
+    assert.equal(failed, false, out);
+    assert.equal(JSON.parse(out).anchor, true);
+    const carried = sdlcOf(T, 'EP-fix', 'state.json').steps.filter((s) => s.inherited);
+    assert.equal(carried.length, 6);
+    assert.ok(carried.every((s) => s.boundHash === null && s.inheritedFrom === 'EP-legacy'));
+    assert.equal(fs.existsSync(path.join(epicRoot(T, 'EP-fix'), '.sdlc/contract-lock.json')), false);
+    // And the gate reads a null hash as "nothing locked upstream", so the carried step passes.
+    assert.equal(gatePredicate({ step: carried[3], approvals: [], acceptedHashes: [] }).passed, true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: only work written AND approved upstream is carried (the E37/E41 limit)', async () => {
+  // The thread's owner map names the epic that DECIDED about a base, which is right for a skip — and a
+  // skip is not an artifact. Carrying one would seed an inherited UI nobody wrote; carrying a deferral
+  // would drop the owed work out of the thread.
+  const cases = [
+    ['skipped', (s) => { s.status = 'skipped'; s.record = { reason: 'backend only', by: null, date: null }; }, /EP-checkout skipped ui-design \(backend only\)[\s\S]*yad skip/],
+    ['legacy skip', (s) => { s.skipped = true; s.skipReason = 'no screens'; }, /EP-checkout skipped ui-design/],
+    ['deferred', (s) => { s.status = 'deferred'; s.record = { reason: 'later', by: null, date: null }; }, /deferred ui-design — that work is still owed[\s\S]*author it on this epic/],
+    ['unfinished', (s) => { s.status = s.type === 'author' ? 'done' : 'in_review'; }, /has not finished ui-design-review \(in_review\)/],
+    ['claims inherited', (s) => { s.inherited = true; s.inheritedFrom = 'EP-elsewhere'; }, /ledger carries ui-design from EP-elsewhere, but its epic\.md does not list ui-design/],
+  ];
+  for (const [name, edit, message] of cases) {
+    const T = hub();
+    const P = approvedEpic(T, 'EP-checkout');
+    setSteps(P, (s) => { if (s.id.startsWith('ui-design')) edit(s); });
+    try {
+      const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-checkout', inherits: 'ui-design' });
+      assert.equal(failed, true, name);
+      assert.match(out, message, name);
+      assert.equal(seeded(T, 'EP-fix'), false, `${name}: a refusal wrote a ledger`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('yad epic new --parent: rule 5 — a carried contract must be a real, current lock', async () => {
+  const cases = [
+    ['no lock', (P) => fs.rmSync(path.join(P, '.sdlc/contract-lock.json')), /holds no usable contract lock[\s\S]*rule 5/],
+    ['malformed lock', (P) => fs.writeFileSync(path.join(P, '.sdlc/contract-lock.json'), '{"hash":"sha256:nope"}'), /holds no usable contract lock/],
+    ['drifted surface', (P) => fs.writeFileSync(path.join(P, 'contract.md'), SURFACE.replace('GET', 'POST')), /surface no longer matches its lock/],
+    ['approved but missing', (P) => fs.rmSync(path.join(P, 'ui-design.md')), /approved ui-design, but ui-design\.md is not there/],
+  ];
+  for (const [name, edit, message] of cases) {
+    const T = hub();
+    edit(approvedEpic(T, 'EP-checkout'));
+    try {
+      const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-checkout', inherits: 'architecture,contract,ui-design' });
+      assert.equal(failed, true, name);
+      assert.match(out, message, name);
+      assert.equal(seeded(T, 'EP-fix'), false, name);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+
+  // And a lock already sitting in the new epic is somebody's record: refused before anything is written.
+  const T = hub();
+  approvedEpic(T, 'EP-checkout');
+  const stray = path.join(T, 'epics/EP-fix/.sdlc/contract-lock.json');
+  fs.mkdirSync(path.dirname(stray), { recursive: true });
+  fs.writeFileSync(stray, '{"mine":true}');
+  try {
+    const { out, failed } = await seedOn(T, { slug: 'fix', type: 'defect', parent: 'EP-checkout', inherits: 'architecture,contract' });
+    assert.equal(failed, true);
+    assert.match(out, /already has a contract-lock\.json/);
+    assert.equal(fs.readFileSync(stray, 'utf8'), '{"mine":true}');
+    assert.equal(seeded(T, 'EP-fix'), false);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: the header wins over no flag, and a contradicting flag is refused', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-checkout');
+  approvedEpic(T, 'EP-other');
+  writeEpic(T, 'EP-fix', { kind: 'defect', type: 'defect', parent: 'EP-checkout', thread: 'EP-checkout', inherits: ['epic', 'ui-design'] });
+  try {
+    for (const [opts, message] of [
+      [{ parent: 'EP-other' }, /epic\.md says `parent: EP-checkout`, --parent says `EP-other`/],
+      [{ inherits: 'epic' }, /epic\.md inherits \[epic, ui-design\], --inherits says \[epic\]/],
+      [{ type: 'change' }, /epic\.md says `defect`, --type says `change`/],
+    ]) {
+      const r = await seedOn(T, { slug: 'fix', ...opts });
+      assert.equal(r.failed, true, JSON.stringify(opts));
+      assert.match(r.out, message);
+      assert.equal(seeded(T, 'EP-fix'), false);
+    }
+    // The same list in another order or spelling is not a contradiction.
+    const { out, failed } = await seedOn(T, { slug: 'fix', inherits: 'ui-design epic' });
+    assert.equal(failed, false, out);
+    const state = sdlcOf(T, 'EP-fix', 'state.json');
+    assert.equal(state.type, 'defect');
+    assert.equal(state.steps.filter((s) => s.inherited).length, 4);
+    assert.doesNotMatch(out, /lists no `inherits:`/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  // A thread cache that disagrees with the parent's line is refused; a header with no inherits is told
+  // to add them, because `yad thread` reads the header.
+  const T2 = hub();
+  approvedEpic(T2, 'EP-checkout');
+  writeEpic(T2, 'EP-bad', { kind: 'defect', type: 'defect', parent: 'EP-checkout', thread: 'EP-wrong' });
+  writeEpic(T2, 'EP-bare', { kind: 'defect', type: 'defect', parent: 'EP-checkout', thread: 'EP-checkout' });
+  try {
+    const bad = await seedOn(T2, { slug: 'bad', inherits: 'epic' });
+    assert.equal(bad.failed, true);
+    assert.match(bad.out, /thread: EP-wrong`, but EP-checkout's thread starts at EP-checkout/);
+    const bare = await seedOn(T2, { slug: 'bare', inherits: 'epic' });
+    assert.equal(bare.failed, false, bare.out);
+    assert.match(bare.out, /epic\.md lists no `inherits:` — add `inherits: \[epic\]`/);
+  } finally { fs.rmSync(T2, { recursive: true, force: true }); }
+});
+
+test('yad epic new --parent: what may be inherited, and from what, is refused before anything is written', async () => {
+  const T = hub();
+  approvedEpic(T, 'EP-checkout');
+  const foundation = path.join(T, 'foundation', '.sdlc');
+  fs.mkdirSync(foundation, { recursive: true });
+  try {
+    for (const [opts, message] of [
+      [{ type: 'defect', parent: 'EP-checkout', inherits: 'stories' }, /stories cannot be inherited/],
+      [{ type: 'defect', parent: 'EP-checkout', inherits: 'test-cases,epic' }, /test-cases cannot be inherited/],
+      [{ type: 'defect', parent: 'EP-checkout', inherits: 'architecture' }, /architecture and contract are inherited together/],
+      [{ type: 'defect', parent: 'EP-checkout', inherits: 'contract' }, /architecture and contract are inherited together/],
+      [{ type: 'defect', parent: 'EP-checkout', inherits: 'design' }, /unknown base in inherits: design/],
+      [{ type: 'defect', parent: 'EP-nope', inherits: 'epic' }, /EP-nope is not an epic with a lifecycle here/],
+      [{ type: 'defect', parent: 'EP-foundation' }, /EP-foundation is the Product level/],
+      [{ type: 'defect', parent: 'not an id' }, /invalid parent id/],
+      [{ type: 'defect', parent: 'EP-r' }, /EP-r cannot be its own parent/],
+      [{ type: 'feature', parent: 'EP-checkout' }, /a feature has no parent/],
+      [{ type: 'chore', parent: 'EP-checkout' }, /a chore has no parent/],
+      [{ inherits: 'epic' }, /--inherits needs a parent/],
+      [{ type: 'hotfix' }, /a hotfix epic cannot be seeded without its parent[\s\S]*--parent/],
+      [{ type: 'defect', parent: 'EP-checkout', profile: 'chore' }, /takes its parent's route — EP-checkout is on 'classic', --profile says 'chore'/],
+      [{ type: 'defect', parent: 'EP-checkout', stub: true }, /a stub has no parent/],
+      [{ parent: 'EP-checkout', stub: true }, /a stub has no parent/],
+    ]) {
+      const r = await seedOn(T, { slug: 'r', ...opts });
+      assert.equal(r.failed, true, JSON.stringify(opts));
+      assert.match(r.out, message, JSON.stringify(opts));
+      assert.equal(seeded(T, 'EP-r'), false, JSON.stringify(opts));
+    }
+    // A --profile naming the parent's own route is not a contradiction.
+    const same = await seedOn(T, { slug: 'r', type: 'defect', parent: 'EP-checkout', profile: 'classic' });
+    assert.equal(same.failed, false, same.out);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  // A parent whose lineage is broken is fixed first.
+  const T2 = hub();
+  approvedEpic(T2, 'EP-mid', { fm: { kind: 'change', type: 'change', parent: 'EP-gone', thread: 'EP-gone' } });
+  try {
+    const r = await seedOn(T2, { slug: 'r', type: 'defect', parent: 'EP-mid' });
+    assert.equal(r.failed, true);
+    assert.match(r.out, /EP-mid: its lineage is broken — missing parent epic EP-gone/);
+  } finally { fs.rmSync(T2, { recursive: true, force: true }); }
+});
+
+test('triage.md\'s worked example is what `yad epic new --parent` really writes (E42)', async () => {
+  // The example is prose a reviewer trusts. Once the engine writes the chain, nothing else would notice
+  // the two drifting apart — a field renamed, a status changed, a key moved.
+  const example = templateSeed('yad-change/references/triage.md');
+  const T = hub();
+  approvedEpic(T, 'EP-genesis');
+  const { out, failed } = await seedOn(T, { slug: 'slug', type: 'defect', parent: 'EP-genesis', inherits: 'epic,architecture,contract,ui-design' });
+  try {
+    assert.equal(failed, false, out);
+    const real = sdlcOf(T, 'EP-slug', 'state.json');
+    assert.deepEqual(Object.keys(real), Object.keys(example), 'top-level keys and their order');
+    assert.equal(real.currentStep, example.currentStep);
+    assert.equal(real.profile, example.profile);
+    const norm = (s) => ({ ...s, ...(s.boundHash ? { boundHash: 'H' } : {}), ...(s.record ? { record: { ...s.record, date: 'D' } } : {}),
+      ...(s.inheritedFrom ? { inheritedFrom: 'O', record: { ...s.record, date: 'D', reason: 'R', link: 'O' } } : {}) });
+    real.steps.forEach((s, i) => {
+      assert.deepEqual(Object.keys(s), Object.keys(example.steps[i]), `${s.id}: keys and their order`);
+      assert.deepEqual(norm(s), norm(example.steps[i]), s.id);
+    });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

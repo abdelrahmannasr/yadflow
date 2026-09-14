@@ -1,6 +1,6 @@
 ---
 name: yad-change
-description: 'Phase 6 post-lock change management — the change-request/defect INTAKE + TRIAGE step of a feature thread. After the contract locks and code ships, a change must NOT mutate a locked artifact; it becomes a NEW epic threaded to its parent. This skill classifies the change DEPTH (defect-fix / behavioral-no-surface / contract-surface / new-capability), seeds a new EP-<slug> change-epic threaded to its parent (lineage frontmatter kind+type/parent/thread/inherits/supersedes + a state.json whose inherited steps are pre-marked done and only the changed steps run; a pointer-lock contract-lock.json when architecture is inherited), and records the intake in change.json (escape_stage + root_cause for defects). For hotfixes it records the ship-first exception and opens reconcile-debt.json. Never auto-advances — hands off to the normal authoring skills + the team review gate. Use when the user says "log a change request", "file a defect", "thread a change off EP-…", "open a hotfix", or after a shipped feature needs a fix.'
+description: 'Phase 6 post-lock change management — the change-request/defect INTAKE + TRIAGE step of a feature thread. After the contract locks and code ships, a change must NOT mutate a locked artifact; it becomes a NEW epic threaded to its parent. This skill classifies the change DEPTH (defect-fix / behavioral-no-surface / contract-surface / new-capability), seeds a new EP-<slug> change-epic threaded to its parent (lineage frontmatter kind+type/parent/thread/inherits/supersedes; then `yad epic new --parent` writes the state.json whose inherited steps are carried by reference and only the changed steps run, plus a pointer-lock contract-lock.json when architecture is inherited), and records the intake in change.json (escape_stage + root_cause for defects). For hotfixes it records the ship-first exception and opens reconcile-debt.json. Never auto-advances — hands off to the normal authoring skills + the team review gate. Use when the user says "log a change request", "file a defect", "thread a change off EP-…", "open a hotfix", or after a shipped feature needs a fix.'
 ---
 
 # SDLC — Change/Defect Intake + Triage (Phase 6, the entry of a feature thread)
@@ -144,24 +144,44 @@ root_cause: <tag>
 For a **contract-surface** depth, do NOT inherit `architecture` — it will be re-authored (and re-locked)
 by `yad-architecture` downstream.
 
-### Step 5 — Seed `state.json` (inherited steps pre-done; only the changed steps run)
-**Read the parent's `profile` and `steps[]` first** (`epics/EP-<parent>/.sdlc/state.json`; a parent
-seeded before file shape 6 has no `profile`, so its `steps[]` is the answer). The child's
-chain and route are the PARENT's, not a constant — see the short-lane rule below. For the ordinary case
-of a `classic` parent, create `.sdlc/state.json` with the **same 10-step chain** as `yad-epic` (so
-`advanceState`/`nextAction`/`gatePredicate`/the verified ledger run unchanged) — same
-`schemaVersion: 6` and `profile: "classic"`, which names the route the chain takes — but:
-- **Inherited** authoring steps **and their review gates**: `status: "done"`, `"inherited": true`,
-  `"inheritedFrom": "<owning epic from the resolved truth>"`, `"boundHash": "<that artifact's current
-  hash>"`.
-- The **first re-authored** authoring step: `status: "in_progress"`; its review: `status: "in_review"`
-  only once authored — seed it `blocked` and let the authoring skill open it. Set `currentStep` to the
-  first re-authored authoring step.
-- Remaining re-authored steps: `blocked`.
+### Step 5 — Seed the ledger with the engine (inherited steps carried; only the changed steps run)
+Run it from the Product, after Step 4 has written `epic.md`:
 
-Seed `.sdlc/approvals.json` with one **provenance** record per inherited gate (NOT a forged approval):
-`{ "artifact": "<art>", "step": "<…-review>", "status": "inherited", "from": "<epic>", "boundHash": "<hash>", "date": "<today>" }`.
-Seed `.sdlc/comments.json` = `[]` and create `reviews/`.
+```bash
+yad epic new EP-<slug> --type <change|defect|hotfix> --parent <EP-parent> --inherits <bases>
+```
+
+`<bases>` is the Step 2 inherit list, comma-separated — for a defect-fix off a `classic` parent,
+`epic,architecture,contract,ui-design`. It must be the same list as `inherits:` in `epic.md`: the command
+reads that header, takes its answer when a flag is left off, and refuses a flag that contradicts it. Leave
+`--profile` off. The child takes the **parent's** route — a 4-step `chore` parent gives a 4-step child —
+and the command refuses a route that differs.
+
+The engine writes everything this step used to spell out by hand (E42):
+
+- `.sdlc/state.json` — the parent's chain and route. Every inherited step **and its review gate** is
+  `satisfied`, with `inherited: true`, `inheritedFrom` (the epic along the parent's line that owns the
+  artifact — not always the parent), `boundHash` (that artifact's current hash) and a `record`. The first
+  re-authored step is `in_progress` and is the `currentStep`; the rest are `todo`.
+- `.sdlc/approvals.json` — one **provenance** record per inherited gate
+  (`{ artifact, step, status: "inherited", from, boundHash, date }`) — never a forged approval.
+- `.sdlc/comments.json` = `[]` and `reviews/`.
+- `.sdlc/contract-lock.json` — the **pointer-lock**, only when `architecture` and `contract` are inherited:
+  the owner's hash copied verbatim, with `inheritedFrom` and `ref`. There is no `contract.md` in the
+  change-epic, so the surface cannot drift, and `contract-check` passes unchanged because the hash is
+  identical. (Field shapes: `references/triage.md`.)
+
+**A refusal means the triage is wrong, and nothing is written.** Fix the inherit list and run it again:
+
+| The command says | Why | What to do |
+|---|---|---|
+| `<owner> skipped <step>` | a skip is a decision, not an artifact — carrying it would claim a review nobody did | leave that base out of `inherits`, then `yad skip` it on this epic if it does not apply here either |
+| `<owner> deferred <step>` | that work is still owed | leave the base out and author it on this epic, so the owed work follows the thread |
+| `<owner> has not finished <step>` | nothing approved exists yet | finish it on the owner, or author it here |
+| `holds no usable contract lock` / `surface no longer matches its lock` | you may skip authoring a contract, never having one | lock (or re-lock) the owner's surface first (`yad-architecture` Step 5) |
+| `stories cannot be inherited` / `test-cases cannot be inherited` | every change writes its own; `stories-review` is what hands an epic to Build | leave them out |
+| `architecture and contract are inherited together` | the architecture step writes `contract.md` | list both, or neither (a contract-surface change) |
+| `route has no <base> step` | a short-lane parent never had it | leave it out |
 
 Commit the seed on the `change/EP-<slug>` branch. It reaches the Product's default branch through this
 change-epic's **first** review PR/MR — cut the `review/EP-<slug>/<artifact>` branch from `change/…` so
@@ -169,17 +189,12 @@ it carries the seed. In verified mode `ledger-guard` exempts a new epic's ledger
 #162), so no direct push to a protected default branch is needed; every later change to that ledger is
 CI's. See `../yad-epic/references/state-schema.md`, "Authoring branches".
 
-When `architecture` is **inherited**, materialize the **pointer-lock** `.sdlc/contract-lock.json`:
-`{ "artifact": "contract.md", "hash": "<parent surface hash, verbatim>", "lockedAt": "<today>", "inheritedFrom": "<epic>", "ref": "../../<epic>/.sdlc/contract-lock.json" }`.
-There is no `contract.md` in the change-epic, so the surface cannot drift, and `contract-check` passes
-unchanged because the hash is identical. (Exact recipe + field shapes: `references/triage.md`.)
-
 **Stub parent (brownfield, no locked surface yet).** When the `parent` is a **stub**
 (`stub: backfill-pending` / `verified: false`, minted by `yad-stub`), it has no `architecture.md` /
-`contract.md` / `ui-design.md` to inherit — the surface has not been documented yet. So for the bases the
-stub lacks, mark the inherited steps `"inherited": true, "inheritedFrom": "<stub>", "boundHash": null`
+`contract.md` / `ui-design.md` to inherit — the surface has not been documented yet. `yad epic new`
+sees the anchor and carries those bases as `"inherited": true, "inheritedFrom": "<stub>", "boundHash": null`
 (a `null` boundHash is treated as "nothing locked upstream → no drift" by the gate predicate, so the step
-passes and never blocks), and write **NO** `contract-lock.json` (there is no surface to point at — the
+passes and never blocks), and it writes **NO** `contract-lock.json` (there is no surface to point at — the
 child never touches `specs/*/contracts/**`, so `contract-check` passes trivially). Contract protection on
 this thread begins only after `yad-backfill promote` documents and locks the feature. Record
 `"parentStub": true` in `change.json` so it is auditable that the change threaded off an undocumented
@@ -189,17 +204,12 @@ contract locked).
 
 **Short-lane parent (no architecture step ever existed).** When the parent records `profile: "chore"`
 or `"spike"`, it has no `architecture.md`, no `contract.md`, no `ui-design.md` and no lock — not
-because they are undocumented, as with a stub, but because **its route never had those steps**. So:
+because they are undocumented, as with a stub, but because **its route never had those steps**. The
+engine already handles the ledger: it seeds the parent's short chain and route, writes no lock, and
+refuses `architecture`, `contract` or `ui-design` in `inherits`, because inheriting a step the parent
+never walked would stamp `inherited: true` on a review that never happened anywhere. What is left for
+this skill:
 
-- **Seed the PARENT's chain, not the 10-step one**, and copy the parent's `profile` verbatim. A 4-step
-  parent gives a 4-step child. Writing the 10-step chain here would mint steps stamped
-  `"inherited": true, "inheritedFrom": "EP-<parent>"` for an architecture review **that never happened
-  anywhere** — a forged provenance record, which is the one thing this whole skill exists to avoid.
-  Writing `profile: "classic"` over a short chain mislabels the epic permanently and `yad doctor`
-  reports `profile:disagree` for the life of the thread.
-- **Write NO `contract-lock.json`.** There is no parent hash to point at. A pointer-lock with a `null`
-  or invented `hash` FAILS `contract-check.sh` the first time any story in the thread touches a
-  contract slice, and a lock nobody can verify is worse than none.
 - **Record `"parentShortLane": "<the parent's profile>"` in `change.json`**, the same way a stub parent
   records `"parentStub": true`, so it is auditable that this thread inherited from a route with no
   locked surface.
@@ -236,8 +246,9 @@ again. Unbound, that command names `yad-architecture` for a contract-surface cha
 
 - **Never mutate a locked artifact.** A change is a new threaded epic, not an edit to a shipped one.
 - **A change MUST thread to a real parent.** Validate the parent + thread first; STOP on a broken lineage.
-- **Inherit by reference, never copy.** Inherited steps are pre-done with `inherited: true` + a
-  `boundHash`; the pointer-lock carries the parent hash verbatim. The gate never re-reviews them.
+- **Inherit by reference, never copy.** `yad epic new --parent` carries inherited steps as `satisfied` with
+  `inherited: true` + a `boundHash`; the pointer-lock carries the owner's hash verbatim. The gate never
+  re-reviews them, and only work written AND approved upstream can be carried.
 - **Contract-surface ⇒ re-author architecture.** Omitting `architecture` from `inherits` is the ONLY way
   to change the surface; it re-locks (new hash) and routes through the escalated architecture review —
   the same mechanism as the Build `Contract-Change` route, unified.

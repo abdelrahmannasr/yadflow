@@ -1956,9 +1956,9 @@ export function markInReview(state, step) {
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default
 // between the two, once E50 can detect which skills are installed. Three of the five
-// skills that used to hand-write a seed now run `yad epic new` instead (E17b), and `yad-discovery` runs
-// `yad foundation new` (E75); the one that still does not is the threaded change-epic (E42 owns
-// inheritance).
+// skills that used to hand-write a seed now run `yad epic new` instead (E17b), `yad-discovery` runs
+// `yad foundation new` (E75), and `yad-change` runs `yad epic new --parent` for a threaded change-epic
+// (E42).
 //
 // IT IS CODE, NOT A FILE. Nothing here is written to disk, so no file shape changes and there is
 // nothing to migrate. When a project's `state.json` disagrees with the catalogue, THE FILE WINS for
@@ -3367,7 +3367,13 @@ const chainHasBase = (root, id, base) => {
 // latest re-author); ADDITIVE bases resolve to the ordered LIST of every epic that re-authored them
 // (genesis-first) — use resolveCurrentStories for story-id-level ownership of the composed set.
 export function resolveCurrentArtifacts(root, threadOrEpicId) {
-  const members = threadEpics(root, threadOrEpicId); // genesis-first
+  return ownersAlong(root, threadEpics(root, threadOrEpicId)); // genesis-first
+}
+
+// The same map over an explicit genesis-first list of epics. `resolveCurrentArtifacts` passes the whole
+// thread; the threaded seed (E42) passes only the PARENT'S line, because a sibling branch off the same
+// genesis is not something the new epic builds on.
+function ownersAlong(root, members) {
   const out = {};
   for (const b of REPLACE_BASES) out[b] = null;
   for (const b of ADDITIVE_BASES) out[b] = [];
@@ -3400,6 +3406,195 @@ export function resolveCurrentStories(root, threadOrEpicId) {
     }
   }
   return owner;
+}
+
+// ---- threading a change-epic off its parent (E42) -----------------------------------------------
+//
+// Rule 5: you may skip AUTHORING a contract, never skip HAVING one. A change that does not move the
+// surface carries its parent's contract by reference — a pointer-lock holding the parent's hash
+// verbatim — instead of writing a second copy. Until E42 that chain was hand-written by the
+// `yad-change` skill. This is the engine writing it.
+//
+// WHAT IS DECIDED HERE AND WHAT IS NOT. Which bases a change inherits is the depth triage, a judgement
+// made with a person, and it stays in the skill. This takes the OUTCOME of that triage (`inherits`) and
+// writes the ledger it implies, refusing every outcome the ledger could not honestly record.
+
+// The bases a change may carry by reference. The REPLACE bases, where one epic owns the current copy.
+// `stories` and `test-cases` are ADDITIVE — the thread's set is the union of every contributor, so
+// there is no single owner to bind a hash to — and every depth re-authors both anyway: `stories-review`
+// is the step that hands the epic to Build, so a change that inherited it would have nothing to build.
+export const INHERITABLE_BASES = ['epic', 'architecture', 'contract', 'ui-design'];
+
+// The chain steps each base carries. `analysis` rides with `epic`: it is the brief the epic was written
+// from, it has no base of its own, and re-running it under a carried epic would review a brief for a
+// decision already made. `contract` has no step — the architecture step writes `contract.md`.
+const INHERIT_STEPS = { epic: ['analysis', 'epic'], architecture: ['architecture'], contract: ['architecture'], 'ui-design': ['ui-design'] };
+
+const LOCK_HASH = /^sha256:[0-9a-f]{64}$/;
+
+// Plan the ledger of a change-epic threaded off `parent`. Reads the Product; writes nothing.
+// Returns `{ ok: false, message, hint }` or `{ ok: true, state, approvals, lock, profile, owners, anchor, thread }`.
+export function planThreadedSeed(root, { epic, parent, inherits = [], type, today }) {
+  const refuse = (message, hint) => ({ ok: false, message, hint });
+  const bases = [...new Set(inherits.map((b) => String(b).trim()).filter(Boolean))];
+
+  const unknown = bases.filter((b) => !THREAD_ARTIFACT_BASES.includes(b));
+  if (unknown.length) {
+    return refuse(`unknown base in inherits: ${unknown.join(', ')}`,
+      `a change carries some of ${INHERITABLE_BASES.join(' · ')}`);
+  }
+  const additive = bases.filter((b) => !INHERITABLE_BASES.includes(b));
+  if (additive.length) {
+    return refuse(`${additive.join(' and ')} cannot be inherited`,
+      'every change writes its own stories and test cases: the thread\'s set is the union of every epic that wrote some, and `stories-review` is what hands an epic to Build. Leave them out of inherits');
+  }
+  if (bases.includes('architecture') !== bases.includes('contract')) {
+    return refuse('architecture and contract are inherited together, or not at all',
+      'the architecture step writes contract.md, so they are one step. To change the surface, inherit neither — the change re-authors architecture and re-locks');
+  }
+
+  if (!isValidEpicId(parent)) return refuse(`invalid parent id: ${parent} (expected EP-<slug>)`);
+  if (PRODUCT_EPICS.includes(parent)) {
+    return refuse(`${parent} is the Product level, not an epic a change can thread off`,
+      'name the feature epic this change evolves');
+  }
+  if (parent === epic) return refuse(`${epic} cannot be its own parent`);
+  const parentDir = epicRoot(root, parent);
+  let parentState;
+  try { parentState = readJSONStrict(path.join(parentDir, '.sdlc', 'state.json'), null); } catch (e) {
+    return refuse(`${parent}: its state.json cannot be read — ${e.message}`, 'run `yad doctor` and fix the parent first');
+  }
+  if (!fs.existsSync(path.join(parentDir, 'epic.md')) || !isPlainObject(parentState) || !Array.isArray(parentState.steps)) {
+    return refuse(`${parent} is not an epic with a lifecycle here`,
+      'a change threads off an epic that exists. For a feature built before it had one, mint an anchor with the yad-stub skill first');
+  }
+  const line = resolveThread(root, parent);
+  if (line.broken) return refuse(`${parent}: its lineage is broken — ${line.broken}`, 'fix the parent\'s epic.md first');
+
+  // THE ROUTE IS THE PARENT'S. A short-lane parent gives a short child; writing `classic` over it would
+  // mint inherited architecture steps for a review that never happened anywhere.
+  const profile = epicProfileId(parentState);
+  if (!profile || !seedableProfiles().includes(profile)) {
+    return refuse(`${parent}: its chain is on no route this command can seed${profile ? ` ('${profile}')` : ''}`,
+      'run `yad doctor` on the parent — its recorded profile and its chain must agree');
+  }
+  const steps = seedChain(lifecycleProfile(profile));
+  const onChain = new Set(steps.map((s) => s.id));
+
+  // Who owns each base, along the parent's line only.
+  const owners = ownersAlong(root, line.chain);
+  const carried = new Map(); // step id -> { owner, boundHash }
+  const ownerOf = {};
+  let anchor = false;
+  let lock = null;
+  for (const base of bases) {
+    const ids = INHERIT_STEPS[base].filter((id) => onChain.has(id));
+    const owner = owners[base];
+    if (!ids.length || !owner) {
+      return refuse(`${parent}'s ${profile} route has no ${base} step — there is nothing to inherit`,
+        `leave ${base} out of inherits. A short lane has no architecture or UI, and a change that moves the contract is a new epic on classic`);
+    }
+    ownerOf[base] = owner;
+    const ownerDir = epicRoot(root, owner);
+    let ownerState;
+    try { ownerState = readJSONStrict(path.join(ownerDir, '.sdlc', 'state.json'), null); } catch { ownerState = null; }
+    if (!isPlainObject(ownerState) || !Array.isArray(ownerState.steps)) {
+      return refuse(`${owner} owns ${base}, but its state.json is missing or cannot be read`,
+        'nothing here can check that it was approved. Run `yad doctor` and fix it first');
+    }
+    // A brownfield anchor has an un-started chain and nothing locked: the base is carried with no hash
+    // to drift from, and no pointer-lock is written — there is no surface to point at yet.
+    if (backfillAnchorKind(ownerState)) {
+      anchor = true;
+      for (const id of ids) carried.set(id, { owner, boundHash: null });
+      continue;
+    }
+    for (const id of ids) {
+      // THE SET-ASIDE RULE (the limit E37 and E41 left open). The thread's owner map names the epic that
+      // DECIDED about a base, which is right for a skip: the decision is that epic's. It is not the same
+      // as an artifact to carry. Only work written AND approved there is inherited.
+      for (const sid of [id, `${id}-review`]) {
+        const s = ownerState.steps.find((x) => x?.id === sid);
+        const st = stepStatus(s);
+        if (st === 'done') continue;
+        if (claimsSkipped(s)) {
+          return refuse(`${owner} skipped ${sid}${s.record?.reason ? ` (${s.record.reason})` : ''} — nothing was written to inherit`,
+            `leave ${base} out of inherits, then \`yad skip\` it on this epic if it does not apply here either`);
+        }
+        if (st === 'deferred') {
+          return refuse(`${owner} deferred ${sid} — that work is still owed, not written`,
+            `leave ${base} out of inherits and author it on this epic, so the owed work follows the thread`);
+        }
+        // The owner map reads `inherits:` in epic.md; the ledger says the step came from further up. The
+        // two records disagree, and choosing one would be guessing where the artifact really lives.
+        if (claimsInherited(s)) {
+          return refuse(`${owner}'s ledger carries ${sid} from ${s.inheritedFrom || 'its parent'}, but its epic.md does not list ${base} in inherits`,
+            `add ${base} to ${owner}'s inherits (or re-author it there), then thread again`);
+        }
+        return refuse(`${owner} has not finished ${sid} (${s ? (st ?? s.status) : 'not on its chain'}) — nothing approved to inherit yet`,
+          `finish it on ${owner} first, or leave ${base} out of inherits and author it here`);
+      }
+      const boundHash = artifactHash(ownerDir, stepDef(id).artifact);
+      if (!boundHash) {
+        return refuse(`${owner} approved ${id}, but ${stepDef(id).artifact} is not there to bind to`,
+          `restore it on ${owner}, or leave ${base} out of inherits`);
+      }
+      carried.set(id, { owner, boundHash });
+    }
+    if (base === 'architecture') {
+      let ownerLock;
+      try { ownerLock = readJSONStrict(path.join(ownerDir, '.sdlc', 'contract-lock.json'), null); } catch { ownerLock = null; }
+      if (!isPlainObject(ownerLock) || !LOCK_HASH.test(String(ownerLock.hash || ''))) {
+        return refuse(`${owner} approved its architecture but holds no usable contract lock`,
+          `rule 5: a change may skip authoring a contract, never having one. Lock the surface on ${owner} (yad-architecture Step 5) first`);
+      }
+      // A pointer to a lock that no longer matches its surface would pass that drift down the thread.
+      if (contractSurfaceHash(ownerDir) !== ownerLock.hash) {
+        return refuse(`${owner}'s contract surface no longer matches its lock`,
+          `run \`yad doctor\` — re-lock ${owner}'s surface before a change points at it`);
+      }
+      lock = {
+        artifact: 'contract.md', hash: ownerLock.hash, lockedAt: today,
+        inheritedFrom: owner, ref: `../../${owner}/.sdlc/contract-lock.json`,
+      };
+    }
+  }
+
+  let opened = false;
+  const chain = steps.map((row) => {
+    const hit = carried.get(row.id.replace(/-review$/, ''));
+    if (!hit) {
+      const status = opened ? 'todo' : 'in_progress';
+      opened = true;
+      return { ...row, status };
+    }
+    const { risk_tags: riskTags, ...head } = row;
+    return {
+      ...head,
+      status: 'satisfied',
+      // The legacy flag is still written beside the new word (rule 3), so a 3.x reader keying on
+      // `.inherited` keeps working for this whole major.
+      inherited: true,
+      inheritedFrom: hit.owner,
+      boundHash: hit.boundHash,
+      record: stepRecord({ reason: `carried by reference from ${hit.owner}`, date: today, link: hit.owner }),
+      risk_tags: riskTags,
+    };
+  });
+  const first = chain.find((s) => s.status === 'in_progress');
+  const approvals = canonicalApprovals(chain.filter((s) => s.inherited && s.type === 'review+approve').map((s) => ({
+    artifact: s.artifact, step: s.id, status: 'inherited', from: s.inheritedFrom, boundHash: s.boundHash, date: today,
+  })));
+  return {
+    ok: true,
+    profile,
+    thread: line.rootId,
+    owners: ownerOf,
+    anchor,
+    lock,
+    approvals,
+    state: { epicId: epic, createdAt: today, type, profile, currentStep: first.id, steps: chain },
+  };
 }
 
 export { writeJSON };
