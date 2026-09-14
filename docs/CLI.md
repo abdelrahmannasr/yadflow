@@ -385,6 +385,22 @@ for every other epic in the project. `classic` and `analysis-first` both mark th
 altogether, so there is nothing on them to mark N/A, and `yad skip` says so rather than reporting the
 chain as broken.
 
+**A whole Build lane can be skipped too (E39).** A lane is one story in one repo. When a story declares a
+repo that turns out to need no change, `yad skip <epic> <story> --repo <name> --reason "<why>"` marks that
+lane N/A in `build-state/<story>.json` — commit it with `yad checkpoint --push` — and
+`yad unskip <epic> <story> --repo <name>` puts it back. It is refused before the stories review has passed
+(edit the story's `repos:` then: nothing is approved yet, so that edit revokes nothing), for a repo the
+story does not declare, once work has started in the lane or a ship is recorded for it, and for the
+story's last lane. **No single Build step can be skipped**, and a lane is never deferred. `yad next` prints
+a skipped lane with its reason, `yad foundation status` counts it as finished (as long as another lane
+really shipped), `yad checkpoint --retro-ship` refuses it, and `yad doctor` fails a skipped lane that also
+has work or a ship, and warns about one with no reason, one for a repo the story does not declare, and a
+single Build step marked `skipped` or `deferred` by hand.
+
+So a skip can be declared at three levels: the **profile** marks which steps may be skipped (E35 — in the
+engine's routes, not a project file), the **epic** skips one of them (`yad skip <epic> <step>`), and the
+**story/repo** skips a whole Build lane.
+
 **When a skip is too late, or an un-skip is.** Neither command names a step. Both look at the steps
 that come **after** the skipped pair. "The step after the pair" means the first later step that is not
 itself skipped or deferred — the step the skip opens.
