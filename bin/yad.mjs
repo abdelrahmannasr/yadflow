@@ -20,7 +20,7 @@ import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 import { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 import { runNext } from '../cli/next.mjs';
-import { runSkip, runDefer, runUnblock } from '../cli/skip.mjs';
+import { runSkip, runDefer, runUnblock, runLaneSkip } from '../cli/skip.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
@@ -127,6 +127,15 @@ ${c.bold('Where am I / what next')}
   yad unskip <epic> <step>             Put a skipped step back in the chain (\`skip --undo\` does the
                                        same), until the step that follows it is finished or work
                                        past it starts — on classic, until stories are done
+  yad skip <epic> <story> --repo <name> --reason <text>
+                                       Skip a whole Build lane: this story needs no change in this
+                                       repo (E39). Written to build-state/<story>.json; commit it with
+                                       yad checkpoint --push. Refused before the stories review passes
+                                       (edit the story's repos: instead), for a repo the story does not
+                                       declare, once work started or a ship is recorded, and for the
+                                       story's last lane. No single Build step can be skipped
+  yad unskip <epic> <story> --repo <name>
+                                       Put a skipped Build lane back; yad-run adds it on its next run
   yad defer <epic> <step> --reason <text> [--debt]
                                        Set an optional step aside to do LATER: marks it deferred.
                                        Say who is waiting for it in the reason. Same steps and same
@@ -397,6 +406,16 @@ async function main() {
     case 'undefer': {
       const [verb, epic, step] = o._;
       if (!epic || !isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+      // A STORY id where the step goes names a whole Build lane (E39), with --repo naming the repo. No Shape
+      // step id ends in -S<n>, so the two never overlap. A lane is skipped, never deferred.
+      if (step && /-S\d+$/i.test(step)) {
+        if (verb === 'defer' || verb === 'undefer') {
+          log(c.red(`a Build lane is skipped whole, never deferred: yad skip ${epic} ${step} --repo <name> --reason "<why>"`));
+          process.exitCode = 1; break;
+        }
+        await runLaneSkip(o.dir, { epic, story: step, repo: o.repo, reason: o.reason, undo: verb === 'unskip' || o.undo, today });
+        break;
+      }
       // `unskip` / `undefer` are the verbs E36 / E37 named; `--undo` is the spelling that shipped first and stays.
       const runVerb = verb === 'defer' || verb === 'undefer' ? runDefer : runSkip;
       await runVerb(o.dir, { epic, step, reason: o.reason, debt: o.debt, undo: verb.startsWith('un') || o.undo, today });

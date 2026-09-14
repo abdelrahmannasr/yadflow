@@ -115,7 +115,7 @@ Print, in this order:
 7. **Build (per story, per repo)** — if any `.sdlc/build-state/<story-id>.json` exists, then for
    each such story and each of its repos print the Build chain
    `spec → tasks → implement → checks → engineer-review`, marking each step's `status`, its
-   `advance` dial (or `automation`, whichever the step carries), and `locked`. Mark that repo's `currentStep` with `→`. This shows, at a glance,
+   `advance` dial (or `automation`, whichever the step carries), and `locked`. Mark that repo's `currentStep` with `→`. A repo whose lane is `status: skipped` (a whole lane set aside with `yad skip <epic> <story> --repo <repo>`, E39) prints `skipped (N/A)` and its `record.reason` instead of the chain. This shows, at a glance,
    which Build steps are automated and where a run is waiting. (For the single *next* build sub-step to
    take per story/repo — rather than this full status view — point the user at `yad next <epic>`, which
    reads the same `build-state` files.)
