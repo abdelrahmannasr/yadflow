@@ -348,6 +348,37 @@ test('issue #164: a locally modified managed file is reported, never silently ov
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('an edited gate-sync fragment left on another major is kept — and named, because CI would skip the new stamp', async () => {
+  const { T } = scaffold();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', bridge_enabled: true }));
+    await reconcile(T, { fix: true });
+    const wf = path.join(T, '.github/workflows/yad-gate-sync.yml');
+    const shipped = fs.readFileSync(wf, 'utf8');
+    const ships = Number(shipped.match(/^\s*YAD_MAJOR=(\d+)\s*$/m)[1]);
+
+    // An edit that keeps the fragment's major: the ordinary "locally modified" report, and nothing more.
+    fs.writeFileSync(wf, `# our CI constraint\n${shipped}`);
+    const same = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+    assert.match(same.out, /yad-gate-sync\.yml is locally modified/);
+    assert.doesNotMatch(same.out, /trusts only yadflow/);
+
+    // An edit on an older major — the copy a team kept from before a major.
+    const older = `# our CI constraint\n${shipped.replace(/^(\s*)YAD_MAJOR=\d+$/gm, `$1YAD_MAJOR=${ships - 1}`)}`;
+    fs.writeFileSync(wf, older);
+    const out = await captureConsole(() => reconcile(T, { fix: true, scope: 'changed' }));
+    assert.match(out.out, new RegExp(`yad-gate-sync\\.yml trusts only yadflow ${ships - 1}\\.x pins, but this release's fragment trusts ${ships}\\.x`));
+    assert.match(out.out, /--overwrite-local/);
+    assert.equal(fs.readFileSync(wf, 'utf8'), older, 'still kept — the warning is the change, not a clobber');
+
+    // A fragment from before `YAD_MAJOR` existed wrote the major into its check. It is read too.
+    const legacy = `# our CI constraint\n${shipped.replace(/^\s*YAD_MAJOR=\d+\n/gm, '').replace(/"\^\$\{YAD_MAJOR\}\\\./g, `'^${ships - 1}\\.`)}`;
+    fs.writeFileSync(wf, legacy);
+    const out2 = await captureConsole(() => reconcile(T, { fix: false }));
+    assert.match(out2.out, new RegExp(`trusts only yadflow ${ships - 1}\\.x pins`));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('issue #164: --overwrite-local replaces the edit and saves it beside the file', async () => {
   const { T, backend } = scaffold();
   await reconcile(T, { fix: true });
