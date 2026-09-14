@@ -60,8 +60,17 @@ with `npm run release-check`.
    - pushes the `vX.Y.Z` git tag and cuts a GitHub release with the notes.
 
 Auth is the `id-token: write` permission in the workflow plus the npm trusted-publisher entry — there is
-no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs the Node 18/20/22 test matrix and a
-tarball-leak smoke on every PR.
+no long-lived secret to rotate. CI (`.github/workflows/ci.yml`) runs on every pull request into `main` and
+every push to `main`:
+
+- the test matrix — Linux on Node 18, 20 and 22, and macOS on Node 22;
+- the end-to-end harness against the packed tarball, on Linux and macOS;
+- lint, the 70% coverage gate, and the tarball-leak smoke (Linux, Node 22);
+- `npm audit` of production dependencies (failing on high severity), and a check of the registry
+  signatures.
+
+OpenSSF Scorecard runs as its own workflow (`.github/workflows/scorecard.yml`), weekly and on every push
+to `main`.
 
 > **Note — the commit back, and why `release` then leads `main`.** The pipeline includes
 > `@semantic-release/git`, so after publishing it commits the regenerated `CHANGELOG.md`,

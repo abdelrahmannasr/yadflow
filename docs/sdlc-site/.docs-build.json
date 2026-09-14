@@ -1,7 +1,6 @@
 {
-  "builtAt": "2026-09-13",
+  "builtAt": "2026-09-14",
   "theme": "yadflow-brand",
-  "artifactHash": "sha256:8304aaf085f1df69fa304f78c21f973fe35e57a08e8c935633ee6c75d8cc9ee8",
-  "skillCount": 38,
-  "templateVersion": "3.19.0-next.2"
+  "artifactHash": "sha256:325712f548ae3a07528499e4e1bc2c44049b4d7c444140c807f41c72b156548a",
+  "skillCount": 38
 }

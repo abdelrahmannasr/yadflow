@@ -180,6 +180,7 @@ workflow-hygiene flags — derived read-only, so an EM can see how the team actu
 - **[docs/SKILLS.md](docs/SKILLS.md)** — the catalogue of all 38 agent skills.
 - **[docs/WALKTHROUGH.md](docs/WALKTHROUGH.md)** — the by-hand, end-to-end path through every phase.
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[RESEARCH-NOTES.md](RESEARCH-NOTES.md)** · **[RELEASING.md](RELEASING.md)**
+- **[SECURITY.md](SECURITY.md)** — how to report a vulnerability, which versions get fixes, and the supply-chain stance. **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — the community standards for taking part.
 
 ---
 

@@ -107,7 +107,7 @@ Write `epics/EP-<slug>/.sdlc/docs-build.json` — the baseline `yad-docs-sync` c
   "artifactHash": "<sha256 of epic.md + architecture.md + contract.md CONTRACT-SURFACE + ui-design.md + each story>",
   "repoHeads": { "<repo>": "<HEAD sha>" },
   "deployUrl": "<url or null>",
-  "templateVersion": "<shell template version>"
+  "shellVersion": "<the `version` in templates/app/package.json>"
 }
 ```
 

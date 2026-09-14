@@ -22,8 +22,11 @@ It only reads the pipeline definition and writes a project-level site. When a do
 - `{project-root}` resolves from the project working directory (the **Product**).
 - The overview site lives at `{project-root}/docs/sdlc-site/`; its `dist/`/`node_modules/` are gitignored,
   the generated **source is committed**. The overview build manifest is `docs/sdlc-site/.docs-build.json`.
-- The shell template is `skills/yad-docs/templates/app/` — copied **verbatim**, themed only in the
-  `:root` of `index.css`. Generated data satisfies `src/data/types.ts`.
+- The shell template is `skills/yad-docs/templates/app/`. It is copied **only when `docs/sdlc-site/`
+  does not exist yet** — see Step 3. The overview site in this repo has since grown sections of its own
+  (for example CheckGates, CliReference, TwoDials, Glossary, ContractLock, ReviewGate, Connectors and the
+  Reference tables) and dropped the template's per-epic ones, so it is **updated in place, never
+  re-copied**. Generated data satisfies `src/data/types.ts`.
 - Theme: **yadflow's own brand palette** (the `:root` of the legacy report, now `docs/sdlc-site/public/report.html`) — for visual continuity with
   the existing overview, not an epic's design tokens.
 - Speak in the configured `communication_language`; write documents in `document_output_language`.
@@ -67,7 +70,16 @@ Map the pipeline onto the same data structures `yad-docs` uses (concrete mapping
   to its relevant sections + paths.
 
 ### Step 3 — Generate the site into `docs/sdlc-site/`
-Copy the shell from `templates/app/` **verbatim**, generate `src/data/*.ts` deterministically (same
+**First check whether `docs/sdlc-site/` already exists.**
+
+- **It does not exist** (a first build): copy the shell from `templates/app/` verbatim, then do the rest
+  of this step.
+- **It exists** (every build after the first): **do not copy the shell.** Copying it would overwrite the
+  site's own components and delete the sections the template does not have. Instead, update the site in
+  place: regenerate the data in `src/data/*.ts`, and edit a component only where the pipeline change
+  needs it. Before you finish, run `git status docs/sdlc-site/` and check that nothing was deleted.
+
+Then generate `src/data/*.ts` deterministically (same
 determinism rules as `yad-docs`: stable-ID sort by skill pipeline order / phase, fixed key order, no
 timestamps in the data files), theme the `:root` of `index.css` from **yadflow's brand palette** — the
 the legacy report's `:root`: `--accent: #2471a3` and the node colors (`--artifact-*`, `--gate-*`,
@@ -84,13 +96,14 @@ Write `docs/sdlc-site/.docs-build.json` — `yad-docs-sync` compares against it:
   "theme": "yadflow-brand",
   "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd>",
   "skillCount": <number of yad-* skills>,
-  "deployUrl": "<url or null>",
-  "templateVersion": "<shell template version = the yad CLI version>"
+  "deployUrl": "<url or null>"
 }
 ```
 
-The overview's freshness inputs are the **config + manifest + diagram** (plus the `templateVersion`, so a
-doc-shell upgrade triggers a rebuild). `skillCount` rides along in the manifest as an informational field
+The overview's freshness inputs are the **config + manifest + diagram**. There is **no shell version**:
+the overview is not re-copied from the shell (Step 3), so a shell upgrade is not a reason to rebuild it.
+An older manifest may still carry a `templateVersion` (the yad CLI version); it is ignored, because it
+made the overview read stale after every release. `skillCount` rides along in the manifest as an informational field
 — it is **not** a separate hash input, since `module-help.csv` already moves whenever the skill set does.
 Not per-epic artifacts/repo heads.
 
@@ -124,8 +137,9 @@ under `<base>/app/` and cross-linked. Never touches any epic state.
   work hand-updates `docs/index.html` + the overview diagram + skill counts: the overview site now
   regenerates whenever `module-help.csv` / `config.yaml` / the skill count changes — and `yad-docs-sync`
   **enforces** that (it flags the overview stale when those inputs move).
-- **Brand-palette themed, copy the shell verbatim.** Theme only the `:root`; generate only `src/data/*.ts`
-  + the Vite base. Never hand-edit `templates/app/`.
+- **Copy the shell once, then update in place.** The template is copied only into a missing
+  `docs/sdlc-site/`. An existing site is never re-copied over, because that deletes its own sections.
+  Theme only the `:root`. Never hand-edit `templates/app/` for the overview's sake.
 - **Deterministic generation.** Same stable-sort / fixed-key / no-timestamp discipline as `yad-docs`.
 - **Degrade gracefully.** No docs target → build-only; no `.mmd` / no build-plan docs → omit those
   sections with a note, never invent.
