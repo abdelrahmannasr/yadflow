@@ -223,9 +223,10 @@ only what it does. So artifacts never go stale — they are *superseded*; the fe
 head of the thread. This is what keeps the SDLC a trusted source of truth for AI on the next change.
 
 - **`yad-change`** — the intake + triage. Classifies the change *depth* (defect-fix /
-  behavioral-no-surface / contract-surface / new-capability), seeds a new `EP-<slug>` threaded to its
-  parent (lineage frontmatter, an inherited-step `state.json`, a pointer-lock `contract-lock.json`,
-  `change.json`), and for hotfixes opens `reconcile-debt.json`. Never auto-advances — hands off to the
+  behavioral-no-surface / contract-surface / new-capability), writes a new `EP-<slug>` threaded to its
+  parent (lineage frontmatter and `change.json`), seeds its ledger with `yad epic new --parent` (the
+  inherited-step `state.json` and a pointer-lock `contract-lock.json` — E42), and for hotfixes opens
+  `reconcile-debt.json`. Never auto-advances — hands off to the
   normal authoring skills + the review gate.
 - **`yad-timeline`** — render the thread as an evolution view (yad-docs shell + `TIMELINE.md`) and emit
   `thread-resolved.md`, the composed **current-truth map** (which epic owns each artifact now).

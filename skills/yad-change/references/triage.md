@@ -1,4 +1,4 @@
-# Change triage — depth, seeding, the pointer-lock, migration, concurrency
+# Change triage — depth, what the seed writes, the pointer-lock, migration, concurrency
 
 This is the detail behind `yad-change`. The lineage frontmatter + ledger schemas live in
 `../../yad-epic/references/state-schema.md` (Phase 6 section); this file is the *how*.
@@ -21,13 +21,12 @@ enum/identifier in the genesis (or current-truth) `contract.md` `CONTRACT-SURFAC
 contract-surface. If it only changes internal behaviour, validation, or a repo-private field → not the
 surface.
 
-## The seeded `state.json` (worked shape)
+## What `yad epic new --parent` writes (worked shape)
 
-Same 10 steps as `yad-epic` — **when the parent is on `classic`**. The child's chain is always the
-PARENT's chain: read `epics/EP-<parent>/.sdlc/state.json` and copy its `profile`. A parent on a short
-lane (`chore`, 4 steps; `spike`, 6) gives a short child, with no `architecture`/`ui-design` rows to
-inherit and no pointer-lock — see "Short-lane parent" in `../SKILL.md` Step 5. Inheriting a step the
-parent never walked would stamp `inherited: true` on a review that never happened.
+The engine writes this (E42); it is shown so the author and the reviewers know what to expect, and a
+test keeps it equal to what the engine really writes. The child's chain is always the PARENT's chain and
+`profile`: 10 steps under a `classic` parent, 4 under a `chore` one (no `architecture`/`ui-design` rows to
+inherit and no pointer-lock — see "Short-lane parent" in `../SKILL.md` Step 5).
 
 For a **defect-fix** off a `classic` parent, inheriting epic/architecture/ui-design and re-authoring
 stories+test-cases:
@@ -39,12 +38,12 @@ stories+test-cases:
   "profile": "classic",
   "currentStep": "stories",
   "steps": [
-    { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": null, "link": "EP-<genesis>" }, "risk_tags": [] },
-    { "id": "epic-review",         "type": "review+approve", "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": null, "link": "EP-<genesis>" }, "risk_tags": [] },
-    { "id": "architecture",        "type": "author",         "artifact": "architecture.md", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": null, "link": "EP-<genesis>" }, "risk_tags": [] },
-    { "id": "architecture-review", "type": "review+approve", "artifact": "architecture.md", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": null, "link": "EP-<genesis>" }, "risk_tags": ["contract"] },
-    { "id": "ui-design",           "type": "author",         "artifact": "ui-design.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": null, "link": "EP-<genesis>" }, "risk_tags": [] },
-    { "id": "ui-design-review",    "type": "review+approve", "artifact": "ui-design.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": null, "link": "EP-<genesis>" }, "risk_tags": [] },
+    { "id": "epic",                "type": "author",         "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": "<today>", "link": "EP-<genesis>" }, "risk_tags": [] },
+    { "id": "epic-review",         "type": "review+approve", "artifact": "epic.md",         "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": "<today>", "link": "EP-<genesis>" }, "risk_tags": [] },
+    { "id": "architecture",        "type": "author",         "artifact": "architecture.md", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": "<today>", "link": "EP-<genesis>" }, "risk_tags": [] },
+    { "id": "architecture-review", "type": "review+approve", "artifact": "architecture.md", "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": "<today>", "link": "EP-<genesis>" }, "risk_tags": ["contract"] },
+    { "id": "ui-design",           "type": "author",         "artifact": "ui-design.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": "<today>", "link": "EP-<genesis>" }, "risk_tags": [] },
+    { "id": "ui-design-review",    "type": "review+approve", "artifact": "ui-design.md",    "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "satisfied", "inherited": true, "inheritedFrom": "EP-<genesis>", "boundHash": "sha256:…", "record": { "reason": "carried by reference from EP-<genesis>", "by": null, "date": "<today>", "link": "EP-<genesis>" }, "risk_tags": [] },
     { "id": "stories",             "type": "author",         "artifact": "stories/",        "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "in_progress", "risk_tags": [] },
     { "id": "stories-review",      "type": "review+approve", "artifact": "stories/",        "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "todo",        "risk_tags": [] },
     { "id": "test-cases",          "type": "author",         "artifact": "test-cases.md",   "assistance": "review", "driver": "pair", "automation": "human_approve", "advance": "human", "locked": true, "status": "todo",        "risk_tags": [] },
@@ -53,12 +52,14 @@ stories+test-cases:
 }
 ```
 
-`boundHash` is the inherited artifact's **current** hash from the owning epic — the same hashes
+`inheritedFrom` is the epic that owns the artifact along the parent's line — the latest one that
+re-authored it, which is not always the parent. `boundHash` is the inherited artifact's **current** hash from the owning epic — the same hashes
 `cli/epic-state.mjs` computes: `contractSurfaceHash` for `architecture`, `storiesHash` for `stories`,
 the file otherwise — every file without its frontmatter `status:` line (`reviewedSha`, shape 9). A
 `boundHash` computed over the whole file by an older release is still accepted. The gate predicate treats an `inherited` step as satisfied (never re-reviewed)
-as long as `boundHash` matches the thread's current hash for that artifact — which it always does,
-because the artifact lives in the parent and cannot be edited from the child.
+as long as `boundHash` matches the current hash of that artifact in the owning epic (`inheritedFrom`) —
+which holds unless the owner's copy changes. Compare against the OWNER's copy, never the child's: a
+change-epic writes its own `epic.md` (the change brief), which is not the epic it carries.
 
 `approvals.json` provenance record per inherited gate (append-only, NOT an approval that the predicate
 counts — it just documents where the sign-off lives):
@@ -70,15 +71,16 @@ counts — it just documents where the sign-off lives):
 
 ## The pointer-lock (when `architecture` is inherited)
 
-Write `.sdlc/contract-lock.json` with the parent's hash **verbatim**:
+`yad epic new` writes `.sdlc/contract-lock.json` with the owning epic's hash **verbatim**:
 
 ```json
 { "artifact": "contract.md", "hash": "sha256:<parent hash, copied byte-for-byte>", "lockedAt": "<today>",
   "inheritedFrom": "EP-<genesis>", "ref": "../../EP-<genesis>/.sdlc/contract-lock.json" }
 ```
 
-Get the parent hash from the owning epic's `.sdlc/contract-lock.json` `hash` field (do NOT recompute — copy
-it). `contract-check.sh` reads only `hash`, so a Build story in the change-epic pins this identical
+The engine copies the `hash` field of the owning epic's `.sdlc/contract-lock.json` (it never recomputes
+it), and refuses when that lock is missing, malformed, or no longer matches the owner's `contract.md`
+surface — a pointer to a stale lock would pass the drift down the thread. `contract-check.sh` reads only `hash`, so a Build story in the change-epic pins this identical
 hash via its `link.md` and the gate passes unchanged. There is no `contract.md` in the change-epic, so
 the surface physically cannot drift.
 

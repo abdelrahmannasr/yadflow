@@ -217,10 +217,10 @@ If the predicate **passes**:
 > With a platform, you do not perform them at all: `yad gate sync` (local ledger) or `yad gate ci`
 > (verified) runs the same transition from that function.
 >
-> One other skill still writes a chain by hand, and it is not an oversight: `yad-change` seeds a
-> threaded chain bound to a parent's artifact hashes (E42 owns inheritance). `yad-backfill promote`
-> rewrites one too, and needs its own verb. (`yad-discovery` used to be the third; since E75 it runs
-> `yad foundation new`.)
+> One other skill still writes a chain by hand, and it is not an oversight: `yad-backfill promote`
+> rewrites one, and needs its own verb. (`yad-discovery` used to be one; since E75 it runs
+> `yad foundation new`. `yad-change` used to seed a threaded chain by hand; since E42 it runs
+> `yad epic new --parent`.)
 
 - Mark this review step `status: "done"`.
 - **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively

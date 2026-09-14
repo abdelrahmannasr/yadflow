@@ -82,11 +82,15 @@ ${c.bold('Team usage (EM adoption & behavior report)')}
                                        --member <name>, --format html|json|md, --repos (code commits)
 
 ${c.bold('Where am I / what next')}
-  yad epic new <slug> [--type <t>] [--profile <p>] [--stub] [--json]
+  yad epic new <slug> [--type <t>] [--profile <p>] [--stub] [--parent <epic> --inherits <bases>] [--json]
                                        Seed a new epic's lifecycle: writes its step chain from a
                                        profile, plus empty approval/comment ledgers and reviews/.
-                                       --type feature|chore (default feature) — a change/defect/
-                                       hotfix threads off an existing epic, so use yad-change.
+                                       --type feature|chore (default feature). A change/defect/
+                                       hotfix needs --parent: it takes the parent's route, and
+                                       --inherits epic,architecture,contract,ui-design carries
+                                       those steps by reference (satisfied, bound to the owner's
+                                       hash). Carrying the contract writes a pointer-lock instead
+                                       of a second contract (E42). The yad-change skill triages.
                                        --profile ${seedableProfiles().join('|')} (default classic).
                                        classic and analysis-first are the full chains; chore and
                                        spike are E40's short lanes — epic + stories, with the
@@ -247,7 +251,7 @@ ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--retro-ship', '--merge-commit', '--path']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--retro-ship', '--merge-commit', '--path']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -363,13 +367,19 @@ async function main() {
       break;
     }
     case 'epic': {
-      const [, action, slug] = o._;
-      if (action !== 'new') {
-        log(c.red(`unknown epic action: ${action ?? '(none)'} (new)`));
-        log(`usage: yad epic new <slug> [--type feature|chore] [--profile ${seedableProfiles().join('|')}]`);
+      const [, action, slug, ...extra] = o._;
+      // A stray word is refused rather than dropped: `--inherits epic architecture` takes only `epic` as
+      // the value, and silently seeding without `architecture` would carry less than the author asked.
+      if (action === 'new' && extra.length) {
+        log(c.red(`unexpected argument(s): ${extra.join(' ')} — a list takes commas, e.g. --inherits epic,architecture`));
         process.exitCode = 1; break;
       }
-      await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, today, json: o.json });
+      if (action !== 'new') {
+        log(c.red(`unknown epic action: ${action ?? '(none)'} (new)`));
+        log(`usage: yad epic new <slug> [--type feature|chore|change|defect|hotfix] [--profile ${seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
+        process.exitCode = 1; break;
+      }
+      await runEpicNew(o.dir, { slug, type: o.type, profile: o.profile, stub: o.stub, parent: o.parent, inherits: o.inherits, today, json: o.json });
       break;
     }
     case 'foundation': {

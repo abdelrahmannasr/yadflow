@@ -112,7 +112,7 @@ the intake, then it hands off to the normal authoring skills + the review gate.
 
 | Step (skill) | Outputs / sideEffects |
 |--------------|------------------------|
-| `yad-change` | intake + triage depth (defect-fix / behavioral-no-surface / contract-surface / new-capability); seeds a threaded change-epic — lineage frontmatter, inherited-step `state.json`, pointer-lock `contract-lock.json`, `change.json`, and `reconcile-debt.json` for hotfixes |
+| `yad-change` | intake + triage depth (defect-fix / behavioral-no-surface / contract-surface / new-capability); writes a threaded change-epic's lineage frontmatter and `change.json`, seeds its ledger with `yad epic new --parent` (inherited-step `state.json`, pointer-lock `contract-lock.json` — E42), and opens `reconcile-debt.json` for hotfixes |
 | `yad-timeline` | `TIMELINE.md` (the thread evolution view) + `thread-resolved.md` (the resolved current truth) |
 | `yad-defects` | `DEFECTS.md` (quality-gap report by `escape_stage` + root cause) |
 | `yad-reconcile` | advisory drift / orphan / debt sweep (read-only; mirrors `yad-docs-sync`) |

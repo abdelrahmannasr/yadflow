@@ -80,8 +80,8 @@ binding that will never run: a value that is not a skill name (`YAD-CFG-006`), a
 does not know (`skills:unknown-step`) and a review gate, which `yad gate` drives (`skills:review-step`).
 It never rewrites the file.
 
-**When a chain disagrees with the catalogue, the chain wins.** `yad-change` still writes a chain by
-hand, a project may run a chain from a newer release, and leaving a step out is normal
+**When a chain disagrees with the catalogue, the chain wins.** A change-epic seeded by hand before E42
+may carry a chain the engine would not write, a project may run a chain from a newer release, and leaving a step out is normal
 — not every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
 `step:artifact` (a step naming a different file from the one the gate hashes — different spellings of
 the SAME artifact are fine, since `stories`, `stories/` and `stories.md` are one gate),
@@ -191,9 +191,9 @@ existing `state.json` and does **not** re-seed.
 
 **The engine owns the chain.** No skill writes one by hand on these two routes any more — `yad-epic`
 runs `yad epic new EP-<slug>`, `yad-analysis` runs it with `--profile analysis-first`, and `yad-stub`
-runs it with `--stub`, and `yad-discovery` runs `yad foundation new` for the Product level (E75). One
-seed is still hand-written and it is not an oversight: `yad-change` seeds a threaded chain whose
-inherited steps are bound to a parent's artifact hashes. A seeded chain leaves its first author step **open**, not `done` — the
+runs it with `--stub`, and `yad-discovery` runs `yad foundation new` for the Product level (E75). `yad-change`
+runs it with `--parent` and `--inherits` for a threaded chain whose inherited steps are bound to the
+owning epic's artifact hashes (E42). A seeded chain leaves its first author step **open**, not `done` — the
 command runs before the artifact exists; `yad gate open` closes it when the gate opens.
 
 - **With analysis** — the `analysis-first` route, 12 steps:
@@ -814,7 +814,8 @@ From promotion on, the thread's contract protection is live.
 
 A change-epic's `state.json` is structurally identical (so `advanceState` / `nextAction` / `gatePredicate`
 / the verified ledger run unchanged), but **inherited** steps are pre-marked `done` with two extra fields, and
-only re-authored steps run. The seeder sets `currentStep` to the first re-authored step.
+only re-authored steps run. `yad epic new <slug> --type <change|defect|hotfix> --parent <EP-parent> --inherits <bases>`
+writes it (E42) and sets `currentStep` to the first re-authored step.
 
 ```json
 { "id": "architecture", "type": "author", "artifact": "architecture.md",
@@ -824,13 +825,14 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
 ```
 
 - `inherited` — `true` when this step's artifact is taken by reference from the thread (not authored here).
-- `inheritedFrom` — the epic in the thread that owns the referenced artifact.
+- `inheritedFrom` — the epic along the parent's line that owns the referenced artifact (not always the parent).
 - `boundHash` — the artifact's hash at inherit time (contract surface hash for `architecture`; the
   `storiesHash`/file hash for others — without the frontmatter `status:` line from shape 9, and an older
   whole-file hash is still accepted). The gate predicate short-circuits an `inherited` step as
-  **satisfied** iff `boundHash` still equals the thread's current hash for that artifact — always true,
-  since the artifact lives in the parent and can't be edited from the child, so inherited steps never
-  block and are never re-reviewed.
+  **satisfied** iff `boundHash` still equals the current hash of that artifact in the owning epic
+  (`inheritedFrom`) — which holds unless the owner's copy changes, so inherited steps never block and are
+  never re-reviewed. Compare against the owner's copy, not the child's: a change-epic writes its own
+  `epic.md` (the change brief), which is not the epic it carries.
 
 `approvals.json` gets a **provenance** record per inherited gate (not a forged approval):
 
@@ -839,9 +841,29 @@ only re-authored steps run. The seeder sets `currentStep` to the first re-author
   "from": "EP-checkout", "boundHash": "sha256:…", "date": "<YYYY-MM-DD>" }
 ```
 
+**What may be inherited (E42).** The engine carries a base only from the epic that owns it along the
+PARENT's line (`inheritedFrom` — a sibling change off the same genesis is not something this epic builds
+on), and only when that owner wrote AND approved it: both the step and its `-review` are `done`, and the
+artifact is on disk. `epic`, `architecture` + `contract` (always together) and `ui-design` may be
+inherited; `analysis` rides with `epic`. `stories` and `test-cases` never are — the thread's set is the
+union of every contributor, and `stories-review` is what hands an epic to Build. Everything else is
+refused before anything is written:
+
+| Upstream | Refused because | Instead |
+|---|---|---|
+| the step is `skipped` | a skip is a decision, not an artifact — carrying it would claim a review nobody did | leave the base out, then `yad skip` it on this epic |
+| the step is `deferred` | the work is still owed | leave the base out and author it here, so the owed work follows the thread |
+| the step or its review is unfinished | nothing approved exists yet | finish it on the owner first |
+| architecture approved, but no usable lock | rule 5 — you may skip authoring a contract, never having one | lock the owner's surface first |
+| the owner's surface no longer matches its lock | a pointer would pass the drift down the thread | re-lock the owner first |
+| the route has no such step (a short lane) | nothing to inherit | leave the base out |
+
+A brownfield anchor (`kind: stub`, or a light-promoted `backfill-done`) is the one exception: its chain
+was never started, so its bases carry `boundHash: null` and no pointer-lock is written.
+
 ## The pointer-lock — `contract-lock.json` in a change-epic
 
-When `architecture` is inherited, the seeder writes a **derived** `contract-lock.json` carrying the
+When `architecture` is inherited, `yad epic new` writes a **derived** `contract-lock.json` carrying the
 parent's hash **verbatim** so `contract-check.sh` (which reads only `hash`) passes unchanged. There is
 no `contract.md` in the child to edit, so the surface physically cannot drift.
 
