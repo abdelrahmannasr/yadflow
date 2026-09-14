@@ -115,7 +115,7 @@ It waits, and moves nothing, when:
 | no review has merged since the workflow runs this release | it moves with the next merged review |
 | a person ran `yad gate ci` by hand on a checkout with uncommitted changes under `epics/EP-discovery/` or `foundation/`, or not on the default branch | commit or discard them, and run it on the default branch — CI's own checkout is never affected |
 | `foundation/.sdlc/` already exists, a file would collide, or a ledger file does not parse | the same fixes as for a local ledger, above |
-| the gate workflow still runs a yadflow older than this release | move the version it runs: `yad update` re-stamps `.sdlc/cli-version.json`, but a `gate_sync_version` in `.sdlc/hub.json` is read first, so change that too if you set one — or set the `YAD_VERSION` variable |
+| the gate workflow still runs a yadflow older than this release | run `yad update` and commit the result: it rewrites the workflow and re-stamps `.sdlc/cli-version.json` together. A `gate_sync_version` in `.sdlc/hub.json` is read first, and one from 3.x is skipped by the new workflow — update it or remove it. Or set the `YAD_VERSION` variable |
 
 Until it moves, nothing is broken. This release reads the old spelling everywhere: `yad next`,
 `yad gate`, `yad doctor` and CI all treat `EP-discovery` as the product level, and its review still ends

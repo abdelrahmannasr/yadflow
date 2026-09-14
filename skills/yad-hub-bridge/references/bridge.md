@@ -187,21 +187,28 @@ other way — up through its first review PR/MR; see "the seed of a new epic" be
 | Schedule (`*/15`) | reconcile | Safety net: enumerate recently-**merged** `review/EP-*` PRs/MRs via the API and advance any not yet `done` (idempotent). Recovers a merge whose merge-time run failed transiently, and on GitLab also picks up a squash merge whose commit dropped the branch name (and a bare approval — GitLab fires no pipeline on one). **GitHub:** a scheduled workflow, automatic once committed. **GitLab:** a pipeline schedule with `SDLC_GATE_SYNC=true` (one-time setup) |
 
 **Which yadflow the wired job runs.** Both fragments resolve the version from a `YAD_VERSION` variable
-and fall back to `3`:
+and fall back to the major the fragment ships with — `YAD_MAJOR` in its `yad-pin` block (`4` in this release):
 
 | # | Source | Set it in |
 |---|---|---|
 | 1 | `YAD_VERSION` — used **verbatim**, the operator's override | GitHub: Settings → Secrets and variables → Actions → **Variables**. GitLab: Settings → CI/CD → **Variables** (beside `SDLC_GATE_TOKEN`) |
 | 2 | `.sdlc/hub.json` → `gate_sync_version` — this Product's committed pin | edit `hub.json`, commit it |
 | 3 | `.sdlc/cli-version.json` → `version` — the yadflow that last wired the Product | `yad update` re-stamps it |
-| 4 | `3` — floating major, only when nothing above resolves | — |
+| 4 | `$YAD_MAJOR` — floating major, only when nothing above resolves. While only prereleases of that major exist (`4.0.0-next.N`) npm cannot resolve a bare major, so the job says so on stderr first; a Product wired by that release always has a stamp that resolves | — |
 
-Sources 2 and 3 are **validated** before use: an exact `3.x.y` release token, prereleases included
-(`3.16.0-rc.1` is a legitimate pin; `latest` and a bare `3` are not). A `.sdlc/cli-version.json`
+Sources 2 and 3 are **validated** before use: an exact release token of the fragment's own major, prereleases
+included (`4.16.0-rc.1` is a legitimate pin; `latest`, a bare `4` and a `3.x` are not). A `.sdlc/cli-version.json`
 written by a long-untouched project can still say something like `1.0.2`, a version with no `yad gate ci`
 in it at all, and the value is interpolated into `npx -p "yadflow@$V"` on a runner holding a push token —
 so anything that is not an exact release of this major is skipped, loudly, in favour of the next source.
 `YAD_VERSION` is exempt: it is a human's deliberate act, and it is the only way to cross a major.
+
+**A new major moves both files at once.** `yad update` rewrites the fragment from the release's template
+and re-stamps `.sdlc/cli-version.json` in the same run, so a Product that updates to 4.x gets a fragment
+with `YAD_MAJOR=4` and a `4.x` stamp together. A `gate_sync_version` pin in `hub.json` from the old major
+is then SKIPPED (the job logs `ignoring pin … not an exact 4.x release`) — update it or remove it. The
+fragment's major is held to the major a release publishes by `scripts/pin-major-check.sh`, a step of the
+release check.
 
 **Why this is no longer a floating major.** It used to be, on the argument that a published fix should
 reach a scheduled job with nobody in the loop — this page's own issue #163 as the example. The same

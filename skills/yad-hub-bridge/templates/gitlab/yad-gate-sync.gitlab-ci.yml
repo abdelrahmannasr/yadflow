@@ -43,7 +43,7 @@
 # Product is no longer carried onto a fix automatically, so if the resolved pin is older than 3.15.3, run
 # `yad update` or disable this schedule.
 #
-# To override it, set a CI/CD variable YAD_VERSION (e.g. `3.15.2`) in project Settings → CI/CD →
+# To override it, set a CI/CD variable YAD_VERSION (e.g. `4.0.0`) in project Settings → CI/CD →
 # Variables — the same place SDLC_GATE_TOKEN lives, and deliberately NOT in this file, which `yad` owns
 # and rewrites byte-for-byte from its template on every sync.
 variables:
@@ -92,7 +92,7 @@ yad-gate-sync:
       #   1. $YAD_VERSION            — the CI/CD variable, a human's deliberate override, verbatim
       #   2. .sdlc/hub.json          — "gate_sync_version", the committed pin for this Product
       #   3. .sdlc/cli-version.json  — the version that last wired it (`yad update` re-stamps this)
-      #   4. 3                       — floating major, only when nothing above resolves
+      #   4. $YAD_MAJOR              — floating major, only when nothing above resolves
       # Sources 2 and 3 are machine-written files a stale or hand-edited checkout can get wrong, so
       # they are VALIDATED: an exact release token of the major this fragment was written for. That
       # also keeps the value safe to interpolate into `npx -p "yadflow@$V"` — a repo-controlled
@@ -101,20 +101,30 @@ yad-gate-sync:
       # the same shell, so YAD_PKG carries into the block below.
       # Pipes, not bash here-strings: a GitLab runner falls back to `sh` when the image has no bash,
       # and `<<<` is a bashism. `sed` drains its input (no early exit, so nothing SIGPIPEs `tr`).
+      # The major this fragment ships with. ONE literal, read by the check, the message and the fallback
+      # below, so they cannot drift apart; scripts/pin-major-check.sh holds it to the major a release
+      # publishes. `yad update` rewrites this file and re-stamps .sdlc/cli-version.json together, so a
+      # Product moves both to the new major at once — and a pin from an older major is skipped.
+      YAD_MAJOR=4
       yad_pin_read() { # <file> <key>
         [ -f "$1" ] || return 0
         tr -d '\n' < "$1" 2>/dev/null | sed -nE "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\1/p"
       }
-      yad_pin_valid() { printf '%s' "${1:-}" | grep -Eq '^3\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; }
+      yad_pin_valid() { printf '%s' "${1:-}" | grep -Eq "^${YAD_MAJOR}\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\$"; }
       YAD_PKG="${YAD_VERSION:-}"
       if [ -z "$YAD_PKG" ]; then
         for _cand in "$(yad_pin_read .sdlc/hub.json gate_sync_version)" "$(yad_pin_read .sdlc/cli-version.json version)"; do
           [ -n "$_cand" ] || continue
           if yad_pin_valid "$_cand"; then YAD_PKG="$_cand"; break; fi
-          echo "yad-gate-sync: ignoring pin '${_cand}' — not an exact 3.x release." >&2
+          echo "yad-gate-sync: ignoring pin '${_cand}' — not an exact ${YAD_MAJOR}.x release." >&2
         done
       fi
-      YAD_PKG="${YAD_PKG:-3}"
+      if [ -z "$YAD_PKG" ]; then
+        YAD_PKG="$YAD_MAJOR"
+        # A bare major is an npm RANGE, and a range never matches a prerelease: while only ${YAD_MAJOR}.0.0-next.N
+        # exists, npm fails with ETARGET. Say what to do before that happens.
+        echo "yad-gate-sync: no exact pin resolved — floating on yadflow@${YAD_MAJOR}. If npm cannot find it, run: yad update — and commit .sdlc/cli-version.json — or set YAD_VERSION." >&2
+      fi
       echo "yad-gate-sync: running yadflow@${YAD_PKG}"
       # <<< yad-pin
     - |

@@ -15,6 +15,7 @@
 #   4  fresh install       the tarball people actually download installs and sets a project up
 #   5  doctor              that brand-new project is healthy by this release's own reckoning
 #   6  migration guide     if the file shape moved, the page explaining it exists (rule 7)
+#   7  gate-sync major     the CI fragments `yad update` wires trust the major this release publishes
 #
 # Run it yourself before deciding: bash scripts/release-check.sh
 set -euo pipefail
@@ -40,7 +41,7 @@ node -e '
 ' "$MIN_NODE" || die "this check needs Node >= $MIN_NODE (running $(node -v)) — the coverage thresholds in step 1 use node flags older runtimes do not have. The PUBLISHED package still supports Node >= 18; this floor is only for running the check."
 
 # ---------------------------------------------------------------------------------------------
-say "1/6  tests + coverage"
+say "1/7  tests + coverage"
 # Coverage carries its own thresholds (package.json) and runs the whole suite, so it subsumes `npm
 # test`. Running both would double the slowest step of this script for no extra signal.
 npm run coverage >"$WORK/coverage.log" 2>&1 || { cat "$WORK/coverage.log"; die "tests or coverage thresholds"; }
@@ -48,14 +49,14 @@ grep -E '^# (tests|pass|fail)' "$WORK/coverage.log" | sed 's/^# /   /'
 pass "suite green at the configured coverage floors"
 
 # ---------------------------------------------------------------------------------------------
-say "2/6  the golden compatibility test"
+say "2/7  the golden compatibility test"
 # Already covered by step 1, but named separately and run on its own so a failure here is unmissable:
 # this is the alarm bell for the whole roadmap, and "if it breaks, the change is wrong" (rule 6).
 node --test cli/test-golden.mjs >"$WORK/golden.log" 2>&1 || { cat "$WORK/golden.log"; die "the frozen v3 project no longer reads as it did — the change is wrong, not the test"; }
 pass "the frozen v3 project reads exactly as it did"
 
 # ---------------------------------------------------------------------------------------------
-say "3/6  yad migrate --preview on the golden project"
+say "3/7  yad migrate --preview on the golden project"
 # The upgrade path, planned against a REAL v3 project. A preview must never write, and must never
 # report a file it cannot handle — that would be a user, on the current release, who cannot upgrade.
 GOLDEN="$WORK/golden-v3"
@@ -93,7 +94,7 @@ J_FILE="$WORK/migrate.json" node -e '
 pass "the upgrade can be planned, and the preview wrote nothing"
 
 # ---------------------------------------------------------------------------------------------
-say "4/6  a fresh install of the real tarball"
+say "4/7  a fresh install of the real tarball"
 # Not the working tree — the artifact people download. `files` mistakes (a missing bin/, a leaked
 # fixture) only ever show up here.
 # Not `$(npm pack … 2>/dev/null | tail -1)`: under `set -e` + `pipefail` a pack failure aborts on the
@@ -123,7 +124,7 @@ SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" --solo --greenfield --separate >"$W
 pass "a new project can be created by this release"
 
 # ---------------------------------------------------------------------------------------------
-say "5/6  yad doctor on that brand-new project"
+say "5/7  yad doctor on that brand-new project"
 # A release that cannot produce a project its own doctor calls healthy is not shippable. Warnings are
 # fine (a fresh project has no repos connected yet); a FAILURE is not.
 set +e
@@ -151,10 +152,17 @@ J_FILE="$WORK/doctor.json" node -e '
 pass "a project this release creates passes its own health check"
 
 # ---------------------------------------------------------------------------------------------
-say "6/6  a migration guide, if the file shape moved"
+say "6/7  a migration guide, if the file shape moved"
 # Rule 7: a file-shape change ships together with its migration guide. The changelog is generated
 # AFTER this check by semantic-release, so what is enforced here is the page the notes point at —
 # authored by a person, before the release, or the release does not happen.
 bash "$ROOT/scripts/shape-guide-check.sh"
+
+# ---------------------------------------------------------------------------------------------
+say "7/7  the gate-sync fragments ship the major this release publishes"
+# A fragment trusts a committed version only from its own major, and `yad update` wires it into every
+# verified Product. Shipping the old major rejects every stamp the new release writes and runs the old
+# engine against the new file shape, in CI, silently.
+bash "$ROOT/scripts/pin-major-check.sh"
 
 printf '\n== RELEASE CHECK PASSED — safe to publish\n'

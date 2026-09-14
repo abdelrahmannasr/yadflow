@@ -22,7 +22,7 @@ login to an SDLC name + role. It is a single object for the Product itself — t
   "ledger": "verified",                                       // WHO WRITES THE LEDGER, and the one that decides: "verified" = CI only, signed; "local" = this machine. Travels WITH platform — verified is both (isVerifiedLedger), so never "verified" beside platform: null (#186)
   "bridge_enabled": true,                                     // the older spelling of the same switch, kept so a check gate that predates `yad update` still reads it. Write it to MATCH `ledger`, never against it
   "bridge": true,                                             // older still. Same rule
-  "gate_sync_version": "3.15.3",                              // OPTIONAL exact pin for the wired gate-sync job; an exact 3.x.y, prereleases included (3.16.0-rc.1) — anything else is skipped. Omitted => the .sdlc/cli-version.json stamp if that qualifies, else floating 3
+  "gate_sync_version": "4.0.0",                              // OPTIONAL exact pin for the wired gate-sync job; an exact release of the wired fragment's major (4.x.y in this release), prereleases included (4.1.0-rc.1) — anything else, a 3.x pin included, is skipped. Omitted => the .sdlc/cli-version.json stamp if that qualifies, else floating on that major
   "review": { "requireEngagement": false },                   // Review Companion: false (soft) counts bare approves but nudges; true counts only verified-engagement approvals
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
   "roster": [
