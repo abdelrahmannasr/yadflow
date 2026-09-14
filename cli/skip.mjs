@@ -1,8 +1,8 @@
 // `yad skip <epic> <step> --reason "<why>"` / `yad unskip <epic> <step>` (E35, E36) and
 // `yad defer <epic> <step> --reason "<why>"` / `yad undefer <epic> <step>` (E37) — set an OPTIONAL Shape
 // step aside for one epic, or put it back. A skip says the step does not apply; a deferral says it does,
-// later. `yad skip … --undo` and `yad defer … --undo` are the same as the undo verbs. `yad undefer` (E41)
-// re-opens a deferral even after later work has finished.
+// later. `yad skip … --undo` and `yad defer … --undo` are the same as the undo verbs. `yad defer --debt`
+// (E41) marks the deferral owed back, and `yad undefer` re-opens a deferral even after later work finished.
 // Which steps qualify is a fact about the epic's ROUTE, read from the lifecycle profile it is on (E35,
 // `optionalStepsFor`), not a list this engine keeps: on `classic` and `analysis-first` that is
 // `ui-design` and its gate. E40's short lanes mark NOTHING optional — they drop the steps they do not
@@ -45,7 +45,7 @@ const VERBS = {
   },
 };
 
-async function runSetAside(root, verb, { epic, step, reason, undo = false, today } = {}) {
+async function runSetAside(root, verb, { epic, step, reason, debt = false, undo = false, today } = {}) {
   const V = VERBS[verb];
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -63,6 +63,8 @@ async function runSetAside(root, verb, { epic, step, reason, undo = false, today
     // Putting a step back deletes its record, so a reason given here would be recorded nowhere. Say so
     // rather than accept it in silence.
     if (reason != null && reason !== true) info(V.reasonNote);
+    // The same for `--debt`: putting a step back is how a debt is PAID, so the flag means nothing here (E41).
+    if (debt === true) info('--debt is not used when putting a step back: a debt is set with `yad defer --debt`, and putting the step back starts paying it');
     writeState(ledger.files.state, ledger.state);
     // A deferral put back after later work finished RE-OPENS beside that work (E41), and `currentStep`
     // stays where the chain is — so "back in the chain" and a currentStep line would both mislead.
@@ -77,9 +79,10 @@ async function runSetAside(root, verb, { epic, step, reason, undo = false, today
   }
 
   const by = recordActor(root);
-  V.set(ledger.state, step, { reason, by, at: today });
+  V.set(ledger.state, step, { reason, by, at: today, debt: debt === true });
   writeState(ledger.files.state, ledger.state);
-  ok(`${step} ${V.done}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
+  const owed = ledger.state.steps.find((s) => s?.id === step)?.debt === true;
+  ok(`${step} ${V.done}${owed ? ' as debt' : ''}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`${V.gate}; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad ${V.undo} ${epic} ${step}\`)`);
 }

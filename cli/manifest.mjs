@@ -190,8 +190,9 @@ export const LEARNING_PRIMARY = 'deeptutor';
 //     breaking one, because an older yadflow reads that value as stale — so it has to see a newer
 //     shape and say so. This release reads both the new value and every form older ones recorded.
 //     docs/migrations/shape-9.md.
-// 10 — a deferred step can be put back after the chain has built past it (E41). No field is added and
-//     nothing on disk is rewritten. It is a breaking shape because an older yadflow cannot read a
+// 10 — a deferred step can be put back after the chain has built past it, and can carry `debt: true`
+//     (E41). One optional key is added to a step in `state.json`, written only by `yad defer --debt`,
+//     and nothing on disk is rewritten. It is a breaking shape because an older yadflow cannot read a
 //     step re-opened behind finished work: it names that step the blocker of the work, and passing its
 //     review re-opens the step after it. docs/migrations/shape-10.md.
 //

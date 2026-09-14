@@ -1542,9 +1542,9 @@ test('migrate 8 -> 9: moves the number and nothing else — no field changes, ap
   } finally { cleanup(T); }
 });
 
-// ---- shape 10: a deferred step can be re-opened behind finished work ------------------------------
+// ---- shape 10: a deferred step can be re-opened behind finished work, and can carry `debt: true` ----
 
-test('migrate 9 -> 10: moves the number and nothing else', async () => {
+test('migrate 9 -> 10: moves the number and nothing else — no step gains a `debt` key', async () => {
   const state = { schemaVersion: 9, epicId: 'EP-x', createdAt: '2026-01-01', type: 'feature', profile: 'classic', currentStep: 'stories',
     steps: [
       { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'deferred', record: { reason: 'later', by: null, date: null } },
@@ -1558,6 +1558,6 @@ test('migrate 9 -> 10: moves the number and nothing else', async () => {
     await runMigrate(T, { apply: true });
     const after = read(path.join(T, 'epics/EP-x/.sdlc/state.json'));
     assert.equal(after.schemaVersion, ENGINE_SHAPE);
-    assert.deepEqual({ ...after, schemaVersion: 9 }, state, 'every other field is exactly as it was');
+    assert.deepEqual({ ...after, schemaVersion: 9 }, state, 'a plain deferral is not turned into a debt');
   } finally { cleanup(T); }
 });

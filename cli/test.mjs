@@ -6052,13 +6052,14 @@ test('undeferStep puts the pair back under the un-skip window, and neither verb 
   assert.equal(byId(deferred, 'ui-design').status, 'deferred', 'refused, and unchanged');
 });
 
-const { isReopenedStep } = await import('./epic-state.mjs');
+const { isReopenedStep, owedSteps } = await import('./epic-state.mjs');
+const { stepStateChecks } = await import('./doctor.mjs');
 
 // A classic chain whose `ui-design` pair was deferred before stories began, and which then built on:
 // stories done, and the stories review open (or passed, with `stories-review: 'done'`).
-const builtPastDeferral = ({ storiesReview = 'in_review' } = {}) => {
+const builtPastDeferral = ({ storiesReview = 'in_review', debt = false } = {}) => {
   const state = uiChain('ui-design', { ui: 'in_progress' });
-  deferStep(state, 'ui-design', { reason: 'launch date; @design waits', by: '@al', at: '2026-09-14' });
+  deferStep(state, 'ui-design', { reason: 'launch date; @design waits', by: '@al', at: '2026-09-14', debt });
   byId(state, 'stories').status = 'done';
   byId(state, 'stories-review').status = storiesReview;
   state.currentStep = storiesReview === 'done' ? 'ready-for-build' : 'stories-review';
@@ -6090,6 +6091,7 @@ test('undeferStep after later work finished re-opens the pair beside it, and the
   const a = nextAction({ state, hubPrs: [] });
   assert.equal(a.kind, 'build');
   assert.deepEqual(a.reopened.map((l) => [l.step, l.kind]), [['ui-design', 'author']]);
+  assert.equal(a.debt, undefined, 'a plain deferral is no debt');
 
   // (3) Its review opens: currentStep is not pulled back out of Build, and the lane is now the review.
   markInReview(state, byId(state, 'ui-design-review'));
@@ -6145,6 +6147,44 @@ test('preconditionsMet: only work COMPLETED here after an unfinished step makes 
   assert.equal(preconditionsMet(chain(['b', 'todo'], ['b-review', 'done'], ['d', 'todo']), 'd').blockedBy, 'b');
   // And the work between the open step and the one asked about is what counts, not work further on.
   assert.equal(preconditionsMet(chain(['b', 'todo'], ['c', 'todo'], ['d', 'done']), 'c').blockedBy, 'b');
+});
+
+test('debt: `yad defer --debt` marks the pair owed, the reminder lasts until the review passes, and a skip cannot carry it (E41)', () => {
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(state, 'ui-design', { reason: 'launch date', by: '@al', at: '2026-09-14', debt: true });
+  assert.equal(byId(state, 'ui-design').debt, true);
+  assert.equal(byId(state, 'ui-design-review').debt, true);
+  assert.equal(stepStatus(byId(state, 'ui-design')), 'deferred', 'a flag beside the state, not a state');
+  assert.equal(isPassed(byId(state, 'ui-design')), true);
+  assert.deepEqual(owedSteps(state).map((s) => s.id), ['ui-design'], 'one debt per pair');
+  assert.deepEqual(nextAction({ state, hubPrs: [] }).debt,
+    [{ step: 'ui-design', status: 'deferred', record: { reason: 'launch date', by: '@al', date: '2026-09-14' } }]);
+
+  // A plain deferral carries no flag; `--debt` on it later adds one and keeps the record.
+  const plain = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(plain, 'ui-design', { reason: 'later', by: '@al' });
+  assert.equal(byId(plain, 'ui-design').debt, undefined);
+  assert.deepEqual(owedSteps(plain), []);
+  deferStep(plain, 'ui-design', { debt: true });
+  assert.equal(byId(plain, 'ui-design-review').debt, true);
+  assert.equal(byId(plain, 'ui-design').record.reason, 'later');
+
+  // A skip says nothing is owed.
+  assert.throws(() => skipStep(uiChain('ui-design', { ui: 'in_progress' }), 'ui-design', { reason: 'x', debt: true }),
+    (e) => /a skip cannot carry debt/.test(e.message) && /yad defer <epic> ui-design .*--debt/.test(e.hint));
+
+  // Paying it back: late undefer keeps the flag, opening the review keeps it, passing the review clears it.
+  const owed = builtPastDeferral({ storiesReview: 'done', debt: true });
+  undeferStep(owed, 'ui-design');
+  assert.equal(byId(owed, 'ui-design').debt, true, 'putting it back starts paying — it does not pay');
+  assert.deepEqual(owedSteps(owed).map((s) => [s.id, s.status]), [['ui-design', 'in_progress']]);
+  markInReview(owed, byId(owed, 'ui-design-review'));
+  assert.deepEqual(owedSteps(owed).map((s) => [s.id, s.status]), [['ui-design-review', 'in_review']]);
+  advanceState(owed, byId(owed, 'ui-design-review'));
+  assert.equal(byId(owed, 'ui-design').debt, undefined);
+  assert.equal(byId(owed, 'ui-design-review').debt, undefined);
+  assert.deepEqual(owedSteps(owed), []);
+  assert.equal(nextAction({ state: owed, hubPrs: [] }).debt, undefined);
 });
 
 test('the shared walk steps over a deferred pair when a skip, un-skip or un-defer moves currentStep (E37)', () => {
@@ -6443,7 +6483,7 @@ test('gate sync on a deferred step says its review is still owed — not "alread
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('a re-opened review goes through `yad gate open` and `yad gate sync` beside Build (E41)', async () => {
+test('a re-opened review goes through `yad gate open` and `yad gate sync` beside Build, and paying it clears the debt (E41)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e41-gate-'));
   try {
     git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
@@ -6455,9 +6495,9 @@ test('a re-opened review goes through `yad gate open` and `yad gate sync` beside
     fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
     fs.writeFileSync(path.join(ep, 'epic.md'), '---\nowner: alice\nrepos: []\n---\n');
     fs.writeFileSync(path.join(ep, 'ui-design.md'), '# ui\n');
-    // Deferred, built past (stories written and approved), then put back late — the author step is
-    // written, so the lane is the review.
-    const state = { ...builtPastDeferral({ storiesReview: 'done' }), profile: 'classic' };
+    // Deferred as debt, built past (stories written and approved), then paid back late — the author step
+    // is written, so the lane is the review.
+    const state = { ...builtPastDeferral({ storiesReview: 'done', debt: true }), profile: 'classic' };
     undeferStep(state, 'ui-design');
     byId(state, 'ui-design').status = 'done';
     for (const s of state.steps) s.risk_tags = [];
@@ -6483,6 +6523,7 @@ test('a re-opened review goes through `yad gate open` and `yad gate sync` beside
     assert.equal(after.steps.find((x) => x.id === 'ui-design-review').status, 'done');
     assert.equal(after.steps.find((x) => x.id === 'stories').status, 'done', 'the finished stories are not re-opened');
     assert.equal(after.currentStep, 'ready-for-build');
+    assert.equal(after.steps.some((x) => 'debt' in x), false, 'passing the review paid the debt');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -6872,24 +6913,68 @@ test('runSkip --undo: reverses a skip and rewrites state.json', async () => {
   assert.equal(s.steps.find((x) => x.id === 'ui-design').skipped, undefined);
 });
 
-test('runDefer undo after later work finished: says the step re-opened, and yad next shows the lane (E41)', async () => {
+test('runDefer --debt and a late undefer: the words, the file, and the reminders yad next prints (E41)', async () => {
   const { runDefer } = await import('./skip.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e41-'));
   try {
     seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
-    await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', today: '2026-09-14' }));
+    const set = await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'launch date; @design waits', debt: true, today: '2026-09-14' }));
+    assert.match(set, /ui-design deferred as debt/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design-review').debt, true);
+    // A skip refuses the flag, through the wrapper too.
+    await assert.rejects(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'x', debt: true }), /skip cannot carry debt/);
+
+    const reminded = await grab(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(reminded, /owed \(debt\): ui-design — deferred .*launch date; @design waits — pay it back with yad undefer EP-x ui-design/);
+
+    // The team builds past it, then pays it back.
     const s = readUiState(T);
     s.steps.find((x) => x.id === 'stories').status = 'done';
     s.steps.find((x) => x.id === 'stories-review').status = 'done';
     s.currentStep = 'ready-for-build';
     fs.writeFileSync(uiStateFile(T), JSON.stringify(s, null, 2));
-    const back = await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', undo: true }));
+    const back = await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', undo: true, debt: true }));
+    assert.match(back, /--debt is not used when putting a step back/);
     assert.match(back, /re-opened beside the work already finished after it/);
     assert.match(back, /currentStep stays ready-for-build/);
     assert.doesNotMatch(back, /back in the chain/);
-    assert.match(await grab(() => runNext(T, { epic: 'EP-x' })), /re-opened lane: invoke .*author ui-design\.md/);
+    const lane = await grab(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(lane, /re-opened lane: invoke .*author ui-design\.md/);
+    assert.match(lane, /owed \(debt\): ui-design — being paid back \(ui-design is in_progress\)/);
     const [action] = JSON.parse(await grab(() => runNext(T, { epic: 'EP-x', json: true }))).actions;
     assert.equal(action.reopened[0].step, 'ui-design');
+    assert.equal(action.debt[0].step, 'ui-design');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad doctor reminds of step debt as `step:debt` until it is paid, and says nothing once it is (E41)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e41-doc-'));
+  try {
+    const state = uiChain('ui-design', { ui: 'in_progress' });
+    deferStep(state, 'ui-design', { reason: 'launch date', debt: true });
+    seedEpic(T, 'EP-x', { ...state, schemaVersion: 10 });
+    const checks = [];
+    stepStateChecks(checks, T);
+    const debt = checks.filter((x) => x.id === 'step:debt');
+    assert.equal(debt.length, 1);
+    assert.equal(debt[0].status, 'warn');
+    assert.match(debt[0].message, /1 step\(s\) still owed as debt: EP-x\/ui-design \(deferred\)/);
+    assert.match(debt[0].hint, /yad undefer <epic> <step>/);
+
+    // Put back, but waiting behind an earlier step that has not passed: the reminder says it is waiting,
+    // not that it is being paid back.
+    const waiting = uiChain('stories-review', { ui: 'todo', uiReview: 'todo', stories: 'done' });
+    byId(waiting, 'architecture').status = 'in_progress';
+    for (const id of ['ui-design', 'ui-design-review']) byId(waiting, id).debt = true;
+    seedEpic(T, 'EP-x', { ...waiting, schemaVersion: 10 });
+    assert.match(await grab(() => runNext(T, { epic: 'EP-x' })),
+      /owed \(debt\): ui-design — back in the chain, waiting for an earlier step; the debt clears when ui-design-review passes/);
+
+    const paid = uiChain('ui-design', { ui: 'done', uiReview: 'done' });
+    seedEpic(T, 'EP-x', { ...paid, schemaVersion: 10 });
+    const after = [];
+    stepStateChecks(after, T);
+    assert.equal(after.some((x) => x.id === 'step:debt'), false);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

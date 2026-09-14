@@ -533,8 +533,13 @@ function loadBuildStates(dir) {
 // WHO WRITES THE RECORDED STATES. `yad skip` writes `skipped` (E35, E36) and `yad defer` writes
 // `deferred` (E37), both THROUGH this table rather than beside it. Nothing in the CLI writes `blocked`:
 // a person does, by hand, and the `yad-run` skill does for a halted Build lane. `yad unblock` clears one
-// (E37). The `debt: true` flag is E41. `cli/test.mjs` still constructs a chain carrying every row of this
-// table and pins each reader against it, because a state the fixtures happen not to use is untested.
+// (E37). `cli/test.mjs` still constructs a chain carrying every row of this table and pins each reader
+// against it, because a state the fixtures happen not to use is untested.
+//
+// `debt: true` (E41) is a FLAG BESIDE a state, not a ninth row: it changes nothing any column above
+// answers. `yad defer --debt` writes it on a deferred pair — work the team set aside under pressure and
+// owes back — and it only decides what REMINDS (`owedSteps`: `yad next`, `yad doctor`). It stays on the
+// pair while the step is paid back, and `advanceState` removes it when the step's review passes.
 export const STEP_STATES = [
   { id: 'todo', passed: false, authored: false, record: false, meaning: 'not started' },
   { id: 'in_progress', passed: false, authored: false, record: false, meaning: 'being worked on' },
@@ -1195,6 +1200,11 @@ export function advanceState(state, step) {
   // advances on a merge event without ever running it locally. Close it here too, so a passed gate can
   // never leave its author step behind (issue #131).
   closeAuthorStep(state, step);
+  // DEBT IS PAID when the review passes (E41) — not when the step is put back, which only starts paying
+  // it. `closeAuthorStep` above has already closed the author step, so the pair is paid together.
+  delete state.steps[i].debt;
+  const paid = authorStepFor(state, step);
+  if (paid) delete paid.debt;
   if (step.id === 'stories-review') {
     const tc = state.steps.find((s) => s.id === 'test-cases');
     if (tc && stepStatus(tc) === 'todo') tc.status = 'in_progress';
@@ -1395,7 +1405,9 @@ const SET_ASIDE = {
     claims: (step) => stepStatus(step) === 'deferred',
     // No legacy fields: `deferred` was born in shape 7, so there is no older reader to keep fed. The
     // record's `by` is who WROTE it, as on every record; who is waiting for the step belongs in the reason.
-    stamp: ({ reason, by, at }) => ({ status: 'deferred', record: stepRecord({ reason, by, date: at }) }),
+    // `debt` (E41) only when asked for: a plain deferral is planned, a debt is owed back and reminded.
+    stamp: ({ reason, by, at, debt }) => ({ status: 'deferred', record: stepRecord({ reason, by, date: at }), ...(debt ? { debt: true } : {}) }),
+    carriesDebt: true,
   },
 };
 const otherWay = (as) => (as === 'skipped' ? 'deferred' : 'skipped');
@@ -1413,8 +1425,14 @@ const otherWay = (as) => (as === 'skipped' ? 'deferred' : 'skipped');
 // skipped one does, so it needs the same permission from the route. Deferring a required step would carry
 // the chain past its review gate with no approvals on it, which rule 2 forbids however the reason is
 // worded. The gate itself is not waived: `gatePredicate` still reports a deferred step's review as owed.
-function setAsideStep(state, stepId, as, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
+function setAsideStep(state, stepId, as, { reason, by = null, at = null, debt = false, profiles = LIFECYCLE_PROFILES } = {}) {
   const V = SET_ASIDE[as];
+  // DEBT IS OWED WORK, and a skip says the step does not apply (E36/E37), so nothing is owed back. Asked
+  // first, before any chain question: it is a wrong command, whatever state the chain is in.
+  if (debt && !V.carriesDebt) {
+    throw err('YAD-STATE-004', 'a skip cannot carry debt',
+      `a skip says ${stepId} does not apply, so nothing is owed back. If the step is owed, defer it instead: \`yad defer <epic> ${stepId} --reason "<why>" --debt\``);
+  }
   const steps = requireChain(state, `${V.verb} a step in`);
   const optional = optionalStepsFor(state, profiles);
   if (!optional.includes(stepId)) throw notOptional(stepId, optional, epicProfileId(state, profiles), as);
@@ -1425,7 +1443,12 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, profile
   const author = steps[ai];
   // Idempotent BEFORE the reason check: a repeat on a step already set aside this way is a no-op that
   // keeps the original reason/actor, so it must not fail merely for lacking a fresh --reason.
-  if (V.claims(author)) return state;
+  // One addition is allowed: `--debt` on a deferral already made marks it owed, on both steps of the
+  // pair, and keeps its record. The reverse is not offered — debt is cleared by paying it back (E41).
+  if (V.claims(author)) {
+    if (debt) for (const s of [author, steps.find((x) => x?.id === `${stepId}-review`)]) if (isPlainObject(s) && V.claims(s)) s.debt = true;
+    return state;
+  }
   const O = SET_ASIDE[otherWay(as)];
   if (O.claims(author)) {
     throw err('YAD-STATE-004', `${stepId} is already ${otherWay(as)}`,
@@ -1476,7 +1499,7 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, profile
     throw err('YAD-STATE-004', `cannot ${V.verb} ${stepId} — ${started.id} is already '${started.status ?? '(no status)'}'`,
       `${V.verb} ${stepId} before ${started.id} begins`);
   }
-  const stamp = V.stamp({ reason, by, at });
+  const stamp = V.stamp({ reason, by, at, debt });
   state.steps[ai] = { ...author, ...stamp };
   state.steps[ri] = { ...review, ...stamp };
   // If currentStep was on the pair we just set aside, move it to the next step not set aside.
@@ -1507,6 +1530,7 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, profile
 // step opens (or waits, if an earlier step has not passed), its gate goes to `todo`, and nothing after the
 // pair and nothing about `currentStep` moves. The re-opened step then runs beside the chain — see
 // `behindFinishedWork` for how `preconditionsMet`, `advanceState`, `markInReview` and `yad next` tell.
+// This is also how DEBT is paid back: a debt is a deferral, and its flag stays on until the review passes.
 function restoreStep(state, stepId, as) {
   // NO ROUTE GUARD HERE, and that asymmetry with `setAsideStep` is deliberate. Setting a step aside needs
   // the route's permission because it makes a gate pass without approvals. Putting it back only returns
@@ -1537,7 +1561,8 @@ function restoreStep(state, stepId, as) {
   const beyond = (stepStatus(after) === 'done' ? after : null) || steps.slice(j + 1).find(hasStarted);
   const priorAllDone = steps.slice(0, ai).every((s) => isPassed(s));
   if (beyond && as === 'deferred') {
-    // LATE RESUME (E41): re-open the pair behind the work built past it.
+    // LATE RESUME (E41): re-open the pair behind the work built past it. `withoutSetAside` keeps `debt`,
+    // which is still owed until the review passes.
     steps[ai] = { ...withoutSetAside(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };
     if (ri !== -1) steps[ri] = { ...withoutSetAside(steps[ri]), status: 'todo' };
     return state;
@@ -2656,15 +2681,26 @@ export function repairState(state) {
 //   'review-sync' — a review PR/MR is open; sync its state (`yad gate sync`)
 //   'build'       — Shape approved (ready-for-build); Build can run
 //
-// One key is added only when it has something in it, so an epic without one prints exactly the JSON it
-// printed before (the golden test deep-equals it):
+// Two keys are added only when they have something in them, so an epic with neither prints exactly the
+// JSON it printed before (the golden test deep-equals it):
 //   reopened — a lane per step re-opened behind finished work (E41), each shaped like an action
+//   debt     — the steps still owed as debt (`owedSteps`), the reminder that repeats until they are paid
 export function nextAction(ledger, opts = {}) {
   const a = shapeNextAction(ledger, opts);
   const state = ledger?.state;
   if (!state || !Array.isArray(state.steps) || isProductLevel(state) || backfillAnchorKind(state)) return a;
   const lanes = reopenedLanes(ledger, { epicId: a.epicId, currentStep: state.currentStep, bindings: opts.bindings ?? null });
-  return { ...a, ...(lanes.length ? { reopened: lanes } : {}) };
+  const debt = owedSteps(state).map((s) => ({ step: s.id, status: stepStatus(s) ?? s.status, record: s.record || null }));
+  return { ...a, ...(lanes.length ? { reopened: lanes } : {}), ...(debt.length ? { debt } : {}) };
+}
+
+// The steps still OWED AS DEBT (E41): flagged `debt: true` and not yet written here. One entry per pair —
+// the author step while it is unfinished, then its gate — so one `yad defer --debt` reads as one debt.
+export function owedSteps(state) {
+  if (!isPlainObject(state) || !Array.isArray(state.steps)) return [];
+  const open = state.steps.filter((s) => isPlainObject(s) && typeof s.id === 'string' && s.debt === true && stepStatus(s) !== 'done');
+  const ids = new Set(open.map((s) => s.id));
+  return open.filter((s) => !(s.id.endsWith('-review') && ids.has(s.id.replace(/-review$/, ''))));
 }
 
 // Is this step open again BEHIND finished work (E41)? For the words a command prints after `yad undefer`.

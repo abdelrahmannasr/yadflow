@@ -286,8 +286,9 @@ export const MIGRATIONS = [
   {
     from: 9,
     to: 10,
-    title: 'a deferred step can be re-opened behind finished work',
-    // E41. No key is added and nothing is converted. This row only moves the shape number.
+    title: 'a deferred step can be re-opened behind finished work, and can carry `debt: true`',
+    // E41. The new key, `debt`, is written only by `yad defer --debt`, so no existing file holds it and
+    // there is nothing to convert. This row only moves the shape number.
     //
     // It is a breaking shape because of what an older yadflow does with a chain this release writes. A
     // deferral resumed after `stories` finished leaves `ui-design` open behind done work, and an older

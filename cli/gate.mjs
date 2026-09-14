@@ -855,7 +855,7 @@ export async function gateStatus(root, { epic } = {}) {
     const waived = claimsInherited(s)
       ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
       : (claimsSkipped(s) && isSkippableStep(s.id, optional)) ? '; skipped (N/A)'
-        : (state === 'deferred' && isSkippableStep(s.id, optional)) ? '; deferred (still owed)' : '';
+        : (state === 'deferred' && isSkippableStep(s.id, optional)) ? `; deferred (still owed${s.debt === true ? ', as debt' : ''})` : '';
     // The shortfall, the same number `gatePredicate` returns as `short`. Printed here because this is the
     // surface people read when they want to know where a gate stands, and a count with no distance to it
     // is half the fact.

@@ -227,7 +227,24 @@ function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
   // A step re-opened behind finished work (E41) is a lane of its own beside the chain, like the
   // test-cases track above: it gets its own line, with the same words a chain step would get.
   for (const lane of a.reopened || []) hand(`re-opened lane: ${actionLine({ ...lane, epicId: a.epicId }, { solo, bindings })}`);
+  // DEBT is reminded on every run until it is paid (E41). The line says what is owed and the one command
+  // that starts paying it — or, once that has started, what finishes it.
+  for (const d of a.debt || []) warn(debtLine(a.epicId, d));
   phaseLine(a);
+}
+
+// One reminder line for a step owed as debt (E41).
+function debtLine(epicId, d) {
+  const author = d.step.replace(/-review$/, '');
+  if (d.status === 'deferred') {
+    const r = d.record || {};
+    const when = [r.by ? `by ${r.by}` : '', r.date ? `on ${r.date}` : ''].filter(Boolean).join(' ');
+    return `owed (debt): ${author} — deferred${when ? ` ${when}` : ''}${r.reason ? `: ${r.reason}` : ''} — pay it back with yad undefer ${epicId} ${author}`;
+  }
+  // Put back, but waiting behind an earlier step that has not passed: say so, rather than "being paid
+  // back" about a step nobody can work on yet.
+  if (d.status === 'todo') return `owed (debt): ${author} — back in the chain, waiting for an earlier step; the debt clears when ${author}-review passes`;
+  return `owed (debt): ${author} — being paid back (${d.step} is ${d.status}); the debt clears when ${author}-review passes`;
 }
 
 // Where this epic sits in the lifecycle: the six phases, with the current one marked.
@@ -338,7 +355,10 @@ function generalNext(root, { all } = {}) {
   // off would have meant bare `yad next`, the command people run by default, never showed the tag.
   for (const { action: a, theme: tag } of rows) {
     const theme = tag ? ` ${c.dim(`#${tag}`)}` : '';
-    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo })}`);
+    // Debt is reminded here too (E41): the roll-up is the view people run most, and a reminder that only
+    // appears once you already look at the one epic is not a reminder.
+    const owed = a.debt?.length ? `  ${c.yellow(`· ${a.debt.length} owed as debt`)}` : '';
+    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo })}${owed}`);
   }
   // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
   // form loses the dim from the first bold word to the end of the line.
