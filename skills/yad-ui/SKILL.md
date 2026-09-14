@@ -45,9 +45,10 @@ This passes when `ui-design` is the next runnable step per the state sequence �
 **This step is OPTIONAL.** If the epic has no user-facing surface (a backend/API service, a data
 pipeline, infra work), it does not need a UI design. Two signals to watch for:
 
-- **Already skipped:** if `ui-design.status` is `done` with `skipped: true` in `state.json` (the
-  `--check` above will report `ui-design is already done`), the step was marked N/A — **STOP**, there
-  is nothing to author; point the user at `yad next EP-<slug>` (the next step is `stories`).
+- **Already skipped:** if `ui-design.status` is `skipped` in `state.json` — or, in a file from before
+  shape 7, `done` with `skipped: true` beside it (the `--check` above reports `ui-design is already
+  done` for both) — the step was marked N/A. **STOP**, there is nothing to author; point the user at
+  `yad next EP-<slug>` (the next step is `stories`).
 - **Should be skipped:** if you reach this step and the epic clearly produces no screens, do **not**
   invent a hollow UI artifact. Offer to mark it N/A instead:
   `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That pre-marks both the
