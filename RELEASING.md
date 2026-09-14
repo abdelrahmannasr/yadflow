@@ -50,7 +50,8 @@ with `npm run release-check`.
 1. installs deps (`npm ci`),
 2. runs `npx semantic-release`, which:
    - reads the [Conventional Commits](CONTRIBUTING.md) since the last release to pick the next version
-     (`fix:`/`perf:`/`revert:` → patch, `feat:` → minor, `!`/`BREAKING CHANGE:` → major;
+     (`fix:`/`perf:`/`revert:` → patch, `feat:` → minor, a `BREAKING CHANGE:` footer → major — a `!` in the
+     subject alone is NOT a major under this repo's `angular` preset;
      `docs:`/`chore:`/`ci:`/`test:`/`refactor:` → nothing),
    - regenerates `CHANGELOG.md` and ships it **inside the npm tarball**,
    - **publishes to npm via tokenless Trusted Publishing (OIDC) with build provenance** — no `NPM_TOKEN`,
@@ -164,8 +165,9 @@ second person; the real gate on a release is the check job.
 
 1. Merge PRs to `main` with Conventional-Commit titles (**squash-merge** keeps the PR title as the
    commit subject, which is what semantic-release reads).
-   - `feat: …` → minor, `fix: …`/`perf: …`/`revert: …` → patch, `feat!:` or a `BREAKING CHANGE:`
-     footer → major.
+   - `feat: …` → minor, `fix: …`/`perf: …`/`revert: …` → patch, a `BREAKING CHANGE:` footer → major.
+     A `feat!:` subject WITHOUT that footer is no release at all under the `angular` preset this repo
+     uses — the release check (`scripts/release-type.mjs`) asks semantic-release's own analyzer.
    - `docs:`/`chore:`/`ci:`/`test:`/`refactor:` alone → **no release**. Docs that ship in the npm
      tarball reach the registry with the next real release.
 2. When a human decides it is time to release, fast-forward `release` to `main`:

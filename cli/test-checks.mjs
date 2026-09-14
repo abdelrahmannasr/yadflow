@@ -2221,10 +2221,18 @@ const SHAPE_GUIDE = path.join(ROOT, 'scripts/shape-guide-check.sh');
 // `breaking` says how the change after the tag is committed, because that is what semantic-release
 // reads to decide major vs minor: 'footer' = a BREAKING CHANGE: trailer, 'subject' = a `feat!:`
 // subject, false = an ordinary commit that would cut a minor.
+// The script asks semantic-release's own analyzer (scripts/release-type.mjs), so the scratch repo gets
+// that helper and this repo's installed node_modules beside it.
+function releaseToolsInto(T) {
+  fs.mkdirSync(path.join(T, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'scripts/release-type.mjs'), path.join(T, 'scripts/release-type.mjs'));
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(T, 'node_modules'), 'dir');
+  fs.writeFileSync(path.join(T, '.gitignore'), 'node_modules\n');
+}
 function shapeRepo({ tagged, current, guides = [], breaking = 'footer' }) {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shape-guide-'));
   fs.mkdirSync(path.join(T, 'cli'), { recursive: true });
-  fs.mkdirSync(path.join(T, 'scripts'), { recursive: true });
+  releaseToolsInto(T);
   fs.copyFileSync(SHAPE_GUIDE, path.join(T, 'scripts/shape-guide-check.sh'));
   const manifest = (v) => (v === null
     ? 'export const VERSION = "0.0.0";\n'            // pre-E13: no SCHEMA_VERSION at all
@@ -2290,11 +2298,16 @@ test('shape guide: a moved shape with NO declared breaking change blocks the rel
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('shape guide: a `feat!:` subject declares the break just as well as a footer', () => {
+// This test used to say the opposite — "a `feat!:` subject declares the break just as well as a
+// footer" — and it was checking the script against itself. This repo's semantic-release uses the
+// `angular` preset, which reads a `feat!:` subject on its own as NO release at all. So a shape moved in
+// a commit like that shipped as a minor with this check green. The script now asks the real analyzer.
+test('shape guide: a `feat!:` subject ALONE is not a major to semantic-release, so it blocks the release', () => {
   const T = shapeRepo({ tagged: 1, current: 2, guides: ['shape-2.md'], breaking: 'subject' });
   const r = runShapeGuide(T);
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /breaking change declared/);
+  assert.equal(r.status, 1, r.stdout);
+  assert.match(r.stderr, /reads the commits since v1\.0\.0 as a none release/);
+  assert.match(r.stderr, /`feat!:` subject on its own does NOT count/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
