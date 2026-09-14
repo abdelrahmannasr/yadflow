@@ -527,6 +527,11 @@ print, and which does not hold a gate until the capacity cap ships:
   order given, each one seeing what the one before it produced — every extra one is another model run,
   so the command tells you the cost. `yad skill list` shows what runs each step today and whose choice
   it is; `yad skill unbind <step>` goes back to the default.
+- **Something not working? Run the doctor first:** `npx yadflow doctor`. It checks your environment (git,
+  Node, and whether `gh` or `glab` is installed and logged in — a warning if not), that the `.sdlc/` config
+  parses and points at real repos, and that every epic ledger loads. It prints a fix-it hint for each
+  problem, and exits with an error if any check fails. Add `--json` when you file a bug. Environment and
+  state-file failures carry a stable code (such as `YAD-STATE-001`), listed in [docs/CLI.md](docs/CLI.md).
 - **Keep the install in sync with the CLI** (run from the Product):
   - `npx yadflow check` — report what's missing / drifted / stale (read-only).
   - `npx yadflow check --fix` — reconcile it (re-syncs skills + repo wiring).
