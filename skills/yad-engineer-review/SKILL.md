@@ -73,6 +73,10 @@ the gate talks only through files; refuse to treat AI review as a human approval
 Ship **iff ALL hold**: the check gates pass (Step C), the AI review has run (advisory), and the
 engineer-review rule is satisfied (Step 2). Then:
 - **Merge** the task branch into the repo's default branch (the human performs/authorises the merge).
+- **Check the lane is not skipped (E39)** — read `build-state/<story>.json`. If this repo's lane is
+  `status: skipped`, it was set aside as needing no change: stop, and run
+  `yad unskip <epic> <story> --repo <repo>` before recording a ship, so the two records never say opposite
+  things (`yad doctor` fails that as `lane:…:contradiction`; `yad checkpoint --retro-ship` refuses it).
 - **Record the ship** — write the ship to its own shard
   `epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json` (readers union the folded `build-log.json` +
   the loose shards, deduping by (story, task, repo) so a shard wins over a stale folded ship):

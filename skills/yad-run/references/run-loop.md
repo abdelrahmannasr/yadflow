@@ -23,7 +23,13 @@ stop, never automated, and bindable like any other step.
 
 ```
 cfg   = config.yaml.automation
-bs    = build-state/<story>.json.repos[<repo>]        # create from defaults if absent
+bs    = build-state/<story>.json.repos[<repo>]        # create the FILE from defaults if absent; if the file
+                                                      #   exists but has no entry for <repo>, add one from the
+                                                      #   defaults — never remove an entry you did not add
+if bs.status == "skipped":                            # E39: the whole lane was set aside with
+    STOP — report bs.record.reason                    #   `yad skip <epic> <story> --repo <repo>`; do not drive it.
+                                                      #   `yad unskip <epic> <story> --repo <repo>` puts it back.
+                                                      # Never write a single Build step as skipped or deferred.
 step  = from or bs.currentStep
 
 while step is a Build step (not engineer-review):

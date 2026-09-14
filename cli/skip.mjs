@@ -15,8 +15,12 @@
 // the skip. Either way the step stays VISIBLE and auditable — marked with a recorded reason (and
 // actor/date), short-circuited at the gate. All state logic is the pure `skipStep` / `unskipStep` /
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
-import { ok, info, hand, fail, run } from './lib.mjs';
-import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { ok, info, hand, fail, run, readJSONStrict, writeJSON } from './lib.mjs';
+import { epicRel, epicRoot, epicStories, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
+import { epicFiles } from './manifest.mjs';
+import { readShips } from './ledger.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
@@ -98,6 +102,58 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
   ok(`${step} ${V.done}${owed ? ' as debt' : ''}${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
   info(`reason: ${String(reason).trim()}`);
   hand(`${V.gate}; currentStep is now ${ledger.state.currentStep}  (reverse with \`yad ${V.undo} ${epic} ${step}\`)`);
+}
+
+// `yad skip <epic> <story> --repo <name> --reason "<why>"` / `yad unskip <epic> <story> --repo <name>`
+// (E39) — set a whole Build LANE aside: this story needs no change in this repo. The rules are the pure
+// `skipLane` / `unskipLane` in epic-state.mjs; this reads the story and the ships, and writes
+// `build-state/<story>.json`, which `yad checkpoint --push` commits. There is no lane deferral: a lane that
+// is owed later is simply not driven yet.
+export async function runLaneSkip(root, { epic, story, repo, reason, undo = false, today } = {}) {
+  const epicDir = epicRoot(root, epic);
+  const ledger = loadLedger(epicDir);
+  if (!ledger.state) { fail(`no epic state at ${epicDir} — seed the epic first with yad-epic`); process.exitCode = 1; return; }
+  if (!repo || repo === true) {
+    fail(`usage: yad ${undo ? 'unskip' : 'skip'} ${epic} ${story} --repo <name>${undo ? '' : ' --reason "<why>"'}`);
+    process.exitCode = 1;
+    return;
+  }
+  const file = path.join(epicFiles(epicDir).buildStateDir, `${story}.json`);
+  const current = readJSONStrict(file, null);
+
+  // Putting a lane back asks nothing but that it was skipped — not even that the story file still exists,
+  // so a story renamed or removed after the skip can still have its skip undone (E39 review).
+  if (undo) {
+    const { buildState, empty } = unskipLane(current, { story, repo });
+    if (empty) fs.rmSync(file);
+    else writeJSON(file, buildState);
+    if (reason != null && reason !== true) info('--reason is not used when un-skipping: the skip record is removed with the skip');
+    ok(`${story} / ${repo} un-skipped — the lane is owed again`);
+    hand(`yad-run adds the lane the next time ${story} is driven in ${repo}; commit this with \`yad checkpoint --push\``);
+    return;
+  }
+
+  const entry = epicStories(epicDir).find((st) => st.id === story);
+  if (!entry) { fail(`no story ${story} under ${epicRel(epic)}/stories/`); process.exitCode = 1; return; }
+  // An EARNED stories review only: `done` here, or `satisfied` (reviewed in the parent epic) — the rule E36
+  // gives for "Build can run". `isPassed` would also accept a hand-typed `skipped` or `deferred` review, and
+  // a lane skip over stories nobody approved is what this refusal exists to stop (E39 review).
+  const storiesReview = ledger.state.steps.find((st) => st?.id === 'stories-review');
+  const shippedRepos = readShips(epicDir).filter((sh) => sh.story === story).map((sh) => sh.repo);
+  const by = recordActor(root);
+  const { buildState, already } = skipLane(current, {
+    story, repo, reason, by, date: today, declared: entry.repos, shippedRepos, storiesPassed: ['done', 'satisfied'].includes(stepStatus(storiesReview)),
+  });
+  if (already) {
+    const r = current.repos[repo].record || {};
+    ok(`${story} / ${repo} was already skipped${r.by ? ` by ${r.by}` : ''}${r.date ? ` on ${r.date}` : ''} — nothing changed`);
+    if (r.reason) info(`reason: ${r.reason}`);
+    return;
+  }
+  writeJSON(file, buildState);
+  ok(`${story} / ${repo} lane skipped — N/A${by ? ` by ${by}` : ''}${today ? ` on ${today}` : ''}`);
+  info(`reason: ${String(reason).trim()}`);
+  hand(`the feature can ship without it; commit this with \`yad checkpoint --push\`  (reverse with \`yad unskip ${epic} ${story} --repo ${repo}\`)`);
 }
 
 export const runSkip = (root, opts) => runSetAside(root, 'skip', opts);

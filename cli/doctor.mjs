@@ -9,8 +9,9 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
+import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
 
@@ -1469,6 +1470,67 @@ export function phaseChecks(checks, root) {
   }
 }
 
+// ---- Build lanes set aside (E39) ----------------------------------------------------------------
+// A Build lane — one story in one repo, in `build-state/<story>.json` — may be SKIPPED WHOLE with
+// `yad skip <epic> <story> --repo <name>`, and nothing smaller: no single Build step may be set aside (the
+// user's E39 decision). The file is written by skills and by hand as well, so it is read for four faults:
+//   lane:<epic>:<story>:<repo>:contradiction   fail — skipped, yet work started in it or a ship is
+//                                              recorded. Two records say opposite things.
+//   …:no-record                                warn — skipped with no reason: a hole, not an audit trail.
+//   …:undeclared                               warn — skipped for a repo the story does not declare, so
+//                                              it owes no lane there and the skip means nothing.
+//   …:step-set-aside                           warn — one Build step `skipped` or `deferred` inside a lane.
+//                                              `buildNextForRepo` walks past a passed step, so this would
+//                                              read as done work nobody did.
+export function laneChecks(checks, root) {
+  for (const e of epicIds(root)) {
+    const epicDir = epicRoot(root, e);
+    const bsDir = path.join(epicDir, '.sdlc', 'build-state');
+    if (!exists(bsDir)) continue;
+    let names;
+    try { names = fs.readdirSync(bsDir).filter((n) => n.endsWith('.json')).sort(); } catch { continue; }
+    const stories = new Map(epicStories(epicDir).map((st) => [st.id, st]));
+    let ships = [];
+    try { ships = readShips(epicDir); } catch { /* an unreadable build-log is reported by the epic checks */ }
+    for (const n of names) {
+      const bs = readJSON(path.join(bsDir, n), null);
+      if (!isPlainObject(bs) || !isPlainObject(bs.repos)) continue;
+      const storyId = typeof bs.story === 'string' && bs.story ? bs.story : n.replace(/\.json$/, '');
+      for (const [repo, lane] of Object.entries(bs.repos)) {
+        if (!isPlainObject(lane)) continue;
+        const where = `${e}: ${storyId} / ${repo}`;
+        const id = (kind) => `lane:${e}:${storyId}:${repo}:${kind}`;
+        const steps = Array.isArray(lane.steps) ? lane.steps.filter(isPlainObject) : [];
+        if (lane.status === 'skipped') {
+          const shipped = ships.some((sh) => sh.story === storyId && sh.repo === repo);
+          const started = laneStarted(lane);   // an unknown status word counts as started (E39 review)
+          if (shipped || started) {
+            check(checks, id('contradiction'), 'epics', 'fail',
+              `${where} is skipped, but ${shipped ? 'a ship is recorded for it' : 'work has started in it'}`,
+              `decide which is true: if the lane is owed, put it back with \`yad unskip ${e} ${storyId} --repo ${repo}\`; if it really needs no change, remove the work from build-state/${n}`);
+          }
+          if (!isStepRecord(lane.record)) {
+            check(checks, id('no-record'), 'epics', 'warn', `${where} is skipped with no recorded reason`,
+              `a skip is an audit trail only with its record — put it back with \`yad unskip ${e} ${storyId} --repo ${repo}\`, then skip it again with --reason`);
+          }
+          const story = stories.get(storyId);
+          if (story && !story.repos.includes(repo)) {
+            check(checks, id('undeclared'), 'epics', 'warn', `${where} is skipped, but ${storyId} does not declare ${repo}`,
+              `the story owes no lane there, so the skip means nothing — remove the \`${repo}\` entry from build-state/${n}`);
+          }
+          continue;
+        }
+        const aside = steps.filter((st) => ['skipped', 'deferred'].includes(stepStatus(st)));
+        if (aside.length) {
+          check(checks, id('step-set-aside'), 'epics', 'warn',
+            `${where}: ${aside.map((st) => `${st.id} is ${stepStatus(st)}`).join(', ')} — no single Build step may be set aside`,
+            `a Build lane is skipped whole or not at all: \`yad skip ${e} ${storyId} --repo ${repo} --reason "<why>"\` when the story needs no change in ${repo}; otherwise set the step back to todo`);
+        }
+      }
+    }
+  }
+}
+
 export function shapeChecks(checks, root, { plan: injected = null } = {}) {
   if (!injected && !exists(productConfigPath(root)) && !exists(path.join(root, PROJECT_FILES.version))) return;
   let plan = injected;
@@ -1546,6 +1608,7 @@ export function collectDoctor(root) {
   skipChecks(checks, root);
   stepStateChecks(checks, root);
   phaseChecks(checks, root);
+  laneChecks(checks, root);
   epicChecks(checks, root);
   threadChecks(checks, root);
   const failed = checks.filter((x) => x.status === 'fail');

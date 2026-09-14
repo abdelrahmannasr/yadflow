@@ -128,6 +128,8 @@ function printBuildLanes(builds) {
   for (const lane of buildLanes(builds)) {
     const where = `${c.cyan(lane.story || '(story)')} / ${c.bold(lane.repo)}`;
     if (lane.shipped) { log(`    ${where} ${c.green('— shipped ✓')}`); continue; }
+    // A lane skipped whole (E39): nothing to drive, and the reason is the point of the record.
+    if (lane.status === 'skipped') { log(`    ${where} ${c.dim(`— skipped (N/A)${lane.record?.reason ? `: ${lane.record.reason}` : ''}`)}`); continue; }
     // No resolvable next skill (an empty/half-seeded build-state file): show it as not-started, no ▸.
     if (!lane.skill) { log(`    ${where} ${c.dim('— not started yet (no build steps recorded)')}`); continue; }
     log(`    ${where} ${c.dim('—')} ${c.bold(lane.step)}  (${dialNote(lane)})`);
@@ -164,12 +166,17 @@ function actionLine(a, { solo, bindings = null } = {}) {
     case 'build': {
       // In Build: compact the lanes to "N lane(s) in build — next: <skill> @ <story>/<repo>".
       if (a.builds?.length) {
-        const open = buildLanes(a.builds).filter((r) => !r.shipped);
-        if (!open.length) return c.dim('Build — every lane shipped');
-        // Headline the first lane with a resolvable next skill; if none, the half is started but unspecced.
-        const first = open.find((r) => r.skill);
-        if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet`);
-        return `${c.dim(`${open.length} lane(s) in build — next:`)} ${c.bold(first.skill)} ${c.dim(`@ ${shortStory(first.story)}/${first.repo}`)}`;
+        const all = buildLanes(a.builds);
+        const open = all.filter((r) => !r.shipped && r.status !== 'skipped');
+        if (open.length) {
+          // Headline the first lane with a resolvable next skill; if none, the half is started but unspecced.
+          const first = open.find((r) => r.skill);
+          if (!first) return c.dim(`${open.length} lane(s) in build — not specced yet`);
+          return `${c.dim(`${open.length} lane(s) in build — next:`)} ${c.bold(first.skill)} ${c.dim(`@ ${shortStory(first.story)}/${first.repo}`)}`;
+        }
+        if (all.some((r) => r.shipped)) return c.dim(all.some((r) => r.status === 'skipped') ? 'Build — every lane shipped or skipped' : 'Build — every lane shipped');
+        // Every recorded lane is SKIPPED and none shipped (E39 review): a skip written before Build began
+        // creates the build-state file on its own. Build has not started, so fall through to the yad-run hint.
       }
       return `${c.bold('yad-run')} ${c.dim(`(or per story: ${runs('spec', 'yad-spec')} → ${runs('implement', 'yad-implement')} → yad ship → ${runs('engineer-review', 'yad-engineer-review')})`)}`;
     }
@@ -210,8 +217,13 @@ function printAction(a, { solo, theme: tag = null, bindings = null } = {}) {
   log(`\n  ${c.bold(`${noun}${a.epicId || '(epic)'}`)}${theme} ${c.dim(`— ${a.why}`)}`);
   // In Build with live lanes, print each story/repo's next sub-step + remaining chain instead
   // of the single static hint; otherwise the one actionable line.
-  if (a.kind === 'build' && a.builds?.length) printBuildLanes(a.builds);
-  else {
+  if (a.kind === 'build' && a.builds?.length) {
+    printBuildLanes(a.builds);
+    // Every lane printed is a skip and nothing has started (E39 review): the lanes alone name no command,
+    // so the one actionable line is printed too.
+    const lanes = buildLanes(a.builds);
+    if (lanes.length && lanes.every((r) => r.status === 'skipped')) hand(actionLine(a, { solo, bindings }));
+  } else {
     hand(actionLine(a, { solo, bindings }));
     const note = costNote(a);
     if (note) info(c.dim(note));

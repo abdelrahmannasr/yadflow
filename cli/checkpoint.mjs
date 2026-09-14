@@ -22,13 +22,13 @@
 //      marker would strand the PR's required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, fail, hand, exists, readJSON, pushWithRebase } from './lib.mjs';
+import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWithRebase } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
-import { readFrontmatter } from './epic-state.mjs';
+import { readFrontmatter, declaredRepos } from './epic-state.mjs';
 
 // The machine-written Build ledgers, relative to an epic's dir. The two append-only logs are
 // shard-then-fold (cli/ledger.mjs): each is a folded file PLUS a shard dir of loose per-entry files —
@@ -183,8 +183,7 @@ export function stagedStoryIsStatusOnly(git, file) {
 // neither declares anything — a legacy story with no metadata is still backfillable, never blocked on
 // a missing list.
 export function retroShipRepos(root, storyFile) {
-  const declared = readFrontmatter(storyFile).repos;
-  const story = (Array.isArray(declared) ? declared : declared ? [declared] : []).map(String).filter(Boolean);
+  const story = declaredRepos(readFrontmatter(storyFile));
   if (story.length) return { names: story, source: 'story' };
   const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const names = (Array.isArray(reg?.repos) ? reg.repos : []).map((r) => r?.name).filter(Boolean);
@@ -219,6 +218,24 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
     hand(`known: ${names.join(', ')} (names are case-sensitive)`);
     return { ok: false };
   }
+  // A lane SKIPPED whole (E39) did not ship: recording a ship for it would make the two records contradict.
+  // And a skipped repo is not "still unrecorded" — it is owed nothing — so it is left out of `remaining`.
+  // Read STRICTLY: a corrupt file would otherwise read as "nothing skipped" and let a permanent ship be
+  // recorded over a skip — the same refusal to guess this function makes for a corrupt build-log (E39 review).
+  let laneRepos;
+  try { laneRepos = readJSONStrict(path.join(epicDir, '.sdlc', 'build-state', `${story}.json`), null)?.repos; }
+  catch (e) {
+    fail(`could not read ${story}'s build-state — ${e.message}`);
+    hand('a ship is permanent audit evidence, so it is not recorded while the lane state cannot be read — fix the file, then re-run');
+    return { ok: false };
+  }
+  const skipped = new Set(laneRepos && typeof laneRepos === 'object'
+    ? Object.entries(laneRepos).filter(([, lane]) => lane?.status === 'skipped').map(([name]) => name) : []);
+  if (skipped.has(repo)) {
+    fail(`${story} / ${repo} is skipped — a lane that was skipped did not ship`);
+    hand(`if it did ship after all, put the lane back first: yad unskip ${epic} ${story} --repo ${repo}`);
+    return { ok: false };
+  }
   // Which of the story's OWN declared repos still lack evidence — read BEFORE the write so both the
   // refusal and the success path can report honestly how much of a multi-repo backfill is left. Only
   // the story's own list is used: the Product registry lists every connected repo, which says nothing
@@ -228,7 +245,7 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
     let recorded;
     try { recorded = new Set(readShips(epicDir).filter((s) => s.story === story).map((s) => s.repo)); }
     catch { return []; } // corrupt build-log — the write below reports it; don't guess at progress
-    return names.filter((n) => !recorded.has(n) && n !== repo);
+    return names.filter((n) => !recorded.has(n) && n !== repo && !skipped.has(n));
   };
   const left = remaining();
 

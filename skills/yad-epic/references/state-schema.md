@@ -611,6 +611,29 @@ Each `steps[]` entry:
 created when a story enters Build; all dials start `advance: human` (`automation: human_approve`) (the `config.yaml`
 `automation.default`).
 
+**A lane skipped whole (E39).** When a story declares a repo that turns out to need no change,
+`yad skip <epic> <story> --repo <name> --reason "<why>"` writes that repo's entry as a skipped lane —
+no `steps`, just the state and its record:
+
+```json
+{ "story": "EP-<slug>-S0N", "repos": { "web": { "status": "skipped", "record": { "reason": "no UI change", "by": "<login>", "date": "<YYYY-MM-DD>" } } } }
+```
+
+- Refused before `stories-review` has passed (edit the story's `repos:` then), for a repo the story does
+  not declare, once work has started in the lane or a ship is recorded for it, and for the story's last
+  lane. `yad unskip <epic> <story> --repo <name>` removes the entry again.
+- **Only a whole lane.** No single Build step is ever `skipped` or `deferred` — `yad doctor` reports one.
+  `yad-run` adds a missing repo's entry to an existing file, and never drives a skipped lane.
+- It is not written into the story's `repos:` list, because that list is part of what the stories review
+  approved. `yad checkpoint --push` commits it with the rest of the Build state.
+- Readers: `yad next` prints `skipped (N/A)` with the reason (and still points at `yad-run` while every
+  recorded lane is skipped and nothing has started); `yad foundation status` counts the lane as finished
+  once another lane really shipped; `yad checkpoint --retro-ship` refuses it, and `yad-engineer-review`
+  checks for it before recording a ship.
+- `skipped` is honoured only over a lane with no work in it. An entry that says `skipped` beside steps that
+  have started — including a status word this release does not know — is read as the work, and
+  `yad doctor` fails it as a contradiction.
+
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
 story/repo's `currentStep` into the next build sub-step and prints it with the remaining chain and the
 step's advance dial — so Build is guided, not just hinted at. The skill it names comes from

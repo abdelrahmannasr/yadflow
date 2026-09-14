@@ -63,6 +63,14 @@ Read `config.yaml` `automation`, the story's `build-state/<story>.json` (create 
 **write it to disk before the loop starts**, because `yad next` reads that file to know this lane
 exists), and `trust-log.json` (treat missing as `[]`). Resolve the code repo.
 
+If the file exists but has **no entry for this `repo`**, add that repo's entry from the same `back_steps`
+defaults — the file may already hold another repo, or a skipped lane — and never remove an entry you did
+not add. If this repo's entry is **`status: skipped`** (E39: the whole lane was set aside with
+`yad skip <epic> <story> --repo <repo>`, because the story needs no change in this repo), **do not drive
+it**: stop, report the recorded `record.reason`, and point at `yad unskip <epic> <story> --repo <repo>` if
+the lane is owed after all. **Never write a Build step as `skipped` or `deferred`**: a lane is skipped
+whole or not at all, and `yad doctor` reports a single step set aside.
+
 Also read **which skill runs each step** — `yad skill list --json`, whose `steps[]` gives each step id
 its `skills` array. That is the project's choice (`.sdlc/skills.json`, E6) and the engine's default
 when it has made none. Read it once here; it does not change during a run.
