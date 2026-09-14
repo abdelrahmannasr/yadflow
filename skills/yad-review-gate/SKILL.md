@@ -228,15 +228,19 @@ If the predicate **passes**:
   later step behind `YAD-STATE-005`.
 - **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
   handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track
-  (set its step `blocked` → `in_progress`). Build can now start **and** the tester can work
+  (if its step is `todo`, set it to `in_progress`). Build can now start **and** the tester can work
   `test-cases` at the same time.
 - **`test-cases-review`** is the parallel track's gate: mark it `done` but **leave `currentStep` at
   `ready-for-build`** — completing test cases must never pull the epic back from Build.
 - **`foundation-review`** (the Product level, `foundation/`) ends at its own sentinel: set
   `currentStep: "foundation-done"`, never `ready-for-build` — the product level has no Build part. The
   old spelling does the same: **`discovery-review`** sets `currentStep: "discovery-done"`.
-- Any **other** review step: set the next step in `steps[]` from `blocked` to `in_progress` (authoring)
-  or `in_review`, and set `currentStep` to that next step.
+- Any **other** review step: find the next step in `steps[]` that is not `skipped`, set it to
+  `in_progress` (authoring) or `in_review`, and set `currentStep` to it. A skipped step was marked N/A
+  with `yad skip`; it stays as it is. If every later step is skipped, set `currentStep:
+  "ready-for-build"`. A step waiting its turn is `todo` from shape 7 on. An older file may still say
+  `blocked` with no `record` on it, which means the same thing; a `blocked` step **with** a `record` is
+  waiting on someone outside the workflow, so leave it as it is.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is
   now `ready-for-build`, with `test-cases` running in parallel).
 
