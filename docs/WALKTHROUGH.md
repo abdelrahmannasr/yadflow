@@ -80,7 +80,9 @@ threads are resolved. Details: **"Run all of Shape by hand"** below.
 0. *(optional, once per product)* `yad foundation new` then `yad-discovery` → the **Foundation** in
    `foundation/` (`purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md`, plus
    optional `market.md` and `risks.md`) under the fixed id `EP-foundation` → review (base rule) →
-   `currentStep: foundation-done`. The six required sections must exist to review; its `roadmap.md`
+   `currentStep: foundation-done`. The six required sections must exist to review, and the gate warns
+   when a section still holds only its template headings (greenfield: the skill asks for each section
+   in turn); its `roadmap.md`
    then frames each epic below (read once it is approved).
 6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (base rule).
 7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).

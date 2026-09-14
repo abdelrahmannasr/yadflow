@@ -12,7 +12,7 @@ import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
   advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
-  upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED,
+  upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
 } from './epic-state.mjs';
@@ -82,14 +82,28 @@ function warnUnlockedContract(epicDir, artifact) {
 // complete the set before the gate is opened/advanced (mirrors warnUnlockedContract). Two sets: the
 // Foundation's required sections (E75 — its optional ones never make it incomplete) and the six files
 // of the old `discovery` spelling.
+//
+// A complete Foundation can still be an EMPTY one (E76): every section present and holding only its
+// template headings has a fingerprint, so reviewers could approve it. That is named too — a warning,
+// never a refusal, the stance E75 took on the Foundation's gate itself. The old `discovery` spelling
+// is not asked: its templates were never read this way, and it is only ever converted, not authored.
 export function warnIncompleteDiscovery(epicDir, artifact) {
   const b = artifactBase(artifact);
   const required = b === 'foundation' ? FOUNDATION_REQUIRED : b === 'discovery' ? DISCOVERY_FILES : null;
   if (!required) return;
-  if (artifactHash(epicDir, artifact) !== null) return;
-  const missing = required.filter((f) => !fs.existsSync(path.join(epicDir, f)));
-  const label = b === 'foundation' ? 'Foundation incomplete' : 'discovery set incomplete';
-  warn(`${label} — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
+  if (artifactHash(epicDir, artifact) === null) {
+    const missing = required.filter((f) => !fs.existsSync(path.join(epicDir, f)));
+    const label = b === 'foundation' ? 'Foundation incomplete' : 'discovery set incomplete';
+    warn(`${label} — missing ${missing.join(', ')}; review is not yet reviewable (approvals will not be hash-bound until the full set exists)`);
+  }
+  if (b !== 'foundation') return;
+  const empty = unwrittenSections(epicDir);
+  if (empty.length) {
+    // Worded for both callers: `gate open` before any approval, and `gate sync` on a review that may
+    // already have passed — so it says what an approval of this content means, not that one is coming.
+    const one = empty.length === 1;
+    warn(`Foundation not written yet — ${empty.join(', ')} ${one ? 'holds nothing but its' : 'hold nothing but their'} template, so an approval of ${one ? 'it approves an empty section' : 'them approves empty sections'}`);
+  }
 }
 
 // Fail fast on a corrupt or wrong-shape Product config: a silently-defaulted hub.json would degrade

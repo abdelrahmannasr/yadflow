@@ -179,7 +179,7 @@ const discoverySteps: FlowStep[] = [
     id: "foundation",
     title: "Foundation (the Product level)",
     description:
-      "Once per product, before any epic: `yad foundation new` seeds the ledger, then with the analyst and pm write the Foundation into foundation/ — purpose, scope (what it is and is not), MVP, roadmap, stack, repos, and optional market and risks. roadmap.md is the feature menu each epic reads. Greenfield AND brownfield; fixed id EP-foundation; it terminates at foundation-done (no Build). Its approval is reported, not enforced, before feature work.",
+      "Once per product, before any epic: `yad foundation new` seeds the ledger, then with the analyst and pm write the Foundation into foundation/ — purpose, scope (what it is and is not), MVP, roadmap, stack, repos, and optional market and risks. roadmap.md is the feature menu each epic reads. Greenfield AND brownfield (greenfield: one section at a time, from the questions the skill gives for each; the gate warns while a section is still only its template); fixed id EP-foundation; it terminates at foundation-done (no Build). Its approval is reported, not enforced, before feature work.",
     actor: "analyst",
     status: "draft",
     stepState: "foundation/ · roadmap.md",
