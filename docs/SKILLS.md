@@ -93,6 +93,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   `foundation-done` (no Build). The roadmap puts that approval "before feature work begins" — in this
   release that is **reported by `yad next`, not enforced**. Its `roadmap.md` is the menu of features —
   each `yad-epic` reads it for product context (reference-only; the Foundation never auto-seeds epics).
+  Its `Status` column is not kept by hand: `yad foundation status` reads how far each feature has got
+  from the epic ledgers.
   A product made before E75 may still have the old spelling, `epics/EP-discovery/`; see
   [shape 8](migrations/shape-8.md).
 

@@ -214,7 +214,7 @@ contradict `scope.md`'s non-goals?
 ## Phase 1 — MVP
 | Feature | Proposed epic id | Status |
 |---------|------------------|--------|
-<!-- one row per feature, e.g. | Registration | EP-registration | planned | -->
+<!-- one row per feature, e.g. | Registration | EP-registration | planned |. Write the Status once, when you add the row; do not update it by hand — `yad foundation status` reads it from the epic ledgers -->
 
 ## Phase 2 — <name>
 | Feature | Proposed epic id | Status |
@@ -236,16 +236,24 @@ Each proposed epic id follows `EP-<2–4 lowercase words>`.
 **The reviewer checks:** does Phase 1 match `mvp.md`, no more and no less? Is anything in a later phase
 a non-goal in `scope.md`?
 
-Per-feature `status:` (set by hand): `planned` → `epic-started` (a feature epic has been seeded with
-`yad-epic`) → `shipped`. The proposed ids are suggestions — `yad-epic` still assigns the id, and never
-picks the reserved `EP-foundation` or `EP-discovery`.
+The proposed ids are suggestions — `yad-epic` still assigns the id, and never picks the reserved
+`EP-foundation` or `EP-discovery`.
 
-> **Known limit.** The status column is part of what reviewers approved, so changing a row's status
-> after the Foundation's review has passed changes its fingerprint, and `yad doctor` then reports the
-> Foundation's approvals as stale. Only the frontmatter `status:` line is left out of the fingerprint.
-> **Decided (E76):** the fix is to stop this hand edit and work out each feature's status from the
-> epic ledgers instead — whether its epic exists and how far it has got. That is a follow-up; until it
-> ships, tell the user what the edit does before making it.
+**Do not update the Status column by hand.** The roadmap table is part of what the Foundation's
+reviewers approved, so editing a row after the review has passed changes the Foundation's fingerprint,
+and `yad doctor` then reports its approvals as stale. Instead, `yad foundation status` reads how far each
+feature has got from the epic ledgers:
+
+| Status | Meaning |
+|---|---|
+| `planned` | No epic with the proposed id exists yet |
+| `in-shape` | The epic is seeded and still in Shape (epic, architecture, UI, stories) |
+| `in-build` | Shape is done, and Build has not shipped every story in every repo |
+| `shipped` | Every Build lane of every story is shipped (or the epic is a brownfield anchor) |
+
+It also names feature epics that no row proposes — `yad-epic` may give an epic a different id from the
+one proposed. Write `planned` when you first add a row; an older Foundation that says `epic-started` or
+`shipped` can stay as it is, and the command notes where the column and the ledgers disagree.
 
 **Example (Tally):**
 

@@ -83,7 +83,8 @@ threads are resolved. Details: **"Run all of Shape by hand"** below.
    `currentStep: foundation-done`. The six required sections must exist to review, and the gate warns
    when a section still holds only its template headings (greenfield: the skill asks for each section
    in turn); its `roadmap.md`
-   then frames each epic below (read once it is approved).
+   then frames each epic below (read once it is approved; `yad foundation status` shows which features are started, read from the
+   epic ledgers — the roadmap's Status column is not edited by hand).
 6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (base rule).
 7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
 8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).

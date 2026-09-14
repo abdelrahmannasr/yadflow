@@ -109,8 +109,10 @@ owner:
 <!-- explicitly deferred, with why -->
 ```
 
-Per-feature `status:` lifecycle (set by hand): `planned` → `epic-started` (a feature epic has been
-seeded with `yad-epic`) → `shipped`. The proposed `EP-<slug>` ids are suggestions for the eventual
+Per-feature `status:` lifecycle: `planned` → `epic-started` (a feature epic has been seeded with
+`yad-epic`) → `shipped`. It was set by hand; it no longer needs to be, and editing it after the review has
+passed makes the approvals read as stale — `yad foundation status` reads each feature's status from the
+epic ledgers, for this spelling too. The proposed `EP-<slug>` ids are suggestions for the eventual
 `yad-epic` runs — `yad-epic` still assigns the id (and skips the reserved `EP-discovery`).
 
 The other four artifacts (`market-research.md`, `competitor-analysis.md`, `current-state.md`,
