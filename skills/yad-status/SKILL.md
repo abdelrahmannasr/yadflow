@@ -64,6 +64,10 @@ Print, in this order:
      present) instead of the plain status, so the deliberate skip and its reason are visible and the
      gate does not appear to vanish. The chain then reads `… architecture-review → ui-design (N/A) → ui-design-review (N/A) →
      stories → …`; the review gate never needs approvals.
+   - **Deferred steps:** `yad defer` sets an optional step aside to come back to later. Both the author
+     step and its `-review` gate carry `status: "deferred"` and a `record`. Render each as
+     `<id> — DEFERRED (later: <reason>)`, with who and when if present. A deferred step is still owed:
+     never render it as done or as N/A.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required
      domains), or **per-repo** for `stories-review` (list each repo needing sign-off), **plus** the

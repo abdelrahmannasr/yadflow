@@ -442,9 +442,18 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       // next step, and moving it back to in_review would un-ship work already built on it. What this
       // pass DOES do is record the approvals that arrived, so `gate status` tells the truth about how
       // many of them are live against the current artifact.
-      const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
-      info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${verdict}`);
-      for (const m of pred.missing) hand(`recorded gap: ${m}`);
+      // A DEFERRED step reads as passed, so it lands here too — but nothing was approved, and "already
+      // done … the rule no longer holds" would describe a pass that never happened. Say what is true: the
+      // review is still owed, and what it still needs (E37). The approvals themselves are kept either way:
+      // a sync of a step that reads as passed only ever adds to its record (`upsertBridge`'s `closed`).
+      if (stepStatus(step) === 'deferred') {
+        info(`${step.id} is deferred — approvals re-synced, chain not re-advanced; its review is still owed`);
+        for (const m of pred.missing) hand(`still owed: ${m}`);
+      } else {
+        const verdict = pred.passed ? 'the rule still holds' : `the rule no longer holds${pred.staleDropped ? ` (${pred.staleDropped} stale)` : ''}`;
+        info(`${step.id} already done — approvals re-synced, chain not re-advanced; ${verdict}`);
+        for (const m of pred.missing) hand(`recorded gap: ${m}`);
+      }
     } else if (pred.passed) {
       state = advanceState(state, step);
       advanced++;
@@ -845,7 +854,8 @@ export async function gateStatus(root, { epic } = {}) {
     const state = stepStatus(s);
     const waived = claimsInherited(s)
       ? `; inherited from ${s.inheritedFrom || 'the parent epic'}`
-      : (claimsSkipped(s) && isSkippableStep(s.id, optional)) ? '; skipped (N/A)' : '';
+      : (claimsSkipped(s) && isSkippableStep(s.id, optional)) ? '; skipped (N/A)'
+        : (state === 'deferred' && isSkippableStep(s.id, optional)) ? '; deferred (still owed)' : '';
     // The shortfall, the same number `gatePredicate` returns as `short`. Printed here because this is the
     // surface people read when they want to know where a gate stands, and a count with no distance to it
     // is half the fact.
@@ -857,7 +867,9 @@ export async function gateStatus(root, { epic } = {}) {
     // would make the old vocabulary outlive the model. A status this release cannot name falls back
     // to the raw string with a mark, because inventing a name for it would hide the finding
     // `yad doctor` reports as `step:unknown-status`.
-    log(`    ${isPassed(s) ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
+    // A deferred step lets the chain continue, but nobody has reviewed it: a green tick beside "still
+    // owed" would read as reviewed, so it keeps the open-step mark (E37).
+    log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}`)}`);
   }
 }
 
@@ -937,6 +949,16 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   if (!artifact) { fail('artifact is required: `yad gate open <epic> <artifact>`'); process.exitCode = 1; return; }
   const step = findReviewStep(ledger.state, artifact);
   if (!step) { fail(`no review step for ${artifact}`); process.exitCode = 1; return; }
+  // A step SET ASIDE — skipped or deferred — has no review to open. The chain already walks past it, so
+  // `markInReview` would leave the ledger alone while the PR opened anyway: a live review of a step the
+  // chain has walked past, which no merge can advance. Put the step back first (E37).
+  const aside = stepStatus(step);
+  if (aside === 'skipped' || aside === 'deferred') {
+    fail(`${step.id} is ${aside} — there is no review to open`);
+    hand(`put it back in the chain first: yad ${aside === 'skipped' ? 'unskip' : 'undefer'} ${epic} ${step.id.replace(/-review$/, '')}`);
+    process.exitCode = 1;
+    return;
+  }
   const b = base(artifact);
   const branch = head || `review/${epic}/${b}`;
   const domains = touchedDomains(epicDir, step);

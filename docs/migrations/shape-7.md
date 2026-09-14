@@ -141,6 +141,10 @@ Not much, yet, and that is deliberate. Shape 7 is the vocabulary; the commands t
   and add a record by hand — every reader understands it, `yad next` will name what you are waiting on
   instead of telling you to author the artifact, and no gate is waived by it.
 
+> **Later releases.** This list describes shape 7 as it shipped. Since then, `yad skip` works for any
+> step a route marks optional, and `yad defer` writes `deferred`. See
+> [the step states](../CLI.md#where-a-step-stands-the-step-states).
+
 ## If `yad doctor` says something
 
 | It says | What it means | What to do |

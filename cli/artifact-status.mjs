@@ -34,6 +34,11 @@ export function desiredStatus(state, base) {
   // `isPassed`, not `status === 'done'`: a gate that PASSED is what makes an artifact approved,
   // however it passed. An inherited gate was approved upstream in the thread, and a skipped one has
   // no artifact for this command to find — both used to reach here spelled `done`.
+  // A gate SET ASIDE — skipped or deferred — lets the chain continue without anybody reviewing the
+  // artifact, so it says nothing about the file. `isPassed` alone read it as approved: a skip taken over a half-written draft,
+  // or a deferral of one, would have had CI stamp `status: approved` on a file nobody reviewed (E37).
+  const reviewState = stepStatus(review);
+  if (reviewState === 'skipped' || reviewState === 'deferred') return null;
   if (isPassed(review)) return 'approved';
   if (stepStatus(review) === 'in_review' || isPassed(author)) return 'in-review';
   return 'draft';

@@ -235,10 +235,10 @@ If the predicate **passes**:
 - **`foundation-review`** (the Product level, `foundation/`) ends at its own sentinel: set
   `currentStep: "foundation-done"`, never `ready-for-build` — the product level has no Build part. The
   old spelling does the same: **`discovery-review`** sets `currentStep: "discovery-done"`.
-- Any **other** review step: find the next step in `steps[]` that is not `skipped`, set it to
-  `in_progress` (authoring) or `in_review`, and set `currentStep` to it. A skipped step was marked N/A
-  with `yad skip`; it stays as it is. If every later step is skipped, set `currentStep:
-  "ready-for-build"`. A step waiting its turn is `todo` from shape 7 on. An older file may still say
+- Any **other** review step: find the next step in `steps[]` that is not `skipped` or `deferred`, set
+  it to `in_progress` (authoring) or `in_review`, and set `currentStep` to it. A skipped step was marked
+  N/A with `yad skip`, and a deferred one set aside for later with `yad defer`; both stay as they are.
+  If every later step is skipped or deferred, set `currentStep: "ready-for-build"`. A step waiting its turn is `todo` from shape 7 on. An older file may still say
   `blocked` with no `record` on it, which means the same thing; a `blocked` step **with** a `record` is
   waiting on someone outside the workflow, so leave it as it is.
 - Write `state.json`. Report the advance and what the next authored artifact is (or that the epic is

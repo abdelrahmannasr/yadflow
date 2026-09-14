@@ -20,7 +20,7 @@ import { runDocs } from '../cli/docs.mjs';
 import { runDoctor } from '../cli/doctor.mjs';
 import { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 import { runNext } from '../cli/next.mjs';
-import { runSkip } from '../cli/skip.mjs';
+import { runSkip, runDefer } from '../cli/skip.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
@@ -123,6 +123,11 @@ ${c.bold('Where am I / what next')}
   yad unskip <epic> <step>             Put a skipped step back in the chain (\`skip --undo\` does the
                                        same), until the step that follows it is finished or work
                                        past it starts — on classic, until stories are done
+  yad defer <epic> <step> --reason <text>  Set an optional step aside to do LATER: marks it deferred.
+                                       Say who is waiting for it in the reason. Same steps and same
+                                       refusals as skip; the chain goes on, its review is still owed
+  yad undefer <epic> <step>            Put a deferred step back, until the step that follows it is
+                                       finished or work past it starts
 
 ${c.bold('Review gate (Shape)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
@@ -376,11 +381,14 @@ async function main() {
       break;
     }
     case 'skip':
-    case 'unskip': {
+    case 'unskip':
+    case 'defer':
+    case 'undefer': {
       const [verb, epic, step] = o._;
       if (!epic || !isValidEpicId(epic)) { log(c.red(`invalid or missing epic id: ${epic ?? '(none)'} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
-      // `unskip` is the verb E36 named; `skip --undo` is the spelling that shipped first and stays.
-      await runSkip(o.dir, { epic, step, reason: o.reason, undo: verb === 'unskip' || o.undo, today });
+      // `unskip` / `undefer` are the verbs E36 / E37 named; `--undo` is the spelling that shipped first and stays.
+      const runVerb = verb === 'defer' || verb === 'undefer' ? runDefer : runSkip;
+      await runVerb(o.dir, { epic, step, reason: o.reason, undo: verb.startsWith('un') || o.undo, today });
       break;
     }
     case 'gate': {
