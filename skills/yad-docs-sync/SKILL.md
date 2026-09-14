@@ -50,14 +50,17 @@ Read each `docs-build.json` and compare. A site is **stale** when **any** of:
 - any `repoHeads[<repo>]` differs from the repo's current HEAD (the code the components cite advanced —
   the same head-sha staleness as `repos.json`), or
 - for the overview, `config.yaml` / `module-help.csv` / the `.mmd` / `skillCount` moved, or
-- its `templateVersion` < the current shell template version (the shell was upgraded).
+- for a per-epic site, its `shellVersion` differs from the `version` in `skills/yad-docs/templates/app/package.json`
+  (the shell was upgraded). The overview has no shell version: it is updated in place, not re-copied. An
+  older manifest records only `templateVersion` (the yad CLI version, which changed on every release). That
+  value is never compared; such a manifest counts as built on shell `0.0.0`, the only version before this.
 
 A missing `docs-build.json` (a site never generated) counts as **stale → needs generate**.
 
 ### Step 3 — Act on `action`
 - **`check`** (default, **read-only**) — print which sites are stale and **WHY**, in `yad check` drift
   style: *which artifact moved* (name it), *which repo HEAD advanced* (`<repo>: <old>→<new>`), *config /
-  manifest / diagram / skill-count changed*, or *shell upgraded* (`templateVersion`). Writes nothing.
+  manifest / diagram / skill-count changed*, or *shell upgraded* (`shellVersion`, per-epic only). Writes nothing.
 - **`refresh`** — for each stale site, re-run the generator (`yad-docs` for an epic site, `yad-docs-overview`
   for the overview) to regenerate `src/data/*.ts` + theme + manifest, then redeploy via `yad docs deploy`
   (degrading to build-only when no platform CLI). Report every site refreshed. **Never silent** — refresh

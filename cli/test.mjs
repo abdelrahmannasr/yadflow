@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8335,7 +8336,8 @@ test('gate loadProduct: an existing hub.json holding literal null is rejected (n
 // ---- docs (interactive documentation sites) -----------------------------------------------------
 const {
   deployTargetFromHub, siteBasePath, siteDir, manifestPath,
-  docsArtifactHash, docsArtifactFiles, docsStale, pagesWorkflow, pagesWorkflowPath,
+  docsArtifactHash, docsArtifactFiles, docsStale, pagesWorkflow, pagesWorkflowPath, shellVersion, LEGACY_SHELL_VERSION,
+  runDocs: runDocsFresh,
 } = await import('./docs.mjs');
 
 test('deployTargetFromHub maps platform (and git_url) to a Pages target', () => {
@@ -8397,11 +8399,65 @@ test('docsArtifactFiles collects existing epic artifacts + stories, sorted', () 
 
 test('docsStale flags never-built, changed artifacts, advanced HEADs, and shell upgrades', () => {
   assert.deepEqual(docsStale(null, {}), { stale: true, reasons: ['never built'] });
-  const m = { artifactHash: 'sha256:aaa', repoHeads: { backend: 'h1' }, templateVersion: '1.0.0' };
-  assert.equal(docsStale(m, { artifactHash: 'sha256:aaa', repoHeads: { backend: 'h1' }, templateVersion: '1.0.0' }).stale, false);
+  const m = { artifactHash: 'sha256:aaa', repoHeads: { backend: 'h1' }, shellVersion: '1.0.0' };
+  assert.equal(docsStale(m, { artifactHash: 'sha256:aaa', repoHeads: { backend: 'h1' }, shellVersion: '1.0.0' }).stale, false);
   assert.ok(docsStale(m, { artifactHash: 'sha256:bbb' }).reasons.some((r) => /artifacts changed/.test(r)));
   assert.ok(docsStale(m, { repoHeads: { backend: 'h2' } }).reasons.some((r) => /backend HEAD advanced/.test(r)));
-  assert.ok(docsStale(m, { templateVersion: '2.0.0' }).reasons.some((r) => /shell upgraded/.test(r)));
+  assert.ok(docsStale(m, { shellVersion: '2.0.0' }).reasons.some((r) => /shell upgraded/.test(r)));
+  // A manifest from before `shellVersion` recorded the yad CLI version as `templateVersion`. That moved on
+  // every release and flagged every site on every publish, so it is never compared. The manifest is read
+  // as built on LEGACY_SHELL_VERSION instead — the one shell version that existed — so it reads fresh
+  // today AND still reports the first real shell upgrade.
+  const legacy = { artifactHash: 'sha256:aaa', templateVersion: '3.19.0-next.2' };
+  assert.equal(docsStale(legacy, { artifactHash: 'sha256:aaa', shellVersion: LEGACY_SHELL_VERSION }).stale, false);
+  assert.deepEqual(docsStale(legacy, { artifactHash: 'sha256:aaa', shellVersion: '1.0.0' }).reasons, [`doc shell upgraded (${LEGACY_SHELL_VERSION} → 1.0.0)`]);
+  assert.equal(docsStale({ artifactHash: 'sha256:aaa' }, { artifactHash: 'sha256:aaa', shellVersion: '1.0.0' }).stale, false, 'a manifest with neither field makes no shell claim');
+});
+
+test('docs freshness: a new yad release alone never marks the overview or an epic site stale', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-docs-fresh-'));
+  try {
+    // The overview, built from the pipeline files, with a manifest an older release wrote.
+    for (const [rel, body] of [['skills/sdlc/config.yaml', 'a: 1\n'], ['skills/sdlc/module-help.csv', 'module,skill\n'], ['docs/diagrams/sdlc-overview.mmd', 'flowchart\n']]) {
+      fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(T, rel), body);
+    }
+    const files = ['skills/sdlc/config.yaml', 'skills/sdlc/module-help.csv', 'docs/diagrams/sdlc-overview.mmd'].map((f) => path.join(T, f));
+    fs.mkdirSync(path.join(T, 'docs/sdlc-site'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'docs/sdlc-site/.docs-build.json'), JSON.stringify({ artifactHash: docsArtifactHash(files), templateVersion: '0.0.1-an-old-cli' }));
+    // An epic site whose manifest carries today's shell version and an old CLI version.
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '---\nid: EP-x\n---\n# x\n');
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({ epicId: 'EP-x', steps: [] }));
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/docs-build.json'), JSON.stringify({
+      artifactHash: docsArtifactHash(docsArtifactFiles(T, 'EP-x')), repoHeads: {}, shellVersion: shellVersion(), templateVersion: '0.0.1-an-old-cli',
+    }));
+    fs.mkdirSync(path.join(T, 'epics/EP-x/docs-site'), { recursive: true });
+    const out = await captureConsole(() => runDocsFresh(T, { action: 'sync' }));
+    assert.doesNotMatch(out.out, /stale/, out.out);
+    assert.doesNotMatch(out.out, /shell upgraded/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// The shell version is only honest if it moves when the shell does. This pins it to a fingerprint of
+// every git-tracked file in the template: change the template and this fails until the shell version (the
+// `version` in its package.json) is bumped and the fingerprint below updated with it. Then every per-epic
+// site correctly reads "doc shell upgraded" — once, for a real reason.
+test('docs shell: the template cannot change without a new shell version', (t) => {
+  const dir = path.join(ROOT, 'skills/yad-docs/templates/app');
+  // The fingerprint is over git-TRACKED files, so a developer's local node_modules/ or dist/ never moves
+  // it. That needs a git checkout; a source download without `.git` cannot run it, so say so and skip.
+  let listed;
+  try { listed = execFileSync('git', ['ls-files', '-z', '.'], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch {
+    t.skip('not a git checkout — the shell fingerprint is taken over git-tracked files');
+    return;
+  }
+  const tracked = listed.split('\0').filter(Boolean).sort();
+  const h = createHash('sha256');
+  for (const f of tracked) h.update(`${f}:${createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}\n`);
+  const PINNED = { '0.0.0': 'sha256:870722dccfa6c2ca5a14a99ab4504df71c7eebb2c66f0e9a7e38e7cdb2efb2ab' };
+  assert.equal('sha256:' + h.digest('hex'), PINNED[shellVersion()],
+    `skills/yad-docs/templates/app changed, or its version did. Bump "version" in its package.json, then pin the new fingerprint here under that version.`);
 });
 
 test('pagesWorkflow emits a valid github vs gitlab Pages job, yad-managed + loop-safe', () => {

@@ -96,13 +96,14 @@ Write `docs/sdlc-site/.docs-build.json` — `yad-docs-sync` compares against it:
   "theme": "yadflow-brand",
   "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd>",
   "skillCount": <number of yad-* skills>,
-  "deployUrl": "<url or null>",
-  "templateVersion": "<shell template version = the yad CLI version>"
+  "deployUrl": "<url or null>"
 }
 ```
 
-The overview's freshness inputs are the **config + manifest + diagram** (plus the `templateVersion`, so a
-doc-shell upgrade triggers a rebuild). `skillCount` rides along in the manifest as an informational field
+The overview's freshness inputs are the **config + manifest + diagram**. There is **no shell version**:
+the overview is not re-copied from the shell (Step 3), so a shell upgrade is not a reason to rebuild it.
+An older manifest may still carry a `templateVersion` (the yad CLI version); it is ignored, because it
+made the overview read stale after every release. `skillCount` rides along in the manifest as an informational field
 — it is **not** a separate hash input, since `module-help.csv` already moves whenever the skill set does.
 Not per-epic artifacts/repo heads.
 

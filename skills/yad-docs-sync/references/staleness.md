@@ -16,7 +16,7 @@ the current inputs, or its shell template is out of date. This mirrors the `repo
   "artifactHash": "<sha256 of epic.md + architecture.md + contract.md CONTRACT-SURFACE + ui-design.md + each story>",
   "repoHeads": { "<repo>": "<HEAD sha>" },
   "deployUrl": "<url or null>",
-  "templateVersion": "<shell template version>"
+  "shellVersion": "<the `version` in templates/app/package.json>"
 }
 ```
 
@@ -28,8 +28,7 @@ the current inputs, or its shell template is out of date. This mirrors the `repo
   "theme": "yadflow-brand",
   "artifactHash": "<sha256 of config.yaml + module-help.csv + docs/diagrams/sdlc-overview.mmd>",
   "skillCount": <number of yad-* skills>,
-  "deployUrl": "<url or null>",
-  "templateVersion": "<shell template version>"
+  "deployUrl": "<url or null>"
 }
 ```
 
@@ -55,10 +54,12 @@ A site is **stale** when ANY holds:
    repo is *flagged*, never auto-refreshed: the `code-context` itself is refreshed by a human via
    `yad repo refresh`, and the docs are regenerated only on an explicit `refresh`/CI decision;
 3. (overview) `config.yaml` / `module-help.csv` / the `.mmd` moved — the pipeline changed (this is what
-   enforces "the overview regenerates whenever the workflow definition or skill set changes"); or the
-   `templateVersion` (the yad CLI version) advanced — the doc shell upgraded;
-4. manifest `templateVersion` < the current shell template version — the `templates/app/` shell was
-   upgraded, so every site should re-copy it;
+   enforces "the overview regenerates whenever the workflow definition or skill set changes");
+4. (per-epic) manifest `shellVersion` ≠ the `version` in `templates/app/package.json` — the shell was
+   upgraded, so the site should re-copy it. The overview has no shell version (it is updated in place).
+   A manifest's older `templateVersion` field held the yad CLI version, which moved on every release, so
+   it is never compared: a manifest with only that field counts as built on shell `0.0.0`, the one version
+   the shell had before `shellVersion` existed. It reads fresh today, and a real shell upgrade still shows;
 5. the `docs-build.json` is **missing** — the site was never generated (treat as stale → generate).
 
 `check` reports which of these tripped and why; `refresh` regenerates + redeploys; neither blocks any

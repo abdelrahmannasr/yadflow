@@ -12,7 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { c, log, ok, info, warn, hand, fail, readJSON, run, has, exists } from './lib.mjs';
-import { PROJECT_FILES, VERSION } from './manifest.mjs';
+import { PROJECT_FILES } from './manifest.mjs';
 import { detectPlatform, platformReady } from './platform.mjs';
 import { gitHead } from './setup.mjs';
 import { contractSurfaceHash } from './epic-state.mjs';
@@ -95,8 +95,33 @@ export function repoHeadsFor(root, repos = [], registry = { repos: [] }) {
   return out;
 }
 
+// The version of the docs shell a per-epic site is copied from: the `version` in the template's own
+// package.json. It moves only when the shell changes — cli/test.mjs pins it to a fingerprint of the
+// template, so an edit to the shell cannot land without a new version.
+//
+// It replaced the yad CLI VERSION here, which moves on EVERY release: each publish marked every docs site
+// "doc shell upgraded" whether or not the shell had changed. A manifest written before this carries that
+// CLI version as `templateVersion`, which is never compared. What such a manifest is read as instead is
+// LEGACY_SHELL_VERSION, below.
+//
+// Read when a freshness check asks, never at import: every `yad` command loads this module, and a copy of
+// the CLI without `skills/` beside it (a test harness, a partial checkout) must still start. No template
+// found means no shell version, so that one comparison is skipped.
+export function shellVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('../skills/yad-docs/templates/app/package.json', import.meta.url), 'utf8')).version || null;
+  } catch { return null; }
+}
+
+// The shell version every site built before `shellVersion` existed was built on. Exact, not a guess: the
+// template's package.json has said `0.0.0` since its first commit, so a manifest that records only the old
+// `templateVersion` came from that shell. Reading it this way reports nothing today, and still reports
+// the first real shell upgrade — ignoring the old manifest instead would have missed that for ever,
+// because only a skill rewrites a manifest and nothing prompts one to.
+export const LEGACY_SHELL_VERSION = '0.0.0';
+
 // Compare a build manifest to the current world; list the concrete reasons it is stale.
-export function docsStale(manifest, { artifactHash, repoHeads = {}, templateVersion } = {}) {
+export function docsStale(manifest, { artifactHash, repoHeads = {}, shellVersion } = {}) {
   const reasons = [];
   if (!manifest) return { stale: true, reasons: ['never built'] };
   if (artifactHash && manifest.artifactHash && artifactHash !== manifest.artifactHash) {
@@ -106,8 +131,9 @@ export function docsStale(manifest, { artifactHash, repoHeads = {}, templateVers
     const was = (manifest.repoHeads || {})[repo];
     if (head && was && head !== was) reasons.push(`repo ${repo} HEAD advanced`);
   }
-  if (templateVersion && manifest.templateVersion && templateVersion !== manifest.templateVersion) {
-    reasons.push(`doc shell upgraded (${manifest.templateVersion} → ${templateVersion})`);
+  const builtOn = manifest.shellVersion || (manifest.templateVersion ? LEGACY_SHELL_VERSION : null);
+  if (shellVersion && builtOn && shellVersion !== builtOn) {
+    reasons.push(`doc shell upgraded (${builtOn} → ${shellVersion})`);
   }
   return { stale: reasons.length > 0, reasons };
 }
@@ -267,10 +293,12 @@ function label(t) { return t.overview ? 'overview (docs/sdlc-site)' : `epic ${t.
 function freshness(root, t, registry) {
   const manifest = readJSON(manifestPath(root, t), null);
   if (t.overview) {
-    // The overview is generated from the project pipeline definition, not an epic's artifacts.
+    // The overview is generated from the project pipeline definition, not an epic's artifacts. No shell
+    // version: the overview is copied from the shell once and updated in place after that
+    // (yad-docs-overview, Step 3), so a shell upgrade is not a reason to rebuild it.
     const files = ['skills/sdlc/config.yaml', 'skills/sdlc/module-help.csv', 'docs/diagrams/sdlc-overview.mmd']
       .map((f) => path.join(root, f)).filter(exists);
-    return docsStale(manifest, { artifactHash: docsArtifactHash(files), templateVersion: VERSION });
+    return docsStale(manifest, { artifactHash: docsArtifactHash(files) });
   }
   const epicMeta = readJSON(path.join(root, 'epics', t.epic, '.sdlc/state.json'), {});
   const repos = epicMeta.repos || [];
@@ -278,7 +306,7 @@ function freshness(root, t, registry) {
   return docsStale(manifest, {
     artifactHash: docsArtifactHash(docsArtifactFiles(root, t.epic), surface || ''),
     repoHeads: repoHeadsFor(root, repos, registry),
-    templateVersion: VERSION,
+    shellVersion: shellVersion(),
   });
 }
 function reportFreshness(root, t) {
