@@ -626,8 +626,13 @@ no `steps`, just the state and its record:
   `yad-run` adds a missing repo's entry to an existing file, and never drives a skipped lane.
 - It is not written into the story's `repos:` list, because that list is part of what the stories review
   approved. `yad checkpoint --push` commits it with the rest of the Build state.
-- Readers: `yad next` prints `skipped (N/A)` with the reason; `yad foundation status` counts the lane as
-  finished once another lane really shipped; `yad checkpoint --retro-ship` refuses it.
+- Readers: `yad next` prints `skipped (N/A)` with the reason (and still points at `yad-run` while every
+  recorded lane is skipped and nothing has started); `yad foundation status` counts the lane as finished
+  once another lane really shipped; `yad checkpoint --retro-ship` refuses it, and `yad-engineer-review`
+  checks for it before recording a ship.
+- `skipped` is honoured only over a lane with no work in it. An entry that says `skipped` beside steps that
+  have started — including a status word this release does not know — is read as the work, and
+  `yad doctor` fails it as a contradiction.
 
 `yad next` reads these files too: once an epic is `ready-for-build`, `yad next <epic>` resolves each
 story/repo's `currentStep` into the next build sub-step and prints it with the remaining chain and the

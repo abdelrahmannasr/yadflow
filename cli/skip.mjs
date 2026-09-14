@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ok, info, hand, fail, run, readJSONStrict, writeJSON } from './lib.mjs';
-import { epicRel, epicRoot, epicStories, isPassed, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
+import { epicRel, epicRoot, epicStories, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
 import { epicFiles } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { loadProduct } from './gate.mjs';
@@ -118,11 +118,11 @@ export async function runLaneSkip(root, { epic, story, repo, reason, undo = fals
     process.exitCode = 1;
     return;
   }
-  const entry = epicStories(epicDir).find((st) => st.id === story);
-  if (!entry) { fail(`no story ${story} under ${epicRel(epic)}/stories/`); process.exitCode = 1; return; }
   const file = path.join(epicFiles(epicDir).buildStateDir, `${story}.json`);
   const current = readJSONStrict(file, null);
 
+  // Putting a lane back asks nothing but that it was skipped — not even that the story file still exists,
+  // so a story renamed or removed after the skip can still have its skip undone (E39 review).
   if (undo) {
     const { buildState, empty } = unskipLane(current, { story, repo });
     if (empty) fs.rmSync(file);
@@ -133,11 +133,16 @@ export async function runLaneSkip(root, { epic, story, repo, reason, undo = fals
     return;
   }
 
+  const entry = epicStories(epicDir).find((st) => st.id === story);
+  if (!entry) { fail(`no story ${story} under ${epicRel(epic)}/stories/`); process.exitCode = 1; return; }
+  // An EARNED stories review only: `done` here, or `satisfied` (reviewed in the parent epic) — the rule E36
+  // gives for "Build can run". `isPassed` would also accept a hand-typed `skipped` or `deferred` review, and
+  // a lane skip over stories nobody approved is what this refusal exists to stop (E39 review).
   const storiesReview = ledger.state.steps.find((st) => st?.id === 'stories-review');
   const shippedRepos = readShips(epicDir).filter((sh) => sh.story === story).map((sh) => sh.repo);
   const by = recordActor(root);
   const { buildState, already } = skipLane(current, {
-    story, repo, reason, by, date: today, declared: entry.repos, shippedRepos, storiesPassed: isPassed(storiesReview),
+    story, repo, reason, by, date: today, declared: entry.repos, shippedRepos, storiesPassed: ['done', 'satisfied'].includes(stepStatus(storiesReview)),
   });
   if (already) {
     const r = current.repos[repo].record || {};

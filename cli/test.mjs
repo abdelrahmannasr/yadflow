@@ -7284,6 +7284,99 @@ test('checkpoint --retro-ship refuses a skipped lane, and never lists one as sti
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('E39 review: a lane skipped before Build began still says Build can run, in the Build line, the roll-up and the single-epic view', async () => {
+  const { nextAction } = await import('./epic-state.mjs');
+  const { runNext } = await import('./next.mjs');
+  const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
+  const onlySkip = { state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord } } }] };
+  assert.equal(nextAction(onlySkip).why, 'Shape approved — Build can run (every recorded lane is skipped; nothing has started)');
+
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lane-first-step-'));
+  try {
+    laneEpic(T, { buildState: { 'EP-l-S01': { story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord } } } } });
+    const one = await grab(() => runNext(T, { epic: 'EP-l' }));
+    assert.match(one, /EP-l-S01 \/ web — skipped \(N\/A\): no UI change/);
+    assert.match(one, /yad-run/, 'the lanes alone name no command, so the yad-run line is printed too');
+    assert.doesNotMatch(one, /every .*lane .*shipped/);
+
+    // The roll-up (two epics, a set-up project) says the same.
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    fs.cpSync(path.join(T, 'epics/EP-l'), path.join(T, 'epics/EP-m'), { recursive: true });
+    const m = JSON.parse(fs.readFileSync(path.join(T, 'epics/EP-m/.sdlc/state.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, 'epics/EP-m/.sdlc/state.json'), JSON.stringify({ ...m, epicId: 'EP-m' }));
+    const roll = await grab(() => runNext(T, {}));
+    assert.match(roll, /EP-l\s.*yad-run/);
+    assert.doesNotMatch(roll, /every lane shipped/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E39 review: skipped over real work is read as the work, an unknown status word counts as started, and odd files are refused', async () => {
+  const { buildNextForRepo, featureStatus, skipLane, laneStarted, declaredRepos } = await import('./epic-state.mjs');
+  const busy = { status: 'skipped', record: laneRecord, currentStep: 'implement', steps: [{ id: 'spec', status: 'done' }, { id: 'implement', status: 'in_progress' }] };
+  const read = buildNextForRepo(busy);
+  assert.equal(read.status, 'in_progress', 'the work wins over the word');
+  assert.equal('record' in read, false);
+  const done = { currentStep: 'engineer-review', steps: [{ id: 'spec', status: 'done' }, { id: 'engineer-review', status: 'done' }] };
+  const state = { epicId: 'EP-l', currentStep: 'ready-for-build', steps: [
+    { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] }] };
+  const L = { state, approvals: [], comments: [], hubPrs: [], buildStates: [{ story: 'EP-l-S01', repos: { api: done, web: busy } }] };
+  assert.equal(featureStatus(L, { stories: [{ id: 'EP-l-S01', repos: ['api', 'web'] }] }), 'in-build', 'not shipped while work is under way');
+
+  assert.equal(laneStarted({ steps: [{ id: 'spec', status: 'running' }] }), true, 'an unknown word is started (fail closed)');
+  assert.equal(laneStarted({ steps: [{ id: 'spec' }, { id: 'tasks', status: 'todo' }] }), false, 'a step with no status is a seeded step nobody began');
+  assert.equal(laneStarted({ steps: [{ id: 'spec', status: 'blocked' }] }), false, 'a bare blocked is the old spelling of todo');
+  const base = { story: 'EP-l-S01', repo: 'web', reason: 'no UI change', declared: ['api', 'web'], storiesPassed: true };
+  assert.throws(() => skipLane({ story: 'EP-l-S01', repos: { web: { steps: [{ id: 'spec', status: 'running' }] } } }, base), /work has started/);
+  assert.throws(() => skipLane([], base), /is not a JSON object/);
+  assert.throws(() => skipLane({ story: 'EP-l-S01', repos: ['web'] }, base), /has a `repos` that is not an object/);
+  assert.deepEqual(declaredRepos({ repos: ['web', ' web ', 'api'] }), ['web', 'api'], 'duplicates fold to one lane');
+});
+
+test('E39 review: the stories review must be earned, unskip needs no story file, and corrupt build-state is refused', async () => {
+  const { runLaneSkip } = await import('./skip.mjs');
+  const { laneChecks } = await import('./doctor.mjs');
+  const { recordRetroShip } = await import('./checkpoint.mjs');
+  for (const review of ['skipped', 'deferred']) {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), `sdlc-lane-review-${review}-`));
+    try {
+      laneEpic(T, { storiesReview: review });
+      await assert.rejects(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', reason: 'x' }), /stories review has not passed/,
+        `a hand-typed ${review} stories review is not an approval`);
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-lane-review-files-'));
+  try {
+    const dir = laneEpic(T);
+    await grab(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', reason: 'no UI change', today: '2026-09-14' }));
+    fs.rmSync(path.join(dir, 'stories/EP-l-S01.md'));
+    assert.match(await grab(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', undo: true })), /un-skipped/, 'a removed story can still have its skip undone');
+
+    const file = path.join(dir, '.sdlc/build-state/EP-l-S01.json');
+    fs.writeFileSync(path.join(dir, 'stories/EP-l-S01.md'), '---\nid: EP-l-S01\nstatus: in-build\nrepos: [api, web]\n---\n');
+    fs.writeFileSync(file, '{ not json');
+    await assert.rejects(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', reason: 'x' }));
+    await assert.rejects(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', undo: true }));
+    assert.equal(fs.readFileSync(file, 'utf8'), '{ not json', 'nothing overwrote the file');
+    const retro = grabSync(() => recordRetroShip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', today: '2026-09-14' }));
+    assert.match(retro, /could not read EP-l-S01's build-state/);
+    assert.equal(fs.existsSync(path.join(dir, '.sdlc/build-log')), false, 'no ship shard was written');
+
+    fs.writeFileSync(file, JSON.stringify({ story: 'EP-l-S01', repos: { web: { status: 'skipped', record: laneRecord, steps: [{ id: 'spec', status: 'running' }] } } }));
+    const checks = [];
+    laneChecks(checks, T);
+    assert.ok(checks.some((x) => x.id === 'lane:EP-l:EP-l-S01:web:contradiction' && x.status === 'fail'), 'an unknown word under a skip is a contradiction');
+
+    // Flags that mean nothing on the path taken are named, not silently dropped.
+    fs.writeFileSync(file, JSON.stringify({ story: 'EP-l-S01', repos: {} }));
+    assert.match(yadRun(T, 'skip', 'EP-l', 'EP-l-S01', '--repo', 'web', '--reason', 'no UI change', '--debt').out, /--debt is not used on a Build lane/);
+    assert.match(yadRun(T, 'skip', 'EP-l', 'epic', '--repo', 'web', '--reason', 'x').out, /--repo is only for a Build lane/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad-run and yad-status name the skipped Build lane, so neither drives nor hides one (E39)', () => {
   const run = fs.readFileSync(path.join(ROOT, 'skills/yad-run/SKILL.md'), 'utf8');
   assert.match(run, /`status: skipped`/);
@@ -7292,6 +7385,13 @@ test('yad-run and yad-status name the skipped Build lane, so neither drives nor 
   assert.match(run, /Never write a Build step as `skipped` or `deferred`/);
   const status = fs.readFileSync(path.join(ROOT, 'skills/yad-status/SKILL.md'), 'utf8');
   assert.match(status, /`status: skipped`.*prints `skipped \(N\/A\)`/);
+  // The pseudocode the loop follows step by step, not only the prose above it (E39 review).
+  const loop = fs.readFileSync(path.join(ROOT, 'skills/yad-run/references/run-loop.md'), 'utf8');
+  assert.match(loop, /if bs\.status == "skipped":/);
+  assert.match(loop, /never remove an entry you did not add/);
+  const review = fs.readFileSync(path.join(ROOT, 'skills/yad-engineer-review/SKILL.md'), 'utf8');
+  assert.match(review, /Check the lane is not skipped \(E39\)/);
+  assert.match(review, /yad unskip <epic> <story> --repo <repo>` before recording a ship/);
 });
 
 test('gateOpen refuses a skipped or deferred step: there is no review to open, and nothing is written (E37)', async () => {

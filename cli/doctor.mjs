@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -1503,7 +1503,7 @@ export function laneChecks(checks, root) {
         const steps = Array.isArray(lane.steps) ? lane.steps.filter(isPlainObject) : [];
         if (lane.status === 'skipped') {
           const shipped = ships.some((sh) => sh.story === storyId && sh.repo === repo);
-          const started = steps.some((st) => (stepStatus(st) || 'todo') !== 'todo');
+          const started = laneStarted(lane);   // an unknown status word counts as started (E39 review)
           if (shipped || started) {
             check(checks, id('contradiction'), 'epics', 'fail',
               `${where} is skipped, but ${shipped ? 'a ship is recorded for it' : 'work has started in it'}`,

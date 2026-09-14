@@ -530,7 +530,9 @@ export function epicStories(epicDir) {
 // one come to disagree about whether a repo is declared.
 export const declaredRepos = (fm = {}) => {
   const v = fm?.repos;
-  return (Array.isArray(v) ? v : v ? [v] : []).map((r) => String(r).trim()).filter(Boolean);
+  // Duplicates folded: `[web, web]` declares one lane, and counting it twice would make a skip of it read
+  // as "the last lane left" (E39 review).
+  return [...new Set((Array.isArray(v) ? v : v ? [v] : []).map((r) => String(r).trim()).filter(Boolean))];
 };
 
 // ---- skipping a whole Build lane (E39) ----------------------------------------------------------
@@ -559,6 +561,17 @@ export const declaredRepos = (fm = {}) => {
 //
 // PURE: returns the new build-state; the caller reads and writes the file. Refusals throw YAD-STATE-004.
 const laneIsSkipped = (lane) => isPlainObject(lane) && lane.status === 'skipped';
+
+// Has work STARTED in a lane? Any step carrying a status that is not `todo` — a halt (`blocked` with a
+// record) and a status word this release does not know both count, because E36 pinned "an unknown word
+// counts as started (fail closed)" and `stepStatus` answers `null` for one. A step with NO status at all
+// is a seeded step nobody has begun, which is how `buildNextForRepo` has always read it.
+//
+// ONE predicate for the three readers that ask: `skipLane` (refuse to skip over work),
+// `buildNextForRepo` (a `skipped` word over real work is not honoured — the claim is not walked past on
+// its own, E38's rule), and `yad doctor`'s `lane:…:contradiction`.
+export const laneStarted = (lane) => isPlainObject(lane) && Array.isArray(lane.steps)
+  && lane.steps.some((st) => isPlainObject(st) && st.status != null && stepStatus(st) !== 'todo');
 export function skipLane(buildState, { story, repo, reason, by = null, date = null, declared = [], shippedRepos = [], storiesPassed = false } = {}) {
   const bs = isPlainObject(buildState) ? buildState : { story, repos: {} };
   const repos = isPlainObject(bs.repos) ? bs.repos : {};
@@ -571,6 +584,14 @@ export function skipLane(buildState, { story, repo, reason, by = null, date = nu
     throw err('YAD-STATE-004', `${story} does not declare ${repo}, so it owes no lane there`,
       declared.length ? `its repos: ${declared.join(', ')} (names are case-sensitive)` : 'the story declares no repos at all');
   }
+  // A file this cannot read as a lane map is refused, never overwritten: replacing it would destroy content
+  // the skills wrote (E39 review).
+  if (buildState != null && !isPlainObject(buildState)) {
+    throw err('YAD-STATE-004', `build-state/${story}.json is not a JSON object`, 'fix the file by hand — nothing here overwrites content it cannot read');
+  }
+  if (isPlainObject(buildState) && 'repos' in buildState && !isPlainObject(buildState.repos)) {
+    throw err('YAD-STATE-004', `build-state/${story}.json has a \`repos\` that is not an object`, 'fix the file by hand — nothing here overwrites content it cannot read');
+  }
   // Idempotent BEFORE the reason check, like a Shape skip: a repeat keeps the original record.
   if (laneIsSkipped(lane)) return { buildState: bs, already: true };
   if (shippedRepos.includes(repo)) {
@@ -578,7 +599,7 @@ export function skipLane(buildState, { story, repo, reason, by = null, date = nu
   }
   // "Started" the way E36 counts it: any step past `todo`, a halt (`blocked` with a record) included —
   // a skip says the lane does not apply, and work in it says otherwise.
-  if (isPlainObject(lane) && Array.isArray(lane.steps) && lane.steps.some((st) => isPlainObject(st) && (stepStatus(st) || 'todo') !== 'todo')) {
+  if (laneStarted(lane)) {
     throw err('YAD-STATE-004', `work has started in ${story} / ${repo}`,
       'a skip says the lane does not apply; finish it, or clear the halt and drive it with yad-run');
   }
@@ -589,6 +610,9 @@ export function skipLane(buildState, { story, repo, reason, by = null, date = nu
   if (reason == null || reason === true || !String(reason).trim()) {
     throw err('YAD-STATE-004', 'a lane skip needs a reason', `yad skip <epic> ${story} --repo ${repo} --reason "<why it needs no change>"`);
   }
+  // A lane the skill SEEDED but never began is replaced whole, and with it any per-step dial a person set
+  // with `yad-run set-dial`. `yad unskip` does not bring those back: `yad-run` re-seeds the lane from the
+  // `back_steps` defaults, which is what an unstarted lane would have been driven with anyway.
   return {
     buildState: { ...bs, story: bs.story || story, repos: { ...repos, [repo]: { status: 'skipped', record: stepRecord({ reason, by, date }) } } },
     already: false,
@@ -2773,9 +2797,12 @@ export function dedupeConsecutive(skills) {
 // `shipped: true` only when there ARE steps and every one is `done`; an empty/missing steps array is
 // `unknown` (not-started), NEVER shipped — otherwise a half-seeded file would render a false "shipped ✓".
 export function buildNextForRepo(repoState = {}, { bindings = null } = {}) {
-  // A whole lane SKIPPED (E39): nothing to drive and nothing shipped. `status: 'skipped'` rides the key
-  // every lane already has; `record` is added ONLY here, so a frozen v3 lane's output is byte-identical.
-  if (repoState?.status === 'skipped') {
+  // A whole lane SKIPPED (E39): nothing to drive and nothing shipped. A lane on disk carries a `status` only
+  // when it is skipped; this RESULT always has a `status`, so the skip reuses that key, and `record` is added
+  // ONLY here, which keeps a frozen v3 lane's output byte-identical. The word is honoured only over a lane
+  // with no work in it (`laneStarted`): `skipped` beside real steps — a hand edit, or an older `yad-run`
+  // filling in what looked like a half-seeded lane — is read as the work, and `yad doctor` fails the file.
+  if (repoState?.status === 'skipped' && !laneStarted(repoState)) {
     return { step: null, status: 'skipped', shipped: false, skill: null, automation: null, locked: false, chain: [],
       ...(isPlainObject(repoState.record) ? { record: repoState.record } : {}) };
   }
@@ -3059,6 +3086,10 @@ function shapeNextAction(ledger, { epic, bindings = null } = {}) {
     if (builds.length) {
       let why;
       if (!lanes.length) why = 'Build started — no repo lanes recorded yet';
+      // Every recorded lane SKIPPED and none shipped (E39 review): a skip written before Build began creates
+      // the build-state file on its own, and "every lane is shipped or skipped" would call Build finished at
+      // its first step. Nothing has started, so say what was said before the skip.
+      else if (!open.length && !lanes.some((r) => r.shipped)) why = 'Shape approved — Build can run (every recorded lane is skipped; nothing has started)';
       // The first wording is frozen golden bytes; the second is said only when a lane was skipped (E39).
       else if (!open.length) why = lanes.some((r) => r.status === 'skipped') ? 'Build — every story/repo lane is shipped or skipped' : 'Build — every story/repo lane is shipped';
       else why = `Build in progress — ${open.length} story/repo lane(s) still moving`;

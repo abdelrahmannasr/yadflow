@@ -413,9 +413,11 @@ async function main() {
           log(c.red(`a Build lane is skipped whole, never deferred: yad skip ${epic} ${step} --repo <name> --reason "<why>"`));
           process.exitCode = 1; break;
         }
+        if (o.debt) log(c.yellow('--debt is not used on a Build lane: a lane is skipped whole, never owed back'));
         await runLaneSkip(o.dir, { epic, story: step, repo: o.repo, reason: o.reason, undo: verb === 'unskip' || o.undo, today });
         break;
       }
+      if (o.repo) log(c.yellow(`--repo is only for a Build lane (yad ${verb} ${epic} <story> --repo <name>) — ignored for a Shape step`));
       // `unskip` / `undefer` are the verbs E36 / E37 named; `--undo` is the spelling that shipped first and stays.
       const runVerb = verb === 'defer' || verb === 'undefer' ? runDefer : runSkip;
       await runVerb(o.dir, { epic, step, reason: o.reason, debt: o.debt, undo: verb.startsWith('un') || o.undo, today });

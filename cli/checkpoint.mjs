@@ -22,7 +22,7 @@
 //      marker would strand the PR's required checks.
 import fs from 'node:fs';
 import path from 'node:path';
-import { c, log, ok, info, fail, hand, exists, readJSON, pushWithRebase } from './lib.mjs';
+import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWithRebase } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
@@ -220,7 +220,15 @@ export function recordRetroShip(root, { epic, story, repo, task, mergeCommit, to
   }
   // A lane SKIPPED whole (E39) did not ship: recording a ship for it would make the two records contradict.
   // And a skipped repo is not "still unrecorded" — it is owed nothing — so it is left out of `remaining`.
-  const laneRepos = readJSON(path.join(epicDir, '.sdlc', 'build-state', `${story}.json`), null)?.repos;
+  // Read STRICTLY: a corrupt file would otherwise read as "nothing skipped" and let a permanent ship be
+  // recorded over a skip — the same refusal to guess this function makes for a corrupt build-log (E39 review).
+  let laneRepos;
+  try { laneRepos = readJSONStrict(path.join(epicDir, '.sdlc', 'build-state', `${story}.json`), null)?.repos; }
+  catch (e) {
+    fail(`could not read ${story}'s build-state — ${e.message}`);
+    hand('a ship is permanent audit evidence, so it is not recorded while the lane state cannot be read — fix the file, then re-run');
+    return { ok: false };
+  }
   const skipped = new Set(laneRepos && typeof laneRepos === 'object'
     ? Object.entries(laneRepos).filter(([, lane]) => lane?.status === 'skipped').map(([name]) => name) : []);
   if (skipped.has(repo)) {
