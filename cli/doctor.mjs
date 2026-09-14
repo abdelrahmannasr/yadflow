@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
@@ -599,6 +599,33 @@ export function foundationChecks(checks, root) {
       `move anything real into ${FOUNDATION_DIR}/, then delete epics/${FOUNDATION_EPIC}/`);
   }
   foundationGuardChecks(checks, root, hub);
+  if (hasFoundation) foundationSectionChecks(checks, root);
+}
+
+// A Foundation whose review has OPENED or PASSED while a section is still only its template (E76).
+// While it is being authored an empty section is simply work not done yet, so nothing is said then;
+// once reviewers are looking at it, or have approved it, an empty section is part of what they approved.
+// A warning: the fix — write the section, re-open the review — is a person's decision.
+//
+// Only a review bound to `foundation/`. A Foundation converted from the old spelling keeps
+// `artifact: "discovery/"` and its six old files (shape 8), and those were never templates of this kind.
+// A ledger that does not load is left to the epic checks, which already report it.
+export function foundationSectionChecks(checks, root) {
+  const dir = epicRoot(root, FOUNDATION_EPIC);
+  let state;
+  try { state = loadLedger(dir).state; } catch { return; }
+  if (!state) return;                                        // no state.json — no Foundation to read
+  const review = state.steps.find((s) => s.id === 'foundation-review');
+  if (!review || artifactBase(review.artifact) !== 'foundation') return;
+  const status = stepStatus(review);
+  if (status !== 'in_review' && status !== 'done') return;
+  const empty = unwrittenSections(dir);
+  if (!empty.length) return;
+  check(checks, 'foundation:unwritten', 'project', 'warn',
+    `${FOUNDATION_EPIC}: ${empty.join(', ')} ${empty.length === 1 ? 'holds' : 'hold'} only template headings, and its review has ${status === 'done' ? 'passed' : 'opened'}`,
+    status === 'done'
+      ? 'write the section, then re-open the review (a fresh PR/MR) — the approval on record approved an empty section'
+      : 'write the section before the review is approved — the yad-discovery skill says what each section needs');
 }
 
 function foundationGuardChecks(checks, root, hub) {

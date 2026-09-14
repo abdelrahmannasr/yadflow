@@ -34,6 +34,22 @@ steps        foundation (author, artifact foundation/) · foundation-review (rev
   epic's. The committed `checks/ledger-guard.sh` must be from E75 or later to guard them — `yad doctor`
   warns when it is not, and `yad update` refreshes it.
 
+## When a section counts as written (E76)
+
+A section that still holds **only its template** is not written. "Only its template" means nothing but
+the frontmatter, headings, `<!-- comments -->`, blank lines, and an empty table (its header row, its
+`|---|` rule, and rows whose cells are all empty). One real sentence or one filled table row makes it
+written.
+
+The engine checks this, and only ever **warns**:
+
+- `yad gate open` and `yad gate sync` print `Foundation not written yet — <files> hold only template
+  headings` when a section that exists is still empty.
+- `yad doctor` reports `foundation:unwritten` once the review has **opened or passed** with an empty
+  section. While the Foundation is still being written, an empty section is just work not done yet.
+
+So write every example into a comment, never as a table row: a filled row is read as your content.
+
 ## Section templates
 
 Every section carries the same frontmatter block:
@@ -89,7 +105,7 @@ owner:
 ## Phase 1 — MVP
 | Feature | Proposed epic id | Status |
 |---------|------------------|--------|
-| Registration | EP-registration | planned |
+<!-- one row per feature, e.g. | Registration | EP-registration | planned | -->
 
 ## Phase 2 — <name>
 | Feature | Proposed epic id | Status |

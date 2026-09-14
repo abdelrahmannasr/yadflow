@@ -376,6 +376,39 @@ export function foundationHash(dir, sections = FOUNDATION_SECTIONS, sha = review
   return 'sha256:' + createHash('sha256').update(parts.join('\n')).digest('hex');
 }
 
+// Is a Foundation section still only its template (E76)? `foundationHash` asks whether the files EXIST,
+// so six files holding nothing but their headings are a complete, reviewable Foundation — and an
+// approval on it approves nothing. This is the other half: does a section say anything yet?
+//
+// What does NOT count as writing is exactly what the templates in
+// `skills/yad-discovery/references/foundation-schema.md` are made of, and a test reads those templates
+// to keep the two in step: the frontmatter, headings, HTML comments, blank lines, and an empty table —
+// its header row, its `|---|` rule and rows whose cells are all empty. Anything else is a person's words.
+//
+// A heuristic, and it errs one way on purpose: a single real sentence makes a section written. It is
+// only ever used to WARN (`yad gate open`, `yad gate sync`, `yad doctor`), never to refuse, so a false
+// "written" costs a missing reminder and a false "unwritten" would cost a wrong one.
+const TABLE_RULE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
+export function isUnwrittenSection(text) {
+  const lines = text.replace(/\r\n?/g, '\n').replace(FRONTMATTER_BLOCK, '').replace(/<!--[\s\S]*?-->/g, '')
+    .split('\n').map((l) => l.trim());
+  return lines.every((l, i) => !l
+    || /^#{1,6}(\s|$)/.test(l)
+    || TABLE_RULE.test(l)
+    || TABLE_RULE.test(lines[i + 1] ?? '')                        // a table's header row
+    || (l.startsWith('|') && l.split('|').every((cell) => !cell.trim())));
+}
+
+// The sections that exist and are still only their template, in section order. Optional ones are
+// asked too: once `risks.md` exists it is part of what reviewers approve, empty or not. A section that
+// does not exist is not listed — missing is `foundationHash`'s answer, and the gate names it separately.
+export function unwrittenSections(dir, sections = FOUNDATION_SECTIONS) {
+  return sections.map((s) => s.file).filter((f) => {
+    const p = path.join(dir, f);
+    return fs.existsSync(p) && isUnwrittenSection(fs.readFileSync(p, 'utf8'));
+  });
+}
+
 // The two spellings of the product level. `foundation` is the one this release writes; `discovery` is
 // what every release before it wrote, under `epics/EP-discovery/`, and it is still READ (rule 2) — a
 // verified project cannot be converted by `yad migrate`, because CI owns its ledger, so the old

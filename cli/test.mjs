@@ -14355,13 +14355,123 @@ test('gate: an incomplete Foundation is named at gate time, and its optional sec
   const { warnIncompleteDiscovery } = await import('./gate.mjs');
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-incomplete-'));
   try {
-    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'repos.md']) fs.writeFileSync(path.join(T, f), `# ${f}\n`);
+    // Each file holds a line of prose: a heading alone is a template, which E76 names separately.
+    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'repos.md']) fs.writeFileSync(path.join(T, f), `# ${f}\nWords.\n`);
     const out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
     assert.match(out, /Foundation incomplete — missing stack\.md;/);
     assert.doesNotMatch(out, /market|risks/);
-    fs.writeFileSync(path.join(T, 'stack.md'), '# stack\n');
+    fs.writeFileSync(path.join(T, 'stack.md'), '# stack\nWords.\n');
     assert.equal(await grab(() => warnIncompleteDiscovery(T, 'foundation/')), '', 'complete without the optional sections');
     assert.equal(await grab(() => warnIncompleteDiscovery(T, 'epic.md')), '', 'not a product-level set');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// E76. The rule for "still only its template" is invisible from the code: nothing breaks if a template
+// in the skill gains a line the reader counts as writing, and the gate would then call a blank Foundation
+// written. So the templates themselves are read, and every one of them must come out unwritten.
+const foundationTemplates = () => {
+  const src = fs.readFileSync(path.join(ROOT, 'skills/yad-discovery/references/foundation-schema.md'), 'utf8');
+  const front = src.match(/```markdown\n(---\n[\s\S]*?\n---)\n```/)[1];
+  const out = {};
+  for (const m of src.matchAll(/^### `([a-z]+\.md)`[^\n]*\n\n```markdown\n([\s\S]*?)\n```/gm)) out[m[1]] = `${front}\n\n${m[2]}\n`;
+  return out;
+};
+
+test('isUnwrittenSection: every shipped Foundation template reads as unwritten, and one real line makes it written (E76)', async () => {
+  const { isUnwrittenSection, FOUNDATION_FILES } = await import('./epic-state.mjs');
+  const tpl = foundationTemplates();
+  assert.deepEqual(Object.keys(tpl).sort(), [...FOUNDATION_FILES].sort(), 'one template per section, found by heading');
+  for (const [file, text] of Object.entries(tpl)) {
+    assert.equal(isUnwrittenSection(text), true, `${file}: the template alone must not count as writing`);
+    assert.equal(isUnwrittenSection(text.replace(/\r?\n/g, '\r\n')), true, `${file}: CRLF line endings too`);
+    assert.equal(isUnwrittenSection(`${text}Flatmates never chase money.\n`), false, `${file}: one sentence is writing`);
+  }
+  // A filled table row is writing; an empty one is not; a header row alone is not.
+  const table = '| A | B |\n|---|---|\n';
+  assert.equal(isUnwrittenSection(table), true);
+  assert.equal(isUnwrittenSection(`${table}|  |  |\n`), true, 'a row whose cells are all empty');
+  assert.equal(isUnwrittenSection(`${table}| Splitwise | trips |\n`), false, 'a filled row');
+  // A comment spanning lines is dropped whole; the frontmatter never counts, even with an owner in it.
+  assert.equal(isUnwrittenSection('---\nid: EP-foundation\nowner: sam\n---\n## Why\n<!-- one\ntwo -->\n'), true);
+  assert.equal(isUnwrittenSection('## Why\n- one bullet\n'), false, 'a list item is writing');
+  assert.equal(isUnwrittenSection(''), true);
+});
+
+test('gate: a complete Foundation whose sections are still templates is named as not written, and missing is named first (E76)', async () => {
+  const { warnIncompleteDiscovery } = await import('./gate.mjs');
+  const { unwrittenSections } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-unwritten-'));
+  const tpl = foundationTemplates();
+  const write = (f, extra = '') => fs.writeFileSync(path.join(T, f), tpl[f] + extra);
+  try {
+    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'repos.md']) write(f, 'Real words.\n');
+    write('risks.md');
+    let out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
+    assert.match(out, /Foundation incomplete — missing stack\.md;/, 'a missing section is still named');
+    assert.match(out, /Foundation not written yet — risks\.md holds only template headings; an approval now would approve an empty section/,
+      'an OPTIONAL section that exists is part of what is reviewed, so it is asked too');
+
+    write('stack.md');
+    out = await grab(() => warnIncompleteDiscovery(T, 'foundation/'));
+    assert.doesNotMatch(out, /incomplete/);
+    assert.match(out, /stack\.md, risks\.md hold only template headings; an approval now would approve empty sections/, 'section order, plural');
+    assert.deepEqual(unwrittenSections(T), ['stack.md', 'risks.md']);
+
+    write('stack.md', 'TypeScript.\n');
+    fs.rmSync(path.join(T, 'risks.md'));
+    assert.equal(await grab(() => warnIncompleteDiscovery(T, 'foundation/')), '', 'written, and a missing optional section is not asked');
+
+    // The old spelling is converted, never authored, and its six files were never these templates.
+    fs.writeFileSync(path.join(T, 'roadmap.md'), tpl['roadmap.md']);
+    assert.doesNotMatch(await grab(() => warnIncompleteDiscovery(T, 'discovery/')), /not written/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor: foundation:unwritten fires only once the review has opened or passed, and only on a foundation/ review (E76)', async () => {
+  const { foundationSectionChecks, collectDoctor } = await import('./doctor.mjs');
+  const { seedFoundationState, writeState } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-foundation-doctor-unwritten-'));
+  const dir = path.join(T, 'foundation');
+  const stateFile = path.join(dir, '.sdlc/state.json');
+  const run = () => { const checks = []; foundationSectionChecks(checks, T); return checks; };
+  const tpl = foundationTemplates();
+  try {
+    assert.deepEqual(run(), [], 'no Foundation — nothing to read');
+    fs.mkdirSync(path.join(dir, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.sdlc/approvals.json'), '[]');
+    fs.writeFileSync(path.join(dir, '.sdlc/comments.json'), '[]');
+    const state = seedFoundationState({ today: '2026-09-14' });
+    writeState(stateFile, state);
+    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'stack.md', 'repos.md']) fs.writeFileSync(path.join(dir, f), tpl[f]);
+    assert.deepEqual(run(), [], 'still being authored — an empty section is work not done yet');
+
+    const review = () => state.steps.find((s) => s.id === 'foundation-review');
+    state.steps[0].status = 'done';
+    review().status = 'in_review';
+    writeState(stateFile, state);
+    let [w] = run();
+    assert.equal(w?.id, 'foundation:unwritten');
+    assert.equal(w.status, 'warn');
+    assert.match(w.message, /purpose\.md, scope\.md, mvp\.md, roadmap\.md, stack\.md, repos\.md hold only template headings, and its review has opened/);
+    assert.match(w.hint, /before the review is approved/);
+    assert.ok(collectDoctor(T).checks.some((x) => x.id === 'foundation:unwritten'), 'wired into yad doctor, not just exported');
+
+    review().status = 'done';
+    writeState(stateFile, state);
+    [w] = run();
+    assert.match(w.message, /review has passed/);
+    assert.match(w.hint, /re-open the review/);
+
+    for (const f of ['purpose.md', 'scope.md', 'mvp.md', 'roadmap.md', 'stack.md', 'repos.md']) fs.appendFileSync(path.join(dir, f), 'Written.\n');
+    assert.deepEqual(run(), [], 'every section written');
+
+    fs.writeFileSync(path.join(dir, 'purpose.md'), tpl['purpose.md']);
+    for (const s of state.steps) s.artifact = 'discovery/';
+    writeState(stateFile, state);
+    assert.deepEqual(run(), [], 'a Foundation converted from the old spelling binds discovery/, which is never read this way');
+
+    fs.writeFileSync(stateFile, '{ not json');
+    assert.deepEqual(run(), [], 'an unreadable ledger is left to the epic checks');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
