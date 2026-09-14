@@ -48,7 +48,9 @@ must collectively satisfy the epic's acceptance signals and stay within the cont
 - **UI-optional-safe:** `ui-design.md` may be absent — the `ui-design` step is optional and can be
   marked N/A for an epic with no user-facing surface (state.json shows it `skipped`). When there is no
   UI design, proceed without UI screens; the epic's acceptance signals + contract remain the source of
-  truth for the stories.
+  truth for the stories. If state.json shows it `deferred` instead, the UI **will** come later: write the
+  stories so they do not assume there are no screens, and note in each story that touches the UI that
+  its screens are still to be designed.
 - **Short-lane-safe:** `architecture.md` and `contract.md` may BOTH be absent, and on the `chore` and
   `spike` routes they always are — those lanes carry no architecture step, so there is no locked
   contract for this epic. Read `state.json`'s `profile` key first — an epic seeded before file shape 6

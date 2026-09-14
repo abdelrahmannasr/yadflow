@@ -484,16 +484,19 @@ function loadBuildStates(dir) {
 // used to be spelled `status === 'done'`, which is why a skipped step had to be pre-marked `done` to
 // get past the first group and carry a flag to be excluded from the second. Which reader wants which:
 //
-//   isPassed     `preconditionsMet`'s blocker scan · `unskipStep`'s `priorAllDone` ·
+//   isPassed     `preconditionsMet`'s blocker scan · `restoreStep`'s `priorAllDone` ·
 //                `closeAuthorStep`'s "already finished" guard (stamping `done` over a SKIPPED author
 //                step would destroy the provenance of the skip) · `gate sync`'s `alreadyDone` ·
 //                `buildNextForRepo`'s active-step scan · `artifact-status`'s "approved"
-//   isAuthored   `skipStep`'s "already authored" refusal
+//   isAuthored   `setAsideStep`'s "already authored" refusal
 //   == 'done'    `stateInvariants` on the REVIEW side and `yad doctor`'s gate-blind check — both ask
 //                "did this gate genuinely complete here", which `isAuthored` answers for an author
 //                step and this answers for a gate
-//   == 'skipped' the three step-over scans (`advanceState`, `skipStep`, `unskipStep`), which walk past
-//                a step marked N/A and must NOT walk past a hand-edited claim
+//   set aside    the three step-over scans (`advanceState`, `setAsideStep`, `restoreStep`) walk past a
+//                step whose STATUS is `skipped` or `deferred` (`isSetAside`, E37). They read the status,
+//                never a legacy flag alone, so `skipped: true` on an unfinished step is not walked past.
+//                A status word typed by hand onto a required step IS walked past, as a hand-typed
+//                `skipped` always was: the file wins, and `yad doctor` reports it (`skip:not-optional`)
 //
 // A THIRD QUESTION, and it is not either column: what the file CLAIMS about itself. `claimsSkipped` /
 // `claimsInherited` below answer that, for the readers that apply their own guard to the claim.
@@ -517,8 +520,9 @@ function loadBuildStates(dir) {
 // Shape 7 writes `todo` going forward, and `blocked`-with-no-record stays READ as `todo` for this
 // whole major — rule 2, read old and write new.
 //
-// THE CONVERSE, for whoever ships E37 (`yad defer`) or E41 (debt payback): clearing a `blocked` must
-// move `status` OFF `blocked`. Deleting only the record turns the step silently back into a `todo`.
+// THE CONVERSE: clearing a `blocked` must move `status` OFF `blocked`. Deleting only the record turns the
+// step silently back into a `todo`. `unblockStep` (`yad unblock`, E37) is that verb, and it does both in
+// one write.
 //
 // `in_review` is not in the roadmap's table and stays on purpose. It is `in_progress` on a
 // `review+approve` step, and `markInReview`, `advanceState` and `cli/artifact-status.mjs` all key on
@@ -526,10 +530,11 @@ function loadBuildStates(dir) {
 // `draft`. The table's `in-progress` hyphen is prose: the hyphen appears nowhere in code and in no
 // file on disk, where the word has always been `in_progress`.
 //
-// NOTHING WRITES `deferred` OR `blocked` YET. The verbs come later — `yad defer` is E37, general
-// `yad skip` is E36, the `debt: true` flag is E41 — and this table is what they will write THROUGH
-// rather than beside. A state no data exercises is an untested state, so `cli/test.mjs` constructs a
-// chain carrying every row of this table and pins each reader against it.
+// WHO WRITES THE RECORDED STATES. `yad skip` writes `skipped` (E35, E36) and `yad defer` writes
+// `deferred` (E37), both THROUGH this table rather than beside it. Nothing in the CLI writes `blocked`:
+// a person does, by hand, and the `yad-run` skill does for a halted Build lane. `yad unblock` clears one
+// (E37). The `debt: true` flag is E41. `cli/test.mjs` still constructs a chain carrying every row of this
+// table and pins each reader against it, because a state the fixtures happen not to use is untested.
 export const STEP_STATES = [
   { id: 'todo', passed: false, authored: false, record: false, meaning: 'not started' },
   { id: 'in_progress', passed: false, authored: false, record: false, meaning: 'being worked on' },
@@ -1095,6 +1100,11 @@ export function gatePredicate({
     };
   }
 
+  // A DEFERRED step gets NO short-circuit here. That is E38's decision, and E37 keeps it on purpose: the
+  // chain walks past a deferred step (`isPassed`), but its review is still owed. A skip's gate will never
+  // be asked again; a deferral's will. So the predicate answers honestly — not passed, and what is still
+  // missing — which is the true report of what the team owes.
+
   const forStep = approvals.filter((a) => a.step === step.id && a.status === 'approved');
   // Revoke-on-change: an approval bound to a stale content hash no longer counts.
   const stale = forStep.filter((a) => isStaleHash(a.artifactHash, accepted));
@@ -1207,14 +1217,21 @@ export function advanceState(state, step) {
     state.currentStep = 'discovery-done';
     return state;
   }
-  // Step over any SKIPPED steps (an optional step marked N/A for this epic — e.g. a skipped
-  // `ui-design`/`ui-design-review` pair). They are pre-marked `done`, so the next runnable step is the
-  // first later step that is not skipped. When the whole tail is skipped, fall through to ready-for-build.
+  // Step over any step SET ASIDE — a skipped or a deferred pair (`isSetAside`). Neither is waiting to be
+  // opened by the gate in front of it: a skip does not apply, and a deferral comes back through
+  // `yad undefer`. Opening one here would write `in_progress` over the deferral and lose its record
+  // (E37). The next runnable step is the first later step not set aside; when the whole tail is set
+  // aside, fall through to ready-for-build.
   let j = i + 1;
-  while (state.steps[j] && stepStatus(state.steps[j]) === 'skipped') j++;
+  while (state.steps[j] && isSetAside(state.steps[j])) j++;
   const next = state.steps[j];
   if (next) {
-    next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
+    // A BLOCKED next step is not opened. A gate passing is not somebody saying the wait is over, and
+    // writing `in_progress` over it kept the record while hiding the block: `yad next` then said to
+    // author the step, and `yad unblock` refused a step that read as in progress (E37). `currentStep`
+    // still moves there, so `yad next` shows the blocker and how to clear it — `markInReview` already
+    // leaves a blocked step alone the same way.
+    if (stepStatus(next) !== 'blocked') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
     state.currentStep = next.id;
   } else {
     state.currentStep = 'ready-for-build';
@@ -1264,36 +1281,50 @@ const requireChain = (state, verb) => {
 // recognises, on which NOTHING is optional, because they dropped the optional steps from the chain
 // rather than marking them skippable. Sending that user to `yad doctor` for a `step:off-route` finding
 // that will never fire is worse than saying nothing — it is a remedy for a fault they do not have.
-const notOptional = (stepId, optional, route) => err(
+// The same three sentences answer `yad defer` (E37), which asks the same route the same question.
+const notOptional = (stepId, optional, route, participle = 'skipped') => err(
   'YAD-STATE-004',
   `step '${stepId}' is not optional on this epic's route`,
   optional.length
-    ? `only these steps may be skipped here: ${optional.join(', ')}`
+    ? `only these steps may be ${participle} here: ${optional.join(', ')}`
     : route
       ? `this epic is on the \`${route}\` route, and no step on it is optional — a short lane leaves the steps it does not need OUT of the chain rather than making them skippable, so there is nothing to mark N/A. If this epic needs '${stepId}', it is on the wrong route: start it again on a route that carries the step`
       : 'this epic is on no lifecycle route this release knows — it records none, and its chain matches none — so nothing on it is optional. Run `yad doctor` and look for `step:off-route`',
 );
 
-// Strip the skip-provenance fields off a step — the inverse of the stamp `skipStep` applies.
-function withoutSkip(step) {
+// Strip the set-aside fields off a step — the inverse of the stamp `setAsideStep` applies: a skip's four
+// legacy fields, and the record either verb writes.
+function withoutSetAside(step) {
   const rest = { ...step };
   delete rest.skipped;
   delete rest.skipReason;
   delete rest.skippedBy;
   delete rest.skippedAt;
-  // And the shape-7 pair. Leaving `record` behind would be worse than untidy: the caller sets
-  // `status` to `todo`, and a `todo` carrying a stale skip reason is a step that claims to be
-  // un-started and explains why it was skipped.
+  // And the shape-7 record. Leaving it behind would be worse than untidy: the caller sets `status` to
+  // `todo`, and a `todo` carrying a stale reason is a step that claims to be un-started and explains
+  // why it was set aside.
   delete rest.record;
   return rest;
 }
 
-// The index of the first step after `index` that is not itself skipped: the step a skip opens. Past
-// the end of the chain when the whole rest of it is skipped. Both verbs below refuse a hole after the
-// pair (`refuseHoleAfter`) before they ask this, so it never has to decide what a null entry means.
-const firstUnskippedAfter = (steps, index) => {
+// SET ASIDE: a step that passed without anybody working on it here, because a person chose that —
+// `skipped` (E35/E36: it does not apply) or `deferred` (E37: it applies, later). The chain walks past
+// both, the gate passes both on a step the route marks optional, and neither verb turns one into the
+// other. `satisfied` is not in this set: an inherited step was worked on, in the parent epic, and
+// nobody here set it aside. `stepStatus`, never the claim: a hand-typed flag on an unfinished step must
+// not be walked past (E38).
+const isSetAside = (step) => {
+  const st = stepStatus(step);
+  return st === 'skipped' || st === 'deferred';
+};
+
+// The index of the first step after `index` that is not itself set aside: the step a skip or a deferral
+// opens. Past the end of the chain when the whole rest of it is set aside. Both verbs below refuse a
+// hole after the pair (`refuseHoleAfter`) before they ask this, so it never has to decide what a null
+// entry means.
+const firstLiveAfter = (steps, index) => {
   let j = index + 1;
-  while (steps[j] && stepStatus(steps[j]) === 'skipped') j++;
+  while (steps[j] && isSetAside(steps[j])) j++;
   return j;
 };
 
@@ -1317,26 +1348,79 @@ const refuseHoleAfter = (steps, index, verb) => {
   }
 };
 
-// PURE. Mark a skippable step (its author step + paired `<id>-review` gate) N/A for this epic: pre-mark
-// both `skipped` with a recorded reason, and — if currentStep is sitting on the pair — advance
-// currentStep past them to the next non-skipped step. Idempotent on an already-skipped step. Refuses once
-// the step was authored, once its review gate has opened, or once work has started on any later step —
-// the step is optional only up to authoring it. Throws on a non-skippable id or a malformed (unpaired)
-// chain. Which step ids qualify is the epic's route (`optionalStepsFor`), and nothing below names one.
-export function skipStep(state, stepId, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
-  const steps = requireChain(state, 'skip a step in');
+// The two ways to set a step aside, and everything that differs between them: the words, the command
+// that puts the step back, what the step claims, and the stamp. Everything else — which steps qualify,
+// when it is too late, what happens to `currentStep` — is ONE rule, in `setAsideStep` / `restoreStep`.
+const SET_ASIDE = {
+  skipped: {
+    verb: 'skip', undo: 'un-skip', undoCommand: 'unskip', noun: 'skip',
+    needsReason: 'a skip needs a reason', reasonHint: 'say why the step does not apply',
+    // What the step CLAIMS, in either spelling — the shape-7 status or the legacy flag beside `done`.
+    claims: (step) => claimsSkipped(step),
+    // `status: 'skipped'` is the step's own state from shape 7 on (E38), and the four legacy fields
+    // stay beside it — rule 3, add before you remove. `skipped: true` is what a 3.x reader keys on and
+    // what `stepStatus` still translates, so both vocabularies describe the same step for this major.
+    stamp: ({ reason, by, at }) => ({
+      skipped: true, skipReason: String(reason).trim(), skippedBy: by, skippedAt: at,
+      status: 'skipped', record: stepRecord({ reason, by, date: at }),
+    }),
+  },
+  deferred: {
+    verb: 'defer', undo: 'un-defer', undoCommand: 'undefer', noun: 'deferral',
+    needsReason: 'a deferral needs a reason', reasonHint: 'say why it waits, and who is waiting for it',
+    // `deferred` has no older spelling, so the status word IS the claim.
+    claims: (step) => stepStatus(step) === 'deferred',
+    // No legacy fields: `deferred` was born in shape 7, so there is no older reader to keep fed. The
+    // record's `by` is who WROTE it, as on every record; who is waiting for the step belongs in the reason.
+    stamp: ({ reason, by, at }) => ({ status: 'deferred', record: stepRecord({ reason, by, date: at }) }),
+  },
+};
+const otherWay = (as) => (as === 'skipped' ? 'deferred' : 'skipped');
+
+// PURE. Set a step aside for this epic: mark its author step and paired `<id>-review` gate `skipped`
+// (`skipStep`) or `deferred` (`deferStep`) with a recorded reason, and — if currentStep is sitting on the
+// pair — advance currentStep past them to the next step not set aside. Idempotent on a step already set
+// aside the same way. Refuses once the step was authored, once its review gate has opened, or once work
+// has started on any later step — the step is optional only up to authoring it. Refuses a step set aside
+// the OTHER way: each has its own record and its own way back, and converting in place would lose one.
+// Throws on a step the route does not mark optional, or a malformed (unpaired) chain. Which step ids
+// qualify is the epic's route (`optionalStepsFor`), and nothing below names one.
+//
+// WHY DEFERRING IS NO WIDER THAN SKIPPING (E37). A deferred step lets the chain continue exactly as a
+// skipped one does, so it needs the same permission from the route. Deferring a required step would carry
+// the chain past its review gate with no approvals on it, which rule 2 forbids however the reason is
+// worded. The gate itself is not waived: `gatePredicate` still reports a deferred step's review as owed.
+function setAsideStep(state, stepId, as, { reason, by = null, at = null, profiles = LIFECYCLE_PROFILES } = {}) {
+  const V = SET_ASIDE[as];
+  const steps = requireChain(state, `${V.verb} a step in`);
   const optional = optionalStepsFor(state, profiles);
-  if (!optional.includes(stepId)) throw notOptional(stepId, optional, epicProfileId(state, profiles));
+  if (!optional.includes(stepId)) throw notOptional(stepId, optional, epicProfileId(state, profiles), as);
   // `s?.id` throughout: a hand-edited chain can hold a null entry, and a crash on one would be the
   // same unhelpful answer `requireChain` exists to replace.
   const ai = steps.findIndex((s) => s?.id === stepId);
-  if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to skip');
+  if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, `nothing to ${V.verb}`);
   const author = steps[ai];
-  // Idempotent BEFORE the reason check: a repeat skip on an already-N/A step is a no-op that keeps the
-  // original reason/actor, so it must not fail merely for lacking a fresh --reason.
-  if (claimsSkipped(author)) return state;
+  // Idempotent BEFORE the reason check: a repeat on a step already set aside this way is a no-op that
+  // keeps the original reason/actor, so it must not fail merely for lacking a fresh --reason.
+  if (V.claims(author)) return state;
+  const O = SET_ASIDE[otherWay(as)];
+  if (O.claims(author)) {
+    throw err('YAD-STATE-004', `${stepId} is already ${otherWay(as)}`,
+      `put it back with \`yad ${O.undoCommand} <epic> ${stepId}\` first, then ${V.verb} it — changing it in place would lose the ${O.noun}'s record`);
+  }
+  // A BLOCKED step is waiting on somebody outside the workflow, and its record says who. Setting it aside
+  // would replace that record with this verb's own, and putting the step back would then delete it — the
+  // blocker would vanish without anybody clearing it. Refuse, and name the verb that does clear it. This
+  // was a hole in `yad skip` from E35 on; `yad unblock` (E37) is what makes the refusal answerable. It
+  // also replaces a wrong answer: a blocked REVIEW gate used to be refused as "its review has already
+  // opened".
+  const blockedStep = [author, steps.find((s) => s?.id === `${stepId}-review`)].find((s) => stepStatus(s) === 'blocked');
+  if (blockedStep) {
+    throw err('YAD-STATE-004', `${blockedStep.id} is blocked — ${blockedStep.record?.reason || 'no reason recorded'}`,
+      `clear the blocker first with \`yad unblock <epic> ${blockedStep.id}\`, then ${V.verb} ${stepId} — setting it aside now would lose the record of who it waits on`);
+  }
   if (!reason || !String(reason).trim()) {
-    throw err('YAD-STATE-004', 'a skip needs a reason', `say why the step does not apply, e.g. \`yad skip <epic> ${stepId} --reason "<why>"\``);
+    throw err('YAD-STATE-004', V.needsReason, `${V.reasonHint}, e.g. \`yad ${V.verb} <epic> ${stepId} --reason "<why>"\``);
   }
   // A skippable step must carry its paired `-review` gate — the change keeps BOTH in the chain. A
   // missing gate is a malformed chain; refuse rather than half-stamp only the author step.
@@ -1344,7 +1428,7 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   if (ri === -1) throw err('YAD-STATE-004', `malformed chain: ${stepId} has no ${stepId}-review gate`, 'restore state.json from git');
   const review = steps[ri];
   if (isAuthored(author)) {
-    throw err('YAD-STATE-004', `${stepId} is already authored`, 'cannot skip a step whose artifact was already written');
+    throw err('YAD-STATE-004', `${stepId} is already authored`, `cannot ${V.verb} a step whose artifact was already written`);
   }
   // An INHERITED author step is not authored here and not skippable either — its artifact belongs to
   // the parent epic. Without this it falls through to the review guard below and is refused for the
@@ -1352,35 +1436,29 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   // never opened in this epic.
   if (claimsInherited(author)) {
     throw err('YAD-STATE-004', `${stepId} is inherited from ${author.inheritedFrom || 'the parent epic'}`,
-      'a step carried by reference is already satisfied upstream — there is nothing here to skip. Re-thread the change if it should be re-authored');
+      `a step carried by reference is already satisfied upstream — there is nothing here to ${V.verb}. Re-thread the change if it should be re-authored`);
   }
-  // Once the review gate has opened (in_review / done), the work is effectively committed — skipping
-  // then would orphan a live review PR. Refuse; the step is optional only up to authoring it.
+  // Once the review gate has opened (in_review / done), the work is effectively committed — setting it
+  // aside then would orphan a live review PR. Refuse; the step is optional only up to authoring it.
   if (stepStatus(review) !== 'todo') {
-    throw err('YAD-STATE-004', `cannot skip ${stepId} — its review has already opened`, `skip ${stepId} before its review begins`);
+    throw err('YAD-STATE-004', `cannot ${V.verb} ${stepId} — its review has already opened`, `${V.verb} ${stepId} before its review begins`);
   }
   // No step past the pair may have started. This used to name `stories`, which was right only because
   // `ui-design` was the one step any route marked optional and `stories` is what follows it. On a route
   // that marks `architecture` optional, the step after the pair is `ui-design`, and a literal `stories`
   // would let the skip through with ui-design already under way (E36).
-  refuseHoleAfter(steps, ri, 'skip');
+  refuseHoleAfter(steps, ri, V.verb);
   const started = steps.slice(ri + 1).find(hasStarted);
   if (started) {
-    throw err('YAD-STATE-004', `cannot skip ${stepId} — ${started.id} is already '${started.status ?? '(no status)'}'`,
-      `skip ${stepId} before ${started.id} begins`);
+    throw err('YAD-STATE-004', `cannot ${V.verb} ${stepId} — ${started.id} is already '${started.status ?? '(no status)'}'`,
+      `${V.verb} ${stepId} before ${started.id} begins`);
   }
-  // `status: 'skipped'` is the step's own state from shape 7 on (E38), and the four legacy fields
-  // stay beside it — rule 3, add before you remove. `skipped: true` is what a 3.x reader keys on and
-  // what `stepStatus` still translates, so both vocabularies describe the same step for this major.
-  const stamp = {
-    skipped: true, skipReason: String(reason).trim(), skippedBy: by, skippedAt: at,
-    status: 'skipped', record: stepRecord({ reason, by, date: at }),
-  };
+  const stamp = V.stamp({ reason, by, at });
   state.steps[ai] = { ...author, ...stamp };
   state.steps[ri] = { ...review, ...stamp };
-  // If currentStep was on the pair we just skipped, move it to the next non-skipped step.
+  // If currentStep was on the pair we just set aside, move it to the next step not set aside.
   if (state.currentStep === stepId || state.currentStep === `${stepId}-review`) {
-    const next = state.steps[firstUnskippedAfter(state.steps, ri)];
+    const next = state.steps[firstLiveAfter(state.steps, ri)];
     if (next) {
       if (stepStatus(next) === 'todo') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
       state.currentStep = next.id;
@@ -1391,59 +1469,117 @@ export function skipStep(state, stepId, { reason, by = null, at = null, profiles
   return state;
 }
 
-// PURE. Reverse a skip: clear the N/A stamp on the pair and restore the chain. Allowed while the step
-// after the pair — the one the skip opened — is at most under way: once it is finished, or anything PAST
-// it has started (on `classic`, once `stories` is done or `stories-review` opens), the chain has built on
-// the skip, and it is too late.
+// PURE. Put a set-aside step back: clear the stamp on the pair and restore the chain (`unskipStep`,
+// `undeferStep`). Allowed while the step after the pair — the one setting it aside opened — is at most
+// under way: once it is finished, or anything PAST it has started (on `classic`, once `stories` is done
+// or `stories-review` opens), the chain has built on the step being absent, and it is too late.
 // If every earlier step has passed, the restored author step becomes the active step again (and the
-// downstream the skip auto-opened is pushed back to `todo` behind it); otherwise it just returns to
-// `todo`. Throws if the step is not skipped or it is too late.
-export function unskipStep(state, stepId) {
-  // NO ROUTE GUARD HERE, and that asymmetry with `skipStep` is deliberate. Skipping needs the route's
-  // permission because it makes a gate pass without approvals. Un-skipping only puts a step BACK in
-  // the chain — it can never let anything through, so refusing it has no safety value and one real
-  // cost: `yad doctor`'s `skip:not-optional` names exactly the epics whose skip the route does not
+// downstream that was auto-opened is pushed back to `todo` behind it); otherwise it just returns to
+// `todo`. Throws if the step is not set aside this way, or it is too late.
+//
+// FOR A DEFERRAL, THE WINDOW IS A LIMIT OF THE MACHINERY, NOT OF THE MEANING (E37). For a skip it is
+// the meaning: stories finished on the assumption that there is no UI were built without one. A
+// deferral promised to come back, so stories finished before the UI are expected. What stops the late
+// resume is that the chain cannot carry it yet — `preconditionsMet` would name the restored step as the
+// blocker of stories already done, and `advanceState` would re-open those stories when the restored
+// review passed. Re-opening a step after the chain has built past it is one piece of machinery, and it
+// ships once, in E41, for a deferral and for debt alike.
+function restoreStep(state, stepId, as) {
+  // NO ROUTE GUARD HERE, and that asymmetry with `setAsideStep` is deliberate. Setting a step aside needs
+  // the route's permission because it makes a gate pass without approvals. Putting it back only returns
+  // a step to the chain — it can never let anything through, so refusing it has no safety value and one
+  // real cost: `yad doctor`'s `skip:not-optional` names exactly the epics whose skip the route does not
   // allow, and its remedy is this command. With the guard, the one command the finding recommends was
   // the one command guaranteed to throw in the state that produced the finding.
-  const steps = requireChain(state, 'un-skip a step in');
+  const V = SET_ASIDE[as];
+  const steps = requireChain(state, `${V.undo} a step in`);
   const ai = steps.findIndex((s) => s?.id === stepId);
-  if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to un-skip');
-  if (!claimsSkipped(steps[ai])) throw err('YAD-STATE-004', `${stepId} is not skipped`, 'nothing to un-skip');
+  if (ai === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, `nothing to ${V.undo}`);
+  if (!V.claims(steps[ai])) {
+    const O = SET_ASIDE[otherWay(as)];
+    throw err('YAD-STATE-004', `${stepId} is not ${as}`,
+      O.claims(steps[ai]) ? `it is ${otherWay(as)} — put it back with \`yad ${O.undoCommand} <epic> ${stepId}\`` : `nothing to ${V.undo}`);
+  }
   const ri = steps.findIndex((s) => s?.id === `${stepId}-review`);
-  // The step after the pair may be under way — the skip itself opened it, and un-skipping pushes it
-  // back — but not FINISHED: a `done` step was authored on the assumption that the skipped step did not
-  // apply (stories written with no UI), and putting that step back would leave the work built without it
-  // standing as complete. Work started on anything BEYOND it means the same. This used to be a literal
+  // The step after the pair may be under way — setting it aside opened it, and putting it back pushes it
+  // back — but not FINISHED: a `done` step was authored while the set-aside step was absent (stories
+  // written with no UI), and putting that step back would leave the work built without it standing as
+  // complete. Work started on anything BEYOND it means the same. This used to be a literal
   // `stories-review` — the same rule read off the one route shape that existed (E36) — and asking only
   // past the step after the pair missed a finished `stories` whose review was then blocked.
   const tail = ri !== -1 ? ri : ai;
-  refuseHoleAfter(steps, tail, 'un-skip');
-  const j = firstUnskippedAfter(steps, tail);
+  refuseHoleAfter(steps, tail, V.undo);
+  const j = firstLiveAfter(steps, tail);
   const after = steps[j];
   const beyond = (stepStatus(after) === 'done' ? after : null) || steps.slice(j + 1).find(hasStarted);
   if (beyond) {
-    throw err('YAD-STATE-004', `cannot un-skip ${stepId} — ${beyond.id} is already '${beyond.status ?? '(no status)'}'`,
-      `un-skip before ${beyond.id} ${beyond === after ? 'is finished' : 'begins'} — the chain has built on the skip since`);
+    throw err('YAD-STATE-004', `cannot ${V.undo} ${stepId} — ${beyond.id} is already '${beyond.status ?? '(no status)'}'`,
+      `${V.undo} before ${beyond.id} ${beyond === after ? 'is finished' : 'begins'} — the chain has built on the ${V.noun} since`);
   }
   const priorAllDone = steps.slice(0, ai).every((s) => isPassed(s));
-  steps[ai] = { ...withoutSkip(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };
-  if (ri !== -1) steps[ri] = { ...withoutSkip(steps[ri]), status: 'todo' };
+  steps[ai] = { ...withoutSetAside(steps[ai]), status: priorAllDone ? 'in_progress' : 'todo' };
+  if (ri !== -1) steps[ri] = { ...withoutSetAside(steps[ri]), status: 'todo' };
   if (priorAllDone) {
-    // The restored author step is the active step again. Push the downstream the skip auto-opened
-    // back to `todo` (it must wait behind the now-live step), whether it was opened as an author step
+    // The restored author step is the active step again. Push the downstream that was auto-opened back
+    // to `todo` (it must wait behind the now-live step), whether it was opened as an author step
     // (`in_progress`) or a review gate (`in_review`).
     const afterState = stepStatus(after);
     if (afterState === 'in_progress' || afterState === 'in_review') after.status = 'todo';
     // Re-point currentStep here — EXCEPT when the epic EARNED `ready-for-build`: its `stories-review`
-    // passed a review — `done` here, or `satisfied`, reviewed in the parent epic — and sits before this step. A step restored after that gate runs
-    // beside Build the way `test-cases` does, and must not pull the epic out of Build (`markInReview`
-    // keeps the same rule; `advanceState` names the same gate). Anywhere else `ready-for-build` was
-    // reached by skipping, and restoring the step takes the claim back with it: on a chore lane whose
-    // stories pair was skipped by hand, keeping it would leave "Build can run" over unapproved stories.
+    // passed a review — `done` here, or `satisfied`, reviewed in the parent epic — and sits before this
+    // step. A step restored after that gate runs beside Build the way `test-cases` does, and must not
+    // pull the epic out of Build (`markInReview` keeps the same rule; `advanceState` names the same
+    // gate). Anywhere else `ready-for-build` was reached by setting steps aside, and restoring the step
+    // takes the claim back with it: on a chore lane whose stories pair was skipped by hand, keeping it
+    // would leave "Build can run" over unapproved stories.
     const gate = steps.findIndex((s) => s?.id === 'stories-review');
     const earnedBuild = state.currentStep === 'ready-for-build' && gate !== -1 && gate < ai && ['done', 'satisfied'].includes(stepStatus(steps[gate]));
     if (!earnedBuild) state.currentStep = stepId;
   }
+  return state;
+}
+
+// The four verbs. `yad skip` / `yad unskip` (E35, E36) say a step does not apply to this epic;
+// `yad defer` / `yad undefer` (E37) say it does, later.
+export function skipStep(state, stepId, opts) { return setAsideStep(state, stepId, 'skipped', opts); }
+export function unskipStep(state, stepId) { return restoreStep(state, stepId, 'skipped'); }
+export function deferStep(state, stepId, opts) { return setAsideStep(state, stepId, 'deferred', opts); }
+export function undeferStep(state, stepId) { return restoreStep(state, stepId, 'deferred'); }
+
+// PURE. Clear a recorded blocker once the wait is over (`yad unblock`, E37 — the E38 row gave this verb
+// to E37). A `blocked` step is waiting on somebody outside the workflow, so nothing in the chain ever
+// clears it; a person says the wait is over.
+//
+// STATUS AND RECORD GO TOGETHER. Deleting only the record would turn the step silently back into a
+// `todo` (a `blocked` with no record IS the older spelling of `todo`), and moving only the status would
+// leave a record explaining a wait that is over. So one write does both: an author step whose earlier
+// steps have all passed goes back to `in_progress`, and anything else to `todo` — a review gate included,
+// because opening a review is `yad gate open`'s job, not this verb's. `currentStep` is not touched: the
+// chain already points wherever it pointed while the step was blocked.
+//
+// `state.json` only. A halted Build lane is `blocked` in `build-state/<story>.json`, and that file is
+// the `yad-run` skill's: a write here would be undone by its next run (the E38 row).
+export function unblockStep(state, stepId) {
+  const steps = requireChain(state, 'unblock a step in');
+  const i = steps.findIndex((s) => s?.id === stepId);
+  if (i === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to unblock');
+  const step = steps[i];
+  const st = stepStatus(step);
+  if (st !== 'blocked') {
+    // The one case worth its own sentence: `blocked` with no record is the pre-shape-7 word for "not
+    // started". Nobody is being waited on, so there is no blocker to clear — and saying "not blocked"
+    // about a step whose file says `blocked` would read as a bug.
+    if (step.status === 'blocked') {
+      throw err('YAD-STATE-004', `${stepId} has no blocker recorded`,
+        'a `blocked` step with no `record` is the older spelling of `todo` — it is not waiting on anyone, so there is nothing to clear. `yad migrate --apply` rewrites the word to `todo` (on a verified project, the next gate write does)');
+    }
+    throw err('YAD-STATE-004', `${stepId} is not blocked`, `it is '${st ?? step.status ?? '(no status)'}' — nothing to unblock`);
+  }
+  const cleared = { ...step };
+  delete cleared.record;
+  const earlierPassed = steps.slice(0, i).every((s) => isPassed(s));
+  cleared.status = earlierPassed && step.type === 'author' ? 'in_progress' : 'todo';
+  steps[i] = cleared;
   return state;
 }
 
@@ -2427,7 +2563,9 @@ export function preconditionsMet(state, stepId) {
         ? `${stepId} is not on this epic's route${route ? ` (\`${route}\`)` : ''} — the step exists, this chain does not carry it`
         : `unknown step '${stepId}'` };
   }
-  if (isPassed(state.steps[i])) return { ok: false, blockedBy: null, reason: `${stepId} is already done` };
+  // Name the state that finished it. `yad next --check ui-design` answering "already done" for a deferred
+  // step would tell somebody the UI exists (E37).
+  if (isPassed(state.steps[i])) return { ok: false, blockedBy: null, reason: `${stepId} is already ${stepStatus(state.steps[i])}` };
   const blocker = state.steps.slice(0, i).find((s) => !isPassed(s));
   if (blocker) return { ok: false, blockedBy: blocker.id, reason: `${blocker.id} has not passed yet` };
   return { ok: true, blockedBy: null, reason: 'ready' };

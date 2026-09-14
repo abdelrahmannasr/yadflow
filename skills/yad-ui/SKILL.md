@@ -45,16 +45,22 @@ This passes when `ui-design` is the next runnable step per the state sequence �
 **This step is OPTIONAL.** If the epic has no user-facing surface (a backend/API service, a data
 pipeline, infra work), it does not need a UI design. Two signals to watch for:
 
-- **Already skipped:** if `ui-design.status` is `skipped` in `state.json` — or, in a file from before
-  shape 7, `done` with `skipped: true` beside it (the `--check` above reports `ui-design is already
-  done` for both) — the step was marked N/A. **STOP**, there is nothing to author; point the user at
-  `yad next EP-<slug>` (the next step is `stories`).
+- **Already skipped or deferred:** if `ui-design.status` is `skipped` in `state.json` — or, in a file
+  from before shape 7, `done` with `skipped: true` beside it — the step was marked N/A. If it is
+  `deferred`, the team set it aside to come back to later. Either way the `--check` above refuses it
+  (`ui-design is already skipped`, or `already deferred`). **STOP**, there is nothing to author now;
+  point the user at `yad next EP-<slug>` (the next step is `stories`). To pick a deferred UI back up,
+  run `yad undefer EP-<slug> ui-design` first.
 - **Should be skipped:** if you reach this step and the epic clearly produces no screens, do **not**
   invent a hollow UI artifact. Offer to mark it N/A instead:
   `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That marks both the
   `ui-design` and `ui-design-review` steps `skipped` (recorded reason + actor), short-circuits the review
   gate, and advances to `stories`. It is reversible with `yad unskip EP-<slug> ui-design` until the
   stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional".
+- **Will have screens, just not yet:** if the epic does need a UI but the team wants to design it later,
+  offer `yad defer EP-<slug> ui-design --reason "<why, and who is waiting for it>"` instead of a skip.
+  It passes the step for now and keeps it visibly owed. It can be picked back up with
+  `yad undefer EP-<slug> ui-design` until the stories are finished.
 
 ### Step 1b — Open the authoring branch
 Open the UI authoring branch `ui-design/EP-<slug>` per the shared procedure

@@ -287,7 +287,7 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `step:kind` | A step is on the wrong side of the author / review line. An author step is run by a skill and a review step by `yad gate`, so on the wrong side nothing drives it. |
 | `step:orphan-gate` | A review gate is in the chain but the step it reviews is not. Nothing then tells anyone to write the artifact being reviewed, and for a folder artifact the gate has nothing to bind an approval to. |
 | `step:off-route` | The chain matches no lifecycle profile. See the section above: leaving a step out is fine, a step no route has or two in the wrong order is not. |
-| `skip:not-optional` | A step is marked N/A but this epic's route does not mark it optional. Nothing breaks today: the step is already done, so a gate sync reports that the rule no longer holds and changes nothing. What is lost is the justification — the gate stops treating the skip as the reason the step passed. Silent when `profile:disagree` already names the epic, because correcting that clears this too. |
+| `skip:not-optional` | A step is marked N/A or deferred, but this epic's route does not mark it optional. Nothing breaks today: the step is already done, so a gate sync reports that the rule no longer holds and changes nothing. What is lost is the justification — the gate stops treating the skip as the reason the step passed. A `deferred` status on a required step is reported the same way, and `yad undefer` puts it back. Silent when `profile:disagree` already names the epic, because correcting that clears this too. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.
 
@@ -385,16 +385,16 @@ chain as broken.
 
 **When a skip is too late, or an un-skip is.** Neither command names a step. Both look at the steps
 that come **after** the skipped pair. "The step after the pair" means the first later step that is not
-itself skipped — the step the skip opens.
+itself skipped or deferred — the step the skip opens.
 
 | Command | Refused once |
 |---|---|
-| `yad skip` | the step was authored, its review opened, or any later step has started |
+| `yad skip` | the step was authored, its review opened, any later step has started, or the step or its review gate is `blocked` (clear it with `yad unblock` first) |
 | `yad unskip` | the step after the pair is finished (`done`), or any step **past** it has started |
 
 "Started" means work happened on the step **in this epic**: it is open (`in_progress`, `in_review`) or
-`done`. A step that is `skipped`, `satisfied` (carried from a parent epic), `deferred` or `blocked` has
-had no work done on it here, so it never makes either command too late. A status word this release does
+`done`. A later step that is `skipped`, `satisfied` (carried from a parent epic), `deferred` or `blocked`
+has had no work done on it here, so it never makes either command too late. A status word this release does
 not know counts as started, and a gap in the chain (an entry that is not a step) is refused as a broken
 chain.
 
@@ -406,6 +406,29 @@ rules would read `ui-design` and its review instead.
 stories review really passed (here, or in the parent epic it inherits from), a step put back after that review runs beside Build, the way `test-cases`
 does, and the epic stays in Build. When the epic only reached `ready-for-build` by skipping — a `chore`
 epic whose stories pair was skipped by hand — un-skipping moves it back to the restored step.
+
+**Deferring a step: `yad defer`.** A skip says a step does not apply. A deferral says it does, just
+not yet: `yad defer <epic> <step> --reason "<why>"` marks the step and its review gate `deferred`, with
+the reason, who and when recorded. Put who is waiting for it in the reason. `yad undefer <epic> <step>`
+puts it back. Everything else works the way a skip does:
+
+- only a step the epic's route marks optional can be deferred, because the chain carries on past a
+  deferred step before anyone has approved its review, and a required review may never be left behind;
+- the same refusals and the same window apply, so `yad undefer` works until the step that follows is
+  finished or work past it starts;
+- the chain walks past a deferred step, `yad gate open` refuses to open a review on one, and the
+  artifact's `status:` line is left alone rather than marked approved.
+
+The review is not waived, only postponed: `yad gate status` shows a deferred step as "deferred (still
+owed)", the gate check still reports the approvals it is missing, and `yad gate sync` on a review PR
+opened before the deferral says the review is still owed rather than "already done".
+
+A step cannot be both: `yad defer` refuses a skipped step and `yad skip` a deferred one, and each names
+the command that puts the step back first.
+
+**Picking a deferred step up after later work has finished is not possible yet.** Stories finished
+while the UI waited are expected, but the chain cannot yet re-open a step behind finished work without
+re-opening that work too. That arrives with debt payback, which needs the same thing.
 
 **The recorded route is the answer, even when the chain disagrees with it.** An epic records its route
 in `state.json`, and that is what the engine reads. Working it out from the steps instead would guess,
@@ -533,7 +556,7 @@ no copy in any ledger file, so no file shape changed and there is nothing to mig
 | `in_review` | Its review gate is open | no |
 | `done` | Completed here | yes |
 | `skipped` | You chose not to do it — `yad skip` writes this | yes |
-| `deferred` | You will do it, later | yes |
+| `deferred` | You will do it, later — `yad defer` writes this | yes |
 | `satisfied` | Done elsewhere — a change-epic inheriting its parent's artifact | yes |
 | `blocked` | Cannot proceed, and **not by your choice** | no |
 
@@ -547,9 +570,20 @@ step", which is now `todo`. The two are told apart by the record and by nothing 
 record is the old word and reads as `todo`; `blocked` with a record is a real blocker. `yad migrate`
 rewrites the old ones. See [shape 7](migrations/shape-7.md).
 
-Nothing writes `deferred` or `blocked` for you yet. Set the status and add a record by hand and every
-command understands it — `yad next` names what you are waiting on instead of telling you to author the
-artifact, and no gate is waived by it.
+`yad skip` and `yad defer` write their states for you. Nothing writes `blocked` for you: set the status
+and add a record by hand and every command understands it — `yad next` prints the record instead of
+telling you to author the artifact, and no gate is waived by it. A record's `by` is whoever wrote it.
+
+**When the wait is over: `yad unblock <epic> <step>`.** It moves the step off `blocked` and removes
+its record in the same write. An author step whose earlier steps have all passed goes back to
+`in_progress`; anything else goes to `todo`, including a review gate, whose review you then open as
+usual. It refuses a step that is not blocked, and says so separately for a `blocked` with no record,
+which is the older word for `todo` and has nothing to clear. It changes only `state.json`: a halted
+Build lane lives in `build-state/<story>.json`, which `yad-run` owns. A review gate passing does not clear
+a blocker on the step after it either: the chain moves there, and `yad next` shows the block. `yad skip`
+and `yad defer` refuse a
+blocked step for the same reason: setting it aside would lose the record of who it waits on, so clear
+the blocker first.
 
 ## File shape: `schemaVersion`
 
@@ -669,7 +703,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 | `YAD-STATE-001` | a ledger/config JSON file exists but does not parse | fix the file or restore from git — never delete a ledger blindly |
 | `YAD-STATE-002` | a ledger/config file parses but has the wrong shape | fix the file or restore from git (the message names the field) |
 | `YAD-STATE-003` | a registered repo path is missing or not a git repo | fix the path in `.sdlc/repos.json` or re-connect the repo. A repo *outside* the project root (a sibling, `../backend`) that is simply absent from this checkout is a **warn**, not this failure |
-| `YAD-STATE-004` | an epic step cannot be skipped / un-skipped in its current state | the step must be one the epic's own [lifecycle route](#lifecycle-profiles-the-route-an-epic-takes) marks optional — `ui-design` on `classic` and `analysis-first` — and needs a `--reason`; it can be skipped only up to authoring it (before its review opens / before the step after it starts — `stories`, on `classic`); `yad unskip` works until a step past that one starts (the stories review, on `classic`). A chain on **no** route has nothing optional: fix `step:off-route` first |
+| `YAD-STATE-004` | an epic step cannot be skipped, deferred, put back, or unblocked in its current state | the step must be one the epic's own [lifecycle route](#lifecycle-profiles-the-route-an-epic-takes) marks optional — `ui-design` on `classic` and `analysis-first` — and needs a `--reason`; it can be skipped only up to authoring it (before its review opens / before the step after it starts — `stories`, on `classic`); `yad unskip` works until a step past that one starts (the stories review, on `classic`). `yad defer` and `yad undefer` follow exactly the same rules, and neither will change a step the other one set aside. A step that is `blocked` must be cleared with `yad unblock` before it can be skipped or deferred, and `yad unblock` refuses a step that is not blocked. A chain on **no** route has nothing optional: fix `step:off-route` first |
 | `YAD-STATE-005` | an authoring step is stranded behind its completed review gate | a pre-3.11 `gate sync` could advance a review step while leaving its author step `in_progress`, silently blocking every later step (and the parallel `test-cases` track). Run `yad gate repair <epic>` |
 | `YAD-STATE-006` | a Build ledger (`build-log`/`trust-log`) is locked by another yad process writing it | every read-modify-write on these ledgers (`--retro-ship`, `yad review reconcile`, `yad tidy up`) takes an exclusive lock, so two runs can never interleave and lose an entry. Wait for the other command and re-run; a lock left by a killed process is reclaimed automatically after 30s, or delete the `.lock` directory the message names |
 | `YAD-CFG-001` | `hub.json` names an unknown platform | expected `github`, `gitlab`, or `null` — fix it or re-run `yad setup` |

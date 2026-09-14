@@ -2432,7 +2432,9 @@ test('runNext on a blocked step names the blocker instead of a skill, in prose a
 
   const s = await grab(() => runNext(T, { epic: 'EP-x' }));
   assert.match(s, /waiting on the payments vendor/, 'the reason is what a person needs to read');
-  assert.match(s, /waiting on @al since 2026-08-01/, 'and the line names who, from the record');
+  assert.match(s, /recorded by @al on 2026-08-01/, 'and the line says who recorded it, and when');
+  assert.match(s, /yad unblock EP-x architecture/, 'and how to clear it once the wait is over');
+  assert.doesNotMatch(s, /waiting on @al/, '`by` is who wrote the record, not who we are waiting on');
   assert.doesNotMatch(s, /invoke .*yad-architecture/, 'it must not tell anyone to author the artifact');
 
   const j = await nextJSON(T, { epic: 'EP-x' });
@@ -2447,7 +2449,7 @@ test('runNext on a blocked step names the blocker instead of a skill, in prose a
   seedEpic(T, 'EP-y', anon);
   const s2 = await grab(() => runNext(T, { epic: 'EP-y' }));
   assert.match(s2, /the vendor contract is unsigned/);
-  assert.match(s2, /waiting on something outside this workflow/);
+  assert.match(s2, /blocked — clear it with yad unblock EP-y architecture once resolved/, 'nobody named, so no "recorded by"');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5146,7 +5148,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, unblockStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 // issue #163. Sorting is only a fix if the order is TOTAL: `Array#sort` is stable, so records that tie
@@ -5533,9 +5535,9 @@ test('which steps are optional comes from the epic\'s own route, not from the en
 // ---------------------------------------------------------------------------------------------
 // E38 — the step-state model. Every state, pinned.
 //
-// NOTHING WRITES `deferred` OR `blocked` YET (their verbs are E37 and E36), and a rule no data
-// exercises is a rule nobody has tested. So these construct a chain carrying every row of
-// STEP_STATES plus both legacy encodings, and pin each reader against it by hand.
+// `yad defer` writes `deferred` (E37), but nothing in the CLI writes `blocked`, and a rule the
+// fixtures happen not to exercise is a rule nobody has tested. So these construct a chain carrying
+// every row of STEP_STATES plus both legacy encodings, and pin each reader against it by hand.
 // ---------------------------------------------------------------------------------------------
 const { STEP_STATES, stepStatus, stepStateDef, claimsSkipped, claimsInherited, isStepRecord, RECORDED_STEP_STATES, stampStepStates, seedState } = await import('./epic-state.mjs');
 
@@ -5970,6 +5972,184 @@ test('un-skipping a pair at the END of the chain never pulls an epic out of Buil
   assert.equal(change.currentStep, 'ready-for-build', 'an inherited stories review is a reviewed one');
 });
 
+test('deferStep: marks an optional pair `deferred` with a record and no legacy fields, under a skip\'s permission (E37)', () => {
+  const reason = 'screens come with the redesign; @design is waiting on it';
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(state, 'ui-design', { reason, by: '@me', at: '2026-09-14' });
+  for (const id of ['ui-design', 'ui-design-review']) {
+    const s = byId(state, id);
+    assert.equal(s.status, 'deferred', id);
+    assert.deepEqual(s.record, { reason, by: '@me', date: '2026-09-14' }, id);
+    assert.equal(s.skipped, undefined, 'a deferral writes no skip fields: `deferred` has no older spelling to feed');
+  }
+  assert.equal(state.currentStep, 'stories');
+  assert.equal(byId(state, 'stories').status, 'in_progress');
+  // Idempotent, keeping the first record; a fresh deferral needs a reason.
+  deferStep(state, 'ui-design', {});
+  assert.equal(byId(state, 'ui-design').record.by, '@me');
+  assert.throws(() => deferStep(uiChain('ui-design', { ui: 'in_progress' }), 'ui-design', { reason: ' ' }), /a deferral needs a reason/);
+  // The chain continues past a deferred step with no approvals on its review, so only a step the route
+  // marks optional may be deferred.
+  assert.throws(() => deferStep(uiChain('architecture'), 'architecture', { reason: 'later' }),
+    (e) => /not optional/.test(e.message) && /may be deferred here: ui-design/.test(e.hint));
+  // …and the windows are the skip's.
+  const late = uiChain('stories', { ui: 'in_progress', stories: 'in_progress' });
+  assert.throws(() => deferStep(late, 'ui-design', { reason: 'later' }), /cannot defer ui-design — stories is already 'in_progress'/);
+});
+
+test('advanceState walks past a deferred pair, and leaves the deferral and its record alone (E37)', () => {
+  const state = uiChain('architecture-review');
+  deferStep(state, 'ui-design', { reason: 'later' });
+  assert.equal(state.currentStep, 'architecture-review', 'deferring a step ahead of currentStep leaves it put');
+  // The gate in front of the pair passes. Before E37 the walk stepped over `skipped` only, so it landed
+  // on `ui-design` and wrote `in_progress` over the deferral.
+  advanceState(state, byId(state, 'architecture-review'));
+  assert.equal(state.currentStep, 'stories');
+  assert.equal(byId(state, 'ui-design').status, 'deferred');
+  assert.equal(byId(state, 'ui-design').record.reason, 'later');
+  assert.equal(byId(state, 'ui-design-review').status, 'deferred');
+  assert.equal(byId(state, 'stories').status, 'in_progress');
+});
+
+test('undeferStep puts the pair back under the un-skip window, and neither verb converts the other (E37)', () => {
+  const state = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(state, 'ui-design', { reason: 'later' });
+  undeferStep(state, 'ui-design');
+  assert.equal(byId(state, 'ui-design').status, 'in_progress');
+  assert.equal(byId(state, 'ui-design').record, undefined);
+  assert.equal(byId(state, 'ui-design-review').status, 'todo');
+  assert.equal(byId(state, 'stories').status, 'todo');
+  assert.equal(state.currentStep, 'ui-design');
+
+  // Stories finished while the UI waited: too late for now. For a deferral that is the machinery, not
+  // the meaning — re-opening a step behind finished work is E41's.
+  const built = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(built, 'ui-design', { reason: 'later' });
+  byId(built, 'stories').status = 'done';
+  assert.throws(() => undeferStep(built, 'ui-design'),
+    (e) => /stories is already 'done'/.test(e.message) && /the chain has built on the deferral since/.test(e.hint));
+
+  // Each way of setting a step aside has its own record and its own way back.
+  const skipped = uiChain('ui-design', { ui: 'in_progress' });
+  skipStep(skipped, 'ui-design', { reason: 'no UI' });
+  assert.throws(() => deferStep(skipped, 'ui-design', { reason: 'later' }),
+    (e) => /ui-design is already skipped/.test(e.message) && /yad unskip <epic> ui-design/.test(e.hint));
+  assert.throws(() => undeferStep(skipped, 'ui-design'),
+    (e) => /not deferred/.test(e.message) && /yad unskip <epic> ui-design/.test(e.hint));
+  assert.equal(byId(skipped, 'ui-design').status, 'skipped', 'refused, and unchanged');
+  const deferred = uiChain('ui-design', { ui: 'in_progress' });
+  deferStep(deferred, 'ui-design', { reason: 'later' });
+  assert.throws(() => skipStep(deferred, 'ui-design', { reason: 'no UI' }),
+    (e) => /ui-design is already deferred/.test(e.message) && /yad undefer <epic> ui-design/.test(e.hint));
+  assert.throws(() => unskipStep(deferred, 'ui-design'),
+    (e) => /not skipped/.test(e.message) && /yad undefer <epic> ui-design/.test(e.hint));
+  assert.equal(byId(deferred, 'ui-design').status, 'deferred', 'refused, and unchanged');
+});
+
+test('the shared walk steps over a deferred pair when a skip, un-skip or un-defer moves currentStep (E37)', () => {
+  // Every other defer test uses a chain with ONE optional step, where the walk inside the skip/defer core
+  // never meets a second set-aside pair — so reverting it to "skipped only" would fail nothing. Two
+  // optional steps on one route make the difference visible.
+  const ROUTES = [{ id: 'wide', level: 'feature', steps: ['epic', 'epic-review',
+    { id: 'architecture', optional: true }, { id: 'architecture-review', optional: true },
+    { id: 'ui-design', optional: true }, { id: 'ui-design-review', optional: true },
+    'stories', 'stories-review'] }];
+  const ids = ['epic', 'epic-review', 'architecture', 'architecture-review', 'ui-design', 'ui-design-review', 'stories', 'stories-review'];
+  const state = { epicId: 'EP-x', profile: 'wide', currentStep: 'architecture',
+    steps: ids.map((id, i) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`,
+      status: i < 2 ? 'done' : id === 'architecture' ? 'in_progress' : 'todo' })) };
+  const opts = { reason: 'later', profiles: ROUTES };
+
+  deferStep(state, 'ui-design', opts);
+  assert.equal(state.currentStep, 'architecture', 'deferring a step ahead of currentStep leaves it put');
+  skipStep(state, 'architecture', opts);
+  assert.equal(state.currentStep, 'stories', 'the skip walks over the deferred pair, not onto it');
+  assert.equal(byId(state, 'stories').status, 'in_progress');
+  assert.equal(byId(state, 'ui-design').status, 'deferred');
+  unskipStep(state, 'architecture');
+  assert.equal(state.currentStep, 'architecture');
+  assert.equal(byId(state, 'stories').status, 'todo', 'the step the skip opened, found past the deferred pair, is pushed back');
+  assert.equal(byId(state, 'ui-design').status, 'deferred');
+  undeferStep(state, 'ui-design');
+  assert.equal(state.currentStep, 'architecture', 'un-deferring behind an unfinished step leaves currentStep where it is');
+  assert.equal(byId(state, 'ui-design').status, 'todo');
+  assert.equal(byId(state, 'ui-design-review').status, 'todo');
+});
+
+test('unblockStep clears a real blocker: the status and the record together, never one without the other (E37)', () => {
+  const rec = { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' };
+  const S = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status, ...extra });
+  const chain = (currentStep, arch, archReview) => ({ epicId: 'EP-x', currentStep, steps: [
+    S('epic', 'done'), S('epic-review', 'done'), S('architecture', arch, arch === 'blocked' ? { record: { ...rec } } : {}),
+    S('architecture-review', archReview, archReview === 'blocked' ? { record: { ...rec } } : {}),
+  ] });
+
+  // An author step whose earlier steps have all passed goes back to being worked on.
+  const a = unblockStep(chain('architecture', 'blocked', 'todo'), 'architecture');
+  assert.equal(byId(a, 'architecture').status, 'in_progress');
+  assert.equal(byId(a, 'architecture').record, undefined, 'the record goes with the wait it explained');
+  assert.equal(a.currentStep, 'architecture', 'currentStep is not this verb\'s to move');
+  assert.equal(nextAction({ state: a, hubPrs: [] }).kind, 'author');
+
+  // A blocked review gate goes to `todo`: opening the review is `yad gate open`'s job.
+  const g = unblockStep(chain('architecture-review', 'done', 'blocked'), 'architecture-review');
+  assert.equal(byId(g, 'architecture-review').status, 'todo');
+  assert.equal(byId(g, 'architecture-review').record, undefined);
+  assert.equal(nextAction({ state: g, hubPrs: [] }).kind, 'review-open');
+
+  // A blocker the chain has not reached yet stays `todo`: nobody can work on it until the steps before it pass.
+  const early = { epicId: 'EP-x', currentStep: 'epic', steps: [S('epic', 'in_progress'), S('epic-review', 'todo'), S('architecture', 'blocked', { record: { ...rec } })] };
+  assert.equal(byId(unblockStep(early, 'architecture'), 'architecture').status, 'todo');
+
+  // `blocked` with NO record is the pre-shape-7 word for `todo`: nothing recorded, nothing to clear.
+  const legacy = chain('architecture', 'todo', 'todo');
+  byId(legacy, 'architecture').status = 'blocked';
+  assert.throws(() => unblockStep(legacy, 'architecture'),
+    (e) => e.code === 'YAD-STATE-004' && /has no blocker recorded/.test(e.message) && /older spelling of `todo`/.test(e.hint));
+  assert.throws(() => unblockStep(chain('architecture', 'in_progress', 'todo'), 'architecture'),
+    (e) => /architecture is not blocked/.test(e.message) && /'in_progress'/.test(e.hint));
+  assert.throws(() => unblockStep(chain('architecture', 'blocked', 'todo'), 'nope'), /not in this epic's chain/);
+  assert.throws(() => unblockStep({ steps: 'nope' }, 'architecture'), /no step chain/);
+});
+
+test('a gate passing does not open a blocked step after it — the blocker stays, and yad unblock clears it (E37)', () => {
+  const rec = { reason: 'the design tool licence expired', by: '@al', date: '2026-09-01' };
+  const state = uiChain('architecture-review', { ui: 'blocked' });
+  byId(state, 'ui-design').record = { ...rec };
+  advanceState(state, byId(state, 'architecture-review'));
+  assert.equal(state.currentStep, 'ui-design', 'the chain still moves to the step');
+  assert.equal(byId(state, 'ui-design').status, 'blocked', 'a gate passing is not somebody saying the wait is over');
+  assert.deepEqual(byId(state, 'ui-design').record, rec);
+  assert.equal(nextAction({ state, hubPrs: [] }).kind, 'blocked', '`yad next` shows the blocker, not "author the UI"');
+  unblockStep(state, 'ui-design');
+  assert.equal(byId(state, 'ui-design').status, 'in_progress', 'and once cleared, the step is the one being worked on');
+  // The older spelling — `blocked` with NO record — is `todo`, so the gate still opens it as before.
+  const legacy = uiChain('architecture-review');
+  advanceState(legacy, byId(legacy, 'architecture-review'));
+  assert.equal(byId(legacy, 'ui-design').status, 'in_progress');
+});
+
+test('skip and defer refuse a blocked step: setting it aside would lose the record of who it waits on (E37)', () => {
+  const rec = { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' };
+  // The author step blocked…
+  const held = uiChain('ui-design', { ui: 'blocked' });
+  byId(held, 'ui-design').record = { ...rec };
+  for (const verb of [skipStep, deferStep]) {
+    assert.throws(() => verb(held, 'ui-design', { reason: 'no UI' }),
+      (e) => e.code === 'YAD-STATE-004' && /ui-design is blocked — waiting on the payments vendor/.test(e.message) && /yad unblock <epic> ui-design/.test(e.hint));
+  }
+  assert.equal(byId(held, 'ui-design').status, 'blocked', 'refused, and unchanged');
+  assert.deepEqual(byId(held, 'ui-design').record, rec, 'the record naming the blocker survives');
+  // …or its review gate, which used to be refused for the wrong reason ("its review has already opened").
+  const gateHeld = uiChain('ui-design', { ui: 'in_progress', uiReview: 'blocked' });
+  byId(gateHeld, 'ui-design-review').record = { ...rec };
+  assert.throws(() => deferStep(gateHeld, 'ui-design', { reason: 'later' }),
+    (e) => /ui-design-review is blocked/.test(e.message) && /yad unblock <epic> ui-design-review/.test(e.hint));
+  // Once the blocker is cleared the step can be set aside as usual.
+  unblockStep(held, 'ui-design');
+  assert.equal(skipStep(held, 'ui-design', { reason: 'no UI' }).steps.find((s) => s.id === 'ui-design').status, 'skipped');
+});
+
 test('skip / un-skip: only work done in this chain makes them too late — not an inherited, blocked or deferred step', () => {
   const r = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status, ...extra });
   const rec = { reason: 'waiting on the vendor', by: '@ops', date: '2026-09-14' };
@@ -6124,6 +6304,73 @@ test('skipStep / unskipStep refuse a step this epic\'s route does not mark optio
   assert.throws(() => skipStep({ ...real, steps: chain('long').steps }, 'stories', { reason: 'x' }), /not optional/);
 });
 
+test('gate sync on a deferred step says its review is still owed — not "already done" — and moves nothing (E37)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e37-gate-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [{ login: 'al', name: 'alice', role: 'owner' }] }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    const ep = path.join(T, 'epics/EP-x');
+    fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(ep, 'ui-design.md'), '# ui\n');
+    const rec = { reason: 'screens come with the redesign', by: '@al', date: '2026-09-14' };
+    fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({
+      epicId: 'EP-x', profile: 'classic', currentStep: 'stories',
+      steps: [
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+        { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'deferred', record: rec, risk_tags: [] },
+        { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'deferred', record: rec, risk_tags: [] },
+        { id: 'stories', type: 'author', artifact: 'stories/', status: 'in_progress', risk_tags: [] },
+      ],
+    }));
+    // A review PR opened BEFORE the step was deferred — the one way a deferred step still has one, since
+    // `yad gate open` now refuses it.
+    fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), JSON.stringify([
+      { step: 'ui-design-review', artifact: 'ui-design.md', platform: 'github', number: 7, url: 'http://x/7', branch: 'review/EP-x/ui-design', lastSyncedAt: null },
+    ]));
+    const pr = { ok: true, state: 'OPEN', merged: false, headOid: 'abc', reviews: [], threads: [] };
+    const out = await grab(() => gateSync(T, { epic: 'EP-x', today: '2026-06-09', reader: () => pr }));
+    assert.match(out, /ui-design-review is deferred — approvals re-synced, chain not re-advanced; its review is still owed/);
+    assert.doesNotMatch(out, /already done/, 'a deferral is not a pass');
+    assert.doesNotMatch(out, /the rule no longer holds/);
+    const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
+    const gate = after.steps.find((x) => x.id === 'ui-design-review');
+    assert.equal(gate.status, 'deferred');
+    assert.deepEqual(gate.record, rec, 'the deferral and its record survive a sync');
+    assert.equal(after.currentStep, 'stories');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate status prints a deferred step as still owed (E37)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e37-status-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', default_branch: 'main', roster: [{ login: 'al', name: 'alice', role: 'owner' }] }));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    const ep = path.join(T, 'epics/EP-x');
+    fs.mkdirSync(path.join(ep, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(ep, 'ui-design.md'), '# ui\n');
+    const rec = { reason: 'later', by: null, date: null };
+    fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-x', profile: 'classic', currentStep: 'stories', steps: [
+      { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      { id: 'ui-design', type: 'author', artifact: 'ui-design.md', status: 'deferred', record: rec, risk_tags: [] },
+      { id: 'ui-design-review', type: 'review+approve', artifact: 'ui-design.md', status: 'deferred', record: rec, risk_tags: [] },
+      { id: 'stories', type: 'author', artifact: 'stories/', status: 'in_progress', risk_tags: [] },
+    ] }));
+    const lines = [];
+    const orig = console.log;
+    console.log = (s = '') => lines.push(String(s));
+    try { await gateStatus(T, { epic: 'EP-x' }); } finally { console.log = orig; }
+    const line = lines.find((l) => l.includes('ui-design-review'));
+    assert.ok(line, `no ui-design-review line in:\n${lines.join('\n')}`);
+    assert.match(line, /deferred \(still owed\)/);
+    assert.doesNotMatch(line, /✓/, 'no green tick: nobody has reviewed it');
+    assert.match(line, /•/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('gate sync honours a skip only when the epic\'s route allows it', async () => {
   // The wiring test for the gate half: `gatePredicate` fails closed with no route, so if `gateSync`
   // stopped handing it the epic's own optional set, a legitimately skipped step would start asking
@@ -6264,7 +6511,7 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
     assert.equal(checks[0].status, 'warn');
     // One `yad skip` stamps the author step AND its gate; the finding names the author step alone, so
     // one action reads as one fault and the id it prints is the one `yad skip … --undo` takes.
-    assert.match(checks[0].message, /^1 skipped step\(s\).*EP-x\/architecture$/);
+    assert.match(checks[0].message, /^1 skipped or deferred step\(s\).*EP-x\/architecture$/);
     assert.doesNotMatch(checks[0].message, /architecture-review/);
     assert.doesNotMatch(checks[0].message, /ui-design/, 'a skip the route allows must stay silent');
     assert.equal(fs.readFileSync(file, 'utf8'), before, 'doctor rewrote the ledger');
@@ -6310,7 +6557,7 @@ test('doctor reports a skip the epic\'s route does not allow, and corrects nothi
     // one action and hand the user an id the command does not take.
     assert.match(wired.message, /EP-x\/architecture\b/);
     assert.doesNotMatch(wired.message, /architecture-review/);
-    assert.match(wired.message, /^1 skipped step/);
+    assert.match(wired.message, /^1 skipped or deferred step/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -6526,6 +6773,109 @@ test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as 
     assert.match(noStep.out, /usage: yad unskip <epic> <step>/);
     assert.equal(yadRun(T, 'unskip', '../etc', 'ui-design').code, 1, 'the epic id is validated like every other verb');
     assert.match(yadRun(T, '--help').out, /yad unskip <epic> <step>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen refuses a skipped or deferred step: there is no review to open, and nothing is written (E37)', async () => {
+  for (const [as, back] of [['deferred', 'undefer'], ['skipped', 'unskip']]) {
+    const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen-aside-'));
+    const prev = process.exitCode;
+    try {
+      fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [] }));
+      const state = uiChain('stories', { ui: 'in_progress' });
+      (as === 'deferred' ? deferStep : skipStep)(state, 'ui-design', { reason: 'later' });
+      seedEpic(T, 'EP-x', state);
+      const file = path.join(T, 'epics/EP-x/.sdlc/state.json');
+      const before = fs.readFileSync(file, 'utf8');
+      const out = await grab(() => gateOpen(T, { epic: 'EP-x', artifact: 'ui-design.md' }));
+      assert.equal(process.exitCode, 1, as);
+      assert.match(out, new RegExp(`ui-design-review is ${as} — there is no review to open`));
+      assert.match(out, new RegExp(`yad ${back} EP-x ui-design`));
+      assert.equal(fs.readFileSync(file, 'utf8'), before, 'the ledger is untouched');
+    } finally {
+      process.exitCode = prev;
+      fs.rmSync(T, { recursive: true, force: true });
+    }
+  }
+});
+
+test('doctor: a deferred step the route does not mark optional is reported like a skipped one (E37)', async () => {
+  const { skipChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e37-doc-'));
+  const S = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status, ...extra });
+  const rec = { reason: 'later', by: null, date: null };
+  try {
+    fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), JSON.stringify({ epicId: 'EP-x', profile: 'classic', currentStep: 'stories', steps: [
+      S('epic', 'done'), S('epic-review', 'done'),
+      S('architecture', 'deferred', { record: rec }), S('architecture-review', 'deferred', { record: rec }),
+      // Allowed by `classic`, so silent.
+      S('ui-design', 'deferred', { record: rec }), S('ui-design-review', 'deferred', { record: rec }),
+      S('stories', 'in_progress'),
+    ] }));
+    const checks = [];
+    skipChecks(checks, T);
+    assert.equal(checks.length, 1);
+    assert.match(checks[0].message, /^1 skipped or deferred step\(s\).*EP-x\/architecture$/);
+    assert.match(checks[0].hint, /yad undefer <epic> <step>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('CLI: `yad defer` / `yad undefer` set an optional step aside for later and put it back (E37)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-defer-cli-'));
+  try {
+    seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+    const d = yadRun(T, 'defer', 'EP-x', 'ui-design', '--reason', 'screens come with the redesign; @design waits');
+    assert.equal(d.code, 0, d.out);
+    assert.match(d.out, /ui-design deferred/);
+    assert.match(d.out, /yad undefer EP-x ui-design/);
+    const s = readUiState(T);
+    assert.equal(s.steps.find((x) => x.id === 'ui-design').status, 'deferred');
+    assert.equal(s.currentStep, 'stories');
+    // `--check` names the state that finished the step, not "already done".
+    const check = yadRun(T, 'next', 'EP-x', '--check', 'ui-design');
+    assert.equal(check.code, 1);
+    assert.match(check.out, /ui-design is already deferred/);
+    const u = yadRun(T, 'undefer', 'EP-x', 'ui-design', '--reason', 'x');
+    assert.equal(u.code, 0, u.out);
+    assert.match(u.out, /un-deferred/);
+    assert.match(u.out, /--reason is not used when un-deferring/);
+    assert.equal(readUiState(T).currentStep, 'ui-design');
+    assert.match(yadRun(T, 'undefer', 'EP-x').out, /usage: yad undefer <epic> <step>/);
+    // `yad defer … --undo` is the same as `yad undefer`, as `yad skip … --undo` is for a skip.
+    yadRun(T, 'defer', 'EP-x', 'ui-design', '--reason', 'later');
+    const viaFlag = yadRun(T, 'defer', 'EP-x', 'ui-design', '--undo');
+    assert.equal(viaFlag.code, 0, viaFlag.out);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
+    assert.match(yadRun(T, '--help').out, /yad defer <epic> <step>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('CLI: `yad unblock` clears a recorded blocker, and `yad next` names it as the way out (E37)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-unblock-cli-'));
+  try {
+    const st = uiChain('ui-design', { ui: 'blocked' });
+    st.steps.find((x) => x.id === 'ui-design').record = { reason: 'the design tool licence expired', by: '@al', date: '2026-09-01' };
+    seedEpic(T, 'EP-x', st);
+    const next = yadRun(T, 'next', 'EP-x');
+    assert.match(next.out, /the design tool licence expired/);
+    assert.match(next.out, /yad unblock EP-x ui-design/);
+
+    const u = yadRun(T, 'unblock', 'EP-x', 'ui-design');
+    assert.equal(u.code, 0, u.out);
+    assert.match(u.out, /ui-design unblocked — now in_progress/);
+    assert.match(u.out, /cleared: the design tool licence expired/);
+    const s = readUiState(T).steps.find((x) => x.id === 'ui-design');
+    assert.equal(s.status, 'in_progress');
+    assert.equal(s.record, undefined);
+
+    const again = yadRun(T, 'unblock', 'EP-x', 'ui-design');
+    assert.equal(again.code, 1);
+    assert.match(again.out, /ui-design is not blocked/);
+    assert.match(yadRun(T, 'unblock', 'EP-x').out, /usage: yad unblock <epic> <step>/);
+    assert.equal(yadRun(T, 'unblock', '../etc', 'ui-design').code, 1, 'the epic id is validated like every other verb');
+    assert.match(yadRun(T, '--help').out, /yad unblock <epic> <step>/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -8751,6 +9101,17 @@ test('runDocs: list/sync/wire orchestrate over generated sites and install the P
 
 // ---- artifact-status: derive frontmatter status from state.json + sweep ----------------------
 const { desiredStatus, setFrontmatterStatus, syncStatuses } = await import('./artifact-status.mjs');
+
+test('desiredStatus leaves a skipped or deferred review\'s artifact alone — nobody reviewed it (E37)', () => {
+  const S = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: 'ui-design.md', status, ...extra });
+  const rec = { reason: 'later', by: null, date: null };
+  const pair = (status, extra) => ({ steps: [S('ui-design', status, extra), S('ui-design-review', status, extra)] });
+  assert.equal(desiredStatus(pair('deferred', { record: rec }), 'ui-design'), null, 'a deferred draft must not be stamped approved');
+  assert.equal(desiredStatus(pair('skipped', { record: rec }), 'ui-design'), null, 'nor a skip taken over a half-written draft');
+  assert.equal(desiredStatus(pair('done', { skipped: true }), 'ui-design'), null, 'the legacy spelling of a skip too');
+  // An inherited gate WAS reviewed — upstream — so its artifact still reads approved.
+  assert.equal(desiredStatus(pair('done', { inherited: true }), 'ui-design'), 'approved');
+});
 
 test('desiredStatus derives draft/in-review/approved from the step pair', () => {
   const state = {

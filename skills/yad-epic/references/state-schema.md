@@ -244,7 +244,7 @@ the eighth, and is `in_progress` on a step that is a review gate.
 | `in_review` | Its review gate is open | no | no | — |
 | `done` | Completed here | yes | **yes** | the artifact |
 | `skipped` | Consciously chose not to | yes | no | reason + who + when |
-| `deferred` | Will do it, later | yes | no | reason + who waits |
+| `deferred` | Will do it, later — `yad defer` | yes | no | reason (saying who waits) + who + when |
 | `satisfied` | Done elsewhere | yes | no | link + who + when |
 | `blocked` | Cannot proceed, **not our choice** | no | no | who or what we wait for |
 
@@ -269,9 +269,11 @@ earlier step" — what is now `todo`. The two are told apart by the record, not 
 > `blocked` with **no** record is the old word and reads as `todo`.
 > `blocked` **with** a record is a real blocker, and the record says on whom.
 
-No release before shape 7 ever wrote a record, so that is exact. The converse matters for whoever adds
-a verb that CLEARS a blocker: it must move `status` off `blocked`, never just delete the record, or the
-step silently becomes a `todo`.
+No release before shape 7 ever wrote a record, so that is exact. The converse is why clearing a blocker
+has a verb: `yad unblock EP-<slug> <step>` (E37) moves `status` off `blocked` **and** removes the record
+in one write, because deleting only the record would turn the step silently into a `todo`. An author
+step whose earlier steps have all passed goes to `in_progress`; anything else, a review gate included,
+goes to `todo`. It never touches `build-state/<story>.json`, which the `yad-run` skill writes.
 
 A status this release does not know is left alone — the file wins — and reported as
 `step:unknown-status`. It fails closed: the step counts as neither passed nor authored.
@@ -332,6 +334,43 @@ any skipped step, so approving `architecture-review` on a UI-less epic lands dir
 refused once the step after the pair is finished or a step past it has started (on `classic`, once `stories` is done or `stories-review` opens). `ui-design` is the
 only step any route marks optional today; the engine reads that off the epic's own route
 (`optionalStepsFor`) rather than from a list of its own.
+
+### Deferring an optional step (`yad defer`)
+
+A step the route marks optional can also be **deferred**: it applies, and the team will do it later.
+`yad defer EP-<slug> ui-design --reason "<why, and who is waiting>"` writes this on both the author step
+and its `-review` gate:
+
+```json
+{ "id": "ui-design", "type": "author", "artifact": "ui-design.md",
+  "status": "deferred",
+  "record": { "reason": "screens come with the redesign; @design is waiting on it", "by": "@al", "date": "2026-09-14" } }
+```
+
+There are no legacy fields: `deferred` was new in shape 7, so no older reader needs them. `by` is who
+wrote the record, as on every record. `yad undefer EP-<slug> ui-design` removes the record and puts the
+step back.
+
+A deferral follows the skip rules above:
+
+- **Same permission.** Only a route-optional step can be deferred, because the chain continues past a
+  deferred step (`isPassed`) with no approvals on its review. The review is not waived, though:
+  `gatePredicate` gives a deferred step no short-circuit (E38), so it still reports what is missing, and
+  `yad gate status` prints the step as "deferred (still owed)".
+- **Same windows.** `yad defer` is refused where `yad skip` is, and `yad undefer` where `yad unskip` is.
+- **Same walk.** `advanceState` and the shared skip/defer code (`setAsideStep`, `restoreStep`) step over
+  `skipped` **and** `deferred` steps (`isSetAside`). `yad gate open` refuses a set-aside step, and
+  `yad sync-status` leaves its artifact's `status:` line alone. A `deferred` status typed by hand onto a
+  required step is walked past too, as a hand-typed `skipped` always was; `yad doctor` reports both
+  (`skip:not-optional`).
+- **Not interchangeable.** Deferring a skipped step, or skipping a deferred one, is refused with the
+  command that puts it back first, so neither record is lost.
+
+For a skip, the un-skip window is the meaning: work finished without the step was built on it not
+applying. For a deferral it is a limit of the machinery. The team expected later work to finish first,
+but the chain cannot yet re-open a step behind finished work without re-opening that work too
+(`preconditionsMet` would name the step as a blocker, and `advanceState` would re-open the step after
+it). That re-opening ships with debt payback (E41).
 
 ### `test-cases` is a parallel, non-blocking track
 

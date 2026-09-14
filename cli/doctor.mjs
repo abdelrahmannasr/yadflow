@@ -1205,7 +1205,10 @@ export function skipChecks(checks, root) {
     // allow, so it has to see the claim before it can refuse it. A HALF-STAMPED one — `skipped: true`
     // on a step that is not `done` — is the case most worth reporting, and reading the canonical state
     // would let exactly that one through silently (E38).
-    const skipped = new Set(state.steps.filter((x) => claimsSkipped(x) && typeof x.id === 'string').map((x) => x.id));
+    // A `deferred` step (E37) needs the same route permission, because the chain walks past it with no
+    // approvals on its review — so the same finding covers it. It has no legacy flag, so its status word
+    // is the claim.
+    const skipped = new Set(state.steps.filter((x) => (claimsSkipped(x) || stepStatus(x) === 'deferred') && typeof x.id === 'string').map((x) => x.id));
     for (const step of state.steps) {
       if (!skipped.has(step.id)) continue;
       if (isSkippableStep(step.id, optional)) continue;
@@ -1220,8 +1223,8 @@ export function skipChecks(checks, root) {
   if (bad.length) {
     check(
       checks, 'skip:not-optional', 'shape', 'warn',
-      `${bad.length} skipped step(s) their epic's route does not mark optional: ${some(bad, 3)}`,
-      'the gate fails closed on a skip the route does not allow, so it stops treating the skip as the reason the step passed. On a step already marked N/A in full nothing breaks: it reads as passed either way, and `yad gate sync` reports that the rule no longer holds and changes nothing — what is lost is the justification. A HALF-STAMPED one is different and is why this reads the claim rather than the state: `skipped: true` on a step that is not finished is a flag nothing honours, so the step is simply not done and the chain waits on it. Either the epic is on the wrong route (`step:off-route`), or the skip was written by hand — `yad unskip <epic> <step>` puts the step back in the chain. It refuses, naming the step, once work has started past the step that follows the skipped pair, or that step is finished: the chain has been built on the skip by then, and putting it right is a decision about that later work, not a command',
+      `${bad.length} skipped or deferred step(s) their epic's route does not mark optional: ${some(bad, 3)}`,
+      'the gate fails closed on a skip the route does not allow, so it stops treating the skip as the reason the step passed. On a step already marked N/A in full nothing breaks: it reads as passed either way, and `yad gate sync` reports that the rule no longer holds and changes nothing — what is lost is the justification. A HALF-STAMPED one is different and is why this reads the claim rather than the state: `skipped: true` on a step that is not finished is a flag nothing honours, so the step is simply not done and the chain waits on it. Either the epic is on the wrong route (`step:off-route`), or the skip was written by hand — `yad unskip <epic> <step>` puts the step back in the chain (`yad undefer <epic> <step>` for a deferred one). It refuses, naming the step, once work has started past the step that follows the skipped pair, or that step is finished: the chain has been built on the skip by then, and putting it right is a decision about that later work, not a command',
     );
   }
 }

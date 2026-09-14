@@ -62,7 +62,9 @@ for the cases — the test cases must collectively verify every story's criteria
 
 - **UI-optional-safe:** `ui-design.md` may be absent — the `ui-design` step is optional and can be
   marked N/A for a UI-less epic (state.json shows it `skipped`). When there is no UI design, there are
-  simply no screens to exercise; the stories' acceptance criteria remain the source of truth.
+  simply no screens to exercise; the stories' acceptance criteria remain the source of truth. If it
+  shows `deferred`, the screens are still to be designed: cover the stories' criteria now, and leave the
+  screen-level cases for when the UI design lands.
 
 ### Step 2b — Load existing-code context (make the brain code-aware)
 Read the registry `{project-root}/.sdlc/repos.json` (`config.yaml` `code_context`). For **each repo in
