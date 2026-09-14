@@ -57,8 +57,9 @@ re-authored it, which is not always the parent. `boundHash` is the inherited art
 `cli/epic-state.mjs` computes: `contractSurfaceHash` for `architecture`, `storiesHash` for `stories`,
 the file otherwise — every file without its frontmatter `status:` line (`reviewedSha`, shape 9). A
 `boundHash` computed over the whole file by an older release is still accepted. The gate predicate treats an `inherited` step as satisfied (never re-reviewed)
-as long as `boundHash` matches the thread's current hash for that artifact — which it always does,
-because the artifact lives in the parent and cannot be edited from the child.
+as long as `boundHash` matches the current hash of that artifact in the owning epic (`inheritedFrom`) —
+which holds unless the owner's copy changes. Compare against the OWNER's copy, never the child's: a
+change-epic writes its own `epic.md` (the change brief), which is not the epic it carries.
 
 `approvals.json` provenance record per inherited gate (append-only, NOT an approval that the predicate
 counts — it just documents where the sign-off lives):

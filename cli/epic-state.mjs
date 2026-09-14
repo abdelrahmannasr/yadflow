@@ -1334,6 +1334,10 @@ export function gatePredicate({
   // entry. It is pre-marked `done` in state.json, so the gate is normally never invoked on it; this
   // short-circuit makes a direct call safe and surfaces a corrupted boundHash (a referenced artifact
   // cannot change under the child, so a mismatch is corruption — re-thread, do not silently pass).
+  // COMPARE AGAINST THE OWNER'S COPY. `boundHash` is the hash of the artifact in `inheritedFrom`, and the
+  // child's folder is not always empty where that artifact's name would be: a change-epic writes its own
+  // `epic.md` (the change brief), so hashes taken from the CHILD's folder for a carried `epic-review`
+  // would read as drift that is not there. No caller runs the predicate on a carried step today.
   const accepted = acceptedHashes ?? (currentHash ? [currentHash] : []);
   if (claimsInherited(step)) {
     const drift = isStaleHash(step.boundHash, accepted);
@@ -3483,6 +3487,13 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
 
   // Who owns each base, along the parent's line only.
   const owners = ownersAlong(root, line.chain);
+  // One step writes both, so one epic must own both. They can split when an epic between here and the
+  // genesis lists only one of the two in its `inherits:` — and carrying them from two owners would bind
+  // the architecture steps to one surface and point the lock at another.
+  if (bases.includes('architecture') && owners.architecture !== owners.contract) {
+    return refuse(`along ${parent}'s line the architecture is owned by ${owners.architecture || 'no epic'} but the contract by ${owners.contract || 'no epic'}`,
+      'one step writes both, so one epic must own both. An epic between them lists only one of the two in its `inherits:` — list both there, or neither, then thread again');
+  }
   const carried = new Map(); // step id -> { owner, boundHash }
   const ownerOf = {};
   let anchor = false;
@@ -3510,6 +3521,8 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
       continue;
     }
     for (const id of ids) {
+      // `analysis` was never named by the person typing the list, so say why it is being checked.
+      const rides = id === base ? '' : ` (${id} rides with ${base})`;
       // THE SET-ASIDE RULE (the limit E37 and E41 left open). The thread's owner map names the epic that
       // DECIDED about a base, which is right for a skip: the decision is that epic's. It is not the same
       // as an artifact to carry. Only work written AND approved there is inherited.
@@ -3518,25 +3531,25 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
         const st = stepStatus(s);
         if (st === 'done') continue;
         if (claimsSkipped(s)) {
-          return refuse(`${owner} skipped ${sid}${s.record?.reason ? ` (${s.record.reason})` : ''} — nothing was written to inherit`,
+          return refuse(`${owner} skipped ${sid}${s.record?.reason ? ` (${s.record.reason})` : ''}${rides} — nothing was written to inherit`,
             `leave ${base} out of inherits, then \`yad skip\` it on this epic if it does not apply here either`);
         }
         if (st === 'deferred') {
-          return refuse(`${owner} deferred ${sid} — that work is still owed, not written`,
+          return refuse(`${owner} deferred ${sid}${rides} — that work is still owed, not written`,
             `leave ${base} out of inherits and author it on this epic, so the owed work follows the thread`);
         }
         // The owner map reads `inherits:` in epic.md; the ledger says the step came from further up. The
         // two records disagree, and choosing one would be guessing where the artifact really lives.
         if (claimsInherited(s)) {
-          return refuse(`${owner}'s ledger carries ${sid} from ${s.inheritedFrom || 'its parent'}, but its epic.md does not list ${base} in inherits`,
+          return refuse(`${owner}'s ledger carries ${sid} from ${s.inheritedFrom || 'its parent'}${rides}, but its epic.md does not list ${base} in inherits`,
             `add ${base} to ${owner}'s inherits (or re-author it there), then thread again`);
         }
-        return refuse(`${owner} has not finished ${sid} (${s ? (st ?? s.status) : 'not on its chain'}) — nothing approved to inherit yet`,
+        return refuse(`${owner} has not finished ${sid} (${s ? (st ?? s.status) : 'not on its chain'})${rides} — nothing approved to inherit yet`,
           `finish it on ${owner} first, or leave ${base} out of inherits and author it here`);
       }
       const boundHash = artifactHash(ownerDir, stepDef(id).artifact);
       if (!boundHash) {
-        return refuse(`${owner} approved ${id}, but ${stepDef(id).artifact} is not there to bind to`,
+        return refuse(`${owner} approved ${id}${rides}, but ${stepDef(id).artifact} is not there to bind to`,
           `restore it on ${owner}, or leave ${base} out of inherits`);
       }
       carried.set(id, { owner, boundHash });

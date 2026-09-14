@@ -825,13 +825,14 @@ writes it (E42) and sets `currentStep` to the first re-authored step.
 ```
 
 - `inherited` — `true` when this step's artifact is taken by reference from the thread (not authored here).
-- `inheritedFrom` — the epic in the thread that owns the referenced artifact.
+- `inheritedFrom` — the epic along the parent's line that owns the referenced artifact (not always the parent).
 - `boundHash` — the artifact's hash at inherit time (contract surface hash for `architecture`; the
   `storiesHash`/file hash for others — without the frontmatter `status:` line from shape 9, and an older
   whole-file hash is still accepted). The gate predicate short-circuits an `inherited` step as
-  **satisfied** iff `boundHash` still equals the thread's current hash for that artifact — always true,
-  since the artifact lives in the parent and can't be edited from the child, so inherited steps never
-  block and are never re-reviewed.
+  **satisfied** iff `boundHash` still equals the current hash of that artifact in the owning epic
+  (`inheritedFrom`) — which holds unless the owner's copy changes, so inherited steps never block and are
+  never re-reviewed. Compare against the owner's copy, not the child's: a change-epic writes its own
+  `epic.md` (the change brief), which is not the epic it carries.
 
 `approvals.json` gets a **provenance** record per inherited gate (not a forged approval):
 

@@ -124,7 +124,9 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   // and the same rule as the type holds: the header's word wins over no flag, and a flag that
   // contradicts it is refused. `yad thread` and the owner map read the header, so a ledger seeded from
   // a flag the header disagrees with would describe a thread nobody can see.
-  const declaredParent = typeof fm.parent === 'string' && fm.parent.trim() ? fm.parent.trim() : null;
+  // Normalised like the slug, so `--parent checkout` names the epic `yad next` printed as EP-checkout.
+  parent = parent ? epicIdFrom(parent) : null;
+  const declaredParent = typeof fm.parent === 'string' && fm.parent.trim() ? epicIdFrom(fm.parent) : null;
   if (parent && declaredParent && parent !== declaredParent) {
     return bail(`${epic}: epic.md says \`parent: ${declaredParent}\`, --parent says \`${parent}\``,
       'drop the flag to take the header\'s answer, or fix the header first — nothing here rewrites epic.md');
@@ -132,6 +134,14 @@ export async function runEpicNew(root, { slug, type = null, profile = null, stub
   parent = parent || declaredParent;
   const flagInherits = inherits == null ? null : listOf(inherits);
   const declaredInherits = 'inherits' in fm ? listOf(fm.inherits) : null;
+  // Every other reader — `yad thread`, the owner map, the next change threading off this one — takes the
+  // header through `epicLineage`, which reads a list only in brackets. `inherits: epic, ui-design` is one
+  // base named "epic, ui-design" to them, so seeding what this parse sees would describe a thread they
+  // cannot. Refused, with the spelling they all read.
+  if (declaredInherits && [...new Set(declaredInherits)].sort().join() !== [...new Set(epicLineage(root, epic).inherits)].sort().join()) {
+    return bail(`${epic}: epic.md writes \`inherits:\` in a form the other readers take as [${epicLineage(root, epic).inherits.join(' | ')}]`,
+      `write it as \`inherits: [${declaredInherits.join(', ')}]\` — in brackets — then run this again`);
+  }
   if (flagInherits && declaredInherits
     && [...new Set(flagInherits)].sort().join() !== [...new Set(declaredInherits)].sort().join()) {
     return bail(`${epic}: epic.md inherits [${declaredInherits.join(', ')}], --inherits says [${flagInherits.join(', ')}]`,
@@ -261,6 +271,17 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
       'drop --profile. To change the route, start a new epic instead of threading one');
   }
   const declaredThread = typeof fm.thread === 'string' && fm.thread.trim() ? fm.thread.trim() : null;
+  // A header that EXISTS must carry the lineage too. `resolveThread` reads only epic.md, so a header with
+  // no `parent:` reads as a genesis of its own, and one with no `thread:` is a broken lineage the moment
+  // it is seeded — a ledger nobody's thread view can find.
+  if (fs.existsSync(mdPath) && !(typeof fm.parent === 'string' && fm.parent.trim())) {
+    return bail(`${epic}: epic.md has no \`parent:\``,
+      `add \`parent: ${parent}\` (and \`thread: ${plan.thread}\`) to epic.md — \`yad thread\` reads the header, not the flag`);
+  }
+  if (fs.existsSync(mdPath) && !declaredThread) {
+    return bail(`${epic}: epic.md has no \`thread:\` — add \`thread: ${plan.thread}\``,
+      'the thread is the genesis of the parent\'s line, and a change without the cache reads as a broken lineage');
+  }
   if (declaredThread && declaredThread !== plan.thread) {
     return bail(`${epic}: epic.md says \`thread: ${declaredThread}\`, but ${parent}'s thread starts at ${plan.thread}`,
       `set \`thread: ${plan.thread}\` in epic.md — the thread is the genesis of the parent's line`);
@@ -269,6 +290,15 @@ function seedThreaded(root, { epic, dir, files, mdPath, fm, type, parent, profil
   if (plan.lock && fs.existsSync(files.contractLock)) {
     return bail(`${epic} already has a contract-lock.json`,
       'nothing here overwrites a lock. Remove it only if it is left over from a mistake, then run this again');
+  }
+  // The same for an approvals ledger holding anything at all. An empty list is what a seed writes, so it
+  // is the one value that is safe to replace; a file that will not parse is not.
+  if (fs.existsSync(files.approvals)) {
+    const held = readJSON(files.approvals, null);
+    if (!Array.isArray(held) || held.length) {
+      return bail(`${epic} already has an approvals.json with records in it`,
+        'nothing here overwrites an approval. Remove it only if it is left over from a mistake, then run this again');
+    }
   }
 
   writeState(files.state, plan.state);

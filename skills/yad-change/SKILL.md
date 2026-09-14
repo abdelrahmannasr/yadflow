@@ -182,6 +182,10 @@ The engine writes everything this step used to spell out by hand (E42):
 | `stories cannot be inherited` / `test-cases cannot be inherited` | every change writes its own; `stories-review` is what hands an epic to Build | leave them out |
 | `architecture and contract are inherited together` | the architecture step writes `contract.md` | list both, or neither (a contract-surface change) |
 | `route has no <base> step` | a short-lane parent never had it | leave it out |
+| `architecture is owned by <A> but the contract by <B>` | one step writes both, so one epic must own both | in the epic between them, list both in `inherits:`, or neither |
+| `ledger carries <step> from <epic>, but its epic.md does not list <base>` | that epic's two records disagree about where the artifact lives | fix that epic's `inherits:` first |
+| `epic.md says …, --parent says …` · `--inherits says …` · `thread: …` · `has no parent:` / `has no thread:` · `write it as inherits: [a, b]` | the header is what `yad thread` reads, so it must say the same as the flags — in brackets for a list | fix `epic.md` (Step 4), or drop the flag |
+| `already has a contract-lock.json` · `already has an approvals.json with records in it` | a file already there is somebody's record | remove it only if it is left over from a mistake |
 
 Commit the seed on the `change/EP-<slug>` branch. It reaches the Product's default branch through this
 change-epic's **first** review PR/MR — cut the `review/EP-<slug>/<artifact>` branch from `change/…` so

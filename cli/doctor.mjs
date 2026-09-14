@@ -386,20 +386,20 @@ function contractLockCheck(checks, root, epic, ledger) {
     if (refPath !== epicsDir && !refPath.startsWith(epicsDir + path.sep)) {
       check(checks, id, 'epics', 'fail',
         `${epic}: pointer-lock ref '${lock.ref}' resolves outside epics/`,
-        'a pointer-lock must reference another epic in this Product — fix `ref` (yad-change writes ../../EP-<parent>/.sdlc/contract-lock.json)');
+        'a pointer-lock must reference another epic in this Product — fix `ref` (`yad epic new --parent` writes ../../EP-<owner>/.sdlc/contract-lock.json, where the owner is the epic along the parent\'s line that holds the contract)');
       return;
     }
     const parent = readJSON(refPath, null);
     if (!parent || typeof parent.hash !== 'string') {
       check(checks, id, 'epics', 'fail',
         `${epic}: pointer-lock references ${lock.inheritedFrom || lock.ref}, whose contract-lock.json is missing or has no hash`,
-        're-thread the change-epic (yad-change) so it points at a real parent lock');
+        're-seed the change-epic (`yad epic new --parent`) so it points at the real lock of the epic that owns the contract');
       return;
     }
     if (parent.hash !== stored) {
       check(checks, id, 'epics', 'fail',
         `${epic}: pointer-lock pins ${short(stored)} but ${lock.inheritedFrom || 'its parent'} now locks ${short(parent.hash)}`,
-        'the inherited surface was re-locked upstream — re-copy the parent hash, or re-author architecture in this epic');
+        'the inherited surface was re-locked upstream — re-copy the owner\'s hash, or re-author architecture in this epic');
       return;
     }
     // A pointer-lock epic has no contract.md by construction (the surface physically cannot drift).

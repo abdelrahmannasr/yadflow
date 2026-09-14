@@ -367,7 +367,13 @@ async function main() {
       break;
     }
     case 'epic': {
-      const [, action, slug] = o._;
+      const [, action, slug, ...extra] = o._;
+      // A stray word is refused rather than dropped: `--inherits epic architecture` takes only `epic` as
+      // the value, and silently seeding without `architecture` would carry less than the author asked.
+      if (action === 'new' && extra.length) {
+        log(c.red(`unexpected argument(s): ${extra.join(' ')} — a list takes commas, e.g. --inherits epic,architecture`));
+        process.exitCode = 1; break;
+      }
       if (action !== 'new') {
         log(c.red(`unknown epic action: ${action ?? '(none)'} (new)`));
         log(`usage: yad epic new <slug> [--type feature|chore|change|defect|hotfix] [--profile ${seedableProfiles().join('|')}] [--parent EP-<slug> --inherits <bases>]`);
