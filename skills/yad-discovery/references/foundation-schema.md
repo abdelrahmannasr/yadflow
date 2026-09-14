@@ -243,7 +243,9 @@ picks the reserved `EP-foundation` or `EP-discovery`.
 > **Known limit.** The status column is part of what reviewers approved, so changing a row's status
 > after the Foundation's review has passed changes its fingerprint, and `yad doctor` then reports the
 > Foundation's approvals as stale. Only the frontmatter `status:` line is left out of the fingerprint.
-> This is recorded in the E76 row of the roadmap and is not yet decided.
+> **Decided (E76):** the fix is to stop this hand edit and work out each feature's status from the
+> epic ledgers instead — whether its epic exists and how far it has got. That is a follow-up; until it
+> ships, tell the user what the edit does before making it.
 
 **Example (Tally):**
 
