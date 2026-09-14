@@ -68,6 +68,10 @@ Print, in this order:
      step and its `-review` gate carry `status: "deferred"` and a `record`. Render each as
      `<id> — DEFERRED (later: <reason>)`, with who and when if present. A deferred step is still owed:
      never render it as done or as N/A.
+   - **Blocked steps:** a step with `status: "blocked"` **and** a `record` is waiting on someone outside
+     the workflow. Render it as `<id> — BLOCKED (<reason>)`, with who recorded it and when, and say it is
+     cleared with `yad unblock <epic> <id>` once the wait is over. A `blocked` with no record is the older
+     word for `todo`: render it as not started.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required
      domains), or **per-repo** for `stories-review` (list each repo needing sign-off), **plus** the

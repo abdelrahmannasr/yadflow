@@ -15,7 +15,7 @@
 // actor/date), short-circuited at the gate. All state logic is the pure `skipStep` / `unskipStep` /
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import { ok, info, hand, fail, run } from './lib.mjs';
-import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, writeState } from './epic-state.mjs';
+import { epicRoot, loadLedger, skipStep, unskipStep, deferStep, undeferStep, unblockStep, writeState } from './epic-state.mjs';
 import { loadProduct } from './gate.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
@@ -78,3 +78,20 @@ async function runSetAside(root, verb, { epic, step, reason, undo = false, today
 
 export const runSkip = (root, opts) => runSetAside(root, 'skip', opts);
 export const runDefer = (root, opts) => runSetAside(root, 'defer', opts);
+
+// `yad unblock <epic> <step>` (E37) — clear a recorded blocker once the wait is over. The state logic is
+// the pure `unblockStep`; `build-state/<story>.json` belongs to the skills and is never touched here.
+export async function runUnblock(root, { epic, step } = {}) {
+  const epicDir = epicRoot(root, epic);
+  const ledger = loadLedger(epicDir);
+  if (!ledger.state) { fail(`no epic state at ${epicDir} — seed the epic first with yad-epic`); process.exitCode = 1; return; }
+  if (!step) { fail('usage: yad unblock <epic> <step>'); process.exitCode = 1; return; }
+  // Read the reason BEFORE the write removes it, so the line can say what was cleared.
+  const steps = Array.isArray(ledger.state.steps) ? ledger.state.steps : [];
+  const was = steps.find((s) => s?.id === step)?.record?.reason || null;
+  unblockStep(ledger.state, step);
+  writeState(ledger.files.state, ledger.state);
+  ok(`${step} unblocked — now ${ledger.state.steps.find((s) => s?.id === step).status}`);
+  if (was) info(`cleared: ${was}`);
+  hand(`see what to do now: yad next ${epic}`);
+}

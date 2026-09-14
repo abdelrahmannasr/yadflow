@@ -142,7 +142,7 @@ Not much, yet, and that is deliberate. Shape 7 is the vocabulary; the commands t
   instead of telling you to author the artifact, and no gate is waived by it.
 
 > **Later releases.** This list describes shape 7 as it shipped. Since then, `yad skip` works for any
-> step a route marks optional, and `yad defer` writes `deferred`. See
+> step a route marks optional, `yad defer` writes `deferred`, and `yad unblock` clears a blocker. See
 > [the step states](../CLI.md#where-a-step-stands-the-step-states).
 
 ## If `yad doctor` says something

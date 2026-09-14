@@ -2432,7 +2432,9 @@ test('runNext on a blocked step names the blocker instead of a skill, in prose a
 
   const s = await grab(() => runNext(T, { epic: 'EP-x' }));
   assert.match(s, /waiting on the payments vendor/, 'the reason is what a person needs to read');
-  assert.match(s, /waiting on @al since 2026-08-01/, 'and the line names who, from the record');
+  assert.match(s, /recorded by @al on 2026-08-01/, 'and the line says who recorded it, and when');
+  assert.match(s, /yad unblock EP-x architecture/, 'and how to clear it once the wait is over');
+  assert.doesNotMatch(s, /waiting on @al/, '`by` is who wrote the record, not who we are waiting on');
   assert.doesNotMatch(s, /invoke .*yad-architecture/, 'it must not tell anyone to author the artifact');
 
   const j = await nextJSON(T, { epic: 'EP-x' });
@@ -2447,7 +2449,7 @@ test('runNext on a blocked step names the blocker instead of a skill, in prose a
   seedEpic(T, 'EP-y', anon);
   const s2 = await grab(() => runNext(T, { epic: 'EP-y' }));
   assert.match(s2, /the vendor contract is unsigned/);
-  assert.match(s2, /waiting on something outside this workflow/);
+  assert.match(s2, /blocked — clear it with yad unblock EP-y architecture once resolved/, 'nobody named, so no "recorded by"');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -5146,7 +5148,7 @@ test('runCommit: the missing-Task warning is stage-aware (hub vs code repo)', as
 // `yad gate ci` — merge-driven sync (Path B): read-only pre-merge; advance + status flip on the
 // default branch at merge. Derives the epic/artifact from the review branch name.
 // ---------------------------------------------------------------------------------------------
-const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
+const { parseReviewBranch, artifactFromBase, artifactPaths, upsertHubPr, artifactBase, advanceState, markInReview, discoveryHash, DISCOVERY_FILES, skipStep, unskipStep, deferStep, undeferStep, unblockStep, optionalStepsOf, optionalStepsFor, isSkippableStep, authorStepFor, repairState, canonicalApprovals, canonicalComments, canonicalHubPrs, isPassed, isAuthored } = await import('./epic-state.mjs');
 const { gateCi } = await import('./gate.mjs');
 
 // issue #163. Sorting is only a fix if the order is TOTAL: `Array#sort` is stable, so records that tie
@@ -6074,6 +6076,80 @@ test('the shared walk steps over a deferred pair when a skip, un-skip or un-defe
   assert.equal(byId(state, 'ui-design-review').status, 'todo');
 });
 
+test('unblockStep clears a real blocker: the status and the record together, never one without the other (E37)', () => {
+  const rec = { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' };
+  const S = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status, ...extra });
+  const chain = (currentStep, arch, archReview) => ({ epicId: 'EP-x', currentStep, steps: [
+    S('epic', 'done'), S('epic-review', 'done'), S('architecture', arch, arch === 'blocked' ? { record: { ...rec } } : {}),
+    S('architecture-review', archReview, archReview === 'blocked' ? { record: { ...rec } } : {}),
+  ] });
+
+  // An author step whose earlier steps have all passed goes back to being worked on.
+  const a = unblockStep(chain('architecture', 'blocked', 'todo'), 'architecture');
+  assert.equal(byId(a, 'architecture').status, 'in_progress');
+  assert.equal(byId(a, 'architecture').record, undefined, 'the record goes with the wait it explained');
+  assert.equal(a.currentStep, 'architecture', 'currentStep is not this verb\'s to move');
+  assert.equal(nextAction({ state: a, hubPrs: [] }).kind, 'author');
+
+  // A blocked review gate goes to `todo`: opening the review is `yad gate open`'s job.
+  const g = unblockStep(chain('architecture-review', 'done', 'blocked'), 'architecture-review');
+  assert.equal(byId(g, 'architecture-review').status, 'todo');
+  assert.equal(byId(g, 'architecture-review').record, undefined);
+  assert.equal(nextAction({ state: g, hubPrs: [] }).kind, 'review-open');
+
+  // A blocker the chain has not reached yet stays `todo`: nobody can work on it until the steps before it pass.
+  const early = { epicId: 'EP-x', currentStep: 'epic', steps: [S('epic', 'in_progress'), S('epic-review', 'todo'), S('architecture', 'blocked', { record: { ...rec } })] };
+  assert.equal(byId(unblockStep(early, 'architecture'), 'architecture').status, 'todo');
+
+  // `blocked` with NO record is the pre-shape-7 word for `todo`: nothing recorded, nothing to clear.
+  const legacy = chain('architecture', 'todo', 'todo');
+  byId(legacy, 'architecture').status = 'blocked';
+  assert.throws(() => unblockStep(legacy, 'architecture'),
+    (e) => e.code === 'YAD-STATE-004' && /has no blocker recorded/.test(e.message) && /older spelling of `todo`/.test(e.hint));
+  assert.throws(() => unblockStep(chain('architecture', 'in_progress', 'todo'), 'architecture'),
+    (e) => /architecture is not blocked/.test(e.message) && /'in_progress'/.test(e.hint));
+  assert.throws(() => unblockStep(chain('architecture', 'blocked', 'todo'), 'nope'), /not in this epic's chain/);
+  assert.throws(() => unblockStep({ steps: 'nope' }, 'architecture'), /no step chain/);
+});
+
+test('a gate passing does not open a blocked step after it — the blocker stays, and yad unblock clears it (E37)', () => {
+  const rec = { reason: 'the design tool licence expired', by: '@al', date: '2026-09-01' };
+  const state = uiChain('architecture-review', { ui: 'blocked' });
+  byId(state, 'ui-design').record = { ...rec };
+  advanceState(state, byId(state, 'architecture-review'));
+  assert.equal(state.currentStep, 'ui-design', 'the chain still moves to the step');
+  assert.equal(byId(state, 'ui-design').status, 'blocked', 'a gate passing is not somebody saying the wait is over');
+  assert.deepEqual(byId(state, 'ui-design').record, rec);
+  assert.equal(nextAction({ state, hubPrs: [] }).kind, 'blocked', '`yad next` shows the blocker, not "author the UI"');
+  unblockStep(state, 'ui-design');
+  assert.equal(byId(state, 'ui-design').status, 'in_progress', 'and once cleared, the step is the one being worked on');
+  // The older spelling — `blocked` with NO record — is `todo`, so the gate still opens it as before.
+  const legacy = uiChain('architecture-review');
+  advanceState(legacy, byId(legacy, 'architecture-review'));
+  assert.equal(byId(legacy, 'ui-design').status, 'in_progress');
+});
+
+test('skip and defer refuse a blocked step: setting it aside would lose the record of who it waits on (E37)', () => {
+  const rec = { reason: 'waiting on the payments vendor', by: '@al', date: '2026-08-01' };
+  // The author step blocked…
+  const held = uiChain('ui-design', { ui: 'blocked' });
+  byId(held, 'ui-design').record = { ...rec };
+  for (const verb of [skipStep, deferStep]) {
+    assert.throws(() => verb(held, 'ui-design', { reason: 'no UI' }),
+      (e) => e.code === 'YAD-STATE-004' && /ui-design is blocked — waiting on the payments vendor/.test(e.message) && /yad unblock <epic> ui-design/.test(e.hint));
+  }
+  assert.equal(byId(held, 'ui-design').status, 'blocked', 'refused, and unchanged');
+  assert.deepEqual(byId(held, 'ui-design').record, rec, 'the record naming the blocker survives');
+  // …or its review gate, which used to be refused for the wrong reason ("its review has already opened").
+  const gateHeld = uiChain('ui-design', { ui: 'in_progress', uiReview: 'blocked' });
+  byId(gateHeld, 'ui-design-review').record = { ...rec };
+  assert.throws(() => deferStep(gateHeld, 'ui-design', { reason: 'later' }),
+    (e) => /ui-design-review is blocked/.test(e.message) && /yad unblock <epic> ui-design-review/.test(e.hint));
+  // Once the blocker is cleared the step can be set aside as usual.
+  unblockStep(held, 'ui-design');
+  assert.equal(skipStep(held, 'ui-design', { reason: 'no UI' }).steps.find((s) => s.id === 'ui-design').status, 'skipped');
+});
+
 test('skip / un-skip: only work done in this chain makes them too late — not an inherited, blocked or deferred step', () => {
   const r = (id, status, extra = {}) => ({ id, type: id.endsWith('-review') ? 'review+approve' : 'author', artifact: `${id.replace(/-review$/, '')}.md`, status, ...extra });
   const rec = { reason: 'waiting on the vendor', by: '@ops', date: '2026-09-14' };
@@ -6773,6 +6849,33 @@ test('CLI: `yad defer` / `yad undefer` set an optional step aside for later and 
     assert.equal(viaFlag.code, 0, viaFlag.out);
     assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
     assert.match(yadRun(T, '--help').out, /yad defer <epic> <step>/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('CLI: `yad unblock` clears a recorded blocker, and `yad next` names it as the way out (E37)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-unblock-cli-'));
+  try {
+    const st = uiChain('ui-design', { ui: 'blocked' });
+    st.steps.find((x) => x.id === 'ui-design').record = { reason: 'the design tool licence expired', by: '@al', date: '2026-09-01' };
+    seedEpic(T, 'EP-x', st);
+    const next = yadRun(T, 'next', 'EP-x');
+    assert.match(next.out, /the design tool licence expired/);
+    assert.match(next.out, /yad unblock EP-x ui-design/);
+
+    const u = yadRun(T, 'unblock', 'EP-x', 'ui-design');
+    assert.equal(u.code, 0, u.out);
+    assert.match(u.out, /ui-design unblocked — now in_progress/);
+    assert.match(u.out, /cleared: the design tool licence expired/);
+    const s = readUiState(T).steps.find((x) => x.id === 'ui-design');
+    assert.equal(s.status, 'in_progress');
+    assert.equal(s.record, undefined);
+
+    const again = yadRun(T, 'unblock', 'EP-x', 'ui-design');
+    assert.equal(again.code, 1);
+    assert.match(again.out, /ui-design is not blocked/);
+    assert.match(yadRun(T, 'unblock', 'EP-x').out, /usage: yad unblock <epic> <step>/);
+    assert.equal(yadRun(T, 'unblock', '../etc', 'ui-design').code, 1, 'the epic id is validated like every other verb');
+    assert.match(yadRun(T, '--help').out, /yad unblock <epic> <step>/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

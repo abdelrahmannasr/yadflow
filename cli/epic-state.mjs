@@ -520,8 +520,9 @@ function loadBuildStates(dir) {
 // Shape 7 writes `todo` going forward, and `blocked`-with-no-record stays READ as `todo` for this
 // whole major — rule 2, read old and write new.
 //
-// THE CONVERSE, for whoever ships E37 (`yad defer`) or E41 (debt payback): clearing a `blocked` must
-// move `status` OFF `blocked`. Deleting only the record turns the step silently back into a `todo`.
+// THE CONVERSE: clearing a `blocked` must move `status` OFF `blocked`. Deleting only the record turns the
+// step silently back into a `todo`. `unblockStep` (`yad unblock`, E37) is that verb, and it does both in
+// one write.
 //
 // `in_review` is not in the roadmap's table and stays on purpose. It is `in_progress` on a
 // `review+approve` step, and `markInReview`, `advanceState` and `cli/artifact-status.mjs` all key on
@@ -531,9 +532,9 @@ function loadBuildStates(dir) {
 //
 // WHO WRITES THE RECORDED STATES. `yad skip` writes `skipped` (E35, E36) and `yad defer` writes
 // `deferred` (E37), both THROUGH this table rather than beside it. Nothing in the CLI writes `blocked`:
-// a person does, by hand, and the `yad-run` skill does for a halted Build lane. The `debt: true` flag is
-// E41. `cli/test.mjs` still constructs a chain carrying every row of this table and pins each reader
-// against it, because a state the fixtures happen not to use is an untested state.
+// a person does, by hand, and the `yad-run` skill does for a halted Build lane. `yad unblock` clears one
+// (E37). The `debt: true` flag is E41. `cli/test.mjs` still constructs a chain carrying every row of this
+// table and pins each reader against it, because a state the fixtures happen not to use is untested.
 export const STEP_STATES = [
   { id: 'todo', passed: false, authored: false, record: false, meaning: 'not started' },
   { id: 'in_progress', passed: false, authored: false, record: false, meaning: 'being worked on' },
@@ -1225,7 +1226,12 @@ export function advanceState(state, step) {
   while (state.steps[j] && isSetAside(state.steps[j])) j++;
   const next = state.steps[j];
   if (next) {
-    next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
+    // A BLOCKED next step is not opened. A gate passing is not somebody saying the wait is over, and
+    // writing `in_progress` over it kept the record while hiding the block: `yad next` then said to
+    // author the step, and `yad unblock` refused a step that read as in progress (E37). `currentStep`
+    // still moves there, so `yad next` shows the blocker and how to clear it — `markInReview` already
+    // leaves a blocked step alone the same way.
+    if (stepStatus(next) !== 'blocked') next.status = next.type === 'review+approve' ? 'in_review' : 'in_progress';
     state.currentStep = next.id;
   } else {
     state.currentStep = 'ready-for-build';
@@ -1402,6 +1408,17 @@ function setAsideStep(state, stepId, as, { reason, by = null, at = null, profile
     throw err('YAD-STATE-004', `${stepId} is already ${otherWay(as)}`,
       `put it back with \`yad ${O.undoCommand} <epic> ${stepId}\` first, then ${V.verb} it — changing it in place would lose the ${O.noun}'s record`);
   }
+  // A BLOCKED step is waiting on somebody outside the workflow, and its record says who. Setting it aside
+  // would replace that record with this verb's own, and putting the step back would then delete it — the
+  // blocker would vanish without anybody clearing it. Refuse, and name the verb that does clear it. This
+  // was a hole in `yad skip` from E35 on; `yad unblock` (E37) is what makes the refusal answerable. It
+  // also replaces a wrong answer: a blocked REVIEW gate used to be refused as "its review has already
+  // opened".
+  const blockedStep = [author, steps.find((s) => s?.id === `${stepId}-review`)].find((s) => stepStatus(s) === 'blocked');
+  if (blockedStep) {
+    throw err('YAD-STATE-004', `${blockedStep.id} is blocked — ${blockedStep.record?.reason || 'no reason recorded'}`,
+      `clear the blocker first with \`yad unblock <epic> ${blockedStep.id}\`, then ${V.verb} ${stepId} — setting it aside now would lose the record of who it waits on`);
+  }
   if (!reason || !String(reason).trim()) {
     throw err('YAD-STATE-004', V.needsReason, `${V.reasonHint}, e.g. \`yad ${V.verb} <epic> ${stepId} --reason "<why>"\``);
   }
@@ -1528,6 +1545,43 @@ export function skipStep(state, stepId, opts) { return setAsideStep(state, stepI
 export function unskipStep(state, stepId) { return restoreStep(state, stepId, 'skipped'); }
 export function deferStep(state, stepId, opts) { return setAsideStep(state, stepId, 'deferred', opts); }
 export function undeferStep(state, stepId) { return restoreStep(state, stepId, 'deferred'); }
+
+// PURE. Clear a recorded blocker once the wait is over (`yad unblock`, E37 — the E38 row gave this verb
+// to E37). A `blocked` step is waiting on somebody outside the workflow, so nothing in the chain ever
+// clears it; a person says the wait is over.
+//
+// STATUS AND RECORD GO TOGETHER. Deleting only the record would turn the step silently back into a
+// `todo` (a `blocked` with no record IS the older spelling of `todo`), and moving only the status would
+// leave a record explaining a wait that is over. So one write does both: an author step whose earlier
+// steps have all passed goes back to `in_progress`, and anything else to `todo` — a review gate included,
+// because opening a review is `yad gate open`'s job, not this verb's. `currentStep` is not touched: the
+// chain already points wherever it pointed while the step was blocked.
+//
+// `state.json` only. A halted Build lane is `blocked` in `build-state/<story>.json`, and that file is
+// the `yad-run` skill's: a write here would be undone by its next run (the E38 row).
+export function unblockStep(state, stepId) {
+  const steps = requireChain(state, 'unblock a step in');
+  const i = steps.findIndex((s) => s?.id === stepId);
+  if (i === -1) throw err('YAD-STATE-004', `step '${stepId}' is not in this epic's chain`, 'nothing to unblock');
+  const step = steps[i];
+  const st = stepStatus(step);
+  if (st !== 'blocked') {
+    // The one case worth its own sentence: `blocked` with no record is the pre-shape-7 word for "not
+    // started". Nobody is being waited on, so there is no blocker to clear — and saying "not blocked"
+    // about a step whose file says `blocked` would read as a bug.
+    if (step.status === 'blocked') {
+      throw err('YAD-STATE-004', `${stepId} has no blocker recorded`,
+        'a `blocked` step with no `record` is the older spelling of `todo` — it is not waiting on anyone, so there is nothing to clear. `yad migrate --apply` rewrites the word to `todo` (on a verified project, the next gate write does)');
+    }
+    throw err('YAD-STATE-004', `${stepId} is not blocked`, `it is '${st ?? step.status ?? '(no status)'}' — nothing to unblock`);
+  }
+  const cleared = { ...step };
+  delete cleared.record;
+  const earlierPassed = steps.slice(0, i).every((s) => isPassed(s));
+  cleared.status = earlierPassed && step.type === 'author' ? 'in_progress' : 'todo';
+  steps[i] = cleared;
+  return state;
+}
 
 // Mark a step in-review (idempotent) and point currentStep at it — EXCEPT once the epic is
 // `ready-for-build`: the parallel `test-cases` track must not pull currentStep back (Build

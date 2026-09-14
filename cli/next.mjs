@@ -180,12 +180,15 @@ function actionLine(a, { solo, bindings = null } = {}) {
       return `invoke the ${c.bold('yad-backfill')} skill ${c.dim('(document the code, then `yad-backfill promote` — or thread bugs now with yad-change)')}`;
     case 'backfill-done':
       return `invoke the ${c.bold('yad-change')} skill ${c.dim('(documented anchor — evolve it by threading a change/defect off it)')}`;
-    // A blocked step (E38) has no command, and that is the point: the thing in the way is not in this
-    // tool. What the line CAN do is name who or what was recorded as the blocker, and where to look.
-    case 'blocked':
-      return a.record?.by
-        ? c.dim(`blocked — waiting on ${a.record.by}${a.record.date ? ` since ${a.record.date}` : ''}`)
-        : c.dim('blocked — waiting on something outside this workflow');
+    // A blocked step (E38) has no command to run, and that is the point: the thing in the way is not in
+    // this tool. The line says who recorded the block and when, and how to clear it once the wait is
+    // over (E37); the reason itself is on the line above. It used to print `by` as "waiting on", but
+    // `by` is who WROTE the record, on every record — the `yad-run` skill writes the login the run ran as —
+    // so it named the wrong party.
+    case 'blocked': {
+      const who = a.record?.by ? ` — recorded by ${a.record.by}${a.record.date ? ` on ${a.record.date}` : ''}` : '';
+      return c.dim(`blocked${who} — clear it with yad unblock ${a.epicId} ${a.step} once resolved`);
+    }
     default:
       return c.dim('nothing to do');
   }
