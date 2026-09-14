@@ -30,10 +30,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { c, fail, hand, info, log, ok, readJSON } from './lib.mjs';
+import { c, fail, hand, info, log, ok, readJSON, warn } from './lib.mjs';
 import {
-  DISCOVERY_EPIC, epicRel, epicRoot, FOUNDATION_EPIC, FOUNDATION_SECTIONS, isGenesisType, isValidEpicId,
-  lifecycleProfile, loadSkillBindings, PRODUCT_EPICS, readFrontmatter, seedableProfiles, seedFoundationState,
+  DISCOVERY_EPIC, epicIds, epicLineage, epicRel, epicRoot, epicStories, featureStatus, FOUNDATION_EPIC, FOUNDATION_SECTIONS,
+  isGenesisType, isValidEpicId, lifecycleProfile, loadLedger, loadSkillBindings, PRODUCT_DONE, PRODUCT_EPICS,
+  readFrontmatter, roadmapFeatures, seedableProfiles, seedFoundationState,
   seedState, staleFoundationGuards, stepSkills, typeNoun, WORK_ITEM_TYPES, workItemType, writeJSON, writeState,
 } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
@@ -280,4 +281,100 @@ export async function runFoundationNew(root, { today, json = false } = {}) {
   info(`sections: ${required.join(', ')} ${c.dim(`(optional: ${optional.join(', ')})`)}`);
   if (skills.length > 1) info(`${skills.length} skills run for this step, one after another — each one costs tokens`);
   info('then `yad gate open EP-foundation foundation/`. Commit the seed on the Foundation\'s authoring branch — it reaches the default branch through the first review PR/MR.');
+}
+
+// `yad foundation status` — which roadmap features are started, READ from the epic ledgers (E76
+// follow-up). Read-only: it never writes `roadmap.md`, whose table is part of what the Foundation's
+// reviewers approved. See `roadmapFeatures` / `featureStatus` in epic-state.mjs for the rules.
+//
+// Both spellings of the product level are read (rule 2): a product still in `epics/EP-discovery/` has
+// the same `roadmap.md`, with a `Requirements` column the reader steps over.
+//
+// A hand-written `Status` cell is shown only when it disagrees with the ledger, as a note — that column
+// is no longer kept by hand, and a person reading an older Foundation needs to be told which answer is
+// current. `epic-started` was the old word for a seeded epic, so it agrees with `in-shape` and `in-build`.
+const WRITTEN_AGREES = { 'epic-started': ['in-shape', 'in-build'] };
+const writtenDisagrees = (written, status) => {
+  if (!written || !status) return false;
+  const w = written.toLowerCase();
+  return w !== status && !(WRITTEN_AGREES[w] || []).includes(status);
+};
+
+export async function runFoundationStatus(root, { json = false } = {}) {
+  const bail = (message, hint) => {
+    if (json) log(JSON.stringify({ ok: false, error: message, hint }, null, 2));
+    else { fail(message); if (hint) hand(hint); }
+    process.exitCode = 1;
+  };
+  const present = PRODUCT_EPICS.filter((id) => fs.existsSync(epicFiles(epicRoot(root, id)).state));
+  const productId = present[0];
+  // Two product levels is a fault `yad doctor` fails on. The Foundation is the one read — the same
+  // choice `yad next` makes — and the other is named, so the answer is never silently from one of two.
+  const warnings = present.length > 1
+    ? [`two product levels: ${present.map((id) => `${epicRel(id)}/`).join(' and ')} — reading ${productId}; run \`yad doctor\``]
+    : [];
+  if (!productId) {
+    return bail('this product has no Foundation yet, so there is no roadmap to read',
+      'run `yad foundation new`, then the yad-discovery skill — its roadmap.md lists the features');
+  }
+  const dir = epicRoot(root, productId);
+  const file = path.join(dir, 'roadmap.md');
+  const rel = path.relative(root, file);
+  if (!fs.existsSync(file)) return bail(`${rel} does not exist yet`, 'write the roadmap with the yad-discovery skill');
+
+  let productState = null;
+  try { productState = loadLedger(dir).state; } catch { /* `yad doctor` reports an unreadable ledger */ }
+  const approved = PRODUCT_DONE.includes(productState?.currentStep);
+  const features = roadmapFeatures(fs.readFileSync(file, 'utf8')).map((row) => {
+    if (!isValidEpicId(row.epicId) || PRODUCT_EPICS.includes(row.epicId)) {
+      return { ...row, status: null, problem: 'not a valid feature epic id' };
+    }
+    try {
+      const epicDir = epicRoot(root, row.epicId);
+      const status = featureStatus(loadLedger(epicDir), { stories: epicStories(epicDir) });
+      return { ...row, status, ...(writtenDisagrees(row.written, status) ? { disagrees: true } : {}) };
+    } catch {
+      return { ...row, status: null, problem: 'its ledger does not load — run `yad doctor`' };
+    }
+  });
+  // Feature epics no row proposes. `yad-epic` assigns the id, and it may not be the proposed one, so this
+  // is where a started feature would otherwise disappear. Change, defect and hotfix epics are work ON a
+  // feature, never a roadmap row, so they are not named.
+  //
+  // Only a folder with a ledger counts: an empty `epics/EP-x/` is not an epic. The type comes from
+  // `epic.md` when it exists (that is where the author wrote it) and from the ledger's own `type` when it
+  // does not — a `yad epic new --type chore` has no `epic.md` yet, and reading that absence as `feature`
+  // would list a chore. Anything that cannot be read is left to `yad doctor`, never allowed to throw here.
+  const listed = new Set(features.map((f) => f.epicId));
+  const unlisted = epicIds(root).filter((id) => {
+    if (PRODUCT_EPICS.includes(id) || listed.has(id)) return false;
+    try {
+      const state = loadLedger(epicRoot(root, id)).state;
+      if (!state) return false;
+      const type = fs.existsSync(path.join(epicRoot(root, id), 'epic.md')) ? epicLineage(root, id).type : state.type;
+      return type === 'feature';
+    } catch { return false; }
+  });
+
+  if (json) {
+    return log(JSON.stringify({ ok: true, epic: productId, roadmap: rel, approved, features, unlisted, ...(warnings.length ? { warnings } : {}) }, null, 2));
+  }
+  for (const w of warnings) warn(w);
+  log(`\n  ${c.bold(`${productId} roadmap`)}  ${c.dim(`${rel} — each status is read from the epic ledgers`)}`);
+  if (!approved) info(c.dim('the Foundation has not passed its review yet, so this roadmap is still a draft'));
+  if (!features.length) warn(`${rel} has no feature table — a table whose header has a "Proposed epic id" column`);
+  let phase;
+  for (const f of features) {
+    if (f.phase !== phase) { phase = f.phase; log(`  ${c.bold(phase || '(no heading)')}`); }
+    const name = `${f.feature || '(no name)'}  ${c.dim(f.epicId || '(no id)')}`;
+    if (f.problem) { log(`    ${c.yellow('!')} ${name}  ${c.yellow(f.problem)}`); continue; }
+    const mark = f.status === 'shipped' ? c.green('✓') : f.status === 'planned' ? c.dim('·') : c.cyan('•');
+    log(`    ${mark} ${name}  ${f.status}`);
+    if (f.disagrees) log(`      ${c.dim(`the row says "${f.written}" — that column is no longer kept by hand; the ledger's answer is shown`)}`);
+  }
+  if (unlisted.length) {
+    info(`not on the roadmap: ${unlisted.join(', ')} ${c.dim('(feature epics no row proposes — an epic may have been given a different id)')}`);
+  }
+  const next = features.find((f) => f.status === 'planned');
+  if (next) hand(`next planned feature: ${next.feature || next.epicId} — seed it with the yad-epic skill (proposed id ${next.epicId})`);
 }

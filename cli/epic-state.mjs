@@ -419,6 +419,109 @@ export function unwrittenSections(dir, sections = FOUNDATION_SECTIONS) {
   });
 }
 
+// ---- the roadmap's features, and how far each has got (E76 follow-up) ---------------------------
+// `roadmap.md` lists the product's features with a proposed epic id each. It used to carry a `Status`
+// column people bumped by hand (`planned` → `epic-started` → `shipped`). That table is part of what the
+// Foundation's reviewers approved, so the hand edit changed the Foundation's fingerprint and made its
+// approvals read as stale. The user's decision (recorded in the E76 row): stop the edit, and READ the
+// status from the epic ledgers instead. Nothing here writes `roadmap.md`.
+//
+// The table reader. A feature table is any Markdown table whose header row has a `Proposed epic id`
+// cell — in any column, because the old `discovery` spelling put `Requirements` between the id and the
+// status. The heading above a table is its phase. Rows run until the first line with no `|`. Comments
+// are never read, so the template's example row (kept in a comment) is never read as a feature.
+// Cells split on UNESCAPED pipes only: `\|` inside a cell is a literal pipe, as GitHub renders it.
+const tableCells = (line) => line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '')
+  .split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, '|').trim());
+const HEADING = /^(#{1,6})\s+(.*)$/;
+const FENCE = /^(```|~~~)/;
+export function roadmapFeatures(text) {
+  // A line that held ONLY a comment is dropped whole, not left blank: the template keeps its example
+  // row in a comment directly under the `|---|` rule, and a blank line there would end the table before
+  // the rows a person adds beneath it.
+  const lines = String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').replace(FRONTMATTER_BLOCK, '')
+    .replace(/<!--[\s\S]*?-->/g, '\u0000').split('\n')
+    .filter((l) => !(l.includes('\u0000') && !l.split('\u0000').join('').trim()))
+    .map((l) => l.split('\u0000').join('').trim());
+  const out = [];
+  let phase = null;
+  let fence = null;   // the marker of an open code fence — a table shown as an example is not a feature
+  for (let i = 0; i < lines.length; i++) {
+    const mark = lines[i].match(FENCE);
+    if (fence) { if (mark && mark[1] === fence) fence = null; continue; }
+    if (mark) { fence = mark[1]; continue; }
+    const heading = lines[i].match(HEADING);
+    // The PHASE is the nearest `#` or `##` heading — the level the template's phases use. A `###` under a
+    // phase (`### Must have`) groups rows inside it; it does not start a new one.
+    if (heading) { if (heading[1].length <= 2) phase = heading[2].trim(); continue; }
+    if (!lines[i].includes('|') || !isTableRule(lines[i + 1] ?? '')) continue;
+    const head = tableCells(lines[i]).map((cell) => cell.toLowerCase().replace(/\s+/g, ' '));
+    const idCol = head.findIndex((cell) => cell.includes('proposed epic id'));
+    if (idCol === -1) continue;
+    const statusCol = head.indexOf('status');
+    const named = head.indexOf('feature');
+    const featureCol = named !== -1 ? named : head.findIndex((_, n) => n !== idCol && n !== statusCol);
+    let r = i + 2;
+    // A heading or a fence ends a table, even one with a `|` in it (`## Phase 2 | later`), as GitHub ends it.
+    for (; r < lines.length && lines[r].includes('|') && !HEADING.test(lines[r]) && !FENCE.test(lines[r]); r++) {
+      const cells = tableCells(lines[r]);
+      if (cells.every((cell) => !cell)) continue;
+      out.push({
+        phase,
+        feature: cells[featureCol] || '',
+        // `EP-x`, **EP-x** and EP-x are the same id.
+        epicId: (cells[idCol] || '').replace(/[`*]/g, '').trim(),
+        written: statusCol === -1 ? null : (cells[statusCol] || null),
+      });
+    }
+    i = r - 1;   // the line that ended the table may be the next heading
+  }
+  return out;
+}
+
+// How far a feature has got, read from its epic's ledger — the words the artifact-status ladder already
+// uses for Build (`in-build`, `shipped`), plus `planned` and `in-shape` for before it:
+//   planned    no ledger — nobody has seeded the epic yet
+//   in-shape   seeded, and still walking Shape (epic, architecture, UI, stories)
+//   in-build   Shape is done; Build has not shipped every story in every repo yet
+//   shipped    every Build lane of every story is shipped — or a brownfield anchor (`yad-stub`), which
+//              exists precisely because the feature shipped before the Product did
+// It reuses `nextAction`, the same reader `yad next` prints, so the two can never disagree about an epic.
+export const FEATURE_STATUSES = ['planned', 'in-shape', 'in-build', 'shipped'];
+export function featureStatus(ledger, { stories = [] } = {}) {
+  if (!ledger?.state) return 'planned';
+  const a = nextAction(ledger);
+  if (a.kind === 'build') return buildShipped(a.builds || [], stories) ? 'shipped' : 'in-build';
+  if (a.kind === 'backfill-pending' || a.kind === 'backfill-done') return 'shipped';
+  return 'in-shape';
+}
+
+// Shipped means EVERY lane the epic owes, not every lane that happens to exist. A story's build-state
+// file appears only once that story starts Build (the `yad-run` skill creates it), so the lanes on disk
+// can all be shipped while two stories have not begun — the E76 follow-up review found exactly that.
+// So, when the epic's stories are known: each one needs a build-state, and each repo it declares needs a
+// lane in it. `buildNextForRepo` already refuses a false "shipped" for an empty lane; this is the same
+// refusal one level up. With no stories to compare against, the lanes on disk are all there is to read.
+function buildShipped(builds, stories) {
+  const lanes = builds.flatMap((b) => b.repos);
+  if (!lanes.length || !lanes.every((lane) => lane.shipped)) return false;
+  return stories.every((story) => {
+    const b = builds.find((x) => x.story === story.id);
+    return !!b && story.repos.every((repo) => b.repos.some((lane) => lane.repo === repo));
+  });
+}
+
+// The stories an epic expects Build to ship, from its `stories/` folder: each file's frontmatter `id`
+// (its file name without `.md` when that is missing — the name `yad-stories` gives it) and its `repos`.
+export function epicStories(epicDir) {
+  const dir = path.join(epicDir, 'stories');
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return [];
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.md')).sort().map((f) => {
+    const fm = readFrontmatter(path.join(dir, f));
+    return { id: fm.id || f.replace(/\.md$/, ''), repos: asList(fm.repos) };
+  });
+}
+
 // The two spellings of the product level. `foundation` is the one this release writes; `discovery` is
 // what every release before it wrote, under `epics/EP-discovery/`, and it is still READ (rule 2) — a
 // verified project cannot be converted by `yad migrate`, because CI owns its ledger, so the old

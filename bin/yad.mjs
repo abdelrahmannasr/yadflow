@@ -6,7 +6,7 @@ import { runSetup } from '../cli/setup.mjs';
 import { reconcile } from '../cli/reconcile.mjs';
 import { gateOpen, gateSync, gateComments, gateStatus, gateCi, gateReview, gateTrailer, gateWalkthrough, gateRepair } from '../cli/gate.mjs';
 import { isValidEpicId, seedableProfiles } from '../cli/epic-state.mjs';
-import { runEpicNew, runFoundationNew } from '../cli/epic.mjs';
+import { runEpicNew, runFoundationNew, runFoundationStatus } from '../cli/epic.mjs';
 import { runSkillBind, runSkillList, runSkillUnbind } from '../cli/skill.mjs';
 import { runCommit } from '../cli/commit.mjs';
 import { runOpenPr } from '../cli/openpr.mjs';
@@ -103,6 +103,10 @@ ${c.bold('Where am I / what next')}
                                        per product, before any epic — then the yad-discovery skill
                                        authors its sections. Refuses a second one, and a product still
                                        on the old epics/EP-discovery/ (yad migrate converts that)
+  yad foundation status [--json]       Which roadmap features are started: reads each proposed epic id
+                                       in roadmap.md and reports planned / in-shape / in-build /
+                                       shipped from the epic ledgers. Read-only — the roadmap's Status
+                                       column is no longer kept by hand
   yad next                             Project-wide: the one next action to take (or run setup)
   yad next <epic>                      The single next action for one epic (skill or yad command)
   yad next <epic> --check <step>       Exit 0 if <step> is runnable now, else 1 (precondition guard)
@@ -361,9 +365,10 @@ async function main() {
     }
     case 'foundation': {
       const [, action] = o._;
+      if (action === 'status') { await runFoundationStatus(o.dir, { json: o.json }); break; }
       if (action !== 'new') {
-        log(c.red(`unknown foundation action: ${action ?? '(none)'} (new)`));
-        log('usage: yad foundation new [--json]');
+        log(c.red(`unknown foundation action: ${action ?? '(none)'} (new, status)`));
+        log('usage: yad foundation new [--json] | yad foundation status [--json]');
         process.exitCode = 1; break;
       }
       await runFoundationNew(o.dir, { today, json: o.json });

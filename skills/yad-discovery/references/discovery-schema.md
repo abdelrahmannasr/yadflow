@@ -109,8 +109,10 @@ owner:
 <!-- explicitly deferred, with why -->
 ```
 
-Per-feature `status:` lifecycle (set by hand): `planned` → `epic-started` (a feature epic has been
-seeded with `yad-epic`) → `shipped`. The proposed `EP-<slug>` ids are suggestions for the eventual
+**Do not update the `Status` column by hand.** Editing the roadmap after its review has passed makes the
+approvals read as stale; `yad foundation status` reads each feature's status from the epic ledgers, for
+this spelling too. (The column's old hand-set ladder was `planned` → `epic-started` → `shipped`; rows that
+already say so can stay.) The proposed `EP-<slug>` ids are suggestions for the eventual
 `yad-epic` runs — `yad-epic` still assigns the id (and skips the reserved `EP-discovery`).
 
 The other four artifacts (`market-research.md`, `competitor-analysis.md`, `current-state.md`,
