@@ -435,6 +435,24 @@ const buildSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "build-log.json · story-status (in-build → shipped)", notifications: "permanently human — never auto-advances" },
   },
+  {
+    id: "backfill",
+    title: "Backfill Specs (Step G, brownfield)",
+    description:
+      "For a feature built before yadflow: pack ONE feature from the repo with Repomix (secret-scanned), have the AI describe what exists — never invent — and write a DRAFT spec marked verified: false. A human approves it through the review gate; only then is it real. A change is blocked until the features it touches have approved specs, and `promote` then flips a yad-stub anchor into a real, verified feature epic.",
+    actor: "engineer",
+    status: "draft",
+    stepState: "specs/backfill/<feature>/spec.md (verified: false)",
+    trigger: "yad-backfill {repo} {feature}",
+    handler: "yad-backfill",
+    activeComponents: ["code-repos", "product-hub", "state-json"],
+    messages: [
+      { id: "bf-1", from: "code-repos", to: "engineer", label: "pack one feature (Repomix, secret-scanned)", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "bf-2", from: "engineer", to: "code-repos", label: "write DRAFT spec (verified: false)", type: "write", color: "#2471a3", delay: 800, duration: 700 },
+      { id: "bf-3", from: "product-hub", to: "state-json", label: "approved → promote the stub epic", type: "gate", color: "#ca6f1e", delay: 1600, duration: 700 },
+    ],
+    sideEffects: { jobs: "specs/backfill/<feature>/spec.md · backfill-check.sh", notifications: "never auto-advances — a human approval makes the spec real" },
+  },
 ];
 
 // ── Phase 4 — Automation (earned, reversible) ───────────────────────────────
@@ -655,7 +673,7 @@ export const PATHS: FlowPath[] = [
     icon: "build",
     color: "#1e8449",
     description:
-      "Turn a ready-for-build story into shipped code, per repo: spec → implement → check gates → PR template → optional pair review → engineer review & merge.",
+      "Turn a ready-for-build story into shipped code, per repo: spec → implement → check gates → PR template → optional pair review → engineer review & merge. For code built before yadflow, backfill a draft spec first.",
     category: "build",
     steps: buildSteps,
   },
