@@ -307,7 +307,9 @@ optional by being **omitted** from the chain at seed time), `ui-design` is **alw
 **marked N/A in place** so the skip stays visible and auditable. The single mechanism is
 `yad skip EP-<slug> ui-design --reason "<why>"` (reverse with `yad unskip EP-<slug> ui-design`, or the
 older spelling `yad skip … --undo`), usable at epic-authoring time or any point **up to authoring the
-`ui-design` step**.
+`ui-design` step**. On a verified Product the window is shorter: once the epic's ledger is on the default
+branch (its first review PR has merged), `state.json` is CI's alone, and `yad skip`, `unskip`, `defer`,
+`undefer` and `unblock` refuse and write nothing. So there, skip `ui-design` right after seeding.
 
 When each verb is too late is a rule about the chain, not about `ui-design` (E36):
 

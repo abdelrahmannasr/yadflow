@@ -217,7 +217,7 @@ Notes:
   user-facing surface (a backend/API service, data pipeline, infra), the `ui-design` step is optional
   and can be marked N/A now with `yad skip EP-<slug> ui-design --reason "<why>"` — it stays visible,
   short-circuits its gate, and advances straight to `stories` when architecture is approved. It is
-  reversible with `yad unskip EP-<slug> ui-design` until the stories review opens. Don't hand-edit the chain to drop the steps;
+  reversible with `yad unskip EP-<slug> ui-design` until the stories review opens. **On a verified Product, now is the only time:** once this epic's first review PR merges, CI owns `state.json` and `yad skip` refuses. Don't hand-edit the chain to drop the steps;
   the skip is the single, auditable mechanism (see `references/state-schema.md` → "ui-design is optional").
 
 ### Step 5b — Open the epic's review gate

@@ -392,6 +392,13 @@ for every other epic in the project. `classic` and `analysis-first` both mark th
 altogether, so there is nothing on them to mark N/A, and `yad skip` says so rather than reporting the
 chain as broken.
 
+**On a verified Product, CI owns the ledger.** Once an epic's `state.json` is on the default branch,
+`yad skip`, `yad unskip`, `yad defer`, `yad undefer` and `yad unblock` refuse and write nothing.
+`ledger-guard` rejects any commit to that file that CI did not make, and CI has no step for these verbs
+yet. A new epic is different: its ledger rides its first review PR, so skipping `ui-design` right after
+seeding still works. If `origin` cannot be read, the verb writes and warns that it could not tell. A
+Build lane skip is not affected: it writes `build-state`, which CI does not own.
+
 **A whole Build lane can be skipped too (E39).** A lane is one story in one repo. When a story declares a
 repo that turns out to need no change, `yad skip <epic> <story> --repo <name> --reason "<why>"` marks that
 lane N/A in `build-state/<story>.json` — commit it with `yad checkpoint --push` — and

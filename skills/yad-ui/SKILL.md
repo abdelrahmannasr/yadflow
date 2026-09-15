@@ -56,7 +56,10 @@ pipeline, infra work), it does not need a UI design. Two signals to watch for:
   `yad skip EP-<slug> ui-design --reason "<why, e.g. backend-only service>"`. That marks both the
   `ui-design` and `ui-design-review` steps `skipped` (recorded reason + actor), short-circuits the review
   gate, and advances to `stories`. It is reversible with `yad unskip EP-<slug> ui-design` until the
-  stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional".
+  stories review opens. See `../yad-epic/references/state-schema.md` → "ui-design is optional". **On a verified
+  Product (the mode check below) neither offer works here:** by this step the epic's ledger is on the
+  default branch, so `yad skip` and `yad defer` refuse (CI owns `state.json`). Tell the user that, and do
+  not edit the ledger by hand.
 - **Will have screens, just not yet:** if the epic does need a UI but the team wants to design it later,
   offer `yad defer EP-<slug> ui-design --reason "<why, and who is waiting for it>"` instead of a skip.
   It passes the step for now and keeps it visibly owed. If the team is setting it aside under pressure

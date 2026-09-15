@@ -7063,6 +7063,71 @@ test('runSkip: a guard violation propagates as a YadError (to bin\'s top-level c
   );
 });
 
+// On a verified Product the verbs ask the question the ledger-guard hook asks: is this epic's ledger on
+// the default branch yet? git is faked, so every answer can be driven — the rule is invisible in a test
+// project that has no origin.
+test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger CI owns, and still write a new epic\'s (#162)', async () => {
+  const { runDefer, runUnblock, runLaneSkip } = await import('./skip.mjs');
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-verified-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+    const onBase = (...ledgers) => fakeRunner({
+      [`git -C ${T} rev-parse`]: '',
+      [`git -C ${T} -c core.quotePath=false ls-tree`]: ledgers.map((l) => `${l}\0`).join(''),
+    });
+    const owned = onBase('epics/ep-x/.sdlc/state.json');   // folded, as the gate folds
+    const bytes = () => fs.readFileSync(uiStateFile(T), 'utf8');
+    const before = bytes();
+    const refusals = [
+      ['yad skip', () => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })],
+      ['yad unskip', () => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: owned })],
+      ['yad defer', () => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', runner: owned })],
+      ['yad undefer', () => runDefer(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: owned })],
+      ['yad unblock', () => runUnblock(T, { epic: 'EP-x', step: 'ui-design', runner: owned })],
+    ];
+    for (const [command, verb] of refusals) {
+      process.exitCode = undefined;
+      const out = await grab(verb);
+      assert.match(out, new RegExp(`\`${command}\` is refused: epics/EP-x/\\.sdlc/state\\.json is on the default branch`), command);
+      assert.match(out, /only CI writes it — nothing is written/, command);
+      assert.match(out, /before its first review PR merges/, command);
+      assert.equal(process.exitCode, 1, command);
+      assert.equal(bytes(), before, `${command} wrote nothing`);
+    }
+
+    // A new epic — its ledger is not on the base — is the seeding window: the skip is written.
+    process.exitCode = undefined;
+    const fresh = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only', runner: onBase('epics/EP-other/.sdlc/state.json') }));
+    assert.match(fresh, /N\/A/);
+    assert.doesNotMatch(fresh, /refused|could not be read/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'skipped');
+    assert.notEqual(process.exitCode, 1);
+
+    // origin cannot be read: unknown, so it writes — and says it could not tell.
+    const unknown = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: fakeRunner() }));
+    assert.match(unknown, /origin could not be read — cannot tell whether CI already owns epics\/EP-x\/\.sdlc\/state\.json/);
+    assert.match(unknown, /un-skipped/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
+
+    // A local ledger on the same answers is never refused: only the verified mode hands the file to CI.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'local' }));
+    assert.match(await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', runner: owned })), /deferred/);
+    assert.equal(owned.calls.filter((call) => call.includes('ls-tree')).length, 5, 'git is not even asked on a local ledger');
+
+    // A Build lane lives in build-state, which CI does not own: a lane skip still writes on a verified Product.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    const dir = laneEpic(T);
+    assert.match(await grab(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', reason: 'no UI change', today: '2026-09-15' })), /lane skipped/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.sdlc/build-state/EP-l-S01.json'), 'utf8')).repos.web.status, 'skipped');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as the way back', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-unskip-cli-'));
   try {
