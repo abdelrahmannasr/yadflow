@@ -7364,6 +7364,49 @@ test('yad-run writes a closing record when it moves a lane past a step, pointing
   assert.match(skill, /"via": "human", "run": "<the trust-log uid>"/);
 });
 
+// The platform reads that feed a closing record (E18). `gh` / `glab` are replaced by a scripted runner, so
+// what is parsed out of each CLI's JSON is pinned here, not only what gate sync does with a fake reader.
+test('readPr (GitHub): a merged PR gives who merged, when and the merge commit; an open one gives nulls; the --json list asks for them (E18)', async () => {
+  const { readPr } = await import('./platform.mjs');
+  const merged = fakeRunner({
+    'gh pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid': JSON.stringify({
+      state: 'MERGED', mergedAt: '2026-06-08T21:40:00Z', mergedBy: { login: 'al', name: 'Alice' }, mergeCommit: { oid: 'c0ffee1234567' }, headRefOid: 'abc',
+    }),
+    'gh pr view 7 --json latestReviews': JSON.stringify({ latestReviews: [{ author: { login: 'bo' }, state: 'APPROVED' }] }),
+  });
+  const pr = readPr('github', 7, { runner: merged });
+  assert.equal(pr.ok, true);
+  assert.deepEqual([pr.merged, pr.mergedAt, pr.mergedBy, pr.mergeCommit, pr.headOid], [true, '2026-06-08T21:40:00Z', 'al', 'c0ffee1234567', 'abc']);
+  assert.deepEqual(pr.reviews, [{ login: 'bo', state: 'APPROVED', submittedAt: undefined, body: undefined, commit: null }], 'the degraded review read still works');
+  assert.ok(merged.calls.includes('gh pr view 7 --json state,mergedAt,mergedBy,mergeCommit,headRefOid'), merged.calls.join('\n'));
+
+  const open = readPr('github', 8, { runner: fakeRunner({
+    'gh pr view 8 --json state': JSON.stringify({ state: 'OPEN', mergedAt: null, mergedBy: null, mergeCommit: null, headRefOid: 'def' }),
+  }) });
+  assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit], [false, null, null, null]);
+
+  assert.equal(readPr('github', 9, { runner: fakeRunner() }).ok, false, 'a failed view is a failed read');
+});
+
+test('readPr (GitLab): merge_user, then the older merged_by; merge_commit_sha, then squash_commit_sha; nulls on an open MR (E18)', async () => {
+  const { readPr } = await import('./platform.mjs');
+  const view = (mr) => fakeRunner({ [`glab mr view ${mr.iid} -F json`]: JSON.stringify(mr) });
+
+  const current = readPr('gitlab', 3, { runner: view({
+    iid: 3, state: 'merged', merged_at: '2026-06-08T21:40:00.000Z', merge_user: { username: 'al' }, merged_by: { username: 'old-name' },
+    merge_commit_sha: 'c0ffee1234567', squash_commit_sha: 'squash9876', diff_refs: { head_sha: 'abc' },
+  }) });
+  assert.equal(current.ok, true);
+  assert.deepEqual([current.merged, current.mergedAt, current.mergedBy, current.mergeCommit, current.headOid],
+    [true, '2026-06-08T21:40:00.000Z', 'al', 'c0ffee1234567', 'abc'], 'merge_user wins over the deprecated merged_by');
+
+  const older = readPr('gitlab', 4, { runner: view({ iid: 4, state: 'merged', merged_at: '2026-06-09T08:00:00.000Z', merged_by: { username: 'bo' }, merge_commit_sha: null, squash_commit_sha: 'squash9876', sha: 'def' }) });
+  assert.deepEqual([older.mergedBy, older.mergeCommit, older.headOid], ['bo', 'squash9876', 'def'], 'an older instance, and a squash merge');
+
+  const open = readPr('gitlab', 5, { runner: view({ iid: 5, state: 'opened', sha: 'ghi' }) });
+  assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit], [false, null, null, null]);
+});
+
 test('yad-review-gate, passing a gate by hand on a Product with no platform, writes the closing records advanceState would (E18 review)', async () => {
   const { CLOSED_VIA } = await import('./epic-state.mjs');
   const skill = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');

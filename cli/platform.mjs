@@ -221,8 +221,8 @@ export function mapApprovers(reviews = [], { roster, repos, touchedDomains, head
 }
 
 // ---- read PR state (github) ---------------------------------------------------------------------
-function readPrGitHub(n, { cwd } = {}) {
-  const view = run('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,mergedBy,mergeCommit,headRefOid'], { cwd });
+function readPrGitHub(n, { cwd, runner = run } = {}) {
+  const view = runner('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,mergedBy,mergeCommit,headRefOid'], { cwd });
   if (!view.ok) return { ok: false, reason: view.stderr || 'gh pr view failed' };
   const meta = JSON.parse(view.stdout);
   let reviews = [];
@@ -230,7 +230,7 @@ function readPrGitHub(n, { cwd } = {}) {
   // Review-thread resolution via GraphQL (REST does not expose isResolved). Paginate so a PR with
   // >100 threads is not mistakenly read as "all resolved".
   let threads = [];
-  const nwo = run('gh', ['repo', 'view', '--json', 'owner,name'], { cwd });
+  const nwo = runner('gh', ['repo', 'view', '--json', 'owner,name'], { cwd });
   if (nwo.ok) {
     const { owner, name } = JSON.parse(nwo.stdout);
     // latestReviews collapses a reviewer's superseded reviews to their current one; commit.oid binds
@@ -245,7 +245,7 @@ function readPrGitHub(n, { cwd } = {}) {
     for (let guard = 0; guard < 50; guard++) {
       const args = ['api', 'graphql', '-f', `query=${rq}`, '-F', `o=${owner.login}`, '-F', `r=${name}`, '-F', `n=${n}`];
       if (rcursor) args.push('-F', `c=${rcursor}`);
-      const rg = run('gh', args, { cwd });
+      const rg = runner('gh', args, { cwd });
       if (!rg.ok) { reviewsOk = false; reviews = []; break; }
       const conn = JSON.parse(rg.stdout)?.data?.repository?.pullRequest?.latestReviews;
       for (const x of conn?.nodes || []) {
@@ -259,7 +259,7 @@ function readPrGitHub(n, { cwd } = {}) {
     for (let guard = 0; guard < 50; guard++) {
       const args = ['api', 'graphql', '-f', `query=${q}`, '-F', `o=${owner.login}`, '-F', `r=${name}`, '-F', `n=${n}`];
       if (cursor) args.push('-F', `c=${cursor}`);
-      const g = run('gh', args, { cwd });
+      const g = runner('gh', args, { cwd });
       if (!g.ok) break;
       const page = JSON.parse(g.stdout)?.data?.repository?.pullRequest?.reviewThreads;
       for (const t of page?.nodes || []) {
@@ -279,7 +279,7 @@ function readPrGitHub(n, { cwd } = {}) {
   // is for the merged content), while CHANGES_REQUESTED is still honored — so a transient failure
   // holds the gate, never advances it.
   if (!reviewsOk) {
-    const rev = run('gh', ['pr', 'view', String(n), '--json', 'latestReviews'], { cwd });
+    const rev = runner('gh', ['pr', 'view', String(n), '--json', 'latestReviews'], { cwd });
     if (rev.ok) reviews = (JSON.parse(rev.stdout).latestReviews || [])
       .map((x) => ({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, body: x.body, commit: null }));
   }
@@ -298,13 +298,13 @@ function readPrGitHub(n, { cwd } = {}) {
 }
 
 // ---- read PR state (gitlab) ---------------------------------------------------------------------
-function readPrGitLab(n, { cwd } = {}) {
-  const view = run('glab', ['mr', 'view', String(n), '-F', 'json'], { cwd });
+function readPrGitLab(n, { cwd, runner = run } = {}) {
+  const view = runner('glab', ['mr', 'view', String(n), '-F', 'json'], { cwd });
   if (!view.ok) return { ok: false, reason: view.stderr || 'glab mr view failed' };
   const mr = JSON.parse(view.stdout);
-  const approvals = run('glab', ['api', `projects/:id/merge_requests/${mr.iid}/approvals`], { cwd });
+  const approvals = runner('glab', ['api', `projects/:id/merge_requests/${mr.iid}/approvals`], { cwd });
   const approvedBy = approvals.ok ? (JSON.parse(approvals.stdout).approved_by || []) : [];
-  const disc = run('glab', ['api', `projects/:id/merge_requests/${mr.iid}/discussions`], { cwd });
+  const disc = runner('glab', ['api', `projects/:id/merge_requests/${mr.iid}/discussions`], { cwd });
   const discussions = disc.ok ? (JSON.parse(disc.stdout) || []) : [];
   // A GitLab approval carries no body, so the companion's engagement marker rides in a NOTE the
   // reviewer posts; attach the latest engagement-bearing note per username to their approval so
@@ -339,8 +339,11 @@ function readPrGitLab(n, { cwd } = {}) {
 }
 
 // Injectable entry point. gate.mjs accepts a `reader` override; default dispatches to gh/glab.
+// `opts.runner` replaces the gh/glab calls, so the parsing is unit-testable without either installed
+// (mirrors platformDefaultBranch). With a runner there is no CLI to probe, only a platform to name.
 export function readPr(platform, n, opts = {}) {
-  if (!platformReady(platform)) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
+  const ready = opts.runner ? !!cliFor(platform) : platformReady(platform);
+  if (!ready) return { ok: false, reason: `${cliFor(platform) || 'platform CLI'} not available` };
   return platform === 'gitlab' ? readPrGitLab(n, opts) : readPrGitHub(n, opts);
 }
 
