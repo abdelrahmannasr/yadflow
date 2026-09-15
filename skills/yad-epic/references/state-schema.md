@@ -80,6 +80,25 @@ binding that will never run: a value that is not a skill name (`YAD-CFG-006`), a
 does not know (`skills:unknown-step`) and a review gate, which `yad gate` drives (`skills:review-step`).
 It never rewrites the file.
 
+**The kill switch and the Shape dials live in `.sdlc/automation.json` (E34)**, also a Product-level file,
+also absent by default:
+
+```json
+{ "schemaVersion": 10, "kill": { "on": true, "reason": "bad deploy", "by": "al", "date": "2026-09-15" },
+  "steps": { "architecture": "auto" } }
+```
+
+`kill` is written by `yad kill --reason "<why>"` / `yad unkill`; while `on`, every step is held at
+`advance: human`; the record a `yad unkill` or a second `yad kill` replaces is kept as `kill.previous`, one level
+deep. `steps` lists the feature Shape AUTHOR steps (not the Foundation's) the project set to `auto` with `yad dial <step> --to
+auto` — `human` is the key's absence. A Shape `auto` is **recorded, not acted on**: nothing drives a Shape
+step on its own until the engine runs agents (E26). A Build step's dial is not here; it is on its lane in
+`build-state`. A review gate is never `auto`. A file that will not parse is read as the kill switch ON,
+and nothing writes over it. `yad doctor` reports a broken file (`automation`), an active switch
+(`automation:kill`), a gate set to auto (`automation:gate`), a Build step listed here
+(`automation:build-step`), an unknown id or value (`automation:unknown`), and a `kill_switch: true` left in
+`_bmad/sdlc/config.yaml`, which nothing reads any more (`automation:legacy-kill`).
+
 **When a chain disagrees with the catalogue, the chain wins.** A change-epic seeded by hand before E42
 may carry a chain the engine would not write, a project may run a chain from a newer release, and leaving a step out is normal
 — not every epic has screens. `yad doctor` reports five disagreements it can see and rewrites nothing:
@@ -273,7 +292,9 @@ No release before shape 7 ever wrote a record, so that is exact. The converse is
 has a verb: `yad unblock EP-<slug> <step>` (E37) moves `status` off `blocked` **and** removes the record
 in one write, because deleting only the record would turn the step silently into a `todo`. An author
 step whose earlier steps have all passed goes to `in_progress`; anything else, a review gate included,
-goes to `todo`. It never touches `build-state/<story>.json`, which the `yad-run` skill writes.
+goes to `todo`. It never touches `build-state/<story>.json`, which the `yad-run` skill writes. On a verified
+Product it refuses once the epic's ledger is on the default branch: CI owns `state.json` there and has no
+step for it yet.
 
 A status this release does not know is left alone — the file wins — and reported as
 `step:unknown-status`. It fails closed: the step counts as neither passed nor authored.
@@ -288,7 +309,11 @@ optional by being **omitted** from the chain at seed time), `ui-design` is **alw
 **marked N/A in place** so the skip stays visible and auditable. The single mechanism is
 `yad skip EP-<slug> ui-design --reason "<why>"` (reverse with `yad unskip EP-<slug> ui-design`, or the
 older spelling `yad skip … --undo`), usable at epic-authoring time or any point **up to authoring the
-`ui-design` step**.
+`ui-design` step**. On a verified Product the window is shorter: once the epic's ledger is on the default
+branch (its first review PR has merged), `state.json` is CI's alone, and `yad skip`, `unskip`, `defer`,
+`undefer` and `unblock` refuse and write nothing. So there, skip `ui-design` before that first PR merges:
+right after seeding on `classic`, and during the analysis step on `analysis-first`, whose first review PR
+is the analysis review.
 
 When each verb is too late is a rule about the chain, not about `ui-design` (E36):
 
@@ -371,7 +396,8 @@ A deferral follows the skip rules above:
 
 For a skip, the un-skip window is the meaning: work finished without the step was built on it not
 applying, so `yad unskip` is still refused once the step after the pair is finished. A deferral promised
-to come back, so `yad undefer` has **no closing window**. Before later work has finished it behaves like
+to come back, so `yad undefer` has **no closing window** — except on a verified Product, where it refuses once the epic's
+ledger is on the default branch. Before later work has finished it behaves like
 `yad unskip`. After it has finished, it **re-opens** the pair behind that work:
 
 | Field | After a late `yad undefer` |
@@ -419,7 +445,7 @@ of the pair:
 | Where it may sit | a `deferred` pair only; `yad skip --debt` is refused, since a skip owes nothing |
 | What it changes | nothing about the state: a debt is exactly as passed, and as unauthored, as any deferral |
 | Adding it later | `yad defer … --debt` on a step already deferred adds the flag and keeps the record |
-| Paying it back | `yad undefer`, early or late; the flag stays on while the step is worked on |
+| Paying it back | `yad undefer`, early or late; the flag stays on while the step is worked on. Not on a verified Product once the ledger is on the default branch: there a debt cannot be paid back until CI has a step for it |
 | Setting it aside again | `yad defer` again keeps the flag; `yad skip` is refused on a step owed as debt, because a skip owes nothing and its review would never run again |
 | When it clears | `advanceState` removes it from both steps when the `-review` gate passes — nothing else does |
 | Reminders | `yad next` (a warning per debt, a count in the all-epics list, `debt` in JSON), `yad doctor` (`step:debt`, a warn), `yad gate status` ("deferred (still owed, as debt)") |
@@ -476,7 +502,7 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `driver` | `human` \| `pair` \| `agent` | Dial 1, shape-4 name, written beside `assistance`: `human`=`none`, `pair`=`review`, `agent`=`heavy`. |
 | `automation` | `human_approve` \| `machine_advance` | Dial 2 (advance) — who moves it forward. **The name the engine reads.** |
 | `advance` | `human` \| `auto` | Dial 2, shape-4 name, written beside `automation`: `human`=`human_approve`, `auto`=`machine_advance`. A review step is NEVER `auto`. |
-| `locked` | `true` \| `false` | Shape steps are `true`: may NOT be set to `advance: auto` in this version. |
+| `locked` | `true` \| `false` | Seeded `true` on every Shape step. Since E34 it decides nothing about the dial on a step the catalogue knows: an author step may be set to `auto` (for the whole project, in `.sdlc/automation.json`), and a review gate is `human` because it is a gate. It is still read as a gate on a step id the catalogue does not know. |
 | `status` | one of the **step states** below | Where the step stands. |
 | `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4), and sets the step's reported approver count: `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). |
@@ -603,7 +629,7 @@ Each `steps[]` entry:
 | Field | Values | Meaning |
 |-------|--------|---------|
 | `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Build step identity (the `back_steps` from `config.yaml` + the human merge gate). |
-| `automation` / `advance` | `human_approve`/`human` \| `machine_advance`/`auto` | Dial 2, written under both names (the OLD one is read). Defaults to `human_approve`; flipped to `machine_advance` only after the trust threshold is met (and never for `locked` steps). |
+| `automation` / `advance` | `human_approve`/`human` \| `machine_advance`/`auto` | Dial 2, written under both names (the OLD one is read). Defaults to `human_approve`; `yad dial <epic> <story> --repo <r> <step> --to auto` flips it (E34 — nothing to earn), never on the `engineer-review` gate. |
 | `locked` | `true` \| `false` | `engineer-review` is `true` — it never auto-advances (build plan §E). |
 | `status` | the same **step states** as the Shape chain | Lifecycle. This file is **not** migrated to shape 7 — the `yad-run` / `yad-implement` skills write it, not the engine, so a rewrite would be undone by their next write. `yad-run` advances `done` steps and marks a halted lane `blocked` **with a `record`** naming the halt cause (a failed check, a scope overrun, a contract touch): that record is what separates a halted lane from one nobody started, because a bare `blocked` is the pre-shape-7 spelling of `todo` and still reads that way here. A lane halted by an older `yad-run` carries no record and reads as `todo` until the next run rewrites it — nothing advances past it either way. |
 
@@ -656,7 +682,7 @@ back:
 - **Folded file:** `epics/<epic>/.sdlc/trust-log.json` = `{ "epic": "<id>", "runs": [ <entry>, … ] }`
   (also the legacy single-file layout, and the output of `yad tidy up`).
 - **Union-read rule:** to read the ledger, take the folded file's `runs` array PLUS every file in the
-  `trust-log/` shard dir, and **concatenate** — every entry is a distinct run and the trust threshold
+  `trust-log/` shard dir, and **concatenate** — every entry is a distinct run and the run record
   counts re-runs, so **never dedup by `(story, repo, step)`**. (The only guard: a shard whose FULL
   identity `(story, repo, step, uid)` already appears in the folded `runs` is a half-applied tidy and is
   skipped — keying on `uid` alone would wrongly drop a different run that happened to reuse a token.) A legacy epic with only
@@ -664,7 +690,7 @@ back:
 - **`yad tidy up`** (manual, one person) folds a SHIPPED story's finished shards into the folded file's
   `runs` and deletes them. Writers never fold — they only add shards; `yad checkpoint` commits the shard
   dir, and `yad tidy up` is the Build analogue of `git gc` folding loose objects.
-- The **threshold slice** (below) reads this same union, filtered to the step (and repo).
+- The **run record** `yad dial` prints reads this same union, filtered to the step and repo.
 
 ```json
 {
@@ -705,11 +731,9 @@ same three-way shape, anchored to each step's human gate, never self-graded):
 - accepted after a human edited the output (`human_edited_diff` / `human_edited_spec` / `task_rescoped`) → `approved-with-edits`;
 - accepted as produced → `approved-unchanged`.
 
-**Trust threshold** (from `config.yaml` `automation.trust_threshold`): a step is a candidate for
-`machine_advance` only when its slice of the trust ledger — the **union** of the folded `trust-log.json`
-`runs` plus every `trust-log/` shard, filtered to the same `step` (this story's repo or the project) —
-has `>= min_runs` entries AND the fraction with `verdict == "approved-unchanged"` is
-`>= min_approved_unchanged`. The dial-setter in `yad-run` enforces this; `yad-status` surfaces it.
+**The run record is advice (E34).** There is no trust threshold. `yad dial` prints a step's slice — runs
+and the fraction `approved-unchanged`, from the union above — beside its dial, and never refuses on it; the
+team decides. `yad-status` shows the same record.
 
 ## `build-log.json` (shard-then-fold)
 The build ledger records one ship per merged task. Its schema and the ship record's fields are

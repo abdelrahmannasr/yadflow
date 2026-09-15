@@ -95,7 +95,7 @@ engineer-review rule is satisfied (Step 2). Then:
   `epics/<epic>/.sdlc/trust-log/<story>-<repo>-implement-<uid>.json` (or, if the run was already folded
   by `yad tidy up`, into its entry in the folded `trust-log.json`). The human has the last word on the trust signal: a diff merged
   as authored is `approved-unchanged`; one the engineer edited before merge is `approved-with-edits`;
-  a rejected one is `rejected`. This is the evidence that later earns a step its `advance: auto`
+  a rejected one is `rejected`. This is the run record `yad dial` shows the team beside a step's dial
   (it never weakens the merge gate — the engineer still owns the merge).
 - **Commit the machine-written ledgers.** Run `yad checkpoint --push` from `{project-root}` to commit
   the Build ledgers just written (the `build-log/` shard, and the `trust-log/` shard /

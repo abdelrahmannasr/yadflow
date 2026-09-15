@@ -3,7 +3,7 @@
 `yad-docs-overview` reuses the per-epic shell, but the *content* is the **workflow itself** rather than
 one epic's flows. This file pins how the setup→ship pipeline maps onto the shell's primitives. The
 ordering source of truth is `skills/sdlc/module-help.csv` (`phase`, `preceded-by`, `followed-by`,
-`outputs`); the dials/thresholds come from `skills/sdlc/config.yaml`; the node classes come from
+`outputs`); the dial defaults come from `skills/sdlc/config.yaml`; the node classes come from
 `docs/diagrams/sdlc-overview.mmd`.
 
 ## Primitive mapping
@@ -14,7 +14,7 @@ ordering source of truth is `skills/sdlc/module-help.csv` (`phase`, `preceded-by
 | `FlowStep` (within a path) | a **skill or gate** in order; `messages` = its `outputs`; `sideEffects` = the `.sdlc/` files it writes; `status`/`bookingStatus` annotate gated vs. enrichment vs. earned. |
 | `SystemComponent` (`components.ts`) | a **durable state object** (the Product, each `.sdlc/*.json`, code repos, the design/testing/learning tools, the platform). |
 | `RoleConfig` (`roles.ts`) | a **lens** → its relevant sections + paths. |
-| doc sections (`docSections.ts`/`referenceData.ts`) | the phase narratives + the dial/threshold reference tables (from `config.yaml` + the build-plan docs). |
+| doc sections (`docSections.ts`/`referenceData.ts`) | the phase narratives + the dial reference tables (from `config.yaml` + the build-plan docs). |
 
 ## Flow paths = phases, with their skills in order
 
@@ -97,7 +97,7 @@ node classes from the diagram.
 
 | Step (skill) | Outputs / sideEffects |
 |--------------|------------------------|
-| `yad-run` | drives the Build loop; `build-state/<story>.json`, `trust-log.json`, kill switch |
+| `yad-run` | drives the Build loop; `build-state/<story>.json`, `trust-log.json`; dials and kill switch through `yad dial` / `yad kill` (`.sdlc/automation.json`) |
 | `yad-learn` | tutoring; `learning-records.json` (LOCAL-ONLY, gitignored) |
 | `yad-status` | read-only view (no writes) |
 | `yad-docs` / `yad-docs-overview` / `yad-docs-sync` | the docs sites + their `docs-build.json` manifests |

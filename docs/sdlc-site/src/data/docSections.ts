@@ -51,7 +51,7 @@ export const DOC_SECTIONS: Record<string, DocSectionConfig> = {
   },
   'two-dials': {
     id: 'two-dials',
-    title: 'The Two Dials & Earned Automation',
+    title: 'The Two Dials & the Kill Switch',
     icon: 'tune',
     iconColor: '#b7950b',
     component: TwoDialsSection,

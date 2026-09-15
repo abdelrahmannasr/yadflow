@@ -13,11 +13,11 @@ import { FeatureFlagMatrix } from './FeatureFlagMatrix';
 import { CliCommandChips } from './CliCommandChips';
 import { TroubleshootingSection } from './TroubleshootingSection';
 
-// Who advances each step type — the locked vs earnable rule.
+// Who advances each step type — every gate is a person; a Build step's dial is the team's (E34).
 const STEP_ADVANCE_RULES = [
   { status: 'Setup & connectors', canCancel: 'Not gated', color: '#b7950b', dotColor: '#b7950b' },
-  { status: 'Shape steps (epic … stories)', canCancel: 'Human (locked)', color: '#566573', dotColor: '#566573' },
-  { status: 'Build steps (spec … checks)', canCancel: 'Earnable', color: '#1e8449', dotColor: '#1e8449' },
+  { status: 'Shape steps (epic … stories)', canCancel: 'Reviews human · author dial recorded', color: '#566573', dotColor: '#566573' },
+  { status: 'Build steps (spec … checks)', canCancel: 'Switchable (yad dial)', color: '#1e8449', dotColor: '#1e8449' },
   { status: 'Engineer review & merge', canCancel: 'Human (locked)', color: '#ca6f1e', dotColor: '#ca6f1e' },
 ];
 

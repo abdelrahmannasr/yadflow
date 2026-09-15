@@ -931,8 +931,7 @@ export function stampStepDials(state) {
       moved = true;
     }
     if (typeof s.automation === 'string' && !('advance' in s) && Object.hasOwn(ADVANCE_FROM_AUTOMATION, s.automation)) {
-      const isReview = s.type === 'review+approve' || s.locked === true;
-      out.advance = isReview ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
+      out.advance = isGateStep(s) ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
       moved = true;
     }
     return out;
@@ -1269,6 +1268,29 @@ export function authorStepFor(state, reviewStep) {
   if (baseDef && (baseDef.phase === 'build' || baseDef.kind !== 'author')) return null;
   return state?.steps?.find((s) => s.id === base) || null;
 }
+
+// Is this step a GATE — one a human signs off, which may never advance on its own (rule 1)? (E34)
+//
+// Three answers, in order. `type: review+approve` is how the Shape chain marks one. For a step the
+// catalogue knows, its `kind` decides — that is how a Build `engineer-review`, which carries no `type`, is
+// recognised. And `locked: true` counts ONLY on an id the catalogue does not know, a step from a newer
+// yadflow, where it is the one signal left.
+//
+// `locked` alone used to decide it, and that was wrong for Shape: every seeded Shape step carries
+// `locked: true`, author steps included, so every Shape author step was pinned to `advance: human`. Since
+// E34 an author step's advance dial is the team's to set; `locked` on a step the catalogue knows to be
+// an author step decides nothing. No file changes — only what the readers conclude from it.
+//
+// `type` is checked before the catalogue on purpose: a step that SAYS it is a review is treated as one
+// even if its id names an author step. Of the two ways to be wrong, a gate read as an author step is the
+// one that breaks rule 1.
+export const isGateStep = (step) => {
+  if (!isPlainObject(step)) return false;
+  if (step.type === 'review+approve') return true;
+  const def = stepDef(step.id);
+  if (def) return def.kind === 'review';
+  return step.locked === true;
+};
 
 // Closing a review gate implies its artifact was authored — so the CLI, not the authoring skill, is
 // what makes `<step>.status = done` true. Without this an author step left at `in_progress` strands
@@ -3608,6 +3630,163 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
     approvals,
     state: { epicId: epic, createdAt: today, type, profile, currentStep: first.id, steps: chain },
   };
+}
+
+// ---- the advance dial, set freely, and the kill switch (E34) ------------------------------------
+//
+// Automation used to be EARNED: the `yad-run` skill refused `advance: auto` until a step's trust log
+// cleared a threshold. E34 deletes that. The dial is the team's to set, `yad dial` shows the run record as
+// advice, and a recorded kill switch holds every step at `human`. What never moves is rule 1: a gate
+// (`isGateStep`) is `human`, whatever any file says.
+//
+// TWO HOMES, because the two parts are written by different hands. A Build lane's dial stays on the
+// lane, in `build-state/<story>.json`, where `yad-run` already reads it. A Shape author step's dial is
+// project-wide, in `.sdlc/automation.json` beside the kill switch: `state.json` belongs to CI on a
+// verified Product, so a dial written there could not be changed by the team it belongs to.
+//
+// A SHAPE `auto` IS RECORDED, NOT ACTED ON — yet. Nothing drives a Shape step on its own until the engine
+// runs agents (E26, Wave 3.5). The same pattern as E7's approver count: the value is real, stored and
+// shown, and the command that prints it says so.
+export const ADVANCE_VALUES = ['human', 'auto'];
+
+const strOrNull = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+// `.sdlc/automation.json` as the readers see it: `{ kill, steps, error }`. An absent file is the
+// defaults — the switch off and every Shape step `human`. A file that is there and wrong carries an
+// `error`, and `killSwitchOn` reads an error as ON: of the two ways to be wrong about a safety switch,
+// holding everything at `human` is the one nobody gets hurt by. `steps` keeps its values as written, so
+// `yad doctor` can name a bad one; the readers honour only `auto`.
+export function normalizeAutomation(raw) {
+  const out = { kill: null, steps: {}, error: null };
+  if (raw == null) return out;
+  if (!isPlainObject(raw)) return { ...out, error: 'is not a JSON object' };
+  if (raw.kill != null) {
+    if (!isPlainObject(raw.kill) || typeof raw.kill.on !== 'boolean') return { ...out, error: 'has a `kill` that is not { on, reason, by, date }' };
+    out.kill = { on: raw.kill.on, reason: strOrNull(raw.kill.reason), by: strOrNull(raw.kill.by), date: strOrNull(raw.kill.date) };
+    // The record this one replaced, one level deep (rule 7: turning the switch off must not erase who
+    // turned it on, and why).
+    const p = raw.kill.previous;
+    if (isPlainObject(p) && typeof p.on === 'boolean') {
+      out.kill.previous = { on: p.on, reason: strOrNull(p.reason), by: strOrNull(p.by), date: strOrNull(p.date) };
+    }
+  }
+  if (raw.steps != null) {
+    if (!isPlainObject(raw.steps)) return { ...out, error: 'has a `steps` that is not an object' };
+    for (const [id, v] of Object.entries(raw.steps)) out.steps[id] = v;
+  }
+  return out;
+}
+
+export function loadAutomation(root) {
+  try {
+    return normalizeAutomation(readJSONStrict(path.join(root, PROJECT_FILES.automationConfig), null));
+  } catch {
+    return { kill: null, steps: {}, error: 'does not parse' };
+  }
+}
+
+// What goes back on disk. Steps sorted, so the bytes depend on what is set, not on the order it was set.
+export const serializeAutomation = (a) => ({
+  ...(a.kill ? { kill: a.kill } : {}),
+  steps: Object.fromEntries(Object.entries(a.steps || {}).sort(([x], [y]) => cmp(x, y))),
+});
+
+export const killSwitchOn = (a) => !!a && (a.error != null || a.kill?.on === true);
+
+// A step's advance as it will actually be applied: `{ advance, set, why }`. `set` is what the team chose;
+// `advance` is what happens. `why` is `gate` (rule 1), `kill` (held by the switch), `project` (a Shape
+// step, from automation.json) or `lane` (a Build step, from its own row).
+export function effectiveAdvance(step, automation = null) {
+  if (!isPlainObject(step)) return { advance: 'human', set: 'human', why: 'unknown' };
+  if (isGateStep(step)) return { advance: 'human', set: 'human', why: 'gate' };
+  const def = stepDef(step.id);
+  // A step this release does not know is held at human: nothing here can say it is not a gate.
+  if (!def) return { advance: 'human', set: 'human', why: 'unknown' };
+  const shape = def.phase !== 'build';
+  const set = shape
+    ? (automation?.steps && Object.hasOwn(automation.steps, step.id) && automation.steps[step.id] === 'auto' ? 'auto' : 'human')
+    : (stepAdvance(step) === 'auto' ? 'auto' : 'human');
+  if (set === 'auto' && killSwitchOn(automation)) return { advance: 'human', set, why: 'kill' };
+  return { advance: set, set, why: shape ? 'project' : 'lane' };
+}
+
+const refusal = (message, hint) => ({ ok: false, message, hint });
+const shapeAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase !== 'build' && d.level !== 'product').map((d) => d.id);
+const buildAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase === 'build').map((d) => d.id);
+
+// Set a Shape author step's dial for the whole project. PURE: takes and returns the automation object.
+export function planShapeDial(automation, { step, to }) {
+  const def = stepDef(step);
+  if (!def) return refusal(`unknown step: ${step}`, `a Shape step's dial is one of ${shapeAuthorIds().join(' · ')}`);
+  // "Shape author steps" means a feature's chain. The Foundation is the Product level, reviewed once per
+  // product; its dial is not the team's per-feature automation choice.
+  if (def.level === 'product') {
+    return refusal(`${step} is the Product level, not a step on a feature's Shape chain`,
+      `a Shape step's dial is one of ${shapeAuthorIds().join(' · ')}`);
+  }
+  if (def.kind === 'review') {
+    return refusal(`${step} is a review gate, and a gate is never auto`,
+      'a person clears every gate (rule 1). Set the dial of the step it reviews instead');
+  }
+  if (def.phase === 'build') {
+    return refusal(`${step} is a Build step — its dial is set per lane`,
+      `yad dial <epic> <story> --repo <name> ${step} --to ${to || 'auto'}`);
+  }
+  if (!ADVANCE_VALUES.includes(to)) return refusal(`--to must be human or auto, not ${to}`);
+  const steps = { ...(automation?.steps || {}) };
+  const before = steps[step] === 'auto' ? 'auto' : 'human';
+  // `human` is the default, so it is written as the key's ABSENCE: the file only ever lists what a team
+  // turned on.
+  if (to === 'auto') steps[step] = 'auto';
+  else delete steps[step];
+  return { ok: true, before, changed: before !== to || (to === 'human' && Object.hasOwn(automation?.steps || {}, step)), automation: { kill: automation?.kill || null, steps } };
+}
+
+// Set one Build step's dial on one lane. PURE: takes the parsed build-state, returns a new one.
+export function planLaneDial(buildState, { story, repo, step, to, declared = [] }) {
+  const def = stepDef(step);
+  if (def && def.phase !== 'build' && def.kind === 'author') {
+    return refusal(`${step} is a Shape step — its dial is set for the whole project`, `yad dial ${step} --to ${to || 'auto'}`);
+  }
+  if (!def || def.phase !== 'build') return refusal(`unknown Build step: ${step}`, `a lane's dial is one of ${buildAuthorIds().join(' · ')}`);
+  if (isGateStep({ id: step })) {
+    return refusal(`${step} is the merge gate, and a gate is never auto`, 'a person clears every gate (rule 1)');
+  }
+  if (!ADVANCE_VALUES.includes(to)) return refusal(`--to must be human or auto, not ${to}`);
+  if (!declared.includes(repo)) {
+    return refusal(`${story} does not declare the repo ${repo}`, `its repos are ${declared.join(' · ') || '(none)'}`);
+  }
+  const lane = isPlainObject(buildState?.repos) ? buildState.repos[repo] : null;
+  if (lane?.status === 'skipped') return refusal(`${story} / ${repo} is skipped — a skipped lane runs nothing`, `yad unskip <epic> ${story} --repo ${repo} first`);
+  const row = Array.isArray(lane?.steps) ? lane.steps.find((x) => isPlainObject(x) && x.id === step) : null;
+  if (!row) {
+    return refusal(`${story} / ${repo} has no ${step} step yet`,
+      'yad-run writes every Build step onto a lane the first time it drives it. Set the dial after that');
+  }
+  const before = stepAdvance(row) === 'auto' ? 'auto' : 'human';
+  // A deep copy: the caller's object is left exactly as it was read.
+  const next = JSON.parse(JSON.stringify(buildState));
+  const target = next.repos[repo].steps.find((x) => isPlainObject(x) && x.id === step);
+  // BOTH names, the old one first in meaning: `automation` is still the one read (shape 4), and a row
+  // carrying only `advance` is what `yad doctor` reports as `dials:new-only`.
+  target.automation = AUTOMATION_FROM_ADVANCE[to];
+  target.advance = to;
+  return { ok: true, before, changed: row.automation !== target.automation || row.advance !== target.advance, buildState: next };
+}
+
+// Turn the kill switch on or off. PURE. Turning it ON needs a reason (rule 7 — the escape hatch is
+// recorded); turning it off records who and when, and the reason when one is given.
+export function planKill(automation, { on, reason = null, by = null, date = null }) {
+  const why = strOrNull(reason);
+  if (on && !why) return refusal('the kill switch needs a reason', 'yad kill --reason "<why>" — the record is what tells the team when it is safe to turn it off');
+  const already = (automation?.kill?.on === true) === on;
+  if (already) return { ok: true, already: true, automation };
+  // The record being replaced is kept as `previous`, without its own `previous` — one level is the audit
+  // trail a person reads; the rest is git history.
+  const replaced = automation?.kill ? (({ previous: _previous, ...rest }) => rest)(automation.kill) : null;
+  return { ok: true, already: false, automation: { steps: { ...(automation?.steps || {}) }, kill: {
+    on, reason: why, by: by || null, date: date || null, ...(replaced ? { previous: replaced } : {}),
+  } } };
 }
 
 export { writeJSON };

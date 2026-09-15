@@ -24,8 +24,8 @@ const TERM_GROUPS = [
     steps: [
       'driver — human | pair | agent: who does the work on a step. Older name: `assistance` (none | review | heavy), still what the engine reads.',
       'advance — human | auto: who moves a step forward. Older name: `automation` (human_approve | machine_advance), still what the engine reads.',
-      'Earned automation — a Build step set to `advance: auto` after its trust slice clears ≥5 runs / ≥80% unchanged.',
-      'Kill switch — one line that forces every step back to `advance: human` system-wide, instantly reversible.',
+      'yad dial — sets a step\'s advance dial. A Build lane step in build-state; a Shape author step for the whole project in .sdlc/automation.json (recorded only). It shows the step\'s run record as advice; nothing is earned (E34).',
+      'Kill switch — `yad kill --reason` holds every step at `advance: human`, recorded in .sdlc/automation.json; `yad unkill` turns it off.',
     ],
   },
 ];
@@ -34,7 +34,7 @@ const KEY_FILES = [
   { label: 'state.json', query: 'currentStep + each step\'s driver/advance dials (older names: assistance/automation) + shape_steps_locked' },
   { label: 'approvals.json', query: 'recorded approvals, hash-bound to the reviewed artifact' },
   { label: 'contract-lock.json', query: 'the SHA-256 of the CONTRACT-SURFACE block in contract.md' },
-  { label: 'trust-log.json', query: 'every Build run\'s verdict — the evidence base for earning automation' },
+  { label: 'trust-log.json', query: 'every Build run\'s verdict — the run record yad dial shows as advice' },
   { label: 'schemaVersion', query: 'the shape a state file is in, stamped as the first key of every JSON object yad writes under .sdlc/ — a file without it counts as version 1' },
 ];
 

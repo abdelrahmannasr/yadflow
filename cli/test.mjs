@@ -7063,6 +7063,161 @@ test('runSkip: a guard violation propagates as a YadError (to bin\'s top-level c
   );
 });
 
+// On a verified Product the verbs ask the question the ledger-guard hook asks: is this epic's ledger on
+// the default branch yet? git is faked, so every answer can be driven — the rule is invisible in a test
+// project that has no origin.
+test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger CI owns, and still write a new epic\'s (#162)', async () => {
+  const { runDefer, runUnblock, runLaneSkip } = await import('./skip.mjs');
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-verified-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+    const onBase = (...ledgers) => fakeRunner({
+      [`git -C ${T} rev-parse`]: '',
+      [`git -C ${T} -c core.quotePath=false ls-tree`]: ledgers.map((l) => `${l}\0`).join(''),
+    });
+    const owned = onBase('epics/ep-x/.sdlc/state.json');   // folded, as the gate folds
+    const bytes = () => fs.readFileSync(uiStateFile(T), 'utf8');
+    const before = bytes();
+    const refusals = [
+      ['yad skip', () => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })],
+      ['yad unskip', () => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: owned })],
+      ['yad defer', () => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', runner: owned })],
+      ['yad undefer', () => runDefer(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: owned })],
+      ['yad unblock', () => runUnblock(T, { epic: 'EP-x', step: 'ui-design', runner: owned })],
+    ];
+    for (const [command, verb] of refusals) {
+      process.exitCode = undefined;
+      const out = await grab(verb);
+      assert.match(out, new RegExp(`\`${command}\` is refused: epics/EP-x/\\.sdlc/state\\.json is on the default branch`), command);
+      assert.match(out, /only CI writes it — nothing is written/, command);
+      assert.match(out, /before its first review PR merges/, command);
+      assert.equal(process.exitCode, 1, command);
+      assert.equal(bytes(), before, `${command} wrote nothing`);
+    }
+
+    // A new epic — its ledger is not on the base — is the seeding window: the skip is written.
+    process.exitCode = undefined;
+    const fresh = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only', runner: onBase('epics/EP-other/.sdlc/state.json') }));
+    assert.match(fresh, /N\/A/);
+    assert.doesNotMatch(fresh, /is refused:|could not be read/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'skipped');
+    assert.notEqual(process.exitCode, 1);
+    // …and it says the skip is one way once that PR merges, naming the verb that will then be refused.
+    assert.match(fresh, /yours to write only until the epic's first review PR merges; after that `yad unskip EP-x ui-design` is refused/);
+    assert.match(fresh, /git fetch origin/);
+
+    // A repeat of a skip already written is refused too once CI owns the ledger: the refusal comes before the
+    // "already skipped" path, which would otherwise rewrite the file.
+    const skipped = bytes();
+    process.exitCode = undefined;
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })), /`yad skip` is refused/);
+    assert.equal(process.exitCode, 1);
+    assert.equal(bytes(), skipped, 'the already-skipped path wrote nothing');
+    process.exitCode = undefined;
+
+    // origin cannot be read: unknown, so it writes — and says it could not tell.
+    const unknown = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: fakeRunner() }));
+    assert.match(unknown, /origin could not be read — cannot tell whether CI already owns epics\/EP-x\/\.sdlc\/state\.json/);
+    assert.match(unknown, /un-skipped/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
+
+    // A local ledger on the same answers is never refused: only the verified mode hands the file to CI.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'local' }));
+    assert.match(await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', runner: owned })), /deferred/);
+    assert.equal(owned.calls.filter((call) => call.includes('ls-tree')).length, 6, 'git is not even asked on a local ledger');
+
+    // A Build lane lives in build-state, which CI does not own: a lane skip still writes on a verified Product.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    const dir = laneEpic(T);
+    assert.match(await grab(() => runLaneSkip(T, { epic: 'EP-l', story: 'EP-l-S01', repo: 'web', reason: 'no UI change', today: '2026-09-15' })), /lane skipped/);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.sdlc/build-state/EP-l-S01.json'), 'utf8')).repos.web.status, 'skipped');
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('a broken hub.json or repos.json does not stop a skip on a local ledger — read leniently, as the hook reads it', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-broken-'));
+  try {
+    seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: 'not a list' }));
+    const runner = fakeRunner();
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only', runner })), /N\/A/);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ not json');
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner })), /un-skipped/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
+    assert.deepEqual(runner.calls, [], 'a ledger that is not verified never asks git');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('verified Product: the refusal names foundation/ for the Product level, and an EP-discovery ledger on base counts as the same one (E75)', async () => {
+  const { runUnblock } = await import('./skip.mjs');
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-foundation-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+    const file = path.join(T, 'foundation/.sdlc/state.json');
+    fs.writeFileSync(file, JSON.stringify({
+      epicId: 'EP-foundation', currentStep: 'foundation', schemaVersion: 10,
+      steps: [{ id: 'foundation', type: 'author', artifact: 'foundation', status: 'blocked', record: { reason: 'legal', by: 'amn', date: '2026-09-15' } }],
+    }));
+    const before = fs.readFileSync(file, 'utf8');
+    for (const onBase of ['foundation/.sdlc/state.json', 'epics/EP-discovery/.sdlc/state.json']) {
+      process.exitCode = undefined;
+      const runner = fakeRunner({ [`git -C ${T} rev-parse`]: '', [`git -C ${T} -c core.quotePath=false ls-tree`]: `${onBase}\0` });
+      const out = await grab(() => runUnblock(T, { epic: 'EP-foundation', step: 'foundation', runner }));
+      assert.match(out, /`yad unblock` is refused: foundation\/\.sdlc\/state\.json is on the default branch/, onBase);
+      assert.equal(process.exitCode, 1, onBase);
+      assert.equal(fs.readFileSync(file, 'utf8'), before, `${onBase}: nothing written`);
+    }
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('verified Product: yad next and yad doctor do not send a blocker or a debt to a verb that refuses there (E34 review)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-verified-hints-'));
+  try {
+    const state = uiChain('ui-design', { ui: 'in_progress' });
+    deferStep(state, 'ui-design', { reason: 'launch date', debt: true });
+    seedEpic(T, 'EP-x', { ...state, schemaVersion: 10 });
+    const local = await grab(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(local, /pay it back with yad undefer EP-x ui-design/);
+    assert.doesNotMatch(local, /refused/);
+    const localChecks = [];
+    stepStateChecks(localChecks, T);
+    assert.doesNotMatch(localChecks.find((x) => x.id === 'step:debt').hint, /verified/);
+
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    assert.match(await grab(() => runNext(T, { epic: 'EP-x' })),
+      /pay it back with yad undefer EP-x ui-design \(on a verified Product it is refused once the epic's ledger is on the default branch, until CI has a step for it\)/);
+    const checks = [];
+    stepStateChecks(checks, T);
+    assert.match(checks.find((x) => x.id === 'step:debt').hint, /On this verified Product `yad undefer` is refused once an epic's ledger is on the default branch/);
+
+    const blocked = uiChain('ui-design', { ui: 'blocked' });
+    byId(blocked, 'ui-design').record = { reason: 'waiting on legal', by: 'amn', date: '2026-09-15' };
+    seedEpic(T, 'EP-x', { ...blocked, schemaVersion: 10 });
+    const one = await grab(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(one, /blocked — recorded by amn on 2026-09-15 — on a verified Product only CI can clear it/);
+    assert.doesNotMatch(one, /clear it with yad unblock/);
+    // The all-epics list carries the same line.
+    seedEpic(T, 'EP-y', { ...blocked, epicId: 'EP-y', schemaVersion: 10 });
+    const list = await grab(() => runNext(T, {}));
+    assert.match(list, /EP-x.*only CI can clear it/);
+    assert.doesNotMatch(list, /clear it with yad unblock/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as the way back', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-unskip-cli-'));
   try {
@@ -13037,6 +13192,414 @@ test('doctor dials: a LOCKED build step claiming machine_advance is caught too',
   assert.ok(d, 'build-state is inspected too, not just state.json');
   assert.match(d.message, /backend/, 'and the repo is named, so the step can be found');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor dials: a Shape AUTHOR step on auto is not a gate, whatever `locked` says (E34)', () => {
+  // Every seeded Shape step carries `locked: true`, author steps included. Reading `locked` as "a review"
+  // would fail the one dial E34 lets a team set; the two gates beside it must still fail.
+  const checks = [];
+  const T = dialProject([
+    { id: 'architecture', type: 'author', locked: true, automation: 'machine_advance', advance: 'auto' },
+    { id: 'architecture-review', type: 'review+approve', locked: true, automation: 'human_approve', advance: 'human' },
+  ], { story: 'EP-x-S01', repos: { backend: { steps: [
+    { id: 'a-step-from-a-newer-yadflow', locked: true, automation: 'machine_advance', advance: 'auto' },
+  ] } } });
+  try {
+    dialChecks(checks, T);
+    const d = checks.find((c) => c.id === 'dials:review-auto');
+    assert.ok(d, 'a locked id the catalogue does not know is still read as a gate');
+    assert.doesNotMatch(d.message, /`architecture`/, 'the author step is not named');
+    assert.match(d.message, /a-step-from-a-newer-yadflow/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor dials: an auto nothing reads, and one `locked` no longer holds, are each reported (E34)', () => {
+  const checks = [];
+  const T = dialProject([
+    { id: 'architecture', type: 'author', locked: true, automation: 'machine_advance', advance: 'auto' },
+    { id: 'epic', type: 'author', locked: true, automation: 'human_approve', advance: 'human' },
+  ], { story: 'EP-x-S01', repos: { backend: { steps: [
+    { id: 'checks', locked: true, automation: 'machine_advance', advance: 'auto' },
+    { id: 'implement', locked: false, automation: 'machine_advance', advance: 'auto' },
+  ] } } });
+  try {
+    dialChecks(checks, T);
+    const shape = checks.find((c) => c.id === 'dials:shape-auto-unread');
+    assert.equal(shape?.status, 'warn');
+    assert.match(shape.message, /`architecture`/);
+    assert.doesNotMatch(shape.message, /`epic`/);
+    assert.match(shape.hint, /yad dial <step> --to auto/);
+    const locked = checks.find((c) => c.id === 'dials:locked-auto');
+    assert.equal(locked?.status, 'warn');
+    assert.match(locked.message, /`checks`/);
+    assert.doesNotMatch(locked.message, /`implement`/, 'an unlocked auto is simply what the team set');
+    assert.equal(checks.find((c) => c.id === 'dials:review-auto'), undefined);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('bin: `yad dial` takes one word or three, and names the usage otherwise (E34)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e34b-'));
+  const run = (...args) => {
+    try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], { encoding: 'utf8', stdio: 'pipe' }), code: 0 }; } catch (e) { return { out: String(e.stdout), code: e.status }; }
+  };
+  try {
+    for (const args of [['dial'], ['dial', 'EP-x', 'EP-x-S01'], ['dial', 'EP-x', 'EP-x-S01', 'web', 'checks']]) {
+      const r = run(...args);
+      assert.equal(r.code, 1, args.join(' '));
+      assert.match(r.out, /usage: yad dial <step>/, args.join(' '));
+    }
+    const bad = run('dial', 'nope', 'EP-x-S01', 'checks', '--repo', 'web');
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /invalid epic id: nope/);
+    const extra = run('kill', 'now', '--reason', 'x');
+    assert.equal(extra.code, 1);
+    assert.match(extra.out, /unexpected argument\(s\): now/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('isGateStep: type, then the catalogue, then `locked` only for an id nobody knows (E34)', async () => {
+  const { isGateStep } = await import('./epic-state.mjs');
+  assert.equal(isGateStep({ id: 'epic-review', type: 'review+approve' }), true);
+  assert.equal(isGateStep({ id: 'engineer-review' }), true, 'known review with no type or lock');
+  assert.equal(isGateStep({ id: 'architecture', type: 'author', locked: true }), false, 'a locked author step');
+  assert.equal(isGateStep({ id: 'checks', locked: true }), false, 'a known Build author step, however it is marked');
+  assert.equal(isGateStep({ id: 'architecture', type: 'review+approve' }), true, 'a step that SAYS it is a review is one');
+  assert.equal(isGateStep({ id: 'from-the-future', locked: true }), true);
+  assert.equal(isGateStep({ id: 'from-the-future' }), false);
+  for (const junk of [null, undefined, 42, ['x']]) assert.equal(isGateStep(junk), false);
+});
+
+test('E34 dial rules: a gate is human, the kill switch holds, a Shape dial is project-wide, a lane dial is the lane\'s', async () => {
+  const { effectiveAdvance, normalizeAutomation, planShapeDial, planLaneDial, planKill, killSwitchOn, serializeAutomation } = await import('./epic-state.mjs');
+  const none = normalizeAutomation(null);
+  assert.deepEqual(effectiveAdvance({ id: 'architecture', type: 'author', locked: true }, none), { advance: 'human', set: 'human', why: 'project' });
+  assert.equal(effectiveAdvance({ id: 'architecture', type: 'author', locked: true }, normalizeAutomation({ steps: { architecture: 'auto' } })).advance, 'auto');
+  assert.equal(effectiveAdvance({ id: 'architecture-review', type: 'review+approve' }, normalizeAutomation({ steps: { 'architecture-review': 'auto' } })).why, 'gate',
+    'a gate is human whatever the file says');
+  assert.deepEqual(effectiveAdvance({ id: 'checks', automation: 'machine_advance', advance: 'auto' }, none), { advance: 'auto', set: 'auto', why: 'lane' });
+  assert.equal(effectiveAdvance({ id: 'checks', automation: 'machine_advance' }, normalizeAutomation({ steps: { checks: 'human' } })).advance, 'auto',
+    'a Build step reads its lane, not the project file');
+  const killed = normalizeAutomation({ kill: { on: true, reason: 'incident' }, steps: { architecture: 'auto' } });
+  assert.deepEqual(effectiveAdvance({ id: 'checks', automation: 'machine_advance' }, killed), { advance: 'human', set: 'auto', why: 'kill' });
+  assert.equal(effectiveAdvance({ id: 'architecture' }, killed).advance, 'human');
+  // A file that is there and wrong holds everything at human — the safe way to be wrong about a switch.
+  for (const raw of [[1], 'x', { kill: { on: 'yes' } }, { kill: 3 }, { steps: [] }]) {
+    const a = normalizeAutomation(raw);
+    assert.ok(a.error, JSON.stringify(raw));
+    assert.equal(killSwitchOn(a), true, JSON.stringify(raw));
+  }
+  assert.equal(killSwitchOn(none), false);
+  // A step id this release does not know is held at human — nothing here can say it is not a gate.
+  assert.deepEqual(effectiveAdvance({ id: 'release', advance: 'auto', automation: 'machine_advance' }, none), { advance: 'human', set: 'human', why: 'unknown' });
+  assert.match(planShapeDial(none, { step: 'foundation', to: 'auto' }).message, /Product level, not a step on a feature's Shape chain/);
+  assert.doesNotMatch(planShapeDial(none, { step: 'nope', to: 'auto' }).hint, /foundation|discovery/, 'and the hint does not offer it');
+
+  assert.match(planShapeDial(none, { step: 'architecture-review', to: 'auto' }).message, /review gate, and a gate is never auto/);
+  assert.match(planShapeDial(none, { step: 'checks', to: 'auto' }).hint, /yad dial <epic> <story> --repo <name> checks --to auto/);
+  assert.match(planShapeDial(none, { step: 'nope', to: 'auto' }).message, /unknown step: nope/);
+  assert.match(planShapeDial(none, { step: 'epic', to: 'maybe' }).message, /--to must be human or auto/);
+  const set = planShapeDial(none, { step: 'epic', to: 'auto' });
+  assert.equal(set.changed, true);
+  assert.deepEqual(serializeAutomation(set.automation), { steps: { epic: 'auto' } }, 'no kill key until somebody flips it');
+  assert.equal(planShapeDial(set.automation, { step: 'epic', to: 'auto' }).changed, false);
+  const back = planShapeDial(set.automation, { step: 'epic', to: 'human' });
+  assert.equal(back.changed, true);
+  assert.deepEqual(back.automation.steps, {}, 'human is written as the key\'s absence');
+  assert.equal(planShapeDial(none, { step: 'epic', to: 'human' }).changed, false);
+
+  const bs = { story: 'EP-x-S01', repos: {
+    web: { steps: [{ id: 'checks', automation: 'human_approve', advance: 'human' }, { id: 'engineer-review', locked: true, automation: 'human_approve' }] },
+    api: { status: 'skipped', record: { reason: 'no change' } },
+  } };
+  const opts = { story: 'EP-x-S01', declared: ['web', 'api'] };
+  const lane = planLaneDial(bs, { ...opts, repo: 'web', step: 'checks', to: 'auto' });
+  assert.equal(lane.changed, true);
+  assert.deepEqual(lane.buildState.repos.web.steps[0], { id: 'checks', automation: 'machine_advance', advance: 'auto' }, 'both names, in place');
+  assert.equal(bs.repos.web.steps[0].advance, 'human', 'the input is not mutated');
+  assert.equal(planLaneDial(lane.buildState, { ...opts, repo: 'web', step: 'checks', to: 'auto' }).changed, false);
+  for (const [o, message] of [
+    [{ repo: 'web', step: 'engineer-review', to: 'auto' }, /merge gate, and a gate is never auto/],
+    [{ repo: 'web', step: 'architecture', to: 'auto' }, /Shape step — its dial is set for the whole project/],
+    [{ repo: 'web', step: 'deploy', to: 'auto' }, /unknown Build step: deploy/],
+    [{ repo: 'web', step: 'checks', to: 'x' }, /--to must be human or auto/],
+    [{ repo: 'mobile', step: 'checks', to: 'auto' }, /does not declare the repo mobile/],
+    [{ repo: 'api', step: 'checks', to: 'auto' }, /is skipped — a skipped lane runs nothing/],
+    [{ repo: 'web', step: 'spec', to: 'auto' }, /has no spec step yet/],
+  ]) {
+    const r = planLaneDial(bs, { ...opts, ...o });
+    assert.equal(r.ok, false, JSON.stringify(o));
+    assert.match(r.message, message, JSON.stringify(o));
+  }
+
+  assert.match(planKill(none, { on: true, reason: '  ' }).message, /needs a reason/);
+  const k = planKill(none, { on: true, reason: ' incident ', by: 'al', date: '2026-09-15' });
+  assert.deepEqual(k.automation.kill, { on: true, reason: 'incident', by: 'al', date: '2026-09-15' });
+  assert.equal(planKill(k.automation, { on: true, reason: 'again' }).already, true);
+  assert.equal(planKill(none, { on: false }).already, true, 'off is where an absent file already is');
+  const off = planKill({ ...k.automation, steps: { epic: 'auto' } }, { on: false, by: 'bo', date: '2026-09-16' });
+  assert.deepEqual(off.automation, { steps: { epic: 'auto' }, kill: {
+    on: false, reason: null, by: 'bo', date: '2026-09-16', previous: { on: true, reason: 'incident', by: 'al', date: '2026-09-15' },
+  } }, 'the steps survive, and so does the record the unkill replaced');
+  // One level deep: the record kept is the one replaced, without ITS own previous.
+  const again = planKill(off.automation, { on: true, reason: 'second', by: 'cy', date: '2026-09-17' });
+  assert.deepEqual(again.automation.kill.previous, { on: false, reason: null, by: 'bo', date: '2026-09-16' });
+  assert.deepEqual(normalizeAutomation(serializeAutomation(again.automation)).kill.previous, again.automation.kill.previous, 'previous survives a read back');
+});
+
+test('yad dial / kill / unkill write their files, show the run record, and refuse what they must (E34)', async () => {
+  const { runDial, runKill } = await import('./dial.mjs');
+  const { seedState: seed } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e34-'));
+  const E = path.join(T, 'epics/EP-x');
+  fs.mkdirSync(path.join(E, '.sdlc/build-state'), { recursive: true });
+  fs.mkdirSync(path.join(E, 'stories'), { recursive: true });
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(E, '.sdlc/state.json'), JSON.stringify(seed({ epic: 'EP-x', profile: 'classic', type: 'feature', today: '2026-01-01' })));
+  fs.writeFileSync(path.join(E, 'stories/EP-x-S01.md'), '---\nid: EP-x-S01\nepic: EP-x\nrepos: [web]\n---\n\n## Story\nx\n');
+  const laneFile = path.join(E, '.sdlc/build-state/EP-x-S01.json');
+  fs.writeFileSync(laneFile, JSON.stringify({ story: 'EP-x-S01', repos: { web: { currentStep: 'checks', steps: [
+    { id: 'checks', automation: 'human_approve', advance: 'human', locked: false, status: 'todo' },
+  ] } } }));
+  fs.writeFileSync(path.join(E, '.sdlc/trust-log.json'), JSON.stringify({ runs: [
+    { story: 'EP-x-S01', repo: 'web', step: 'checks', verdict: 'approved-unchanged' },
+    { story: 'EP-x-S02', repo: 'web', step: 'checks', verdict: 'rejected' },
+    { story: 'EP-x-S01', repo: 'api', step: 'checks', verdict: 'approved-unchanged' },
+  ] }));
+  const autoFile = path.join(T, '.sdlc/automation.json');
+  const readAuto = () => JSON.parse(fs.readFileSync(autoFile, 'utf8'));
+  const run = async (fn) => {
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(fn);
+    const failed = process.exitCode === 1;
+    process.exitCode = code;
+    return { out, failed };
+  };
+  const lane = { epic: 'EP-x', story: 'EP-x-S01', repo: 'web', step: 'checks' };
+  try {
+    // A Shape author step, project-wide — and honest that nothing acts on it yet.
+    let r = await run(() => runDial(T, { step: 'architecture', to: 'auto' }));
+    assert.equal(r.failed, false, r.out);
+    assert.deepEqual(readAuto().steps, { architecture: 'auto' });
+    assert.match(r.out, /no run record exists for a Shape step/);
+    assert.match(r.out, /recorded, not acted on yet/);
+    r = await run(() => runDial(T, { step: 'architecture', json: true }));
+    assert.deepEqual(JSON.parse(r.out), { ok: true, scope: 'shape', step: 'architecture', set: 'auto', advance: 'auto', why: 'project', changed: false, kill: null, trust: null });
+    r = await run(() => runDial(T, { step: 'architecture-review', to: 'auto' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /a gate is never auto/);
+
+    // A Build lane step, on the lane, with its run record as advice.
+    r = await run(() => runDial(T, { ...lane, to: 'auto' }));
+    assert.equal(r.failed, false, r.out);
+    const row = JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0];
+    assert.equal(row.automation, 'machine_advance');
+    assert.equal(row.advance, 'auto');
+    assert.match(r.out, /run record for checks in web: 2 run\(s\), 50% approved unchanged/);
+    assert.match(r.out, /advice, not a rule/);
+    r = await run(() => runDial(T, { ...lane, json: true }));
+    assert.deepEqual(JSON.parse(r.out).trust, { runs: 2, approvedUnchanged: 1 });
+    assert.equal('automationError' in JSON.parse(r.out), false, 'no error key on a healthy project');
+
+    // Setting what is already set writes nothing, so there is nothing to commit.
+    r = await run(() => runDial(T, { step: 'architecture', to: 'auto' }));
+    assert.match(r.out, /architecture.*was already advance: auto — nothing changed/);
+    assert.doesNotMatch(r.out, /commit \.sdlc\/automation\.json/);
+    r = await run(() => runDial(T, { ...lane, to: 'auto' }));
+    assert.match(r.out, /checks.*was already advance: auto — nothing changed/);
+    assert.doesNotMatch(r.out, /yad checkpoint --push/);
+
+    // A GATE ASKED is answered, not refused: yad-run asks about every step it walks, the merge gate included.
+    r = await run(() => runDial(T, { ...lane, step: 'engineer-review', json: true }));
+    assert.equal(r.failed, false, r.out);
+    assert.deepEqual(JSON.parse(r.out), { ok: true, scope: 'lane', epic: 'EP-x', story: 'EP-x-S01', repo: 'web', step: 'engineer-review',
+      set: 'human', advance: 'human', why: 'gate', changed: false, kill: null, trust: null });
+    r = await run(() => runDial(T, { step: 'architecture-review', json: true }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(r.out).why, 'gate');
+    r = await run(() => runDial(T, { ...lane, step: 'engineer-review' }));
+    assert.match(r.out, /advance: human \(a review gate: always a person\)/);
+    r = await run(() => runDial(T, { ...lane, step: 'engineer-review', to: 'auto' }));
+    assert.equal(r.failed, true, 'setting one is still refused');
+    r = await run(() => runDial(T, { step: 'foundation', to: 'auto' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /Product level/);
+
+    // The kill switch: a reason, a record, the steps untouched, and every dial held at human.
+    r = await run(() => runKill(T, { on: true }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /needs a reason/);
+    r = await run(() => runKill(T, { on: true, reason: 'bad deploy', today: '2026-09-15' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(readAuto().kill.on, true);
+    assert.equal(readAuto().kill.reason, 'bad deploy');
+    assert.equal(readAuto().kill.date, '2026-09-15');
+    assert.deepEqual(readAuto().steps, { architecture: 'auto' });
+    r = await run(() => runDial(T, { ...lane, json: true }));
+    assert.deepEqual([JSON.parse(r.out).advance, JSON.parse(r.out).set, JSON.parse(r.out).why], ['human', 'auto', 'kill']);
+    r = await run(() => runDial(T, { step: 'architecture' }));
+    assert.match(r.out, /advance: auto \(held at human\)/);
+    assert.match(r.out, /the kill switch is ON.*bad deploy/, 'and the line after it names the cause');
+    r = await run(() => runKill(T, { on: false, today: '2026-09-16' }));
+    assert.equal(readAuto().kill.on, false);
+    r = await run(() => runKill(T, { on: false }));
+    assert.match(r.out, /already off — nothing changed/);
+
+    // Lane refusals the CLI owns.
+    r = await run(() => runDial(T, { ...lane, story: 'EP-x-S09', to: 'auto' }));
+    assert.match(r.out, /no story EP-x-S09/);
+    r = await run(() => runDial(T, { ...lane, repo: null, to: 'auto' }));
+    assert.match(r.out, /usage: yad dial EP-x <story> --repo <name> checks/);
+
+    // A file that cannot be read is never written over, by either command.
+    fs.writeFileSync(autoFile, '{ nope');
+    r = await run(() => runDial(T, { step: 'epic', to: 'auto' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /nothing is written over it/);
+    r = await run(() => runKill(T, { on: true, reason: 'x' }));
+    assert.equal(r.failed, true);
+    assert.equal(fs.readFileSync(autoFile, 'utf8'), '{ nope');
+
+    // …but a LANE dial never writes that file, so `--to human` is still one move.
+    r = await run(() => runDial(T, { ...lane, to: 'human' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0].advance, 'human');
+    r = await run(() => runDial(T, { ...lane, to: 'auto', json: true }));
+    const held = JSON.parse(r.out);
+    assert.deepEqual([held.set, held.advance, held.why, held.automationError], ['auto', 'human', 'kill', 'does not parse'],
+      'the file, not somebody\'s switch, is named as the cause');
+    r = await run(() => runDial(T, { ...lane }));
+    assert.match(r.out, /automation\.json does not parse — every step is held at advance: human until it is fixed/);
+
+    // A run record that cannot be read never blocks the dial beside it — and is read before any write.
+    fs.writeFileSync(path.join(E, '.sdlc/trust-log.json'), '{ nope');
+    r = await run(() => runDial(T, { ...lane, to: 'human' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0].advance, 'human');
+    assert.match(r.out, /the run record cannot be read .* the dial is not affected/);
+    r = await run(() => runDial(T, { ...lane, json: true }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(r.out).trust, null);
+    assert.ok(JSON.parse(r.out).trustError);
+
+    // A row carrying only the old name gains the new one, and says so rather than claiming a change.
+    const bs = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
+    bs.repos.web.steps[0] = { id: 'checks', automation: 'machine_advance', status: 'todo' };
+    fs.writeFileSync(laneFile, JSON.stringify(bs));
+    r = await run(() => runDial(T, { ...lane, to: 'auto' }));
+    assert.match(r.out, /was already advance: auto — the new dial name was added beside the old one/);
+    assert.equal(JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0].advance, 'auto');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor automation: silent by default; a broken file, a gate on auto and a kill_switch left in config.yaml fail (E34)', async () => {
+  const { automationChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e34d-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.mkdirSync(path.join(T, '_bmad/sdlc'), { recursive: true });
+  const found = () => { const checks = []; automationChecks(checks, T); return checks; };
+  const byId = (checks, id) => checks.find((x) => x.id === id);
+  try {
+    fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), 'automation:\n  kill_switch: false\n');
+    assert.deepEqual(found(), [], 'a project that never touched automation reads exactly as before');
+
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), '{ nope');
+    assert.equal(byId(found(), 'automation')?.status, 'fail');
+
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), JSON.stringify({
+      kill: { on: true, reason: 'incident', by: 'al', date: '2026-09-15' },
+      steps: { architecture: 'auto', 'architecture-review': 'auto', checks: 'auto', epic: 'maybe', 'from-the-future': 'auto' },
+    }));
+    let checks = found();
+    assert.match(byId(checks, 'automation:kill').message, /ON \(by al on 2026-09-15\): incident/);
+    assert.equal(byId(checks, 'automation:gate').status, 'fail');
+    assert.match(byId(checks, 'automation:gate').message, /architecture-review/);
+    assert.match(byId(checks, 'automation:build-step').message, /checks/);
+    assert.match(byId(checks, 'automation:unknown').message, /epic: "maybe"[\s\S]*from-the-future/);
+    assert.ok(!checks.some((x) => x.message.includes('architecture,') || /: architecture$/.test(x.message)), 'a Shape author step on auto is not a finding');
+
+    // The switch's old home: set by hand there, it is OFF now, and that must not be quiet.
+    fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), 'automation:\n  kill_switch: true\n');
+    assert.equal(byId(found(), 'automation:legacy-kill'), undefined, 'not while the real switch is on');
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), JSON.stringify({ kill: { on: false } }));
+    checks = found();
+    assert.equal(byId(checks, 'automation:legacy-kill')?.status, 'fail');
+    assert.match(byId(checks, 'automation:legacy-kill').hint, /yad kill --reason/);
+    // Every spelling YAML reads as true; a commented-out line is not a setting.
+    for (const [line, fires] of [['kill_switch: yes', true], ['  Kill_Switch: ON', true], ['kill_switch: True', true], ['# kill_switch: true', false], ['kill_switch: false', false]]) {
+      fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), `automation:\n${line}\n`);
+      assert.equal(!!byId(found(), 'automation:legacy-kill'), fires, line);
+    }
+    // A broken file already holds every step at human, so "the kill switch is OFF" would be false.
+    fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), 'automation:\n  kill_switch: true\n');
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), '{ nope');
+    checks = found();
+    assert.equal(byId(checks, 'automation')?.status, 'fail');
+    assert.equal(byId(checks, 'automation:legacy-kill'), undefined);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad next says when a dial is held by the kill switch, and that a Shape auto is only recorded (E34)', async () => {
+  const { runNext } = await import('./next.mjs');
+  const { seedState: seed } = await import('./epic-state.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e34n-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  const epicWith = (id, edit) => {
+    const dir = path.join(T, 'epics', id);
+    fs.mkdirSync(path.join(dir, '.sdlc/build-state'), { recursive: true });
+    const state = seed({ epic: id, profile: 'classic', type: 'feature', today: '2026-01-01' });
+    edit(state, dir);
+    fs.writeFileSync(path.join(dir, '.sdlc/state.json'), JSON.stringify(state));
+  };
+  // A Shape author step open now: epic approved, architecture being written.
+  epicWith('EP-shape', (state) => {
+    for (const st of state.steps) if (st.id === 'epic' || st.id === 'epic-review') st.status = 'done';
+    state.steps.find((st) => st.id === 'architecture').status = 'in_progress';
+    state.currentStep = 'architecture';
+  });
+  // A Build lane whose `checks` step is on auto.
+  epicWith('EP-build', (state, dir) => {
+    for (const st of state.steps) st.status = 'done';
+    state.currentStep = 'ready-for-build';
+    fs.writeFileSync(path.join(dir, '.sdlc/build-state/EP-build-S01.json'), JSON.stringify({ story: 'EP-build-S01', repos: { web: { currentStep: 'checks', steps: [
+      { id: 'spec', automation: 'human_approve', advance: 'human', status: 'done' },
+      { id: 'checks', automation: 'machine_advance', advance: 'auto', status: 'todo' },
+      { id: 'engineer-review', automation: 'human_approve', advance: 'human', locked: true, status: 'todo' },
+    ] } } }));
+  });
+  const auto = (body) => fs.writeFileSync(path.join(T, '.sdlc/automation.json'), JSON.stringify(body));
+  const next = (epic) => grab(() => runNext(T, { epic }));
+  try {
+    assert.doesNotMatch(await next('EP-shape'), /advance: auto/, 'no line at all while nobody set one');
+    assert.match(await next('EP-build'), /advance: auto — yad-run auto-drives/);
+
+    auto({ steps: { architecture: 'auto' } });
+    assert.match(await next('EP-shape'), /advance: auto — recorded; nothing drives a Shape step on its own yet/);
+
+    auto({ kill: { on: true, reason: 'incident' }, steps: { architecture: 'auto' } });
+    const shape = await next('EP-shape');
+    assert.match(shape, /held at human by the kill switch \(yad unkill\)/);
+    assert.doesNotMatch(shape, /recorded; nothing drives/);
+    const build = await next('EP-build');
+    assert.match(build, /advance: auto — held at human by the kill switch \(yad unkill\)/);
+    assert.doesNotMatch(build, /yad-run auto-drives/);
+
+    // A broken file holds every step too — and `yad unkill` cannot fix a file it cannot read, so it is not named.
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), '{ nope');
+    const broken = await next('EP-build');
+    assert.match(broken, /held at human: \.sdlc\/automation\.json does not parse \(yad doctor\)/);
+    assert.doesNotMatch(broken, /yad unkill/);
+
+    // A `locked` Build AUTHOR step is not a merge gate since E34 — the line says what actually runs.
+    fs.rmSync(path.join(T, '.sdlc/automation.json'));
+    const laneFile = path.join(T, 'epics/EP-build/.sdlc/build-state/EP-build-S01.json');
+    const bs = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
+    bs.repos.web.steps[1].locked = true;
+    fs.writeFileSync(laneFile, JSON.stringify(bs));
+    const locked = await next('EP-build');
+    assert.match(locked, /advance: auto — yad-run auto-drives/);
+    assert.doesNotMatch(locked, /human merge gate/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('doctor dials: a project that agrees, or carries only the old names, says nothing', () => {

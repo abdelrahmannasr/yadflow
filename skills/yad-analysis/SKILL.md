@@ -166,6 +166,10 @@ Notes:
   epic's **first** review PR/MR carries the ledger to the default branch. In verified mode `ledger-guard`
   exempts a new epic's ledger (creation, not mutation, #162); every later change to it is CI's. See
   `../yad-epic/references/state-schema.md`, "Authoring branches".
+- **No UI, on a verified Product?** The analysis review PR is this epic's first, so until it merges is the
+  only time `yad skip` can write the ledger. If the idea clearly has no user-facing surface, offer
+  `yad skip EP-<slug> ui-design --reason "<why>"` now; after that PR merges, CI owns `state.json` and the
+  skip is refused. On a local ledger there is no hurry: `yad-ui` offers the same skip later.
 
 ### Step 6b — Open the analysis review gate
 *(**Always run this**, on both entry modes. The chain is seeded by now either way — by `yad epic new`

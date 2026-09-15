@@ -633,6 +633,32 @@ test('migrate 3 -> 4: a REVIEW step is never told it may advance on its own', as
   } finally { cleanup(T); }
 });
 
+test('migrate 3 -> 4: a Shape AUTHOR step is not a gate, even though it is seeded locked (E34)', async () => {
+  // Every seeded Shape step carries `locked: true`, author steps included, and `locked` used to be read
+  // as "a review". That pinned every Shape author step to human. No real project holds `machine_advance`
+  // on one yet, so the rule is invisible in today's data — the input is injected here.
+  const { stampStepDials } = await import('./epic-state.mjs');
+  const steps = [
+    { id: 'architecture', type: 'author', locked: true, automation: 'machine_advance', status: 'in_progress' },
+    { id: 'architecture-review', type: 'review+approve', locked: true, automation: 'machine_advance', status: 'todo' },
+    { id: 'engineer-review', locked: true, automation: 'machine_advance', status: 'todo' },
+    { id: 'a-step-from-a-newer-yadflow', locked: true, automation: 'machine_advance', status: 'todo' },
+  ];
+  const T = project({ files: { 'epics/EP-x/.sdlc/state.json': stateWith(steps) } });
+  try {
+    await runMigrate(T, { apply: true });
+    const [author, gate, merge, unknown] = read(path.join(T, 'epics/EP-x/.sdlc/state.json')).steps;
+    assert.equal(author.advance, 'auto', 'a locked AUTHOR step keeps what it had');
+    assert.equal(gate.advance, 'human', 'its review gate is still pinned');
+    assert.equal(merge.advance, 'human', 'engineer-review is a gate by the catalogue, with no type');
+    assert.equal(unknown.advance, 'human', 'and a locked id the catalogue does not know stays pinned');
+    // The gate write's stamper answers the same, so a verified project that migrates on its next gate
+    // write lands in the same place.
+    const stamped = stampStepDials({ steps: steps.map((x) => ({ ...x })) }).steps;
+    assert.deepEqual(stamped.map((x) => x.advance), ['auto', 'human', 'human', 'human']);
+  } finally { cleanup(T); }
+});
+
 test('migrate 3 -> 4: build-state dials migrate too, per repo', async () => {
   const bs = { schemaVersion: 3, story: 'EP-x-S01', repos: {
     backend: { currentStep: 'checks', steps: [{ id: 'checks', automation: 'machine_advance' }] },

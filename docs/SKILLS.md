@@ -2,7 +2,7 @@
 
 The CLI **installs and wires** the module; the skills below are the **agents you invoke by name** in your
 AI IDE (e.g. *"run `yad-epic`"*) to actually do the work. State lives in files you can also edit
-directly. Each skill stops at a gate and never auto-advances unless a step has *earned* automation.
+directly. Each skill stops at a gate and never auto-advances unless the team set a Build step to `auto` with `yad dial`.
 
 **These are the defaults, not a fixed wiring.** Which skill runs a lifecycle step is a project
 setting: `yad skill bind <step> <skill>` records your own in `.sdlc/skills.json`, and `yad next` names
@@ -116,7 +116,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   screen→frame map in `design-links.json`; degrades to markdown-only otherwise. Reads epic + architecture.
   **Optional** — an epic with no user-facing surface (backend/API, data, infra) skips it, keeping the
   step visible and auditable, with `yad skip <epic> ui-design --reason "<why>"` (reverse with `yad unskip <epic> ui-design`
-  until the stories review opens). An epic that will have screens later can `yad defer` the step instead — with `--debt` when it is owed back — and `yad undefer` picks it up again at any time, even after the stories are done.
+  until the stories review opens). An epic that will have screens later can `yad defer` the step instead — with `--debt` when it is owed back — and `yad undefer` picks it up again at any time, even after the stories are done. On a verified Product these verbs refuse once the epic's first review PR has merged, because CI owns `state.json`.
 - **`yad-stories`** — Shape step 7. With the pm, break the approved epic into user stories, each
   tagged with the repos that must implement it. Assigns zero-padded `EP-<slug>-S0N` IDs, one file per
   story under `stories/`. Reads epic + architecture + contract + UI.
@@ -198,13 +198,14 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 ## Automation & status
 
 - **`yad-run`** — The Phase 4 orchestrator. Drives a story's Build loop (spec → tasks → implement →
-  checks) on each step's advance dial, recording every run in the trust log. A clean `checks` pass
-  auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS for a
-  human. Also sets a step's dial (gated by trust evidence) and flips the system-wide kill switch. It
+  checks) on each step's advance dial, recording every run in the trust log. A clean `checks` pass on
+  auto advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS for a
+  human. Sets a step's dial through `yad dial` (nothing to earn since E34) and flips the kill switch
+  through `yad kill` / `yad unkill`. It
   never drives a lane skipped whole with `yad skip <epic> <story> --repo <name>` (E39), and never marks a
   single Build step skipped.
-- **`yad-status`** — Read-only view of an epic: the current step, each step's dials (driver/advance) and status, which approvals are still required, per-story Build trust records, the
-  kill-switch state, and a fleet roll-up across epics.
+- **`yad-status`** — Read-only view of an epic: the current step, each step's dials (driver/advance) and status, which approvals are still required, per-story Build run records (as advice),
+  the kill switch and the Shape dials from `.sdlc/automation.json`, and a fleet roll-up across epics.
 - **`yad-report`** — Self issue reporter. When a `yad` flow breaks, files a bug in the upstream
   yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool
   present+authenticated booleans, the Product platform enum, the error code/hint, a path-scrubbed

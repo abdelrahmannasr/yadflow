@@ -210,7 +210,7 @@
   </p>
   <div class="callout green">
     <strong>The one-sentence idea:</strong> AI does the heavy lifting; humans keep every important decision.
-    Automation is never assumed — it must be <em>earned</em> with evidence, and it can be switched off in one move.
+    Automation is never assumed — the team switches it on per step, reading the run record, and it can be switched off in one move.
   </div>
 
   <h3>The four repos</h3>
@@ -252,7 +252,7 @@
       <strong>Build = build.</strong><br>
       Runs <em>once per story, per code repo</em>, inside that code repo:
       spec → implement → check → ship. These are the safe, mechanical steps —
-      they can <em>earn</em> automation over time.
+      the team can set them to run on their own.
     </div>
   </div>
 
@@ -284,13 +284,13 @@
 <section id="structure">
   <h2>2. The workflow structure, end to end</h2>
   <p>Setup is one-time. Shape runs once per epic in the Product; Build runs once per story
-  per code repo; automation is opt-in and earned. The diagram below is the whole lifecycle.</p>
+  per code repo; automation is opt-in, switched on by the team. The diagram below is the whole lifecycle.</p>
 
   <div class="diagram">
     <div class="legend">
       <span><span class="key k-artifact"></span><strong>artifact</strong> — an author step writes a file and stops</span>
       <span><span class="key k-gate"></span><strong>gate</strong> — a human review that must pass</span>
-      <span><span class="key k-earns"></span><strong>earns automation</strong> — can later auto-advance once proven</span>
+      <span><span class="key k-earns"></span><strong>can run on auto</strong> — the team may set it to advance on its own (<code>yad dial</code>)</span>
       <span><span class="key k-locked"></span><strong>locked</strong> — permanently human</span>
       <span><span class="key k-sentinel"></span><strong>milestone</strong></span>
     </div>
@@ -363,9 +363,9 @@
       <div class="flow-v">
         <div class="node plain"><strong>yad-spec</strong><small>Spec Kit ceremony (specify → clarify → plan → analyze → checklist → tasks) → <code>specs/&lt;story-id&gt;/</code></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node"><strong>yad-implement</strong><small>1 atomic task = 1 branch = 1 commit (small diff, ≤3 files) — <em>earns automation</em></small></div>
+        <div class="node"><strong>yad-implement</strong><small>1 atomic task = 1 branch = 1 commit (small diff, ≤3 files) — <em>can run on auto</em></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node"><strong>yad-checks</strong><small>CI gates: spec-link · contract-check · build/test/lint · verified-commits · lineage-check · epic-open · reconcile-debt — <em>earns automation</em></small></div>
+        <div class="node"><strong>yad-checks</strong><small>CI gates: spec-link · contract-check · build/test/lint · verified-commits · lineage-check · epic-open · reconcile-debt — <em>can run on auto</em></small></div>
         <div class="arrow-v">▼</div>
         <div class="node plain"><strong>Open PR/MR</strong><small>from the wired template; risk routing picks the required reviewers</small></div>
         <div class="arrow-v">▼</div>
@@ -384,7 +384,7 @@
       <div class="flow-v">
         <div class="node"><strong>yad-run</strong><small>drives Build on each step’s automation dial, recording every run in <code>trust-log.json</code></small></div>
         <div class="arrow-v">▼</div>
-        <div class="node plain"><strong>Kill switch</strong><small><code>yad-run action: kill</code> → everything back to <code>advance: human</code> instantly</small></div>
+        <div class="node plain"><strong>Kill switch</strong><small><code>yad kill --reason</code> → everything back to <code>advance: human</code> instantly, recorded</small></div>
       </div>
     </div>
 
@@ -488,7 +488,7 @@ each code repo/
   <div class="term"><strong>Code repo</strong><span class="badge b-core">core</span><br>A separate git repo holding real application code (e.g. backend, mobile, dashboard). Each story’s spec lives inside the code repo it belongs to, with a link back to the story in the Product.</div>
   <div class="term"><strong>Skills source (this repo)</strong><span class="badge b-core">core</span><br>The <code>yadflow</code> repo itself — where the 37 skills live and where you pull updates from. No real product work happens inside it.</div>
   <div class="term"><strong>Shape (“decide” / the brain)</strong><span class="badge b-core">core</span><br>The first half of the workflow, run once per epic in the Product: analysis (optional) → epic → architecture + contract → UI design → stories — each followed by a human review gate, ending at <code>ready-for-build</code>. <strong>Test cases</strong> is a parallel, non-blocking track that opens at the stories gate and runs alongside Build. Permanently human-approved.</div>
-  <div class="term"><strong>Build / Build (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. These mechanical steps may earn automation over time.</div>
+  <div class="term"><strong>Build / Build (“build”)</strong><span class="badge b-core">core</span><br>The second half, run once per story per code repo, inside that repo: spec → implement → checks → PR → ship. The team may set these mechanical steps to run on their own.</div>
   <div class="term"><strong>Gate</strong><span class="badge b-core">core</span><br>A stopping point after a step. The step writes its output and <em>waits</em>; a human must approve before the workflow moves on. “Every step stops at a gate” is the heart of the whole system.</div>
   <div class="term"><strong>Driver dial</strong><span class="badge b-core">core</span><br>A per-step setting for who does the work: <code>human</code> (no AI), <code>pair</code> (a person and an agent together), or <code>agent</code> (the agent drafts, the person directs). Older name in the files: <code>assistance</code> &mdash; <code>none</code>, <code>review</code>, <code>heavy</code>.</div>
   <div class="term"><strong>Advance dial</strong><span class="badge b-core">core</span><br>A per-step setting for who moves the step forward: <code>human</code> (default &mdash; a person records the approval) or <code>auto</code> (the orchestrator moves on by itself). Older name in the files: <code>automation</code> &mdash; <code>human_approve</code>, <code>machine_advance</code>. Shape steps and the engineer review can never be set to <code>advance: auto</code>.</div>
@@ -565,15 +565,15 @@ each code repo/
 
   <h3>Automation &amp; trust</h3>
   <div class="term"><strong>Orchestrator (<code>yad-run</code>)</strong><span class="badge b-auto">automation</span><br>The engine that drives a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: on <code>advance: auto</code> it advances alone; on <code>advance: human</code> it stops; on any failure, scope overrun, or contract-surface touch it <strong>halts and pulls in a human</strong>. It always stops at the engineer review.</div>
-  <div class="term"><strong>Earned automation</strong><span class="badge b-auto">automation</span><br>The principle that no step is automated by promise — only by evidence. A step may be flipped to <code>advance: auto</code> only after its trust record clears the threshold, and the flip is refused otherwise.</div>
-  <div class="term"><strong>Trust log (<code>trust-log.json</code>)</strong><span class="badge b-auto">automation</span><br>The evidence base: every orchestrated run’s verdict is recorded here. This is what justifies (or blocks) flipping a step’s dial. Written <strong>shard-then-fold</strong> (one shard file per entry, so parallel writers never conflict); <code>yad tidy up</code> folds a shipped story's shards back into the single folded file.</div>
+  <div class="term"><strong>Setting the dial (<code>yad dial</code>)</strong><span class="badge b-auto">automation</span><br>The team switches a step to <code>advance: auto</code> itself. <code>yad dial</code> shows the step’s run record beside the dial as advice and never refuses on it — nothing has to be earned (E34). A review gate is always refused. A Shape author step’s dial is recorded for the whole project, and nothing acts on it yet.</div>
+  <div class="term"><strong>Trust log (<code>trust-log.json</code>)</strong><span class="badge b-auto">automation</span><br>The evidence base: every orchestrated run’s verdict is recorded here. It is the run record <code>yad dial</code> shows the team as advice. Written <strong>shard-then-fold</strong> (one shard file per entry, so parallel writers never conflict); <code>yad tidy up</code> folds a shipped story's shards back into the single folded file.</div>
   <div class="term"><strong>Checkpoint (<code>yad checkpoint</code>)</strong><span class="badge b-auto">automation</span><br>Commits the machine-written Build ledgers — <code>trust-log.json</code>, <code>build-log.json</code>, <code>build-state/&lt;story&gt;.json</code> — plus any story <code>status:</code> flip (→ in-build/shipped) now backed by a <code>build-log</code> ship (#112) — as one <code>chore(hub)</code> audit-trail commit so no human hand-commits them. The Build analogue of the Shape <code>yad gate ci</code> sync: it stages only those ledgers + ship-backed story flips by an explicit allowlist (never a Shape gate file, so <code>ledger-guard</code> never trips) and commits only on the default branch. Carrying the story flip keeps the artifact from drifting from <code>build-log.json</code>, so no operator falls back to a raw git-to-main push. Called by <code>yad-run</code> each loop iteration and by <code>yad-engineer-review</code> after recording the ship.</div>
   <div class="term"><strong>Tidy up (<code>yad tidy up</code>)</strong><span class="badge b-auto">automation</span><br>Folds a <strong>shipped</strong> story's finished <code>trust-log</code>/<code>build-log</code> <strong>shards</strong> back into the single folded ledger file, as one <code>chore(hub)</code> commit — the manual "pack it up" companion to the shard-then-fold storage, and the analogue of loose git objects → <code>git gc</code>. Concurrent Build writers each write their own shard file so parallel stories never conflict; readers union the folded file + loose shards, and <code>tidy up</code> is the on-demand compaction. Default branch only, <code>--push</code> to push; a no-op when nothing is foldable.</div>
-  <div class="term"><strong>Trust threshold</strong><span class="badge b-auto">automation</span><br>The bar a step must clear to earn automation — by default at least 5 runs with ≥80% “approved-unchanged” (configurable in <code>config.yaml</code>).</div>
+  <div class="term"><strong>Run record</strong><span class="badge b-auto">automation</span><br>What <code>yad dial</code> prints beside a step’s dial: how many times it ran in that repo and how many of those were “approved-unchanged”. Advice, never a rule — the trust threshold was removed in E34.</div>
   <div class="term"><strong>Run verdicts</strong><span class="badge b-auto">automation</span><br>How each engineer review scores an automated run: <code>approved-unchanged</code> (merged exactly as authored — the strongest signal), <code>approved-with-edits</code> (a human fixed it first), <code>rejected</code> (failed).</div>
-  <div class="term"><strong>Kill switch</strong><span class="badge b-auto">automation</span><br><code>yad-run action: kill</code> — one move that forces <em>every</em> step system-wide back to <code>advance: human</code> instantly, no code change needed. <code>unkill</code> restores earned automation. Automation is always reversible in one move.</div>
-  <div class="term"><strong>Locked steps</strong><span class="badge b-auto">automation</span><br>The steps that may <em>never</em> be set to <code>advance: auto</code>: all five Shape authoring steps, their reviews, and the engineer review. A Shape step advances only on a human act.</div>
-  <div class="term"><strong>Fleet roll-up</strong><span class="badge b-auto">automation</span><br>The cross-epic summary <code>yad-status</code> prints: where every epic stands, which steps are “earned but still manual” (nudge cost), at a glance.</div>
+  <div class="term"><strong>Kill switch</strong><span class="badge b-auto">automation</span><br><code>yad kill --reason "&lt;why&gt;"</code> — one move that holds <em>every</em> step at <code>advance: human</code> instantly, recorded with who, when and why in <code>.sdlc/automation.json</code>. <code>yad unkill</code> turns it off. Automation is always reversible in one move.</div>
+  <div class="term"><strong>Locked steps</strong><span class="badge b-auto">automation</span><br>The steps that may <em>never</em> be set to <code>advance: auto</code>: every review gate — each Shape review and the engineer review. A gate advances only on a human act.</div>
+  <div class="term"><strong>Fleet roll-up</strong><span class="badge b-auto">automation</span><br>The cross-epic summary <code>yad-status</code> prints: where every epic stands and which Build steps wait at a human gate, at a glance.</div>
 
   <h3>Tools the workflow builds on</h3>
   <div class="term"><strong>BMAD (BMAD-METHOD)</strong><span class="badge b-tool">tools</span><br>The open-source workflow engine underneath: it provides the step runner, quality gates, the project rules file, and the AI roles. Yadflow is a custom BMAD <em>module</em> that turns it from a solo tool into a team, gated, multi-repo tool.</div>
@@ -674,9 +674,9 @@ each code repo/
       <div class="arrow-v">▼</div>
       <div class="node artifact"><strong>Shape + Build, fully manual gates</strong><small>the team learns the rhythm: author → gate → approve, with heavy AI <em>assistance</em> but zero AI <em>advancement</em></small></div>
       <div class="arrow-v">▼</div>
-      <div class="node"><strong>Earn automation step by step</strong><small>after months of evidence in <code>trust-log.json</code>, flip <code>checks</code> first, then <code>implement</code> — end-first, never the front</small></div>
+      <div class="node"><strong>Switch automation on step by step</strong><small>read each step’s run record, then <code>yad dial</code> <code>checks</code> to auto first, then <code>implement</code> — end-first</small></div>
       <div class="arrow-v">▼</div>
-      <div class="node sentinel"><strong>Kill switch always available</strong><small><code>yad-run action: kill</code> — back to fully manual in one move</small></div>
+      <div class="node sentinel"><strong>Kill switch always available</strong><small><code>yad kill --reason</code> — back to fully manual in one move</small></div>
     </div>
   </div>
 
@@ -1005,14 +1005,14 @@ yad-engineer-review … action: ship        # merge + record in build-log.json</
 
   <div class="skillcard" id="sk-run">
     <h4><code>yad-run</code></h4>
-    <div class="row"><span class="lbl lbl-what">What</span> The orchestrator that makes automation real. It walks a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: <code>advance: auto</code> → it proceeds alone; <code>advance: human</code> → it stops for you. Any failure, scope overrun, or contract-surface touch <strong>halts and pulls in a human</strong>, and it always stops at the engineer review. Every run lands in the trust log. It also flips dials (refusing without enough evidence) and owns the kill switch.</div>
+    <div class="row"><span class="lbl lbl-what">What</span> The orchestrator that makes automation real. It walks a story’s Build (spec → tasks → implement → checks) reading each step’s automation dial: <code>advance: auto</code> → it proceeds alone; <code>advance: human</code> → it stops for you. Any failure, scope overrun, or contract-surface touch <strong>halts and pulls in a human</strong>, and it always stops at the engineer review. Every run lands in the trust log. Its dials are set with <code>yad dial</code>, and the kill switch is <code>yad kill</code> / <code>yad unkill</code>.</div>
     <div class="row"><span class="lbl lbl-how">How</span></div>
 <pre><code>yad-run story: EP-checkout-S02 repo: backend        # drive Build on the dials
-yad-run action: set-dial step: checks to: auto            # earn automation (needs trust evidence)
-yad-run action: set-dial step: checks to: human          # revert &mdash; always allowed
-yad-run action: kill      # everything back to human, system-wide, instantly
-yad-run action: unkill    # restore earned automation</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> Entirely optional — ignore it at first; every step is human-approved by default. Reach for it once a Build step’s trust record clears the threshold (default: ≥5 runs, ≥80% approved-unchanged). Use <code>kill</code> the moment anything feels wrong.</div>
+yad dial EP-checkout EP-checkout-S02 --repo backend checks --to auto    # shows the run record as advice
+yad dial EP-checkout EP-checkout-S02 --repo backend checks --to human   # revert &mdash; always allowed
+yad kill --reason "bad deploy"   # everything back to human, recorded, instantly
+yad unkill                       # each step follows its own dial again</code></pre>
+    <div class="row"><span class="lbl lbl-when">When</span> Entirely optional — ignore it at first; every step is human-approved by default. Reach for it when the team wants a Build step to run on its own — read the step’s run record first. Use <code>yad kill</code> the moment anything feels wrong.</div>
   </div>
 
   <div class="skillcard" id="sk-status">
@@ -1314,7 +1314,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <h4>Kiro (AWS) <span class="badge b-tool">the polished product</span></h4>
     <div class="row"><span class="lbl lbl-what">What</span> Amazon’s agentic <em>IDE</em> (Code OSS base, launched July 2025) built around specs: every feature gets <code>requirements.md</code> (EARS syntax) → <code>design.md</code> → <code>tasks.md</code>, plus automated hooks and steering files. Free tier; Pro $20 / Pro+ $40 / Power $200 per month.</div>
     <div class="row"><span class="lbl lbl-how">Overlap</span> The same spec-before-code conviction, productized with the smoothest UX in the market. Its three-file spec maps roughly onto this workflow’s epic → architecture → tasks chain.</div>
-    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> Single developer, single repo, single IDE — and a paid, closed product with AWS lock-in. The “gate” is one person clicking approve in their own editor; there is no team rule, no named-approval ledger, no contract shared across repos, no earned automation. Yadflow is IDE-agnostic (Claude Code, agents, zencoder, opencode) and the state is portable files in git.</div>
+    <div class="row"><span class="lbl lbl-when">Gaps vs this</span> Single developer, single repo, single IDE — and a paid, closed product with AWS lock-in. The “gate” is one person clicking approve in their own editor; there is no team rule, no named-approval ledger, no contract shared across repos, no switchable automation with a recorded kill switch. Yadflow is IDE-agnostic (Claude Code, agents, zencoder, opencode) and the state is portable files in git.</div>
   </div>
 
   <div class="skillcard">
@@ -1370,7 +1370,7 @@ yad usage --format json --all              # machine-readable, to stdout</code><
     <tr><td><strong>Locked multi-repo contract</strong> (hash + CI enforcement)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>◐ library specs only</td></tr>
     <tr><td>PR/MR-native reviews (GitHub <em>and</em> GitLab)</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
     <tr><td>Brownfield (spec what exists, gate changes)</td><td>✅ backfill, human-verified</td><td>◐ document-project</td><td>❌</td><td>◐ steering</td><td>◐</td><td>✅ best-in-class deltas</td><td>❌</td><td>◐</td></tr>
-    <tr><td><strong>Earned automation</strong> (trust log + threshold)</td><td>✅</td><td>❌</td><td>❌</td><td>❌ hooks ≠ earned</td><td>❌ always manual</td><td>❌</td><td>❌ always auto</td><td>❌</td></tr>
+    <tr><td><strong>Per-step automation dial</strong> (with the run record as advice)</td><td>✅</td><td>❌</td><td>❌</td><td>❌ hooks only</td><td>❌ always manual</td><td>❌</td><td>❌ always auto</td><td>❌</td></tr>
     <tr><td>One-move kill switch</td><td>✅</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
     <tr><td>All state = plain files in git</td><td>✅</td><td>✅</td><td>✅</td><td>◐ IDE-bound</td><td>✅</td><td>✅</td><td>✅</td><td>◐ platform</td></tr>
     <tr><td>IDE/agent-agnostic</td><td>✅ 4 harnesses</td><td>✅</td><td>✅ 30+</td><td>❌ its own IDE</td><td>✅</td><td>✅</td><td>❌ Claude Code</td><td>✅ MCP</td></tr>

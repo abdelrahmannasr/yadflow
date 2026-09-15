@@ -17,17 +17,18 @@
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, hand, fail, run, readJSONStrict, writeJSON } from './lib.mjs';
+import { ok, info, hand, fail, run, readJSON, readJSONStrict, warn, writeJSON } from './lib.mjs';
 import { epicRel, epicRoot, epicStories, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
-import { epicFiles } from './manifest.mjs';
+import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { loadProduct } from './gate.mjs';
+import { seededSlugs } from './hook.mjs';
 import { resolveCommitterLogin } from './platform.mjs';
 
 // Best-effort auditable actor for a record's `by` — who WROTE the record: the roster login for the
 // local git identity, else the raw git user.name, else null. A malformed/absent Product degrades to the
 // raw name — attribution is a nicety on the audit trail, never a gate, so it must not block the verb.
-function recordActor(root) {
+export function recordActor(root) {
   let roster = [];
   try { roster = loadProduct(root)?.hub?.roster || []; } catch { /* no Product / malformed — attribute by raw git name */ }
   return resolveCommitterLogin(root, roster)
@@ -49,7 +50,40 @@ const VERBS = {
   },
 };
 
-async function runSetAside(root, verb, { epic, step, reason, debt = false, undo = false, today } = {}) {
+// On a verified Product, an epic's `state.json` is CI's alone once it is on the default branch (rule 9):
+// `ledger-guard` rejects every other commit that changes it, and `gate ci` has no step for a skip, a
+// deferral or an unblock. A write here could never land, and the ledger on this machine would drift from
+// the one CI keeps — so these verbs refuse, before anything is written. The question is the one the
+// `ledger-guard` hook asks (`seededSlugs`, cli/hook.mjs), so the hook and the verb never disagree:
+//   - an epic whose ledger is NOT on the base yet still writes. Its seed rides the first review PR (#162):
+//     the epic review on `classic`, the analysis review on `analysis-first`. A skip or deferral written
+//     then is one way once that PR merges, so the verb says so.
+//   - a base that cannot be read is unknown, and allowed with a warning, as the hook allows it. The CI gate
+//     is the one that fails closed.
+// `hub.json` is read leniently, as the hook reads it. A broken `hub.json` or `repos.json` must not stop
+// these verbs on a local ledger (`yad doctor` reports both), and the hook and the verb must give the same
+// answer on the same file.
+function ciOwnsLedger(root, { epic, command, undoCommand = null, runner }) {
+  const hub = readJSON(productConfigPath(root), null);
+  if (!isVerifiedLedger(hub)) return false;
+  const seeded = seededSlugs(root, hub, runner);
+  if (seeded === null) {
+    warn(`this Product's ledger is verified, and origin could not be read — cannot tell whether CI already owns ${epicRel(epic)}/.sdlc/state.json. If the epic's first review PR has merged, ledger-guard will reject this change`);
+    return false;
+  }
+  if (!seeded.has(epic.toLowerCase())) {
+    if (undoCommand) {
+      info(`on this verified Product ${epicRel(epic)}/.sdlc/state.json is yours to write only until the epic's first review PR merges; after that \`${undoCommand}\` is refused until CI has a step for it (checked against origin as last fetched — run \`git fetch origin\` if that PR may have merged)`);
+    }
+    return false;
+  }
+  fail(`\`${command}\` is refused: ${epicRel(epic)}/.sdlc/state.json is on the default branch, and on a verified Product only CI writes it — nothing is written`);
+  hand(`ledger-guard rejects any commit to it that CI did not make, and CI has no step for \`${command}\` yet. An epic's ledger is still yours to write while the epic is new, before its first review PR merges`);
+  process.exitCode = 1;
+  return true;
+}
+
+async function runSetAside(root, verb, { epic, step, reason, debt = false, undo = false, today, runner } = {}) {
   const V = VERBS[verb];
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -59,6 +93,7 @@ async function runSetAside(root, verb, { epic, step, reason, debt = false, undo 
     process.exitCode = 1;
     return;
   }
+  if (ciOwnsLedger(root, { epic, command: `yad ${undo ? V.undo : verb}`, undoCommand: undo ? null : `yad ${V.undo} ${epic} ${step}`, runner })) return;
 
   // Guard violations throw a YadError (YAD-STATE-004) with a hint — the top-level catch in bin/yad.mjs
   // renders those. Here we only handle the happy path + the two plain-arg checks above.
@@ -161,11 +196,12 @@ export const runDefer = (root, opts) => runSetAside(root, 'defer', opts);
 
 // `yad unblock <epic> <step>` (E37) — clear a recorded blocker once the wait is over. The state logic is
 // the pure `unblockStep`; `build-state/<story>.json` belongs to the skills and is never touched here.
-export async function runUnblock(root, { epic, step } = {}) {
+export async function runUnblock(root, { epic, step, runner } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir} — seed the epic first with yad-epic`); process.exitCode = 1; return; }
   if (!step) { fail('usage: yad unblock <epic> <step>'); process.exitCode = 1; return; }
+  if (ciOwnsLedger(root, { epic, command: 'yad unblock', runner })) return;
   // Read the reason BEFORE the write removes it, so the line can say what was cleared.
   const steps = Array.isArray(ledger.state.steps) ? ledger.state.steps : [];
   const was = steps.find((s) => s?.id === step)?.record?.reason || null;

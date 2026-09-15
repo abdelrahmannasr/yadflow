@@ -54,12 +54,12 @@ flowchart LR
       sp --> im --> shp --> ck --> prm --> air --> eng --> merged
     end
 
-    subgraph AUTO["C · Automation — earned & reversible"]
+    subgraph AUTO["C · Automation — switched on & reversible"]
       direction TB
-      run["yad-run<br/>reads automation dial + trust-log.json"]:::earns
+      run["yad-run<br/>reads the dial (yad dial) + trust-log.json"]:::earns
       cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state<br/>chore(hub) · default branch · allowlist-scoped"]:::artifact
       tdy["yad tidy up --push<br/>fold a shipped story's trust-log · build-log shards<br/>into the folded ledger (loose objects → git gc)"]:::artifact
-      kill["kill switch → everything advance: human"]
+      kill["yad kill → everything advance: human"]
       run --> cpt --> tdy
       run --- kill
     end

@@ -26,7 +26,7 @@ import {
 import { backupPathFor } from './plan.mjs';
 import {
   artifactHash, canonicalApprovals, canonicalComments, canonicalHubPrs, DISCOVERY_EPIC, epicIds, epicRel,
-  epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isPassed, stampProfile, stampStepStates, stampWorkItemType, writeState,
+  epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, isGateStep, isPassed, stampProfile, stampStepStates, stampWorkItemType, writeState,
 } from './epic-state.mjs';
 
 // ---- the migration list --------------------------------------------------------------------
@@ -518,9 +518,11 @@ export function applyProductMove(root, move, { migrations = MIGRATIONS, copy = f
 export const productMoveFiles = (move) =>
   [...move.rewrites, ...move.moves.map((m) => m.to).filter((p) => !move.rewrites.includes(p))];
 
-// A review step must never be told it may advance on its own. `type` is what the Shape chain uses;
-// a Build step has no `type`, and `locked: true` is how those are pinned today.
-const isReviewStep = (s) => s?.type === 'review+approve' || s?.locked === true;
+// A review step must never be told it may advance on its own. The ONE gate rule the dial stamper and
+// `yad doctor` use (`isGateStep`, E34): `type` on the Shape chain, the catalogue's `kind` for a known step
+// (a Build `engineer-review` has no `type`), and `locked` only on an id the catalogue does not know. A
+// Shape AUTHOR step is seeded `locked: true` too, and is no longer pinned to human by it.
+const isReviewStep = isGateStep;
 
 // Add the new dial beside the old one on every step that carries one. Idempotent: a step that
 // already has the new name is returned untouched, so a second `yad migrate` is a no-op.

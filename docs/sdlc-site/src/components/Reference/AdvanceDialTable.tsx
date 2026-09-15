@@ -30,7 +30,7 @@ export function AdvanceDialTable() {
             <tr>
               <th className="px-4 py-3 font-semibold text-slate-300">Value</th>
               <th className="px-4 py-3 font-semibold text-slate-300">Setting</th>
-              <th className="px-4 py-3 font-semibold text-slate-300 text-right">Earned</th>
+              <th className="px-4 py-3 font-semibold text-slate-300 text-right">Advances on its own</th>
             </tr>
           </thead>
           <tbody>

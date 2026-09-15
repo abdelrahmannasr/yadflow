@@ -27,7 +27,7 @@ AI, the harder it gets to keep control of quality, architecture, and accountabil
 
 Yadflow puts a **human gate on every step** of the lifecycle. Each step does its work, writes its
 output to a plain file, and **waits** — it never advances until a human clears its gate (by approving,
-or in solo mode by merging your own PR), or, later, once a step has *earned* the right to auto-advance.
+or in solo mode by merging your own PR) — or, for a Build step the team set to `auto`, on its own after a clean run.
 Reviews ride real PR/MRs; all state lives in files you
 can read, diff, and edit — no database, nothing hidden. The result is a paper trail for every decision
 and a hard wall between "AI proposed" and "we shipped it."
@@ -38,11 +38,11 @@ one Product + many code repos, solo or team.
 ## How the workflow looks
 
 <!-- Source: docs/diagrams/sdlc-overview.mmd — edit the .mmd and run `npm run diagrams` to regenerate -->
-![Yadflow SDLC overview — setup, human-gated Shape, per-story Build, earned automation](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
+![Yadflow SDLC overview — setup, human-gated Shape, per-story Build, automation you switch on](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/sdlc-overview.svg)
 
 **Legend:** 🟨 **artifact** (a step writes a file and stops) · 🟧 **gate** (a human review that must
-pass) · 🟦 **earns automation** (a Build step that can later auto-advance once it proves itself) ·
-⬜ **locked** (the engineer review and every Shape step — permanently human).
+pass) · 🟦 **can run on auto** (a Build step the team may set to advance on its own, with `yad dial`) ·
+⬜ **locked** (the engineer review — always a person).
 
 ## Quickstart
 
@@ -127,9 +127,9 @@ Every step is the same contract: *AI proposes → a human decides → the trail 
 - **Build = make it real.** Once per story per code repo: spec → implement → checks → ship.
 - **Every step stops at a gate.** A human moves it forward (local, or by merging a review PR/MR).
   <!-- IMAGE: docs/media/pr-gate.png — "The review gate rides a real PR/MR: approve to advance, comment to block." -->
-- **Automation is opt-in and earned.** A safe Build step can earn auto-advance after it proves
-  itself — and a one-command kill switch reverts everything to manual. The engineer review and all
-  Shape steps are never automatable.
+- **Automation is opt-in.** The team switches a Build step to auto with `yad dial`, which shows that
+  step's run record as advice — and `yad kill` holds everything at manual in one command. A review
+  gate — the engineer review and every Shape review — is never automatic.
 - **Everything is files.** State, approvals, the contract lock, the build log — all plain files under
   `epics/EP-<slug>/`. No database. The audit trail *is* the repo.
 
@@ -145,7 +145,7 @@ complementary: bring your favorite, and Yadflow wraps the engineering process ar
 | **Layer**     | Writes the code          | Governs how it ships                                 |
 | **Output**    | Diffs, completions       | Gated artifacts + a file-based audit trail           |
 | **Answers**   | "Write this for me"      | "Should this merge — and who approved it?"           |
-| **Review**    | You eyeball the diff     | Human-gated PR/MR, contract lock, earned automation  |
+| **Review**    | You eyeball the diff     | Human-gated PR/MR, contract lock, switchable automation |
 | **Fit**       | Bring your own           | Wraps around all of them                             |
 
 ## Review, made a pairing — and a lesson

@@ -148,7 +148,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#b7950b",
     position: { x: 88, y: 67 },
     description:
-      "Every Build run's verdict — the evidence base a step must clear (≥5 runs, ≥80% unchanged) to earn automation. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
+      "Every Build run's verdict — the run record yad dial shows beside a step\'s dial, as advice. Committed by `yad checkpoint` (chore(hub), default branch, allowlist-scoped).",
   },
   // Phase 6 — the feature-thread ledgers (post-lock change management).
   {

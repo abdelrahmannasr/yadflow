@@ -108,7 +108,7 @@ Report: the spec folder path, the files written, whether Spec Kit was used, the 
 
 ### Step 8 — Record the `spec` trust signal (Phase 4b)
 When this step runs under the orchestrator (`yad-run`), the generated spec is a Build run that the
-trust log measures (it is the evidence that could later earn the `spec` step a `machine_advance`). The
+trust log measures (part of the run record `yad dial` shows beside the `spec` dial). The
 verdict is **anchored to the human who accepts the spec**, never self-graded:
 - the human approves the generated `specs/<story>/` untouched → `approved-unchanged`;
 - the human edits the spec/plan/tasks before accepting → `approved-with-edits` (signal
@@ -119,8 +119,8 @@ pattern as the engineer review finalizing `implement` at `yad-engineer-review`).
 entry in its own shard `epics/<epic>/.sdlc/trust-log/<story>-<repo>-spec-<uid>.json` (a fresh `uid` per
 run; readers union the folded `trust-log.json` + the loose shards). Schema:
 `../yad-epic/references/state-schema.md`. **Run standalone, no trust entry is written** — the
-log measures orchestrated runs. `spec` stays `advance: human` until its slice clears the threshold;
-this step only *gathers* the evidence, it does not flip the dial.
+log measures orchestrated runs. The record is advice: the `spec` dial is
+whatever the team sets with `yad dial`, and this step never changes it.
 
 ## Hard rules (build plan §A, Cross-cutting)
 

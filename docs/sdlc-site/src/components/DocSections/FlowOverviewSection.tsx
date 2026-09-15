@@ -13,7 +13,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   setup: 'Setup & connect',
   front: 'Shape (human-gated)',
   build: 'Build (per story)',
-  automate: 'Automation (earned)',
+  automate: 'Automation (switched on)',
   change: 'Change management (feature threads)',
 };
 
@@ -38,7 +38,7 @@ export function FlowOverviewSection() {
           <strong className="text-white">{PATHS.length} phases</strong> and{' '}
           <strong className="text-white">{totalSteps} steps</strong>. Setup is one-time; Shape is
           human-gated and runs once per epic; Build runs once per story per code repo; automation is
-          opt-in and earned. Each author step writes its artifact and stops at the reusable team review gate.
+          opt-in, set by the team. Each author step writes its artifact and stops at the reusable team review gate.
         </p>
       </div>
 

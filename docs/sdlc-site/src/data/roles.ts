@@ -52,7 +52,7 @@ export const ROLES: RoleConfig[] = [
     shortLabel: 'Engineer',
     icon: 'engineering',
     color: '#ca6f1e',
-    description: 'Owns the human merge gate: advisory AI first-pass, engineer review, and the trust-log evidence for earned automation.',
+    description: 'Owns the human merge gate: advisory AI first-pass, engineer review, and the verdicts that make up each step\'s run record.',
     sectionIds: ['executive-summary', 'gated-flow', 'two-dials', 'check-gates', 'cli-reference', 'glossary'],
     relevantPathIds: [4, 5],
   },
