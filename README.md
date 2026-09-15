@@ -26,7 +26,7 @@ AI, the harder it gets to keep control of quality, architecture, and accountabil
 
 Yadflow puts a **human gate on every step** of the lifecycle. Each step does its work, writes its
 output to a plain file, and **waits** — it never advances until a human clears its gate (by approving,
-or in solo mode by merging your own PR) — or, for a Build step the team set to `auto`, on its own after a clean run.
+or in solo mode, switched with `yad mode`, by merging your own PR) — or, for a Build step the team set to `auto`, on its own after a clean run.
 Reviews ride real PR/MRs; all state lives in files you
 can read, diff, and edit — no database, nothing hidden. The result is a paper trail for every decision
 and a hard wall between "AI proposed" and "we shipped it."
