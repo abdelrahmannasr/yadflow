@@ -938,7 +938,7 @@ export function automationChecks(checks, root) {
   if (/^\s*kill_switch:\s*(?:true|yes|on)\b/im.test(text) && !killSwitchOn(a)) {
     check(checks, 'automation:legacy-kill', 'project', 'fail',
       '_bmad/sdlc/config.yaml says `kill_switch: true`, and nothing reads that key any more — the kill switch is OFF',
-      'turn it on where it is read: `yad kill --reason "<why>"`. Then set that line back to false, or refresh the file with `yad update --overwrite-local`');
+      'turn it on where it is read: `yad kill --reason "<why>"`. Then set that line back to false, or delete _bmad/sdlc/ (see `module:legacy-bmad`)');
   }
 }
 
@@ -952,7 +952,7 @@ export function legacyModuleChecks(checks, root) {
   const installed = exists(path.join(root, MODULE_CONFIG));
   check(checks, 'module:legacy-bmad', 'project', 'warn',
     `_bmad/sdlc/ is left over from before E3, and nothing reads it — the module config is ${MODULE_CONFIG} now`,
-    `${installed ? '' : `run \`yad check --fix\` to install ${MODULE_CONFIG}, then `}delete _bmad/sdlc/. If \`automation:legacy-kill\` shows, clear it first — it reads that folder`);
+    `${installed ? '' : `run \`yad check --fix\` to install ${MODULE_CONFIG}, then `}copy any value you changed in _bmad/sdlc/config.yaml into ${MODULE_CONFIG}, then delete _bmad/sdlc/. If \`automation:legacy-kill\` shows, clear it first — it reads that folder`);
 }
 
 // The work-item type, mid-rename. Shape 5 writes `type:` beside `kind:` in `epic.md` and copies the
