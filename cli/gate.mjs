@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, readJSONStrict, writeJSON, run, pushWithRebase,
+  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase,
   writeMirrored,
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
@@ -26,6 +26,23 @@ import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './
 import { sequenceDiff } from './walkthrough.mjs';
 import { syncStatuses } from './artifact-status.mjs';
 import { err } from './errors.mjs';
+
+// Who WRITES a closing record (E18): the roster login for the local git identity, else the raw git
+// user.name, else null. On CI that is the bot. Best-effort, like every record's `by`: attribution never
+// blocks a gate. Kept here rather than imported from skip.mjs, which imports this file.
+function closingActor(root, hub) {
+  return resolveCommitterLogin(root, Array.isArray(hub?.roster) ? hub.roster : [])
+    || (run('git', ['config', 'user.name'], { cwd: root }).stdout || '').trim()
+    || null;
+}
+
+// One line for a review step's closing record in `yad gate status` (E18).
+function closedLine(closed) {
+  const how = closed.via === 'merge'
+    ? `merged${closed.mergedBy ? ` by ${closed.mergedBy}` : ''}${closed.pr != null ? ` (PR #${closed.pr})` : ''}${closed.commit ? ` at ${String(closed.commit).slice(0, 7)}` : ''}`
+    : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;
+  return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${closed.by ? `; recorded by ${closed.by}` : ''}`;
+}
 
 // ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------
 function frontmatter(file) {
@@ -332,6 +349,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   // dryRun forces the same read-only behavior regardless of the ledger — used for the Path B pre-merge
   // evaluation, which must persist nothing (gateCi passes dryRun for a held branch event).
   const readOnly = (local && isVerifiedLedger(hub)) || dryRun;
+  // Who writes this run's closing records (E18). Not asked on a read-only run, which writes nothing.
+  const by = readOnly ? null : closingActor(root, hub);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
@@ -469,11 +488,16 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
         for (const m of pred.missing) hand(`recorded gap: ${m}`);
       }
     } else if (pred.passed) {
-      state = advanceState(state, step);
+      // The merge is the close (E18): its date, not the day this sweep happened to run, when the platform
+      // says so.
+      state = advanceState(state, step, {
+        by, date: (typeof pull.mergedAt === 'string' && pull.mergedAt.slice(0, 10)) || today,
+        pr: pr.number ?? null, commit: pull.mergeCommit || null, hash: curHash, mergedBy: pull.mergedBy || null,
+      });
       advanced++;
       ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);
     } else {
-      state = markInReview(state, step);
+      state = markInReview(state, step, { by, date: today, pr: pr.number ?? null, hash: curHash });
       for (const m of pred.missing) hand(`still needed: ${m}`);
     }
     // Stamp when this run actually learned something: an open step every time, and a closed one only
@@ -887,6 +911,7 @@ export async function gateStatus(root, { epic } = {}) {
     // until the review passes and clears the flag.
     const paying = s.debt === true && state !== 'deferred' ? '; owed as debt — being paid back' : '';
     log(`    ${isPassed(s) && state !== 'deferred' ? c.green('✓') : c.yellow('•')} ${s.id} ${c.dim(`— ${state || `${s.status} (unknown)`}, ${live.length} approval(s) ${from}${tags}${count}${paying}`)}`);
+    if (s.closed && typeof s.closed === 'object' && !Array.isArray(s.closed)) log(`      ${c.dim(closedLine(s.closed))}`);
   }
 }
 
@@ -909,7 +934,7 @@ export function buildRepairMessage({ epic, steps }) {
 // sweep up an unrelated edit. It lands on the DEFAULT branch, where `ledger-guard` (which polices the
 // machine-written ledger on review PRs) does not apply — so this stays compatible with "CI is the sole
 // writer of the ledger" during review.
-export async function gateRepair(root, { epic, push = false, allowBranch = false, dryRun = false } = {}) {
+export async function gateRepair(root, { epic, push = false, allowBranch = false, dryRun = false, today = new Date().toISOString().slice(0, 10) } = {}) {
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { closed: [] }; }
@@ -919,7 +944,8 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
   if (!violations.length) { ok('epic state is consistent — nothing to repair'); return { closed: [] }; }
   for (const v of violations) warn(`${v.message} [${v.code}]`);
 
-  const closed = repairState(ledger.state);
+  // Read leniently: a repair heals a broken ledger, and a broken hub.json must not stop it (E18).
+  const closed = repairState(ledger.state, { by: closingActor(root, readJSON(productConfigPath(root), null)), date: today });
   if (dryRun) { info('dry run — nothing written'); return { closed }; }
   writeState(ledger.files.state, ledger.state);
   ok(`closed ${closed.length} stranded author step(s): ${c.dim(closed.join(', '))}`);
@@ -958,7 +984,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 // the user's checked-out branch, which for a per-story review (review/EP-*/stories-S01) does NOT equal
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
-export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists } = {}) {
+export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, today = new Date().toISOString().slice(0, 10) } = {}) {
   const { hub, repos } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
@@ -1007,7 +1033,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // Outside verified mode (local, OR a platform with no gate-sync CI) there is no CI to write the
   // ledger, so the local command marks the step in_review. In verified mode CI is the sole writer.
   if (!verified) {
-    ledger.state = markInReview(ledger.state, step);
+    ledger.state = markInReview(ledger.state, step, { by: closingActor(root, hub), date: today, hash: artifactHash(epicDir, step.artifact) });
     writeState(ledger.files.state, ledger.state);
   }
   if (!hub?.platform) {

@@ -7218,6 +7218,142 @@ test('verified Product: yad next and yad doctor do not send a blocker or a debt 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+// ---- E18: closing records ------------------------------------------------------------------------
+test('closing records: advanceState, markInReview and repairState stamp `closed` only when told how, and the first close wins (E18)', async () => {
+  const { closingRecord, CLOSED_VIA } = await import('./epic-state.mjs');
+  assert.deepEqual(closingRecord({ via: 'repair' }), { by: null, date: null, via: 'repair' }, 'no empty optional keys');
+  assert.deepEqual(CLOSED_VIA, ['merge', 'review-passed', 'review-opened', 'repair', 'auto', 'human']);
+
+  // No closing facts: nothing is stamped, so every existing caller is unchanged.
+  const plain = uiChain('ui-design-review', { ui: 'in_progress', uiReview: 'in_review' });
+  advanceState(plain, byId(plain, 'ui-design-review'));
+  assert.equal(JSON.stringify(plain).includes('"closed"'), false);
+
+  const close = { by: 'amn', date: '2026-09-15', pr: 12, commit: 'c0ffee1234', hash: 'sha256:abc', mergedBy: 'bo' };
+  const s = uiChain('ui-design-review', { ui: 'in_progress', uiReview: 'in_review' });
+  advanceState(s, byId(s, 'ui-design-review'), close);
+  assert.deepEqual(byId(s, 'ui-design-review').closed, { by: 'amn', date: '2026-09-15', via: 'merge', pr: 12, commit: 'c0ffee1234', hash: 'sha256:abc', mergedBy: 'bo' });
+  assert.deepEqual(byId(s, 'ui-design').closed, { by: 'amn', date: '2026-09-15', via: 'review-passed', pr: 12, hash: 'sha256:abc' });
+  assert.equal(byId(s, 'architecture').closed, undefined, 'a step already done was not closed here');
+
+  // The first close wins.
+  const earlier = { by: 'someone', date: '2026-01-01', via: 'human' };
+  const w = uiChain('ui-design-review', { ui: 'done', uiReview: 'in_review' });
+  byId(w, 'ui-design-review').closed = earlier;
+  advanceState(w, byId(w, 'ui-design-review'), close);
+  assert.deepEqual(byId(w, 'ui-design-review').closed, earlier);
+
+  // A blocked gate that passes drops the blocker's record and gains a closing record: two keys, two meanings.
+  const b = uiChain('ui-design-review', { ui: 'done', uiReview: 'blocked' });
+  byId(b, 'ui-design-review').record = { reason: 'legal', by: 'x', date: '2026-09-01' };
+  advanceState(b, byId(b, 'ui-design-review'), close);
+  assert.equal(byId(b, 'ui-design-review').record, undefined);
+  assert.equal(byId(b, 'ui-design-review').closed.via, 'merge');
+
+  // Opening a review closes its author step, and only that.
+  const m = uiChain('ui-design', { ui: 'in_progress', uiReview: 'todo' });
+  markInReview(m, byId(m, 'ui-design-review'), { by: 'amn', date: '2026-09-15', hash: 'sha256:ui' });
+  assert.deepEqual(byId(m, 'ui-design').closed, { by: 'amn', date: '2026-09-15', via: 'review-opened', hash: 'sha256:ui' });
+  assert.equal(byId(m, 'ui-design-review').closed, undefined, 'an open review is not closed');
+
+  // A repair is an escape hatch, and says so.
+  const r = uiChain('stories', { ui: 'in_progress', uiReview: 'done', stories: 'in_progress' });
+  assert.deepEqual(repairState(r, { by: 'amn', date: '2026-09-15' }), ['ui-design']);
+  assert.deepEqual(byId(r, 'ui-design').closed, { by: 'amn', date: '2026-09-15', via: 'repair' });
+});
+
+test('gate sync: a merge writes the closing record (merge date, PR, commit, hash, merger), gate status reads it, and a re-sync changes nothing (E18)', async () => {
+  const { gateStatus } = await import('./gate.mjs');
+  const { T, ep } = scaffoldEpic();
+  try {
+    const stateFile = path.join(ep, '.sdlc/state.json');
+    const s0 = JSON.parse(fs.readFileSync(stateFile));
+    s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
+    fs.writeFileSync(stateFile, JSON.stringify(s0));
+    const merged = { ...fullApproval, mergedAt: '2026-06-08T21:40:00Z', mergedBy: 'al', mergeCommit: 'c0ffee1234567' };
+    await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => merged });
+    const state = JSON.parse(fs.readFileSync(stateFile));
+    const { by, hash, ...review } = state.steps.find((x) => x.id === 'architecture-review').closed;
+    assert.ok(by === null || typeof by === 'string', 'by is who wrote the record, best-effort');
+    assert.equal(typeof hash, 'string');
+    assert.deepEqual(review, { date: '2026-06-08', via: 'merge', pr: 7, commit: 'c0ffee1234567', mergedBy: 'al' });
+    const author = state.steps.find((x) => x.id === 'architecture').closed;
+    assert.deepEqual([author.via, author.pr, author.date, author.hash, author.mergedBy], ['review-passed', 7, '2026-06-08', hash, undefined]);
+
+    const bytes = fs.readFileSync(stateFile, 'utf8');
+    await gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => merged });
+    assert.equal(fs.readFileSync(stateFile, 'utf8'), bytes, 'an already-done step is not closed twice');
+
+    const out = await grab(() => gateStatus(T, { epic: 'EP-test' }));
+    assert.match(out, /closed on 2026-06-08 — merged by al \(PR #7\) at c0ffee1/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate sync: an open review closes only its author step; with no merge facts the close takes the run date and invents nothing (E18)', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    const stateFile = path.join(ep, '.sdlc/state.json');
+    const s0 = JSON.parse(fs.readFileSync(stateFile));
+    s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
+    fs.writeFileSync(stateFile, JSON.stringify(s0));
+    await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => ({ ...fullApproval, state: 'OPEN', merged: false }) });
+    let state = JSON.parse(fs.readFileSync(stateFile));
+    assert.equal(state.steps.find((x) => x.id === 'architecture-review').closed, undefined);
+    const opened = state.steps.find((x) => x.id === 'architecture').closed;
+    assert.deepEqual([opened.via, opened.pr, opened.date], ['review-opened', 7, '2026-06-09']);
+
+    await gateSync(T, { epic: 'EP-test', today: '2026-06-10', reader: () => fullApproval });
+    state = JSON.parse(fs.readFileSync(stateFile));
+    const closed = state.steps.find((x) => x.id === 'architecture-review').closed;
+    assert.deepEqual(Object.keys(closed).sort(), ['by', 'date', 'hash', 'pr', 'via']);
+    assert.equal(closed.date, '2026-06-10');
+    assert.equal(state.steps.find((x) => x.id === 'architecture').closed.date, '2026-06-09', 'the first close wins');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate open on a local ledger closes the author step with who, when and the artifact hash (E18)', async () => {
+  const { gateOpen } = await import('./gate.mjs');
+  const { T, ep } = scaffoldEpic();
+  try {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null }));
+    const stateFile = path.join(ep, '.sdlc/state.json');
+    const s0 = JSON.parse(fs.readFileSync(stateFile));
+    s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
+    s0.steps.find((x) => x.id === 'architecture-review').status = 'todo';
+    s0.currentStep = 'architecture';
+    fs.writeFileSync(stateFile, JSON.stringify(s0));
+    await grab(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-09-15' }));
+    const state = JSON.parse(fs.readFileSync(stateFile));
+    assert.equal(state.steps.find((x) => x.id === 'architecture-review').status, 'in_review');
+    const closed = state.steps.find((x) => x.id === 'architecture').closed;
+    assert.deepEqual([closed.via, closed.date, typeof closed.hash, 'pr' in closed], ['review-opened', '2026-09-15', 'string', false]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gate repair stamps the step it closes as closed via repair, even with a broken hub.json (E18)', async () => {
+  const { gateRepair } = await import('./gate.mjs');
+  const { T, ep } = scaffoldEpic();
+  try {
+    const stateFile = path.join(ep, '.sdlc/state.json');
+    const s0 = JSON.parse(fs.readFileSync(stateFile));
+    s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
+    s0.steps.find((x) => x.id === 'architecture-review').status = 'done';
+    s0.currentStep = 'ui-design';
+    fs.writeFileSync(stateFile, JSON.stringify(s0));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ broken');
+    await grab(() => gateRepair(T, { epic: 'EP-test', today: '2026-09-15' }));
+    const closed = JSON.parse(fs.readFileSync(stateFile)).steps.find((x) => x.id === 'architecture').closed;
+    assert.deepEqual([closed.via, closed.date], ['repair', '2026-09-15']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad-run writes a closing record when it moves a lane past a step, pointing at its trust-log run (E18)', () => {
+  const loop = fs.readFileSync(new URL('../skills/yad-run/references/run-loop.md', import.meta.url), 'utf8');
+  assert.match(loop, /bs\.step\.closed = \{ by: .*, via: "auto", run: uid \}/);
+  assert.match(loop, /bs\.step\.closed = \{ by: .*, via: "human", run: uid \}/);
+  assert.match(loop, /never over a `closed` already on the step/);
+});
+
 test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as the way back', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-unskip-cli-'));
   try {
@@ -7818,6 +7954,9 @@ test('gate ci --merged: advances the step + flips artifact status on the default
   const state = JSON.parse(show(author, 'origin/trunk:epics/EP-test/.sdlc/state.json'));
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
   assert.equal(state.currentStep, 'ui-design');
+  // CI wrote the closing record (E18): the merge, on the PR, on the run date when the platform gives none.
+  const closed = state.steps.find((s) => s.id === 'architecture-review').closed;
+  assert.deepEqual([closed.via, closed.pr, closed.date], ['merge', 7, '2026-06-09']);
   // the merged artifact is on trunk (via the human merge) and its status flipped to approved at merge.
   assert.equal(show(author, 'origin/trunk:epics/EP-test/contract.md'), BRANCH_CONTRACT);
   assert.match(show(author, 'origin/trunk:epics/EP-test/architecture.md'), /status: approved/);

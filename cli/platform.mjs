@@ -222,7 +222,7 @@ export function mapApprovers(reviews = [], { roster, repos, touchedDomains, head
 
 // ---- read PR state (github) ---------------------------------------------------------------------
 function readPrGitHub(n, { cwd } = {}) {
-  const view = run('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,headRefOid'], { cwd });
+  const view = run('gh', ['pr', 'view', String(n), '--json', 'state,mergedAt,mergedBy,mergeCommit,headRefOid'], { cwd });
   if (!view.ok) return { ok: false, reason: view.stderr || 'gh pr view failed' };
   const meta = JSON.parse(view.stdout);
   let reviews = [];
@@ -287,6 +287,10 @@ function readPrGitHub(n, { cwd } = {}) {
     ok: true,
     state: meta.state,
     merged: meta.state === 'MERGED' || !!meta.mergedAt,
+    // What a closing record points at (E18). Null when the platform does not say, never invented.
+    mergedAt: meta.mergedAt || null,
+    mergedBy: meta.mergedBy?.login || null,
+    mergeCommit: meta.mergeCommit?.oid || null,
     headOid: meta.headRefOid,
     reviews,
     threads,
@@ -324,6 +328,9 @@ function readPrGitLab(n, { cwd } = {}) {
     ok: true,
     state: mr.state,
     merged: mr.state === 'merged',
+    mergedAt: mr.merged_at || null,
+    mergedBy: mr.merged_by?.username || null,
+    mergeCommit: mr.merge_commit_sha || mr.squash_commit_sha || null,
     headOid: mr.diff_refs?.head_sha || mr.sha,
     reviews,
     threads,

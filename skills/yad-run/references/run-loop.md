@@ -55,12 +55,21 @@ while step is a Build step (not engineer-review):
                            by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>" }
         persist; checkpoint; STOP and report the human action needed
     elif eff == "auto":
-        bs.step.status = "done"; advance bs.currentStep to next; persist; checkpoint; continue  # Step B advance
+        bs.step.status = "done"
+        bs.step.closed = { by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>", via: "auto", run: uid }
+        advance bs.currentStep to next; persist; checkpoint; continue  # Step B advance
     else:  # "human"
-        bs.step.status = "done"; persist; checkpoint; STOP and report "waiting for human at <next>"
+        bs.step.status = "done"
+        bs.step.closed = { by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>", via: "human", run: uid }
+        persist; checkpoint; STOP and report "waiting for human at <next>"
 
 # reached engineer-review: always stop, hand to yad-engineer-review (human gate, finalizes the verdict)
 ```
+
+`closed` is the step's **closing record** (E18): who wrote it, when, and how the lane moved past the
+step. `via: "auto"` means the dial let the run go on by itself; `via: "human"` means it stopped for a
+person. `run` is the `uid` of the trust-log shard this run wrote, so the record points at the evidence.
+Write it only when you write `done`, and never over a `closed` already on the step.
 
 `ranBy` is `machine` when the *previous* step's effective dial caused this step to run without a human
 nudge; otherwise `human`. Persist build-state after every transition so a halt leaves an accurate,
