@@ -13771,6 +13771,34 @@ test('doctor automation: silent by default; a broken file, a gate on auto and a 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor module:legacy-bmad: a leftover _bmad/sdlc/ is named, never deleted; BMAD\'s own _bmad/ is not ours (E3)', async () => {
+  const { legacyModuleChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e3d-'));
+  const found = () => { const checks = []; legacyModuleChecks(checks, T); return checks; };
+  try {
+    assert.deepEqual(found(), [], 'a project with no _bmad/ reads exactly as before');
+    fs.mkdirSync(path.join(T, '_bmad', 'core'), { recursive: true });
+    assert.deepEqual(found(), [], 'a BMAD install without our sdlc/ folder is not a finding');
+
+    fs.mkdirSync(path.join(T, '_bmad', 'sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), 'automation:\n  kill_switch: true\n');
+    let [c, ...rest] = found();
+    assert.equal(rest.length, 0);
+    assert.equal(c.id, 'module:legacy-bmad');
+    assert.equal(c.status, 'warn', 'a warning, not a failure: nothing reads the folder');
+    assert.match(c.message, /\.sdlc\/config\.yaml/);
+    assert.match(c.hint, /yad check --fix/, 'names the install when the new config is missing');
+    assert.match(c.hint, /automation:legacy-kill/, 'clear the kill-switch finding before deleting its evidence');
+    assert.ok(fs.existsSync(path.join(T, '_bmad/sdlc/config.yaml')), 'the doctor deletes nothing');
+
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/config.yaml'), 'a: 1\n');
+    [c] = found();
+    assert.doesNotMatch(c.hint, /yad check --fix/, 'no install step once the new config is there');
+    assert.match(c.hint, /delete _bmad\/sdlc\//);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('yad next says when a dial is held by the kill switch, and that a Shape auto is only recorded (E34)', async () => {
   const { runNext } = await import('./next.mjs');
   const { seedState: seed } = await import('./epic-state.mjs');
