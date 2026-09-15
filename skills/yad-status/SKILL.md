@@ -72,7 +72,8 @@ Print, in this order:
      never render it as done or as N/A.
    - **Debt:** a step carrying `"debt": true` (written by `yad defer … --debt`) is owed back and must be
      reminded until paid. Add `· DEBT` to its line, and list every debt in a short **Owed** block under
-     the chain with the command that pays it: `yad undefer <epic> <id>` while it is still `deferred`, or
+     the chain with the command that pays it: `yad undefer <epic> <id>` while it is still `deferred` (on a verified Product,
+     say that verb is refused once the ledger is on the default branch), or
      "being paid back — clears when `<id>-review` passes" once it is back in progress. The flag is
      removed only when that review passes. `yad doctor` reports the same list as `step:debt`.
    - **Re-opened steps:** an unfinished step with a later step `done` (not its own `-review` gate) was
@@ -81,7 +82,8 @@ Print, in this order:
      `currentStep` stays where it is. `yad next <epic>` prints it as a `re-opened lane`.
    - **Blocked steps:** a step with `status: "blocked"` **and** a `record` is waiting on someone outside
      the workflow. Render it as `<id> — BLOCKED (<reason>)`, with who recorded it and when, and say it is
-     cleared with `yad unblock <epic> <id>` once the wait is over. A `blocked` with no record is the older
+     cleared with `yad unblock <epic> <id>` once the wait is over — on a verified Product that verb refuses
+     once the ledger is on the default branch, so say so. A `blocked` with no record is the older
      word for `todo`: render it as not started.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
    - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required

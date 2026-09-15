@@ -1411,7 +1411,7 @@ export function stepStateChecks(checks, root) {
     check(
       checks, 'step:debt', 'shape', 'warn',
       `${owed.length} step(s) still owed as debt: ${some(owed, 3)}`,
-      'a debt is a step deferred with `--debt`: owed back, and reminded until paid. `yad undefer <epic> <step>` starts paying it — after later work has finished, the step re-opens beside that work, which stays done — and the debt clears when the step\'s review passes',
+      `a debt is a step deferred with \`--debt\`: owed back, and reminded until paid. \`yad undefer <epic> <step>\` starts paying it — after later work has finished, the step re-opens beside that work, which stays done — and the debt clears when the step's review passes${isVerifiedLedger(readJSON(productConfigPath(root), null)) ? '. On this verified Product `yad undefer` is refused once an epic\'s ledger is on the default branch: only CI writes `state.json` there, and CI has no step for it yet' : ''}`,
     );
   }
   if (noRecord.length) {

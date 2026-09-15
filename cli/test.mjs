@@ -7102,9 +7102,21 @@ test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger
     process.exitCode = undefined;
     const fresh = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only', runner: onBase('epics/EP-other/.sdlc/state.json') }));
     assert.match(fresh, /N\/A/);
-    assert.doesNotMatch(fresh, /refused|could not be read/);
+    assert.doesNotMatch(fresh, /is refused:|could not be read/);
     assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'skipped');
     assert.notEqual(process.exitCode, 1);
+    // …and it says the skip is one way once that PR merges, naming the verb that will then be refused.
+    assert.match(fresh, /yours to write only until the epic's first review PR merges; after that `yad unskip EP-x ui-design` is refused/);
+    assert.match(fresh, /git fetch origin/);
+
+    // A repeat of a skip already written is refused too once CI owns the ledger: the refusal comes before the
+    // "already skipped" path, which would otherwise rewrite the file.
+    const skipped = bytes();
+    process.exitCode = undefined;
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'no UI', runner: owned })), /`yad skip` is refused/);
+    assert.equal(process.exitCode, 1);
+    assert.equal(bytes(), skipped, 'the already-skipped path wrote nothing');
+    process.exitCode = undefined;
 
     // origin cannot be read: unknown, so it writes — and says it could not tell.
     const unknown = await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner: fakeRunner() }));
@@ -7115,7 +7127,7 @@ test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger
     // A local ledger on the same answers is never refused: only the verified mode hands the file to CI.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'local' }));
     assert.match(await grab(() => runDefer(T, { epic: 'EP-x', step: 'ui-design', reason: 'later', runner: owned })), /deferred/);
-    assert.equal(owned.calls.filter((call) => call.includes('ls-tree')).length, 5, 'git is not even asked on a local ledger');
+    assert.equal(owned.calls.filter((call) => call.includes('ls-tree')).length, 6, 'git is not even asked on a local ledger');
 
     // A Build lane lives in build-state, which CI does not own: a lane skip still writes on a verified Product.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
@@ -7126,6 +7138,84 @@ test('verified Product: skip, unskip, defer, undefer and unblock refuse a ledger
     process.exitCode = prev;
     fs.rmSync(T, { recursive: true, force: true });
   }
+});
+
+test('a broken hub.json or repos.json does not stop a skip on a local ledger — read leniently, as the hook reads it', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-broken-'));
+  try {
+    seedEpic(T, 'EP-x', uiChain('ui-design', { ui: 'in_progress' }));
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: 'not a list' }));
+    const runner = fakeRunner();
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', reason: 'backend-only', runner })), /N\/A/);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ not json');
+    assert.match(await grab(() => runSkip(T, { epic: 'EP-x', step: 'ui-design', undo: true, runner })), /un-skipped/);
+    assert.equal(readUiState(T).steps.find((x) => x.id === 'ui-design').status, 'in_progress');
+    assert.deepEqual(runner.calls, [], 'a ledger that is not verified never asks git');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('verified Product: the refusal names foundation/ for the Product level, and an EP-discovery ledger on base counts as the same one (E75)', async () => {
+  const { runUnblock } = await import('./skip.mjs');
+  const prev = process.exitCode;
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-skip-foundation-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    fs.mkdirSync(path.join(T, 'foundation/.sdlc'), { recursive: true });
+    const file = path.join(T, 'foundation/.sdlc/state.json');
+    fs.writeFileSync(file, JSON.stringify({
+      epicId: 'EP-foundation', currentStep: 'foundation', schemaVersion: 10,
+      steps: [{ id: 'foundation', type: 'author', artifact: 'foundation', status: 'blocked', record: { reason: 'legal', by: 'amn', date: '2026-09-15' } }],
+    }));
+    const before = fs.readFileSync(file, 'utf8');
+    for (const onBase of ['foundation/.sdlc/state.json', 'epics/EP-discovery/.sdlc/state.json']) {
+      process.exitCode = undefined;
+      const runner = fakeRunner({ [`git -C ${T} rev-parse`]: '', [`git -C ${T} -c core.quotePath=false ls-tree`]: `${onBase}\0` });
+      const out = await grab(() => runUnblock(T, { epic: 'EP-foundation', step: 'foundation', runner }));
+      assert.match(out, /`yad unblock` is refused: foundation\/\.sdlc\/state\.json is on the default branch/, onBase);
+      assert.equal(process.exitCode, 1, onBase);
+      assert.equal(fs.readFileSync(file, 'utf8'), before, `${onBase}: nothing written`);
+    }
+  } finally {
+    process.exitCode = prev;
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('verified Product: yad next and yad doctor do not send a blocker or a debt to a verb that refuses there (E34 review)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-verified-hints-'));
+  try {
+    const state = uiChain('ui-design', { ui: 'in_progress' });
+    deferStep(state, 'ui-design', { reason: 'launch date', debt: true });
+    seedEpic(T, 'EP-x', { ...state, schemaVersion: 10 });
+    const local = await grab(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(local, /pay it back with yad undefer EP-x ui-design/);
+    assert.doesNotMatch(local, /refused/);
+    const localChecks = [];
+    stepStateChecks(localChecks, T);
+    assert.doesNotMatch(localChecks.find((x) => x.id === 'step:debt').hint, /verified/);
+
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', ledger: 'verified' }));
+    assert.match(await grab(() => runNext(T, { epic: 'EP-x' })),
+      /pay it back with yad undefer EP-x ui-design \(on a verified Product it is refused once the epic's ledger is on the default branch, until CI has a step for it\)/);
+    const checks = [];
+    stepStateChecks(checks, T);
+    assert.match(checks.find((x) => x.id === 'step:debt').hint, /On this verified Product `yad undefer` is refused once an epic's ledger is on the default branch/);
+
+    const blocked = uiChain('ui-design', { ui: 'blocked' });
+    byId(blocked, 'ui-design').record = { reason: 'waiting on legal', by: 'amn', date: '2026-09-15' };
+    seedEpic(T, 'EP-x', { ...blocked, schemaVersion: 10 });
+    const one = await grab(() => runNext(T, { epic: 'EP-x' }));
+    assert.match(one, /blocked — recorded by amn on 2026-09-15 — on a verified Product only CI can clear it/);
+    assert.doesNotMatch(one, /clear it with yad unblock/);
+    // The all-epics list carries the same line.
+    seedEpic(T, 'EP-y', { ...blocked, epicId: 'EP-y', schemaVersion: 10 });
+    const list = await grab(() => runNext(T, {}));
+    assert.match(list, /EP-x.*only CI can clear it/);
+    assert.doesNotMatch(list, /clear it with yad unblock/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as the way back', () => {

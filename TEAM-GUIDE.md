@@ -600,7 +600,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-analysis` | *(Optional)* pressure-test an idea into `analysis.md` before the epic. |
 | `yad-epic` | Start a feature: write `epic.md`, assign the `EP-<slug>` ID. |
 | `yad-architecture` | Author `architecture.md` + the locked `contract.md`. |
-| `yad-ui` | Author `ui-design.md` + `DESIGN.md`; materialize the screens in the connected design tool. **Optional** — a UI-less epic skips it with `yad skip <epic> ui-design --reason …`; an epic whose screens come later defers it with `yad defer` (with `--debt` when it is owed back; `yad undefer` picks it up again even after the stories are done). |
+| `yad-ui` | Author `ui-design.md` + `DESIGN.md`; materialize the screens in the connected design tool. **Optional** — a UI-less epic skips it with `yad skip <epic> ui-design --reason …`; an epic whose screens come later defers it with `yad defer` (with `--debt` when it is owed back; `yad undefer` picks it up again even after the stories are done). On a verified Product these verbs refuse once the epic's first review PR has merged, because CI owns `state.json`. |
 | `yad-stories` | Break the epic into repo-tagged stories (`EP-<slug>-S0N`). |
 | `yad-test-cases` | With the test architect, author the test cases; implement the automation when a testing tool is connected. |
 | `yad-review-gate` | Review / comment / approve / advance **any** gate. |

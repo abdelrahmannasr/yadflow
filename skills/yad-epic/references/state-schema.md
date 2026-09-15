@@ -292,7 +292,9 @@ No release before shape 7 ever wrote a record, so that is exact. The converse is
 has a verb: `yad unblock EP-<slug> <step>` (E37) moves `status` off `blocked` **and** removes the record
 in one write, because deleting only the record would turn the step silently into a `todo`. An author
 step whose earlier steps have all passed goes to `in_progress`; anything else, a review gate included,
-goes to `todo`. It never touches `build-state/<story>.json`, which the `yad-run` skill writes.
+goes to `todo`. It never touches `build-state/<story>.json`, which the `yad-run` skill writes. On a verified
+Product it refuses once the epic's ledger is on the default branch: CI owns `state.json` there and has no
+step for it yet.
 
 A status this release does not know is left alone — the file wins — and reported as
 `step:unknown-status`. It fails closed: the step counts as neither passed nor authored.
@@ -309,7 +311,9 @@ optional by being **omitted** from the chain at seed time), `ui-design` is **alw
 older spelling `yad skip … --undo`), usable at epic-authoring time or any point **up to authoring the
 `ui-design` step**. On a verified Product the window is shorter: once the epic's ledger is on the default
 branch (its first review PR has merged), `state.json` is CI's alone, and `yad skip`, `unskip`, `defer`,
-`undefer` and `unblock` refuse and write nothing. So there, skip `ui-design` right after seeding.
+`undefer` and `unblock` refuse and write nothing. So there, skip `ui-design` before that first PR merges:
+right after seeding on `classic`, and during the analysis step on `analysis-first`, whose first review PR
+is the analysis review.
 
 When each verb is too late is a rule about the chain, not about `ui-design` (E36):
 
@@ -392,7 +396,8 @@ A deferral follows the skip rules above:
 
 For a skip, the un-skip window is the meaning: work finished without the step was built on it not
 applying, so `yad unskip` is still refused once the step after the pair is finished. A deferral promised
-to come back, so `yad undefer` has **no closing window**. Before later work has finished it behaves like
+to come back, so `yad undefer` has **no closing window** — except on a verified Product, where it refuses once the epic's
+ledger is on the default branch. Before later work has finished it behaves like
 `yad unskip`. After it has finished, it **re-opens** the pair behind that work:
 
 | Field | After a late `yad undefer` |
@@ -440,7 +445,7 @@ of the pair:
 | Where it may sit | a `deferred` pair only; `yad skip --debt` is refused, since a skip owes nothing |
 | What it changes | nothing about the state: a debt is exactly as passed, and as unauthored, as any deferral |
 | Adding it later | `yad defer … --debt` on a step already deferred adds the flag and keeps the record |
-| Paying it back | `yad undefer`, early or late; the flag stays on while the step is worked on |
+| Paying it back | `yad undefer`, early or late; the flag stays on while the step is worked on. Not on a verified Product once the ledger is on the default branch: there a debt cannot be paid back until CI has a step for it |
 | Setting it aside again | `yad defer` again keeps the flag; `yad skip` is refused on a step owed as debt, because a skip owes nothing and its review would never run again |
 | When it clears | `advanceState` removes it from both steps when the `-review` gate passes — nothing else does |
 | Reminders | `yad next` (a warning per debt, a count in the all-epics list, `debt` in JSON), `yad doctor` (`step:debt`, a warn), `yad gate status` ("deferred (still owed, as debt)") |

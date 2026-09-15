@@ -12,7 +12,7 @@
 //   yad next [<epic>] --json  the same answer as an action object, for an agent or CI
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
-import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
+import { PROJECT_FILES, VERSION , isVerifiedLedger, productConfigPath, stepAdvance } from './manifest.mjs';
 import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
@@ -162,7 +162,7 @@ function printBuildLanes(builds, automation = null) {
 // fallback printed when no story has a build-state yet. Both are the engine naming a step's skill in
 // prose, so both must name the project's choice — otherwise `yad next` and `yad skill list` disagree
 // about the same project.
-function actionLine(a, { solo, bindings = null } = {}) {
+function actionLine(a, { solo, bindings = null, verified = false } = {}) {
   const runs = (stepId, fallback) => stepSkills(stepId, bindings)[0] || fallback;
   switch (a.kind) {
     case 'new':
@@ -203,7 +203,12 @@ function actionLine(a, { solo, bindings = null } = {}) {
     // so it named the wrong party.
     case 'blocked': {
       const who = a.record?.by ? ` — recorded by ${a.record.by}${a.record.date ? ` on ${a.record.date}` : ''}` : '';
-      return c.dim(`blocked${who} — clear it with yad unblock ${a.epicId} ${a.step} once resolved`);
+      // On a verified Product the verb refuses once the ledger is on the default branch, and CI has no step
+      // for it yet: naming it there would send the reader to a refusal (E34 review).
+      const clear = verified
+        ? 'on a verified Product only CI can clear it once the epic\'s ledger is on the default branch, and CI has no step for that yet (yad unblock refuses)'
+        : `clear it with yad unblock ${a.epicId} ${a.step} once resolved`;
+      return c.dim(`blocked${who} — ${clear}`);
     }
     default:
       return c.dim('nothing to do');
@@ -216,7 +221,7 @@ function actionLine(a, { solo, bindings = null } = {}) {
 // `printAction` renders `a` and `--json` emits the SAME `a` verbatim, and that JSON is deep-equalled
 // by the golden test, which an added key breaks (see actionFor). It comes from `rowFor`, off the same
 // `epic.md` read the action's own `lineageKind` came from.
-function printAction(a, { solo, theme: tag = null, bindings = null, automation = null } = {}) {
+function printAction(a, { solo, theme: tag = null, bindings = null, automation = null, verified = false } = {}) {
   // Prefix the id with the type noun (Defect / Change request / Hotfix / Chore / Epic) so a glance
   // says what kind of work this is. The product level is not a feature — leave it un-prefixed.
   const noun = a.lineageKind && !PRODUCT_EPICS.includes(a.epicId) ? `${typeNoun(a.lineageKind)} ` : '';
@@ -231,9 +236,9 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
     // Every lane printed is a skip and nothing has started (E39 review): the lanes alone name no command,
     // so the one actionable line is printed too.
     const lanes = buildLanes(a.builds);
-    if (lanes.length && lanes.every((r) => r.status === 'skipped')) hand(actionLine(a, { solo, bindings }));
+    if (lanes.length && lanes.every((r) => r.status === 'skipped')) hand(actionLine(a, { solo, bindings, verified }));
   } else {
-    hand(actionLine(a, { solo, bindings }));
+    hand(actionLine(a, { solo, bindings, verified }));
     const note = costNote(a);
     if (note) info(c.dim(note));
     // A Shape author step the team set to `auto` (E34). Recorded, not acted on: say so, or the line reads
@@ -254,20 +259,20 @@ function printAction(a, { solo, theme: tag = null, bindings = null, automation =
   }
   // A step re-opened behind finished work (E41) is a lane of its own beside the chain, like the
   // test-cases track above: it gets its own line, with the same words a chain step would get.
-  for (const lane of a.reopened || []) hand(`re-opened lane: ${actionLine({ ...lane, epicId: a.epicId }, { solo, bindings })}`);
+  for (const lane of a.reopened || []) hand(`re-opened lane: ${actionLine({ ...lane, epicId: a.epicId }, { solo, bindings, verified })}`);
   // DEBT is reminded on every run until it is paid (E41). The line says what is owed and the one command
   // that starts paying it — or, once that has started, what finishes it.
-  for (const d of a.debt || []) warn(debtLine(a.epicId, d));
+  for (const d of a.debt || []) warn(debtLine(a.epicId, d, verified));
   phaseLine(a);
 }
 
 // One reminder line for a step owed as debt (E41).
-function debtLine(epicId, d) {
+function debtLine(epicId, d, verified = false) {
   const author = d.step.replace(/-review$/, '');
   if (d.status === 'deferred') {
     const r = d.record || {};
     const when = [r.by ? `by ${r.by}` : '', r.date ? `on ${r.date}` : ''].filter(Boolean).join(' ');
-    return `owed (debt): ${author} — deferred${when ? ` ${when}` : ''}${r.reason ? `: ${r.reason}` : ''} — pay it back with yad undefer ${epicId} ${author}`;
+    return `owed (debt): ${author} — deferred${when ? ` ${when}` : ''}${r.reason ? `: ${r.reason}` : ''} — pay it back with yad undefer ${epicId} ${author}${verified ? ' (on a verified Product it is refused once the epic\'s ledger is on the default branch, until CI has a step for it)' : ''}`;
   }
   // Put back, but waiting behind an earlier step that has not passed: say so, rather than "being paid
   // back" about a step nobody can work on yet.
@@ -340,6 +345,7 @@ function generalNext(root, { all } = {}) {
   // One read of `.sdlc/skills.json` for the whole roll-up, not one per epic.
   const bindings = loadSkillBindings(root);
   const automation = loadAutomation(root);
+  const verified = isVerifiedLedger(readJSON(productConfigPath(root), null));
   // The Foundation wins when both exist. Two product levels is a fault `yad doctor` fails on; until it
   // is fixed the new spelling is the one worth acting on, and the old one is named so it is not lost.
   const productIds = PRODUCT_EPICS.filter((id) => allEpics.includes(id));
@@ -353,7 +359,7 @@ function generalNext(root, { all } = {}) {
   }
 
   if (!featureEpics.length) {
-    if (productOpen) { printAction(productRow.action, { solo, bindings, automation, ...productRow }); return; }
+    if (productOpen) { printAction(productRow.action, { solo, bindings, automation, verified, ...productRow }); return; }
     log(`\n  ${c.bold('Set up — no feature epics yet.')}`);
     if (brownfield) hand(`capture what already exists first: invoke the ${c.bold('yad-backfill')} skill`);
     // Both name a STEP's skill, so both ask the project. `yad-backfill` above does not: waking a
@@ -365,7 +371,7 @@ function generalNext(root, { all } = {}) {
 
   const rows = featureEpics.map((id) => rowFor(root, id, bindings));
   if (productOpen) {
-    printAction(productRow.action, { solo, bindings, automation, ...productRow });   // an unfinished Foundation comes first
+    printAction(productRow.action, { solo, bindings, automation, verified, ...productRow });   // an unfinished Foundation comes first
     // REPORTED, NOT ENFORCED (E75). The roadmap puts one approval on the Foundation "before feature
     // work begins", and the decision for this release is to say so rather than to block on it: a
     // project that began its epics first — every project older than this release — must keep working
@@ -374,7 +380,7 @@ function generalNext(root, { all } = {}) {
   }
 
   if (featureEpics.length === 1 || all) {
-    for (const r of rows) printAction(r.action, { solo, bindings, automation, ...r });
+    for (const r of rows) printAction(r.action, { solo, bindings, automation, verified, ...r });
     return;
   }
   // Several epics — list each with a one-liner, then point at the per-epic / --all views.
@@ -387,7 +393,7 @@ function generalNext(root, { all } = {}) {
     // Debt is reminded here too (E41): the roll-up is the view people run most, and a reminder that only
     // appears once you already look at the one epic is not a reminder.
     const owed = a.debt?.length ? `  ${c.yellow(`· ${a.debt.length} owed as debt`)}` : '';
-    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo })}${owed}`);
+    log(`    ${c.cyan(`${typeNoun(a.lineageKind)} ${a.epicId}`)}${theme}  ${actionLine(a, { solo, verified })}${owed}`);
   }
   // Painted per segment, not dim-wrapping a bold: `paint` closes with a full reset, so the nested
   // form loses the dim from the first bold word to the end of the line.
@@ -484,6 +490,7 @@ export async function runNext(root, { epic, check, all, json } = {}) {
   // in the two prose lines no action carries.
   const bindings = loadSkillBindings(root);
   const automation = loadAutomation(root);
+  const verified = isVerifiedLedger(readJSON(productConfigPath(root), null));
   const row = rowFor(root, epic, bindings);
-  printAction(row.action, { solo: isSolo(root), bindings, automation, ...row });
+  printAction(row.action, { solo: isSolo(root), bindings, automation, verified, ...row });
 }

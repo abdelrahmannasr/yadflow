@@ -395,9 +395,13 @@ chain as broken.
 **On a verified Product, CI owns the ledger.** Once an epic's `state.json` is on the default branch,
 `yad skip`, `yad unskip`, `yad defer`, `yad undefer` and `yad unblock` refuse and write nothing.
 `ledger-guard` rejects any commit to that file that CI did not make, and CI has no step for these verbs
-yet. A new epic is different: its ledger rides its first review PR, so skipping `ui-design` right after
-seeding still works. If `origin` cannot be read, the verb writes and warns that it could not tell. A
-Build lane skip is not affected: it writes `build-state`, which CI does not own.
+yet. So a late `yad undefer`, paying a debt back, and clearing a blocker are not available there until it
+does. A new epic is different: its ledger rides its first review PR, so a skip or deferral written before
+that PR merges still lands. That PR is the epic review on `classic` and the analysis review on
+`analysis-first`. A skip or deferral written in that window says it cannot be put back once the PR
+merges. The check reads `origin` as last fetched, so run `git fetch origin` first if the PR may have
+merged. If `origin` cannot be read, the verb writes and warns that it could not tell. A Build lane skip
+is not affected: it writes `build-state`, which CI does not own.
 
 **A whole Build lane can be skipped too (E39).** A lane is one story in one repo. When a story declares a
 repo that turns out to need no change, `yad skip <epic> <story> --repo <name> --reason "<why>"` marks that
@@ -457,7 +461,8 @@ opened before the deferral says the review is still owed rather than "already do
 A step cannot be both: `yad defer` refuses a skipped step and `yad skip` a deferred one, and each names
 the command that puts the step back first.
 
-**Picking a deferred step up late: `yad undefer` works at any time.** Before later work has finished,
+**Picking a deferred step up late: `yad undefer` works at any time** — except on a verified Product once
+the epic's ledger is on the default branch (see "On a verified Product, CI owns the ledger" above). Before later work has finished,
 it puts the step back in the chain the way `yad unskip` does. After later work has finished — say the
 stories were written and approved while the UI waited — it **re-opens** the step beside that work:
 
@@ -485,7 +490,8 @@ pair. `--debt` on a step that is already deferred adds the flag and keeps the re
 - **Reminders, on every run, until it is paid:** a warning line in `yad next <epic>`, a count on the
   epic's row when `yad next` lists every epic, a `step:debt` finding in `yad doctor`, and "deferred
   (still owed, as debt)" in `yad gate status`.
-- **Paying it back** is `yad undefer`, early or late. The flag stays on while the step is worked on.
+- **Paying it back** is `yad undefer`, early or late — not on a verified Product once the epic's ledger is
+  on the default branch, where a debt cannot be paid back until CI has a step for it. The flag stays on while the step is worked on.
   Deferring the step again keeps the flag, and `yad skip` refuses a step owed as debt.
 - **It clears** when the step's review passes, and nothing else removes it.
 - **Only a deferral can carry debt.** `yad skip --debt` is refused, because a skip means nothing is owed.
@@ -638,9 +644,12 @@ rewrites the old ones. See [shape 7](migrations/shape-7.md).
 
 `yad skip` and `yad defer` write their states for you. Nothing writes `blocked` for you: set the status
 and add a record by hand and every command understands it — `yad next` prints the record instead of
-telling you to author the artifact, and no gate is waived by it. A record's `by` is whoever wrote it.
+telling you to author the artifact, and no gate is waived by it. A record's `by` is whoever wrote it. On a
+verified Product that hand edit is CI's to make: `ledger-guard` rejects it once the epic's ledger is on the
+default branch.
 
-**When the wait is over: `yad unblock <epic> <step>`.** It moves the step off `blocked` and removes
+**When the wait is over: `yad unblock <epic> <step>`.** On a verified Product it refuses once the epic's
+ledger is on the default branch, like `yad skip`. Otherwise it moves the step off `blocked` and removes
 its record in the same write. An author step whose earlier steps have all passed goes back to
 `in_progress`; anything else goes to `todo`, including a review gate, whose review you then open as
 usual. It refuses a step that is not blocked, and says so separately for a `blocked` with no record,
