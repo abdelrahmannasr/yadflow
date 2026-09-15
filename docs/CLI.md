@@ -179,10 +179,9 @@ The deterministic file work runs automatically; the AI-only steps are handed to 
 with a printed next-action. Re-run `… check --fix` any time the workflow updates — it never re-asks for
 input you already gave; re-running `setup` carries your profile forward.
 
-**Maintainers / no-CLI fallback:** the underlying copy is still a single script —
-`bash skills/sdlc/install.sh` — which the CLI's install step is a port of. The **source** stays in
-`skills/`, which a `bmad-method` update does not touch, so after any BMAD update just re-run the CLI
-(`… check --fix`) or the script.
+**Maintainers:** the source of every skill and of the module config stays in `skills/`. After you change
+one, re-run `… check --fix` to copy it into the IDE folders and `.sdlc/config.yaml`. The old
+`skills/sdlc/install.sh` script, which the install step was ported from, was removed in E3.
 
 > **The publish is automated; the decision is not.** Merging to `main` publishes nothing. When a person
 > fast-forwards the `release` branch to `main`, [semantic-release](https://semantic-release.gitbook.io/)

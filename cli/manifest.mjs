@@ -1,6 +1,5 @@
 // The single source of truth for what a set-up SDLC project should contain.
 // Drives setup (install from), update (re-sync), and check (diff against).
-// Keep the skill list here in sync with skills/sdlc/install.sh.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -22,7 +21,7 @@ export const UPSTREAM_REPO =
   (pkg.bugs?.url || '').match(/github\.com\/([^/]+\/[^/]+?)(?:\/issues)?\/?$/i)?.[1]
   || 'abdelrahmannasr/yadflow';
 
-// The hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The hand-authored yad-* skills.
 export const SKILLS = [
   'yad-discovery',
   'yad-analysis',
