@@ -289,7 +289,7 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 
 ```json
 { "id": "architecture-review", "status": "done",
-  "closed": { "by": "yad-gate-sync", "date": "2026-06-08", "via": "merge", "pr": 7,
+  "closed": { "by": "yad-gate-sync[bot]", "date": "2026-06-08", "via": "merge", "pr": 7,
               "commit": "c0ffee1", "hash": "sha256:…", "mergedBy": "al" } }
 ```
 
@@ -307,7 +307,8 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 | `via` | Written by | When |
 |---|---|---|
 | `merge` | `yad gate sync` / `yad gate ci` | A review gate passed on its merge |
-| `review-passed` | the same | Its author step, closed at that merge because nothing closed it earlier |
+| `approved` | the `yad-review-gate` skill, by hand | A review gate passed on recorded approvals on a Product with no platform: nothing merged, so no `pr` or `commit` |
+| `review-passed` | `yad gate sync` / `yad gate ci`, or that skill | Its author step, closed when its gate passed because nothing closed it earlier |
 | `review-opened` | `yad gate open` (local ledger) / `yad gate sync` | An author step, closed when its review opened |
 | `repair` | `yad gate repair` | A stranded author step — an escape hatch, so it says so |
 | `auto` / `human` | the `yad-run` skill, in `build-state` | A Build lane step: the dial let the run go on by itself, or it stopped for a person |
@@ -318,7 +319,8 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 - **Steps closed before this release carry none**, and nothing asks for one: `yad doctor` does not warn.
 - **No shape change.** An older release ignores the key, and nothing reads `done` differently because it
   is there.
-- `yad gate status` prints it under each review step.
+- `yad gate status` prints it under each review step. An author step's record has no reader yet;
+  `yad history` (E20) is the command that will read both.
 
 **`blocked` changed meaning in shape 7.** Before it, every writer used `blocked` for "waiting on an
 earlier step" — what is now `todo`. The two are told apart by the record, not by the shape number:

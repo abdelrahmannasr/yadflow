@@ -7222,7 +7222,7 @@ test('verified Product: yad next and yad doctor do not send a blocker or a debt 
 test('closing records: advanceState, markInReview and repairState stamp `closed` only when told how, and the first close wins (E18)', async () => {
   const { closingRecord, CLOSED_VIA } = await import('./epic-state.mjs');
   assert.deepEqual(closingRecord({ via: 'repair' }), { by: null, date: null, via: 'repair' }, 'no empty optional keys');
-  assert.deepEqual(CLOSED_VIA, ['merge', 'review-passed', 'review-opened', 'repair', 'auto', 'human']);
+  assert.deepEqual(CLOSED_VIA, ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human']);
 
   // No closing facts: nothing is stamped, so every existing caller is unchanged.
   const plain = uiChain('ui-design-review', { ui: 'in_progress', uiReview: 'in_review' });
@@ -7255,6 +7255,12 @@ test('closing records: advanceState, markInReview and repairState stamp `closed`
   markInReview(m, byId(m, 'ui-design-review'), { by: 'amn', date: '2026-09-15', hash: 'sha256:ui' });
   assert.deepEqual(byId(m, 'ui-design').closed, { by: 'amn', date: '2026-09-15', via: 'review-opened', hash: 'sha256:ui' });
   assert.equal(byId(m, 'ui-design-review').closed, undefined, 'an open review is not closed');
+  // A blocked review is not opened, so its author step is not labelled `review-opened`.
+  const bl = uiChain('ui-design', { ui: 'in_progress', uiReview: 'blocked' });
+  byId(bl, 'ui-design-review').record = { reason: 'legal', by: 'x', date: '2026-09-01' };
+  markInReview(bl, byId(bl, 'ui-design-review'), { by: 'amn', date: '2026-09-15' });
+  assert.equal(byId(bl, 'ui-design-review').status, 'blocked');
+  assert.equal(byId(bl, 'ui-design').closed, undefined);
 
   // A repair is an escape hatch, and says so.
   const r = uiChain('stories', { ui: 'in_progress', uiReview: 'done', stories: 'in_progress' });
@@ -7352,6 +7358,46 @@ test('yad-run writes a closing record when it moves a lane past a step, pointing
   assert.match(loop, /bs\.step\.closed = \{ by: .*, via: "auto", run: uid \}/);
   assert.match(loop, /bs\.step\.closed = \{ by: .*, via: "human", run: uid \}/);
   assert.match(loop, /never over a `closed` already on the step/);
+  // SKILL.md is what the agent reads first, so it says the same.
+  const skill = fs.readFileSync(new URL('../skills/yad-run/SKILL.md', import.meta.url), 'utf8');
+  assert.match(skill, /"via": "auto", "run": "<the trust-log uid>"/);
+  assert.match(skill, /"via": "human", "run": "<the trust-log uid>"/);
+});
+
+test('yad-review-gate, passing a gate by hand on a Product with no platform, writes the closing records advanceState would (E18 review)', async () => {
+  const { CLOSED_VIA } = await import('./epic-state.mjs');
+  const skill = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
+  assert.match(skill, /"via": "approved"/);
+  assert.match(skill, /"via": "review-passed"/);
+  assert.match(skill, /Never write a `closed` over one already on a step/);
+  assert.ok(CLOSED_VIA.includes('approved'));
+});
+
+test('gate open with a platform adds the new PR number to the author step\'s closing record, and to nothing older (E18 review)', async () => {
+  const { gateOpen } = await import('./gate.mjs');
+  const { T, ep } = scaffoldEpic();
+  try {
+    const stateFile = path.join(ep, '.sdlc/state.json');
+    const s0 = JSON.parse(fs.readFileSync(stateFile));
+    s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
+    s0.steps.find((x) => x.id === 'architecture-review').status = 'todo';
+    s0.currentStep = 'architecture';
+    fs.writeFileSync(stateFile, JSON.stringify(s0));
+    const creator = () => ({ ok: true, url: 'https://github.com/o/r/pull/42' });
+    await grab(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-09-15', creator, hasBranch: () => true }));
+    const closed = JSON.parse(fs.readFileSync(stateFile)).steps.find((x) => x.id === 'architecture').closed;
+    assert.deepEqual([closed.via, closed.pr, closed.date], ['review-opened', 42, '2026-09-15']);
+    assert.deepEqual(Object.keys(closed), ['by', 'date', 'via', 'pr', 'hash'], 'the same key order a closer writes');
+
+    // An author step closed before this open keeps its record exactly: the new PR is not attached to it.
+    const older = { by: 'someone', date: '2026-01-01', via: 'review-opened' };
+    const s1 = JSON.parse(fs.readFileSync(stateFile));
+    Object.assign(s1.steps.find((x) => x.id === 'architecture'), { status: 'done', closed: older });
+    s1.steps.find((x) => x.id === 'architecture-review').status = 'todo';
+    fs.writeFileSync(stateFile, JSON.stringify(s1));
+    await grab(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', today: '2026-09-16', creator: () => ({ ok: true, url: 'https://github.com/o/r/pull/43' }), hasBranch: () => true }));
+    assert.deepEqual(JSON.parse(fs.readFileSync(stateFile)).steps.find((x) => x.id === 'architecture').closed, older);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('CLI: `yad unskip <epic> <step>` reverses a skip, and the skip names it as the way back', () => {

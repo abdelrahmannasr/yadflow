@@ -1332,7 +1332,9 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 // so nothing has to remove one; a writer that ever does must take `closed` with it, as `record` goes
 // with `blocked`. No shape change: an older release ignores a key it does not know, and nothing reads
 // `done` differently because this is present. Steps finished before it carry none, and nothing asks.
-export const CLOSED_VIA = ['merge', 'review-passed', 'review-opened', 'repair', 'auto', 'human'];
+// `approved` is the one no engine command writes: the `yad-review-gate` skill passes a gate by hand on a
+// Product with no platform, where `advanceState` has no caller and nothing merges.
+export const CLOSED_VIA = ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human'];
 
 export const closingRecord = ({ by = null, date = null, via, pr = null, commit = null, hash = null, mergedBy = null, run = null } = {}) => ({
   by: by || null,
@@ -2001,7 +2003,8 @@ export function markInReview(state, step, close = null) {
   if (st && st !== 'blocked' && !isPassed(state.steps[i])) state.steps[i].status = 'in_review';
   // Opening a review gate means the artifact was authored — close the paired author step rather than
   // trusting the authoring skill to have hand-edited state.json (issue #131).
-  closeAuthorStep(state, step, close ? closingRecord({ ...close, via: 'review-opened' }) : null);
+  // A BLOCKED review is not opened (above), so its author step is closed but not labelled `review-opened`.
+  closeAuthorStep(state, step, close && st !== 'blocked' ? closingRecord({ ...close, via: 'review-opened' }) : null);
   // `currentStep` only moves FORWARD. Opening the review of a step re-opened behind finished work (E41)
   // must not point the chain back at it, just as the parallel `test-cases` track must not.
   const cur = state.steps.findIndex((s) => s?.id === state.currentStep);

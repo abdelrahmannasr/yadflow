@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -1032,6 +1032,9 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
 
   // Outside verified mode (local, OR a platform with no gate-sync CI) there is no CI to write the
   // ledger, so the local command marks the step in_review. In verified mode CI is the sole writer.
+  // The author step this run closes, if any: its record gets the PR number once the PR exists (below).
+  const author = ledger.state.steps.find((s) => s?.type === 'author' && s.artifact === step.artifact && s.id !== step.id);
+  const closesAuthor = !verified && !!author && !isPassed(author) && !author.closed;
   if (!verified) {
     ledger.state = markInReview(ledger.state, step, { by: closingActor(root, hub), date: today, hash: artifactHash(epicDir, step.artifact) });
     writeState(ledger.files.state, ledger.state);
@@ -1071,6 +1074,14 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   if (!verified) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
     writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
+    // The record was written before the PR existed, and the first close wins, so no later sync can add
+    // the number. Add it here, to the record this run wrote and to nothing older (E18).
+    const number = ledger.hubPrs.find((p) => p.artifact === artifact)?.number ?? null;
+    const closedHere = closesAuthor ? ledger.state.steps.find((s) => s.id === author.id) : null;
+    if (number != null && closedHere?.closed?.via === 'review-opened' && closedHere.closed.pr == null) {
+      closedHere.closed = closingRecord({ ...closedHere.closed, pr: number });
+      writeState(ledger.files.state, ledger.state);
+    }
   }
   ok(`opened ${r.url}`);
   hand(verified

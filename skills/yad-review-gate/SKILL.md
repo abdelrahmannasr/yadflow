@@ -222,10 +222,13 @@ If the predicate **passes**:
 > `yad foundation new`. `yad-change` used to seed a threaded chain by hand; since E42 it runs
 > `yad epic new --parent`.)
 
-- Mark this review step `status: "done"`.
+- Mark this review step `status: "done"` **and give it a closing record** (E18):
+  `"closed": { "by": "<who performs this advance, or null>", "date": "<YYYY-MM-DD>", "via": "approved", "hash": "<the artifact hash the approvals bind to>" }`.
+  `approved`, not `merge`: nothing merged, so there is no `pr` or `commit` to write.
 - **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
   (issue #131) because a passed gate can never leave its author step behind. Skipping it strands every
-  later step behind `YAD-STATE-005`.
+  later step behind `YAD-STATE-005`. Give it `"closed": { "by": …, "date": …, "via": "review-passed" }`.
+- **Never write a `closed` over one already on a step.** The first close wins.
 - **`stories-review`** is the end of the gating chain: set `currentStep: "ready-for-build"` (the Phase 3
   handoff sentinel; intentionally not a `steps[]` entry) **and** open the parallel **`test-cases`** track
   (if its step is `todo`, set it to `in_progress`). Build can now start **and** the tester can work

@@ -329,7 +329,8 @@ function readPrGitLab(n, { cwd } = {}) {
     state: mr.state,
     merged: mr.state === 'merged',
     mergedAt: mr.merged_at || null,
-    mergedBy: mr.merged_by?.username || null,
+    // `merge_user` since GitLab 14.7; `merged_by` is the deprecated spelling older instances still send.
+    mergedBy: mr.merge_user?.username || mr.merged_by?.username || null,
     mergeCommit: mr.merge_commit_sha || mr.squash_commit_sha || null,
     headOid: mr.diff_refs?.head_sha || mr.sha,
     reviews,

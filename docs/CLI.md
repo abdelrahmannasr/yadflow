@@ -638,13 +638,14 @@ nothing recorded on it.
 | How it closed (`via`) | When |
 |---|---|
 | `merge` | A review gate passed when its PR merged. The record holds the PR, the merge commit, the artifact hash and who merged it. |
-| `review-passed` | An author step closed at that same merge. |
+| `approved` | A review gate passed on recorded approvals on a Product with no platform, where nothing merges. |
+| `review-passed` | An author step closed when its gate passed. |
 | `review-opened` | An author step closed when its review opened. |
 | `repair` | `yad gate repair` closed a stranded author step. |
 | `auto` / `human` | The `yad-run` skill moved a Build lane past a step, on its own or for a person. |
 
-`yad gate status` prints it under each review step. A step closed before this release has none, and
-nothing warns about that. See the state schema's "Closing records" for every field.
+`yad gate status` prints it under each review step; an author step's record has no reader yet (`yad
+history`, E20, will read both). A step closed before this release has none, and nothing warns about that. See the state schema's "Closing records" for every field.
 
 A `deferred` step can also carry `"debt": true`, a flag beside the state rather than a ninth state: it
 marks the deferral as owed back, and changes nothing about whether the chain continues. See `yad defer
