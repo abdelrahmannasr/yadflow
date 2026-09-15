@@ -2627,7 +2627,26 @@ test('resolveProfile: carries a prior profile forward from hub.json on re-run', 
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
 });
 
-const { runSetup, buildReconfiguredHub, selectIdeTargets } = await import('./setup.mjs');
+test('resolveProfile: the older review_gate.solo carries forward, so a scripted re-run never switches solo off (E10)', async () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof-e10-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ review_gate: { solo: true }, roster: [{ login: 'a' }, { login: 'b' }] }));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    const p = await resolveProfile(T, {});
+    assert.equal(p.solo, true, 'a roster of two would otherwise default the question to team');
+  } finally { delete process.env.SDLC_NONINTERACTIVE; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+const { runSetup, buildReconfiguredHub, selectIdeTargets, setupModeFields } = await import('./setup.mjs');
+
+test('setupModeFields: both setup write sites record mode_set only when an existing Product changes mode (E10)', () => {
+  assert.deepEqual(setupModeFields('/nowhere', {}, true, { today: '2026-09-15' }), { solo: true, mode: 'solo' }, 'a first run is not a switch');
+  assert.deepEqual(setupModeFields('/nowhere', { solo: true, mode: 'solo' }, true), { solo: true, mode: 'solo' });
+  const changed = setupModeFields('/nowhere', { solo: false, roster: [] }, true, { today: '2026-09-15' });
+  assert.deepEqual([changed.solo, changed.mode, changed.mode_set.from, changed.mode_set.to, changed.mode_set.reason, changed.mode_set.date],
+    [true, 'solo', 'team', 'solo', 'yad setup', '2026-09-15']);
+});
 
 test('selectIdeTargets: interactive input re-prompts, then trims and deduplicates valid targets', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-prompt-'));
@@ -2721,6 +2740,17 @@ test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers th
   assert.equal(hub.profile.repo_layout, 'monorepo');
   assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'none'); // deferred
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/cli-version.json'), 'utf8')).ideTargets, ['.claude']);
+});
+
+test('runSetup: a re-run with nothing changed leaves the Product config byte for byte (E10)', async () => {
+  const { T } = scaffold();
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
+    const before = fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8');
+    await runSetup(T, { solo: true, greenfield: true, monorepo: true, ideTargets: ['.claude'] });
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), before);
+  } finally { delete process.env.SDLC_NONINTERACTIVE; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('runSetup: team + --tools records a team profile and configures the optional tools', async () => {
@@ -7385,6 +7415,11 @@ test('planMode: solo needs a reason and team does not; the same mode twice chang
   assert.deepEqual(legacy.hub.review_gate, { solo: false, default_reviewers: 1 });
   assert.equal(legacy.hub.mode_set.from, 'solo');
 
+  // A hand edit that left the two apart. Matching `solo` is a correction, not a switch; following `mode` is one.
+  const corrected = planMode({ solo: true, mode: 'team' }, { to: 'solo' });
+  assert.deepEqual([corrected.ok, corrected.changed, corrected.flipped, corrected.hub.mode_set], [true, true, false, undefined]);
+  assert.equal(planMode({ solo: false, mode: 'solo' }, { to: 'solo' }).ok, false, 'following `mode` to solo is a real switch, and needs a reason');
+
   assert.equal(planMode({}, { to: 'duo' }).ok, false);
   assert.equal(modeFields({}, 'team').mode_set, undefined, 'no record when the mode does not change');
 });
@@ -7430,12 +7465,17 @@ test('yad mode writes both names and the record, names the open reviews, reads b
     const w = JSON.parse(r.out);
     assert.deepEqual([w.ok, w.mode, w.changed, w.flipped, w.set.from, w.set.reason], [true, 'team', true, true, 'solo', null]);
     assert.deepEqual(w.openReviews, [{ epic: 'EP-test', step: 'architecture-review' }]);
+    assert.equal(w.openReviewsKnown, true);
 
     // The gates read the old flag, so a hand edit that leaves `mode` behind reads one way and acts another.
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...read('hub.json'), solo: true }));
     r = await run(() => runMode(T, {}));
     assert.match(r.out, /mode: solo/);
     assert.match(r.out, /the file also says mode: "team", but the old `solo` flag is the one read/);
+    r = await run(() => runMode(T, { to: 'solo' }));
+    assert.equal(r.failed, false, 'correcting the name is not a switch, so no reason is asked');
+    assert.match(r.out, /already solo — `mode` now matches `solo`/);
+    assert.equal(read('hub.json').mode, 'solo');
 
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ nope');
     r = await run(() => runMode(T, { to: 'team' }));
@@ -7446,10 +7486,27 @@ test('yad mode writes both names and the record, names the open reviews, reads b
 
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e10-'));
   try {
-    const r = await run(() => runMode(empty, { to: 'team' }));
+    let r = await run(() => runMode(empty, { to: 'team' }));
     assert.equal(r.failed, true);
     assert.match(r.out, /run `yad setup` first/);
+    r = await run(() => runMode(empty, { to: 'duo' }));
+    assert.match(r.out, /unknown mode: duo/, 'a typo is named as a typo before anything else');
   } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+});
+
+test('yad mode on a verified Product says its open reviews are on the platform, and --json says they are not listed (E10)', async () => {
+  const { runMode } = await import('./mode.mjs');
+  const { T } = scaffoldEpic();
+  try {
+    const hubFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), ledger: 'verified', bridge_enabled: true, bridge: true }));
+    let out = await grab(() => runMode(T, { to: 'solo', reason: 'on leave', today: '2026-09-15' }));
+    assert.match(out, /open reviews live on the platform, not in state\.json — every open review PR\/MR follows the solo rule from its next CI run/);
+    assert.doesNotMatch(out, /open review\(s\) follow/, 'the ledger list is not printed, since CI never marks a review open there');
+    out = await grab(() => runMode(T, { to: 'team', json: true }));
+    const j = JSON.parse(out);
+    assert.deepEqual([j.openReviews, j.openReviewsKnown], [[], false]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('doctor mode:disagree: silent with no `mode` or when it agrees; warns when `solo` says the other (E10)', async () => {
@@ -8126,6 +8183,20 @@ function scaffoldCiHub() {
   return { T, origin, author, ci };
 }
 const show = (cwd, ref) => git(cwd, 'show', ref).toString();
+
+test('gate ci: a merge in solo mode records waived: "solo" too — the path a verified Product takes (E10)', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const hubFile = path.join(ci, '.sdlc/hub.json');
+    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    await gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09',
+      reader: () => ({ ...fullApproval, reviews: [], mergedAt: '2026-06-08T00:00:00Z', mergedBy: 'al' }) });
+    const state = JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8'));
+    const review = state.steps.find((x) => x.id === 'architecture-review');
+    assert.equal(review.status, 'done', 'solo passes on the merge with no approval');
+    assert.deepEqual([review.closed?.via, review.closed?.waived], ['merge', 'solo']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
 
 test('gate ci pre-merge: read-only — never pushes the review branch or the default branch (Path B)', async () => {
   const { T, author, ci } = scaffoldCiHub();

@@ -18,7 +18,7 @@
 import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, warn, writeProductConfig } from './lib.mjs';
-import { productConfigPath, PROJECT_FILES } from './manifest.mjs';
+import { isVerifiedLedger, productConfigPath, PROJECT_FILES } from './manifest.mjs';
 import { epicIds, epicRoot, loadLedger, stepStatus } from './epic-state.mjs';
 import { isSolo } from './gate.mjs';
 import { recordActor } from './skip.mjs';
@@ -128,21 +128,31 @@ export async function runMode(root, { to = null, reason = null, json = false, to
     return;
   }
 
+  // The word is checked first, so a typo on a fresh directory is named as a typo, not as a missing setup.
+  if (!MODES.includes(to)) return bail(`unknown mode: ${to}`, 'usage: yad mode [solo --reason "<why>" | team [--reason "<why>"]]');
   if (!hub) return bail(`no Product config at ${rel}`, 'run `yad setup` first — it records the mode with everything else');
   const plan = planMode(hub, { to, reason, by: recordActor(root), date: today });
   if (!plan.ok) return bail(plan.message, plan.hint);
   if (plan.changed) writeProductConfig(root, plan.hub);
-  const open = plan.flipped ? openReviews(root) : [];
+  // On a verified Product CI writes the ledger only at a merge, so an open review is never `in_review` in
+  // state.json — the platform's open PRs are the list. Say so, rather than print nothing and read as "none".
+  const verified = isVerifiedLedger(hub);
+  const open = plan.flipped && !verified ? openReviews(root) : [];
   if (json) {
-    return log(JSON.stringify({ ok: true, mode: to, changed: plan.changed, flipped: plan.flipped, set: plan.flipped ? plan.hub.mode_set : null, openReviews: open }, null, 2));
+    return log(JSON.stringify({ ok: true, mode: to, changed: plan.changed, flipped: plan.flipped, set: plan.flipped ? plan.hub.mode_set : null, openReviews: open, openReviewsKnown: !verified }, null, 2));
   }
   if (!plan.changed) return ok(`already ${to} — nothing changed`);
   if (!plan.flipped) {
-    ok(`already ${to} — the new name \`mode\` was added beside \`solo\`; the gates act exactly as before`);
+    // Reached two ways: `mode` was absent (a Product set up before E10), or a hand edit left it saying the
+    // other mode — which is where `mode:disagree` sends people. Say which one happened.
+    const what = hub.mode === undefined ? 'the new name `mode` was added beside `solo`' : '`mode` now matches `solo`';
+    ok(`already ${to} — ${what}; the gates act exactly as before`);
   } else {
     ok(`mode: ${to} — ${MEANING[to]}`);
     if (plan.hub.mode_set.reason) info(`reason: ${plan.hub.mode_set.reason}`);
-    if (open.length) {
+    if (verified) {
+      info(`this Product's ledger is verified, so its open reviews live on the platform, not in state.json — every open review PR/MR follows the ${to} rule from its next CI run`);
+    } else if (open.length) {
       info(`${open.length} open review(s) follow the ${to} rule from their next sync: ${open.map((r) => `${r.epic} ${r.step}`).join(', ')}`);
     }
     info(c.dim('a gate that already passed keeps its record'));
