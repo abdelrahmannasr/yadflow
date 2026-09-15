@@ -350,12 +350,12 @@ repo) and `trust-log.json` (every run's verdict). `docs/phase-4-build-plan.md` a
 
 ## What's intentionally NOT built yet
 
-**Phase 4b Step C** (the remaining automation): `tasks` generation advance — gated until real
-`tasks`/`spec` trust evidence accrues. The hook that records that evidence is built; the dial flips
-only once the threshold is genuinely met. The scope guard and contract-surface halt always override
-the dial, and **Shape steps and the engineer review stay `advance: human`, permanently.**
+**Shape automation that acts:** a Shape author step's dial can be set to auto (`yad dial <step>`), but
+nothing drives a Shape step on its own until the engine runs agents (E26). The scope guard and
+contract-surface halt always override the dial, and **every review gate — the engineer review and each
+Shape review — stays `advance: human`, permanently.**
 
-**Phase 5 (conditional):** the optional service layer (watch repos, run earned-automation steps
+**Phase 5 (conditional):** the optional service layer (watch repos, run steps set to auto
 unattended, read-only dashboards), built only when the CLI genuinely can't keep up, with git remaining
 the source of truth. It is **trigger-gated** — `docs/phase-5-build-plan.md` is the build plan: its
 three parts (read-index, unattended runner, dashboard) each ship only when *their* bottleneck is

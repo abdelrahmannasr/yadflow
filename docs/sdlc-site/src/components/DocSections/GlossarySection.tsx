@@ -34,7 +34,7 @@ const KEY_FILES = [
   { label: 'state.json', query: 'currentStep + each step\'s driver/advance dials (older names: assistance/automation) + shape_steps_locked' },
   { label: 'approvals.json', query: 'recorded approvals, hash-bound to the reviewed artifact' },
   { label: 'contract-lock.json', query: 'the SHA-256 of the CONTRACT-SURFACE block in contract.md' },
-  { label: 'trust-log.json', query: 'every Build run\'s verdict — the evidence base for earning automation' },
+  { label: 'trust-log.json', query: 'every Build run\'s verdict — the run record yad dial shows as advice' },
   { label: 'schemaVersion', query: 'the shape a state file is in, stamped as the first key of every JSON object yad writes under .sdlc/ — a file without it counts as version 1' },
 ];
 

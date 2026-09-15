@@ -119,8 +119,8 @@ pattern as the engineer review finalizing `implement` at `yad-engineer-review`).
 entry in its own shard `epics/<epic>/.sdlc/trust-log/<story>-<repo>-spec-<uid>.json` (a fresh `uid` per
 run; readers union the folded `trust-log.json` + the loose shards). Schema:
 `../yad-epic/references/state-schema.md`. **Run standalone, no trust entry is written** — the
-log measures orchestrated runs. `spec` stays `advance: human` until its slice clears the threshold;
-this step only *gathers* the evidence, it does not flip the dial.
+log measures orchestrated runs. The record is advice: the `spec` dial is
+whatever the team sets with `yad dial`, and this step never changes it.
 
 ## Hard rules (build plan §A, Cross-cutting)
 

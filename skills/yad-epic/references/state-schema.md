@@ -89,7 +89,8 @@ also absent by default:
 ```
 
 `kill` is written by `yad kill --reason "<why>"` / `yad unkill`; while `on`, every step is held at
-`advance: human`. `steps` lists the Shape AUTHOR steps the project set to `auto` with `yad dial <step> --to
+`advance: human`; the record a `yad unkill` or a second `yad kill` replaces is kept as `kill.previous`, one level
+deep. `steps` lists the feature Shape AUTHOR steps (not the Foundation's) the project set to `auto` with `yad dial <step> --to
 auto` — `human` is the key's absence. A Shape `auto` is **recorded, not acted on**: nothing drives a Shape
 step on its own until the engine runs agents (E26). A Build step's dial is not here; it is on its lane in
 `build-state`. A review gate is never `auto`. A file that will not parse is read as the kill switch ON,

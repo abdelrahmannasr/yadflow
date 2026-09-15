@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { ADVANCE_VALUES, isGateStep, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -789,6 +789,8 @@ export function dialChecks(checks, root) {
   const disagree = [];
   const reviewAuto = [];
   const newOnly = [];
+  const shapeStateAuto = [];
+  const lockedAuto = [];
 
   const inspect = (rel, where, steps) => {
     if (!Array.isArray(steps)) return;
@@ -815,8 +817,17 @@ export function dialChecks(checks, root) {
         newOnly.push(`${at}: \`advance\` with no \`automation\``);
       }
       const isReview = isGateStep(s);
-      if (isReview && (s.advance === 'auto' || s.automation === 'machine_advance')) {
+      const saysAuto = s.advance === 'auto' || s.automation === 'machine_advance';
+      if (isReview && saysAuto) {
         reviewAuto.push(at);
+      }
+      // Two `auto`s E34 changed the meaning of (neither is a failure — nothing breaks, but the file says
+      // something that does not happen, or no longer holds). `where` is empty for state.json, a repo for
+      // build-state.
+      const def = catalogueStep(s.id);
+      if (!isReview && saysAuto && def?.kind === 'author') {
+        if (def.phase !== 'build' && !where) shapeStateAuto.push(at);
+        else if (def.phase === 'build' && s.locked === true) lockedAuto.push(at);
       }
     }
   };
@@ -848,6 +859,20 @@ export function dialChecks(checks, root) {
       checks, 'dials:new-only', 'shape', 'warn',
       `${newOnly.length} step(s) carry only the new dial name: ${newOnly.slice(0, 2).join('; ')}${newOnly.length > 2 ? ` (+${newOnly.length - 2} more)` : ''}`,
       'add the older name beside it (`driver` needs `assistance`, `advance` needs `automation`) — an older yadflow reads only the old one and would see no dial at all. `yad migrate` cannot repair this: it only ever adds the new name from the old',
+    );
+  }
+  if (shapeStateAuto.length) {
+    check(
+      checks, 'dials:shape-auto-unread', 'shape', 'warn',
+      `${shapeStateAuto.length} Shape author step(s) say auto in state.json, where nothing reads a Shape dial: ${shapeStateAuto.slice(0, 2).join('; ')}${shapeStateAuto.length > 2 ? ` (+${shapeStateAuto.length - 2} more)` : ''}`,
+      'a Shape author step\'s dial is read from .sdlc/automation.json (E34) — set it with `yad dial <step> --to auto`',
+    );
+  }
+  if (lockedAuto.length) {
+    check(
+      checks, 'dials:locked-auto', 'shape', 'warn',
+      `${lockedAuto.length} Build step(s) are locked and set to auto, and \`locked\` no longer holds a Build author step at human (E34): ${lockedAuto.slice(0, 2).join('; ')}${lockedAuto.length > 2 ? ` (+${lockedAuto.length - 2} more)` : ''}`,
+      'if it should wait for a person: `yad dial <epic> <story> --repo <name> <step> --to human`',
     );
   }
   if (disagree.length) {
@@ -909,7 +934,8 @@ export function automationChecks(checks, root) {
   try {
     if (exists(legacy)) text = fs.readFileSync(legacy, 'utf8');
   } catch { /* an unreadable module config has nothing to say about the switch */ }
-  if (/^\s*kill_switch:\s*true\b/m.test(text) && !(a.kill?.on === true)) {
+  // Every spelling YAML reads as true, and the old skill (a model reading the file) would have honoured.
+  if (/^\s*kill_switch:\s*(?:true|yes|on)\b/im.test(text) && !killSwitchOn(a)) {
     check(checks, 'automation:legacy-kill', 'project', 'fail',
       '_bmad/sdlc/config.yaml says `kill_switch: true`, and nothing reads that key any more — the kill switch is OFF',
       'turn it on where it is read: `yad kill --reason "<why>"`. Then set that line back to false, or refresh the file with `yad update --overwrite-local`');

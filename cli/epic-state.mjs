@@ -3663,6 +3663,12 @@ export function normalizeAutomation(raw) {
   if (raw.kill != null) {
     if (!isPlainObject(raw.kill) || typeof raw.kill.on !== 'boolean') return { ...out, error: 'has a `kill` that is not { on, reason, by, date }' };
     out.kill = { on: raw.kill.on, reason: strOrNull(raw.kill.reason), by: strOrNull(raw.kill.by), date: strOrNull(raw.kill.date) };
+    // The record this one replaced, one level deep (rule 7: turning the switch off must not erase who
+    // turned it on, and why).
+    const p = raw.kill.previous;
+    if (isPlainObject(p) && typeof p.on === 'boolean') {
+      out.kill.previous = { on: p.on, reason: strOrNull(p.reason), by: strOrNull(p.by), date: strOrNull(p.date) };
+    }
   }
   if (raw.steps != null) {
     if (!isPlainObject(raw.steps)) return { ...out, error: 'has a `steps` that is not an object' };
@@ -3694,7 +3700,9 @@ export function effectiveAdvance(step, automation = null) {
   if (!isPlainObject(step)) return { advance: 'human', set: 'human', why: 'unknown' };
   if (isGateStep(step)) return { advance: 'human', set: 'human', why: 'gate' };
   const def = stepDef(step.id);
-  const shape = !!def && def.phase !== 'build';
+  // A step this release does not know is held at human: nothing here can say it is not a gate.
+  if (!def) return { advance: 'human', set: 'human', why: 'unknown' };
+  const shape = def.phase !== 'build';
   const set = shape
     ? (automation?.steps && Object.hasOwn(automation.steps, step.id) && automation.steps[step.id] === 'auto' ? 'auto' : 'human')
     : (stepAdvance(step) === 'auto' ? 'auto' : 'human');
@@ -3703,13 +3711,19 @@ export function effectiveAdvance(step, automation = null) {
 }
 
 const refusal = (message, hint) => ({ ok: false, message, hint });
-const shapeAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase !== 'build').map((d) => d.id);
+const shapeAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase !== 'build' && d.level !== 'product').map((d) => d.id);
 const buildAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase === 'build').map((d) => d.id);
 
 // Set a Shape author step's dial for the whole project. PURE: takes and returns the automation object.
 export function planShapeDial(automation, { step, to }) {
   const def = stepDef(step);
   if (!def) return refusal(`unknown step: ${step}`, `a Shape step's dial is one of ${shapeAuthorIds().join(' · ')}`);
+  // "Shape author steps" means a feature's chain. The Foundation is the Product level, reviewed once per
+  // product; its dial is not the team's per-feature automation choice.
+  if (def.level === 'product') {
+    return refusal(`${step} is the Product level, not a step on a feature's Shape chain`,
+      `a Shape step's dial is one of ${shapeAuthorIds().join(' · ')}`);
+  }
   if (def.kind === 'review') {
     return refusal(`${step} is a review gate, and a gate is never auto`,
       'a person clears every gate (rule 1). Set the dial of the step it reviews instead');
@@ -3767,7 +3781,12 @@ export function planKill(automation, { on, reason = null, by = null, date = null
   if (on && !why) return refusal('the kill switch needs a reason', 'yad kill --reason "<why>" — the record is what tells the team when it is safe to turn it off');
   const already = (automation?.kill?.on === true) === on;
   if (already) return { ok: true, already: true, automation };
-  return { ok: true, already: false, automation: { steps: { ...(automation?.steps || {}) }, kill: { on, reason: why, by: by || null, date: date || null } } };
+  // The record being replaced is kept as `previous`, without its own `previous` — one level is the audit
+  // trail a person reads; the rest is git history.
+  const replaced = automation?.kill ? (({ previous: _previous, ...rest }) => rest)(automation.kill) : null;
+  return { ok: true, already: false, automation: { steps: { ...(automation?.steps || {}) }, kill: {
+    on, reason: why, by: by || null, date: date || null, ...(replaced ? { previous: replaced } : {}),
+  } } };
 }
 
 export { writeJSON };

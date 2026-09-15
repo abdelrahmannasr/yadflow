@@ -115,7 +115,7 @@ flowchart TD
 
     conn --> an
     rfb --> sp
-    run -. drives earned Build steps .-> im
+    run -. drives Build steps set to auto .-> im
     bridge["yad-hub-bridge<br/>review PR/MR ↔ file ledger"]:::gated
     bridge -. syncs approvals .-> gEp
     status["yad-status — read-only view over all of it"]

@@ -93,8 +93,8 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    with `ranBy: machine` if this advance was automated, else `human` — see `references/run-loop.md` for
    the derivation. Do this for *every* step run, pass or fail; the log is the evidence base.
 3. **Ask the engine for the effective dial:** `yad dial <epic> <story> --repo <repo> <step> --json`, and use
-   its `advance`. It is `human` whenever the step is a gate or the kill switch is on — the kill switch
-   always wins — so never work the dial out from the files yourself.
+   its `advance`. It is `human` whenever the step is a gate (`why: gate` — a read never refuses one), the kill switch
+   is on, or `.sdlc/automation.json` cannot be read (`automationError` says so) — so never work the dial out from the files yourself.
 4. **Decide:**
    - **HALT** if the step failed — any check FAIL, a scope overrun (`yad-implement` stopped on the
      file-boundary rule), a contract-surface touch, or any ambiguity. Set the step `status: blocked`

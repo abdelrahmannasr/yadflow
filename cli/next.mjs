@@ -13,7 +13,7 @@
 import path from 'node:path';
 import { c, log, ok, info, warn, hand, fail, readJSON, exists } from './lib.mjs';
 import { PROJECT_FILES, VERSION , productConfigPath, stepAdvance } from './manifest.mjs';
-import { dedupeConsecutive, epicIds, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
+import { dedupeConsecutive, epicIds, isGateStep, killSwitchOn, loadAutomation, epicRel, epicRoot, loadLedger, loadSkillBindings, stepSkills, nextAction, preconditionsMet, isValidEpicId, epicLineage, typeNoun, phaseOf, stepPhase, profileSteps, lifecycleProfile, PHASES, PRODUCT_DONE, PRODUCT_EPICS } from './epic-state.mjs';
 
 // Is solo mode on? Persisted in hub.json by setup (Phase C/D); default false. Read defensively so a
 // missing/old hub.json never breaks the driver.
@@ -91,9 +91,14 @@ const buildLanes = (builds = []) => builds.flatMap((b) => b.repos.map((r) => ({ 
 //
 // The kill switch (E34) holds an `auto` lane at human, and the line says so: a lane that reads `auto` while
 // nothing drives it would send a person to wait for a run that is never coming.
+//
+// The gate test is the engine's (`isGateStep`), not `locked` alone: since E34 a `locked` Build author step is
+// not held at human, so calling it "a human merge gate" would say the opposite of what runs.
 function dialNote(r, automation = null) {
-  if (r.locked) return c.dim('human merge gate');
+  if (isGateStep({ id: r.step, locked: r.locked })) return c.dim('human merge gate');
   if (stepAdvance(r) !== 'auto') return c.dim('advance: human');
+  // A broken file holds every step at human too, and `yad unkill` cannot fix a file it cannot read.
+  if (automation?.error) return c.dim(`advance: auto — held at human: .sdlc/automation.json ${automation.error} (yad doctor)`);
   return killSwitchOn(automation)
     ? c.dim('advance: auto — held at human by the kill switch (yad unkill)')
     : c.dim('advance: auto — yad-run auto-drives');

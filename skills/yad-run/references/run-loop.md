@@ -88,7 +88,7 @@ eff = (yad dial <epic> <story> --repo <repo> <step> --json).advance    # "human"
 
 The engine reads the lane step's dial under either spelling (the OLD name wins), and answers `human`
 when the step is a gate (`engineer-review`) or the kill switch in `.sdlc/automation.json` is on — whatever
-the dial says. Its `why` says which: `lane`, `gate` or `kill`.
+the dial says. Its `why` says which: `lane`, `gate`, `kill` or `unknown` (a step id this release does not know), and `automationError` is present when the file cannot be read.
 
 ## Deriving signals & the provisional verdict
 

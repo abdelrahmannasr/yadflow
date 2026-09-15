@@ -13058,6 +13058,50 @@ test('doctor dials: a Shape AUTHOR step on auto is not a gate, whatever `locked`
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('doctor dials: an auto nothing reads, and one `locked` no longer holds, are each reported (E34)', () => {
+  const checks = [];
+  const T = dialProject([
+    { id: 'architecture', type: 'author', locked: true, automation: 'machine_advance', advance: 'auto' },
+    { id: 'epic', type: 'author', locked: true, automation: 'human_approve', advance: 'human' },
+  ], { story: 'EP-x-S01', repos: { backend: { steps: [
+    { id: 'checks', locked: true, automation: 'machine_advance', advance: 'auto' },
+    { id: 'implement', locked: false, automation: 'machine_advance', advance: 'auto' },
+  ] } } });
+  try {
+    dialChecks(checks, T);
+    const shape = checks.find((c) => c.id === 'dials:shape-auto-unread');
+    assert.equal(shape?.status, 'warn');
+    assert.match(shape.message, /`architecture`/);
+    assert.doesNotMatch(shape.message, /`epic`/);
+    assert.match(shape.hint, /yad dial <step> --to auto/);
+    const locked = checks.find((c) => c.id === 'dials:locked-auto');
+    assert.equal(locked?.status, 'warn');
+    assert.match(locked.message, /`checks`/);
+    assert.doesNotMatch(locked.message, /`implement`/, 'an unlocked auto is simply what the team set');
+    assert.equal(checks.find((c) => c.id === 'dials:review-auto'), undefined);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('bin: `yad dial` takes one word or three, and names the usage otherwise (E34)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e34b-'));
+  const run = (...args) => {
+    try { return { out: execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), ...args, '--dir', T], { encoding: 'utf8', stdio: 'pipe' }), code: 0 }; } catch (e) { return { out: String(e.stdout), code: e.status }; }
+  };
+  try {
+    for (const args of [['dial'], ['dial', 'EP-x', 'EP-x-S01'], ['dial', 'EP-x', 'EP-x-S01', 'web', 'checks']]) {
+      const r = run(...args);
+      assert.equal(r.code, 1, args.join(' '));
+      assert.match(r.out, /usage: yad dial <step>/, args.join(' '));
+    }
+    const bad = run('dial', 'nope', 'EP-x-S01', 'checks', '--repo', 'web');
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /invalid epic id: nope/);
+    const extra = run('kill', 'now', '--reason', 'x');
+    assert.equal(extra.code, 1);
+    assert.match(extra.out, /unexpected argument\(s\): now/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('isGateStep: type, then the catalogue, then `locked` only for an id nobody knows (E34)', async () => {
   const { isGateStep } = await import('./epic-state.mjs');
   assert.equal(isGateStep({ id: 'epic-review', type: 'review+approve' }), true);
@@ -13090,6 +13134,10 @@ test('E34 dial rules: a gate is human, the kill switch holds, a Shape dial is pr
     assert.equal(killSwitchOn(a), true, JSON.stringify(raw));
   }
   assert.equal(killSwitchOn(none), false);
+  // A step id this release does not know is held at human — nothing here can say it is not a gate.
+  assert.deepEqual(effectiveAdvance({ id: 'release', advance: 'auto', automation: 'machine_advance' }, none), { advance: 'human', set: 'human', why: 'unknown' });
+  assert.match(planShapeDial(none, { step: 'foundation', to: 'auto' }).message, /Product level, not a step on a feature's Shape chain/);
+  assert.doesNotMatch(planShapeDial(none, { step: 'nope', to: 'auto' }).hint, /foundation|discovery/, 'and the hint does not offer it');
 
   assert.match(planShapeDial(none, { step: 'architecture-review', to: 'auto' }).message, /review gate, and a gate is never auto/);
   assert.match(planShapeDial(none, { step: 'checks', to: 'auto' }).hint, /yad dial <epic> <story> --repo <name> checks --to auto/);
@@ -13134,7 +13182,13 @@ test('E34 dial rules: a gate is human, the kill switch holds, a Shape dial is pr
   assert.equal(planKill(k.automation, { on: true, reason: 'again' }).already, true);
   assert.equal(planKill(none, { on: false }).already, true, 'off is where an absent file already is');
   const off = planKill({ ...k.automation, steps: { epic: 'auto' } }, { on: false, by: 'bo', date: '2026-09-16' });
-  assert.deepEqual(off.automation, { steps: { epic: 'auto' }, kill: { on: false, reason: null, by: 'bo', date: '2026-09-16' } }, 'the steps survive a kill');
+  assert.deepEqual(off.automation, { steps: { epic: 'auto' }, kill: {
+    on: false, reason: null, by: 'bo', date: '2026-09-16', previous: { on: true, reason: 'incident', by: 'al', date: '2026-09-15' },
+  } }, 'the steps survive, and so does the record the unkill replaced');
+  // One level deep: the record kept is the one replaced, without ITS own previous.
+  const again = planKill(off.automation, { on: true, reason: 'second', by: 'cy', date: '2026-09-17' });
+  assert.deepEqual(again.automation.kill.previous, { on: false, reason: null, by: 'bo', date: '2026-09-16' });
+  assert.deepEqual(normalizeAutomation(serializeAutomation(again.automation)).kill.previous, again.automation.kill.previous, 'previous survives a read back');
 });
 
 test('yad dial / kill / unkill write their files, show the run record, and refuse what they must (E34)', async () => {
@@ -13190,6 +13244,31 @@ test('yad dial / kill / unkill write their files, show the run record, and refus
     assert.match(r.out, /advice, not a rule/);
     r = await run(() => runDial(T, { ...lane, json: true }));
     assert.deepEqual(JSON.parse(r.out).trust, { runs: 2, approvedUnchanged: 1 });
+    assert.equal('automationError' in JSON.parse(r.out), false, 'no error key on a healthy project');
+
+    // Setting what is already set writes nothing, so there is nothing to commit.
+    r = await run(() => runDial(T, { step: 'architecture', to: 'auto' }));
+    assert.match(r.out, /architecture.*was already advance: auto — nothing changed/);
+    assert.doesNotMatch(r.out, /commit \.sdlc\/automation\.json/);
+    r = await run(() => runDial(T, { ...lane, to: 'auto' }));
+    assert.match(r.out, /checks.*was already advance: auto — nothing changed/);
+    assert.doesNotMatch(r.out, /yad checkpoint --push/);
+
+    // A GATE ASKED is answered, not refused: yad-run asks about every step it walks, the merge gate included.
+    r = await run(() => runDial(T, { ...lane, step: 'engineer-review', json: true }));
+    assert.equal(r.failed, false, r.out);
+    assert.deepEqual(JSON.parse(r.out), { ok: true, scope: 'lane', epic: 'EP-x', story: 'EP-x-S01', repo: 'web', step: 'engineer-review',
+      set: 'human', advance: 'human', why: 'gate', changed: false, kill: null, trust: null });
+    r = await run(() => runDial(T, { step: 'architecture-review', json: true }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(r.out).why, 'gate');
+    r = await run(() => runDial(T, { ...lane, step: 'engineer-review' }));
+    assert.match(r.out, /advance: human \(a review gate: always a person\)/);
+    r = await run(() => runDial(T, { ...lane, step: 'engineer-review', to: 'auto' }));
+    assert.equal(r.failed, true, 'setting one is still refused');
+    r = await run(() => runDial(T, { step: 'foundation', to: 'auto' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /Product level/);
 
     // The kill switch: a reason, a record, the steps untouched, and every dial held at human.
     r = await run(() => runKill(T, { on: true }));
@@ -13204,8 +13283,8 @@ test('yad dial / kill / unkill write their files, show the run record, and refus
     r = await run(() => runDial(T, { ...lane, json: true }));
     assert.deepEqual([JSON.parse(r.out).advance, JSON.parse(r.out).set, JSON.parse(r.out).why], ['human', 'auto', 'kill']);
     r = await run(() => runDial(T, { step: 'architecture' }));
-    assert.match(r.out, /held at human by the kill switch/);
-    assert.match(r.out, /the kill switch is ON.*bad deploy/);
+    assert.match(r.out, /advance: auto \(held at human\)/);
+    assert.match(r.out, /the kill switch is ON.*bad deploy/, 'and the line after it names the cause');
     r = await run(() => runKill(T, { on: false, today: '2026-09-16' }));
     assert.equal(readAuto().kill.on, false);
     r = await run(() => runKill(T, { on: false }));
@@ -13225,6 +13304,36 @@ test('yad dial / kill / unkill write their files, show the run record, and refus
     r = await run(() => runKill(T, { on: true, reason: 'x' }));
     assert.equal(r.failed, true);
     assert.equal(fs.readFileSync(autoFile, 'utf8'), '{ nope');
+
+    // …but a LANE dial never writes that file, so `--to human` is still one move.
+    r = await run(() => runDial(T, { ...lane, to: 'human' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0].advance, 'human');
+    r = await run(() => runDial(T, { ...lane, to: 'auto', json: true }));
+    const held = JSON.parse(r.out);
+    assert.deepEqual([held.set, held.advance, held.why, held.automationError], ['auto', 'human', 'kill', 'does not parse'],
+      'the file, not somebody\'s switch, is named as the cause');
+    r = await run(() => runDial(T, { ...lane }));
+    assert.match(r.out, /automation\.json does not parse — every step is held at advance: human until it is fixed/);
+
+    // A run record that cannot be read never blocks the dial beside it — and is read before any write.
+    fs.writeFileSync(path.join(E, '.sdlc/trust-log.json'), '{ nope');
+    r = await run(() => runDial(T, { ...lane, to: 'human' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0].advance, 'human');
+    assert.match(r.out, /the run record cannot be read .* the dial is not affected/);
+    r = await run(() => runDial(T, { ...lane, json: true }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(JSON.parse(r.out).trust, null);
+    assert.ok(JSON.parse(r.out).trustError);
+
+    // A row carrying only the old name gains the new one, and says so rather than claiming a change.
+    const bs = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
+    bs.repos.web.steps[0] = { id: 'checks', automation: 'machine_advance', status: 'todo' };
+    fs.writeFileSync(laneFile, JSON.stringify(bs));
+    r = await run(() => runDial(T, { ...lane, to: 'auto' }));
+    assert.match(r.out, /was already advance: auto — the new dial name was added beside the old one/);
+    assert.equal(JSON.parse(fs.readFileSync(laneFile, 'utf8')).repos.web.steps[0].advance, 'auto');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -13261,6 +13370,17 @@ test('doctor automation: silent by default; a broken file, a gate on auto and a 
     checks = found();
     assert.equal(byId(checks, 'automation:legacy-kill')?.status, 'fail');
     assert.match(byId(checks, 'automation:legacy-kill').hint, /yad kill --reason/);
+    // Every spelling YAML reads as true; a commented-out line is not a setting.
+    for (const [line, fires] of [['kill_switch: yes', true], ['  Kill_Switch: ON', true], ['kill_switch: True', true], ['# kill_switch: true', false], ['kill_switch: false', false]]) {
+      fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), `automation:\n${line}\n`);
+      assert.equal(!!byId(found(), 'automation:legacy-kill'), fires, line);
+    }
+    // A broken file already holds every step at human, so "the kill switch is OFF" would be false.
+    fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), 'automation:\n  kill_switch: true\n');
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), '{ nope');
+    checks = found();
+    assert.equal(byId(checks, 'automation')?.status, 'fail');
+    assert.equal(byId(checks, 'automation:legacy-kill'), undefined);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -13308,6 +13428,22 @@ test('yad next says when a dial is held by the kill switch, and that a Shape aut
     const build = await next('EP-build');
     assert.match(build, /advance: auto — held at human by the kill switch \(yad unkill\)/);
     assert.doesNotMatch(build, /yad-run auto-drives/);
+
+    // A broken file holds every step too — and `yad unkill` cannot fix a file it cannot read, so it is not named.
+    fs.writeFileSync(path.join(T, '.sdlc/automation.json'), '{ nope');
+    const broken = await next('EP-build');
+    assert.match(broken, /held at human: \.sdlc\/automation\.json does not parse \(yad doctor\)/);
+    assert.doesNotMatch(broken, /yad unkill/);
+
+    // A `locked` Build AUTHOR step is not a merge gate since E34 — the line says what actually runs.
+    fs.rmSync(path.join(T, '.sdlc/automation.json'));
+    const laneFile = path.join(T, 'epics/EP-build/.sdlc/build-state/EP-build-S01.json');
+    const bs = JSON.parse(fs.readFileSync(laneFile, 'utf8'));
+    bs.repos.web.steps[1].locked = true;
+    fs.writeFileSync(laneFile, JSON.stringify(bs));
+    const locked = await next('EP-build');
+    assert.match(locked, /advance: auto — yad-run auto-drives/);
+    assert.doesNotMatch(locked, /human merge gate/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
