@@ -40,8 +40,8 @@ const REVIEWS = [
     method: 'SOLO',
     path: 'opt-in (solo: true)',
     description:
-      "A lone developer can't approve their own PR on GitHub, so solo mode waives the approval requirement only — the review PR/MR + its merge stay (CI runs on the PR; the merge advances the step). Passes on merged + threads resolved.",
-    middleware: ['no approval required', 'all threads resolved', 'PR merged → advance'],
+      "A lone developer can't approve their own PR on GitHub, so solo mode waives the approval requirement only — the review PR/MR + its merge stay (CI runs on the PR; the merge advances the step). Passes on merged + threads resolved, and the closing record says `waived: \"solo\"`. Switch with yad mode solo --reason \"<why>\" / yad mode team, which records who, when and why.",
+    middleware: ['no approval required', 'all threads resolved', 'PR merged → advance', 'waived: solo recorded'],
     category: 'base',
   },
 ];

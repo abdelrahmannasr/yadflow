@@ -51,7 +51,8 @@ distinct-people count) and the generated review-PR body (`Approver count (adviso
 `yad gate review --json` carries the rule as an object under `step.gateRule` instead of a sentence.
 
 Solo mode waives the role rule, exactly as before, and reports no shortfall. The merge and the resolved
-threads still advance the step.
+threads still advance the step, and the review step's closing record carries `waived: "solo"` (E10). Switch
+with `yad mode solo --reason "<why>"` / `yad mode team`.
 
 **Engagement (the Review Companion).** Each approval carries `engagement: verified | none` —
 `verified` when it was recorded through the companion (a real trailer/cards/chat session), `none` for a
@@ -103,7 +104,8 @@ drifted from its lock — run it rather than recomputing by hand.
 5. `action: advance` → `epic-review.status=done`, `architecture.status=in_progress`,
    `currentStep=architecture`. Gate reports the advance. The paired authoring step (`epic`) is closed
    too, if it was not already — a gate cannot have passed on an unauthored artifact. Each step it closes
-   gets a `closed` record: `via: "approved"` on the review step, `via: "review-passed"` on the author step (E18). `doctor` reports
+   gets a `closed` record: `via: "approved"` on the review step, `via: "review-passed"` on the author step (E18). In solo mode the
+   review step's record also carries `waived: "solo"` (E10). `doctor` reports
    any surviving violation as `YAD-STATE-005`; `yad gate repair <epic>` heals it.
 
 ## Participation record (comments.json)

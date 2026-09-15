@@ -114,7 +114,9 @@ review_gate:
   # MERGE stay (CI still runs on the PR, and the merge is what advances the step). Net: the gate passes
   # on `merged + all comment threads resolved`, no approval needed. NOT a default; team gates are
   # unchanged. (Branch protection must not "require approvals", or the solo dev's own merge is blocked —
-  # `yad doctor` warns when it does.)
+  # `yad doctor` warns when it does.) Switch it with `yad mode solo --reason "<why>"` / `yad mode team` (E10),
+  # which records who, when and why, and writes `mode: solo|team` beside `solo`; a gate that passes in solo
+  # mode records `waived: "solo"` on its closing record.
   solo: false
   escalate_when: [contract, auth, payments]   # escalate to domain owners
   # PR-driven automation (the `yad gate` CLI). With a Product platform, the review rides the per-step
