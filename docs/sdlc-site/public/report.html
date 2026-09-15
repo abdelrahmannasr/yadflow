@@ -200,8 +200,8 @@
 <section id="big-picture">
   <h2>1. The big picture — what Yadflow is</h2>
   <p class="lead">
-    <strong>Yadflow</strong> is a team workflow engine built on top of <strong>BMAD</strong>
-    (installed from npm as <code>yadflow</code>; the skills are still named <code>sdlc-*</code> and the
+    <strong>Yadflow</strong> is a team workflow engine
+    (installed from npm as <code>yadflow</code>; the skills are named <code>yad-*</code> and the
     CLI command is <code>yad</code>).
     It takes a feature from a raw idea all the way to shipped code, in small steps.
     Every step does its work, <strong>writes its result to a plain file</strong>, and then
@@ -576,7 +576,7 @@ each code repo/
   <div class="term"><strong>Fleet roll-up</strong><span class="badge b-auto">automation</span><br>The cross-epic summary <code>yad-status</code> prints: where every epic stands and which Build steps wait at a human gate, at a glance.</div>
 
   <h3>Tools the workflow builds on</h3>
-  <div class="term"><strong>BMAD (BMAD-METHOD)</strong><span class="badge b-tool">tools</span><br>The open-source workflow engine underneath: it provides the step runner, quality gates, the project rules file, and the AI roles. Yadflow is a custom BMAD <em>module</em> that turns it from a solo tool into a team, gated, multi-repo tool.</div>
+  <div class="term"><strong>BMAD (BMAD-METHOD)</strong><span class="badge b-tool">tools</span><br>An open-source AI workflow framework. Yadflow was first packaged as a BMAD module; since E3 it no longer depends on BMAD, which a team may still use as an optional source of skills for a step.</div>
   <div class="term"><strong>Spec Kit</strong><span class="badge b-tool">tools</span><br>GitHub’s spec-driven development toolkit. Its commands (<code>/speckit.specify</code>, <code>clarify</code>, <code>plan</code>, <code>analyze</code>, <code>checklist</code>, <code>tasks</code>) produce the spec, plan and task files in each code repo. The workflow drives it when installed and authors the same files by hand when not.</div>
   <div class="term"><strong>Repomix</strong><span class="badge b-tool">tools</span><br>A tool (<code>npx repomix</code>) that packs a codebase into one AI-readable file, with compression and secret-scanning. Used to cache the code picture of connected repos and to read legacy features for backfill.</div>
   <div class="term"><strong>Impeccable</strong><span class="badge b-tool">tools</span><br>A UI-design tool driven via slash-commands: <code>document</code> (read the current UI into a design file), <code>extract</code> (save reusable pieces), <code>craft</code> (make new designs that match). Used by the UI step when installed; the step authors directly otherwise.</div>
@@ -587,13 +587,12 @@ each code repo/
   <div class="term"><strong>The <code>yad</code> CLI</strong><span class="badge b-tool">tools</span><br>A zero-dependency command-line tool (npm: <code>yadflow</code>) that installs, wires and reconciles the workflow (<code>setup</code>, <code>check --fix</code>, <code>update</code>) and runs the deterministic pieces (<code>gate</code>, <code>commit</code>, <code>open-pr</code>, <code>ship</code>, <code>repo</code>, <code>report</code>).</div>
 
   <h3>People &amp; AI roles</h3>
-  <div class="term"><strong>analyst (“Mary”)</strong><span class="badge b-role">roles</span><br>The BMAD AI role for research, brainstorming and shaping the raw idea — drives the optional analysis step.</div>
-  <div class="term"><strong>pm (“John”)</strong><span class="badge b-role">roles</span><br>The product-manager AI role — writes the epic and breaks it into stories.</div>
-  <div class="term"><strong>architect (“Winston”)</strong><span class="badge b-role">roles</span><br>The technical AI role — authors the architecture and the contract.</div>
+  <div class="term"><strong>analyst</strong><span class="badge b-role">roles</span><br>The AI role for research, brainstorming and shaping the raw idea — drives the optional analysis step.</div>
+  <div class="term"><strong>pm</strong><span class="badge b-role">roles</span><br>The product-manager AI role — writes the epic and breaks it into stories.</div>
+  <div class="term"><strong>architect</strong><span class="badge b-role">roles</span><br>The technical AI role — authors the architecture and the contract.</div>
   <div class="term"><strong>ux-designer</strong><span class="badge b-role">roles</span><br>The UI/UX AI role — drives the UI design step (with Impeccable when installed).</div>
-  <div class="term"><strong>sm / Scrum Master (“Bob”)</strong><span class="badge b-role">roles</span><br>The AI role that prepares each story in detail for development and sets up the sprint context.</div>
   <div class="term"><strong>dev</strong><span class="badge b-role">roles</span><br>The developer AI role — writes the code for one atomic task in the implement step.</div>
-  <div class="term"><strong>tea / Test Architect</strong><span class="badge b-role">roles</span><br>The AI role that sets up and runs tests at the check gates.</div>
+  <div class="term"><strong>test architect</strong><span class="badge b-role">roles</span><br>The AI role that sets up and runs tests at the check gates.</div>
 
   <h3>IDs &amp; naming (immutable once assigned)</h3>
   <table>
@@ -1086,7 +1085,7 @@ npx yadflow setup</code></pre>
 <pre><code>npx yadflow check        # just tell me — read-only
 npx yadflow check --fix  # and fix it
 npx yadflow update       # apply updates only</code></pre>
-    <div class="row"><span class="lbl lbl-when">When</span> After any workflow update (a new version on npm), after a BMAD update, or whenever something seems off. Safe to run any time — <code>check</code> changes nothing.</div>
+    <div class="row"><span class="lbl lbl-when">When</span> After any workflow update (a new version on npm), or whenever something seems off. Safe to run any time — <code>check</code> changes nothing.</div>
   </div>
 
   <div class="skillcard">
