@@ -337,27 +337,17 @@ product:
   # roster (in hub.json) maps a platform login -> yad name + role; domain-owners are DERIVED from
   # repos.json (a roster name that equals a repo's domain_owner owns that repo's domain) — never duplicated.
 
-# Phase 4 (automation) — the SECOND dial made real. Until Phase 4 nothing read this dial; the
-# orchestrator (yad-run) now does. Governing rule: automation is EARNED per step, with trust-log
-# evidence, and is reversible in one move (phase-4-build-plan.md §"one principle"). Shape steps are
-# never listed in back_steps and can never be flipped — the engineer keeps authority over decisions.
+# Phase 4 (automation) — the SECOND dial made real: the orchestrator (yad-run) reads it and acts. Since
+# E34 the dial is SET, not earned. `yad dial` sets it — a Build lane step's dial in build-state, a Shape
+# author step's for the whole project in `.sdlc/automation.json` — and shows the step's run record as
+# advice, never as a refusal. A review gate is never auto (rule 1).
+# The KILL SWITCH is not in this file any more: `yad kill --reason "<why>"` / `yad unkill` record it in
+# `.sdlc/automation.json`. This file is installed and hash-managed by `yad update`, so a value edited here
+# stops the file being updated — and nothing reads `kill_switch` now. `yad doctor` fails on one left `true`.
 automation:
   # The only steps that MAY be automated, safest-end first (phase-4-build-plan.md build order).
-  # Phase 4a ships the engine + earns `checks` (Step B). `tasks`/`implement` advance are Phase 4b.
   back_steps: [spec, tasks, implement, checks]
-  default: human_approve            # = `advance: human`. Every Build step starts manual; `auto` must be earned
-  # A Build step is a CANDIDATE for machine_advance only once its trust-log slice clears this bar.
-  # "It seems fine" is not evidence (phase-4-build-plan.md §"Explicitly NOT").
-  trust_threshold:
-    min_runs: 5                     # at least this many recorded runs at the step
-    min_approved_unchanged: 0.8     # >= this fraction "approved-unchanged" over those runs
-  # Hard lock — the dial-setter REFUSES `advance: auto` for these, regardless of trust evidence.
-  # The Shape authoring steps (already locked:true in state.json; analysis is optional) + the human
-  # merge gate.
-  locked_steps: [discovery, analysis, epic, architecture, ui-design, stories, test-cases, engineer-review]
-  # Kill switch (phase-4-build-plan.md §Safety): true => every step forced to `advance: human`
-  # system-wide, no per-step edits. One line, instantly reversible. Toggle via `yad-run action: kill`.
-  kill_switch: false
+  default: human_approve            # = `advance: human`. Every lane step starts manual; `yad dial` turns one to auto
 
 # Phase 6 (post-lock change management) — FEATURE THREADS. After the contract locks and code ships, a
 # change must not MUTATE a locked artifact (that destroys the audit trail and the lock). Instead every

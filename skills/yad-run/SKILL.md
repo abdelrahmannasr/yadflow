@@ -1,6 +1,6 @@
 ---
 name: yad-run
-description: 'Phase 4 (automation) — the orchestrator that makes the second dial real. Drives a story''s Build loop (spec → tasks → implement → checks) in one code repo, reading each step''s advance dial from build-state: on `auto` it advances on its own, on `human` it stops for a human. Records every run in the trust log (the evidence base for earning automation). Realizes Step B: when checks is earned, a clean gate pass auto-advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS and pulls in a human. Also sets a step''s dial (gated by trust evidence) and flips the system-wide kill switch. Never advances a Shape step or the engineer review. Use when the user says "run Build", "advance story <id>", "set the checks dial", or "kill switch".'
+description: 'Phase 4 (automation) — the orchestrator that makes the second dial real. Drives a story''s Build loop (spec → tasks → implement → checks) in one code repo, reading each step''s advance dial from build-state: on `auto` it advances on its own, on `human` it stops for a human. Records every run in the trust log, the run record `yad dial` shows as advice. With `checks` on auto, a clean gate pass advances to engineer-review; any failure, scope overrun, or contract-surface touch HALTS and pulls in a human. Also sets a step''s dial (`yad dial`, nothing to earn since E34) and flips the kill switch (`yad kill` / `yad unkill`). Never advances a Shape step or the engineer review. Use when the user says "run Build", "advance story <id>", "set the checks dial", or "kill switch".'
 ---
 
 # SDLC — Run (Phase 4 orchestrator)
@@ -9,18 +9,17 @@ description: 'Phase 4 (automation) — the orchestrator that makes the second di
 config; this skill reads it and acts. For ONE story in ONE code repo, walk the Build steps —
 `spec → tasks → implement → checks → engineer-review` — and at each step either **advance on its own**
 (dial `advance: auto`, step succeeded) or **stop for a human** (dial `advance: human`, or any halt
-condition). Every run is recorded in the **trust log**, the evidence that earns a step its automation.
+condition). Every run is recorded in the **trust log** — the run record `yad dial` shows the team, as
+advice, when it sets a dial.
 
 This is the most dangerous skill in the system, so it is built to **halt-and-escalate over guess**:
 a failing check, ambiguity, a scope overrun, or a contract-surface touch stops the loop and pulls in a
-human regardless of any dial. The **Shape steps and the engineer review never auto-advance** — they
-are not in `automation.back_steps` and `engineer-review` is `locked`.
+human regardless of any dial. This skill **drives Build only**: it never drives a Shape step, and the
+**engineer review is a gate** — always a person.
 
-Earned so far: **`checks`** (Step B, Phase 4a — safest, a gate's pass/fail was never human judgment)
-and **`implement`** (Step D, Phase 4b — the `implement → check` hand-off; the scope/contract halts and
-the engineer review still gate the merge). **`tasks`** (Step C) and `spec` have their dials and trust
-hooks but stay `advance: human` until their own evidence clears the threshold — there is no historical
-signal to seed them from, so they are earned only on real runs.
+**Nothing has to be earned (E34).** Automation used to be unlocked per step once its trust log cleared a
+threshold. Now the team sets each lane step's dial with `yad dial`, which prints that step's run record
+beside it as advice and never refuses on it. The kill switch (`yad kill`) holds every step at `human`.
 
 ## Conventions
 
@@ -28,8 +27,9 @@ signal to seed them from, so they are earned only on real runs.
   truth: it holds the story, the build-state, and the trust log).
 - Code repos are separate git repos under `{project-root}/demo-repos/<repo>/`
   (`config.yaml` `build.code_repos_root`). Operate inside them with absolute paths.
-- Automation config is `skills/sdlc/config.yaml` → `automation:` (`back_steps`, `default`,
-  `trust_threshold`, `locked_steps`, `kill_switch`).
+- Automation config is `skills/sdlc/config.yaml` → `automation:` (`back_steps`, `default`). The kill
+  switch and the Shape dials live in `.sdlc/automation.json`, and are read and written **only through the
+  engine** — `yad dial … --json`, `yad kill`, `yad unkill`. Never read or edit either file for a dial.
 - Per-story Build state: `epics/<epic>/.sdlc/build-state/<story-id>.json` (per repo).
 - Trust ledger: **shard-then-fold** — each run is its own shard file
   `epics/<epic>/.sdlc/trust-log/<story>-<repo>-<step>-<uid>.json` (a fresh `uid` per run, so concurrent
@@ -52,13 +52,14 @@ signal to seed them from, so they are earned only on real runs.
 - `action` — `run` (default) | `set-dial` | `kill` | `unkill`.
 - For `run`: optional `from` (the step id to start at; default the repo's `currentStep` in
   build-state) and `task` (the atomic task id for the `implement`/`checks` legs).
-- For `set-dial`: `step` (a `back_steps` id), `to` — `human` | `auto` (shape 4), or the older
-  `human_approve` | `machine_advance`, which still mean the same two things and are still accepted.
+- For `set-dial`: `step` (a `back_steps` id), `to` — `human` | `auto` (the older `human_approve` |
+  `machine_advance` mean the same two things).
+- For `kill`: `reason` (required). For `unkill`: an optional `reason`.
 
 ## On Activation
 
 ### Step 0 — Load state
-Read `config.yaml` `automation`, the story's `build-state/<story>.json` (create it from the
+Read `config.yaml` `automation` (for `back_steps`), the story's `build-state/<story>.json` (create it from the
 `back_steps` defaults if absent — all `advance: human` (`automation: human_approve`), `engineer-review` `locked:true`, and
 **write it to disk before the loop starts**, because `yad next` reads that file to know this lane
 exists), and `trust-log.json` (treat missing as `[]`). Resolve the code repo.
@@ -91,9 +92,9 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
    `trust-log/<story>-<repo>-<step>-<uid>.json` (a fresh `uid` per run; never append to a shared file),
    with `ranBy: machine` if this advance was automated, else `human` — see `references/run-loop.md` for
    the derivation. Do this for *every* step run, pass or fail; the log is the evidence base.
-3. **Compute the effective dial.** Start from the step's dial in build-state (`automation`, or `advance` if that is all it carries), then **force it
-   to `advance: human`** if `automation.kill_switch` is true OR the step is `locked` OR the step id is
-   in `automation.locked_steps`. (So a kill switch or a lock always wins.)
+3. **Ask the engine for the effective dial:** `yad dial <epic> <story> --repo <repo> <step> --json`, and use
+   its `advance`. It is `human` whenever the step is a gate or the kill switch is on — the kill switch
+   always wins — so never work the dial out from the files yourself.
 4. **Decide:**
    - **HALT** if the step failed — any check FAIL, a scope overrun (`yad-implement` stopped on the
      file-boundary rule), a contract-surface touch, or any ambiguity. Set the step `status: blocked`
@@ -115,52 +116,39 @@ build-state change in 4), run `yad checkpoint --push` from `{project-root}`. It 
 audit-trail commit, and only ever on the default branch. It is a safe no-op when nothing changed, so
 call it every iteration — teammates don't review these machine writes, but CI and `yad status` on
 other machines must see current trust evidence. Never run it off the default branch (it will refuse):
-an unpushed or branch-stranded trust log quietly undermines the "earned automation" premise.
+an unpushed or branch-stranded trust log leaves the run record `yad dial` shows out of date.
 
-### `action: set-dial` — earn (or revert) a step's advance dial
-Flip `step`'s dial to `to` in build-state. **Write BOTH names on the step**, because a step carries
-each dial under two spellings while the shape-4 rename settles (docs/migrations/shape-4.md):
+### `action: set-dial` — set (or revert) a step's advance dial
+Run `yad dial <epic> <story> --repo <repo> <step> --to <human|auto>` (map `human_approve` → `human` and
+`machine_advance` → `auto` first). The engine writes both dial names on the lane step, refuses a gate and
+a lane step `yad-run` has not written yet, and prints the step's run record in that repo **as advice**.
+Relay its output. There is **no threshold** (E34): the team decides, and "it seems fine" is theirs to
+judge. `--to human` is always accepted. Never edit `build-state` for a dial yourself.
 
-| you were asked for | write |
-|---|---|
-| `human` (or `human_approve`) | `"automation": "human_approve"`, `"advance": "human"` |
-| `auto` (or `machine_advance`) | `"automation": "machine_advance"`, `"advance": "auto"` |
-
-Writing only one of them leaves the step saying two different things, and `yad doctor` reports it as
-drift the person caused by using this command. The OLD name is still the one the engine reads, so it
-is never the one to leave out.
-
-Enforce, in order:
-- **Refuse** if `step` is in `automation.locked_steps` or is a Shape step or `engineer-review` —
-  these can never be `advance: auto` (Shape step lock, build plan §E). Report the refusal reason.
-- For `to: auto`, **refuse unless the trust threshold is met**: the step's slice of the trust
-  ledger — the **union** of the folded `trust-log.json` `runs` PLUS every `trust-log/` shard, filtered to
-  this step (and repo) — has `>= trust_threshold.min_runs` entries AND the fraction with
-  `verdict == "approved-unchanged"` is `>= trust_threshold.min_approved_unchanged`. If it is not met,
-  report the current evidence (runs, % unchanged) and how far short it is — "it seems fine" is not
-  evidence.
-- `to: human` is **always allowed** (reverting automation is one move, never gated).
+For a Shape author step the team wants on auto, point at `yad dial <step> --to auto` — project-wide, and
+recorded only: this loop never drives a Shape step.
 
 ### `action: kill` / `action: unkill` — the kill switch
-Set `automation.kill_switch` to `true` (`kill`) or `false` (`unkill`) in `config.yaml`. While true,
-**every** step's effective dial is `advance: human` system-wide — no per-step edits, instantly
-reversible (build plan §Safety). Report the new state and that `yad-status` will show it.
+Run `yad kill --reason "<why>"` or `yad unkill [--reason "<why>"]`. The engine records who, when and why
+in `.sdlc/automation.json`; while the switch is on, **every** step's effective dial is `human`. Tell the
+user to commit that file so every machine and CI sees it. Never set a `kill_switch` in `config.yaml`:
+nothing reads it, and `yad doctor` fails on one left `true`.
 
 ## Hard rules (phase-4-build-plan.md)
 
-- **Earned per step, with evidence.** A step goes `advance: auto` only after its trust log clears
-  the threshold; `set-dial` enforces it.
-- **Reversible in one move.** `advance: human` is never gated; the kill switch reverts everything with
-  one command and no code change.
+- **The dial is the team's (E34).** `yad dial` sets it and shows the run record as advice; nothing is
+  earned, and nothing is refused on evidence. A gate is never auto.
+- **Reversible in one move.** `yad dial … --to human` is never refused; `yad kill --reason "<why>"` holds
+  every step at human, with no code change.
 - **Halt-and-escalate beats guess.** A failing check, ambiguity, scope overrun, or contract-surface
   touch halts the loop and pulls in a human, regardless of the dial.
-- **Shape steps and the engineer review never auto-advance.** They are not in `back_steps`;
-  `engineer-review` is `locked`; the kill switch and locks always override the dial.
+- **This skill never drives a Shape step, and never passes the engineer review.** The review is a gate,
+  and the kill switch holds every step at human.
 - **The orchestrator never changes what a step does** — it calls the existing skills and owns only the
   advance decision and the trust record.
 
 ## Reference
-- The loop, the trust-verdict derivation, and the threshold predicate: `references/run-loop.md`.
+- The loop and the trust-verdict derivation: `references/run-loop.md`.
 - State/trust schemas: `../yad-epic/references/state-schema.md`.
 - The steps it drives: `../yad-spec/`, `../yad-implement/`, `../yad-checks/`; the human gate it
   hands off to: `../yad-engineer-review/`.

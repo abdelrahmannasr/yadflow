@@ -108,7 +108,7 @@ Report: the spec folder path, the files written, whether Spec Kit was used, the 
 
 ### Step 8 — Record the `spec` trust signal (Phase 4b)
 When this step runs under the orchestrator (`yad-run`), the generated spec is a Build run that the
-trust log measures (it is the evidence that could later earn the `spec` step a `machine_advance`). The
+trust log measures (part of the run record `yad dial` shows beside the `spec` dial). The
 verdict is **anchored to the human who accepts the spec**, never self-graded:
 - the human approves the generated `specs/<story>/` untouched → `approved-unchanged`;
 - the human edits the spec/plan/tasks before accepting → `approved-with-edits` (signal

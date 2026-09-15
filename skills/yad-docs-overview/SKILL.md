@@ -43,7 +43,7 @@ There is no epic; the inputs are the workflow's own config + manifest (full mapp
 `references/pipeline-model.md`):
 
 - `skills/sdlc/config.yaml` — the Shape/Build steps, the **two dials** (`driver`/`assistance`, `advance`/`automation`),
-  defaults, the review-gate rule, the build conventions, the automation/trust thresholds.
+  defaults, the review-gate rule, the build conventions, the automation defaults.
 - `skills/sdlc/module-help.csv` — the **canonical skill manifest**: each skill's `phase`,
   `preceded-by` / `followed-by`, and `outputs`. This is the ordering source of truth.
 - `docs/diagrams/sdlc-overview.mmd` — the overview diagram (the node/edge shape + the node classes:

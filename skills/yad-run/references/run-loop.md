@@ -1,8 +1,9 @@
-# `yad-run` — the loop, the trust verdict, the threshold
+# `yad-run` — the loop and the trust verdict
 
 This is the detail behind `SKILL.md`. It restates the orchestration so the skill is self-contained,
-and pins down the two judgments the skill makes: **what trust verdict to record** and **when a step
-has earned `advance: auto`**.
+and pins down the judgment the skill makes: **what trust verdict to record**. Whether a step advances on
+its own is not a judgment any more — the team sets the dial with `yad dial` (E34), and the engine answers
+what applies.
 
 ## The Build steps
 
@@ -79,19 +80,15 @@ including a halt — is safe and keeps the shared trust evidence current for CI,
 `yad status` on other machines. It refuses to run off the default branch (an unsigned `[skip ci]`
 commit inside a future PR range would fail `verified-commits` and strand the PR).
 
-## Effective dial (kill switch & locks always win)
+## Effective dial (the kill switch and gates always win)
 
 ```
-# The step carries the dial under EITHER spelling while the shape-4 rename settles, and the
-# OLD name is the one that wins. `human_approve` -> "human", `machine_advance` -> "auto".
-eff = bs.step.automation ? map(bs.step.automation) : bs.step.advance    # "human" | "auto"
-if cfg.kill_switch == true:        eff = "human"
-if bs.step.locked == true:         eff = "human"
-if step in cfg.locked_steps:       eff = "human"
+eff = (yad dial <epic> <story> --repo <repo> <step> --json).advance    # "human" | "auto"
 ```
 
-So a kill switch, a `locked` flag, or membership in `locked_steps` forces a stop no matter what the
-per-step dial says. `engineer-review` and the five Shape steps are covered by `locked` / `locked_steps`.
+The engine reads the lane step's dial under either spelling (the OLD name wins), and answers `human`
+when the step is a gate (`engineer-review`) or the kill switch in `.sdlc/automation.json` is on — whatever
+the dial says. Its `why` says which: `lane`, `gate` or `kill`.
 
 ## Deriving signals & the provisional verdict
 
@@ -124,35 +121,31 @@ may also override it to `rejected` — e.g. the human discards/regenerates the s
 rejects the diff at the engineer review for a reason no signal captured. A human override always wins.
 
 Rationale: the trust log should count an output as fully trustworthy (`approved-unchanged`) only when
-the machine's work was accepted as-is. Any human correction is `approved-with-edits` (useful but not
-yet trustworthy enough to automate); any failure or boundary breach is `rejected`.
+the machine's work was accepted as-is. Any human correction is `approved-with-edits` (useful, and a sign
+the step still wants a person); any failure or boundary breach is `rejected`.
 
-## The trust threshold (when a step is earned)
+## The run record as advice (E34)
 
-A step is a **candidate** for `advance: auto` only when its trust evidence clears
-`config.yaml` `automation.trust_threshold`. `set-dial` enforces this predicate before flipping a step
-to `advance: auto`:
+`yad dial` prints a step's record when someone sets its dial, and whenever it is asked with no `--to`:
 
 ```
-# read the ledger by UNION: the folded trust-log.json `runs` array PLUS every loose trust-log/ shard
-# (concatenate — every shard is a distinct run; never dedup by story/repo/step, the threshold counts re-runs)
-all   = trust-log.json.runs + [read each file in trust-log/]
-slice = entries in `all` for this step (this story's repo; widen to the project if you track it there)
+all   = trust-log.json.runs + [read each file in trust-log/]   # UNION; every shard is a distinct run
+slice = entries in `all` for this step in this repo
 runs  = len(slice)
 unchanged = count(e.verdict == "approved-unchanged" in slice)
-earned = runs >= trust_threshold.min_runs
-         AND (unchanged / runs) >= trust_threshold.min_approved_unchanged
 ```
 
-Defaults: `min_runs: 5`, `min_approved_unchanged: 0.8`. If `earned` is false, `set-dial` refuses and
-reports `runs`, the `unchanged/runs` fraction, and how far short of the bar it is.
+It is **advice, never a rule.** There is no threshold and no refusal: the team decides whether a step
+runs on auto, and the record is what they read to decide. A step with no runs says so — no evidence either
+way is not evidence against.
 
-Reverting (`to: human`) is never gated — automation must be reversible in one move.
+Reverting (`--to human`) and the kill switch are always one move.
 
 ## What stays human, always
 
 - `engineer-review` — the merge gate. `yad-run` always stops here and hands to `yad-engineer-review`.
-- The five Shape steps (`epic`, `architecture`, `ui-design`, `stories`, `test-cases`) — not in
-  `back_steps`, in `locked_steps`; the dial-setter refuses them.
+- The Shape steps — this loop never drives them. A Shape author step's dial may be set to auto for the
+  project (`yad dial <step> --to auto`), and is only recorded until the engine runs agents (E26); every
+  Shape review gate is a person.
 - Any contract-surface change — halts the loop and routes back to the architecture gate, regardless of
   the dial.

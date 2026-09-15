@@ -97,7 +97,7 @@ node classes from the diagram.
 
 | Step (skill) | Outputs / sideEffects |
 |--------------|------------------------|
-| `yad-run` | drives the Build loop; `build-state/<story>.json`, `trust-log.json`, kill switch |
+| `yad-run` | drives the Build loop; `build-state/<story>.json`, `trust-log.json`; dials and kill switch through `yad dial` / `yad kill` (`.sdlc/automation.json`) |
 | `yad-learn` | tutoring; `learning-records.json` (LOCAL-ONLY, gitignored) |
 | `yad-status` | read-only view (no writes) |
 | `yad-docs` / `yad-docs-overview` / `yad-docs-sync` | the docs sites + their `docs-build.json` manifests |
