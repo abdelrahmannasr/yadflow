@@ -22,6 +22,7 @@ import { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 import { runNext } from '../cli/next.mjs';
 import { runSkip, runDefer, runUnblock, runLaneSkip } from '../cli/skip.mjs';
 import { runDial, runKill } from '../cli/dial.mjs';
+import { runMode } from '../cli/mode.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
@@ -163,6 +164,10 @@ ${c.bold('Where am I / what next')}
   yad kill --reason <text>             Kill switch: hold every step at advance: human. Recorded in
                                        .sdlc/automation.json — who, when and why
   yad unkill [--reason <text>]         Turn the kill switch off; each step follows its own dial again
+  yad mode [solo --reason <text> | team [--reason <text>]] [--json]
+                                       Who must approve. Solo waives approvals on every review gate (the
+                                       merge still decides); team counts them. Records who, when and why.
+                                       No word reads the mode. Open reviews follow it from their next sync
 
 ${c.bold('Review gate (Shape)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
@@ -458,6 +463,11 @@ async function main() {
         log(c.red('usage: yad dial <step> [--to auto|human]   |   yad dial <epic> <story> --repo <name> <step> [--to auto|human]'));
         process.exitCode = 1;
       }
+      break;
+    }
+    case 'mode': {
+      if (o._.length > 2) { log(c.red(`unexpected argument(s): ${o._.slice(2).join(' ')}`)); process.exitCode = 1; break; }
+      await runMode(o.dir, { to: o._[1] ?? null, reason: o.reason, json: o.json, today });
       break;
     }
     case 'kill':

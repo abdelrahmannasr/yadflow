@@ -95,6 +95,19 @@ export function projectChecks(checks, root) {
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
+      // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave
+      // the two saying different things; name that, and say which one the gates follow. Silent on a file
+      // with no `mode`, which is every Product set up before E10 (the frozen golden one included).
+      if (hub.mode !== undefined) {
+        const acting = isSolo(hub) ? 'solo' : 'team';
+        if (hub.mode !== acting) {
+          check(checks, 'mode:disagree', 'project', 'warn',
+            `${PROJECT_FILES.hubConfig} says mode: ${JSON.stringify(hub.mode)}, but solo mode is ${acting === 'solo' ? 'on' : 'off'} — the old \`solo\` flag is the one the gates read`,
+            ['solo', 'team'].includes(hub.mode)
+              ? `\`yad mode ${acting}\` keeps what the gates do now; \`yad mode ${hub.mode === 'solo' ? 'solo --reason "<why>"' : 'team'}\` makes the gates follow \`mode\``
+              : `\`yad mode ${acting}\` writes a mode the gates recognise`);
+        }
+      }
       // platform CLI + auth (best-effort; auth probing is the user's own session)
       const cli = cliFor(hub.platform);
       if (cli) {

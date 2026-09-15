@@ -2715,6 +2715,8 @@ test('runSetup: solo/greenfield/monorepo writes the profile + solo and defers th
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
   const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
   assert.equal(hub.solo, true);
+  assert.equal(hub.mode, 'solo', 'the new name is written beside the old one (E10)');
+  assert.equal(hub.mode_set, undefined, 'a first run is not a switch');
   assert.equal(hub.profile.codebase, 'greenfield');
   assert.equal(hub.profile.repo_layout, 'monorepo');
   assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'none'); // deferred
@@ -2729,6 +2731,7 @@ test('runSetup: team + --tools records a team profile and configures the optiona
   } finally { delete process.env.SDLC_NONINTERACTIVE; }
   const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
   assert.equal(hub.solo, false);
+  assert.equal(hub.mode, 'team');
   assert.equal(hub.profile.team_size, 2);
   assert.equal(hub.profile.codebase, 'brownfield');
   assert.equal(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/design.json'), 'utf8')).tool, 'figma'); // configured (default)
@@ -2758,6 +2761,8 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
   const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
   assert.equal(hub.git_url, 'https://github.com/acme/hub.git', 'missing git_url backfilled from origin');
   assert.equal(hub.roster.length, 1, 'roster preserved');
+  // A re-run that changes an existing Product's mode records it, and names setup as the reason (E10).
+  assert.deepEqual([hub.solo, hub.mode, hub.mode_set?.from, hub.mode_set?.to, hub.mode_set?.reason], [true, 'solo', 'team', 'solo', 'yad setup']);
   assert.equal(hub.roster[0].login, 'al', 'roster entry untouched');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -7349,6 +7354,125 @@ test('gate sync: in solo mode a merged gate records waived: "solo" on the review
     assert.deepEqual([author.via, author.waived], ['review-passed', undefined], 'the authoring was not waived');
     const out = await grab(() => gateStatus(T, { epic: 'EP-test' }));
     assert.match(out, /merged by al \(PR #7\) at c0ffee1; approvals waived \(solo mode\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('planMode: solo needs a reason and team does not; the same mode twice changes nothing; the older review_gate.solo goes off with team (E10)', async () => {
+  const { planMode, modeFields, modeOf } = await import('./mode.mjs');
+  let p = planMode({ solo: false }, { to: 'solo' });
+  assert.equal(p.ok, false);
+  assert.match(p.message, /needs a reason/);
+  assert.equal(planMode({ solo: false }, { to: 'solo', reason: '   ' }).ok, false, 'a blank reason is no reason');
+  p = planMode({ solo: false, roster: [] }, { to: 'solo', reason: ' just me now ', by: 'al', date: '2026-09-15' });
+  assert.deepEqual([p.ok, p.flipped, p.changed], [true, true, true]);
+  assert.deepEqual(p.hub, { solo: true, roster: [], mode: 'solo',
+    mode_set: { from: 'team', to: 'solo', by: 'al', date: '2026-09-15', reason: 'just me now' } });
+
+  p = planMode(p.hub, { to: 'team', by: 'bo', date: '2026-09-16' });
+  assert.deepEqual([p.ok, p.flipped], [true, true], 'team needs no reason');
+  assert.deepEqual(p.hub.mode_set, { from: 'solo', to: 'team', by: 'bo', date: '2026-09-16', reason: null }, 'the record is replaced, not stacked');
+  const same = planMode(p.hub, { to: 'team' });
+  assert.deepEqual([same.ok, same.changed, same.flipped], [true, false, false]);
+
+  // A Product set up before E10: solo already on and no `mode`. The name is added; no reason, no record.
+  const named = planMode({ solo: true }, { to: 'solo' });
+  assert.deepEqual([named.ok, named.changed, named.flipped], [true, true, false]);
+  assert.deepEqual(named.hub, { solo: true, mode: 'solo' });
+
+  // `review_gate.solo: true` also means solo; switching to team must turn it off, or the gates stay waived.
+  const legacy = planMode({ review_gate: { solo: true, default_reviewers: 1 } }, { to: 'team' });
+  assert.equal(modeOf(legacy.hub), 'team');
+  assert.deepEqual(legacy.hub.review_gate, { solo: false, default_reviewers: 1 });
+  assert.equal(legacy.hub.mode_set.from, 'solo');
+
+  assert.equal(planMode({}, { to: 'duo' }).ok, false);
+  assert.equal(modeFields({}, 'team').mode_set, undefined, 'no record when the mode does not change');
+});
+
+test('yad mode writes both names and the record, names the open reviews, reads back, and never writes over a broken file (E10)', async () => {
+  const { runMode } = await import('./mode.mjs');
+  const { T } = scaffoldEpic();
+  const run = async (fn) => {
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(fn);
+    const failed = process.exitCode === 1;
+    process.exitCode = code;
+    return { out, failed };
+  };
+  const read = (f) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc', f), 'utf8'));
+  try {
+    let r = await run(() => runMode(T, { to: 'solo' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /needs a reason/);
+    assert.equal(read('hub.json').solo, undefined, 'a refusal writes nothing');
+
+    r = await run(() => runMode(T, { to: 'solo', reason: 'the team is on leave', today: '2026-09-15' }));
+    assert.equal(r.failed, false, r.out);
+    for (const f of ['hub.json', 'product.json']) {
+      const h = read(f);
+      assert.deepEqual([h.solo, h.mode, h.mode_set.from, h.mode_set.to, h.mode_set.reason, h.mode_set.date],
+        [true, 'solo', 'team', 'solo', 'the team is on leave', '2026-09-15'], f);
+      assert.equal(h.roster.length, 3, `${f} keeps everything else`);
+    }
+    assert.match(r.out, /1 open review\(s\) follow the solo rule from their next sync: EP-test architecture-review/);
+    assert.match(r.out, /reverse with `yad mode team`/);
+
+    r = await run(() => runMode(T, { to: 'solo', reason: 'again' }));
+    assert.match(r.out, /already solo — nothing changed/);
+    assert.doesNotMatch(r.out, /commit /, 'nothing written, nothing to commit');
+
+    r = await run(() => runMode(T, { json: true }));
+    const j = JSON.parse(r.out);
+    assert.deepEqual([j.ok, j.mode, j.name, j.agrees, j.set.reason], [true, 'solo', 'solo', true, 'the team is on leave']);
+
+    r = await run(() => runMode(T, { to: 'team', json: true, today: '2026-09-16' }));
+    const w = JSON.parse(r.out);
+    assert.deepEqual([w.ok, w.mode, w.changed, w.flipped, w.set.from, w.set.reason], [true, 'team', true, true, 'solo', null]);
+    assert.deepEqual(w.openReviews, [{ epic: 'EP-test', step: 'architecture-review' }]);
+
+    // The gates read the old flag, so a hand edit that leaves `mode` behind reads one way and acts another.
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...read('hub.json'), solo: true }));
+    r = await run(() => runMode(T, {}));
+    assert.match(r.out, /mode: solo/);
+    assert.match(r.out, /the file also says mode: "team", but the old `solo` flag is the one read/);
+
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), '{ nope');
+    r = await run(() => runMode(T, { to: 'team' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /does not parse — nothing is written over it/);
+    assert.equal(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'), '{ nope');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e10-'));
+  try {
+    const r = await run(() => runMode(empty, { to: 'team' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /run `yad setup` first/);
+  } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+});
+
+test('doctor mode:disagree: silent with no `mode` or when it agrees; warns when `solo` says the other (E10)', async () => {
+  const { projectChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e10d-'));
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  const found = (hub) => {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, ...hub }));
+    const checks = [];
+    projectChecks(checks, T);
+    return checks.find((x) => x.id === 'mode:disagree');
+  };
+  try {
+    assert.equal(found({ solo: true }), undefined, 'a Product set up before E10 reads exactly as before');
+    assert.equal(found({ solo: true, mode: 'solo' }), undefined);
+    assert.equal(found({ mode: 'team' }), undefined);
+    let c = found({ solo: true, mode: 'team' });
+    assert.equal(c.status, 'warn');
+    assert.match(c.message, /mode: "team", but solo mode is on/);
+    assert.match(c.hint, /`yad mode solo` keeps what the gates do now/);
+    assert.equal(found({ review_gate: { solo: true }, mode: 'team' })?.status, 'warn', 'the older spelling counts as solo');
+    c = found({ solo: false, mode: 'duo' });
+    assert.match(c.hint, /writes a mode the gates recognise/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
