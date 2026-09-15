@@ -36,7 +36,7 @@ no clone needed.
 | `yad gate open <epic> <artifact>` | Open the Shape **review PR/MR** for an artifact and mark the step `in_review` (in verified mode CI owns the ledger, so it only opens the PR). The `review/<epic>/<artifact>` branch must already be **on origin** — it does not create or push one; `yad open-pr`, run from the branch, pushes it and then delegates here. For an epic's **first** gate, cut that branch from the authoring branch (`epic/…`, `change/…`) so the PR/MR carries the `.sdlc/` **seed**: no CI path can create a ledger, so `ledger-guard` exempts a new epic's ledger there — creation, not mutation (#162) — and it lands on the default branch at merge. |
 | `yad gate sync <epic> [artifact] [--pr <n>]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. With no PR recorded in the ledger (the normal bridge case, where CI records it only at merge) it resolves the PR from the `review/<epic>/<artifact>` branch; `--pr <n>` names one outright and overrides a stale recorded pointer, after confirming the number really is that branch's PR. In **verified mode this stays advisory** — the writing recovery is `yad gate ci … --merged`. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
-| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, and that step's advisory approver count. |
+| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, that step's advisory approver count, and how a closed step closed (when, on which PR, and who merged it). |
 | `yad gate repair <epic>` | Close an authoring step left stranded behind a review gate that already passed (`YAD-STATE-005`). Writes only `state.json`. `--push` commits it to the default branch with a `chore(gate): repair…[skip ci]` audit-trail message (`--allow-branch` to override the default-branch guard, `--dry-run` to preview). |
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the Product workflow calls **at merge** (and from its scheduled reconcile — nothing fires pre-merge, where the platform PR/MR holds the review state): derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the Product default branch. **One exception, once:** on a verified Product it also moves an old-spelling product level (`epics/EP-discovery/` → `foundation/`, shape 8) after its jobs, under the commit subject `chore(gate): move the product level to foundation/ (shape 8)` — only on the default branch, only once the product level's own review has passed, never from a checkout with uncommitted changes under either folder, and not while the checks committed in the repo predate the Foundation (docs/migrations/shape-8.md). A later merge of a `review/EP-discovery/*` branch finds the moved ledger in `foundation/`. The wired jobs always name a branch: they discover merged reviews through the platform API and call `--branch <ref> --pr <n> --merged` per review. With no `--branch` it falls back to a local sweep of the review PRs *already recorded in the ledger* whose step is not yet `done` — it does no platform discovery of its own, so a review the ledger never saw is only reachable by naming it. **Idempotent down to the bytes:** the ledgers are written in a canonical order, so re-syncing an already-`done` step (what the 15-minute sweep does for a week after every merge) produces a byte-identical file and commits nothing. Before the #163 fix the re-sync re-appended each step's approvals at the tail, so a sweep over N merged reviews rotated `approvals.json` and committed the reorder on every pass — an unbounded commit loop (#163). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
@@ -632,6 +632,19 @@ The bottom four carry a `record` saying why: `{ "reason": …, "by": …, "date"
 `reason` is required. A skip with no reason is the thing the whole design refuses — a recorded skip is
 not a hole in the audit trail, it IS the audit trail — so `yad doctor` reports a recorded state with
 nothing recorded on it.
+
+**A `done` step says how it closed** (E18), in a separate key, `closed`: who wrote it, when, and how.
+
+| How it closed (`via`) | When |
+|---|---|
+| `merge` | A review gate passed when its PR merged. The record holds the PR, the merge commit, the artifact hash and who merged it. |
+| `review-passed` | An author step closed at that same merge. |
+| `review-opened` | An author step closed when its review opened. |
+| `repair` | `yad gate repair` closed a stranded author step. |
+| `auto` / `human` | The `yad-run` skill moved a Build lane past a step, on its own or for a person. |
+
+`yad gate status` prints it under each review step. A step closed before this release has none, and
+nothing warns about that. See the state schema's "Closing records" for every field.
 
 A `deferred` step can also carry `"debt": true`, a flag beside the state rather than a ninth state: it
 marks the deferral as owed back, and changes nothing about whether the chain continues. See `yad defer

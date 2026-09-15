@@ -282,6 +282,44 @@ The four states at the bottom carry a `record`:
 audit trail, never a gate). A `satisfied` record also carries `link`, naming where the work happened.
 `yad doctor` reports a recorded state with no record as `step:no-record`.
 
+### Closing records (E18)
+
+A `done` step says **how it closed**, in its own key, `closed`. It is not `record`: `record` says why a
+step is *not* done, and `blocked` is read by whether it has one, so the two never share a key.
+
+```json
+{ "id": "architecture-review", "status": "done",
+  "closed": { "by": "yad-gate-sync", "date": "2026-06-08", "via": "merge", "pr": 7,
+              "commit": "c0ffee1", "hash": "sha256:…", "mergedBy": "al" } }
+```
+
+| Field | Meaning |
+|---|---|
+| `by` | Who **wrote** the record, as on every record: the local git identity, or CI's on a verified Product. Best-effort, may be `null`. |
+| `date` | When the step closed: the merge date for a merge, otherwise the day the command ran. |
+| `via` | How it closed — see the table below. |
+| `pr` | The review PR/MR number, when there is one. |
+| `commit` | The merge commit, when the platform reports it. |
+| `hash` | The artifact hash the step closed on — the one approvals bind to. |
+| `mergedBy` | The platform login that merged the PR, when the platform reports it. |
+| `run` | Build lanes only: the `uid` of the trust-log run that moved past the step. |
+
+| `via` | Written by | When |
+|---|---|---|
+| `merge` | `yad gate sync` / `yad gate ci` | A review gate passed on its merge |
+| `review-passed` | the same | Its author step, closed at that merge because nothing closed it earlier |
+| `review-opened` | `yad gate open` (local ledger) / `yad gate sync` | An author step, closed when its review opened |
+| `repair` | `yad gate repair` | A stranded author step — an escape hatch, so it says so |
+| `auto` / `human` | the `yad-run` skill, in `build-state` | A Build lane step: the dial let the run go on by itself, or it stopped for a person |
+
+- **Optional keys are left out**, never written as `null`: a close with no PR has no `pr`.
+- **The first close wins.** A step that already has a `closed` keeps it; a re-sync never rewrites it.
+- **Nothing is invented.** A field the closer does not know is left out.
+- **Steps closed before this release carry none**, and nothing asks for one: `yad doctor` does not warn.
+- **No shape change.** An older release ignores the key, and nothing reads `done` differently because it
+  is there.
+- `yad gate status` prints it under each review step.
+
 **`blocked` changed meaning in shape 7.** Before it, every writer used `blocked` for "waiting on an
 earlier step" — what is now `todo`. The two are told apart by the record, not by the shape number:
 
@@ -505,6 +543,7 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `locked` | `true` \| `false` | Seeded `true` on every Shape step. Since E34 it decides nothing about the dial on a step the catalogue knows: an author step may be set to `auto` (for the whole project, in `.sdlc/automation.json`), and a review gate is `human` because it is a gate. It is still read as a gate on a step id the catalogue does not know. |
 | `status` | one of the **step states** below | Where the step stands. |
 | `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
+| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4), and sets the step's reported approver count: `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). |
 
 ## `approvals.json`
@@ -631,6 +670,7 @@ Each `steps[]` entry:
 | `id` | `spec`, `tasks`, `implement`, `checks`, `engineer-review` | Build step identity (the `back_steps` from `config.yaml` + the human merge gate). |
 | `automation` / `advance` | `human_approve`/`human` \| `machine_advance`/`auto` | Dial 2, written under both names (the OLD one is read). Defaults to `human_approve`; `yad dial <epic> <story> --repo <r> <step> --to auto` flips it (E34 — nothing to earn), never on the `engineer-review` gate. |
 | `locked` | `true` \| `false` | `engineer-review` is `true` — it never auto-advances (build plan §E). |
+| `closed` | `{ by, date, via, run }` | Written by the `yad-run` skill when it moves the lane past the step: `via` is `auto` or `human`, and `run` names the trust-log run (E18). See "Closing records". |
 | `status` | the same **step states** as the Shape chain | Lifecycle. This file is **not** migrated to shape 7 — the `yad-run` / `yad-implement` skills write it, not the engine, so a rewrite would be undone by their next write. `yad-run` advances `done` steps and marks a halted lane `blocked` **with a `record`** naming the halt cause (a failed check, a scope overrun, a contract touch): that record is what separates a halted lane from one nobody started, because a bare `blocked` is the pre-shape-7 spelling of `todo` and still reads that way here. A lane halted by an older `yad-run` carries no record and reads as `todo` until the next run rewrites it — nothing advances past it either way. |
 
 `currentStep` is the `id` the orchestrator is waiting on / about to run for that repo. The file is

@@ -76,6 +76,9 @@ Print, in this order:
      say that verb is refused once the ledger is on the default branch), or
      "being paid back — clears when `<id>-review` passes" once it is back in progress. The flag is
      removed only when that review passes. `yad doctor` reports the same list as `step:debt`.
+   - **Closed steps:** a `done` step may carry `closed` (E18) — `{ by, date, via, pr?, … }`. Add
+     `(closed <date>, via <via>, PR #<pr>)` to its line when it is there, and nothing when it is not: a
+     step closed before this release has none, and that is not a fault.
    - **Re-opened steps:** an unfinished step with a later step `done` (not its own `-review` gate) was
      put back after the chain built past it — a late `yad undefer`. Render it as
      `<id> — RE-OPENED (beside finished work)`: it does not block the finished steps after it, and
