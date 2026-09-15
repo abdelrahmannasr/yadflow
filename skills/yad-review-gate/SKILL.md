@@ -224,6 +224,8 @@ If the predicate **passes**:
 - Mark this review step `status: "done"` **and give it a closing record** (E18):
   `"closed": { "by": "<who performs this advance, or null>", "date": "<YYYY-MM-DD>", "via": "approved", "hash": "<the artifact hash the approvals bind to>" }`.
   `approved`, not `merge`: nothing merged, so there is no `pr` or `commit` to write.
+  **In solo mode** (`solo: true` in `.sdlc/hub.json`), add `"waived": "solo"` to that record: the gate passed
+  without counting approvals, and the record says so (E10). Only on the review step, never on its author step.
 - **Close its paired authoring step if it is not `done` already.** `advanceState` does this defensively
   (issue #131) because a passed gate can never leave its author step behind. Skipping it strands every
   later step behind `YAD-STATE-005`. Give it `"closed": { "by": …, "date": …, "via": "review-passed" }`.

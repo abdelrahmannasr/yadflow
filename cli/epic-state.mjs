@@ -1327,6 +1327,9 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 //   hash      the artifact hash the step closed on (the one approvals bind to).
 //   mergedBy  the platform login that merged the PR, when the platform reports it.
 //   run       the trust-log run id, for a Build lane step the `yad-run` skill moved past.
+//   waived    `solo` when a REVIEW step passed while solo mode waived its approvals (E10). Absent on a
+//             gate that counted approvals. Never on the author step it closes: the approvals were
+//             waived, the authoring was not, so `closeAuthorStep` is handed its fields one by one.
 //
 // FIRST CLOSE WINS: a step that already carries one keeps it. Nothing moves a `done` step back today,
 // so nothing has to remove one; a writer that ever does must take `closed` with it, as `record` goes
@@ -1336,7 +1339,7 @@ function closeAuthorStep(state, reviewStep, closed = null) {
 // Product with no platform, where `advanceState` has no caller and nothing merges.
 export const CLOSED_VIA = ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human'];
 
-export const closingRecord = ({ by = null, date = null, via, pr = null, commit = null, hash = null, mergedBy = null, run = null } = {}) => ({
+export const closingRecord = ({ by = null, date = null, via, pr = null, commit = null, hash = null, mergedBy = null, run = null, waived = null } = {}) => ({
   by: by || null,
   date: date || null,
   via,
@@ -1345,6 +1348,7 @@ export const closingRecord = ({ by = null, date = null, via, pr = null, commit =
   ...(hash ? { hash } : {}),
   ...(mergedBy ? { mergedBy } : {}),
   ...(run ? { run } : {}),
+  ...(waived ? { waived } : {}),
 });
 
 function stampClosed(step, closed) {

@@ -41,7 +41,8 @@ function closedLine(closed) {
   const how = closed.via === 'merge'
     ? `merged${closed.mergedBy ? ` by ${closed.mergedBy}` : ''}${closed.pr != null ? ` (PR #${closed.pr})` : ''}${closed.commit ? ` at ${String(closed.commit).slice(0, 7)}` : ''}`
     : `via ${closed.via || 'an unknown path'}${closed.pr != null ? ` (PR #${closed.pr})` : ''}`;
-  return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${closed.by ? `; recorded by ${closed.by}` : ''}`;
+  const waived = closed.waived === 'solo' ? '; approvals waived (solo mode)' : closed.waived ? `; approvals waived (${closed.waived})` : '';
+  return `closed${closed.date ? ` on ${closed.date}` : ''} — ${how}${waived}${closed.by ? `; recorded by ${closed.by}` : ''}`;
 }
 
 // ---- tiny frontmatter reader (key: value, and `repos: [a, b]`) ----------------------------------
@@ -493,6 +494,8 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
       state = advanceState(state, step, {
         by, date: (typeof pull.mergedAt === 'string' && pull.mergedAt.slice(0, 10)) || today,
         pr: pr.number ?? null, commit: pull.mergeCommit || null, hash: curHash, mergedBy: pull.mergedBy || null,
+        // Solo mode passed this gate without counting approvals, and the record says so (E10).
+        waived: solo ? 'solo' : null,
       });
       advanced++;
       ok(`gate PASSED — ${step.id} → done; next: ${state.currentStep}`);

@@ -7323,6 +7323,35 @@ test('gate sync: a merge writes the closing record (merge date, PR, commit, hash
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
+test('closingRecord: `waived` rides only when it is given (E10)', async () => {
+  const { closingRecord } = await import('./epic-state.mjs');
+  assert.deepEqual(closingRecord({ by: 'al', date: '2026-09-15', via: 'merge' }), { by: 'al', date: '2026-09-15', via: 'merge' });
+  assert.deepEqual(closingRecord({ by: 'al', date: '2026-09-15', via: 'merge', waived: 'solo' }), { by: 'al', date: '2026-09-15', via: 'merge', waived: 'solo' });
+});
+
+test('gate sync: in solo mode a merged gate records waived: "solo" on the review step only, and gate status prints it (E10)', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    const hubFile = path.join(T, '.sdlc/hub.json');
+    fs.writeFileSync(hubFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(hubFile, 'utf8')), solo: true }));
+    const stateFile = path.join(ep, '.sdlc/state.json');
+    const s0 = JSON.parse(fs.readFileSync(stateFile));
+    s0.steps.find((x) => x.id === 'architecture').status = 'in_progress';
+    fs.writeFileSync(stateFile, JSON.stringify(s0));
+    const merged = { ok: true, state: 'MERGED', merged: true, headOid: 'abc', reviews: [], threads: [],
+      mergedAt: '2026-06-08T21:40:00Z', mergedBy: 'al', mergeCommit: 'c0ffee1234567' };
+    await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => merged });
+    const state = JSON.parse(fs.readFileSync(stateFile));
+    const review = state.steps.find((x) => x.id === 'architecture-review');
+    assert.equal(review.status, 'done', 'solo passes on the merge with no approval');
+    assert.deepEqual([review.closed.via, review.closed.waived], ['merge', 'solo']);
+    const author = state.steps.find((x) => x.id === 'architecture').closed;
+    assert.deepEqual([author.via, author.waived], ['review-passed', undefined], 'the authoring was not waived');
+    const out = await grab(() => gateStatus(T, { epic: 'EP-test' }));
+    assert.match(out, /merged by al \(PR #7\) at c0ffee1; approvals waived \(solo mode\)/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('gate sync: an open review closes only its author step; with no merge facts the close takes the run date and invents nothing (E18)', async () => {
   const { T, ep } = scaffoldEpic();
   try {
