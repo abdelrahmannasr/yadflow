@@ -27,7 +27,7 @@ import { resolveCommitterLogin } from './platform.mjs';
 // Best-effort auditable actor for a record's `by` — who WROTE the record: the roster login for the
 // local git identity, else the raw git user.name, else null. A malformed/absent Product degrades to the
 // raw name — attribution is a nicety on the audit trail, never a gate, so it must not block the verb.
-function recordActor(root) {
+export function recordActor(root) {
   let roster = [];
   try { roster = loadProduct(root)?.hub?.roster || []; } catch { /* no Product / malformed — attribute by raw git name */ }
   return resolveCommitterLogin(root, roster)

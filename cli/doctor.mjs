@@ -9,7 +9,7 @@ import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, re
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
-import { isGateStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
+import { ADVANCE_VALUES, isGateStep, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
@@ -859,6 +859,63 @@ export function dialChecks(checks, root) {
   }
 }
 
+// The advance dial and the kill switch (E34). Silent on a project that never touched either, so a project
+// with no `.sdlc/automation.json` — the frozen golden one included — reads exactly as before.
+export function automationChecks(checks, root) {
+  const rel = PROJECT_FILES.automationConfig;
+  const a = loadAutomation(root);
+  if (a.error) {
+    check(checks, 'automation', 'project', 'fail',
+      `${rel} ${a.error} — every step is held at advance: human until it is fixed`,
+      'fix the JSON, or delete the file to go back to the defaults (kill switch off, every Shape step human)');
+  } else {
+    if (a.kill?.on) {
+      const who = [a.kill.by ? `by ${a.kill.by}` : '', a.kill.date ? `on ${a.kill.date}` : ''].filter(Boolean).join(' ');
+      check(checks, 'automation:kill', 'project', 'warn',
+        `the kill switch is ON${who ? ` (${who})` : ''}${a.kill.reason ? `: ${a.kill.reason}` : ''} — every step is held at advance: human`,
+        'turn it off with `yad unkill` once the reason is gone');
+    }
+    const gates = [];
+    const build = [];
+    const unknown = [];
+    for (const [id, v] of Object.entries(a.steps)) {
+      const def = catalogueStep(id);
+      if (!ADVANCE_VALUES.includes(v)) unknown.push(`${id}: ${JSON.stringify(v)} is not human or auto`);
+      else if (!def) unknown.push(`${id}: not a step this release knows`);
+      else if (def.kind === 'review' && v === 'auto') gates.push(id);
+      else if (def.phase === 'build') build.push(id);
+    }
+    if (gates.length) {
+      check(checks, 'automation:gate', 'project', 'fail',
+        `${rel} sets a review gate to auto: ${gates.join(', ')}`,
+        'a gate is never auto (rule 1), and nothing honours this line — remove it');
+    }
+    if (build.length) {
+      check(checks, 'automation:build-step', 'project', 'warn',
+        `${rel} lists Build step(s) nothing reads here: ${build.join(', ')}`,
+        'a Build step\'s dial is set per lane — `yad dial <epic> <story> --repo <name> <step> --to auto`');
+    }
+    if (unknown.length) {
+      check(checks, 'automation:unknown', 'project', 'warn',
+        `${rel}: ${unknown.slice(0, 3).join('; ')}${unknown.length > 3 ? ` (+${unknown.length - 3} more)` : ''}`,
+        'only `auto` on a Shape author step is read; everything else is ignored');
+    }
+  }
+  // The switch's OLD home. Before E34 it was `kill_switch: true` in the module config `yad update` installs.
+  // Nothing reads that key now, so a team that set it by hand has a kill switch that silently turned OFF —
+  // the one change this row must never make quietly.
+  const legacy = path.join(root, '_bmad', 'sdlc', 'config.yaml');
+  let text = '';
+  try {
+    if (exists(legacy)) text = fs.readFileSync(legacy, 'utf8');
+  } catch { /* an unreadable module config has nothing to say about the switch */ }
+  if (/^\s*kill_switch:\s*true\b/m.test(text) && !(a.kill?.on === true)) {
+    check(checks, 'automation:legacy-kill', 'project', 'fail',
+      '_bmad/sdlc/config.yaml says `kill_switch: true`, and nothing reads that key any more — the kill switch is OFF',
+      'turn it on where it is read: `yad kill --reason "<why>"`. Then set that line back to false, or refresh the file with `yad update --overwrite-local`');
+  }
+}
+
 // The work-item type, mid-rename. Shape 5 writes `type:` beside `kind:` in `epic.md` and copies the
 // value into `state.json`; `kind:` is still the name that is READ. Four things can go wrong while two
 // names are alive, and only one of them is a failure:
@@ -1601,6 +1658,7 @@ export function collectDoctor(root) {
   shapeChecks(checks, root);
   mirrorChecks(checks, root);
   dialChecks(checks, root);
+  automationChecks(checks, root);
   typeChecks(checks, root);
   themeChecks(checks, root);
   catalogueChecks(checks, root);

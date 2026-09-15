@@ -217,6 +217,11 @@ export const PROJECT_FILES = {
   // the normal case and means "every step uses the skill the catalogue names" — like design.json,
   // which is absent on a markdown-only project.
   skillsConfig: '.sdlc/skills.json',
+  // The kill switch and the Shape steps a team has set to `advance: auto` (E34). Absent is the normal
+  // case: the switch is off and every Shape step is `human`. A project file, not the `_bmad/sdlc/config.yaml`
+  // copy the switch lived in before — that one is hash-managed by `yad update`, so flipping it there marked
+  // the file modified and every later update skipped it.
+  automationConfig: '.sdlc/automation.json',
   version: '.sdlc/cli-version.json',
 };
 

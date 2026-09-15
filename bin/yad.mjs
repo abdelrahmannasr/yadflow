@@ -21,6 +21,7 @@ import { runDoctor } from '../cli/doctor.mjs';
 import { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';
 import { runNext } from '../cli/next.mjs';
 import { runSkip, runDefer, runUnblock, runLaneSkip } from '../cli/skip.mjs';
+import { runDial, runKill } from '../cli/dial.mjs';
 import { syncStatuses } from '../cli/artifact-status.mjs';
 import { runThread, runReconcile } from '../cli/thread.mjs';
 import { runReport } from '../cli/report.mjs';
@@ -150,6 +151,18 @@ ${c.bold('Where am I / what next')}
                                        finished, the step re-opens beside that work, which stays done
   yad unblock <epic> <step>            Clear a recorded blocker once the wait is over: moves the
                                        step off blocked and removes its record in one write
+  yad dial <step> [--to auto|human] [--json]
+                                       A Shape author step's advance dial, for the whole project (E34),
+                                       kept in .sdlc/automation.json. No --to shows it. A review gate is
+                                       always human. Recorded only for now: nothing drives a Shape step
+                                       on its own until the engine runs agents
+  yad dial <epic> <story> --repo <name> <step> [--to auto|human] [--json]
+                                       A Build lane step's dial (spec, tasks, implement, checks), in
+                                       build-state; on auto the yad-run skill moves past it after a clean
+                                       run. Shows the step's run record as advice, never as a rule
+  yad kill --reason <text>             Kill switch: hold every step at advance: human. Recorded in
+                                       .sdlc/automation.json — who, when and why
+  yad unkill [--reason <text>]         Turn the kill switch off; each step follows its own dial again
 
 ${c.bold('Review gate (Shape)')}
   yad gate open <epic> <artifact>      Open the review PR/MR; mark the step in_review. The review
@@ -251,7 +264,7 @@ ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--retro-ship', '--merge-commit', '--path']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -431,6 +444,26 @@ async function main() {
       // `unskip` / `undefer` are the verbs E36 / E37 named; `--undo` is the spelling that shipped first and stays.
       const runVerb = verb === 'defer' || verb === 'undefer' ? runDefer : runSkip;
       await runVerb(o.dir, { epic, step, reason: o.reason, debt: o.debt, undo: verb.startsWith('un') || o.undo, today });
+      break;
+    }
+    case 'dial': {
+      // One word names a Shape author step (project-wide). Three name a Build lane step: epic, story, step.
+      const args = o._.slice(1);
+      if (args.length === 1) {
+        await runDial(o.dir, { step: args[0], to: o.to, json: o.json });
+      } else if (args.length === 3) {
+        if (!isValidEpicId(args[0])) { log(c.red(`invalid epic id: ${args[0]} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }
+        await runDial(o.dir, { epic: args[0], story: args[1], step: args[2], repo: o.repo, to: o.to, json: o.json });
+      } else {
+        log(c.red('usage: yad dial <step> [--to auto|human]   |   yad dial <epic> <story> --repo <name> <step> [--to auto|human]'));
+        process.exitCode = 1;
+      }
+      break;
+    }
+    case 'kill':
+    case 'unkill': {
+      if (o._.length > 1) { log(c.red(`unexpected argument(s): ${o._.slice(1).join(' ')}`)); process.exitCode = 1; break; }
+      await runKill(o.dir, { on: o._[0] === 'kill', reason: o.reason, json: o.json, today });
       break;
     }
     case 'unblock': {

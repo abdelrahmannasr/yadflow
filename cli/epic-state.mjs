@@ -3632,4 +3632,142 @@ export function planThreadedSeed(root, { epic, parent, inherits = [], type, toda
   };
 }
 
+// ---- the advance dial, set freely, and the kill switch (E34) ------------------------------------
+//
+// Automation used to be EARNED: the `yad-run` skill refused `advance: auto` until a step's trust log
+// cleared a threshold. E34 deletes that. The dial is the team's to set, `yad dial` shows the run record as
+// advice, and a recorded kill switch holds every step at `human`. What never moves is rule 1: a gate
+// (`isGateStep`) is `human`, whatever any file says.
+//
+// TWO HOMES, because the two parts are written by different hands. A Build lane's dial stays on the
+// lane, in `build-state/<story>.json`, where `yad-run` already reads it. A Shape author step's dial is
+// project-wide, in `.sdlc/automation.json` beside the kill switch: `state.json` belongs to CI on a
+// verified Product, so a dial written there could not be changed by the team it belongs to.
+//
+// A SHAPE `auto` IS RECORDED, NOT ACTED ON — yet. Nothing drives a Shape step on its own until the engine
+// runs agents (E26, Wave 3.5). The same pattern as E7's approver count: the value is real, stored and
+// shown, and the command that prints it says so.
+export const ADVANCE_VALUES = ['human', 'auto'];
+
+const strOrNull = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+// `.sdlc/automation.json` as the readers see it: `{ kill, steps, error }`. An absent file is the
+// defaults — the switch off and every Shape step `human`. A file that is there and wrong carries an
+// `error`, and `killSwitchOn` reads an error as ON: of the two ways to be wrong about a safety switch,
+// holding everything at `human` is the one nobody gets hurt by. `steps` keeps its values as written, so
+// `yad doctor` can name a bad one; the readers honour only `auto`.
+export function normalizeAutomation(raw) {
+  const out = { kill: null, steps: {}, error: null };
+  if (raw == null) return out;
+  if (!isPlainObject(raw)) return { ...out, error: 'is not a JSON object' };
+  if (raw.kill != null) {
+    if (!isPlainObject(raw.kill) || typeof raw.kill.on !== 'boolean') return { ...out, error: 'has a `kill` that is not { on, reason, by, date }' };
+    out.kill = { on: raw.kill.on, reason: strOrNull(raw.kill.reason), by: strOrNull(raw.kill.by), date: strOrNull(raw.kill.date) };
+  }
+  if (raw.steps != null) {
+    if (!isPlainObject(raw.steps)) return { ...out, error: 'has a `steps` that is not an object' };
+    for (const [id, v] of Object.entries(raw.steps)) out.steps[id] = v;
+  }
+  return out;
+}
+
+export function loadAutomation(root) {
+  try {
+    return normalizeAutomation(readJSONStrict(path.join(root, PROJECT_FILES.automationConfig), null));
+  } catch {
+    return { kill: null, steps: {}, error: 'does not parse' };
+  }
+}
+
+// What goes back on disk. Steps sorted, so the bytes depend on what is set, not on the order it was set.
+export const serializeAutomation = (a) => ({
+  ...(a.kill ? { kill: a.kill } : {}),
+  steps: Object.fromEntries(Object.entries(a.steps || {}).sort(([x], [y]) => cmp(x, y))),
+});
+
+export const killSwitchOn = (a) => !!a && (a.error != null || a.kill?.on === true);
+
+// A step's advance as it will actually be applied: `{ advance, set, why }`. `set` is what the team chose;
+// `advance` is what happens. `why` is `gate` (rule 1), `kill` (held by the switch), `project` (a Shape
+// step, from automation.json) or `lane` (a Build step, from its own row).
+export function effectiveAdvance(step, automation = null) {
+  if (!isPlainObject(step)) return { advance: 'human', set: 'human', why: 'unknown' };
+  if (isGateStep(step)) return { advance: 'human', set: 'human', why: 'gate' };
+  const def = stepDef(step.id);
+  const shape = !!def && def.phase !== 'build';
+  const set = shape
+    ? (automation?.steps && Object.hasOwn(automation.steps, step.id) && automation.steps[step.id] === 'auto' ? 'auto' : 'human')
+    : (stepAdvance(step) === 'auto' ? 'auto' : 'human');
+  if (set === 'auto' && killSwitchOn(automation)) return { advance: 'human', set, why: 'kill' };
+  return { advance: set, set, why: shape ? 'project' : 'lane' };
+}
+
+const refusal = (message, hint) => ({ ok: false, message, hint });
+const shapeAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase !== 'build').map((d) => d.id);
+const buildAuthorIds = () => STEPS.filter((d) => d.kind === 'author' && d.phase === 'build').map((d) => d.id);
+
+// Set a Shape author step's dial for the whole project. PURE: takes and returns the automation object.
+export function planShapeDial(automation, { step, to }) {
+  const def = stepDef(step);
+  if (!def) return refusal(`unknown step: ${step}`, `a Shape step's dial is one of ${shapeAuthorIds().join(' · ')}`);
+  if (def.kind === 'review') {
+    return refusal(`${step} is a review gate, and a gate is never auto`,
+      'a person clears every gate (rule 1). Set the dial of the step it reviews instead');
+  }
+  if (def.phase === 'build') {
+    return refusal(`${step} is a Build step — its dial is set per lane`,
+      `yad dial <epic> <story> --repo <name> ${step} --to ${to || 'auto'}`);
+  }
+  if (!ADVANCE_VALUES.includes(to)) return refusal(`--to must be human or auto, not ${to}`);
+  const steps = { ...(automation?.steps || {}) };
+  const before = steps[step] === 'auto' ? 'auto' : 'human';
+  // `human` is the default, so it is written as the key's ABSENCE: the file only ever lists what a team
+  // turned on.
+  if (to === 'auto') steps[step] = 'auto';
+  else delete steps[step];
+  return { ok: true, before, changed: before !== to || (to === 'human' && Object.hasOwn(automation?.steps || {}, step)), automation: { kill: automation?.kill || null, steps } };
+}
+
+// Set one Build step's dial on one lane. PURE: takes the parsed build-state, returns a new one.
+export function planLaneDial(buildState, { story, repo, step, to, declared = [] }) {
+  const def = stepDef(step);
+  if (def && def.phase !== 'build' && def.kind === 'author') {
+    return refusal(`${step} is a Shape step — its dial is set for the whole project`, `yad dial ${step} --to ${to || 'auto'}`);
+  }
+  if (!def || def.phase !== 'build') return refusal(`unknown Build step: ${step}`, `a lane's dial is one of ${buildAuthorIds().join(' · ')}`);
+  if (isGateStep({ id: step })) {
+    return refusal(`${step} is the merge gate, and a gate is never auto`, 'a person clears every gate (rule 1)');
+  }
+  if (!ADVANCE_VALUES.includes(to)) return refusal(`--to must be human or auto, not ${to}`);
+  if (!declared.includes(repo)) {
+    return refusal(`${story} does not declare the repo ${repo}`, `its repos are ${declared.join(' · ') || '(none)'}`);
+  }
+  const lane = isPlainObject(buildState?.repos) ? buildState.repos[repo] : null;
+  if (lane?.status === 'skipped') return refusal(`${story} / ${repo} is skipped — a skipped lane runs nothing`, `yad unskip <epic> ${story} --repo ${repo} first`);
+  const row = Array.isArray(lane?.steps) ? lane.steps.find((x) => isPlainObject(x) && x.id === step) : null;
+  if (!row) {
+    return refusal(`${story} / ${repo} has no ${step} step yet`,
+      'yad-run writes every Build step onto a lane the first time it drives it. Set the dial after that');
+  }
+  const before = stepAdvance(row) === 'auto' ? 'auto' : 'human';
+  // A deep copy: the caller's object is left exactly as it was read.
+  const next = JSON.parse(JSON.stringify(buildState));
+  const target = next.repos[repo].steps.find((x) => isPlainObject(x) && x.id === step);
+  // BOTH names, the old one first in meaning: `automation` is still the one read (shape 4), and a row
+  // carrying only `advance` is what `yad doctor` reports as `dials:new-only`.
+  target.automation = AUTOMATION_FROM_ADVANCE[to];
+  target.advance = to;
+  return { ok: true, before, changed: row.automation !== target.automation || row.advance !== target.advance, buildState: next };
+}
+
+// Turn the kill switch on or off. PURE. Turning it ON needs a reason (rule 7 — the escape hatch is
+// recorded); turning it off records who and when, and the reason when one is given.
+export function planKill(automation, { on, reason = null, by = null, date = null }) {
+  const why = strOrNull(reason);
+  if (on && !why) return refusal('the kill switch needs a reason', 'yad kill --reason "<why>" — the record is what tells the team when it is safe to turn it off');
+  const already = (automation?.kill?.on === true) === on;
+  if (already) return { ok: true, already: true, automation };
+  return { ok: true, already: false, automation: { steps: { ...(automation?.steps || {}) }, kill: { on, reason: why, by: by || null, date: date || null } } };
+}
+
 export { writeJSON };
