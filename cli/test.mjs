@@ -520,6 +520,30 @@ test('moduleActions: an uninstalled skill and the module config are "new"; nothi
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// The config is the team's to edit (E3): an update keeps an edited copy, and only --overwrite-local
+// replaces it, after a backup. A plain file copy would put the shipped file back on every update.
+test('the module config keeps a team edit through yad update; --overwrite-local backs it up first (E3)', async () => {
+  const { BACKUP_SUFFIX } = await import('./manifest.mjs');
+  const { T } = scaffold();
+  try {
+    await reconcile(T, { fix: true });
+    const cfg = path.join(T, '.sdlc/config.yaml');
+    const shipped = fs.readFileSync(cfg, 'utf8');
+    assert.ok(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8')).files['.sdlc/config.yaml'], 'its hash is recorded');
+    fs.writeFileSync(cfg, shipped.replace('communication_language: English', 'communication_language: Arabic'));
+
+    const report = await reconcile(T, { fix: false });
+    assert.equal(report.counts.modified, 1, 'the edited copy reads modified');
+    await reconcile(T, { fix: true, scope: 'changed' });
+    assert.match(fs.readFileSync(cfg, 'utf8'), /communication_language: Arabic/, 'an update keeps the edit');
+    assert.ok(!fs.existsSync(cfg + BACKUP_SUFFIX), 'and makes no backup, since it wrote nothing');
+
+    await reconcile(T, { fix: true, overwriteLocal: true });
+    assert.equal(fs.readFileSync(cfg, 'utf8'), shipped, '--overwrite-local restores the shipped file');
+    assert.match(fs.readFileSync(cfg + BACKUP_SUFFIX, 'utf8'), /communication_language: Arabic/, 'after saving the edit beside it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('ideTargetStateFor: normalizes order/deduplication and safely falls back from malformed state', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ide-state-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });

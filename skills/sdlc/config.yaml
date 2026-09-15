@@ -1,7 +1,8 @@
 # yadflow configuration
 # The source is skills/sdlc/config.yaml in the yadflow package. `yad setup` and `yad update` copy it into
-# each project as .sdlc/config.yaml, and the skills read that copy. `yad update` tracks the copy by its
-# hash, so a local edit stops later updates from refreshing it.
+# each project as .sdlc/config.yaml, and the skills read that copy. You may edit the copy: `yad update`
+# records the hash it wrote in .sdlc/managed.json, reports an edited copy as `modified` and keeps it.
+# `yad update --overwrite-local` replaces an edited copy, after saving it beside the file as .yad-orig.
 
 # Where epic "thinking" artifacts and per-epic state live (the product repo).
 product_root: "{project-root}"

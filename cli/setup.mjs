@@ -357,7 +357,7 @@ function applyActions(actions, { force = false } = {}) {
     if (a.status === 'ok' && !force) continue;
     a.apply();
     changed++;
-    info(`${a.status === 'missing' ? 'installed' : 'updated'} ${a.scope}/${a.item}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
+    info(`${a.status === 'missing' || a.status === 'new' ? 'installed' : 'updated'} ${a.scope}/${a.item}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
   }
   if (!changed) info('already up to date');
   return changed;

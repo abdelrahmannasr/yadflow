@@ -265,8 +265,9 @@ export function ideTargetsFor(root) {
 // so it rides `yad update` (--scope=changed) — like 'legacy'/'removed', the `changed` filter only
 // excludes literal 'missing', so 'new' survives. Used for the module — the skills and the config they
 // read — and for the hook wiring (see `hookActions`): repo/Product wiring stays 'missing' (excluded from
-// update), so `update` never does one-time setup. The config rides too because E3 moved it. Every existing install is missing `.sdlc/config.yaml`,
-// and an update that brought the skills pointing at it without the file would leave them reading nothing.
+// update), so `update` never does one-time setup. The config rides too because E3 moved it. Every
+// existing install is missing `.sdlc/config.yaml`, and an update that brought the skills pointing at it
+// without the file would leave them reading nothing.
 const asNew = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a);
 
 // Module = skills installed into each IDE target + the module config in `.sdlc/`.
@@ -295,11 +296,14 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
       }
     }
   }
-  actions.push(asNew(fileAction(
+  // A wired file, like the Product wiring, because the team may edit it — a language, a code repos root.
+  // An edited copy reads `modified` and is kept; only `--overwrite-local` replaces it, after a backup. A
+  // plain fileAction would copy the shipped file over that edit on every update, with no backup.
+  actions.push(asNew(wiredFileAction(
     '.sdlc', 'config.yaml',
     asset('skills', 'sdlc', 'config.yaml'),
     path.join(root, MODULE_CONFIG),
-    { root },
+    { root, ledger: readManagedLedger(root) },
   )));
   return actions;
 }
