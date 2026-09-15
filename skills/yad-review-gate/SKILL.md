@@ -128,8 +128,7 @@ counterpart to `approvals.json`):
 
 Then help the **owner address the comments** using the agent lens listed for this step
 (analysis → `analyst`; epic → `pm`; architecture → `architect`; ui-design → `ux-designer`;
-stories → `pm`, with `architect` for technical detail — there is **no `sm` agent**, Phase 0
-Deviation 1; test-cases → `test architect` / Murat, `bmad-tea`). Update the authored artifact in place.
+stories → `pm`, with `architect` for technical detail; test-cases → `test architect`). Update the authored artifact in place.
 Repeat comment→address rounds until reviewers are satisfied. **Commenting never advances the gate.**
 
 **`approve`** — Record an approval. Append to `.sdlc/approvals.json`:

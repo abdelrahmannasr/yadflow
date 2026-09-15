@@ -53,7 +53,7 @@ check is not applicable, so proceed and seed state.
 
 ### Step 2 — Shape the idea (assist: analyst) — or read the analysis
 - **Analysis skipped:** ask the user for a one-line feature idea if not provided, then adopt the
-  **analyst** lens (`bmad-agent-analyst`, Mary) to pressure-test it: who is the user, what problem, what
+  **analyst** lens to pressure-test it: who is the user, what problem, what
   signals success, what is out of scope. Keep it brief — this is shaping, not a PRD.
 - **Analysis ran:** read `{project-root}/epics/EP-<slug>/analysis.md` (the analyst's discovery brief)
   and carry its Recommendation / Scope framing forward — do not re-shape from scratch.
@@ -110,7 +110,7 @@ is not a git work tree), check out the branch if it exists, else create it from 
 branch. Author and commit `epic.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
 
 ### Step 4 — Write the epic (assist: pm)
-Adopt the **pm** lens (`bmad-agent-pm`, John) and write `{project-root}/epics/EP-<slug>/epic.md`
+Adopt the **pm** lens and write `{project-root}/epics/EP-<slug>/epic.md`
 using EXACTLY this template (build plan §6b).
 
 **Four of these keys are read by machines, so write them BARE — no trailing `#` comment.** The

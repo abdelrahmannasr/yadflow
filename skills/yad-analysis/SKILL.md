@@ -41,7 +41,7 @@ chain from the CLI. So the question is whether `.sdlc/state.json` exists, not wh
 else does it.
 
 ### Step 2 — Shape the idea (assist: analyst)
-Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) to pressure-test the idea in depth: who is the
+Adopt the **analyst** lens to pressure-test the idea in depth: who is the
 user, what problem, what already exists, what options are on the table, what signals success, what is
 out of scope, and what the recommendation to the epic is. This is the discovery the epic will build on.
 

@@ -63,7 +63,7 @@ is always present.)
   `references/code-context.md`).
 
 ### Step 3 — Author the architecture (assist: architect)
-Adopt the **architect** lens (`bmad-agent-architect`, Winston) and write
+Adopt the **architect** lens and write
 `{project-root}/epics/EP-<slug>/architecture.md` using EXACTLY this template:
 
 ```markdown

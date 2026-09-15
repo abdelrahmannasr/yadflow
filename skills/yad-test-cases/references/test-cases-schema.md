@@ -56,7 +56,7 @@ Written by `yad-test-cases` Step 4b. Absent when the step ran artifacts-only (`t
 - **Cover every story.** The "Coverage & traceability" section must map each story's acceptance criteria
   to at least one case — an unmapped criterion is a gap the reviewer should catch.
 - **Priorities are risk-based.** P0 = critical (run on every commit) … P3 = low (on-demand); depth
-  scales with impact (Murat's principle).
+  scales with impact.
 - **Prefer the lowest useful level.** unit > integration > E2E when a case can be verified lower.
 - **`repos` is a subset of `epic.repos`.** Automation cannot target a repo the epic does not declare.
 - **Single-file, not a folder.** `test-cases.md` resolves through the gate's default content-hash path

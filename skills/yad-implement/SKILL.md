@@ -14,7 +14,7 @@ This step **never auto-advances**. When the task is implemented and committed, c
 **check gates** (Step C — `yad-checks`: spec-link, contract-check, build/test/lint) and then human/AI
 review (Steps D–E, not built yet). Implementation here produces a branch + commit and stops.
 
-The implementing lens is **`dev`** (`bmad-agent-dev`, Amelia). The dev writes only what the task
+The implementing lens is **`dev`**. The dev writes only what the task
 declares; it does not redesign, does not widen the contract, and does not pick up sibling tasks.
 
 ## Conventions

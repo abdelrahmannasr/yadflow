@@ -122,7 +122,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   story under `stories/`. Reads epic + architecture + contract + UI.
 - **`yad-test-cases`** — Shape step 9, a **parallel, non-blocking** track: it opens when the stories
   gate passes (the epic is already `ready-for-build`, so Build runs alongside it). With the
-  test architect (Murat), author `test-cases.md` covering the approved stories (risk-based P0–P3 cases +
+  test architect, author `test-cases.md` covering the approved stories (risk-based P0–P3 cases +
   story→case traceability). When a testing tool is connected (`yad-connect-testing`), also **implements
   the automation tests** in the connected code repo(s) (generate or link), recording the case→test map in
   `test-links.json`; degrades to artifacts-only otherwise. Reads epic + architecture + contract + UI +

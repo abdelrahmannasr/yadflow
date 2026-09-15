@@ -49,11 +49,10 @@ Detect the project mode from `{project-root}/.sdlc/hub.json` `profile.codebase`
 (`greenfield` | `brownfield`, set by `yad setup`). If absent, ask the user; default `greenfield`.
 
 ### Step 2 — Shape with the field-expert lenses (assist: analyst + pm)
-Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) and the **pm** lens (`bmad-agent-pm`) to frame
-the product as a domain expert would. Drive the existing research skills as the assist:
-- `bmad-market-research` — market size, segments, demand, trends, positioning.
-- `bmad-domain-research` — the problem domain, regulations, and constraints of the field.
-- `bmad-product-brief` — personas, value proposition, success metrics.
+Adopt the **analyst** lens and the **pm** lens to frame the product as a domain expert would. Research:
+- **Market** — market size, segments, demand, trends, positioning.
+- **Domain** — the problem domain, regulations, and constraints of the field.
+- **Product brief** — the users it serves, the value proposition, success metrics.
 
 Pressure-test: who is this for and why does it exist, what does success look like, who else does this
 and why us, **what it is and explicitly what it is not**, what the smallest valuable slice is, what
