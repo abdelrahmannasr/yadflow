@@ -931,8 +931,7 @@ export function stampStepDials(state) {
       moved = true;
     }
     if (typeof s.automation === 'string' && !('advance' in s) && Object.hasOwn(ADVANCE_FROM_AUTOMATION, s.automation)) {
-      const isReview = s.type === 'review+approve' || s.locked === true;
-      out.advance = isReview ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
+      out.advance = isGateStep(s) ? 'human' : ADVANCE_FROM_AUTOMATION[s.automation];
       moved = true;
     }
     return out;
@@ -1269,6 +1268,29 @@ export function authorStepFor(state, reviewStep) {
   if (baseDef && (baseDef.phase === 'build' || baseDef.kind !== 'author')) return null;
   return state?.steps?.find((s) => s.id === base) || null;
 }
+
+// Is this step a GATE — one a human signs off, which may never advance on its own (rule 1)? (E34)
+//
+// Three answers, in order. `type: review+approve` is how the Shape chain marks one. For a step the
+// catalogue knows, its `kind` decides — that is how a Build `engineer-review`, which carries no `type`, is
+// recognised. And `locked: true` counts ONLY on an id the catalogue does not know, a step from a newer
+// yadflow, where it is the one signal left.
+//
+// `locked` alone used to decide it, and that was wrong for Shape: every seeded Shape step carries
+// `locked: true`, author steps included, so every Shape author step was pinned to `advance: human`. Since
+// E34 an author step's advance dial is the team's to set; `locked` on a step the catalogue knows to be
+// an author step decides nothing. No file changes — only what the readers conclude from it.
+//
+// `type` is checked before the catalogue on purpose: a step that SAYS it is a review is treated as one
+// even if its id names an author step. Of the two ways to be wrong, a gate read as an author step is the
+// one that breaks rule 1.
+export const isGateStep = (step) => {
+  if (!isPlainObject(step)) return false;
+  if (step.type === 'review+approve') return true;
+  const def = stepDef(step.id);
+  if (def) return def.kind === 'review';
+  return step.locked === true;
+};
 
 // Closing a review gate implies its artifact was authored — so the CLI, not the authoring skill, is
 // what makes `<step>.status = done` true. Without this an author step left at `in_progress` strands

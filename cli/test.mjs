@@ -13039,6 +13039,37 @@ test('doctor dials: a LOCKED build step claiming machine_advance is caught too',
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('doctor dials: a Shape AUTHOR step on auto is not a gate, whatever `locked` says (E34)', () => {
+  // Every seeded Shape step carries `locked: true`, author steps included. Reading `locked` as "a review"
+  // would fail the one dial E34 lets a team set; the two gates beside it must still fail.
+  const checks = [];
+  const T = dialProject([
+    { id: 'architecture', type: 'author', locked: true, automation: 'machine_advance', advance: 'auto' },
+    { id: 'architecture-review', type: 'review+approve', locked: true, automation: 'human_approve', advance: 'human' },
+  ], { story: 'EP-x-S01', repos: { backend: { steps: [
+    { id: 'a-step-from-a-newer-yadflow', locked: true, automation: 'machine_advance', advance: 'auto' },
+  ] } } });
+  try {
+    dialChecks(checks, T);
+    const d = checks.find((c) => c.id === 'dials:review-auto');
+    assert.ok(d, 'a locked id the catalogue does not know is still read as a gate');
+    assert.doesNotMatch(d.message, /`architecture`/, 'the author step is not named');
+    assert.match(d.message, /a-step-from-a-newer-yadflow/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('isGateStep: type, then the catalogue, then `locked` only for an id nobody knows (E34)', async () => {
+  const { isGateStep } = await import('./epic-state.mjs');
+  assert.equal(isGateStep({ id: 'epic-review', type: 'review+approve' }), true);
+  assert.equal(isGateStep({ id: 'engineer-review' }), true, 'known review with no type or lock');
+  assert.equal(isGateStep({ id: 'architecture', type: 'author', locked: true }), false, 'a locked author step');
+  assert.equal(isGateStep({ id: 'checks', locked: true }), false, 'a known Build author step, however it is marked');
+  assert.equal(isGateStep({ id: 'architecture', type: 'review+approve' }), true, 'a step that SAYS it is a review is one');
+  assert.equal(isGateStep({ id: 'from-the-future', locked: true }), true);
+  assert.equal(isGateStep({ id: 'from-the-future' }), false);
+  for (const junk of [null, undefined, 42, ['x']]) assert.equal(isGateStep(junk), false);
+});
+
 test('doctor dials: a project that agrees, or carries only the old names, says nothing', () => {
   const checks = [];
   const T = dialProject([
