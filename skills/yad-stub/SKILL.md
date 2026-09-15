@@ -25,7 +25,7 @@ Product epic a defect must thread from. `yad-stub` does exactly that, and only t
 - The stub is a **genesis** (type `feature` under both names, `thread == id`, no `parent`) — the root of a new thread.
   Lineage frontmatter, the sentinel state, and the `stub`/`verified` fields are defined in
   `../yad-epic/references/state-schema.md` (Phase 6 section).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

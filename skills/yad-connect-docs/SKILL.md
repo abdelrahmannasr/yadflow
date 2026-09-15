@@ -29,7 +29,7 @@ at a local `dist/` — build-only, no publish, exactly as before.
   NOT per-epic), the sibling of `.sdlc/hub.json`, `.sdlc/repos.json`, and `.sdlc/design.json`.
 - Per-epic / overview build manifests (`docs-build.json`) are written later by `yad-docs` /
   `yad-docs-overview`, not here. This skill describes the *connection*; it does not build.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

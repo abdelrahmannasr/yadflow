@@ -21,7 +21,7 @@ engine (never typed by hand); Shape steps are locked to `advance: human`.
 
 - `{project-root}` resolves from the project working directory.
 - Analysis artifacts live under `{project-root}/epics/EP-<slug>/` (build plan §6).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 

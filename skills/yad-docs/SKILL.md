@@ -30,7 +30,7 @@ the site is built + deployed; when none is, it is npm-built to a local `dist/` (
 - The actual data-file **generation** (reading artifacts → writing `src/data/*.ts`, theming
   `index.css`) is the **AI step** inside this skill; the `yad docs` CLI only does the npm build +
   platform deploy + staleness hashing.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

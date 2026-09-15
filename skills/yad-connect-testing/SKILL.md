@@ -29,7 +29,7 @@ connected, `yad-test-cases` runs artifacts-only exactly as before.
   the sibling of `.sdlc/repos.json`, `.sdlc/hub.json`, and `.sdlc/design.json`.
 - Per-epic test→suite links are written later by `yad-test-cases`
   (`epics/EP-<slug>/.sdlc/test-links.json`), not here.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

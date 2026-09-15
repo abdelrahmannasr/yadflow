@@ -30,7 +30,7 @@ declares; it does not redesign, does not widen the contract, and does not pick u
   `Co-Authored-By:` for any AI tool that helped author the diff (the human author owns the commit;
   trailer order `Task:` → `Contract-Change:` → `Co-Authored-By:`). The skill installs a `.gitmessage`
   template that scaffolds these (Step 2).
-- Speak in the configured `communication_language`; write code/comments in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write code/comments in `document_output_language`.
 
 ## Inputs
 

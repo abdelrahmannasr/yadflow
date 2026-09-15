@@ -28,7 +28,7 @@ new behaviour must enter here, and its re-authored stories/test-cases describe t
   `reconcile-debt.json` are all defined in `../yad-epic/references/state-schema.md` (Phase 6 section).
 - Genesis epics authored before Phase 6 must be **migrated once** (`kind: feature` + `type: feature`, `thread: <self>` in
   their `epic.md`) before a change threads off them — see `references/triage.md`.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

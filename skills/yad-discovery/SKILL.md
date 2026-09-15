@@ -30,7 +30,7 @@ reserved `EP-discovery` epic; that older spelling is still read (see Step 1).
 - The Foundation lives in `{project-root}/foundation/`: its sections directly inside it, its ledger in
   `foundation/.sdlc/`, and its review summaries in `foundation/reviews/`. Its fixed id is
   `EP-foundation` — every `yad` command takes that id.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 

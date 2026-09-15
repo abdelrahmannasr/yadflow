@@ -30,7 +30,7 @@ the Markdown artifact only — the testing tool is additive, exactly like the de
 - The connected testing tool is recorded in `{project-root}/.sdlc/testing.json` (`config.yaml`
   `testing`), written by `yad-connect-testing`. The per-epic case→test map is `test-links.json`
   (Step 4b).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 

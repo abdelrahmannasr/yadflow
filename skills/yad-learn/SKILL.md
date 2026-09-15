@@ -47,7 +47,7 @@ approvals ledger, or the contract lock. It writes only the local learning ledger
   Never write learning output into a connected **code repo** — it lives only in the Product, and only
   on the local machine. `.sdlc/learning.json` (the connection registry) is the sole committed learning
   file and is NOT ignored.
-- Speak in the configured `communication_language`; write tutorials in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write tutorials in `document_output_language`.
 
 ## Inputs
 

@@ -18,7 +18,7 @@ shared cross-repo surface at charter altitude; Shape steps stay locked to `advan
 
 - `{project-root}` resolves from the project working directory.
 - Artifacts live under `{project-root}/epics/EP-<slug>/` (build plan §6).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 

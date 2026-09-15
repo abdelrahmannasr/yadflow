@@ -33,7 +33,7 @@ platform.**
 - The session-record comment shape, the dual sign-off, and the learning record this writes live in
   `references/session-state.md` (it reuses [`yad-learn`](../yad-learn/SKILL.md)'s ledger + gitignore
   discipline **verbatim** — the learning output is **local-only, never committed or pushed**).
-- Speak in the configured `communication_language`; write any rendered tutorial in
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write any rendered tutorial in
   `document_output_language`.
 
 ## Inputs

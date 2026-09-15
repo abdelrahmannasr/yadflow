@@ -28,7 +28,7 @@ like Impeccable.
 - `DESIGN.md` is Impeccable's conventional root design-system file (RESEARCH-NOTES §4).
 - The connected design tool is recorded in `{project-root}/.sdlc/design.json` (`config.yaml` `design`),
   written by `yad-connect-design`. The per-epic screen→frame map is `design-links.json` (Step 4b).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 

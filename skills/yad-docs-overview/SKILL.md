@@ -29,7 +29,7 @@ It only reads the pipeline definition and writes a project-level site. When a do
   re-copied**. Generated data satisfies `src/data/types.ts`.
 - Theme: **yadflow's own brand palette** (the `:root` of the legacy report, now `docs/sdlc-site/public/report.html`) — for visual continuity with
   the existing overview, not an epic's design tokens.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 
