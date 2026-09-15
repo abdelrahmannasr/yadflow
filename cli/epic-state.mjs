@@ -1297,14 +1297,58 @@ export const isGateStep = (step) => {
 // forever: `preconditionsMet` requires every PRIOR step done, so the parallel `test-cases` track (and
 // every later step) stays blocked behind a review that already passed. Idempotent; a no-op on an
 // absent step and on a `skipped` one (already `done`, carrying its skip provenance).
-// Returns the id it closed, or null.
-function closeAuthorStep(state, reviewStep) {
+// Returns the id it closed, or null. `closed` (E18) is the closing record to stamp on the step it closes.
+function closeAuthorStep(state, reviewStep, closed = null) {
   const author = authorStepFor(state, reviewStep);
   // `isPassed`, not `status === 'done'`: a skipped or inherited author step is already finished, and
   // stamping `done` over it would erase the reason it never needed authoring.
   if (!author || isPassed(author)) return null;
   author.status = 'done';
+  stampClosed(author, closed);
   return author.id;
+}
+
+// ---- closing records (E18) -----------------------------------------------------------------------
+//
+// A step that becomes `done` says how it closed. Before this, `done` was the one state that recorded
+// nothing: `skipped`, `deferred`, `satisfied` and `blocked` all carry a `record`, while a passed review
+// said only `status: "done"`, and who closed it, when and on which PR had to be pieced together from
+// approvals.json and the PR ledger.
+//
+// It is `closed`, NOT `record`. `record` means why a step is not done, and `blocked` is read by whether
+// it has one, so a second meaning under that key would blur both. The fields:
+//
+//   by        who WROTE the record, as on every record: the local git identity, or CI's on a verified
+//             Product. Never the merger — that is `mergedBy`.
+//   date      when the step closed: the merge date for a merge, otherwise the day the command ran.
+//   via       how it closed — CLOSED_VIA below.
+//   pr        the review PR/MR number, when there is one.
+//   commit    the merge commit, when the platform reports it.
+//   hash      the artifact hash the step closed on (the one approvals bind to).
+//   mergedBy  the platform login that merged the PR, when the platform reports it.
+//   run       the trust-log run id, for a Build lane step the `yad-run` skill moved past.
+//
+// FIRST CLOSE WINS: a step that already carries one keeps it. Nothing moves a `done` step back today,
+// so nothing has to remove one; a writer that ever does must take `closed` with it, as `record` goes
+// with `blocked`. No shape change: an older release ignores a key it does not know, and nothing reads
+// `done` differently because this is present. Steps finished before it carry none, and nothing asks.
+// `approved` is the one no engine command writes: the `yad-review-gate` skill passes a gate by hand on a
+// Product with no platform, where `advanceState` has no caller and nothing merges.
+export const CLOSED_VIA = ['merge', 'approved', 'review-passed', 'review-opened', 'repair', 'auto', 'human'];
+
+export const closingRecord = ({ by = null, date = null, via, pr = null, commit = null, hash = null, mergedBy = null, run = null } = {}) => ({
+  by: by || null,
+  date: date || null,
+  via,
+  ...(pr != null ? { pr } : {}),
+  ...(commit ? { commit } : {}),
+  ...(hash ? { hash } : {}),
+  ...(mergedBy ? { mergedBy } : {}),
+  ...(run ? { run } : {}),
+});
+
+function stampClosed(step, closed) {
+  if (isPlainObject(step) && isPlainObject(closed) && !isPlainObject(step.closed)) step.closed = closed;
 }
 
 const uniqueBy = (arr, key) => {
@@ -1472,7 +1516,10 @@ export function gatePredicate({
 // approving `stories-review` makes the epic `ready-for-build` (Build keys off this) AND opens
 // `test-cases` for the tester; completing `test-cases-review` never pulls `currentStep` back from
 // `ready-for-build`. Both rules degrade safely for an old chain that has no test-cases steps.
-export function advanceState(state, step) {
+// `close` (E18) is what the caller knows about the merge — `{ by, date, pr, commit, hash, mergedBy }`. With
+// it, the review step is stamped `closed` via `merge`, and an author step closed here via `review-passed`.
+// Without it nothing is stamped, so a caller that knows nothing invents nothing.
+export function advanceState(state, step, close = null) {
   const i = state.steps.findIndex((s) => s.id === step.id);
   // A step that was BLOCKED and has now passed is no longer waiting on anybody, so the record goes
   // with the state it belonged to — otherwise the step reads `done` while still naming who we wait
@@ -1481,10 +1528,12 @@ export function advanceState(state, step) {
   const closing = { ...state.steps[i], status: 'done' };
   if (stepStatus(state.steps[i]) === 'blocked') delete closing.record;
   state.steps[i] = closing;
+  if (close) stampClosed(closing, closingRecord({ ...close, via: 'merge' }));
   // Defensive: `markInReview` normally closed the author step when the gate opened, but the CI bridge
   // advances on a merge event without ever running it locally. Close it here too, so a passed gate can
-  // never leave its author step behind (issue #131).
-  closeAuthorStep(state, step);
+  // never leave its author step behind (issue #131). The merge closed it, but nothing here knows who
+  // wrote it, so its record carries the PR and the hash and no `mergedBy` or `commit`.
+  closeAuthorStep(state, step, close ? closingRecord({ by: close.by, date: close.date, pr: close.pr, hash: close.hash, via: 'review-passed' }) : null);
   // DEBT IS PAID when the review passes (E41) — not when the step is put back, which only starts paying
   // it. `closeAuthorStep` above has already closed the author step, so the pair is paid together.
   delete state.steps[i].debt;
@@ -1941,7 +1990,8 @@ export function unblockStep(state, stepId) {
 // Mark a step in-review (idempotent) and point currentStep at it — EXCEPT once the epic is
 // `ready-for-build`: the parallel `test-cases` track must not pull currentStep back (Build
 // runs alongside the tester, and only the test-cases review is in flight at that point).
-export function markInReview(state, step) {
+// `close` (E18): `{ by, date, pr?, hash? }` for the author step this closes, stamped via `review-opened`.
+export function markInReview(state, step, close = null) {
   const i = state.steps.findIndex((s) => s.id === step.id);
   // A BLOCKED step is not opened by a review (E38). The blocker is not this workflow's to clear, so
   // writing `in_review` over `blocked` would drop the record naming who we are waiting on while
@@ -1953,7 +2003,8 @@ export function markInReview(state, step) {
   if (st && st !== 'blocked' && !isPassed(state.steps[i])) state.steps[i].status = 'in_review';
   // Opening a review gate means the artifact was authored — close the paired author step rather than
   // trusting the authoring skill to have hand-edited state.json (issue #131).
-  closeAuthorStep(state, step);
+  // A BLOCKED review is not opened (above), so its author step is closed but not labelled `review-opened`.
+  closeAuthorStep(state, step, close && st !== 'blocked' ? closingRecord({ ...close, via: 'review-opened' }) : null);
   // `currentStep` only moves FORWARD. Opening the review of a step re-opened behind finished work (E41)
   // must not point the chain back at it, just as the parallel `test-cases` track must not.
   const cur = state.steps.findIndex((s) => s?.id === state.currentStep);
@@ -2974,11 +3025,16 @@ export function stateInvariants(state) {
 
 // Apply the repair `stateInvariants` describes: close every author step stranded behind a done review
 // gate. Mutates `state` and returns the ids it closed (empty when already consistent — idempotent).
-export function repairState(state) {
+// `close` (E18): `{ by, date }`. A repair is an escape hatch, so the step it closes says so (rule 7).
+export function repairState(state, close = null) {
   const closed = [];
   for (const v of stateInvariants(state)) {
     const author = state.steps.find((s) => s.id === v.authorStep);
-    if (author && !isPassed(author)) { author.status = 'done'; closed.push(author.id); }
+    if (author && !isPassed(author)) {
+      author.status = 'done';
+      if (close) stampClosed(author, closingRecord({ ...close, via: 'repair' }));
+      closed.push(author.id);
+    }
   }
   return closed;
 }

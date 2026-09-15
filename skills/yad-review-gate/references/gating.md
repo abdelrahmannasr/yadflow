@@ -102,7 +102,8 @@ drifted from its lock — run it rather than recomputing by hand.
    `|owners|=1, |reviewers|=1` → **base pass**.
 5. `action: advance` → `epic-review.status=done`, `architecture.status=in_progress`,
    `currentStep=architecture`. Gate reports the advance. The paired authoring step (`epic`) is closed
-   too, if it was not already — a gate cannot have passed on an unauthored artifact. `doctor` reports
+   too, if it was not already — a gate cannot have passed on an unauthored artifact. Each step it closes
+   gets a `closed` record: `via: "approved"` on the review step, `via: "review-passed"` on the author step (E18). `doctor` reports
    any surviving violation as `YAD-STATE-005`; `yad gate repair <epic>` heals it.
 
 ## Participation record (comments.json)

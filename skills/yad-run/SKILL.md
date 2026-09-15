@@ -103,10 +103,15 @@ Walk the steps for `repo` starting at `from`/`currentStep`. For each step:
      must resolve. The record is not decoration: since shape 7 a `blocked` step with nothing recorded
      on it reads as `todo` ("not started"), so a halt written without one is indistinguishable from a
      lane nobody has begun. `yad doctor` reports the difference as `step:no-record`.
-   - else if effective dial is **`advance: auto`** → set the step `done`, advance `currentStep` to
-     the next step, and **continue the loop** (this is the Step B auto-advance for `checks`).
-   - else (**`advance: human`**) → set the step `done`/`in_review`, **stop** and report
-     "waiting for a human at `<next-step>`".
+   - else if effective dial is **`advance: auto`** → set the step `done` **with a `closed`** —
+     `{ "by": "<login or null>", "date": "<YYYY-MM-DD>", "via": "auto", "run": "<the trust-log uid>" }` —
+     advance `currentStep` to the next step, and **continue the loop** (this is the Step B auto-advance
+     for `checks`).
+   - else (**`advance: human`**) → set the step `done`/`in_review`, and give a `done` step a `closed` —
+     `{ "by": "<login or null>", "date": "<YYYY-MM-DD>", "via": "human", "run": "<the trust-log uid>" }` —
+     then **stop** and report "waiting for a human at `<next-step>`".
+   - `closed` is the step's **closing record** (E18): how the lane moved past it, and which run did it.
+     Never write one over a `closed` already on the step. See `references/run-loop.md`.
 5. **Always stop at `engineer-review`** (it is `locked`): hand off to `yad-engineer-review` for the human merge
    gate, which finalizes the trust verdict (confirm/override the provisional one).
 
