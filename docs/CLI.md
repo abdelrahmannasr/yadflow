@@ -160,7 +160,7 @@ does / why / what to enter / what skipping means), and the step count adapts.
    CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
 1. **Preflight** — confirm the Product is a git repo (offers `git init`); check `git`/`node`/`npx`.
 2. **Install the module** — copy the `yad-*` skills into the IDE skill dirs you pick
-   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
+   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and copy the module config to `.sdlc/config.yaml`.
 3. **Product platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
 4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).

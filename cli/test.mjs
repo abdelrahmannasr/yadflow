@@ -61,7 +61,7 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
 
   for (const f of [
     '.claude/skills/yad-epic/SKILL.md',
-    '_bmad/sdlc/config.yaml',
+    '.sdlc/config.yaml',
     'demo/backend/.github/workflows/yad-checks.yml',
     'demo/backend/checks/spec-link.sh',
     'demo/backend/checks/package-manager.sh',
@@ -69,6 +69,7 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
     'demo/backend/.github/pull_request_template.md',
     '.sdlc/cli-version.json',
   ]) assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
+  assert.ok(!fs.existsSync(path.join(T, '_bmad')), 'nothing is installed under _bmad/ (E3)');
 
   assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/spec-link.sh')).mode & 0o100, 'gate script executable');
   assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/install-deps.sh')).mode & 0o100, 'dependency installer executable');
@@ -502,17 +503,20 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
-// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+Product
-// wiring stay `missing` and remain excluded from update (no one-time setup on update).
+// A brand-NEW first-party install rides `yad update`: moduleActions labels a not-yet-installed skill — and
+// the module config, which E3 moved to `.sdlc/config.yaml` — `new` (not `missing`) so the scope=changed
+// filter keeps it, while repo+Product wiring stays `missing` and remains excluded from update (no one-time
+// setup on update). Nothing is planned under `_bmad/` any more.
 const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
-test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
+test('moduleActions: an uninstalled skill and the module config are "new"; nothing goes to _bmad (E3)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
   const acts = moduleActions(T, ['.claude']);
   const skills = acts.filter((a) => a.scope === '.claude');
-  const bmad = acts.filter((a) => a.scope === '_bmad');
   assert.ok(skills.length && skills.every((a) => a.status === 'new'), 'every uninstalled skill is "new"');
-  assert.ok(bmad.length && bmad.every((a) => a.status === 'missing'), '_bmad files stay "missing"');
+  assert.deepEqual(acts.filter((a) => a.scope === '.sdlc').map((a) => [a.item, a.status, a.paths]),
+    [['config.yaml', 'new', ['.sdlc/config.yaml']]], 'the config is one action, in .sdlc/, and rides update');
+  assert.ok(!acts.some((a) => a.paths.some((p) => p.startsWith('_bmad'))), 'nothing is installed under _bmad/');
+  assert.ok(!acts.some((a) => a.item === 'module-help.csv'), 'module-help.csv is not installed');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

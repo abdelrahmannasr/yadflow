@@ -1,10 +1,7 @@
-# SDLC Workflow Module Configuration
-# Hand-authored custom BMAD module (format mirrors _bmad/<module>/config.yaml, v6.8.0).
-# Source of truth lives in {project-root}/skills/ and survives BMAD updates.
-
-module_name: sdlc
-module_title: "SDLC Workflow"
-methodology: gated-team-multirepo-sdlc
+# yadflow configuration
+# The source is skills/sdlc/config.yaml in the yadflow package. `yad setup` and `yad update` copy it into
+# each project as .sdlc/config.yaml, and the skills read that copy. `yad update` tracks the copy by its
+# hash, so a local edit stops later updates from refreshing it.
 
 # Where epic "thinking" artifacts and per-epic state live (the product repo).
 product_root: "{project-root}"
@@ -35,11 +32,9 @@ discovery:
   modes: [greenfield, brownfield]                       # current-state is code-aware in brownfield; competitor study in both
   artifacts: [market-research.md, competitor-analysis.md, current-state.md, feasibility.md, requirements.md, roadmap.md]
 
-# Core configuration values (inherited convention from _bmad/config.toml).
-project_name: yadflow
+# The language the skills speak in, and the language they write documents in.
 communication_language: English
 document_output_language: English
-output_folder: "{project-root}/_bmad-output"
 
 # Default dials applied to every new step (build plan §2).
 # The lifecycle, top down: three PARTS, six PHASES inside them, and the steps inside those.
