@@ -29,7 +29,7 @@ markdown-only exactly as before.
   the sibling of `.sdlc/repos.json` and `.sdlc/hub.json`.
 - Per-epic screen→frame links are written later by `yad-ui` (`epics/EP-<slug>/.sdlc/design-links.json`),
   not here.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

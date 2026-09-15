@@ -8,7 +8,7 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn,
 } from './lib.mjs';
 import {
-  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_FILES, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_SETTINGS, HOOK_TOOL_MATCHER, HOOK_COMMAND, HOOK_COMMAND_LEGACY,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath,
@@ -263,11 +263,14 @@ export function ideTargetsFor(root) {
 
 // A brand-new first-party skill is `missing` on every existing install. Relabel that to status `'new'`
 // so it rides `yad update` (--scope=changed) — like 'legacy'/'removed', the `changed` filter only
-// excludes literal 'missing', so 'new' survives. Scoped to SKILL installs ONLY: repo/Product wiring and
-// _bmad files stay 'missing' (excluded from update), so `update` never does one-time setup.
-const asNewSkill = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a);
+// excludes literal 'missing', so 'new' survives. Used for the module — the skills and the config they
+// read — and for the hook wiring (see `hookActions`): repo/Product wiring stays 'missing' (excluded from
+// update), so `update` never does one-time setup. The config rides too because E3 moved it. Every
+// existing install is missing `.sdlc/config.yaml`, and an update that brought the skills pointing at it
+// without the file would leave them reading nothing.
+const asNew = (a) => (a.status === 'missing' ? { ...a, status: 'new' } : a);
 
-// Module = skills installed into each IDE target + the _bmad/sdlc registration.
+// Module = skills installed into each IDE target + the module config in `.sdlc/`.
 export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
   const targets = safeIdeTargetsFor(root, ideTargets);
   if (targets.includes('.opencode')) assertSafeOpenCodeWriteDestinations(root, SKILLS);
@@ -275,7 +278,7 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
   for (const ide of targets) {
     if (ide === '.opencode') {
       for (const s of SKILLS) {
-        actions.push(asNewSkill(fileAction(
+        actions.push(asNew(fileAction(
           ide, s,
           asset('skills', s, 'SKILL.md'),
           path.join(root, IDE_OPENCODE_DIR, `${s}.md`),
@@ -284,7 +287,7 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
       }
     } else {
       for (const s of SKILLS) {
-        actions.push(asNewSkill(dirAction(
+        actions.push(asNew(dirAction(
           ide, s,
           asset('skills', s),
           path.join(root, ide, 'skills', s),
@@ -293,14 +296,15 @@ export function moduleActions(root, ideTargets = ideTargetsFor(root)) {
       }
     }
   }
-  for (const f of MODULE_FILES) {
-    actions.push(fileAction(
-      '_bmad', f,
-      asset('skills', 'sdlc', f),
-      path.join(root, '_bmad', 'sdlc', f),
-      { root },
-    ));
-  }
+  // A wired file, like the Product wiring, because the team may edit it — a language, a code repos root.
+  // An edited copy reads `modified` and is kept; only `--overwrite-local` replaces it, after a backup. A
+  // plain fileAction would copy the shipped file over that edit on every update, with no backup.
+  actions.push(asNew(wiredFileAction(
+    '.sdlc', 'config.yaml',
+    asset('skills', 'sdlc', 'config.yaml'),
+    path.join(root, MODULE_CONFIG),
+    { root, ledger: readManagedLedger(root) },
+  )));
   return actions;
 }
 
@@ -640,7 +644,7 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   // the literal 'missing'. Without it, an upgrade on a Product that already has a settings.json applies
   // the entry (`outdated`) while skipping the script (`missing`), leaving every file edit firing a
   // PreToolUse command that does not exist — a hook error per edit, and no guarding at all.
-  return actions.map(asNewSkill);
+  return actions.map(asNew);
 }
 
 // Every email the verified-commits gate should accept as a known author: the Product roster's `email`

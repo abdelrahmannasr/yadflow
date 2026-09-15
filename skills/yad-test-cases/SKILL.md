@@ -1,6 +1,6 @@
 ---
 name: yad-test-cases
-description: 'Shape step 9 of the gated SDLC — a PARALLEL, non-blocking track. Opens when the stories gate passes (the epic is already ready-for-build, so Build can start at the same time) and runs alongside implementation. With the test architect (Murat), author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
+description: 'Shape step 9 of the gated SDLC — a PARALLEL, non-blocking track. Opens when the stories gate passes (the epic is already ready-for-build, so Build can start at the same time) and runs alongside implementation. With the test architect, author test-cases.md for the approved stories, and — when a testing tool is connected — generate/link the actual automation tests in it; otherwise produce the test-case artifact only. Reads epic + architecture + contract + UI + stories as input. Never auto-advances — hands off to the team review gate. Use when the user says "author the test cases" or after the stories gate passes.'
 ---
 
 # SDLC — Author Test Cases (Shape step 9 — parallel, non-blocking)
@@ -17,8 +17,7 @@ the epic is already `ready-for-build`, so implementation (`yad-spec` → `yad-im
 (it opens to `in_progress` when `stories-review` passes) and its review **never moves `currentStep`
 away from `ready-for-build`**, so the two run in parallel.
 
-Test work is shaped by the **test architect** lens — **Murat** (`bmad-tea`), driving
-`bmad-testarch-test-design` for the cases and `bmad-testarch-automate` for the automation. The
+Test work is shaped by the **test architect** lens, which designs the cases and writes the automation. The
 automation is materialized in the **testing tool connected via `yad-connect-testing`**
 (`.sdlc/testing.json`), reached through its MCP. When a tool is connected the lens **generates** tests
 into it (or **links** an existing suite and reads it back); when none is connected, the step degrades to
@@ -31,7 +30,7 @@ the Markdown artifact only — the testing tool is additive, exactly like the de
 - The connected testing tool is recorded in `{project-root}/.sdlc/testing.json` (`config.yaml`
   `testing`), written by `yad-connect-testing`. The per-epic case→test map is `test-links.json`
   (Step 4b).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 
@@ -79,11 +78,11 @@ inventing parallel ones.
 - **Traceability:** record the loaded maps in the `test-cases.md` `code-context:` frontmatter field.
 
 ### Step 3 — Author the test cases (assist: test architect)
-Adopt the **test architect** lens (`bmad-tea`, Murat), driving `bmad-testarch-test-design`. For each
+Adopt the **test architect** lens. For each
 story / user flow shape risk-based test cases:
 
 - **Risk assessment** — categorize and score what can fail (probability × impact); depth scales with
-  impact (Murat's "risk-based testing" principle).
+  impact (risk-based testing).
 - **Coverage plan** — assign each case a priority **P0 (critical) / P1 (high) / P2 (medium) / P3 (low)**
   and a level, preferring the lowest useful level (unit > integration > E2E).
 - **Entry/exit criteria** and any **NFR** thresholds (security, performance, reliability) in scope.
@@ -97,8 +96,8 @@ Read `{project-root}/.sdlc/testing.json` (`config.yaml` `testing.registry`). Dec
   (mirrors the `design: none` degrade). Skip to Step 4.
 - **A tool is connected and its MCP is available:** adopt the `test architect` lens and, using the
   provider recorded in `testing.json` (Playwright via a Playwright MCP, Cypress/pytest/Maestro via
-  theirs — Maestro authors mobile flows where Playwright has no reach) drive
-  `bmad-testarch-automate`:
+  theirs — Maestro authors mobile flows where Playwright has no reach) write the
+  automation:
   - **Generate** — when the provider is write-capable, author one automation test per high-priority
     (P0/P1) case into the connected code repo(s) for the repos in `epic.repos`, reusing the code-maps
     (Step 2b) and existing fixtures so tests target built endpoints/components, then run them via the MCP

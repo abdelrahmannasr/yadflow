@@ -28,7 +28,7 @@ like Impeccable.
 - `DESIGN.md` is Impeccable's conventional root design-system file (RESEARCH-NOTES §4).
 - The connected design tool is recorded in `{project-root}/.sdlc/design.json` (`config.yaml` `design`),
   written by `yad-connect-design`. The per-epic screen→frame map is `design-links.json` (Step 4b).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 
@@ -92,7 +92,7 @@ Impeccable is absent, the code-map is the brain's view of what UI/components alr
 - **Traceability:** record the loaded maps in the `ui-design.md` `code-context:` frontmatter field.
 
 ### Step 3 — Shape the UI (assist: ux-designer + Impeccable slash-commands)
-Adopt the **ux-designer** lens (`bmad-agent-ux-designer`, Sally). Drive Impeccable as slash-commands:
+Adopt the **ux-designer** lens. Drive Impeccable as slash-commands:
 
 - **Existing project** (a codebase/design system already exists): `/impeccable document` → then
   `/impeccable extract` → then `/impeccable craft`.

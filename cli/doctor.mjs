@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -938,8 +938,21 @@ export function automationChecks(checks, root) {
   if (/^\s*kill_switch:\s*(?:true|yes|on)\b/im.test(text) && !killSwitchOn(a)) {
     check(checks, 'automation:legacy-kill', 'project', 'fail',
       '_bmad/sdlc/config.yaml says `kill_switch: true`, and nothing reads that key any more — the kill switch is OFF',
-      'turn it on where it is read: `yad kill --reason "<why>"`. Then set that line back to false, or refresh the file with `yad update --overwrite-local`');
+      'turn it on where it is read: `yad kill --reason "<why>"`. Then set that line back to false, or delete _bmad/sdlc/ (see `module:legacy-bmad`)');
   }
+}
+
+// The module's OLD install folder (E3). Until E3, `yad setup` copied the module config into `_bmad/sdlc/`,
+// because yadflow was packaged as a BMAD module. Nothing reads that folder now, and nothing deletes it:
+// `automation:legacy-kill` above reads a `kill_switch` line in it, and a delete run before the doctor
+// would hide that the switch is off. So the folder is named here, and the team removes it. `_bmad/` on its
+// own is BMAD's install and none of ours; only the `sdlc/` folder inside it was written by yadflow.
+export function legacyModuleChecks(checks, root) {
+  if (!exists(path.join(root, '_bmad', 'sdlc'))) return;
+  const installed = exists(path.join(root, MODULE_CONFIG));
+  check(checks, 'module:legacy-bmad', 'project', 'warn',
+    `_bmad/sdlc/ is left over from before E3, and nothing reads it — the module config is ${MODULE_CONFIG} now`,
+    `${installed ? '' : `run \`yad check --fix\` to install ${MODULE_CONFIG}, then `}copy any value you changed in _bmad/sdlc/config.yaml into ${MODULE_CONFIG}, then delete _bmad/sdlc/. If \`automation:legacy-kill\` shows, clear it first — it reads that folder`);
 }
 
 // The work-item type, mid-rename. Shape 5 writes `type:` beside `kind:` in `epic.md` and copies the
@@ -1685,6 +1698,7 @@ export function collectDoctor(root) {
   mirrorChecks(checks, root);
   dialChecks(checks, root);
   automationChecks(checks, root);
+  legacyModuleChecks(checks, root);
   typeChecks(checks, root);
   themeChecks(checks, root);
   catalogueChecks(checks, root);

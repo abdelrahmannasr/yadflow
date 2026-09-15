@@ -218,4 +218,4 @@ genesis epic carries `kind: feature` + `type: feature` + `thread: <self>` frontm
 - `yad doctor` should be clean (or warnings-only) in any project you touched.
 - Make atomic commits — one logical change per commit.
 - Open the PR/MR with the wired template; let the engineer review (a human) be the merge gate.
-- Run `bash skills/sdlc/install.sh` after any BMAD update to re-sync the installed skill copies.
+- Run `node bin/yad.mjs check --fix` after changing a skill or `skills/sdlc/config.yaml`, to re-sync the installed copies.

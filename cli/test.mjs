@@ -61,7 +61,7 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
 
   for (const f of [
     '.claude/skills/yad-epic/SKILL.md',
-    '_bmad/sdlc/config.yaml',
+    '.sdlc/config.yaml',
     'demo/backend/.github/workflows/yad-checks.yml',
     'demo/backend/checks/spec-link.sh',
     'demo/backend/checks/package-manager.sh',
@@ -69,6 +69,7 @@ test('check --fix installs module + wires repo, then is idempotent', async () =>
     'demo/backend/.github/pull_request_template.md',
     '.sdlc/cli-version.json',
   ]) assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
+  assert.ok(!fs.existsSync(path.join(T, '_bmad')), 'nothing is installed under _bmad/ (E3)');
 
   assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/spec-link.sh')).mode & 0o100, 'gate script executable');
   assert.ok(fs.statSync(path.join(T, 'demo/backend/checks/install-deps.sh')).mode & 0o100, 'dependency installer executable');
@@ -502,18 +503,45 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// A brand-NEW first-party skill rides `yad update`: moduleActions labels a not-yet-installed skill
-// `new` (not `missing`) so the scope=changed filter keeps it, while _bmad module files / repo+Product
-// wiring stay `missing` and remain excluded from update (no one-time setup on update).
+// A brand-NEW first-party install rides `yad update`: moduleActions labels a not-yet-installed skill — and
+// the module config, which E3 moved to `.sdlc/config.yaml` — `new` (not `missing`) so the scope=changed
+// filter keeps it, while repo+Product wiring stays `missing` and remains excluded from update (no one-time
+// setup on update). Nothing is planned under `_bmad/` any more.
 const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
-test('moduleActions: a not-yet-installed skill is status "new"; _bmad files stay "missing"', () => {
+test('moduleActions: an uninstalled skill and the module config are "new"; nothing goes to _bmad (E3)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
   const acts = moduleActions(T, ['.claude']);
   const skills = acts.filter((a) => a.scope === '.claude');
-  const bmad = acts.filter((a) => a.scope === '_bmad');
   assert.ok(skills.length && skills.every((a) => a.status === 'new'), 'every uninstalled skill is "new"');
-  assert.ok(bmad.length && bmad.every((a) => a.status === 'missing'), '_bmad files stay "missing"');
+  assert.deepEqual(acts.filter((a) => a.scope === '.sdlc').map((a) => [a.item, a.status, a.paths]),
+    [['config.yaml', 'new', ['.sdlc/config.yaml']]], 'the config is one action, in .sdlc/, and rides update');
+  assert.ok(!acts.some((a) => a.paths.some((p) => p.startsWith('_bmad'))), 'nothing is installed under _bmad/');
+  assert.ok(!acts.some((a) => a.item === 'module-help.csv'), 'module-help.csv is not installed');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// The config is the team's to edit (E3): an update keeps an edited copy, and only --overwrite-local
+// replaces it, after a backup. A plain file copy would put the shipped file back on every update.
+test('the module config keeps a team edit through yad update; --overwrite-local backs it up first (E3)', async () => {
+  const { BACKUP_SUFFIX } = await import('./manifest.mjs');
+  const { T } = scaffold();
+  try {
+    await reconcile(T, { fix: true });
+    const cfg = path.join(T, '.sdlc/config.yaml');
+    const shipped = fs.readFileSync(cfg, 'utf8');
+    assert.ok(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/managed.json'), 'utf8')).files['.sdlc/config.yaml'], 'its hash is recorded');
+    fs.writeFileSync(cfg, shipped.replace('communication_language: English', 'communication_language: Arabic'));
+
+    const report = await reconcile(T, { fix: false });
+    assert.equal(report.counts.modified, 1, 'the edited copy reads modified');
+    await reconcile(T, { fix: true, scope: 'changed' });
+    assert.match(fs.readFileSync(cfg, 'utf8'), /communication_language: Arabic/, 'an update keeps the edit');
+    assert.ok(!fs.existsSync(cfg + BACKUP_SUFFIX), 'and makes no backup, since it wrote nothing');
+
+    await reconcile(T, { fix: true, overwriteLocal: true });
+    assert.equal(fs.readFileSync(cfg, 'utf8'), shipped, '--overwrite-local restores the shipped file');
+    assert.match(fs.readFileSync(cfg + BACKUP_SUFFIX, 'utf8'), /communication_language: Arabic/, 'after saving the edit beside it');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('ideTargetStateFor: normalizes order/deduplication and safely falls back from malformed state', () => {
@@ -13764,6 +13792,34 @@ test('doctor automation: silent by default; a broken file, a gate on auto and a 
     checks = found();
     assert.equal(byId(checks, 'automation')?.status, 'fail');
     assert.equal(byId(checks, 'automation:legacy-kill'), undefined);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('doctor module:legacy-bmad: a leftover _bmad/sdlc/ is named, never deleted; BMAD\'s own _bmad/ is not ours (E3)', async () => {
+  const { legacyModuleChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e3d-'));
+  const found = () => { const checks = []; legacyModuleChecks(checks, T); return checks; };
+  try {
+    assert.deepEqual(found(), [], 'a project with no _bmad/ reads exactly as before');
+    fs.mkdirSync(path.join(T, '_bmad', 'core'), { recursive: true });
+    assert.deepEqual(found(), [], 'a BMAD install without our sdlc/ folder is not a finding');
+
+    fs.mkdirSync(path.join(T, '_bmad', 'sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '_bmad/sdlc/config.yaml'), 'automation:\n  kill_switch: true\n');
+    let [c, ...rest] = found();
+    assert.equal(rest.length, 0);
+    assert.equal(c.id, 'module:legacy-bmad');
+    assert.equal(c.status, 'warn', 'a warning, not a failure: nothing reads the folder');
+    assert.match(c.message, /\.sdlc\/config\.yaml/);
+    assert.match(c.hint, /yad check --fix/, 'names the install when the new config is missing');
+    assert.match(c.hint, /automation:legacy-kill/, 'clear the kill-switch finding before deleting its evidence');
+    assert.ok(fs.existsSync(path.join(T, '_bmad/sdlc/config.yaml')), 'the doctor deletes nothing');
+
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/config.yaml'), 'a: 1\n');
+    [c] = found();
+    assert.doesNotMatch(c.hint, /yad check --fix/, 'no install step once the new config is there');
+    assert.match(c.hint, /delete _bmad\/sdlc\//);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

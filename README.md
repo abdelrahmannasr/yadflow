@@ -13,8 +13,7 @@ AI builds and a human clears every gate.**
 > Yadflow doesn't write your code; it governs how AI-written code ships. Keep Cursor, GitHub Copilot,
 > Claude Code, Continue — or hand-written commits. The zero-dependency `yad` CLI and the CI gates
 > review the work **no matter who or what produced it.** The workflow skills run today in
-> **Claude Code** (plus `.agents`, Zencoder, and OpenCode), and **BMAD is the default packaging,
-> not a limitation.**
+> **Claude Code** (plus `.agents`, Zencoder, and OpenCode).
 
 ## The problem
 
@@ -32,8 +31,8 @@ Reviews ride real PR/MRs; all state lives in files you
 can read, diff, and edit — no database, nothing hidden. The result is a paper trail for every decision
 and a hard wall between "AI proposed" and "we shipped it."
 
-It installs as a custom [BMAD](https://github.com/bmad-code-org/BMAD-METHOD) module and works across
-one Product + many code repos, solo or team.
+It installs with one command (`npx yadflow setup`) and works across one Product + many code repos,
+solo or team.
 
 ## How the workflow looks
 

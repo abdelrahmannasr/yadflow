@@ -21,7 +21,7 @@ engine (never typed by hand); Shape steps are locked to `advance: human`.
 
 - `{project-root}` resolves from the project working directory.
 - Analysis artifacts live under `{project-root}/epics/EP-<slug>/` (build plan §6).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 
@@ -41,7 +41,7 @@ chain from the CLI. So the question is whether `.sdlc/state.json` exists, not wh
 else does it.
 
 ### Step 2 — Shape the idea (assist: analyst)
-Adopt the **analyst** lens (`bmad-agent-analyst`, Mary) to pressure-test the idea in depth: who is the
+Adopt the **analyst** lens to pressure-test the idea in depth: who is the
 user, what problem, what already exists, what options are on the table, what signals success, what is
 out of scope, and what the recommendation to the epic is. This is the discovery the epic will build on.
 

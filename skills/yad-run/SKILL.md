@@ -27,7 +27,7 @@ beside it as advice and never refuses on it. The kill switch (`yad kill`) holds 
   truth: it holds the story, the build-state, and the trust log).
 - Code repos are separate git repos under `{project-root}/demo-repos/<repo>/`
   (`config.yaml` `build.code_repos_root`). Operate inside them with absolute paths.
-- Automation config is `skills/sdlc/config.yaml` → `automation:` (`back_steps`, `default`). The kill
+- Automation config is `.sdlc/config.yaml` → `automation:` (`back_steps`, `default`). The kill
   switch and the Shape dials live in `.sdlc/automation.json`, and are read and written **only through the
   engine** — `yad dial … --json`, `yad kill`, `yad unkill`. Never read or edit either file for a dial.
 - Per-story Build state: `epics/<epic>/.sdlc/build-state/<story-id>.json` (per repo).

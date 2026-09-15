@@ -70,6 +70,6 @@ the architecture gate. To also open the PR/MR in the same step, use `yad-ship`.
 
 ## Reference
 - Branch/commit conventions + the file-boundary rule: `../yad-implement/references/implement-conventions.md`.
-- The full convention text: `CONTRIBUTING.md`; the config: `skills/sdlc/config.yaml` `build`.
+- The full convention text: `CONTRIBUTING.md`; the config: `.sdlc/config.yaml` `build`.
 - The gate that enforces the subject pattern: `../yad-checks/references/check-gates.md` (`commit-message`).
 - Open the PR/MR after committing: `../yad-open-pr/SKILL.md`; both at once: `../yad-ship/SKILL.md`.

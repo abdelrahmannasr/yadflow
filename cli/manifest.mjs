@@ -1,6 +1,5 @@
 // The single source of truth for what a set-up SDLC project should contain.
 // Drives setup (install from), update (re-sync), and check (diff against).
-// Keep the skill list here in sync with skills/sdlc/install.sh.
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -22,7 +21,7 @@ export const UPSTREAM_REPO =
   (pkg.bugs?.url || '').match(/github\.com\/([^/]+\/[^/]+?)(?:\/issues)?\/?$/i)?.[1]
   || 'abdelrahmannasr/yadflow';
 
-// The hand-authored yad-* skills (mirrors skills/sdlc/install.sh).
+// The hand-authored yad-* skills.
 export const SKILLS = [
   'yad-discovery',
   'yad-analysis',
@@ -122,8 +121,12 @@ export const IDE_OPENCODE_TARGET = '.opencode';
 export const IDE_TARGETS = Object.freeze([...IDE_FOLDER_TARGETS, IDE_OPENCODE_TARGET]);
 export const IDE_OPENCODE_DIR = `${IDE_OPENCODE_TARGET}/commands`; // <skill>.md (flat SKILL.md copy)
 
-// Module registration files copied from skills/sdlc/ into _bmad/sdlc/.
-export const MODULE_FILES = ['config.yaml', 'module-help.csv'];
+// The module config, copied from skills/sdlc/config.yaml into the project, where the skills read it (E3).
+// Until E3 it went to `_bmad/sdlc/`, beside `module-help.csv`, because yadflow was packaged as a BMAD
+// module. Only BMAD's own help menu read the installed `module-help.csv`, so that file is not installed
+// at all now; its source stays in skills/sdlc/, where yad-docs-overview reads it. An existing
+// `_bmad/sdlc/` is left where it is, and `yad doctor` names it.
+export const MODULE_CONFIG = '.sdlc/config.yaml';
 
 // Supported design-tool adapters (mirrors skills/sdlc/config.yaml `design.tools`); `DESIGN_PRIMARY` is
 // the fallback `registerDesign`/setup use when an unknown tool is named, and `none` is the explicit
@@ -218,9 +221,10 @@ export const PROJECT_FILES = {
   // which is absent on a markdown-only project.
   skillsConfig: '.sdlc/skills.json',
   // The kill switch and the Shape steps a team has set to `advance: auto` (E34). Absent is the normal
-  // case: the switch is off and every Shape step is `human`. A project file, not the `_bmad/sdlc/config.yaml`
-  // copy the switch lived in before — that one is hash-managed by `yad update`, so flipping it there marked
-  // the file modified and every later update skipped it.
+  // case: the switch is off and every Shape step is `human`. A project file, not the module config the
+  // switch lived in before (`_bmad/sdlc/config.yaml` then, `.sdlc/config.yaml` since E3) — that one is
+  // hash-managed by `yad update`, so flipping it there marked the file modified and every later update
+  // skipped it.
   automationConfig: '.sdlc/automation.json',
   version: '.sdlc/cli-version.json',
 };

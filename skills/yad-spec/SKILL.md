@@ -30,7 +30,7 @@ is the same graceful-degradation pattern `yad-ui` uses for Impeccable.
   `specs/<story-id>/`.
 - Spec Kit output layout (RESEARCH-NOTES §2): `specs/<feature-id>/spec.md` (+ `research.md`,
   `data-model.md`, `contracts/`), `plan.md`, `tasks.md`; constitution at `.specify/memory/constitution.md`.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

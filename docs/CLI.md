@@ -160,7 +160,7 @@ does / why / what to enter / what skipping means), and the step count adapts.
    CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
 1. **Preflight** — confirm the Product is a git repo (offers `git init`); check `git`/`node`/`npx`.
 2. **Install the module** — copy the `yad-*` skills into the IDE skill dirs you pick
-   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and register `_bmad/sdlc/`.
+   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and copy the module config to `.sdlc/config.yaml`.
 3. **Product platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
 4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).
@@ -179,10 +179,9 @@ The deterministic file work runs automatically; the AI-only steps are handed to 
 with a printed next-action. Re-run `… check --fix` any time the workflow updates — it never re-asks for
 input you already gave; re-running `setup` carries your profile forward.
 
-**Maintainers / no-CLI fallback:** the underlying copy is still a single script —
-`bash skills/sdlc/install.sh` — which the CLI's install step is a port of. The **source** stays in
-`skills/`, which a `bmad-method` update does not touch, so after any BMAD update just re-run the CLI
-(`… check --fix`) or the script.
+**Maintainers:** the source of every skill and of the module config stays in `skills/`. After you change
+one, re-run `… check --fix` to copy it into the IDE folders and `.sdlc/config.yaml`. The old
+`skills/sdlc/install.sh` script, which the install step was ported from, was removed in E3.
 
 > **The publish is automated; the decision is not.** Merging to `main` publishes nothing. When a person
 > fast-forwards the `release` branch to `main`, [semantic-release](https://semantic-release.gitbook.io/)
@@ -295,7 +294,8 @@ every epic has screens, so many have no `ui-design`. `yad doctor` says what it n
 | `automation:kill` | The kill switch is on (**warn**), with who, when and why. Every step is held at `advance: human`. | `yad unkill` once the reason is gone. |
 | `automation:gate` | `.sdlc/automation.json` sets a review gate to `auto` (**fail**). Nothing honours it — a gate is never automatic. | Remove the line. |
 | `automation:build-step` / `automation:unknown` | A Build step listed in `automation.json`, where nothing reads it (a lane's dial is in `build-state`), or an id or value this release does not know (**warn**). | `yad dial <epic> <story> --repo <name> <step>` for a Build step; remove the rest. |
-| `automation:legacy-kill` | `_bmad/sdlc/config.yaml` still says `kill_switch: true`, and nothing reads that key since E34 — so the kill switch is **off** (**fail**). | `yad kill --reason "<why>"`, then set that line back to false or refresh the file with `yad update --overwrite-local`. |
+| `automation:legacy-kill` | `_bmad/sdlc/config.yaml` still says `kill_switch: true`, and nothing reads that key since E34 — so the kill switch is **off** (**fail**). | `yad kill --reason "<why>"`, then set that line back to false, or delete `_bmad/sdlc/` (see `module:legacy-bmad`). |
+| `module:legacy-bmad` | A `_bmad/sdlc/` folder is left from before E3, when `yad setup` installed the module config there. Nothing reads it now; the config is `.sdlc/config.yaml` (**warn**). A BMAD install's own `_bmad/` is not a finding — only the `sdlc/` folder yadflow wrote. | Clear `automation:legacy-kill` first if it shows (it reads that folder), run `yad check --fix` if `.sdlc/config.yaml` is missing, copy any value you changed in `_bmad/sdlc/config.yaml` into `.sdlc/config.yaml`, then delete `_bmad/sdlc/`. |
 | `dials:shape-auto-unread` / `dials:locked-auto` | A Shape author step says `auto` in `state.json`, where nothing reads a Shape dial; or a Build author step is `locked` and `auto`, and `locked` no longer holds it at human (**warn**, E34). | `yad dial <step> --to auto` for the Shape step; `yad dial <epic> <story> --repo <name> <step> --to human` if the Build step should wait for a person. |
 
 A step id the catalogue does not carry is left to `phase:unknown`, which is the check for that.

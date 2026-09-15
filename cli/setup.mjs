@@ -357,7 +357,7 @@ function applyActions(actions, { force = false } = {}) {
     if (a.status === 'ok' && !force) continue;
     a.apply();
     changed++;
-    info(`${a.status === 'missing' ? 'installed' : 'updated'} ${a.scope}/${a.item}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
+    info(`${a.status === 'missing' || a.status === 'new' ? 'installed' : 'updated'} ${a.scope}/${a.item}${a.backup ? ` (previous content saved to ${path.basename(a.backup)})` : ''}`);
   }
   if (!changed) info('already up to date');
   return changed;
@@ -437,7 +437,7 @@ export async function runSetup(root, opts = {}) {
   if (!has('npx')) warn('npx not found — repomix packing will be skipped');
 
   // Install the module
-  S('Install the module (skills + _bmad registration)');
+  S('Install the module (skills + .sdlc/config.yaml)');
   guide([
     'Copies the yad-* skills into your AI tool(s) so they appear in Claude Code / agents / opencode.',
     'Enter the IDE folders to install into, comma-separated; default = whatever is already present.',

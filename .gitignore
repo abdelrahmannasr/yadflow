@@ -5,7 +5,7 @@
 _bmad/
 _bmad-output/
 
-# IDE skill mirrors (regenerable via `bash skills/sdlc/install.sh`)
+# IDE skill mirrors (regenerable via `yad check --fix`)
 # .claude/ is already covered by the global gitignore.
 .agents/
 .opencode/

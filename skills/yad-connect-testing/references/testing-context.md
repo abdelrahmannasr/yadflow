@@ -27,8 +27,7 @@ produce.
 
 ## Generate (write automation tests into the repo)
 
-When the connected provider is write-capable, the `test architect` lens (Murat, `bmad-tea` +
-`bmad-testarch-automate`) produces the epic's automation tests in the connected code repo(s), covering
+When the connected provider is write-capable, the `test architect` lens produces the epic's automation tests in the connected code repo(s), covering
 the cases `test-cases.md` enumerates and the acceptance criteria the stories define:
 
 - **Playwright** — the lens authors `*.spec.ts` E2E/API specs (reusing the repo's existing fixtures and
@@ -43,7 +42,7 @@ the cases `test-cases.md` enumerates and the acceptance criteria the stories def
 
 Reuse what already exists: load the connected code repos' code-maps (`yad-test-cases` Step 2b) so
 generated tests target real endpoints/components, not invented ones, and prefer the lowest useful test
-level (unit > integration > E2E) per Murat's principles.
+level (unit > integration > E2E).
 
 ## Link (reference an existing suite)
 

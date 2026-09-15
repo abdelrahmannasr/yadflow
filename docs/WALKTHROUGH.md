@@ -36,7 +36,7 @@ own yet, so that choice is recorded, not acted on.
 > repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
 > long-hand equivalent and still work.
 
-1. **Install the module:** `bash skills/sdlc/install.sh` (re-run after any BMAD update).
+1. **Install the module:** `npx yadflow setup` (re-sync later with `… check --fix`).
 2. **Have your code repo(s).** They are **separate git repos** (one `.git` each). For the demo they
    live under `demo-repos/<repo>/` — regenerate from `demo-repos/README.md`.
 3. **Optional tools** (the workflow degrades gracefully and records it if any are absent): **Spec Kit**

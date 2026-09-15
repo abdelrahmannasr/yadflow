@@ -23,7 +23,7 @@ silent (the same discipline as `yad repo refresh`).
   delegated back to `yad-docs` / `yad-docs-overview` (the AI generation step). This skill orchestrates
   the reconcile.
 - The docs target is `.sdlc/docs.json` (`yad-connect-docs`).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

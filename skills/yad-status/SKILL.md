@@ -28,7 +28,7 @@ distinct run; never dedup by story/repo/step — but DO skip a shard whose full 
 `(story,repo,step,uid)` already appears in the folded `runs`, i.e. a half-applied `yad tidy up`). All are committed by `yad checkpoint` (so a fresh clone
 or another machine sees current evidence; `yad tidy up` folds finished shards into `trust-log.json`).
 Also read the `automation` block of
-`skills/sdlc/config.yaml` (`back_steps`), and `.sdlc/automation.json` if present — the kill switch and the
+`.sdlc/config.yaml` (`back_steps`), and `.sdlc/automation.json` if present — the kill switch and the
 Shape author steps set to auto (absent = the switch off, every Shape step human). The effective dial of any
 step is `yad dial … --json`, which applies the kill switch and gates for you. For the
 cross-cutting learning layer, also read — if present — the **local-only** `.sdlc/learning-records.json`

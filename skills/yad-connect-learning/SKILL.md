@@ -30,7 +30,7 @@ explains the concept. The learning layer is **purely opt-in and never blocks a g
   the sibling of `.sdlc/repos.json`, `.sdlc/hub.json`, `.sdlc/design.json`, and `.sdlc/testing.json`.
 - Per-epic, per-member learning records + rendered tutorials are written later by `yad-learn`
   (`epics/EP-<slug>/.sdlc/learning-records.json` and `epics/EP-<slug>/learning/`), not here.
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## Inputs
 

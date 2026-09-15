@@ -2604,7 +2604,7 @@ const BUILD_STEP_ORDER = STEPS.filter((s) => s.phase === 'build').map((s) => s.i
 // WHY THIS IS A FILE AND THE CATALOGUE IS NOT. The catalogue says what a step IS — its phase, its
 // artifact, what reviews it — and those are facts about the lifecycle this engine implements, so they
 // stay in code where they cannot drift. WHO does the work is a different kind of fact: it depends on
-// which skills a team has installed and which harness they run. E3 deletes the BMAD personas from the
+// which skills a team has installed and which harness they run. E3 deleted the BMAD personas from the
 // engine, and E11 supports harnesses other than Claude Code; neither is possible while the only
 // answer to "who authors the architecture" is a string compiled into this file.
 //

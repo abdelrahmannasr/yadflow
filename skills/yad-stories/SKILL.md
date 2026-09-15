@@ -19,7 +19,7 @@ There is **no `sm` agent** (Phase 0 Deviation 1): the `pm` lens breaks down the 
 - `{project-root}` resolves from the project working directory.
 - Stories live under `{project-root}/epics/EP-<slug>/stories/` (build plan §6).
 - Story files are named `EP-<slug>-S0N.md` (zero-padded, e.g. `EP-checkout-S01.md`).
-- Speak in the configured `communication_language`; write documents in `document_output_language`.
+- Speak in the `communication_language` set in `{project-root}/.sdlc/config.yaml`; write documents in `document_output_language`.
 
 ## On Activation
 
@@ -74,7 +74,7 @@ Phase 3 build (Spec Kit per repo) accurate anchors instead of invented ones.
 - **Traceability:** record the loaded maps in each story's `code-context:` frontmatter field.
 
 ### Step 3 — Break down the epic (assist: pm)
-Adopt the **pm** lens (`bmad-agent-pm`, John). Decompose the epic into the smallest set of
+Adopt the **pm** lens. Decompose the epic into the smallest set of
 independently reviewable, independently buildable stories. For each story decide which repos it touches
 (must be a subset of the epic's `repos`). Prefer stories scoped to a clear slice of user value.
 
