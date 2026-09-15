@@ -24,8 +24,8 @@ const TERM_GROUPS = [
     steps: [
       'driver — human | pair | agent: who does the work on a step. Older name: `assistance` (none | review | heavy), still what the engine reads.',
       'advance — human | auto: who moves a step forward. Older name: `automation` (human_approve | machine_advance), still what the engine reads.',
-      'Earned automation — a Build step set to `advance: auto` after its trust slice clears ≥5 runs / ≥80% unchanged.',
-      'Kill switch — one line that forces every step back to `advance: human` system-wide, instantly reversible.',
+      'yad dial — sets a step\'s advance dial. A Build lane step in build-state; a Shape author step for the whole project in .sdlc/automation.json (recorded only). It shows the step\'s run record as advice; nothing is earned (E34).',
+      'Kill switch — `yad kill --reason` holds every step at `advance: human`, recorded in .sdlc/automation.json; `yad unkill` turns it off.',
     ],
   },
 ];

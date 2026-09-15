@@ -24,9 +24,10 @@ version. A Shape step advances only on a **human act** — recording an approval
 merging the approved, fully-resolved review PR — never on a machine.
 
 As of **Phase 4a** the `advance` dial is no longer inert: the orchestrator `yad-run` reads it and,
-for the safe **back** steps, advances on its own when a step is set to `advance: auto` (and has
-*earned* it — see "Run Build on the dial" below). The engineer review and all five Shape
-steps stay `advance: human` forever.
+for the **Build** steps, advances on its own when a step is set to `advance: auto` — the team sets it with
+`yad dial`; see "Run Build on the dial" below. The engineer review and every Shape review gate stay
+`advance: human` forever. A Shape author step's dial can be set too, but nothing drives a Shape step on its
+own yet, so that choice is recorded, not acted on.
 
 ## 0 — One-time setup
 
@@ -126,22 +127,23 @@ Build by hand"** below.
     - **Multi-repo:** repeat 10–14 in each repo, all from the **one** locked contract.
     - **Existing code:** `yad-backfill` first, to produce a human-verified spec for a built feature.
 
-## C — Automation (optional, earned over time)
+## C — Automation (optional, switched on by the team)
 
-15. After a Build step accumulates trust evidence, earn it:
-    `yad-run action: set-dial step:<step> to: auto` (refused if evidence is short or for a
-    Shape step / the engineer review).
-16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it auto-advances
-    earned steps and stops for a human otherwise, always halting at the engineer review. Each iteration
+15. Set a Build step to run on its own: `yad dial <epic> <story> --repo <repo> <step> --to auto`. It prints
+    the step's run record in that repo as advice (runs, % approved unchanged) and never refuses on it. The
+    engineer review is a gate, so it is refused. `--to human` puts a step back.
+16. Drive a story's Build on the dials: `yad-run story:<id> repo:<repo>` — it advances past a step set to
+    auto after a clean run and stops for a human otherwise, always halting at the engineer review. Each iteration
     it runs `yad checkpoint --push` to commit the new `trust-log/` shard + `build-state/` it just wrote (a
-    `chore(hub)` commit, default branch only) — so the shared trust evidence stays current with no human commit.
-17. **Kill switch any time:** `yad-run action: kill` (everything → manual) / `action: unkill`.
+    `chore(hub)` commit, default branch only) — so the shared run record stays current with no human commit.
+17. **Kill switch any time:** `yad kill --reason "<why>"` (everything → manual, recorded in
+    `.sdlc/automation.json`) / `yad unkill`.
     Details: **"Run Build on the dial"** below.
 
 ## Any time
 
 - **`yad-status [EP-<slug>]`** — read-only: the Shape chain, each build step's dial + status, the
-  trust record, and (across epics) the fleet roll-up. Start here to see what's blocking.
+  run record, the kill switch, and (across epics) the fleet roll-up. Start here to see what's blocking.
 - **`yad doctor`** — health check. Its `shape` section says whether this project's state files match
   the shape this release expects, one line for the project and one per epic, and names the command to
   run if they do not.
@@ -320,36 +322,31 @@ Build is walked end to end on the worked epic: story **S01** shipped (`status: s
 three tasks in `build-log.json`), **S03** built across backend + mobile, and a `health` feature
 backfilled. The code repos are regenerable from `demo-repos/README.md`.
 
-## Run Build on the dial (Phase 4 — automation, earned)
+## Run Build on the dial (Phase 4 — automation, switched on by the team)
 
-Phase 4 is **automation, earned with evidence and reversible in one move**. Phase 4a made the
-`automation` dial real and earned the safest step (the check-gate advance); Phase 4b added the
-`implement → check` hand-off and the `spec`/`tasks` trust hooks. The engine is `yad-run`; the
-evidence lives in two new files per epic under `.sdlc/`: `build-state/<story-id>.json` (the Build steps
-with their dials, per repo) and `trust-log.json` (every run's verdict). See
-`docs/phase-4-build-plan.md` and `docs/phase-4b-build-plan.md`.
+Phase 4 is **automation you switch on, and switch off in one move**. Phase 4a made the `automation` dial
+real; Phase 4b added the `implement → check` hand-off and the `spec`/`tasks` trust hooks. **Since E34
+nothing is earned:** the team sets each dial with `yad dial`. The engine is `yad-run`; the record lives in
+two files per epic under `.sdlc/`: `build-state/<story-id>.json` (the Build steps with their dials, per
+repo) and `trust-log.json` (every run's verdict). `docs/phase-4-build-plan.md` and
+`docs/phase-4b-build-plan.md` record how it was built.
 
 - **Drive a story's Build:** `yad-run {story} {repo}` walks `spec → tasks → implement → checks`,
   reading each step's dial. On `advance: auto` it advances on its own; on `advance: human` it stops
   for a human; on any FAIL, scope overrun, or contract-surface touch it **halts and pulls in a human**.
   It always stops at the engineer review (`yad-engineer-review`), which is never automated.
-- **Read the trust log:** `yad-status {epic}` shows each Build step's dial, status, and trust record —
-  runs, % `approved-unchanged`, and whether that clears the threshold (`automation.trust_threshold` in
-  `config.yaml`, default ≥5 runs and ≥80% unchanged). The engineer review records each run's verdict
-  (a diff merged as-authored is `approved-unchanged`; one edited first is `approved-with-edits`; a
-  failed one is `rejected`).
-- **Earn automation for a step:** once a step's trust record clears the threshold,
-  `yad-run action: set-dial step: checks to: auto` flips it. The setter **refuses** if the
-  evidence is short, or for any Shape step / the engineer review. Reverting
-  (`to: human`) is always allowed — automation is reversible in one move.
-- **Kill switch:** `yad-run action: kill` forces every step back to `advance: human` system-wide
-  instantly (no code change, no per-step edits); `yad-run action: unkill` restores earned automation.
-
-**Earned so far:** `checks` (Step B, Phase 4a) and `implement` (Step D, Phase 4b — the
-`implement → check` hand-off; the scope/contract halts and the engineer review still gate the merge).
-`tasks` (Step C) and `spec` have their dials + trust hooks but stay `advance: human` until their own
-runs clear the threshold — there is no historical signal to seed them from, so they are earned only on
-genuine runs (never fabricated). See `docs/phase-4b-build-plan.md`.
+- **Read the run record:** `yad dial {epic} {story} --repo {repo} {step}` shows a Build step's dial and its
+  run record in that repo — runs and % `approved-unchanged` — as advice; `yad-status {epic}` shows it for
+  every step. The engineer review records each run's verdict (a diff merged as-authored is
+  `approved-unchanged`; one edited first is `approved-with-edits`; a failed one is `rejected`).
+- **Switch a step to auto:** `yad dial {epic} {story} --repo {repo} checks --to auto`. There is no
+  threshold: the team decides, reading the record. A gate is refused, and `--to human` is always accepted.
+- **A Shape author step:** `yad dial architecture --to auto` records the choice for the whole project in
+  `.sdlc/automation.json`. Nothing drives a Shape step on its own yet — that arrives when the engine runs
+  agents — so it is recorded, not acted on. Its review gate is always a person.
+- **Kill switch:** `yad kill --reason "<why>"` holds every step at `advance: human` instantly, recorded
+  with who and when in `.sdlc/automation.json`; `yad unkill` lets each step follow its own dial again.
+  `yad doctor` warns while it is on.
 
 ## What's intentionally NOT built yet
 

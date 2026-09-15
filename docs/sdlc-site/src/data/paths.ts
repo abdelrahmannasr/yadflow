@@ -455,7 +455,7 @@ const buildSteps: FlowStep[] = [
   },
 ];
 
-// ── Phase 4 — Automation (earned, reversible) ───────────────────────────────
+// ── Phase 4 — Automation (switched on, reversible) ────────────────────────────
 
 const automationSteps: FlowStep[] = [
   {
@@ -480,7 +480,7 @@ const automationSteps: FlowStep[] = [
     id: "trust-log",
     title: "Trust Log",
     description:
-      "Records every run's verdict (approved-unchanged / approved-with-edits / rejected) — the evidence base for earning automation. yad-status rolls it up: runs, % approved-unchanged, and whether it clears the threshold. yad checkpoint commits this ledger (chore(hub), default branch, allowlist-scoped).",
+      "Records every run's verdict (approved-unchanged / approved-with-edits / rejected) — the run record yad dial and yad-status show beside a step's dial as advice: runs and % approved-unchanged. No threshold since E34. yad checkpoint commits this ledger (chore(hub), default branch, allowlist-scoped).",
     actor: "system",
     status: "gathering-evidence",
     stepState: "trust-log.json",
@@ -491,40 +491,40 @@ const automationSteps: FlowStep[] = [
       { id: "tl-1", from: "engineer", to: "trust-log", label: "append run verdict", type: "write", color: "#2471a3", delay: 0, duration: 700 },
       { id: "tl-2", from: "trust-log", to: "product-hub", label: "roll up % approved-unchanged", type: "event", color: "#1e8449", delay: 800, duration: 700 },
     ],
-    sideEffects: { jobs: "trust_threshold: ≥5 runs · ≥80% approved-unchanged" },
+    sideEffects: { jobs: "runs · % approved-unchanged (advice, never a rule)" },
   },
   {
     id: "set-dial",
-    title: "Set Dial (earn automation)",
+    title: "Set Dial (yad dial)",
     description:
-      "Once a Build step's trust slice clears the threshold, `yad-run set-dial step:<step> to: auto` flips it. The setter REFUSES if evidence is short, or for any Shape step / the engineer review. Earned per step.",
+      "`yad dial <epic> <story> --repo <repo> <step> --to auto` sets a Build lane step; `yad dial <step> --to auto` sets a Shape author step for the project (recorded only, for now). It shows the run record as advice and refuses only a review gate. Nothing to earn (E34).",
     actor: "engineer",
     status: "earned",
-    stepState: "state.json (automation dial)",
-    trigger: "yad-run action: set-dial",
-    handler: "yad-run (set-dial)",
+    stepState: "build-state/<story-id>.json · .sdlc/automation.json",
+    trigger: "yad dial",
+    handler: "yad dial (yad-run set-dial runs it)",
     activeComponents: ["trust-log", "state-json"],
     messages: [
-      { id: "sd-1", from: "trust-log", to: "engineer", label: "threshold cleared?", type: "event", color: "#1e8449", delay: 0, duration: 700 },
+      { id: "sd-1", from: "trust-log", to: "engineer", label: "run record (advice)", type: "event", color: "#1e8449", delay: 0, duration: 700 },
       { id: "sd-2", from: "engineer", to: "state-json", label: "set dial → advance: auto", type: "write", color: "#2471a3", delay: 800, duration: 700 },
     ],
-    sideEffects: { jobs: "back_steps: spec · tasks · implement · checks", notifications: "Shape steps + engineer-review hard-locked" },
+    sideEffects: { jobs: "Build lane steps: spec · tasks · implement · checks · Shape author steps (recorded only)", notifications: "every review gate refused" },
   },
   {
     id: "kill-switch",
     title: "Kill Switch",
     description:
-      "Safety: `yad-run action: kill` forces every step back to `advance: human` system-wide instantly — no code change, no per-step edits. `action: unkill` restores earned automation. Automation is reversible in one move.",
+      "Safety: `yad kill --reason` holds every step at `advance: human` instantly, recorded with who, when and why in .sdlc/automation.json — no code change, no per-step edits. `yad unkill` lets each step follow its own dial again.",
     actor: "engineer",
     status: "reversible",
-    stepState: "automation.kill_switch",
-    trigger: "yad-run action: kill | unkill",
-    handler: "yad-run (kill / unkill)",
+    stepState: ".sdlc/automation.json (kill)",
+    trigger: "yad kill | yad unkill",
+    handler: "yad kill / yad unkill",
     activeComponents: ["state-json", "trust-log"],
     messages: [
       { id: "ks-1", from: "engineer", to: "state-json", label: "kill → all steps advance: human", type: "cleanup", color: "#c0392b", delay: 0, duration: 800 },
     ],
-    sideEffects: { jobs: "kill_switch: true | false (one line, instantly reversible)" },
+    sideEffects: { jobs: "kill: { on, reason, by, date } (one command, instantly reversible)" },
   },
   {
     id: "learn",
@@ -679,11 +679,11 @@ export const PATHS: FlowPath[] = [
   },
   {
     id: 5,
-    label: "Automation (earned)",
+    label: "Automation (switched on)",
     icon: "smart_toy",
     color: "#ca6f1e",
     description:
-      "The second dial made real: run Build on each step's dial, record every run in the trust log, earn `advance: auto` per step, and keep the kill switch. Beside it, the opt-in yad-learn tutor teaches any member at any stage.",
+      "The second dial made real: run Build on each step's dial, record every run in the trust log, set `advance: auto` per step with yad dial, and keep the kill switch. Beside it, the opt-in yad-learn tutor teaches any member at any stage.",
     category: "automate",
     steps: automationSteps,
   },

@@ -117,7 +117,7 @@ const trustKey = (e) => `${e.story}|${e.repo}|${e.step}|${e.uid}`;
 
 // trust-log = the evidence base. EVERY entry is a distinct step run (re-runs of a step share
 // story/repo/step), so we CONCATENATE folded runs + shards and never dedup by (story,repo,step) —
-// that would drop re-run history the trust threshold counts. The only guard is a shard whose full
+// that would drop re-run history the run record `yad dial` shows counts. The only guard is a shard whose full
 // identity (`trustKey`) already appears folded (a half-applied tidy). A corrupt folded file must throw
 // (readJSONStrict), never silently read as empty — under-reporting the evidence base is a safety bug.
 export function readTrustRuns(epicDir) {

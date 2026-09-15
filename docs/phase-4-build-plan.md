@@ -1,5 +1,10 @@
 # Phase 4 — Build Plan
 
+> **Since E34 (2026-09), automation is no longer earned.** The team sets each dial with `yad dial`, the
+> trust log is shown beside it as advice, and the kill switch is `yad kill` / `yad unkill`, recorded in
+> `.sdlc/automation.json`. The threshold described below is gone. This plan is kept as the record of how
+> Phase 4 was built.
+
 > **Status:** Split into **4a** (Steps A + B) and **4b** (Steps C + D). **4a + Step D are built;
 > Step C is gated.** The `automation` dial is read by the orchestrator `yad-run`; every run is
 > recorded in `.sdlc/trust-log.json`; back-half state lives in `.sdlc/build-state/<story>.json`. Earned

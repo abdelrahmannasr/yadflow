@@ -12,7 +12,7 @@ const KEY_POINTS = [
   'All state lives in files under .sdlc/ (state.json, approvals.json, contract-lock.json, trust-log.json) that you can also edit directly.',
   'Shape is human-gated and runs once per epic in the Product; Build runs once per story per code repo.',
   'Two per-step dials: driver (human | pair | agent) and advance (human | auto). Older names, still what the engine reads: assistance and automation.',
-  'Automation is earned with trust-log evidence and reversible in one move; Shape steps and the engineer review are permanently human.',
+  'Automation is switched on by the team with yad dial, shown beside its run record as advice, and reversible in one move (yad kill); every review gate is permanently human.',
 ];
 
 export function ExecutiveSummarySection() {
@@ -28,7 +28,7 @@ export function ExecutiveSummarySection() {
           <span dir="rtl">يد</span>, Arabic for "hand") is the AI-driven, gated, team, multi-repo SDLC built
           as a custom BMAD module. It turns BMAD from a solo tool into a{' '}
           <strong className="text-white">team, gated, file-driven SDLC engine</strong>: every step writes a
-          file and stops at a gate, and who advances that gate — a human now, a machine later once earned — is
+          file and stops at a gate, and who advances that gate — a human, or a machine for a Build step the team set to auto — is
           a per-step setting. The principle:{' '}
           <code className="text-xs bg-white/5 px-1.5 py-0.5 rounded text-slate-300">AI builds. The hand decides.</code>
         </p>

@@ -6,7 +6,7 @@ interface DialStep {
 
 const TYPE_COLORS = {
   validate: { color: '#2471a3', bg: 'rgba(36,113,163,0.12)' },   // dial value
-  persist: { color: '#1e8449', bg: 'rgba(30,132,73,0.12)' },     // earned
+  persist: { color: '#1e8449', bg: 'rgba(30,132,73,0.12)' },     // set by the team
   sideEffect: { color: '#b7950b', bg: 'rgba(183,149,11,0.12)' }, // evidence
   notify: { color: '#566573', bg: 'rgba(86,101,115,0.12)' },     // locked
 };
@@ -27,19 +27,18 @@ const CHAINS: { title: string; endpoint: string; color: string; steps: DialStep[
     endpoint: 'state.json · per step',
     color: '#1e8449',
     steps: [
-      { name: 'human', description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.', type: 'notify' },
-      { name: 'auto', description: 'Earned per Build step; yad-run advances it on its own once trust is proven.', type: 'persist' },
+      { name: 'human', description: 'Default. A human advances the step. Every review gate — engineer-review and each Shape review — stays here forever.', type: 'notify' },
+      { name: 'auto', description: 'Set by the team with yad dial. On a Build step yad-run advances it on its own after a clean run; on a Shape author step it is recorded only, for now.', type: 'persist' },
     ],
   },
   {
-    title: 'Earning automation (the trust log)',
-    endpoint: 'trust-log.json · trust_threshold',
+    title: 'Setting the dial (the run record as advice)',
+    endpoint: 'trust-log.json · .sdlc/automation.json',
     color: '#b7950b',
     steps: [
-      { name: 'back_steps only', description: 'spec · tasks · implement · checks — the only steps that MAY be automated, safest-end first.', type: 'sideEffect' },
-      { name: '≥5 runs · ≥80% approved-unchanged', description: 'A step becomes a candidate only once its trust slice clears the threshold. "It seems fine" is not evidence.', type: 'sideEffect' },
-      { name: 'set-dial → auto', description: 'Flips the dial; refused if evidence is short, or for any Shape step / the engineer review.', type: 'persist' },
-      { name: 'kill switch', description: 'yad-run action: kill forces every step back to `advance: human` system-wide — reversible in one move.', type: 'notify' },
+      { name: 'run record', description: 'Every yad-run step records its verdict. yad dial shows runs and % approved-unchanged beside the dial — advice, never a rule.', type: 'sideEffect' },
+      { name: 'yad dial → auto', description: 'The team decides. A review gate is refused; --to human is always accepted.', type: 'persist' },
+      { name: 'yad kill', description: 'Holds every step at `advance: human`, recorded with who, when and why — reversible in one move with yad unkill.', type: 'notify' },
     ],
   },
 ];

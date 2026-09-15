@@ -99,7 +99,7 @@ export const ADVANCE_DIAL_STATES: DialState[] = [
     endpoint: 'state.json · per step',
     schemaValue: 'advance: human  (automation: human_approve)',
     isTerminal: false,
-    description: 'Default. A human advances the step. Shape steps + engineer-review are locked here forever.',
+    description: 'Default. A human advances the step. Every review gate — engineer-review and each Shape review — stays here forever.',
     visibleTo: ALL,
   },
   {
@@ -107,7 +107,7 @@ export const ADVANCE_DIAL_STATES: DialState[] = [
     endpoint: 'state.json · per step',
     schemaValue: 'advance: auto  (automation: machine_advance)',
     isTerminal: true,
-    description: 'Earned per Build step once its trust slice clears the threshold; the orchestrator advances it on its own.',
+    description: 'Set by the team with yad dial (E34, nothing to earn). On a Build step the orchestrator advances it on its own after a clean run; on a Shape author step it is recorded only, for now.',
     visibleTo: ALL,
   },
 ];
@@ -306,6 +306,9 @@ export const CLI_COMMANDS: CliCommand[] = [
   { constant: 'DEFER', value: 'yad defer', target: 'setup', category: 'front', description: 'Set an optional step aside to do later: yad defer <epic> <step> --reason "<why, and who is waiting>". Same steps and refusals as yad skip; the chain goes on and the review is still owed. Add --debt when the work is owed back: yad next and yad doctor (step:debt) remind you until its review passes.', visibleTo: ALL },
   { constant: 'UNDEFER', value: 'yad undefer', target: 'setup', category: 'front', description: 'Put a deferred step back: yad undefer <epic> <step>. Removes the deferral and its record, at any time. After later work has finished, the step re-opens beside that work, which stays done, and currentStep does not move. This is also how a debt is paid back; the debt clears when the step review passes.', visibleTo: ALL },
   { constant: 'UNBLOCK', value: 'yad unblock', target: 'setup', category: 'front', description: 'Clear a recorded blocker once the wait is over: yad unblock <epic> <step>. Moves the step off blocked and removes its record in one write, back to in_progress for an author step whose earlier steps have passed, otherwise to todo. Refuses a step that is not blocked. Changes only state.json, never a Build lane in build-state.', visibleTo: ALL },
+  { constant: 'DIAL', value: 'yad dial', target: 'setup', category: 'build', description: 'Set a step\'s advance dial (E34): yad dial <step> --to auto|human for a Shape author step, project-wide in .sdlc/automation.json and recorded only for now; yad dial <epic> <story> --repo <name> <step> --to auto|human for a Build lane step in build-state. Shows the step\'s run record as advice, never a refusal. A review gate is refused. No --to only reads.', visibleTo: ALL },
+  { constant: 'KILL', value: 'yad kill', target: 'setup', category: 'build', description: 'Kill switch: yad kill --reason <text> holds every step at advance: human, recorded with who, when and why in .sdlc/automation.json.', visibleTo: ALL },
+  { constant: 'UNKILL', value: 'yad unkill', target: 'setup', category: 'build', description: 'Turn the kill switch off: each step follows its own dial again. An optional --reason is recorded.', visibleTo: ALL },
   { constant: 'CHECK', value: 'yad check --fix', target: 'setup', category: 'setup', description: 'Reconcile the install: fill what is missing and update what changed. A managed file you edited (gate script, CI fragment, PR/MR template) is reported as modified and never silently overwritten — .sdlc/managed.json records the sha of every file yad wrote; --overwrite-local replaces them, saving a <file>.yad-orig backup (#164).', visibleTo: ALL },
   { constant: 'DOCTOR', value: 'yad doctor', target: 'setup', category: 'setup', description: 'Environment + state health; exit 1 on any failure (--json for CI). Its shape section reports what schemaVersion this project\'s state files are on against the shape the running release writes — one line for the project and one per epic — warning when files are behind (run yad migrate) and failing when they were written by a NEWER yadflow (upgrade the CLI; migrating would move them backward).', visibleTo: ALL },
   { constant: 'SKILL', value: 'yad skill', target: 'setup', category: 'setup', description: 'Choose which skill runs which lifecycle step. The engine ships a default for every step; yad skill bind <step> <skill> records your own in .sdlc/skills.json and yad next names it from then on. Several skills run as a chain, in the order given, each seeing what the one before it produced — every extra one is another model run, and the command says so. yad skill list shows what runs each step and whose choice it is (--json); yad skill unbind <step> goes back to the default. A review gate is refused (yad gate drives those); a step this release does not know is recorded with a warning, because your file wins and yad doctor only reports.', visibleTo: ALL },

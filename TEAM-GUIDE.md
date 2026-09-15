@@ -56,7 +56,7 @@ Everything *from the spec onward* (specs, tasks, code) lives in each **code repo
 ### The whole workflow, end to end
 
 Setup is one-time. The **Shape** part is human-gated and runs once per epic in the Product; **Build**
-runs once per story per code repo; **automation** is opt-in and earned. `yad-status` reads it
+runs once per story per code repo; **automation** is opt-in, switched on by the team with `yad dial`. `yad-status` reads it
 all; `yad-hub-bridge` mirrors Shape reviews to real PR/MRs on the Product.
 
 ```mermaid
@@ -104,11 +104,11 @@ flowchart TD
       sp --> im --> ck --> prm --> eng --> merged
     end
 
-    subgraph AUTO["C · Automation — earned & reversible"]
+    subgraph AUTO["C · Automation — switched on & reversible"]
       direction TB
-      run["yad-run<br/>automation dial + trust-log.json"]:::earns
+      run["yad-run<br/>the dial (yad dial) + trust-log.json"]:::earns
       cpt["yad checkpoint --push<br/>commit trust-log · build-log · build-state (chore(hub))"]
-      kill["kill switch → all advance: human"]
+      kill["yad kill → all advance: human"]
       run --> cpt
       run --- kill
     end
@@ -124,9 +124,9 @@ flowchart TD
 ```
 
 **Legend.** 🟨 **artifact** = an author step writes a file and stops · 🟧 **gate** = a human review
-that must pass (`open → comment → approve → advance`) · 🟦 **earns automation** = a Build step that
-can later auto-advance once it proves itself · ⬜ dashed **locked** = the engineer review and every
-Shape step, **permanently human**.
+that must pass (`open → comment → approve → advance`) · 🟦 **can run on auto** = a Build step the team
+may set to advance on its own with `yad dial` · ⬜ dashed **locked** = the engineer review and every
+Shape review gate, **permanently human**.
 
 ---
 
@@ -506,11 +506,12 @@ print, and which does not hold a gate until the capacity cap ships:
 - **See what's blocking:** `yad-status` (or `yad-status EP-<slug>`) — read-only view of the whole
   chain, every step's status, the contract lock, and which approvals a gate is still waiting on. Start
   here when stuck.
-- **Automation is opt-in and earned.** You can ignore `yad-run` entirely at first — every step is
-  human-approved by default. Later, safe Build steps can *earn* auto-advance once they prove
-  themselves. The engineer review and all five Shape steps are **never** automatable.
-- **Global "back to manual" switch:** `yad-run action: kill` forces every step to human approval
-  instantly; `yad-run action: unkill` restores it.
+- **Automation is opt-in.** You can ignore `yad-run` entirely at first — every step is
+  human-approved by default. When the team wants a Build step to run on its own, `yad dial` switches it
+  to auto and shows that step's run record as advice; nothing has to be earned. Every review gate — the
+  engineer review and each Shape review — is **never** automatic.
+- **Global "back to manual" switch:** `yad kill --reason "<why>"` holds every step at human approval
+  instantly, recorded in `.sdlc/automation.json`; `yad unkill` turns it off.
 - **See how the team uses the flow (for a team lead / EM):** `yad usage` builds a per-member
   adoption & behavior report — who *authored / commented / approved / shipped*, in order, with factual
   workflow-hygiene flags (e.g. a ship with no recorded engineer review, a dormant member). It is
