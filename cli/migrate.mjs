@@ -90,7 +90,7 @@ export const MIGRATIONS = [
     // spelling, an older CLI knew only `hub`, and `yad setup` wrote `hub` when it added a member, so
     // moving the key would have quietly stripped reviewers of their roles.
     //
-    // E62 removed the roster: nothing reads it, and `yad doctor` names one as unused. The step still
+    // E62 removed the roster: it decides nothing, and `yad doctor` names one as unused. The step still
     // runs, unchanged, so a shape-2 file reaches shape 3 exactly as it always did — a migration that
     // changed with the reader would rewrite an old project differently depending on which release ran
     // it.

@@ -554,7 +554,7 @@ async function main() {
       // instead of "unknown command".
       log(c.red('yad roster was removed — yadflow keeps no list of people'));
       log('  A gate needs one approval from anyone with access to the repo; the platform records who approved.');
-      log('  Request reviewers on the PR itself. An existing `roster` in hub.json is left on disk and not read.');
+      log('  Request reviewers on the PR itself. An existing `roster` in hub.json is left on disk and decides nothing.');
       process.exitCode = 1;
       break;
     case 'docs': {

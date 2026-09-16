@@ -153,7 +153,8 @@ writes only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (old
   | `"ledger": "verified"`, `bridge_enabled: true`, `bridge: true` | `"ledger": "local"`, `bridge_enabled: false`, `bridge: false` |
 
   Write no `roster`. Leave any other key already in the file as it is — including a `roster` or
-  `verified_authors` an older release wrote. Nothing reads them; `yad doctor` warns
+  `verified_authors` an older release wrote. Neither decides anything (the roster's name → login pairs
+  only help the first sync recognise older approvals); `yad doctor` warns
   `people:roster-unused` / `people:verified-authors-unused`, and nothing deletes them.
 
   **`ledger` is the one that decides.** `isVerifiedLedger` (`cli/manifest.mjs`) reads it first and

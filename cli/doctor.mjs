@@ -92,15 +92,16 @@ export function projectChecks(checks, root) {
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
-      // E62 removed the roster. A list an older release wrote is kept on disk and never read, so say so
+      // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
+      // name → login pairs only let the first sync recognise older approvals (`legacyLogins`) — so say so
       // — a team that still edits it would otherwise believe it decides something. An empty list (what a
       // solo setup used to write) says nothing about people and is left quiet.
       const r = hub.roster;
       const listed = Array.isArray(r) ? r.length > 0 : (r && typeof r === 'object' ? Object.keys(r).length > 0 : !!r);
       if (listed) {
         check(checks, 'people:roster-unused', 'project', 'warn',
-          `${PROJECT_FILES.hubConfig} has a \`roster\` that nothing reads any more — a gate needs one approval from anyone with access`,
-          'delete the `roster` key when convenient; approvals are recorded under the platform login that gave them');
+          `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval from anyone with access`,
+          'keep it until every review with older approvals is closed (the first sync uses its name → login pairs to recognise them), then delete the `roster` key');
       }
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
       // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave

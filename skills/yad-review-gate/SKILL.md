@@ -171,9 +171,9 @@ via the local user's `gh`/`glab`. For each:
   `"source": "bridge"`; a `COMMENTED`/`CHANGES_REQUESTED`/note → write to
   `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` + `comments.json` (never an approval).
 **Idempotent:** upsert bridge approvals by `(step, approver)` — one record per person. An older record
-that still carries `role`/`domain` and names a person by their old roster name is matched to the same
-review by PR number and submission time, and replaced by one login-named record that keeps its
-fingerprint. Supersede revoked ones
+that still carries `role`/`domain` and names a person by their old roster name is recognised as
+`../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced by one
+login-named record that keeps its fingerprint. Supersede revoked ones
 **while the step is open** (a step already `done` keeps its approvals — they are the record of why it
 passed), and key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated

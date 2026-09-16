@@ -48,10 +48,13 @@ who is logged in and who has access.
   (E68) will suggest reviewers from history; CODEOWNERS is a hint only.
 
 **Legacy data an older release wrote.** A `roster` array (with `login`/`name`/`email`/`roles`, or the
-older `role`) and a `verified_authors` list may still sit in this file. Nothing reads or writes them any
-more, and nothing deletes them. `yad doctor` warns `people:roster-unused` and
-`people:verified-authors-unused` so nobody edits them believing they decide something. Delete the keys
-when convenient.
+older `role`) and a `verified_authors` list may still sit in this file. Nothing writes them, and nothing
+deletes them. `verified_authors` is never read. The roster is read for one thing only: its `name` →
+`login` pairs let the first sync after the upgrade recognise who an older approval names
+(`../../yad-hub-bridge/references/login-roster.md` → "Older records"). `yad doctor` warns
+`people:roster-unused` and `people:verified-authors-unused` so nobody edits them believing they decide
+something. Delete `verified_authors` when convenient; keep `roster` until every review with older
+approvals is closed.
 
 ## Detection
 

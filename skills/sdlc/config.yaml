@@ -336,7 +336,8 @@ product:
   platforms: [github, gitlab]                          # detected from the Product's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
   # No roster since E62: yadflow stores no people. Approvals record the platform login as `approver`. A
-  # `roster` in hub.json or `domain_owner(s)` in repos.json left by an older release is not read.
+  # `roster` in hub.json or `domain_owner(s)` in repos.json left by an older release decides nothing (the
+  # roster's name -> login pairs only let the first sync recognise older approvals).
 
 # Phase 4 (automation) — the SECOND dial made real: the orchestrator (yad-run) reads it and acts. Since
 # E34 the dial is SET, not earned. `yad dial` sets it — a Build lane step's dial in build-state, a Shape

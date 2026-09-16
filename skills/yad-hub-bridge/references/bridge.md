@@ -78,8 +78,9 @@ repository access decides who may approve. A review with no login is not counted
 
 - Key bridge approvals on `(step, approver)` — one record per person. On re-sync, **upsert** — do not
   append a duplicate. An older record that still carries `role`/`domain` (and may name the person by
-  their old roster name) is matched to the same review by PR number and submission time, and replaced by
-  one login-named record that keeps its `artifactHash` and dates.
+  their old roster name) is recognised as `login-roster.md` → "Older records" describes (the roster's
+  name → login pairs first; never by list order), and replaced by one login-named record that keeps its
+  `artifactHash` and dates.
 - **On an OPEN step**, remove any bridge approval whose platform review was dismissed/revoked: the
   platform is the live source of truth while the review is in flight.
 - **On a step already `done`**, the record is only added to or refreshed in place — an approval the

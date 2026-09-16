@@ -10002,7 +10002,8 @@ test('doctor: roster data an older release wrote is named as unused — empty ke
   const roster = r.checks.find((x) => x.id === 'people:roster-unused');
   const owners = r.checks.find((x) => x.id === 'people:domain-owners-unused');
   assert.equal(roster?.status, 'warn');
-  assert.match(roster.message, /nothing reads any more/);
+  assert.match(roster.message, /no longer decides who approves/);
+  assert.match(roster.hint, /keep it until every review with older approvals is closed/);
   assert.equal(owners?.status, 'warn');
   assert.match(owners.message, new RegExp(repos.repos[0].name));
   assert.ok(!r.checks.some((x) => x.id === 'people:roster-unused' && x.status === 'fail'), 'a warning, never a failure');

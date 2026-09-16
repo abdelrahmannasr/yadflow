@@ -35,13 +35,24 @@ author's own approval.
 ## Older records
 
 Records written while the roster existed may carry `role` and `domain`, and may name a person by their
-roster `name` instead of their login. They are left on disk and never read.
+roster `name` instead of their login. The gate never counts a role; the records stay on disk.
 
-On the first sync after the upgrade, such a bridge record is matched to the **same review** by PR number
-and, where the platform gives one (GitHub), submission time. It is replaced by one login-named record
-that keeps its `artifactHash` and dates, so an approval of old content still reads as stale. Where two
-such reviews cannot be told apart (GitLab has no submission time), a fingerprint that is not today's is
-preferred: at worst a real approval reads as stale and is given again.
+On the first sync after the upgrade, `yad gate sync` recognises the person such a bridge record names,
+so it continues that record instead of treating the approval as new:
+1. **With the roster still on disk** — the roster's `name` → `login` pairs make the match exact. This is
+   the ONLY thing the roster is read for; it decides nothing about the gate.
+2. **Without a roster** — a record is continued only when nothing else could be it: the same submission
+   time (GitHub), or exactly one unmatched approval against exactly one unmatched older approver of that
+   PR (GitLab, which has no submission time). People are never matched by list order.
+3. The continued record keeps the fingerprint and dates it carried. When one person's older records
+   disagree, the **stale** one is kept — stale meaning outside the fingerprints the gate accepts for the
+   artifact (`acceptedHashes`), not merely different from today's hash.
+4. **Still ambiguous:** on a closed step nothing is added (its record is history, and a second entry would
+   count one person twice); on an open step the approval is recorded against a stale fingerprint from
+   those older records, so it must be given again on a new review.
+
+Comment rounds use the same name → login pairs, so the first sync does not open a new round for
+unchanged threads. **Keep the roster until every review with older approvals is closed**; delete it after.
 
 ## Who wrote a record (`by`)
 

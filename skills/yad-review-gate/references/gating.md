@@ -138,8 +138,8 @@ regardless of how they were recorded.
   `../yad-hub-bridge/references/login-roster.md`.
 - `sync` is idempotent (upsert by `(step, approver)`, one record per person; key comments on comment
   id) and never touches **manual** approvals. An older bridge record that carries `role`/`domain` is
-  matched to the same review by PR number and submission time, and replaced by one login-named record
-  that keeps its fingerprint. A revoked approval is superseded **while the step is open**; once
+  recognised as `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced
+  by one login-named record that keeps its fingerprint. A revoked approval is superseded **while the step is open**; once
   the step is `done` its approvals are kept as the record of why it passed, and a re-sync only re-binds
   new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").
 - The architecture+contract staleness rule applies to bridge approvals too: a re-lock discards bridge
