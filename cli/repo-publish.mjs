@@ -209,7 +209,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   }
 
   // Only relevant when we are about to push a commit straight to the default branch: warn (never block)
-  // if signing/allowlisting would make the yad-update-guard reject it. Gated on `push` and deferred to
+  // if unsigned commits would make the yad-update-guard reject it. Gated on `push` and deferred to
   // here so it isn't noise on a guard-refused branch or a nothing-to-commit run.
   if (push) preflightGuardReadiness(root);
 

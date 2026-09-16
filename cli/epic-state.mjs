@@ -322,7 +322,7 @@ const LEGACY_FORMS = [
 ];
 
 // Deterministic fingerprint of the whole stories/ set: hash each story file, sort, combine. Lets an
-// edit to any story revoke prior stories-review approvals (the escalated, per-repo gate).
+// edit to any story revoke prior stories-review approvals.
 // `sha` is how one file is fingerprinted — `reviewedSha` for the record, a legacy form for reading.
 export function storiesHash(epicDir, sha = reviewedSha) {
   const dir = path.join(epicDir, 'stories');
@@ -2018,7 +2018,8 @@ export function markInReview(state, step, close = null) {
 // WHAT THIS TABLE IS NOT. The catalogue is the data structure the rest of Wave 2b keys off, and each
 // of those is its own task: which steps an epic walks and in what order is a lifecycle profile (E5,
 // below), seeding a chain from one is `yad epic new` (E17, cli/epic.mjs); how many approvals each step's
-// gate ASKS FOR — reported, never enforced — is `gateRuleFor` at the top of this file (E7), which reads
+// gate ASKS FOR — the base enforced, the risk step reported until E72 — is `gateRuleFor` at the top of
+// this file (E7, E62), which reads
 // the `risk_tags` a seed copies from the row below into the epic's own `state.json`;
 // the fuller step-state model is E38. The `skill` column stays here as the shipped DEFAULT, and a
 // project overrides it in `.sdlc/skills.json` (E6, below) — E51 later slides a per-profile default

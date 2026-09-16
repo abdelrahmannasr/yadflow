@@ -19,7 +19,7 @@ import { sequenceDiff } from './walkthrough.mjs';
 
 const NUDGE_CMD = 'yad review chat';
 
-// Resolve the target code repo: --repo <name> from the registry (platform + path + roles), else cwd.
+// Resolve the target code repo: --repo <name> from the registry (platform + path), else cwd.
 // An explicit --repo that is NOT in the registry is an error — never silently fall through to cwd (that
 // would operate on the wrong repo). Returns { error } in that case for the caller to surface.
 function resolveRepo(root, { repo, dir }) {

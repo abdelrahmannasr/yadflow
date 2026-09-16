@@ -481,7 +481,7 @@ export const wiringFor = (platform) => [
 // Product wiring: CI installed on the PRODUCT itself (dest is the project root — the Product IS the
 // root). Installed only when hub.json has a platform and the ledger is verified. Carries the
 // event-driven gate sync (approvals/change requests/the merge trigger `yad gate ci`) and the
-// verified-commits gate (no unverified commits from unverified users reach merge on the Product).
+// verified-commits gate (no commit without a platform-Verified signature reaches merge on the Product).
 export const PRODUCT_WIRING = {
   common: [
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
