@@ -1,70 +1,79 @@
-# Login roster — schema, resolution, per-repo routing
+# Login attribution — who a record names
 
-The roster lives in `.sdlc/hub.json` (`roster: [...]`) and is the only thing that turns a platform
-**login** into an SDLC **name + role** for the ledger. Schema and the no-tokens rule are documented once
-in `../../yad-connect-repos/references/hub-config.md`; this file covers how the verified ledger *uses* it.
-It is populated/edited any time with the `yad roster` CLI command (see that reference).
+This file used to describe the reviewer roster; E62 removed the roster, and it now describes how records
+are attributed without one.
 
-## Entry
+yadflow keeps **no stored list of people**. The platform already knows who reviewed, and repository
+access already decides who may approve. So every record names the **platform login** that acted.
 
-```json
-{
-  "login": "abdelrahmannasr",
-  "name": "alice",
-  "email": "alice@example.com",
-  "roles": { "hub": ["owner", "reviewer"], "backend": ["domain-owner"] }
-}
-```
+## Approvals and comments
 
-- `login` — the GitHub/GitLab username whose review/approval is being mapped.
-- `name` — the SDLC name written to `approvals.json` / `comments.json` (the same names as `epic.md`
-  `owner` and `repos.json` `domain_owner`). Keep it stable.
-- `email` — the commit email; drives the **committer → login** reverse lookup used to auto-assign PRs.
-- `roles` — a **per-scope map** from a scope (`hub`, or a connected repo name) to the roles held there
-  (`owner` / `reviewer` / `domain-owner`). A person can hold several roles in one scope (owner **and**
-  reviewer **and** domain-owner at once), and several scopes; a repo gets several owners/reviewers/
-  domain-owners by being listed in several people's maps.
+When `yad gate sync` (or CI, `yad gate ci`) reads a review PR/MR:
 
-**Back-compat (read on all three shapes):** the per-scope object above; a flat array
-`"roles": ["owner","reviewer"]` (treated as `hub` roles); and the legacy single `"role": "owner"`
-(a `hub` role). The legacy `repos.json` `domain_owner` field is still honored (see Resolution step 2).
+- An approval becomes one `approvals.json` record per person:
+  ```json
+  { "artifact": "<artifact>", "step": "<step id>", "approver": "<platform login>", "status": "approved",
+    "date": "<YYYY-MM-DD>", "source": "bridge", "artifactHash": "<hash>", "approvedAt": "<time>",
+    "pr": <n>, "engagement": "verified|none" }
+  ```
+  `pr` is present when the PR/MR number is known. There is no `role`, no `domain` and no `unverified`
+  flag.
+- A comment becomes a `comments.json` record:
+  `{ artifact, step, commenter: <platform login>, round, count, date }` — no `role`.
+- The dated side file `reviews/<artifact>--<date>--approved.md` lists
+  `- <approver> — approved <date> (<source>)`. An older record's role is printed only if that record
+  still has one.
 
-## Resolution
+There is no lookup step: the login the platform reports is the name written. The gate counts distinct
+`approver` values, so the same person is one approver however many records name them.
 
-1. **login → name + roles** from the roster. The `hub` roles map straight to records; each touched
-   domain `R` contributes the roles in `roles[R]` (a `domain-owner` role carries `domain: R`).
-2. **Legacy domain-owner fallback:** if the resolved `name` equals a repo's `domain_owner` in
-   `repos.json`, and that repo is a **touched domain** for the step under review, the verified ledger also emits a
-   `domain-owner` approval scoped to that repo (`domain: <repo>`). One person owning several repos yields
-   several `domain-owner` records with different `domain` values — exactly what the gate predicate allows.
-3. **Unmapped login → reviewer (flagged).** A login not in the roster maps to `name: <login>`,
-   `role: reviewer`, with `<!-- unverified login: <login> -->` in the review record. It counts as a
-   reviewer but is **never** auto-promoted to owner/domain-owner, so a stranger can never satisfy the
-   owner/domain-owner requirement. The marker prompts a human to add the login to the roster.
+**Local ledger (no platform).** The `yad-review-gate` skill writes the same shapes by hand. `approver` /
+`commenter` is the reviewer's platform login, or the name they give when there is no platform. The gate
+needs 1 distinct approver who is not the artifact's author.
 
-## Auto-assignee / auto-reviewer on PR/MR open
+## Older records
 
-When a review PR/MR is opened (Product `yad gate open`, or a code-repo `yad open-pr`):
+Records written while the roster existed may carry `role` and `domain`, and may name a person by their
+roster `name` instead of their login. They are left on disk and never read.
 
-- **Assignee = the committer/opener** — resolved from local git identity (`user.email`, then
-  `user.name`) through the roster (`email`/`name`/`login`). On GitHub an unresolved committer still
-  self-assigns via `@me`.
-- **Reviewers = `reviewer` + `domain-owner`** for the touched scope(s) (`hub` plus every touched
-  domain for a Product review; the repo itself for a code PR), **minus the committer** — you do not review
-  your own PR. The artifact **owner/author is recorded, not requested.**
-- Logins are validated against the Product during `yad setup` / `yad doctor` (`gh api users/<login>`,
-  `glab api users?username=<login>`); a miss is flagged `unverified` but never blocks (fail-open).
+On the first sync after the upgrade, such a bridge record is matched to the **same review** by PR number
+and, where the platform gives one (GitHub), submission time. It is replaced by one login-named record
+that keeps its `artifactHash` and dates, so an approval of old content still reads as stale. Where two
+such reviews cannot be told apart (GitLab has no submission time), a fingerprint that is not today's is
+preferred: at worst a real approval reads as stale and is given again.
 
-## Per-repo routing (stories review, and any escalated step)
+## Who wrote a record (`by`)
 
-The stories review needs a `domain-owner` per repo in the **union of every story's `repos`**. On the
-review PR the verified ledger makes this legible and enforceable:
+Skip, defer, closing records and mode changes carry a `by`. It is:
 
-- Add a `domain:<repo>` **label** per touched repo.
-- **Request** each touched repo's `domain_owner` login as a reviewer (resolved via the roster).
-- On `sync`, an approval from login *L* maps to `domain-owner` for repo *R* **iff**
-  `repos.json[R].domain_owner == roster[L].name`. So a domain owner's approval is scoped to exactly the
-  repos they own, and a repo with no approving owner shows up as still-required in the gate report.
+1. the login `gh api user` (GitHub) or `glab api user` (GitLab) reports, else
+2. git `user.name`, else `null`.
 
-This is the same touched-domains computation the gate uses (`../yad-review-gate/references/gating.md`):
-architecture+contract → `epic.repos`; stories → union of story `repos`.
+`YAD_PLATFORM_LOGIN=0` turns the platform lookup off (offline work, tests). The lookup is best effort and
+never blocks the command. Checkpoint and tidy commit subjects show `@<login>` when the login is known,
+else the git name.
+
+## Opening a PR/MR
+
+`yad gate open` (review PRs) and `yad open-pr` (task PRs):
+
+- **Assignee** = the login `gh`/`glab` reports as logged in. On GitHub it falls back to `@me`.
+- **Reviewers: none are requested.** The command prints
+  `no reviewers were requested — ask them on the PR itself`. E68 will later suggest reviewers from
+  history.
+- **Labels:** a `domain:<repo>` label per touched domain is still applied — for `stories-review` the
+  union of every story's `repos`, for a step with a risk tag the epic's `repos`. The labels are a hint
+  for whom to ask; they add no approvals.
+
+## Legacy data `yad doctor` reports
+
+Nothing reads these any more. `yad doctor` warns so the team can delete them:
+
+| Warning | What is left on disk |
+|---|---|
+| `people:roster-unused` | a non-empty `roster` in `.sdlc/hub.json` |
+| `people:domain-owners-unused` | a repo in `.sdlc/repos.json` that lists `domain_owner` / `domain_owners` |
+| `people:verified-authors-unused` | a `verified_authors` list in `.sdlc/hub.json`, or a `.sdlc/verified-authors` file in the Product or a connected repo |
+
+`yad roster` is removed (typing it prints a notice and exits 1), and `yad setup` collects no reviewers,
+roles, repo owners or commit emails. The verified-commits gate checks platform-Verified signatures only.

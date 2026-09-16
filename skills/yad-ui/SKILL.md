@@ -9,7 +9,7 @@ description: 'Shape step 5 of the gated SDLC. With the ux-designer, author ui-de
 architecture **and**, when a design tool is connected, the **actual feature design** — the mobile
 screens and/or web pages — inside that tool (e.g. Figma), linked back from the artifacts. This is a
 **Shape step**: human-authored with AI assist, **never auto-advances**. When the UI is drafted, control
-passes to `yad-review-gate` (base rule: owner + 1 reviewer).
+passes to `yad-review-gate` (base rule: 1 approver who is not the author).
 
 UI work is shaped by **Impeccable**, invoked as **harness slash-commands** (not a subprocess CLI) per
 the Phase 0 deviation. If Impeccable is not installed, the `ux-designer` lens authors the same outputs
@@ -213,7 +213,7 @@ through the gate.
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, the connected design
 tool and what it produced (e.g. "Figma — 4 screens generated", the file URL + `design-links.json` path,
 or "no design tool — markdown-only"), and that the next action is **review** via `yad-review-gate` (base
-rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review PR on the
+rule: 1 approver who is not the author). **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review PR on the
 Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
 the ledger; otherwise the review is recorded local.
 

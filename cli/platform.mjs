@@ -530,7 +530,7 @@ export function createPr(platform, opts = {}) {
   let mentioned = []; let dropped = [];
   if (rest.length && iid) {
     const ats = rest.map((m) => `@${m}`).join(' ');
-    const note = run('glab', ['mr', 'note', iid, '-m', `Review requested (owner + reviewer rule): ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
+    const note = run('glab', ['mr', 'note', iid, '-m', `Review requested: ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
     if (note.ok) mentioned = rest; else dropped = rest;
   } else if (rest.length) {
     dropped = rest; // could not parse the IID to post the note

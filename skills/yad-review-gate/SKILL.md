@@ -1,6 +1,6 @@
 ---
 name: yad-review-gate
-description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the owner + 1 reviewer rule (escalating to domain owners on contract/auth/payments), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
+description: 'The reusable team review + approve gate for the SDLC. Shares an authored artifact for review, records reviewer comments and approvals as files, enforces the approver count (1 distinct approver; contract/auth/payments raise the full count, which is advisory for now), and advances the epic state ONLY when approval is recorded. Use when the user says "review the analysis/epic/architecture/UI/stories/test-cases", "comment", "approve", or "advance the gate".'
 ---
 
 # SDLC — Team Review Gate (build plan §3 piece 2, §4, §5)
@@ -8,8 +8,8 @@ description: 'The reusable team review + approve gate for the SDLC. Shares an au
 **Goal:** One reusable step type that turns any authored artifact into a gated, human-approved
 review. Every `review+approve` step in the workflow (the optional analysis, epic, architecture+contract,
 UI, stories, test-cases) uses this exact gate. **No step advances until its review is approved** and
-recorded as a file. The `analysis-review`, `epic`/`ui-design`, and `test-cases` reviews use the **base**
-rule (owner + 1 reviewer); escalation applies only where `risk_tags` or per-repo routing call for it.
+recorded as a file. Every review uses the same **count** rule: distinct approvers, base 1. A step's
+`risk_tags` raise the full count, and that raise is advisory until the capacity cap (E72) lands.
 
 This gate is **swappable and file-driven**: it talks only through files. A Shape step advances only on a
 human act — recording an approval and `advance`, or (with a verified ledger) **merging the approved,
@@ -28,8 +28,8 @@ trigger is a parameter, not a hardcoded human.
 - `epic`: the `EP-<slug>` to operate on.
 - `artifact`: the file under the epic being reviewed (e.g. `epic.md`).
 - `action`: one of `open` | `comment` | `approve` | `sync` | `advance` (default: `open`).
-- For `comment` / `approve`: the reviewer name and role (`owner` | `reviewer` | `domain-owner`),
-  and for domain owners the `domain` (repo/area). Ask if not provided.
+- For `comment` / `approve`: the reviewer's platform login (or the name they give, when there is no
+  platform). No role and no domain. Ask if not provided.
 - `sync` needs no reviewer input — it reads the platform PR/MR review state (via `yad-hub-bridge`).
 
 ## On Activation
@@ -37,29 +37,23 @@ trigger is a parameter, not a hardcoded human.
 ### Step 1 — Load state
 Read `.sdlc/state.json`. Find the `review+approve` step whose `artifact` matches the input (or the
 step named `currentStep` if it is a review step). Read `.sdlc/approvals.json`. Read `epic.md` for the
-epic's `repos` (the **touched domains**). Determine the **reviewer rule** for this step:
-- **Base rule:** `owner + 1 reviewer` — at least one `owner` approval AND at least one distinct
-  non-owner `reviewer` approval.
-- **The count, reported beside the rules below but not yet holding the gate:** the step asks for
-  `base + risk step` **distinct approvers** — base 1, plus 2 when the step carries `contract` or 1 when
-  it carries `auth`/`payments` (the highest tag, never the sum). It names no role, so one person holding
-  two roles is one approver. It is ADVISORY until the capacity cap ships (E72): the roadmap's rule caps
-  it at the number of active people, and an uncapped count would deadlock a small team on a contract
-  gate. So report the shortfall; never block on it. `yad gate status` and `yad gate sync` print the
+epic's `repos` (the **touched domains**). Determine the **count** for this step. It counts people, not
+roles — there are no roles, and yadflow keeps no list of people:
+- **Base (enforced):** at least **1 distinct approver**. On a platform that person cannot be the author
+  (you cannot approve your own PR). On a local ledger nothing checks that, so do not record the
+  author's own approval.
+- **Full count (advisory):** `needed = base 1 + risk step`. The risk step comes from the step's
+  `risk_tags`: `contract` +2, `auth`/`payments` +1 (the "high" tier). Take the highest tag, never the
+  sum. The risk step is ADVISORY until the capacity cap ships (E72): the roadmap's rule caps the count
+  at the number of active people, and an uncapped count would deadlock a small team on a contract gate.
+  So report the shortfall (`short`); never block on it. `yad gate status` and `yad gate sync` print the
   arithmetic — read it from there rather than recomputing it.
-- **Escalation option (risk-driven):** if the step's `risk_tags` intersect `{contract, auth,
-  payments}`, ALSO require at least one `domain-owner` approval **per touched domain** (build plan §4,
-  §5). For the **architecture+contract** review (`risk_tags: ["contract"]`), the touched domains are
-  the epic's `repos` — each repo's owner must sign off on the shared surface, so it escalates by
-  default.
-- **Per-repo routing option (stories):** for the **stories** review, the relevant domain engineer
-  reviews the stories touching their repo: treat each repo's engineer as a `domain-owner` for that
-  repo's stories. The touched domains are the **union of every story's `repos`** under `stories/`
-  (build plan §4 step 8). The `domain` field on each approval is the repo name.
+- **Touched domains** only name and label the review; they add no approvals. For a step with a risk
+  tag (the **architecture+contract** review) they are the epic's `repos`. For the **stories** review they
+  are the **union of every story's `repos`** under `stories/`. `stories-review` is an ordinary count gate.
 
-Escalation and per-repo routing are **options of this one gate**, selected by `risk_tags` and the
-touched `repos` — never a forked or copied gate. The count is not an option either: it is computed for
-every step and reported every time, and it decides nothing until E72 caps it.
+This is **one gate** for every step — never a forked or copied gate. The tags change the full count
+and nothing else.
 
 ### Step 2 — Dispatch on `action`
 
@@ -69,12 +63,13 @@ every step and reported every time, and it decides nothing until E72 caps it.
 > `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or `epics/*/reviews/*.md`, local `yad gate
 > sync` is advisory, and `yad gate ci --merged` writes the whole transition when the review PR merges.
 > So every "set / append / write" instruction below is the **local, or a platform with no
-> gate-sync CI** path. In verified mode do the human-facing half — present the artifact, route the
-> required reviewers, help the owner address comments — and let the platform PR/MR carry the review
+> gate-sync CI** path. In verified mode do the human-facing half — present the artifact, say how many
+> approvers the step needs, help the owner address comments — and let the platform PR/MR carry the review
 > state; the approvals, comments, review records and the advance all land through CI at merge.
 
-**`open`** — Present the artifact for review. Summarise what changed, list the required reviewers per
-the rule above, and tell reviewers how to comment/approve. Then make the transition with the engine:
+**`open`** — Present the artifact for review. Summarise what changed, say how many approvers the step
+needs (base, and the full count from its risk tags), and tell reviewers how to comment/approve. Then
+make the transition with the engine:
 
 ```bash
 yad gate open <epic> <artifact>
@@ -101,7 +96,9 @@ Do not advance.
 If `.sdlc/hub.json` has a non-null `platform` and `ledger: "verified"` (or, before `yad migrate`, `bridge_enabled: true` / legacy `bridge: true` —
 `.sdlc/hub.json` is the only source the CLI reads, see `isVerifiedLedger` in `cli/manifest.mjs`), and `gh`/`glab`
 is authenticated, **also open a review PR/MR on the Product** by invoking `yad-hub-bridge action: open`
-(epic + artifact), and report the URL + required reviewers. **CI records the PR** in
+(epic + artifact), and report the URL. The PR requests **no reviewers**; the command prints
+`no reviewers were requested — ask them on the PR itself`, so tell the author to ask people on the PR.
+**CI records the PR** in
 `epics/<epic>/.sdlc/hub-prs.json` (`{step, artifact, platform, number, url, branch, lastSyncedAt}`) —
 write that file yourself only on the local path. Otherwise (no platform / disabled / no CLI)
 proceed **local** exactly as before — no error. Opening the PR records no approvals and never
@@ -113,7 +110,7 @@ advances.
 ```markdown
 # Review comments — <artifact> — <YYYY-MM-DD>
 
-## <reviewer> (<role>)
+## <reviewer>
 - <comment>
 - <comment>
 ```
@@ -122,8 +119,9 @@ Also append a **machine-readable** participation record to `.sdlc/comments.json`
 absent — the markdown stays the human-readable record, this makes commenter names queryable, the
 counterpart to `approvals.json`):
 ```json
-{ "artifact": "<artifact>", "step": "<step id>", "commenter": "<name>", "role": "<owner|reviewer|domain-owner>", "domain": "<optional>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
+{ "artifact": "<artifact>", "step": "<step id>", "commenter": "<platform login, or the name given with no platform>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
 ```
+Write no `role` or `domain`. Older records may carry them; nothing reads them.
 `round` increments each comment→address cycle for the artifact; upsert by `(step, commenter, round)`.
 
 Then help the **owner address the comments** using the agent lens listed for this step
@@ -133,29 +131,29 @@ Repeat comment→address rounds until reviewers are satisfied. **Commenting neve
 
 **`approve`** — Record an approval. Append to `.sdlc/approvals.json`:
 ```json
-{ "artifact": "<artifact>", "step": "<step id>", "approver": "<name>", "role": "<owner|reviewer|domain-owner>", "domain": "<optional>", "status": "approved", "date": "<YYYY-MM-DD>", "engagement": "<verified|none>" }
+{ "artifact": "<artifact>", "step": "<step id>", "approver": "<platform login, or the name given with no platform>", "status": "approved", "date": "<YYYY-MM-DD>", "engagement": "<verified|none>" }
 ```
+One record per person. Write no `role` or `domain`. The approver must not be the artifact's author.
 `engagement` records whether the approval came through the [Review Companion](../yad-review-companion/SKILL.md)
 (a real trailer/cards/chat session = `verified`) or as a bare click (`none`). It is soft by default
 (both count; a bare approve draws a friendly nudge) and only gates when `hub.review.requireEngagement`
 is on — see `references/gating.md`. The signal is gameable by design ("visible, not impossible").
-Also write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named roster** with three
+Also write/refresh `reviews/<artifact-base>--<YYYY-MM-DD>--approved.md` as a **named record** with three
 sections, so every participant is attributable in one place:
 
 ```markdown
 # Approval record — <artifact> — <YYYY-MM-DD>
 
-Reviewer rule in force: **<base | escalated | per-repo>** (<why — e.g. risk_tags / touched repos>).
-Approver count (advisory, not enforced): **<have> of <needed>** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>[, short <N> — recorded here, never blocking].
+Count: **<have> distinct approver(s)** — <the sum, e.g. `3 approvers = base 1 + contract risk 2`>; base 1 enforced[, risk step advisory, short <N> — recorded here, never blocking].
 
 ## Approved by
-- <name> — <role>[ (<domain>)] — approved <date>
+- <approver> — approved <date>[ (<source>)]
 
 ## Reviewed / commented by (participation, from comments.json)
-- <name> — <role> — <n> comment(s) across <r> round(s)
+- <commenter> — <n> comment(s) across <r> round(s)
 
 ## Still required to pass the gate
-- <missing owner/reviewer/domain-owner, or "none">
+- <"1 approval(s)", or "none">
 
 Gate status: **<PASSED | BLOCKED>** — <reason>.
 ```
@@ -167,18 +165,20 @@ a separate, explicit check.
 then re-evaluate the rule (Step 3). Read the PR for this step from `.sdlc/hub-prs.json` and use
 `yad-hub-bridge`'s read recipes (`../yad-hub-bridge/references/bridge.md`) to fetch reviews + comments
 via the local user's `gh`/`glab`. For each:
-- map the platform `login` → SDLC `name` + `role` via `.sdlc/hub.json`'s roster (a roster `name` equal
-  to a repo's `domain_owner` in `repos.json` becomes that repo's `domain-owner` for a touched domain;
-  an unmapped login is a plain `reviewer`, flagged, never promoted);
+- the platform `login` is the name written — `approver` / `commenter` is the login itself. There is no
+  lookup and no role (see `../yad-hub-bridge/references/login-roster.md`);
 - an `APPROVED` review / MR approval → append an `approved` record to `approvals.json` tagged
   `"source": "bridge"`; a `COMMENTED`/`CHANGES_REQUESTED`/note → write to
   `reviews/<artifact-base>--<YYYY-MM-DD>--comments.md` + `comments.json` (never an approval).
-**Idempotent:** upsert bridge approvals by `(step, approver, role, domain)`, supersede revoked ones
+**Idempotent:** upsert bridge approvals by `(step, approver)` — one record per person. An older record
+that still carries `role`/`domain` and names a person by their old roster name is matched to the same
+review by PR number and submission time, and replaced by one login-named record that keeps its
+fingerprint. Supersede revoked ones
 **while the step is open** (a step already `done` keeps its approvals — they are the record of why it
 passed), and key comments on the platform comment id (re-running `sync` does not duplicate). **Manual approvals (no
 `source` tag) are never touched.** For the architecture+contract step, discard bridge approvals dated
 before a new contract lock (re-lock invalidates platform approvals too). Then refresh the `approved.md`
-roster, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never hand-write either PR-ledger file.** It lives under two names while the rename settles — `product-prs.json` and `hub-prs.json` — and the engine writes both together. Writing one leaves the pair disagreeing, and `yad doctor` will report it. Use `yad gate` / `yad review`, which keep them in step.  Under the PR-driven CLI (`yad
+record, set the PR ledger's `lastSyncedAt`, and **re-evaluate Step 3**. **Never hand-write either PR-ledger file.** It lives under two names while the rename settles — `product-prs.json` and `hub-prs.json` — and the engine writes both together. Writing one leaves the pair disagreeing, and `yad doctor` will report it. Use `yad gate` / `yad review`, which keep them in step.  Under the PR-driven CLI (`yad
 gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-resolved, approved PR
 (the merge is the human act); otherwise it records state and holds the step `in_review`.
 
@@ -186,13 +186,14 @@ gate sync`), `sync` advances the step when Step 3 passes on a **merged**, fully-
 
 ### Step 3 — Gate predicate (the only path that advances)
 The step may advance **iff ALL hold**:
-1. the advance dial is `human` (`automation: human_approve` — it always is for Shape steps) and the required approvals exist:
-   ≥1 `owner` AND ≥`review_gate.default_reviewers` (1) distinct non-owner `reviewer`, AND — if the
-   step is escalated — ≥1 `domain-owner` for each touched domain. **The approver count (Step 1) is NOT
-   a condition here** — it is advisory until the capacity cap ships (E72), so a step that is short of it
-   still advances when the three role conditions hold. Report the shortfall in the record; do not hold
-   the step on it. This matches `gatePredicate`, which returns the count as `gateRule`/`have`/`short`
-   and never puts it in `missing`.
+1. the advance dial is `human` (`automation: human_approve` — it always is for Shape steps) and the base
+   is met: **≥1 distinct approver** (counted by `approver`, so two records from one person are one).
+   If it is not, the missing line is `1 approval(s)`. **The risk step (Step 1) is NOT a condition
+   here** — it is advisory until the capacity cap ships (E72), so a step that is short of the full count
+   still advances when the base holds. Report the shortfall in the record; do not hold the step on it.
+   This matches `gatePredicate`, which returns `rule: "count"` and the count as `gateRule`/`have`/`short`,
+   and never puts the risk step in `missing`. With `hub.review.requireEngagement` on, only `verified`
+   approvals count.
 2. The artifact has not changed since the latest approval round (no newer authored edit than the
    newest `approved` record). If it changed, approvals are stale → return to `comment`. For the
    **architecture+contract** review, also recompute the contract-surface hash (see
@@ -270,7 +271,7 @@ instead — see `yad-checks`). The single
 exception is an epic's **seed** — no CI path can create a ledger, so a brand-new epic's `.sdlc/` rides
 its **first** review PR/MR, cut from the authoring branch (creation, not mutation, #162).
 
-Under that CLI the gate **advances on merge**: a review PR/MR whose reviewer rule is satisfied, whose
+Under that CLI the gate **advances on merge**: a review PR/MR whose base count is met, whose
 comment threads are **all resolved**, and which has been **merged** auto-marks the step `done` and
 unblocks the next step. (Until those three hold, the step stays `in_review`.)
 
@@ -305,4 +306,4 @@ write path.
 
 ## Reference
 - Gating details and worked example: `references/gating.md`.
-- The platform PR/MR bridge (`open`/`sync` mechanics, read recipes, roster): `../yad-hub-bridge/SKILL.md`.
+- The platform PR/MR bridge (`open`/`sync` mechanics, read recipes, login attribution): `../yad-hub-bridge/SKILL.md`.

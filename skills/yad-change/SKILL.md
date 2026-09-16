@@ -254,7 +254,7 @@ again. Unbound, that command names `yad-architecture` for a contract-surface cha
   `inherited: true` + a `boundHash`; the pointer-lock carries the owner's hash verbatim. The gate never
   re-reviews them, and only work written AND approved upstream can be carried.
 - **Contract-surface ⇒ re-author architecture.** Omitting `architecture` from `inherits` is the ONLY way
-  to change the surface; it re-locks (new hash) and routes through the escalated architecture review —
+  to change the surface; it re-locks (new hash) and routes through the architecture review again (its `contract` tag raises the count) —
   the same mechanism as the Build `Contract-Change` route, unified.
 - **A hotfix opens debt, never waives it.** Ship-first is allowed once; the thread freezes for new work
   until the debt is paid.

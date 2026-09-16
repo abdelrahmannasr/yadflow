@@ -1,6 +1,6 @@
 ---
 name: yad-checks
-description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unverified commits from unverified users — platform-Verified signature + roster-allowlisted author, on the Product and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
+description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unsigned commits — every commit carries a platform-Verified signature; write access to the repo decides who can author, on the Product and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
 # SDLC — Check Gates (Build Step C)
@@ -33,11 +33,11 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    gate-sync) only run the `yad` CLI and keep their own pinned Node; the variable does not reach them.
    The CI job sets `YAD_TEST_MAX_WORKERS` (default `2`); the gate caps jest/vitest test concurrency at
    that and is a no-op for other runners (see `references/check-gates.md`).
-4. **verified-commits** — no unverified commits from unverified users: every commit in the range must
-   carry a signature the platform marks **Verified** AND be authored by a known identity
-   (`.sdlc/verified-authors`, generated from the Product roster's `email` fields). Enforced on the
-   **Product and every connected repo**; runs on PRs/MRs only, so the gate-sync bot's direct
-   ledger pushes are unaffected (never replace it with a default-branch push rule — see
+4. **verified-commits** — no unsigned commits: every commit in the range must carry a signature the
+   platform marks **Verified**. There is no author allowlist (E62): write access to the repo decides who
+   can author. An old `.sdlc/verified-authors` file is no longer read, and the gate prints a note when it
+   finds one. Enforced on the **Product and every connected repo**; runs on PRs/MRs only, so the
+   gate-sync bot's direct ledger pushes are unaffected (never replace it with a default-branch push rule — see
    `references/check-gates.md` §4).
 5. **lineage-check** (Phase 6) — the change's owning epic is a valid node in a **feature thread**: a
    `change`/`defect`/`hotfix` epic must thread to a real `parent`. Builds on spec-link's story→epic
@@ -78,8 +78,8 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     default branch), so an epic whose `.sdlc/state.json` is absent from the base ref may be created by
     a human on its first review PR/MR — **creation, not mutation** (#162). Once the ledger is on the
     default branch the guard is absolute again. Runs in `yad-hub-checks`
-    alongside `verified-commits` (which waives the allowlist for the bot but still requires its
-    signature). See `yad-hub-bridge`.
+    alongside `verified-commits` (which requires the bot's signature like any other commit's). See
+    `yad-hub-bridge`.
   - `templates/hooks/ledger-guard.sh` → **Product-only** agent guardrail, active **only in verified mode**
     (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the

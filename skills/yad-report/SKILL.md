@@ -1,6 +1,6 @@
 ---
 name: yad-report
-description: 'Self issue reporter for the yad CLI. When a yadflow flow breaks, file a well-formed bug in the upstream yadflow repo (abdelrahmannasr/yadflow) with auto-scrubbed diagnostics attached, so recurring issues surface to the maintainers. Drives the `yad report` command: it captures ONLY a privacy-safe allowlist (yadflow/node/os version, tool present+authenticated booleans, Product platform enum, the YadError code/hint, a path-scrubbed error message, and the failing command + flag NAMES) — never absolute paths, hostnames, git URLs, repo names, roster logins/emails, epic/story IDs, branch names, or flag values. It searches open issues first to avoid duplicates, shows the exact payload, and asks before posting anything to the public repo. Files directly via an authenticated gh/glab, or falls back to a prefilled issues/new URL. Also offered automatically after an unexpected failure (interactive only; YAD_NO_REPORT=1 or SDLC_NONINTERACTIVE disables it). Use when the user says "yad report", "report this bug", "file an issue", or "something broke in the flow".'
+description: 'Self issue reporter for the yad CLI. When a yadflow flow breaks, file a well-formed bug in the upstream yadflow repo (abdelrahmannasr/yadflow) with auto-scrubbed diagnostics attached, so recurring issues surface to the maintainers. Drives the `yad report` command: it captures ONLY a privacy-safe allowlist (yadflow/node/os version, tool present+authenticated booleans, Product platform enum, the YadError code/hint, a path-scrubbed error message, and the failing command + flag NAMES) — never absolute paths, hostnames, git URLs, repo names, logins/emails, epic/story IDs, branch names, or flag values. It searches open issues first to avoid duplicates, shows the exact payload, and asks before posting anything to the public repo. Files directly via an authenticated gh/glab, or falls back to a prefilled issues/new URL. Also offered automatically after an unexpected failure (interactive only; YAD_NO_REPORT=1 or SDLC_NONINTERACTIVE disables it). Use when the user says "yad report", "report this bug", "file an issue", or "something broke in the flow".'
 ---
 
 # yad — Self Issue Reporter
@@ -19,11 +19,11 @@ hand-craft issues.
 Issues post to a **public** repo, so the reporter is **allowlist-first**. It sends ONLY:
 - `yadflow` version, Node version, OS platform;
 - tool state as booleans (`git` present; `gh` present + authenticated);
-- the Product **platform enum** (`github` / `gitlab` / `local`) — never the URL, host, or roster;
+- the Product **platform enum** (`github` / `gitlab` / `local`) — never the URL, host, or any login;
 - the `YadError` **code** + **hint**, and a **path-scrubbed** error message;
 - the failing **command name and flag names only** — never flag values.
 
-It **never** sends absolute paths, cwd, hostnames, git remote URLs, repo names/paths, roster logins
+It **never** sends absolute paths, cwd, hostnames, git remote URLs, repo names/paths, logins
 or emails, epic/story IDs or titles, branch names, `-m` free text, or the raw `yad doctor --json`
 check list. Free-text fields (the summary, the error message) are scrubbed of paths / URLs / emails.
 

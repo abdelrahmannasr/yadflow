@@ -27,11 +27,8 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
 
 ## Inputs
 
-- `action` — `connect` | `refresh` | `list` | `disconnect` | `detect-hub` | `roster` (default `connect`).
+- `action` — `connect` | `refresh` | `list` | `disconnect` | `detect-hub` (default `connect`).
 - `repo` — the repo's short name (the key used in stories' `repos:` tag, e.g. `backend`).
-- `login`, `name`, `email`, `roles` — for `roster` (map login → name + commit email + the per-scope
-  `roles` map, e.g. `roles: hub=owner,reviewer backend=domain-owner`). Validate the login against the
-  Product (`gh api users/<login>` / `glab api users?username=`); a miss is flagged `unverified` (warn-only).
 - `path` — local path to the code repo (relative to `{project-root}` or absolute). For local repos.
   It must resolve inside the **workspace** — the project root's parent — so the standard layout, where
   the code repos sit **beside** the Product rather than under it, registers as `../backend`:
@@ -52,8 +49,9 @@ epic's approvals. It only writes the project-wide registry and the per-repo cont
   directly in `$HOME` — with the Product at `~/product` the workspace becomes `~` and every home-dir
   sibling turns into a registrable repo. The workspace directory itself (`..`) is never registrable.
 - `git_url` — optional remote (SSH or HTTPS; GitHub or GitLab). Used when the repo is not yet on disk.
-- `domain_owners` — the engineer(s) who own this repo's domain (a repo may have several; drives per-repo
-  review routing). Each name is also written into that person's `roles[<repo>]` map in `hub.json`.
+
+yadflow keeps **no list of people** (E62): no roster, no roles, no repo owners, no commit emails. Do not
+ask for them and do not write them.
 
 ## On Activation
 
@@ -103,8 +101,6 @@ HEAD sha as `syncedHead` (this drives staleness):
       "path": "<path rel. to project-root>",
       "git_url": "<url or null>",
       "platform": "github|gitlab|null",
-      "domain_owners": ["<owner>", "…"],
-      "domain_owner": "<domain_owners[0] — legacy mirror>",
       "default_branch": "<branch>",
       "connectedAt": "<YYYY-MM-DD>",
       "lastSyncedAt": "<YYYY-MM-DD>",
@@ -117,7 +113,9 @@ HEAD sha as `syncedHead` (this drives staleness):
 }
 ```
 `connect` is **idempotent** — re-running it for an existing repo refreshes its entry in place. Adding a
-new repo later is the same `connect` action.
+new repo later is the same `connect` action. Write no `domain_owner`/`domain_owners`; an entry an older
+release wrote with them is left as it is (nothing reads them, and `yad doctor` warns
+`people:domain-owners-unused`).
 
 ### Step 5 — Report
 Report the connected repo, its `platform`, the pack + code-map paths, the secret-scan result, and that
@@ -138,11 +136,11 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 - **`disconnect`** — remove the repo from the registry and delete its cache dir. Leaves the **code repo
   itself untouched**.
 
-## Product detection + reviewer roster (the Shape review bridge)
+## Product detection (the Shape review bridge)
 
-The Product is itself a git repo on a platform. These actions record that so the Shape review/comment/
-approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-hub-bridge`). They
-write only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
+The Product is itself a git repo on a platform. This action records that so the Shape review/comment/
+approval cycle can run through a real PR/MR on the Product (`yad-review-gate` + `yad-hub-bridge`). It
+writes only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (older projects: `hub.config`)) — never an epic's state/approvals.
 
 - **`detect-hub`** — detect the Product's own platform and upsert `.sdlc/hub.json`. Run
   `git remote get-url origin` **on the Product** and read the host with the SAME logic Step 1 uses for code
@@ -154,7 +152,9 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (olde
   |---|---|
   | `"ledger": "verified"`, `bridge_enabled: true`, `bridge: true` | `"ledger": "local"`, `bridge_enabled: false`, `bridge: false` |
 
-  (Preserve an existing roster.)
+  Write no `roster`. Leave any other key already in the file as it is — including a `roster` or
+  `verified_authors` an older release wrote. Nothing reads them; `yad doctor` warns
+  `people:roster-unused` / `people:verified-authors-unused`, and nothing deletes them.
 
   **`ledger` is the one that decides.** `isVerifiedLedger` (`cli/manifest.mjs`) reads it first and
   falls back to the booleans only when it is absent — so on a project that has already run
@@ -170,17 +170,10 @@ write only `{project-root}/.sdlc/hub.json` (`config.yaml` `product.config` (olde
   platform-less Product verified creates a state no CLI path can produce and the gates read
   differently (#186).
   Auth is the local user's own `gh`/`glab`/git; **store no tokens**. Idempotent — safe to re-run.
-- **`roster`** — set one roster entry mapping a platform `login` → SDLC `name` + `email` + a per-scope
-  `roles` map (`roles: { hub: ["owner","reviewer"], <repo>: ["domain-owner", …] }`). Upsert by `login`;
-  a person may hold several roles across several scopes, and a repo several people per role. Validate the
-  `login` against the Product (warn-only; flag `unverified` on a miss). `domain-owner` is written into
-  `roles[<repo>]` (and still **derived** as a fallback when a roster `name` equals a repo's
-  `domain_owner`/`domain_owners` in `repos.json` — see `references/hub-config.md`). An unmapped login
-  degrades to a plain `reviewer`, never auto-promoted to owner/domain-owner.
-  **The deterministic half is the `yad roster` CLI command** — runnable any time, not just at setup:
-  `yad roster list`; `yad roster add <login>` (upsert, then a repo-driven walk that asks for each
-  connected repo's role); `yad roster grant|revoke <name> <repo> <role>`; `yad roster remove <login>`.
-  A `domain-owner` grant/revoke keeps `repos.json` `domain_owners` in sync so the gate never drifts.
+
+There is **no roster action** (removed in E62). `yad roster` is gone too: typing it prints a notice and
+exits 1. A team gate needs 1 approval from someone other than the author, and each approval records the
+platform login that gave it. The platform, not a stored list, decides who can approve.
 
 If the Product has no remote (`platform: null`) or the verified ledger is disabled, the Shape gate runs
 local with no error — the verified ledger is purely additive.
@@ -207,8 +200,8 @@ it does not silently re-pack. Refreshing the cache is a human decision. Document
 
 ## Reference
 - Registry schema + freshness rule: `references/repos-registry.md`.
-- Product config + reviewer roster (the review bridge): `references/hub-config.md`.
+- Product config (the review bridge): `references/hub-config.md`.
 - Repomix command, secret-scan, degrade path, the code-map prompt, and live on-demand:
   `references/code-context.md`.
 - The repomix discipline this reuses (one-feature-at-a-time variant): `../yad-backfill/references/backfill.md`.
-- Repos convention + per-repo review routing: `../yad-stories/references/story-schema.md`.
+- Repos convention: `../yad-stories/references/story-schema.md`.

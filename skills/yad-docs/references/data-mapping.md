@@ -11,7 +11,7 @@ shell renders whatever these export, as long as it satisfies `src/data/types.ts`
 |----------------|---------|-------------------|-----------|
 | `components.ts` | `COMPONENTS: SystemComponent[]` | `architecture.md` system components + `code-map.md` module/endpoint names | each durable component → `{ id, label, icon, color, position, description }`; canvas `position` laid out deterministically; real module names from the code-map enrich `label`/`description`. |
 | `paths.ts` | `FLOW_PATHS: FlowPath[]` | `stories/*.md` (one FlowPath each) + `architecture.md` flows | each story → one `FlowPath` (`id`, `label`, `icon`, `color`, `category`, `steps[]`); each acceptance criterion → a `FlowStep` whose `messages: AnimatedMessage[]` animate the request/response/event/job and whose `sideEffects` record jobs/notifications/pubsub. UI states (from `ui-design.md`) annotate each step. |
-| `roles.ts` | `ROLES: RoleConfig[]` | Product roster (`.sdlc/hub.json`) + the yadflow lens set + stories' `repos:` tags | each stakeholder lens → `{ slug, label, shortLabel, icon, color, description, sectionIds, relevantPathIds }` (role derivation below). |
+| `roles.ts` | `ROLES: RoleConfig[]` | the yadflow lens set + which artifacts the epic has + stories' `repos:` tags | each stakeholder lens → `{ slug, label, shortLabel, icon, color, description, sectionIds, relevantPathIds }` (role derivation below). |
 | `docSections.ts` | `DOC_SECTIONS: DocSectionConfig[]` | `epic.md`, `architecture.md`, `contract.md`, `ui-design.md`, `test-cases.md` | the ordered doc-section registry (`{ id, title, icon, iconColor, component }`); each section id is referenced from `roles.ts`. |
 | `referenceData.ts` | the reference tables/payloads the doc-section components render | `contract.md` CONTRACT-SURFACE (authoritative) + `architecture.md` + `test-cases.md` | API reference rows, the status machine, the DB schema, feature flags, error codes, the test plan — the structured data behind the doc sections. |
 
@@ -52,13 +52,15 @@ contract is rendered exactly as locked — the docs are a *view* of the locked s
 
 ## Role derivation (`roles.ts`)
 
-A stakeholder role is generated for each lens that is **both** present in the Product roster **and** relevant
-to this epic:
+A stakeholder role is generated for each lens that is **relevant to this epic** — that is, the epic's
+artifacts give the lens something to read. yadflow keeps no list of people, so no people or roles are
+read from `.sdlc/hub.json`.
 
 1. Start from the **yadflow lens set**: `analyst`, `pm`, `architect`, `ux`, `dev`, `tester`, `reviewer`,
    `engineer`.
-2. Intersect with the **Product roster** roles (`.sdlc/hub.json` `roster[].roles`) — only emit lenses the
-   team actually has (an unmapped lens is dropped, never invented).
+2. Keep only the lenses the epic's artifacts support — for example `analyst` needs `analysis.md`, `ux`
+   needs `ui-design.md`, `tester` needs `test-cases.md`, and `dev`/`engineer` need at least one story
+   with a `repos:` tag. A lens with nothing to read is dropped, never invented.
 3. For the `dev`/`engineer` lenses, **fan out per `repos:` tag** present across the epic's stories (e.g.
    a `backend` dev role and a `mobile` dev role), so each repo audience gets its own integration view —
    mirroring the reference site's per-app dev roles.

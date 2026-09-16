@@ -62,10 +62,11 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 
 ## Interaction with the review gate
 
-- The `architecture-review` step carries `risk_tags: ["contract"]`, so `yad-review-gate` **escalates**
-  it: owner + 1 reviewer **plus** one `domain-owner` approval per repo in the epic's `repos`. The same tag
-  sets the step's approver count — 3 distinct people (base 1 + contract risk 2) — which is reported
-  beside the rule and does not hold the gate until the capacity cap ships.
+- The `architecture-review` step carries `risk_tags: ["contract"]`. The tag sets the step's approver
+  count — 3 distinct people (base 1 + contract risk 2). `yad-review-gate` enforces only the base (1
+  approver who is not the author) until the capacity cap ships (E72); the risk step is reported as a
+  shortfall and does not hold the gate. No per-repo or role approval is required. The review PR names
+  and labels the epic's `repos`.
 - **Staleness:** if the surface block is edited after approvals are recorded, the recomputed hash will
   not match the lock — approvals are stale and the gate drops back to `comment`. Re-lock (Step 5 of the
   skill) and re-approve.

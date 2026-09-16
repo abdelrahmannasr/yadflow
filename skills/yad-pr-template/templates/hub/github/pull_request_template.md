@@ -14,26 +14,24 @@
 
 ## Impact & Risk (front-half)
 - **Domains / repos touched:** <epic.repos, e.g. backend, mobile>
-- **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => escalates to domain owners -->
+- **Risk tags:** <none | contract | auth | payments>  <!-- contract/auth/payments => raises the advisory approver count -->
 - **Contract surface:** <n/a | locked @ sha256:…>  <!-- architecture only; a re-lock invalidates prior approvals -->
 
 ## Required approvals (yad-review-gate rule)
-- Base: **owner + 1 reviewer**.
-- Escalated (risk tag set, or a stories PR): **plus one domain-owner per touched repo** — see the
-  requested reviewers / `domain:<repo>` labels on this PR. Run `bash checks/hub-route.sh <this-description>`
-  to list them.
-- Approver count (**advisory, not enforced**): base 1 + the step's risk step in **distinct people** — 3 on a
-  `contract` step, 2 on `auth`/`payments`, 1 otherwise. One person holding two roles counts once. `yad gate
-  status <epic>` prints it; being short of it never holds the gate.
+- Enforced: **1 approval from someone other than the author** (the base).
+- Full count, in **distinct people**: base 1 + the step's risk step — 3 on a `contract` step, 2 on
+  `auth`/`payments`, 1 otherwise (the largest step, never the sum). The risk step is **advisory** until
+  the capacity cap; `yad gate status <epic>` prints it. Run `bash checks/hub-route.sh <this-description>`
+  to see the count.
+- No reviewers are requested automatically — ask them on this PR. The `domain:<repo>` labels show the touched repos.
 
 ## How to review (this drives the gate)
-- **Approve** this PR to record an `owner` / `reviewer` / `domain-owner` approval in the file ledger
-  (your platform login maps to your SDLC name + role via `.sdlc/hub.json`'s roster).
+- **Approve** this PR to record your approval in the file ledger, under your platform login (no role).
 - **Comment / request changes** to record review comments (synced into `reviews/<artifact>--<date>--comments.md`).
 - **Do NOT merge to advance** — `yad-review-gate action: sync` + `action: advance` move the step.
 
 ## Checklist
 - [ ] `owner` set in the artifact frontmatter (inherited from `epic.md`)
 - [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only — a short-lane epic has no architecture step and no lock, so tick this only if your route has one)
-- [ ] Risk tags reflect the real surface touched (contract/auth/payments escalate)
+- [ ] Risk tags reflect the real surface touched (contract/auth/payments raise the approval count)
 - [ ] No secrets or tokens in the artifact or this description

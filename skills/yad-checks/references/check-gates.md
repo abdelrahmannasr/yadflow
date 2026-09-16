@@ -14,7 +14,7 @@ repo uses. Each reads conventions established by earlier steps — it invents no
 | lineage-check | the `Task:` trailer → `link.md` (`epic` + `product-repo`); the owning epic's work-item type (`kind:`, then `type:`) and `parent` frontmatter in the Product | `yad-spec` (link.md), `yad-change` (lineage frontmatter) |
 | epic-open | the `Task:` trailer → `link.md` → the Product epic's `stories/*.md` `status:` (sealed = all `shipped`) | `yad-engineer-review` (story status), `yad-change` (the change-epic) |
 | reconcile-debt | the `Task:` trailer → `link.md` → the Product epic's `thread`; every thread epic's `reconcile-debt.json` | `yad-change` (opens hotfix debt) |
-| verified-commits | each commit's platform signature-verification status; the author email vs `.sdlc/verified-authors` | Product roster `email` fields (`yad check --fix` generates the allowlist) |
+| verified-commits | each commit's platform signature-verification status | the platform (GitHub/GitLab "Verified"); no author allowlist since E62 |
 | commit-message | each non-merge commit's subject + trailer block | `yad-commit` / `CONTRIBUTING.md` (`config.yaml build.commit_subject_style`) |
 | pr-title | the PR/MR title (from the CI event payload) | `yad-pr-template` (`config.yaml build.pr_title_style`) |
 | pr-template | the PR/MR body (from the CI event payload) | `yad-pr-template` (the committed PR/MR template) |
@@ -150,30 +150,39 @@ runner. Real repos substitute their own eslint/tsc/jest — the gate only calls 
 
 ## 4. verified-commits (`templates/checks/verified-commits.sh`)
 
-No unverified commits from unverified users reach merge — on the Product and on every connected
-repo. For each commit in `<base>..HEAD`, two independent checks:
+No unsigned commits reach merge — on the Product and on every connected repo. For each commit in
+`<base>..HEAD`, one check:
 
 - **Verified signature** — the platform must mark the commit's signature verified (the GitHub/GitLab
   "Verified" badge: signed with a GPG/SSH key registered to the account owning the author email).
   Read via `gh api repos/{owner}/{repo}/commits/<sha>` (GitHub) or the commits/signature API (GitLab).
-- **Known author** — the commit's **author email** must appear in `.sdlc/verified-authors`, generated
-  by `yad check --fix` from the Product roster's `email`/`emails` fields plus hub.json's
-  `verified_authors` list (edit hub.json, never the generated file). Only the author is checked:
-  platform-generated squash commits keep the PR author (who is on the roster). Two identities are
-  **allowlist-waived but still signature-covered**: the `yad-gate-sync` bot, and any **merge commit**
-  (2+ parents) — a merge's author is whoever pressed merge (often a platform noreply), not a roster
-  human, and its content already passed the PR gate suite. This waiver matters for the push-on-default
-  `yad-update-guard` (§9), which — unlike this PR-triggered gate — sees merge commits.
-  A merge commit is **additionally signature-waived when it introduces no content of its own** (its
-  combined diff — `git diff-tree --cc` — is empty, i.e. no conflict-resolution or evil-merge hunks):
-  every change it carries already lives in an individually author+signature-checked parent, so there
-  is nothing to protect. This unblocks **self-hosted GitLab**, which does not sign UI-created merge
-  commits (the signature API returns 404) — without it every routine merge would red the branch. A
-  merge that *does* introduce content of its own still requires a verified signature (fail-closed),
-  so an evil merge pushed direct-to-default cannot smuggle in unverified changes.
 
-Degradation is explicit, never silent: a missing allowlist SKIPs the author check with a warning
-(configure roster emails, re-wire); no GitHub/GitLab remote SKIPs the signature check (the badge is a
+**There is no author allowlist** (E62). yadflow keeps no list of people: write access to the repo
+decides who can author, and the signature proves the commit came from that account. `yad check --fix`
+and `yad setup` no longer generate `.sdlc/verified-authors`, and nothing reads it or hub.json's
+`verified_authors` any more (`SDLC_VERIFIED_AUTHORS` is gone too). When an old `.sdlc/verified-authors`
+file is still on disk, the gate prints:
+
+```
+note [verified-commits]: .sdlc/verified-authors is no longer read — write access to the repo decides who can author; the signature is still required.
+```
+
+`yad doctor` warns `people:verified-authors-unused` for the same leftover data; nothing deletes it.
+The old allowlist waivers for the `yad-gate-sync` bot and for merge commits are gone too, because there
+is no allowlist left to waive. A bot commit inside the checked range needs a Verified signature like any
+other commit.
+
+**Content-free merge exemption** (unchanged). A merge commit (2+ parents) is **signature-waived when it
+introduces no content of its own** (its combined diff — `git diff-tree --cc` — is empty, i.e. no
+conflict-resolution or evil-merge hunks): every change it carries already lives in an individually
+signature-checked parent, so there is nothing to protect. This unblocks **self-hosted GitLab**, which
+does not sign UI-created merge commits (the signature API returns 404) — without it every routine merge
+would red the branch. A merge that *does* introduce content of its own still requires a verified
+signature (fail-closed), so an evil merge pushed direct-to-default cannot smuggle in unverified changes.
+This matters for the push-on-default `yad-update-guard` (§9), which — unlike this PR-triggered gate —
+sees merge commits.
+
+Degradation is explicit, never silent: no GitHub/GitLab remote SKIPs the signature check (the badge is a
 platform concept — this keeps local runs and tests meaningful); an unreachable platform API **fails
 closed** with guidance. GitLab CI needs a `GITLAB_TOKEN`/`SDLC_API_TOKEN` variable with `read_api` —
 `CI_JOB_TOKEN` cannot read the signature API.
@@ -286,7 +295,7 @@ four copies stay byte-identical.
 ## 9. yad-update-guard (`templates/github/yad-update-guard.yml`, `templates/gitlab/yad-update-guard.gitlab-ci.yml`)
 
 The **integrity gate for direct pushes to the default branch**. `yad update --push` (`cli/update-commit.mjs`)
-commits the applied SDLC drift (skills, gate scripts, CI wiring, `verified-authors`) and pushes it
+commits the applied SDLC drift (skills, gate scripts, CI wiring) and pushes it
 **straight to the default branch with no PR/MR** — so the `pull_request`/`merge_request` gate suite never
 fires. This workflow is the "skipped from CI **except** verified-commits + the pattern gate" contract: on a
 **push** to the default branch it runs **only** `verified-commits` and `commit-message` over the pushed
@@ -309,10 +318,10 @@ include line exists** — `yad update --push` warns when it pushes to a gitlab r
 lacks it.
 
 **Prerequisites / caveats.** Direct pushes to the default branch must be permitted for the committer
-(adjust branch protection). The commits `yad update --push` creates must be **signed** and their author
-**allowlisted**, or this guard rejects them — `yad update --push` runs a pre-flight that warns when local
-commit signing is unset or the operator's git email is not in `.sdlc/verified-authors`. Ordinary PR merges
-pass (merge commits are allowlist-waived + Verified), but a **rebase-merge** recreates the PR commits
+(adjust branch protection). The commits `yad update --push` creates must be **signed**, or this guard
+rejects them — `yad update --push` runs a pre-flight that warns when local commit signing is off. Ordinary
+PR merges pass (merge commits are Verified, or content-free and signature-waived), but a **rebase-merge**
+recreates the PR commits
 without the platform signature, so a rebase-merge team should sign commits or not wire this guard.
 
 ## CI wiring (both platforms)
@@ -387,9 +396,10 @@ merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "
 - **contract-locked** — where an epic has a `contract.md`, its surface hash matches
   `.sdlc/contract-lock.json` (reuse the recipe in
   `../yad-architecture/references/contract-format.md`).
-- **approvals-present** — an epic at `ready-for-build` has the approvals the ROLE rule requires recorded
-  in `.sdlc/approvals.json` (the same predicate `yad-review-gate` enforces; a step's advisory approver
-  count is reported beside that rule and gates nothing).
+- **approvals-present** — an epic at `ready-for-build` has the approvals the gate rule requires recorded
+  in `.sdlc/approvals.json`: at least 1 approver who is not the author (the same predicate
+  `yad-review-gate` enforces; the risk step of the full count is reported beside it and gates nothing
+  until the capacity cap).
 
 These are advisory checks on the Product's own PRs (the Shape review PRs the verified ledger opens); they keep
 the Product's artifacts internally consistent. The Product never runs the code-repo `spec-link`/`build-test-lint`
@@ -400,7 +410,7 @@ plus a standalone workflow (`templates/github/yad-verified-commits.yml` →
 `.github/workflows/yad-verified-commits.yml`, or the GitLab fragment
 `templates/gitlab/yad-verified-commits.gitlab-ci.yml` → `.gitlab/ci/yad-verified-commits.yml` +
 its one include line) whenever `.sdlc/hub.json` has a platform with a verified ledger. So the
-Shape review PRs are held to the same rule as code-repo PRs: signed, known authors only.
+Shape review PRs are held to the same rule as code-repo PRs: platform-Verified signatures only.
 
 The Product **also** runs the three pattern gates (`commit-message`, `pr-title`, `pr-template`) with
 `--profile hub`. The pattern gates split by the PR/MR **head branch** (passed via `--head`): a

@@ -8,8 +8,8 @@ predicate (`../yad-review-gate/references/gating.md`) runs unchanged. The verifi
 
 | Platform review state | Ledger effect |
 |---|---|
-| GitHub review `APPROVED` / GitLab MR approval (`approved_by`) | an `approved` record in `approvals.json`, role resolved from the roster (owner/reviewer) or derived domain-owner, tagged `"source": "bridge"` |
-| GitHub `COMMENTED` / `CHANGES_REQUESTED`; GitLab discussions/notes | a line under `## <name> (<role>)` in `reviews/<artifact>--<date>--comments.md` + a `comments.json` record; **never** an approval. `CHANGES_REQUESTED` is also flagged as blocking in the comments file |
+| GitHub review `APPROVED` / GitLab MR approval (`approved_by`) | one `approved` record per person in `approvals.json`, `approver` = the platform login, no role, tagged `"source": "bridge"` |
+| GitHub `COMMENTED` / `CHANGES_REQUESTED`; GitLab discussions/notes | a line under `## <login> (unresolved)` or `## <login> (changes requested — **blocking**)` in `reviews/<artifact>--<date>--comments.md` + a `comments.json` record (`commenter` = the login); **never** an approval. `CHANGES_REQUESTED` is also flagged as blocking in the comments file |
 | GitHub review dismissed / GitLab approval revoked | the prior bridge `approved` record for that approver is removed on re-sync **while the step is open**; once the step is `done` the record is kept as the audit trail of why it passed (see idempotency) |
 
 `approvals.json` records from the verified ledger carry `"source": "bridge"`; **manual** approvals have no such
@@ -23,7 +23,7 @@ gh pr view <n> --json reviews,comments,reviewDecision,latestReviews
 gh api repos/{owner}/{repo}/pulls/{n}/comments        # inline review comments
 ```
 - `reviews[].state` ∈ {APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED}; `reviews[].author.login` is
-  the login to resolve. Use `latestReviews` so a superseded earlier review doesn't double-count.
+  the login written to the record. Use `latestReviews` so a superseded earlier review doesn't double-count.
 
 **GitLab** (`glab` / `glab api`):
 ```
@@ -41,53 +41,50 @@ or the remote is unreachable, the verified ledger stops and the gate falls back 
 > reviewer state. (GitHub maps both.) If you need GitLab "Request changes" honored, read
 > `reviewers[].state` from the MR and map it to `CHANGES_REQUESTED`.
 
-## Open recipes (request the reviewers — used by `yad gate open` / `yad open-pr`)
+## Open recipes (no reviewers requested — used by `yad gate open` / `yad open-pr`)
 
-Opening the review PR/MR must **request the required reviewers**, or an escalated gate is opened with
-nobody asked. The CLI (`createPr` in `cli/platform.mjs`) does this; an agent opening a PR by hand uses:
+Opening the review PR/MR **requests no reviewers**. yadflow keeps no list of people to pick them from
+(E62), so the command prints `no reviewers were requested — ask them on the PR itself`, and the author
+asks people on the PR. (E68 will later suggest reviewers from history.) The CLI (`createPr` in
+`cli/platform.mjs`) assigns the opener and adds the touched-domain labels; an agent opening a PR by hand
+uses:
 
-**GitHub** — create, then add each reviewer (a bad/non-collaborator login WARNS instead of aborting the
-whole create):
+**GitHub:**
 ```bash
 gh pr create --title "review: <artifact> (<epic>)" --body <body> --base <default> --head <branch> \
-  --assignee @me --label domain:<repo>
-gh pr edit <n> --add-reviewer <login>      # once per required reviewer
+  --assignee <login|@me> --label domain:<repo>
 ```
 
-**GitLab** — a Free/Core MR carries a **single** reviewer field (multiple reviewers is Premium), so
-assign the first required reviewer and **@-mention the rest in a note** so they are still notified/routed:
+**GitLab:**
 ```bash
 glab mr create --title "review: <artifact> (<epic>)" --description <body> \
-  --target-branch <default> --source-branch <branch> --reviewer <first-login> --label domain:<repo> --yes
-glab mr note <iid> -m "Review requested (owner + reviewer rule): @<l2> @<l3> — please review and approve/comment on this MR (this drives the gate)."
+  --target-branch <default> --source-branch <branch> --assignee <login> --label domain:<repo> --yes
 ```
-The read side counts a mentioned reviewer normally: their eventual **approval** still appears in
-`…/approvals → approved_by[]`, and their **note** in `…/discussions` — so the single-reviewer-field cap
-loses only the native "Reviewers" UI chip, not the gate routing.
 
-Required reviewers = the Product's `reviewer`/`domain-owner` roster logins for the touched scopes, PLUS any
-repo whose ownership lives only in `repos.json` `domain_owner`/`domain_owners` (those are resolved to a
-login and requested too — otherwise an escalated step is structurally unsatisfiable through routing).
+The assignee is the login `gh api user` / `glab api user` reports; on GitHub, with no login, it is
+`@me`. The `domain:<repo>` labels are the touched domains — for `stories-review` the union of every
+story's `repos`, for a step with a risk tag the epic's `repos`. They are a hint for whom to ask and add no
+approvals.
 
-## Login → role resolution (order)
+## Who a record names
 
-1. Roster (`.sdlc/hub.json`) maps `login` → `name` + base `role` (owner/reviewer).
-2. If that `name` equals a repo's `domain_owner` in `repos.json` **and** that repo is a touched domain
-   for this step → also emit a `domain-owner` record with `domain: <repo>`.
-3. Login not in the roster → `name: <login>`, `role: reviewer`, flagged
-   `<!-- unverified login: <login> -->`. **Never** auto-promoted to owner/domain-owner.
+The platform login that reviewed is written as `approver` / `commenter`. There is no lookup and no
+role, and no login is flagged `unverified`: the platform's record of who approved is the evidence, and
+repository access decides who may approve. A review with no login is not counted.
 
-(Full detail + per-repo routing: `login-roster.md`.)
+(Full detail, including older roster-era records and the `by` field: `login-roster.md`.)
 
 ## Idempotent re-sync
 
-- Key bridge approvals on `(step, approver, role, domain)`. On re-sync, **upsert** — do not append a
-  duplicate.
+- Key bridge approvals on `(step, approver)` — one record per person. On re-sync, **upsert** — do not
+  append a duplicate. An older record that still carries `role`/`domain` (and may name the person by
+  their old roster name) is matched to the same review by PR number and submission time, and replaced by
+  one login-named record that keeps its `artifactHash` and dates.
 - **On an OPEN step**, remove any bridge approval whose platform review was dismissed/revoked: the
   platform is the live source of truth while the review is in flight.
 - **On a step already `done`**, the record is only added to or refreshed in place — an approval the
   platform no longer reports is **kept**. Those approvals are the audit record of *why* the gate
-  passed; a roster edit, an approval reset, or a degraded-but-successful read would otherwise erase
+  passed; an approval reset, or a degraded-but-successful read would otherwise erase
   them and leave the step `done` with zero approvals.
 - Key synced comments on the platform comment id so the same comment is not appended twice. Comment
   rounds are recorded for an **open** step only, so re-visiting a merged review does not append a new
@@ -121,19 +118,19 @@ deliberate act: `yad update` (which re-stamps `.sdlc/cli-version.json`), or a `g
 For the **architecture+contract** review, the gate already drops approvals when the contract-surface hash
 no longer matches `.sdlc/contract-lock.json`. The verified ledger extends this to platform-sourced approvals:
 `sync` discards bridge `approved` records for the architecture step dated **before** the new lock, and
-posts a comment on the review PR noting "contract re-locked — re-approval required". The escalation
-(`risk_tags: ["contract"]` → a domain-owner per repo) is unchanged.
+posts a comment on the review PR noting "contract re-locked — re-approval required". The count
+(`risk_tags: ["contract"]` → 3 approvers, base 1 enforced, risk step advisory) is unchanged.
 
 ## CHANGES_REQUESTED & unresolved threads hold the gate
 
 `CHANGES_REQUESTED` and any **unresolved review thread** are recorded as comments and surfaced as
 **blocking**. Under the PR-driven gate they actively hold the step `in_review`: the predicate does not
-pass while any thread is unresolved, even if the approval counts are met. The owner addresses the
+pass while any thread is unresolved, even if the approval count is met. The owner addresses the
 comments, replies, the reviewer **resolves** their thread, then `sync` runs again.
 
 ## Merge advances; an artifact change revokes approvals
 
-- **Merge → advance.** When the reviewer rule is satisfied, every thread is resolved, **and the review
+- **Merge → advance.** When the base count is met (1 distinct approver), every thread is resolved, **and the review
   PR/MR is merged**, `sync` marks the step `done` and unblocks the next step. The merge is the human
   approval act — there is no separate machine advance. (`yad gate sync` performs this deterministically.)
 - **Revoke on artifact change (checked at merge).** Path B reconciles at merge, so an approval given
@@ -241,7 +238,7 @@ predicate. The gate used to enable itself on the flag alone, which let a platfor
 human's ledger write while the CLI still expected one (#186). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
 edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
-gate still vets every commit's signature + author;
+gate still vets every commit's platform-Verified signature — there is no author allowlist;
 its gate-bot exemption is now vestigial in-PR because CI no longer commits there.) `yad gate open`
 opens the PR only; local `yad gate sync` is advisory in verified mode (writes nothing). After a merge,
 everyone `git checkout <default> && git pull`. (with a local ledger, humans own the ledger locally and
@@ -262,8 +259,8 @@ direct push to a protected default branch is needed.
 **The one sanctioned human ledger write *on the default branch*: `yad gate repair`.** It heals a `YAD-STATE-005` chain (an
 authoring step stranded behind a review gate that already advanced) by writing `state.json` alone. This
 is not a `ledger-guard` gap: the repair commits to the **default branch**, where `ledger-guard` — which
-only inspects review PRs — never runs, and where the `yad-update-guard` (platform-Verified signature +
-roster-allowlisted author) vets it instead, exactly as it does for `yad checkpoint` and `yad update`.
+only inspects review PRs — never runs, and where the `yad-update-guard` (platform-Verified signature)
+vets it instead, exactly as it does for `yad checkpoint` and `yad update`.
 The command refuses to commit off the default branch unless `--allow-branch` is passed.
 
 **Loop prevention & races.** The only ledger commit lands on the **default branch** at merge, which
@@ -327,7 +324,7 @@ rather than failing inside `gh`/`glab`; an origin that cannot be reached at all 
 
 ### Manual end-to-end verification (GitHub)
 
-1. On a scratch Product: `yad setup` (platform github, roster with a second account) → `yad check --fix`
+1. On a scratch Product: `yad setup` (platform github; a second account with write access to review) → `yad check --fix`
    installs `.github/workflows/yad-gate-sync.yml`; commit + push it.
 2. Author an epic → `yad gate open EP-x epic.md` → the review PR opens. CI writes nothing yet — review
    state lives on the platform.

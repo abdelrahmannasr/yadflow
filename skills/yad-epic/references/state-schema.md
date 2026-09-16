@@ -249,7 +249,7 @@ had already written the artifact; a chain seeded that way is still perfectly val
 it.
 
 `analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
-owner + 1 reviewer, and an approver count of 1).
+1 approver who is not the author, and a full approver count of 1).
 
 ### The step states (shape 7)
 
@@ -385,7 +385,7 @@ A skipped step is `status: "skipped"` with a `record`, and keeps four legacy fie
 | `record` | `{ reason, by, date }` | Why it was skipped, who marked it and when. |
 | `skipped` | `true` | The pre-shape-7 spelling, still written and still read (rule 3, add before you remove). |
 | `skipReason` | string | Why it was skipped (e.g. "backend-only service, no UI"). |
-| `skippedBy` | login/name or `null` | Who marked it N/A (best-effort, from the roster/git identity). |
+| `skippedBy` | login/name or `null` | Who marked it N/A (best-effort: the platform login from `gh`/`glab`, else git `user.name`). |
 | `skippedAt` | `YYYY-MM-DD` or `null` | When it was marked N/A. |
 
 A pre-shape-7 file spells the same step `status: "done"` with `skipped: true` beside it, and `yad
@@ -547,14 +547,18 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `status` | one of the **step states** below | Where the step stands. |
 | `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
 | `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
-| `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4), and sets the step's reported approver count: `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). |
+| `risk_tags` | subset of `contract`, `auth`, `payments` | Sets the step's full approver count (build plan §4): `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). Only the base is enforced until the capacity cap (E72); the risk step is advisory and reported as a shortfall. A team gate reports `rule: "count"`. A step with one of these tags has its review PR name and label the epic's `repos`. |
 
 ## `approvals.json`
 Append-only ledger (an array). Each entry:
 
 ```json
-{ "artifact": "epic.md", "step": "epic-review", "approver": "<name>", "role": "owner|reviewer|domain-owner", "domain": "<repo-or-area, optional>", "status": "approved", "date": "<YYYY-MM-DD>", "source": "<bridge, optional>" }
+{ "artifact": "epic.md", "step": "epic-review", "approver": "<platform login>", "status": "approved", "date": "<YYYY-MM-DD>", "source": "<bridge, optional>" }
 ```
+
+`approver` is the platform login. The gate counts distinct approvers and checks no role. An older entry
+may still carry `role` and `domain` fields from the removed roster. They are left on disk, and the gate
+never reads them (the dated `approved.md` still prints them as recorded).
 
 `source: "bridge"` marks an approval synced from a Product review PR/MR by `yad-review-gate action: sync`
 (via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`.
@@ -575,11 +579,13 @@ unchanged re-sync so that re-reading a review never churns the ledger.
 ## `comments.json`
 Append-only ledger (an array), the machine-readable counterpart to the `reviews/*--comments.md` markdown
 ("who reviewed/commented", as `approvals.json` is "who approved"). Written by `yad-review-gate`'s
-`comment` action; feeds the `approved.md` participation roster, not the gate predicate. Each entry:
+`comment` action; feeds the `approved.md` participation list, not the gate predicate. Each entry:
 
 ```json
-{ "artifact": "epic.md", "step": "epic-review", "commenter": "<name>", "role": "owner|reviewer|domain-owner", "domain": "<optional>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
+{ "artifact": "epic.md", "step": "epic-review", "commenter": "<platform login>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
 ```
+
+`commenter` is the platform login. An older entry may still carry `role` and `domain`; the gate never reads them.
 
 ## `hub-prs.json`
 Present only when the Shape review runs through the platform bridge. Per review step, the review
@@ -941,7 +947,7 @@ no `contract.md` in the child to edit, so the surface physically cannot drift.
 
 Omitting `architecture` from `inherits` (depth `contract-surface`) is what triggers a **real re-lock**:
 `yad-architecture` re-authors `contract.md`, computes a **new** hash, and `architecture-review` carries
-`risk_tags: ["contract"]` → the usual domain-owner escalation. This unifies "route back to the
+`risk_tags: ["contract"]` → the usual contract-risk review (full approver count 3; only the base 1 is enforced until the capacity cap, E72). This unifies "route back to the
 architecture gate" with "open a contract-surface change-epic" — one mechanism, not two.
 
 ## `change.json`

@@ -107,7 +107,10 @@ defaults:
 
 # Team review gate defaults (build plan §3 piece 2, §4).
 review_gate:
-  default_reviewers: 1          # non-owner reviewers required (in addition to 1 owner) => owner + 1 reviewer
+  # `default_reviewers` is no longer read since E62 (the owner + reviewer role rule is gone). A team gate
+  # needs 1 approval from someone other than the author (base 1); the full count adds the risk step
+  # below, which is advisory until the capacity cap (E72).
+  default_reviewers: 1          # legacy, not read since E62
   # Solo mode (a lone developer): a relaxed, opt-in safety guarantee, recorded per-project in
   # .sdlc/hub.json (`solo: true`). On GitHub you CANNOT approve your own PR, so requiring an approval
   # would deadlock a solo user. Solo waives the APPROVAL requirement only — the review PR/MR and its
@@ -118,10 +121,10 @@ review_gate:
   # which records who, when and why, and writes `mode: solo|team` beside `solo`; a gate that passes in solo
   # mode records `waived: "solo"` on its closing record.
   solo: false
-  escalate_when: [contract, auth, payments]   # escalate to domain owners
+  escalate_when: [contract, auth, payments]   # risk tags that add a risk step (contract +2, auth/payments +1; the largest, never the sum)
   # PR-driven automation (the `yad gate` CLI). With a Product platform, the review rides the per-step
   # PR/MR: `yad gate sync` maps platform reviews/threads into the file ledger and the step
-  # AUTO-ADVANCES on merge, once (a) the reviewer rule is met, (b) every comment thread is resolved,
+  # AUTO-ADVANCES on merge, once (a) the approval rule is met, (b) every comment thread is resolved,
   # and (c) the review PR/MR is merged. The merge is the human approval act, so Shape steps still never
   # `advance: auto`. The file ledger stays the source of truth; no platform / no gh|glab => local.
   advance_on: merge             # merge of the approved, fully-resolved review PR advances the step
@@ -189,7 +192,7 @@ build:
   # Pattern gates — commit subject + PR/MR title + PR/MR template-usage. Profile-aware (code|hub|product): code
   # repos validate the Conventional-Commits / task-PR conventions; the Product validates its
   # artifact-review conventions (review/EP-<slug>/<artifact>, the Product PR template). verified-commits is
-  # the separate security gate (signature + roster-known author). All blocking in CI; both repos + Product.
+  # the separate security gate (a platform-Verified signature only; no author allowlist since E62). All blocking in CI; both repos + Product.
   pattern_gates: [commit-message, pr-title, pr-template]
   ci_platforms: [github, gitlab]   # both wired from skills/yad-checks/templates/; GitHub is this product repo's platform
   contract_surface_glob: "specs/*/contracts/**"   # the repo's quoted contract slice; a diff here needs Contract-Change + a re-locked contract
@@ -200,7 +203,7 @@ build:
     hub:                                # Shape artifact-review PR/MR on the Product (yad-pr-template repo:hub)
       github: ".github/pull_request_template.md"
       gitlab: ".gitlab/merge_request_templates/Default.md"
-  risk_levels: [low, medium, high]   # high (or a contract/auth/payments surface) routes to domain owners (yad-review-gate escalation)
+  risk_levels: [low, medium, high]   # high +1 / a contract surface +2 to the approver count (advisory; yad-review-gate count)
   # Step E (yad-engineer-review) — AI review (advisory) + engineer review (the human gate) + merge.
   ai_review: coderabbit            # advisory first pass; never the authority (.coderabbit.yaml)
   # Append-only ship ledger (Build analogue of approvals.json), stored shard-then-fold: writers add one
@@ -325,15 +328,15 @@ docs:
 # there is no compatibility shim here: an older project simply still says `hub:`, and the skills name
 # both. The paths below carry both names too, for the same reason the files do.
 product:
-  config: "{project-root}/.sdlc/product.json"          # product platform + reviewer roster (committed, like repos.json)
+  config: "{project-root}/.sdlc/product.json"          # product platform (committed, like repos.json); no roster since E62
   config_legacy: "{project-root}/.sdlc/hub.json"       # the older name, still written and still the one READ this major
   pr_ledger: "{project-root}/epics/EP-<slug>/.sdlc/product-prs.json"       # per-step review-PR record (sibling of approvals.json)
   pr_ledger_legacy: "{project-root}/epics/EP-<slug>/.sdlc/hub-prs.json"    # the older name — written alongside it AND still the one read, like config_legacy
   bridge: true                                         # master enable; false => local Shape gates everywhere
   platforms: [github, gitlab]                          # detected from the Product's own `git remote get-url origin`
   artifact_branch: "review/EP-<slug>/<artifact-base>"  # branch a review PR is opened on, per artifact
-  # roster (in hub.json) maps a platform login -> yad name + role; domain-owners are DERIVED from
-  # repos.json (a roster name that equals a repo's domain_owner owns that repo's domain) — never duplicated.
+  # No roster since E62: yadflow stores no people. Approvals record the platform login as `approver`. A
+  # `roster` in hub.json or `domain_owner(s)` in repos.json left by an older release is not read.
 
 # Phase 4 (automation) — the SECOND dial made real: the orchestrator (yad-run) reads it and acts. Since
 # E34 the dial is SET, not earned. `yad dial` sets it — a Build lane step's dial in build-state, a Shape
@@ -373,7 +376,7 @@ change:
   grouping_frontmatter: [theme]
   # Triage DEPTH (yad-change auto-proposes, human confirms) -> which Shape steps are re-authored vs
   # inherited. defect-fix re-authors stories+test-cases only; contract-surface re-authors architecture
-  # and RE-LOCKS (a new hash routes architecture-review through the contract escalation, as today).
+  # and RE-LOCKS (a new hash sends architecture-review back through review, with the contract risk step, as today).
   depths: [defect-fix, behavioral-no-surface, contract-surface, new-capability]
   thread_id: genesis_epic_id            # the thread id = the genesis epic's id (never renamed -> stablest anchor)
   # Lineage frontmatter added to epic.md (mirrors the design:/testing: enrichment blocks — the locked

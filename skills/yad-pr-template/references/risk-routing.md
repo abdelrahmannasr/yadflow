@@ -1,8 +1,8 @@
 # Impact & Risk block and review routing
 
 The PR/MR template (Phase 3 build plan §D) carries an **Impact & Risk** block so every change states
-its blast radius before review, and so high-risk changes pull in the right reviewers automatically —
-reusing the escalation `yad-review-gate` already applies on the Shape gates.
+its blast radius before review, and so a high-risk change shows how many approvers it asks for —
+the same count `yad-review-gate` prints on the Shape gates.
 
 ## The Impact & Risk block
 
@@ -14,41 +14,51 @@ reusing the escalation `yad-review-gate` already applies on the Shape gates.
 - **Rollback plan:** <how to revert>
 ```
 
-- **Domains / repos touched** — the domains this change affects; these are the candidate domain owners
-  when the change escalates.
+- **Domains / repos touched** — the domains this change affects. `risk-route.sh` lists them as a hint
+  for whom to ask. yadflow keeps no list of people, so no names come from it.
 - **Contract surface touched** — `yes` means the diff changes the shared contract surface. That path is
-  governed by `contract-check` (needs `Contract-Change: yes` + a re-locked contract) AND it escalates
-  the review (contract is a `yad-review-gate` risk tag).
+  governed by `contract-check` (needs `Contract-Change: yes` + a re-locked contract) AND it raises the
+  approver count (contract is a `yad-review-gate` risk tag).
 - **Risk level** — `low | medium | high`. The author's assessment of blast radius.
 - **Rollback plan** — how to revert safely.
 
-## Routing rule (reuses the gate's escalation)
+## Routing rule (reuses the gate's count)
 
-| Condition | Required reviewers |
-|-----------|--------------------|
-| `low` / `medium`, no sensitive surface | **base rule:** owner + 1 reviewer |
-| `high`, OR a touched contract/auth/payments surface | base rule **plus one domain-owner approval per touched domain** |
+The count is `base 1 + risk step`:
 
-This is exactly `yad-review-gate`'s rule (`references/gating.md`): the base rule is owner + 1
-reviewer; escalation adds a domain-owner per touched domain. The PR template applies the same logic at
-the code-review boundary so a risky PR cannot be approved by just any two people. The **approvals are
-recorded by the engineer review (Step E) through `yad-review-gate`** — the template and `risk-route.sh`
-only *route* (advisory); they never approve or merge.
+| Condition | Risk step | Approvers |
+|-----------|-----------|-----------|
+| `low` / `medium`, no contract surface | +0 | 1 (the base) |
+| `high` | +1 | 2 |
+| contract surface touched | +2 | 3 |
+
+`high` risk and a touched contract surface together take the **larger** step (contract, +2), never the
+sum. Approvers are counted as distinct people, and the base is someone other than the author.
+
+**Only the base is enforced.** A merge needs 1 approval from someone other than the author. The risk step
+is **advisory** until the capacity cap (roadmap E72) lands. There are no roles: no owner, no reviewer, no
+domain owner. This is `yad-review-gate`'s rule (`references/gating.md`) applied at the code-review
+boundary. The **approvals are recorded by the engineer review (Step E) through `yad-review-gate`** — the
+template and `risk-route.sh` only *route* (advisory); they never approve or merge.
 
 ## risk-route.sh
 
-`bash checks/risk-route.sh <pr-description-file>` parses the Impact & Risk block and prints the required
-reviewers. Example (high risk, two domains):
+`bash checks/risk-route.sh <pr-description-file>` parses the Impact & Risk block and prints the approver
+count. Example (high risk, two domains):
 
 ```
 Risk level: high
 Contract surface touched: no
 Domains touched: backend, mobile
-ROUTE: ESCALATED (risk: high) -> owner + 1 reviewer PLUS one domain-owner approval per touched domain
-       (same escalation as yad-review-gate). Required domain owners:
-  - domain-owner: backend
-  - domain-owner: mobile
+ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)
+       Only the base holds the merge until the capacity cap: 1 approval from someone other than the author.
+       The risk step is advisory. Ask reviewers who know the touched domains:
+  - backend
+  - mobile
 ```
 
-It is **advisory** — not a blocking gate. CI may run it to comment the required reviewers; the human
-review (Step E) still owns the merge.
+With a touched contract surface the line reads `ROUTE: 3 approvers = base 1 + contract risk 2 (contract
+surface touched)`. With neither it reads `ROUTE: 1 approver = base 1 (no risk step).`
+
+It is **advisory** — not a blocking gate. CI may run it to comment the count; the human review (Step E)
+still owns the merge. No reviewers are requested automatically: ask them on the PR/MR itself.

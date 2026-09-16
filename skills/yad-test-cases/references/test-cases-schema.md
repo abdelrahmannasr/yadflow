@@ -66,5 +66,7 @@ Written by `yad-test-cases` Step 4b. Absent when the step ran artifacts-only (`t
 
 ## Review routing (the test-cases gate)
 
-The test-cases gate uses the **base rule** (owner + 1 reviewer) — it is not escalated. The natural
-reviewer is the test architect / QA owner, but the gate predicate requires only owner + 1.
+The test-cases gate uses the **base rule**: at least 1 distinct approver who is not the author. The
+step carries no risk tags, so its full count is also 1. The natural reviewer is the test architect /
+QA owner, but the gate names no role — any approver who is not the author counts. The review PR requests
+no reviewers; the team asks them on the PR itself.

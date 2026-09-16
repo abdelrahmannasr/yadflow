@@ -89,29 +89,26 @@ Print, in this order:
      once the ledger is on the default branch, so say so. A `blocked` with no record is the older
      word for `todo`: render it as not started.
 3. **Active gate** — for the `currentStep` (if it is a `review+approve` step), compute and show:
-   - the reviewer rule in force — **base** (`owner + 1 reviewer`), **escalated** (list the required
-     domains), or **per-repo** for `stories-review` (list each repo needing sign-off), **plus** the
-     per-step approver count (below), reported beside whichever of those is in force,
-   - approvals **recorded so far** (from `approvals.json`), and
-   - approvals **still required** to pass the gate (name the missing domains/repos).
+   - the count in force — **distinct approvers** recorded, against the **base** (1, enforced) and the
+     **full count** from the step's risk tags (advisory),
+   - approvals **recorded so far** (from `approvals.json`, one line per approver), and
+   - approvals **still required** to pass the gate (`1 approval(s)`, or none).
    Do not advance — just state whether the gate would pass right now.
 
    Apply the same predicate `yad-review-gate` uses (restated here so this skill is
    self-contained). From the `approved` records in `approvals.json` for the current step:
-   - `owners` = records with `role == "owner"`; `reviewers` = distinct `role == "reviewer"`;
-     `domainOwners` = `role == "domain-owner"`, grouped by `domain`.
-   - **Base pass:** `|owners| >= 1` AND `|reviewers| >= 1` (the configured `default_reviewers`).
-   - **Escalated pass** (step `risk_tags` ∩ `{contract, auth, payments}` ≠ ∅): base pass AND, for
-     every touched domain, `|domainOwners[domain]| >= 1`. Touched domains = `epic.repos` for
-     `architecture-review`; the union of every story's `repos` for `stories-review`.
-   - **The count, reported on every step:** the step asks for `base + risk step` **distinct approvers** —
-     base `1`, plus `2` when the step's `risk_tags` carry `contract` or `1` when they carry
-     `auth`/`payments` (the highest tag, never the sum). It reads no role, so one person holding two
-     roles is one approver. It is ADVISORY — it never decides whether the gate would pass, because the
-     full rule caps it at the number of active people and that cap does not exist yet. `yad gate status`
-     prints the sum and the shortfall (`count (advisory): 3 approvers = base 1 + contract risk 2 — 1
-     short`) — read both from there rather than recomputing them, and say "short N" rather than "blocked"
-     when it is short.
+   - `approvers` = the distinct `approver` values. There are no roles; a `role` or `domain` an older
+     record carries is legacy data, and nothing reads it.
+   - **Pass (team mode):** `|approvers| >= 1` — the base. Solo mode waives approvals entirely.
+   - **The full count, reported on every step:** `needed = base 1 + risk step` — plus `2` when the
+     step's `risk_tags` carry `contract`, or `1` when they carry `auth`/`payments` (the highest tag,
+     never the sum). The risk step is ADVISORY — it never decides whether the gate would pass, because
+     the full rule caps it at the number of active people and that cap (E72) does not exist yet.
+     `yad gate status` prints the sum and the shortfall (`; count: 3 approvers = base 1 + contract risk 2
+     — base enforced, risk step advisory — 1 short`) — read both from there rather than recomputing
+     them, and say "short N" rather than "blocked" when it is short.
+   - Touched domains (`epic.repos` for a step with a risk tag; the union of every story's `repos` for
+     `stories-review`) only label the review. They add no approvals.
    - Approvals are **stale** (gate fails) if the artifact was edited after the newest `approved`
      record. For `architecture-review`, also flag staleness if the contract-surface hash no longer
      matches `.sdlc/contract-lock.json`.

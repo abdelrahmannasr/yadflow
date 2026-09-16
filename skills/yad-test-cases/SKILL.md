@@ -9,7 +9,7 @@ description: 'Shape step 9 of the gated SDLC — a PARALLEL, non-blocking track.
 test cases that cover the stories' acceptance criteria — **and**, when a testing tool is connected, the
 **actual automation tests** inside the connected code repo(s), linked back from the artifact. This is a
 **Shape step**: human-authored with AI assist, **never auto-advances**. When the test cases are
-drafted, control passes to `yad-review-gate` (base rule: owner + 1 reviewer).
+drafted, control passes to `yad-review-gate` (base rule: 1 approver who is not the author).
 
 **This step does NOT block Build.** It opens when the **stories** gate passes — at which point
 the epic is already `ready-for-build`, so implementation (`yad-spec` → `yad-implement` → …) can start
@@ -192,7 +192,7 @@ through the gate.
 Report: the path to `test-cases.md`, the connected testing tool and what it produced (e.g. "Playwright —
 6 tests generated", the suite path + `test-links.json` path, or "no testing tool — artifacts-only"), that
 Build may already be underway in parallel, and that the next action is **review** via
-`yad-review-gate` (base rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not
+`yad-review-gate` (base rule: 1 approver who is not the author). **Never record approval here.** Shape steps do not
 auto-advance. When the Product has a platform, the gate opens a review
 PR on the Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
 into the ledger; otherwise the review is recorded local.

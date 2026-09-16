@@ -155,10 +155,11 @@ Notes:
 - **Then advance the authoring step.** The seed leaves `analysis` open, which is truthful: the command
   runs before the artifact exists. Closing it is Step 6b's job, and on the local path `yad gate open`
   does it — so after writing `analysis.md`, take Step 6b.
-- `analysis-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer). The catalogue
-  sets that; there is nothing to type.
-- `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
-  (build plan §4): the contract review needs domain owners, not just owner + 1.
+- `analysis-review` carries no `risk_tags` — it is the **base** rule (1 approver who is not the
+  author). The catalogue sets that; there is nothing to type.
+- `architecture-review` carries `risk_tags: ["contract"]` by default (build plan §4): the tag raises
+  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the gate until
+  the capacity cap (E72); the risk step is advisory and reported as a shortfall.
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — the epic is already `ready-for-build` by then, so Build
   runs alongside the tester (see `../yad-epic/references/state-schema.md`).
@@ -204,7 +205,7 @@ reviewers approve, through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `analysis.md`, and that the next action is **review** via
-`yad-review-gate` (base rule: owner + 1 reviewer). **Never mark the analysis-review step approved
+`yad-review-gate` (base rule: 1 approver who is not the author). **Never mark the analysis-review step approved
 here** — only real reviewers do that through the gate. Shape steps do not auto-advance. When the
 analysis gate passes, control moves to `yad-epic`, which reads `analysis.md` as input. When the
 Product has a platform, the gate opens a review PR on the Product (via `yad-hub-bridge`) and

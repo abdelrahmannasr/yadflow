@@ -23,8 +23,8 @@ export async function runShip(root, opts = {}) {
   // PR step so we never open a PR for a branch whose commit did not land.
   if (process.exitCode) { info('commit did not land — skipping open-pr'); return committed; }
 
-  // Step 2 — open the task PR/MR from the committed template (pushes the branch, auto-assigns the
-  // repo-scoped roster). Pass ONLY an explicit --title: when omitted, runOpenPr derives the title
+  // Step 2 — open the task PR/MR from the committed template (pushes the branch, assigns the committer,
+  // requests no reviewers — E62). Pass ONLY an explicit --title: when omitted, runOpenPr derives the title
   // from the committed subject (the full `<type>: …` form), which the pr-title gate expects — passing
   // the bare --message here would override that with a type-less title and fail the gate.
   const opened = await runOpenPr(root, {

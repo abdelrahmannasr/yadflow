@@ -1244,7 +1244,7 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     hasArchitecture
       ? '- [ ] Contract re-locked (`.sdlc/contract-lock.json`) if the surface changed (architecture only)'
       : '- [ ] Contract surface unchanged — this epic is on a short lane with no architecture gate, so it may consume the shared surface but never change it',
-    '- [ ] Risk tags reflect the real surface touched (contract/auth/payments escalate)',
+    '- [ ] Risk tags reflect the real surface touched (contract/auth/payments raise the approval count)',
     '- [ ] No secrets or tokens in the artifact or this description',
   ].join('\n');
 }

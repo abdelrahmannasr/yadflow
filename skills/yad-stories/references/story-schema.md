@@ -11,7 +11,7 @@ Each story authored at Shape step 7 is one Markdown file under `epics/EP-<slug>/
 | `epic` | `EP-<slug>` | Parent epic ID — the unbroken link back to the epic. |
 | `owner` | name | Inherited from `epic.md` `owner` (the single source — not retyped per story). Carries the responsible owner through to Build. |
 | `status` | `draft` \| `in_review` \| `approved` | Story lifecycle within the stories gate. |
-| `repos` | subset of the epic's `repos` | Which repos must implement this story. **Drives per-repo review routing now and (Phase 3) where specs are scaffolded.** |
+| `repos` | subset of the epic's `repos` | Which repos must implement this story. **Labels the stories review PR with the touched repos now and (Phase 3) decides where specs are scaffolded.** |
 | `code-context` | `{ repos: [<name@sha>], loaded: <date> }` | Optional. Which connected-repo code-maps anchored "Notes for build" (Shape step 7 Step 2b). The `@sha` (a repo's `syncedHead`) is recommended so freshness is recorded but may be omitted; the SKILL templates show the empty placeholder `{ repos: [], loaded: <date or none> }`. `none` / `[]` when no repos are connected. |
 
 ## Body
@@ -38,9 +38,10 @@ As a <role>, I want <capability>, so that <outcome>.
 - **Stay within the contract surface.** "Notes for build" should reference the contract elements a
   story touches; a story may not invent cross-repo surface that `contract.md` does not define.
 
-## Per-repo review routing (the stories gate)
+## Review (the stories gate)
 
-`yad-review-gate` treats each repo's engineer as the `domain-owner` for the stories touching that repo.
-The gate passes only when, in addition to the base rule (owner + 1 reviewer), **every repo appearing in
-any story's `repos`** has at least one `domain-owner` approval scoped to that repo (`domain` = repo
-name). The gate's `approved.md` lists which repos still lack sign-off.
+The stories gate is an ordinary count gate. It passes with at least 1 distinct approver who is not the
+author, resolved threads, and a merged review PR. It is **not** routed per repo: no repo needs its own
+sign-off, and no role is checked. The union of every story's `repos` still names the touched repos, and
+the review PR carries a `domain:<repo>` label for each. The review PR requests no reviewers; the team
+asks them on the PR itself.

@@ -45,7 +45,7 @@ generated: <YYYY-MM-DD>
 ---
 ```
 
-`verified: false` until a human approves (the `yad-review-gate` discipline: owner + 1 reviewer). On
+`verified: false` until a human approves (the `yad-review-gate` discipline: at least 1 approver who is not the author). On
 approval, set `verified: true` and record the approver(s) + date. Only a `verified: true` backfill spec
 counts as real.
 
