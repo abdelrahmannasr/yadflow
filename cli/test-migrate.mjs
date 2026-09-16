@@ -430,9 +430,8 @@ test('migrate 2 -> 3: a roster role under `hub` GAINS a `product` spelling, and 
   try {
     await runMigrate(T, { apply: true });
     const after = read(path.join(T, '.sdlc/product.json'));
-    // BOTH spellings. Replacing `hub` would silently strip every product-level role from the point
-    // of view of an older CLI, of `yad setup` (which still writes `hub` when it adds a member), and
-    // of every caller that asks `rolesForScope(entry, 'hub')`.
+    // BOTH spellings, as this step has always written them. Nothing reads the roster since E62; the
+    // step is pinned so an old project migrates the same way whichever release runs it.
     assert.deepEqual(after.roster[0].roles,
       { product: ['owner', 'reviewer'], hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
     assert.deepEqual(after.roster[1].roles, { payments: ['reviewer'] }, 'a member with no hub role is unchanged');
@@ -440,18 +439,17 @@ test('migrate 2 -> 3: a roster role under `hub` GAINS a `product` spelling, and 
   } finally { cleanup(T); }
 });
 
-test('migrate 2 -> 3: a product-level role survives the rename for BOTH spellings', async () => {
-  const { rolesForScope } = await import('./platform.mjs');
+test('migrate 2 -> 3: the old settings name carries the same roster, both spellings kept', async () => {
+  // An older CLI reads hub.json, and asks for the product scope as `hub`. The step writes that file
+  // too, so a project rolled back to such a CLI still finds the role it had.
   const roster = [{ login: 'alice', roles: { hub: ['owner'], backend: ['domain-owner'] } }];
   const T = project({ files: { '.sdlc/hub.json': JSON.stringify({ platform: 'github', roster }, null, 2) + '\n' } });
   try {
     await runMigrate(T, { apply: true });
     const entry = read(path.join(T, '.sdlc/hub.json')).roster[0];
-    // The gate asks for the product scope by whichever name the code it came from knows. Both must
-    // answer, or a reviewer stops being found and no message says why.
-    assert.deepEqual(rolesForScope(entry, 'hub'), ['owner'], 'an older caller still finds the role');
-    assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'and so does a newer one');
-    assert.deepEqual(rolesForScope(entry, 'backend'), ['domain-owner'], 'repo scopes are untouched');
+    assert.deepEqual(entry.roles.hub, ['owner'], 'the old spelling an older caller asks for');
+    assert.deepEqual(entry.roles.product, ['owner'], 'and the new one beside it');
+    assert.deepEqual(entry.roles.backend, ['domain-owner'], 'repo scopes are untouched');
   } finally { cleanup(T); }
 });
 

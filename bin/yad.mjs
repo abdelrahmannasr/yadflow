@@ -45,14 +45,6 @@ ${c.bold('Setup & maintenance')}
                        code. Wired into .claude/settings.json and .cursor/hooks.json by
                        setup / check --fix. YAD_HOOK_DISABLE=1 skips.
 
-${c.bold('Reviewer roster')}
-  yad roster list                      Show every member + their roles per scope (hub + each repo)
-  yad roster add <login>               Add/edit a member, then walk the connected repos for their roles
-                                       (--name, --email, --roles "hub=owner,reviewer backend=domain-owner")
-  yad roster grant <name> <repo> <role...>   Grant role(s) for a connected repo (domain-owner|reviewer|owner)
-  yad roster revoke <name> <repo> <role...>  Remove role(s) for a repo
-  yad roster remove <login>            Delete a member from the roster
-
 ${c.bold('Team usage (EM adoption & behavior report)')}
   yad usage                            Build a per-member report (HTML) from git + the SDLC ledgers
                                        (derived, read-only — writes no tracked state)
@@ -247,7 +239,7 @@ ${c.bold('Environment')}
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure
   YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -557,11 +549,14 @@ async function main() {
       await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
       break;
     }
-    case 'roster': {
-      const [, action, ...rest] = o._;
-      await commands.runRoster(o.dir, { action: action || 'list', args: rest, name: o.name, email: o.email, roles: o.roles, today });
+    case 'roster':
+      // Removed in E62. Kept as a word for one major so a script or a habit gets told where it went
+      // instead of "unknown command".
+      log(c.red('yad roster was removed — yadflow keeps no list of people'));
+      log('  A gate needs one approval from anyone with access to the repo; the platform records who approved.');
+      log('  Request reviewers on the PR itself. An existing `roster` in hub.json is left on disk and not read.');
+      process.exitCode = 1;
       break;
-    }
     case 'docs': {
       const [, action] = o._;
       if (o.epic && !commands.isValidEpicId(o.epic)) { log(c.red(`invalid epic id: ${o.epic} (expected EP-<slug>, [a-z0-9-] only)`)); process.exitCode = 1; break; }

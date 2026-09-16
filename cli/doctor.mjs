@@ -13,7 +13,7 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
-import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
+import { cliFor, hostFromGitUrl } from './platform.mjs';
 
 const MIN_NODE = 18;
 
@@ -78,7 +78,7 @@ export function projectChecks(checks, root) {
   // hub.json: parse + shape
   let hub = null;
   if (!exists(productPath)) {
-    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform + roster');
+    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform');
   } else {
     let hubBroken = false;
     try {
@@ -91,7 +91,16 @@ export function projectChecks(checks, root) {
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
     else {
-      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
+      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
+      // E62 removed the roster. A list an older release wrote is kept on disk and never read, so say so
+      // — a team that still edits it would otherwise believe it decides something. An empty list (what a
+      // solo setup used to write) says nothing about people and is left quiet.
+      const listed = Array.isArray(hub.roster) ? hub.roster.length > 0 : (hub.roster !== undefined && hub.roster !== null);
+      if (listed) {
+        check(checks, 'people:roster-unused', 'project', 'warn',
+          `${PROJECT_FILES.hubConfig} has a \`roster\` that nothing reads any more — a gate needs one approval from anyone with access`,
+          'delete the `roster` key when convenient; approvals are recorded under the platform login that gave them');
+      }
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
       // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave
       // the two saying different things; name that, and say which one the gates follow. Silent on a file
@@ -130,15 +139,6 @@ export function projectChecks(checks, root) {
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
-          // Re-validate each roster login against the Product (warn-only). Skips when a login is already
-          // flagged unverified by setup; reports any that no longer resolve.
-          const bad = [];
-          for (const e of hub.roster || []) {
-            const v = validateLogin(hub.platform, e.login);
-            if (v.checked && !v.exists) bad.push(e.login);
-          }
-          if (bad.length) check(checks, 'roster', 'project', 'warn', `roster login(s) not found on ${hub.platform}: ${bad.join(', ')}`, 'fix the login or re-run `yad setup` (they cannot satisfy a gate)');
-          else check(checks, 'roster', 'project', 'ok', `roster: ${(hub.roster || []).length} member(s) validated on ${hub.platform}`);
           // GitLab API reachability: the gate reads MR state via `glab api …` (approvals, discussions).
           // A present+authenticated glab whose token lacks api scope would still break readPrGitLab, so
           // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
@@ -385,6 +385,14 @@ export function projectChecks(checks, root) {
       else check(checks, `repo:${repo.name}`, 'project', 'ok', `${repo.name}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
+    // Per-repo owners went with the roster (E62). Named only where a repo actually lists someone: every
+    // repo an older setup connected carries an EMPTY `domain_owner`, which says nothing.
+    const owned = registry.repos.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
+    if (owned.length) {
+      check(checks, 'people:domain-owners-unused', 'project', 'warn',
+        `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => r.name).join(', ')}`,
+        'delete `domain_owner` / `domain_owners` when convenient; request reviewers on the PR itself');
+    }
   }
 
   ciTagsChecks(checks, root, hub, registry);

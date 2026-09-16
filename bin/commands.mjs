@@ -23,7 +23,6 @@ export { runShip } from '../cli/ship.mjs';
 export { runCheckpoint } from '../cli/checkpoint.mjs';
 export { runTidy } from '../cli/tidy.mjs';
 export { runRepo } from '../cli/repo.mjs';
-export { runRoster } from '../cli/roster.mjs';
 export { runDocs } from '../cli/docs.mjs';
 export { runDoctor } from '../cli/doctor.mjs';
 export { runMigrate, warnIfProjectAhead } from '../cli/migrate.mjs';

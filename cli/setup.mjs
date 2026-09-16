@@ -15,28 +15,11 @@ import {
 } from './plan.mjs';
 import { modeFields, modeOf } from './mode.mjs';
 import { recordActor } from './skip.mjs';
-import { validateLogin, rolesForScope, setScopeRoles, deleteScopeRoles } from './platform.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 
 // Parse a comma/space separated list into a clean, deduped array of trimmed tokens.
 export function parseList(s) {
   return [...new Set((s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean))];
-}
-
-// Parse a per-scope roles spec — `"hub=owner,reviewer backend=domain-owner"` — into the roster's
-// per-scope map `{ hub: ['owner','reviewer'], backend: ['domain-owner'] }`. Tokens are whitespace
-// separated; each is `scope=role[,role...]`. Malformed tokens (no `=`, empty scope/roles) are skipped.
-export function parseRolesSpec(s) {
-  const out = {};
-  for (const tok of (s || '').split(/\s+/).map((x) => x.trim()).filter(Boolean)) {
-    const eq = tok.indexOf('=');
-    if (eq < 0) continue;
-    const scope = tok.slice(0, eq).trim();
-    const roles = parseList(tok.slice(eq + 1));
-    if (!scope || !roles.length) continue;
-    out[scope] = [...new Set([...(out[scope] || []), ...roles])];
-  }
-  return out;
 }
 
 // Programmatic setup is strict; interactive setup keeps asking until it receives at least one valid
@@ -96,143 +79,19 @@ export function insideWorkspace(root, rpath) {
   return resolved === projectRoot || resolved.startsWith(workspace + path.sep);
 }
 
+// Build the hub.json object for a (re)configure write: the fields this run collected, laid over the
+// existing file so nothing the wizard does not ask about is dropped. Mirrors the safe { ...cur } merge
+// on the keep path. That includes a `roster` or `verified_authors` an older release wrote (E62): the
+// wizard no longer collects or reads either, and it never deletes them — `yad doctor` names them as
+// unused instead.
+export function buildReconfiguredHub(cur, fields) {
+  return { ...(cur || {}), ...fields };
+}
+
 // Validate + record one code repo into the registry (the testable half of the connect loop).
 // A path that is not a git repository is rejected and NOTHING is written — a registry entry with
 // syncedHead:null would only surface later as an unexplained "unknown status" in the CI gates.
-// Grant per-repo roles to roster members by writing into each person's `roles[<repo>]` array in
-// hub.json. `grants` maps a role -> the yad names that hold it for this repo. A name that is not in
-// the roster is warned about and skipped (the roster is the source of identity). Idempotent.
-export function addRepoRoles(root, repo, grants = {}) {
-  const productPath = productConfigPath(root);
-  const hub = readJSON(productPath, null);
-  if (!hub || !Array.isArray(hub.roster)) return;
-  const byName = new Map(hub.roster.map((e) => [e.name, e]));
-  let touched = false;
-  for (const [role, names] of Object.entries(grants)) {
-    for (const nm of names) {
-      const entry = byName.get(nm);
-      if (!entry) { warn(`'${nm}' is not in the roster — skipped ${role} for ${repo}`); continue; }
-      // Normalize to the per-scope map, migrating the legacy shapes: a flat array or a single
-      // `role` string both become Product roles so nothing is lost.
-      // One normaliser, shared — a second copy of this logic is how one writer ends up maintaining
-      // a different set of scope spellings than the others.
-      normalizeRoles(entry);
-      const list = [...rolesForScope(entry, repo)];
-      if (!list.includes(role)) { list.push(role); touched = true; }
-      setScopeRoles(entry.roles, repo, list);
-    }
-  }
-  if (touched) writeProductConfig(root, hub);
-}
-
-// Normalize a roster entry's roles in place to the per-scope map, migrating the two legacy shapes
-// (a flat array, or a single `role` string) into `roles.hub` so nothing is lost. Mirrors the
-// migration addRepoRoles does; pulled out so upsert/remove share it.
-function normalizeRoles(entry) {
-  if (!entry.roles || typeof entry.roles !== 'object' || Array.isArray(entry.roles)) {
-    const productRoles = Array.isArray(entry.roles) ? entry.roles : (entry.role ? [entry.role] : []);
-    entry.roles = productRoles.length ? setScopeRoles({}, 'hub', productRoles) : {};
-    delete entry.role;
-  }
-  return entry.roles;
-}
-
-// Build the hub.json object for a (re)configure write, preserving user-owned identity data the wizard
-// does not re-collect: top-level `verified_authors` (and any other existing fields), plus a previously
-// populated `roster` when this run collected none (solo re-runs skip the reviewer loop). Never blanks a
-// non-empty roster; never drops verified_authors. Mirrors the safe { ...cur } merge on the keep path.
-// Trade-off (deliberate, fail-safe): a reconfigure can no longer EMPTY a populated roster — collecting
-// zero reviewers keeps the existing entries. To actually remove members, use `yad roster remove` (or
-// edit hub.json directly); this flow only ever grows or replaces the roster, never silently clears it.
-export function buildReconfiguredHub(cur, fields) {
-  const { roster, ...rest } = fields;
-  const keptRoster = (Array.isArray(roster) && roster.length)
-    ? roster
-    : (Array.isArray(cur?.roster) ? cur.roster : []);
-  return { ...(cur || {}), ...rest, roster: keptRoster };
-}
-
-// Upsert one roster member into hub.json, keyed by `login`. Deep-merges the per-scope `roles` map so
-// scopes the caller did not name are preserved; sets `name`/`email` when given; validates the login
-// against the Product (warn-only — a miss flags `unverified`, `checked:false` skips silently). Creates the
-// hub.json shell if absent. Returns { entry, created }.
-export function upsertRosterEntry(root, { login, name, email, roles = {}, platform } = {}) {
-  if (!login) { warn('roster upsert needs a login — skipped'); return { entry: null, created: false }; }
-  const productPath = productConfigPath(root);
-  const hub = readJSON(productPath, null) || { platform: platform && platform !== 'none' ? platform : null, ledger: 'local', bridge_enabled: false, bridge: false, default_branch: 'main', roster: [] };
-  if (!Array.isArray(hub.roster)) hub.roster = [];
-  let entry = hub.roster.find((e) => e.login === login);
-  const created = !entry;
-  if (!entry) { entry = { login, name: name || login, roles: {} }; hub.roster.push(entry); }
-  if (name) entry.name = name;
-  if (email) entry.email = email;
-  normalizeRoles(entry);
-  for (const [scope, list] of Object.entries(roles || {})) {
-    const cur = rolesForScope(entry, scope);
-    setScopeRoles(entry.roles, scope, [...new Set([...cur, ...list])]);
-  }
-  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warn(`'${email}' does not look like an email address`);
-  const plat = platform || hub.platform;
-  if (plat && plat !== 'none') {
-    const v = validateLogin(plat, login);
-    if (v.checked && !v.exists) { warn(`'${login}' not found on ${plat} — saved as unverified`); entry.unverified = true; }
-    else if (v.checked && v.exists) { ok(`verified ${login} on ${plat}`); delete entry.unverified; }
-  }
-  writeProductConfig(root, hub);
-  return { entry, created };
-}
-
-// Inverse of addRepoRoles: drop the named role(s) from a member's `roles[<repo>]` scope, removing the
-// scope key when it empties. Member is found by yad `name` (matching addRepoRoles). Idempotent.
-export function removeRepoRole(root, name, repo, roles = []) {
-  const productPath = productConfigPath(root);
-  const hub = readJSON(productPath, null);
-  if (!hub || !Array.isArray(hub.roster)) return;
-  const entry = hub.roster.find((e) => e.name === name);
-  if (!entry) { warn(`'${name}' is not in the roster — nothing to revoke for ${repo}`); return; }
-  normalizeRoles(entry);
-  const cur = rolesForScope(entry, repo);
-  const next = cur.filter((r) => !roles.includes(r));
-  if (next.length === cur.length) return; // nothing removed
-  if (next.length) setScopeRoles(entry.roles, repo, next); else deleteScopeRoles(entry.roles, repo);
-  writeProductConfig(root, hub);
-}
-
-// Keep repos.json `domain_owners` in sync when a domain-owner role is granted/revoked via the roster,
-// so the gate's per-repo reviewer-routing and the derivation fallback never drift from hub.json. Adds
-// or removes the yad `name` and mirrors `domain_owner = domain_owners[0]`. No-op + warn if the repo is
-// not registered. Returns true when the registry was written.
-export function setRepoDomainOwners(root, repo, name, { add = true } = {}) {
-  const regPath = path.join(root, PROJECT_FILES.reposRegistry);
-  const registry = readJSON(regPath, { repos: [] });
-  const entry = (registry.repos || []).find((r) => r.name === repo);
-  if (!entry) { warn(`repo '${repo}' is not registered (.sdlc/repos.json) — domain_owners not synced`); return false; }
-  const owners = Array.isArray(entry.domain_owners) ? [...entry.domain_owners] : (entry.domain_owner ? [entry.domain_owner] : []);
-  const has = owners.includes(name);
-  let next;
-  if (add) { if (has) return false; next = [...owners, name]; }
-  else { if (!has) return false; next = owners.filter((o) => o !== name); }
-  entry.domain_owners = next;
-  entry.domain_owner = next[0] || '';
-  writeJSON(regPath, registry);
-  return true;
-}
-
-// Reconcile one repo's roles for a member to exactly `want`: grant what is new, revoke what is gone,
-// and mirror domain-owner changes into repos.json. `current` is the member's existing roles for the
-// repo. Shared by the `yad roster` walk and the `yad setup` per-repo role step. Idempotent.
-export function reconcileRepoRoles(root, name, repo, current = [], want = []) {
-  const toAdd = want.filter((r) => !current.includes(r));
-  const toRemove = current.filter((r) => !want.includes(r));
-  if (!toAdd.length && !toRemove.length) { info(`    ${repo}: unchanged`); return; }
-  if (toAdd.length) addRepoRoles(root, repo, Object.fromEntries(toAdd.map((r) => [r, [name]])));
-  if (toRemove.length) removeRepoRole(root, name, repo, toRemove);
-  if (toAdd.includes('domain-owner')) setRepoDomainOwners(root, repo, name, { add: true });
-  if (toRemove.includes('domain-owner')) setRepoDomainOwners(root, repo, name, { add: false });
-  ok(`    ${repo}: ${want.length ? want.join(', ') : 'cleared'}`);
-}
-
-export function registerRepo(root, registry, { name, rpath, platform, domain_owner = '', domain_owners = null, default_branch = 'main', today = null, pack = true }) {
+export function registerRepo(root, registry, { name, rpath, platform, default_branch = 'main', today = null, pack = true }) {
   if (!insideWorkspace(root, rpath)) {
     warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`);
     return null;
@@ -247,12 +106,11 @@ export function registerRepo(root, registry, { name, rpath, platform, domain_own
     if (plat) warn(`unknown platform '${platform}' — using ${detected}`);
     plat = detected;
   }
-  // A repo can have multiple domain owners. `domain_owners` is the array of record; `domain_owner`
-  // is kept as the first element so anything still reading the legacy single-owner field works.
-  const owners = (domain_owners && domain_owners.length) ? domain_owners : (domain_owner ? [domain_owner] : []);
+  // No `domain_owner` / `domain_owners` (E62): people are not stored. A registry entry an older release
+  // wrote may still carry them; nothing reads them, and `yad doctor` names them as unused.
   const repo = {
     name, path: rpath, git_url: (remote.ok && remote.stdout) || null, platform: plat,
-    domain_owner: owners[0] || '', domain_owners: owners, default_branch,
+    default_branch,
     connectedAt: today, lastSyncedAt: today,
     // Only claim a synced HEAD when a pack is actually produced. The greenfield path skips packing
     // (pack:false), so leave syncedHead null — the repo then reads as "needs an initial pack" in
@@ -395,13 +253,15 @@ export async function resolveProfile(root, opts = {}) {
   if (opts.solo) { solo = true; team_size = 1; }
   else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
   // Either spelling carries forward: the older `review_gate.solo: true` also waives the gates, and asking again
-  // would default a Product with a roster to team and switch solo off with nobody choosing it (E10).
+  // would default a configured team Product to solo and switch approvals off with nobody choosing it (E10).
   else if (typeof hub?.solo === 'boolean' || hub?.review_gate?.solo === true) { solo = modeOf(hub) === 'solo'; team_size = prev.team_size ?? (solo ? 1 : 2); }
   else {
-    // Default from any existing roster: a Product already carrying reviewers is a team; otherwise solo.
-    const rosterN = Array.isArray(hub?.roster) ? hub.roster.length : 0;
-    solo = !(await ask('Solo or team?', rosterN > 1 ? 'team' : 'solo')).toLowerCase().startsWith('t');
-    team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', String(rosterN || 2)), 10) || 2);
+    // No mode recorded. The default used to come from the roster's size; it now comes from the team size
+    // setup recorded, and a Product that exists with neither defaults to TEAM (E62). Solo waives every
+    // approval, so it must be a choice, never what a scripted re-run of an old Product falls into.
+    const known = prev.team_size ?? (hub ? 2 : 1);
+    solo = !(await ask('Solo or team?', known > 1 ? 'team' : 'solo')).toLowerCase().startsWith('t');
+    team_size = solo ? 1 : Math.max(2, parseInt(await ask('  how many team members?', String(Math.max(2, known))), 10) || 2);
   }
 
   // 2. Greenfield (new code) or brownfield (existing code).
@@ -427,7 +287,7 @@ export async function resolveProfile(root, opts = {}) {
 }
 
 // The guided, idempotent first-run wizard: a Step 0 profile interview (resolveProfile) that branches
-// the remaining steps — install, Product + roster, optional tools, repos, wiring — and persists the profile.
+// the remaining steps — install, Product platform, optional tools, repos, wiring — and persists the profile.
 export async function runSetup(root, opts = {}) {
   log(c.bold(`\nSDLC Workflow setup  ${c.dim('v' + VERSION)}`));
   log(c.dim(`target: ${root}`));
@@ -501,18 +361,18 @@ export async function runSetup(root, opts = {}) {
     }
   }
 
-  // Detect Product platform + roster
-  S(solo ? 'Product platform (solo — no roster)' : 'Product platform & reviewer roster');
+  // Detect Product platform. No people are collected (E62): anyone with access approves on the platform.
+  S('Product platform');
   guide(solo
     ? [
       'Your hub is this repo on GitHub/GitLab (or none for a local gate).',
-      'Solo: no roster needed — you review by merging your own PR (approval waived).',
+      'Solo: you review by merging your own PR (approval waived).',
     ]
     : [
       'Your hub is this repo on GitHub/GitLab; reviewers approve artifacts there.',
-      `Add your ${team_size}-person roster: platform login → yad name → hub role (owner/reviewer).`,
-      'An owner + 1 reviewer is required to pass a gate; skip now and add later with `yad roster add`.',
-      'A gate also reports how many people it would like: 3 on a contract review, 1 elsewhere. That number is advisory — it never blocks.',
+      'yad keeps no list of people: anyone with access to the repo can approve, and the platform records who did.',
+      'A gate needs one approval from someone other than the author.',
+      'It also reports how many people it would like: 3 on a contract review, 1 elsewhere. That extra number is advisory — it never blocks.',
     ]);
   const productPath = productConfigPath(root);
   if (exists(productPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {
@@ -526,29 +386,6 @@ export async function runSetup(root, opts = {}) {
       warn(`unknown platform '${platform}' — using none (local gate)`);
       platform = 'none';
     }
-    const roster = [];
-    // Solo mode needs no roster — the lone developer is owner and reviewer-by-merge.
-    if (!solo && await askYesNo('Add reviewers to the roster now?', true)) {
-      for (;;) {
-        const login = await ask('  reviewer platform login (blank to finish)', '');
-        if (!login) break;
-        const name = await ask('    yad name', login);
-        const email = await ask('    commit email (committer→login lookup + verified-commits gate; blank to skip)', '');
-        // Per-scope roles: capture the Product roles here; per-repo roles are added in step 7 when the
-        // repo is connected. A person can hold several roles (owner reviewer) at once.
-        const hubRoles = parseList(await ask('    hub roles (owner/reviewer, space-separated)', 'reviewer'));
-        const entry = { login, name, ...(email ? { email } : {}), roles: { hub: hubRoles } };
-        // Validate the login exists on the Product — warn-only (fail-open): a miss is flagged unverified
-        // but still saved. `checked:false` (no CLI/auth) skips the check silently.
-        if (platform !== 'none') {
-          const v = validateLogin(platform, login);
-          if (v.checked && !v.exists) { warn(`'${login}' not found on ${platform} — saved as unverified`); entry.unverified = true; }
-          else if (v.checked && v.exists) ok(`verified ${login} on ${platform}`);
-        }
-        if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) warn(`'${email}' does not look like an email address`);
-        roster.push(entry);
-      }
-    }
     const default_branch = platform === 'none' ? 'main' : await ask('Product default branch', 'main');
     // `ledger` is the canonical switch (shape 2): "verified" = CI writes the ledger, "local" = this
     // machine does. The two booleans below say the same thing in the older spelling and are written
@@ -559,11 +396,9 @@ export async function runSetup(root, opts = {}) {
     // Record git_url — doctor needs it to scope the auth probe (YAD-CFG-005) and the verified ledger/PR flow
     // needs it to open PRs. Derived from the origin remote already resolved above; null when local-only.
     const git_url = enabled ? ((remote.ok && remote.stdout.trim()) || null) : null;
-    // Merge into the existing file, never clobber: roster + verified_authors are user-owned identity
-    // data (the verified-commits gate's allowlist derives from them). A reconfigure that collects no
-    // reviewers (e.g. solo mode skips the loop) must NOT blank a populated roster or drop verified_authors.
+    // Merge into the existing file, never clobber: a key this wizard does not collect is kept as it is.
     // Read strict so a corrupt Product aborts here (YAD-STATE-001) rather than fail-open to `{}` and rewrite
-    // the file with identity stripped — the same silent-loss hole, just triggered by a parse failure.
+    // the file with everything it did not collect stripped.
     const cur = readJSONStrict(productPath, {}) || {};
     // `ledger` belongs to shape 2. On a project still on shape 1 — one that has not run
     // `yad migrate` yet — writing it would leave a file DECLARING shape 1 while carrying a shape-2
@@ -576,21 +411,17 @@ export async function runSetup(root, opts = {}) {
       platform: enabled ? platform : null, git_url,
       ...(onNewShape ? { ledger: enabled ? 'verified' : 'local' } : {}),
       bridge_enabled: enabled, bridge: enabled,
-      default_branch, roster, ...setupModeFields(root, cur, solo, opts), profile: { codebase, repo_layout, team_size },
+      default_branch, ...setupModeFields(root, cur, solo, opts), profile: { codebase, repo_layout, team_size },
     });
-    if (!roster.length && Array.isArray(cur.roster) && cur.roster.length) {
-      info(`kept existing roster (${cur.roster.length} member(s)) — reconfigure collected none`);
-    }
-    if (cur.verified_authors?.length) info(`preserved ${cur.verified_authors.length} verified_authors entry(ies)`);
     writeProductConfig(root, next);
-    ok(`wrote ${PROJECT_FILES.productConfig} + ${PROJECT_FILES.hubConfig} (${next.roster.length} reviewer(s)${solo ? ', solo mode' : ''})`);
+    ok(`wrote ${PROJECT_FILES.productConfig} + ${PROJECT_FILES.hubConfig}${solo ? ' (solo mode)' : ''}`);
   }
   // Persist the profile + solo flag even on the "keeping existing" path, so re-running setup with new
   // flags (e.g. `yad setup --solo`) updates the mode without a full reconfigure. Merge, never clobber.
   // Also backfill a missing git_url from origin here (idempotent repair for the doctor's YAD-CFG-005).
   if (exists(productPath)) {
     // Strict read for the same reason as the reconfigure write above: a corrupt Product must abort, never
-    // fail-open to `{}` and get rewritten with roster/verified_authors stripped on a plain re-run.
+    // fail-open to `{}` and get rewritten with everything else stripped on a plain re-run.
     const cur = readJSONStrict(productPath, {}) || {};
     const backfillUrl = (cur.platform && !cur.git_url)
       ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
@@ -694,7 +525,7 @@ export async function runSetup(root, opts = {}) {
     ]
     : [
       'Register each code repo the feature touches; stories get tagged with the repos that implement them.',
-      'Per repo: name → path (inside this project) → platform → domain owner(s).',
+      'Per repo: name → path (inside this project) → platform → default branch.',
       codebase === 'greenfield' ? 'Greenfield: no code yet — the repomix code-pack step is skipped.' : 'Brownfield: each repo is packed so the Shape phases see what already exists.',
     ]);
   const regPath = path.join(root, PROJECT_FILES.reposRegistry);
@@ -712,38 +543,14 @@ export async function runSetup(root, opts = {}) {
       if (!insideWorkspace(root, rpath)) { warn(`${rpath} resolves outside the workspace (the project root's parent) — skipped`); continue; }
       const detected = run('git', ['remote', 'get-url', 'origin'], { cwd: path.resolve(root, rpath) });
       const platform = (await ask('    platform (github/gitlab)', detectPlatform(detected.ok ? detected.stdout : '') || 'github')).toLowerCase();
-      // Domain owners route the per-repo review. Solo (no roster) and monorepo (one repo = one owner)
-      // skip these prompts — there is no second person to route to.
-      const domain_owners = solo || mono ? [] : parseList(await ask('    domain owner(s) (yad names, space-separated)', ''));
-      const repoReviewers = solo || mono ? [] : parseList(await ask('    repo reviewer(s) (yad names, space-separated; blank to skip)', ''));
-      const repoOwners = solo || mono ? [] : parseList(await ask('    repo owner(s) (yad names, space-separated; blank to skip)', ''));
       const default_branch = await ask('    default branch', 'main');
-      const repo = registerRepo(root, registry, { name, rpath, platform, domain_owners, default_branch, today: opts.today ?? null, pack: !greenfield });
+      const repo = registerRepo(root, registry, { name, rpath, platform, default_branch, today: opts.today ?? null, pack: !greenfield });
       if (!repo) continue;
-      addRepoRoles(root, name, { 'domain-owner': domain_owners, reviewer: repoReviewers, owner: repoOwners });
       known.add(name);
       ok(`registered ${name}`);
       if (greenfield) info(`${name}: greenfield — skipped repomix pack (run \`yad repo refresh ${name}\` once it has code)`);
       else packRepo(root, repo);
       if (mono) { info('monorepo — one repo connected; stop here'); break; }
-    }
-  }
-
-  // Assign/update roles for ALREADY-connected repos. Skipped in solo mode (no roster). The connect loop
-  // above only prompts for repos you add now; this closes the gap so a member's role on a repo connected
-  // in an earlier run can be set without reconnecting. Mirrors `yad roster` (repo-driven).
-  const hub7 = readJSON(productPath, null);
-  if (!solo && registry.repos.length && hub7 && Array.isArray(hub7.roster) && hub7.roster.length
-      && await askYesNo('Assign/update roles for connected repos?', false)) {
-    for (const member of hub7.roster) {
-      if (!(await askYesNo(`  edit ${member.name}'s repo roles?`, false))) continue;
-      for (const repo of registry.repos) {
-        const cur = rolesForScope(member, repo.name);
-        if (!(await askYesNo(`    set ${member.name}'s role on ${repo.name}? (current: ${cur.length ? cur.join(', ') : 'none'})`, false))) continue;
-        const input = await ask('      roles (domain-owner/reviewer/owner, space-separated; blank = clear)', cur.join(' '));
-        const want = parseList(input).filter((x) => ['owner', 'reviewer', 'domain-owner'].includes(x));
-        reconcileRepoRoles(root, member.name, repo.name, cur, want);
-      }
     }
   }
 
@@ -816,9 +623,7 @@ export async function runSetup(root, opts = {}) {
     hand(`author your first epic: run \`${epicSkill}\``);
   }
   hand('your single next action, anytime: `yad next`');
-  if (!solo && !(readJSON(productPath, null)?.roster || []).length) {
-    hand('add reviewers when ready: `yad roster add <login>` (an owner + 1 reviewer passes a gate; a contract review also reports an advisory count of 3, which never blocks)');
-  }
+  if (!solo) hand('reviewers need no setup: anyone with access approves on the platform, and one approval passes a gate');
   log('');
   log(c.bold('Then — AI-only steps (run in your AI agent):'));
   if (registry.repos.length) hand('generate code-maps: run `yad-connect-repos` for each connected repo');

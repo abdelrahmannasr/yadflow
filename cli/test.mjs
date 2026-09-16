@@ -2725,7 +2725,25 @@ test('resolveProfile: the older review_gate.solo carries forward, so a scripted 
   process.env.SDLC_NONINTERACTIVE = '1';
   try {
     const p = await resolveProfile(T, {});
-    assert.equal(p.solo, true, 'a roster of two would otherwise default the question to team');
+    assert.equal(p.solo, true, 'a configured Product with no mode would otherwise default the question to team');
+  } finally { delete process.env.SDLC_NONINTERACTIVE; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('resolveProfile: with no mode recorded, a configured Product defaults to TEAM — never solo by accident (E62)', async () => {
+  // The default used to come from the roster's size. Solo waives every approval, so a scripted re-run of
+  // an old Product must not fall into it: an existing hub.json with no mode and no recorded team size is a
+  // team, a recorded team size decides, and only a project with no Product at all starts solo.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof-e62-'));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    assert.equal((await resolveProfile(T, {})).solo, true, 'no Product yet → solo');
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'a' }] }));
+    const team = await resolveProfile(T, {});
+    assert.equal(team.solo, false, 'a Product with no mode → team, whatever an old roster says');
+    assert.equal(team.team_size, 2);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', profile: { team_size: 1 } }));
+    assert.equal((await resolveProfile(T, {})).solo, true, 'a recorded team size of 1 → solo');
   } finally { delete process.env.SDLC_NONINTERACTIVE; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -2904,9 +2922,9 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// Regression for #97: a reconfigure that collects no reviewers (solo re-run) must NOT blank a populated
-// roster or drop the top-level verified_authors — both feed the verified-commits gate's allowlist.
-test('buildReconfiguredHub: empty collected roster preserves the existing roster + verified_authors', () => {
+// Regression for #97: a reconfigure must never drop a key it does not collect. Since E62 that includes a
+// `roster` and `verified_authors` an older release wrote: nothing reads them, and nothing deletes them.
+test('buildReconfiguredHub: overlays what this run collected and keeps every other key as it was', () => {
   const cur = {
     platform: 'github',
     verified_authors: ['dev@acme.com'],
@@ -2914,43 +2932,18 @@ test('buildReconfiguredHub: empty collected roster preserves the existing roster
   };
   const next = buildReconfiguredHub(cur, {
     platform: 'github', git_url: 'https://github.com/acme/hub.git', bridge_enabled: true, bridge: true,
-    default_branch: 'main', roster: [], solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 },
+    default_branch: 'main', solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 },
   });
   assert.equal(next.git_url, 'https://github.com/acme/hub.git', 'git_url added');
-  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors preserved');
-  assert.equal(next.roster.length, 1, 'populated roster preserved when reconfigure collects none');
-  assert.equal(next.roster[0].login, 'al', 'roster entry untouched');
+  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors left on disk');
+  assert.deepEqual(next.roster, cur.roster, 'an older roster left on disk, untouched');
   assert.equal(next.solo, true, 'reconfigured fields overlaid');
-});
-
-test('buildReconfiguredHub: a non-empty collected roster replaces cur.roster but keeps verified_authors', () => {
-  const cur = {
-    platform: 'github',
-    verified_authors: ['dev@acme.com'],
-    roster: [{ login: 'al', name: 'alice', roles: { hub: ['owner'] } }],
-  };
-  const next = buildReconfiguredHub(cur, {
-    platform: 'github', git_url: null, bridge_enabled: true, bridge: true, default_branch: 'main',
-    roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }], solo: false,
-    profile: { codebase: 'greenfield', repo_layout: 'monorepo', team_size: 2 },
-  });
-  assert.equal(next.roster.length, 1, 'new roster used');
-  assert.equal(next.roster[0].login, 'bo', 'roster replaced by the reconfigured entries');
-  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors still preserved on replace');
-});
-
-test('buildReconfiguredHub: no existing file produces a plain object with an empty roster', () => {
-  const next = buildReconfiguredHub(null, {
-    platform: 'none', git_url: null, bridge_enabled: false, bridge: false, default_branch: 'main',
-    roster: [], solo: true, profile: { codebase: 'greenfield', repo_layout: 'monorepo', team_size: 1 },
-  });
-  assert.deepEqual(next.roster, [], 'fresh write has an empty roster');
-  assert.equal(next.verified_authors, undefined, 'no verified_authors invented');
-  assert.equal(next.platform, 'none', 'reconfigured fields present');
+  const fresh = buildReconfiguredHub(null, { platform: 'none', solo: true });
+  assert.deepEqual(fresh, { platform: 'none', solo: true }, 'a fresh write invents no roster and no verified_authors');
 });
 
 // Wiring guard: a corrupt hub.json must abort the run (YAD-STATE-001), never fail-open to `{}` and get
-// rewritten with roster/verified_authors stripped — the same silent-loss hole via a parse failure.
+// rewritten with every key it did not collect stripped — the same silent-loss hole via a parse failure.
 test('runSetup: a corrupt hub.json aborts instead of silently rewriting it stripped', async () => {
   const { T } = scaffold();
   const corrupt = '{ this is not valid json';
@@ -4541,7 +4534,7 @@ test('repo sync switches a local-only repo (no remote) to its default branch', a
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
-const { registerRepo, registerDesign, registerTesting, registerLearning, addRepoRoles } = await import('./setup.mjs');
+const { registerRepo, registerDesign, registerTesting, registerLearning } = await import('./setup.mjs');
 
 test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
@@ -4645,7 +4638,7 @@ test('registerRepo records a real repo; an unknown platform answer falls back to
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('registerRepo records multiple domain_owners, keeping domain_owner as the first', () => {
+test('registerRepo records no domain owners — people are not stored (E62)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
   const real = path.join(T, 'real');
   fs.mkdirSync(real);
@@ -4654,8 +4647,8 @@ test('registerRepo records multiple domain_owners, keeping domain_owner as the f
   git(real, 'add', '-A');
   git(real, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'init');
   const repo = registerRepo(T, { repos: [] }, { name: 'real', rpath: 'real', platform: 'github', domain_owners: ['carol', 'dave'], today: '2026-06-14' });
-  assert.deepEqual(repo.domain_owners, ['carol', 'dave']);
-  assert.equal(repo.domain_owner, 'carol', 'legacy single field mirrors the first owner');
+  assert.equal(repo.domain_owners, undefined, 'an owner passed in by an older caller is not written');
+  assert.equal(repo.domain_owner, undefined);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4670,139 +4663,6 @@ test('registerRepo with pack:false (greenfield) leaves syncedHead null and reads
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('addRepoRoles grants per-repo roles into the roster map and warns on unknown names', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roles-'));
-  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
-    platform: 'github', roster: [
-      { login: 'ca', name: 'carol', roles: { hub: ['reviewer'] } },
-      { login: 'al', name: 'alice', role: 'owner' }, // legacy entry gets migrated to a map
-    ],
-  }));
-  addRepoRoles(T, 'backend', { 'domain-owner': ['carol', 'ghost'], owner: ['alice'] });
-  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
-  const carol = hub.roster.find((r) => r.name === 'carol');
-  const alice = hub.roster.find((r) => r.name === 'alice');
-  assert.deepEqual(carol.roles.backend, ['domain-owner']);
-  assert.deepEqual(carol.roles.hub, ['reviewer'], 'existing hub roles preserved');
-  assert.deepEqual(alice.roles, { hub: ['owner'], product: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map, under both spellings of the product scope');
-  // idempotent: re-granting the same role does not duplicate
-  addRepoRoles(T, 'backend', { 'domain-owner': ['carol'] });
-  const again = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
-  assert.deepEqual(again.roster.find((r) => r.name === 'carol').roles.backend, ['domain-owner']);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-// ---------------------------------------------------------------------------------------------
-// `yad roster` — manage the roster + per-repo roles at any time (repo-driven, repos.json sync)
-// ---------------------------------------------------------------------------------------------
-const { parseRolesSpec, upsertRosterEntry, removeRepoRole, setRepoDomainOwners } = await import('./setup.mjs');
-const { runRoster } = await import('./roster.mjs');
-
-// A temp root with a hub.json (platform null so login validation is skipped) and a repos.json.
-function rosterRoot(roster = [], repos = []) {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roster-'));
-  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, bridge_enabled: false, default_branch: 'main', roster }));
-  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos }));
-  return T;
-}
-const readHub = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
-const readRepos = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json')));
-
-test('parseRolesSpec parses a multi-scope spec and dedupes', () => {
-  assert.deepEqual(parseRolesSpec('hub=owner,reviewer backend=domain-owner'),
-    { hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
-  assert.deepEqual(parseRolesSpec('hub=reviewer,reviewer'), { hub: ['reviewer'] }, 'dedupes within a scope');
-  assert.deepEqual(parseRolesSpec('garbage no-equals'), {}, 'malformed tokens are skipped');
-  assert.deepEqual(parseRolesSpec(''), {});
-});
-
-test('upsertRosterEntry inserts a new member and upserts by login, merging roles without dropping scopes', () => {
-  const T = rosterRoot();
-  upsertRosterEntry(T, { login: 'gl-abd', name: 'abdulrahman', email: 'a@b.c', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] }, platform: 'none' });
-  let e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.equal(e.name, 'abdulrahman');
-  assert.equal(e.email, 'a@b.c');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'] });
-  // upsert by login: add a dashboard scope; hub + backend must survive
-  upsertRosterEntry(T, { login: 'gl-abd', roles: { dashboard: ['domain-owner'] }, platform: 'none' });
-  e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
-  assert.equal(readHub(T).roster.length, 1, 'upsert, not duplicate');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('setRepoDomainOwners adds/removes a name and mirrors domain_owner; no-op for an unregistered repo', () => {
-  const T = rosterRoot([], [{ name: 'backend', domain_owner: '', domain_owners: [] }]);
-  assert.equal(setRepoDomainOwners(T, 'backend', 'abdulrahman', { add: true }), true);
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['abdulrahman']);
-  assert.equal(readRepos(T).repos[0].domain_owner, 'abdulrahman', 'legacy field mirrors the first owner');
-  setRepoDomainOwners(T, 'backend', 'ayman', { add: true });
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['abdulrahman', 'ayman']);
-  setRepoDomainOwners(T, 'backend', 'abdulrahman', { add: false });
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['ayman']);
-  assert.equal(readRepos(T).repos[0].domain_owner, 'ayman', 'mirror follows the removal');
-  assert.equal(setRepoDomainOwners(T, 'ghost', 'x', { add: true }), false, 'unregistered repo is a no-op');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster grant writes the roles map AND syncs repos.json domain_owners; revoke reverts both', async () => {
-  const T = rosterRoot(
-    [{ login: 'ay', name: 'ayman', roles: { hub: ['reviewer'] } }],
-    [{ name: 'backend', domain_owner: '', domain_owners: [] }],
-  );
-  await runRoster(T, { action: 'grant', args: ['ayman', 'backend', 'domain-owner'] });
-  assert.deepEqual(readHub(T).roster[0].roles.backend, ['domain-owner']);
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['ayman'], 'repos.json kept in sync');
-  await runRoster(T, { action: 'revoke', args: ['ayman', 'backend', 'domain-owner'] });
-  assert.equal(readHub(T).roster[0].roles.backend, undefined, 'empty scope key removed');
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, [], 'repos.json reverted');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster grant refuses a name that is not in the roster', async () => {
-  const T = rosterRoot([], [{ name: 'backend', domain_owners: [] }]);
-  const prev = process.exitCode;
-  await runRoster(T, { action: 'grant', args: ['ghost', 'backend', 'domain-owner'] });
-  assert.equal(process.exitCode, 1, 'sets a failing exit code');
-  assert.deepEqual(readHub(T).roster, [], 'nothing written');
-  process.exitCode = prev;
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster add --roles (scripted) upserts and mirrors domain-owner scopes into repos.json', async () => {
-  const T = rosterRoot([], [{ name: 'backend', domain_owners: [] }, { name: 'dashboard', domain_owners: [] }]);
-  await runRoster(T, { action: 'add', args: ['gl-abd'], name: 'abdulrahman', email: 'a@b.c',
-    roles: 'hub=owner,reviewer backend=domain-owner dashboard=domain-owner' });
-  const e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
-  assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'backend').domain_owners, ['abdulrahman']);
-  assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'dashboard').domain_owners, ['abdulrahman']);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('removeRepoRole drops one role and empties the scope key; runRoster remove deletes by login', async () => {
-  const T = rosterRoot([{ login: 'ca', name: 'carol', roles: { hub: ['reviewer'], backend: ['domain-owner', 'reviewer'] } }],
-    [{ name: 'backend', domain_owners: ['carol'] }]);
-  removeRepoRole(T, 'carol', 'backend', ['reviewer']);
-  assert.deepEqual(readHub(T).roster[0].roles.backend, ['domain-owner'], 'only the named role is removed');
-  removeRepoRole(T, 'carol', 'backend', ['domain-owner']);
-  assert.equal(readHub(T).roster[0].roles.backend, undefined, 'empty scope key deleted');
-  await runRoster(T, { action: 'remove', args: ['ca'] });
-  assert.deepEqual(readHub(T).roster, [], 'member removed by login');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster list reports members, repos, and hub<->repos.json domain-owner drift', async () => {
-  const T = rosterRoot([{ login: 'ca', name: 'carol', roles: { hub: ['reviewer'] } }],
-    [{ name: 'backend', domain_owners: ['carol'] }]); // carol owns backend in repos.json but has no roles.backend
-  const summary = await runRoster(T, { action: 'list' });
-  assert.equal(summary.members, 1);
-  assert.equal(summary.repos, 1);
-  assert.equal(summary.drift, 1, 'flags the repos.json-only ownership');
-  fs.rmSync(T, { recursive: true, force: true });
-});
 
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerDesign: record the design-tool connection (deterministic half)
@@ -4922,7 +4782,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, rolesForScope, hasAnyRole, platformLogin, actorName, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, platformLogin, actorName, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
 
 test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
   assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
@@ -5029,23 +4889,6 @@ test('mapApprovers only counts APPROVED and carries submittedAt', () => {
   assert.equal(mapApprovers([{ state: 'APPROVED', submittedAt: 't3' }], {}).length, 0);
 });
 
-test('rolesForScope normalizes the per-scope map, the flat array, and the legacy single role', () => {
-  assert.deepEqual(rolesForScope({ roles: { hub: ['owner'], backend: ['domain-owner'] } }, 'backend'), ['domain-owner']);
-  assert.deepEqual(rolesForScope({ roles: { hub: ['owner'] } }, 'frontend'), []);
-  assert.deepEqual(rolesForScope({ roles: ['reviewer'] }, 'hub'), ['reviewer']); // flat array => hub
-  assert.deepEqual(rolesForScope({ roles: ['reviewer'] }, 'backend'), []);
-  assert.deepEqual(rolesForScope({ role: 'owner' }, 'hub'), ['owner']);          // legacy single role
-  assert.deepEqual(rolesForScope({ role: 'owner' }, 'backend'), []);
-  assert.deepEqual(rolesForScope(null, 'hub'), []);
-});
-
-test('hasAnyRole searches the requested roles across scopes', () => {
-  const e = { roles: { hub: ['reviewer'], backend: ['domain-owner'] } };
-  assert.equal(hasAnyRole(e, ['hub'], ['owner']), false);
-  assert.equal(hasAnyRole(e, ['hub', 'backend'], ['domain-owner']), true);
-  assert.equal(hasAnyRole(e, ['frontend'], ['reviewer']), false);
-});
-
 test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {
   const gl = buildPrArgs('gitlab', { title: 't', body: 'b', base: 'main', head: 'f', reviewers: ['bo', 'ca', 'dv'] });
   assert.equal(gl[gl.indexOf('--reviewer') + 1], 'bo');   // only the first; the rest get @-mentioned
@@ -5080,11 +4923,6 @@ test('actorName: the platform login, else git user.name, else null', () => {
   assert.equal(actorName('/x', 'github', { runner: runner(null, 'Octo Cat'), env: on }), 'Octo Cat');
   assert.equal(actorName('/x', null, { runner: runner('octocat', 'Octo Cat'), env: on }), 'Octo Cat', 'no platform → git name');
   assert.equal(actorName('/x', 'github', { runner: runner(null, ''), env: on }), null);
-});
-
-test('validateLogin returns checked:false when the platform CLI is unknown', () => {
-  assert.deepEqual(validateLogin(null, 'someone'), { ok: false, exists: false, checked: false });
-  assert.deepEqual(validateLogin('github', ''), { ok: false, exists: false, checked: false });
 });
 
 test('buildPrArgs wires reviewers + assignees for gh and glab', () => {
@@ -9568,44 +9406,6 @@ test('doctor shape: a project this engine wrote is on this engine shape, and say
 
 // Two names for one file only stay in step because the engine writes both. Anything else touching
 // one of them — a person, a script, a half-finished merge — makes the other silently ignored.
-// The product-level scope has two spellings. Readers and WRITERS must use the same one, or a role
-// can be granted and never revoked — a governance control that stops working because someone ran
-// the upgrade command. These are the cases that were broken.
-test('roster: a role on a MIGRATED entry can actually be revoked', () => {
-  const { T } = scaffold();
-  const productPath = path.join(T, '.sdlc/hub.json');
-  // exactly what `yad migrate` leaves behind: the same list under both spellings
-  fs.writeFileSync(productPath, JSON.stringify({ platform: 'none', roster: [
-    { login: 'alice', name: 'Alice', roles: { product: ['owner', 'reviewer'], hub: ['owner', 'reviewer'] } },
-  ] }, null, 2) + '\n');
-  removeRepoRole(T, 'Alice', 'hub', ['owner', 'reviewer']);
-  const entry = JSON.parse(fs.readFileSync(productPath, 'utf8')).roster[0];
-  assert.deepEqual(rolesForScope(entry, 'hub'), [], 'gone under the old spelling');
-  assert.deepEqual(rolesForScope(entry, 'product'), [], 'and under the new one — otherwise they are still an approver');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('roster: a grant on a MIGRATED entry lands under both spellings', () => {
-  const { T } = scaffold();
-  const productPath = path.join(T, '.sdlc/hub.json');
-  fs.writeFileSync(productPath, JSON.stringify({ platform: 'none', roster: [
-    { login: 'alice', name: 'Alice', roles: { product: ['reviewer'], hub: ['reviewer'] } },
-  ] }, null, 2) + '\n');
-  upsertRosterEntry(T, { login: 'alice', name: 'Alice', roles: { hub: ['owner'] }, platform: 'none' });
-  const entry = JSON.parse(fs.readFileSync(productPath, 'utf8')).roster[0];
-  assert.deepEqual(rolesForScope(entry, 'hub').sort(), ['owner', 'reviewer']);
-  assert.deepEqual(rolesForScope(entry, 'product').sort(), ['owner', 'reviewer'], 'the two spellings never diverge');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('roster: when the two spellings disagree, the OLD one wins — the one every writer maintains', () => {
-  // Pins the tie-break. Flipping the preference used to leave the whole suite green, which is how a
-  // reader/writer mismatch got in.
-  const entry = { roles: { hub: ['owner'], product: ['reviewer'] } };
-  assert.deepEqual(rolesForScope(entry, 'hub'), ['owner']);
-  assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'asking by either name gives the authoritative answer');
-});
-
 test('doctor mirror: two copies of the settings that disagree are reported, not left silent', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
@@ -10080,6 +9880,32 @@ test('doctor: hub with a platform but no git_url warns YAD-CFG-005 (not a mislea
   const r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'hub-git-url' && x.status === 'warn' && /YAD-CFG-005/.test(x.message)), 'missing git_url must warn YAD-CFG-005');
   assert.equal(r.failed, 0, 'the warning must never be a failure');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: roster data an older release wrote is named as unused — empty keys stay quiet (E62)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // The scaffold names a domain owner; start from a registry with no people in it at all.
+  const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+  repos.repos = repos.repos.map((r) => { const c = { ...r }; delete c.domain_owner; delete c.domain_owners; return c; });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
+  const quiet = await doctorOn(T);
+  assert.ok(!quiet.checks.some((x) => x.id.startsWith('people:')), 'nothing to say about a project with no people data');
+  // What an older solo setup wrote for every repo and the Product: empty keys, which say nothing.
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: repos.repos.map((r) => ({ ...r, domain_owner: '', domain_owners: [] })) }));
+  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id.startsWith('people:')), 'empty lists are silent');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'al', name: 'alice', role: 'owner' }] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: repos.repos.map((r) => ({ ...r, domain_owner: 'alice' })) }));
+  const r = await doctorOn(T);
+  const roster = r.checks.find((x) => x.id === 'people:roster-unused');
+  const owners = r.checks.find((x) => x.id === 'people:domain-owners-unused');
+  assert.equal(roster?.status, 'warn');
+  assert.match(roster.message, /nothing reads any more/);
+  assert.equal(owners?.status, 'warn');
+  assert.match(owners.message, new RegExp(repos.repos[0].name));
+  assert.ok(!r.checks.some((x) => x.id === 'people:roster-unused' && x.status === 'fail'), 'a warning, never a failure');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -15067,6 +14893,19 @@ test('yad epic new --stub: refuses the two things a stub can never be', async ()
   // …and `--stub --type feature` is not a contradiction, it is the default said out loud.
   const ok2 = await epicNewOn({ slug: 'x', stub: true, type: 'feature' });
   try { assert.equal(ok2.failed, false, ok2.out); } finally { cleanTmp(ok2.T); }
+});
+
+test('CLI: `yad roster` was removed, and says where the people model went instead of "unknown command" (E62)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roster-gone-'));
+  try {
+    for (const args of [['roster'], ['roster', 'add', 'al', '--roles', 'hub=owner']]) {
+      const r = yadRun(T, ...args);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /yad roster was removed — yadflow keeps no list of people/);
+      assert.match(r.out, /one approval from anyone with access/);
+    }
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc')), 'and it writes nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('CLI: `--stub` reaches the command through the arg parser', () => {
