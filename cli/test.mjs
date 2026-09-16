@@ -507,7 +507,7 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 // the module config, which E3 moved to `.sdlc/config.yaml` — `new` (not `missing`) so the scope=changed
 // filter keeps it, while repo+Product wiring stays `missing` and remains excluded from update (no one-time
 // setup on update). Nothing is planned under `_bmad/` any more.
-const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
+const { moduleActions, ideTargetStateFor, detectedIdeTargetStateFor, safeIdeTargetsFor } = await import('./plan.mjs');
 // The fresh-setup default, read by the two tests below and by the setup prompt test far later.
 const { DEFAULT_IDE_TARGETS } = await import('./manifest.mjs');
 
@@ -13998,6 +13998,24 @@ test('a wired script that lost its execute bit is outdated, not ok (E11 review)'
     }
     assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'), 'and back to ok');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a project root that is not a directory is refused, on both paths into the planner', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-rootfile-'));
+  const notADir = path.join(base, 'notadir');
+  try {
+    fs.writeFileSync(notADir, 'x');
+    // Swallowing ENOTDIR (so an unreadable `.cursor/` could not abort `yad check`) also made a
+    // non-directory root read as "nothing here" — and the planner then built a 39-action install plan
+    // against a regular file. It used to abort by accident on the raw errno; it must abort on purpose.
+    for (const call of [
+      () => detectedIdeTargetStateFor(notADir),
+      () => safeIdeTargetsFor(notADir, ['.claude']),
+      () => moduleActions(notADir, ['.claude']),
+    ]) assert.throws(call, /not a directory/);
+    // A real directory is untouched by the guard, including one with nothing in it yet.
+    assert.ok(moduleActions(base, ['.claude']).length > 0);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
 
 test('detection counts an ARMED hook entry as an install, so an upgrade does not drop it (E11 review)', () => {

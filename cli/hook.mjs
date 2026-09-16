@@ -148,12 +148,18 @@ export function hubRootFor(abs) {
 // Where a RELATIVE path in the payload is anchored. Only used to make such a path absolute, so the
 // Product walk-up above has somewhere to start.
 //
-// Every harness's project-root variable is tried, in the order the adapters declare them, before git
-// is asked (E11). Reading only Claude Code's meant that under any other harness the FIRST branch
-// never fired, and a relative payload path was anchored at the git toplevel instead — which in the
-// documented multi-repo layout is a code repo, not the Product, so the walk-up found no `hub.json`
-// and the guard allowed an edit it should have refused. `env` is a parameter precisely so a test can
-// pin that, one harness at a time, without setting real environment variables.
+// Every harness's project-root variable is tried, in the order the adapters declare them, before
+// anything is guessed (E11).
+//
+// A correction worth keeping, because the obvious reasoning is wrong: Cursor's docs say it also
+// exports `CLAUDE_PROJECT_DIR`, as a deliberate compatibility alias for `CURSOR_PROJECT_DIR`. So
+// "reading only Claude Code's variable" did NOT leave Cursor falling through — both names are set
+// there and point at the same directory, which is also why first-wins ordering is safe rather than
+// merely untested. The real gap this order closes is a harness that sets neither, and the case below
+// it: no variable at all, where the git toplevel used to win over the process cwd.
+//
+// `env` is a parameter precisely so a test can pin each branch without setting real environment
+// variables.
 export function baseDirFor(env = process.env, runner = run, payloadCwd = null) {
   for (const name of HOOK_PROJECT_DIR_ENVS) {
     if (env[name]) return env[name];

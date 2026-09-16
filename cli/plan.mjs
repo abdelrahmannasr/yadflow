@@ -165,6 +165,18 @@ const lstatIfPresent = (full) => {
 const installContainer = (ide) => (ide === IDE_OPENCODE_TARGET ? IDE_OPENCODE_DIR : path.join(ide, 'skills'));
 const ideContainers = (ide) => [ide, installContainer(ide)];
 
+// The ROOT itself, before any target under it, on BOTH paths into the planner — detection and an
+// explicit target list. Widening `lstatIfPresent` to swallow ENOTDIR made a non-directory root
+// silently yield "nothing here", and the planner then built a full install plan against a path that
+// is a regular file. It used to abort by accident, on the raw ENOTDIR; aborting on purpose, with a
+// sentence naming the problem, is what it should have been doing.
+function assertRootIsDirectory(root) {
+  const stat = lstatIfPresent(root);
+  if (stat && !stat.isDirectory()) {
+    throw ideTargetError(`not a directory: ${root} — a project root must be a directory`);
+  }
+}
+
 function assertSafeIdeContainers(root, ide) {
   for (const relPath of ideContainers(ide)) {
     const stat = lstatIfPresent(path.join(root, relPath));
@@ -229,6 +241,7 @@ export function canonicalIdeTargets(input) {
 // every target before constructing ANY actions, so a bad later target cannot cause a partial install.
 export function safeIdeTargetsFor(root, input) {
   const targets = canonicalIdeTargets(input);
+  assertRootIsDirectory(root);
   for (const ide of targets) assertSafeIdeContainers(root, ide);
   return targets;
 }
@@ -246,6 +259,7 @@ export const hookScriptReady = (root, relPath) => {
 export function safeIdeTargetStateFor(root, input) {
   const targets = [];
   const unsafe = [];
+  assertRootIsDirectory(root);
   for (const ide of canonicalIdeTargets(input)) {
     try {
       assertSafeIdeContainers(root, ide);
@@ -299,6 +313,7 @@ const hasOurHookEntry = (root, ide) => {
 };
 
 export function detectedIdeTargetStateFor(root) {
+  assertRootIsDirectory(root);
   const targets = [];
   const unsafe = [];
   for (const ide of IDE_TARGETS) {
