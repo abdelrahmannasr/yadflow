@@ -40,10 +40,11 @@ roster `name` instead of their login. The gate never counts a role; the records 
 On the first sync after the upgrade, `yad gate sync` recognises the person such a bridge record names,
 so it continues that record instead of treating the approval as new:
 1. **With the roster still on disk** — the roster's `name` → `login` pairs make the match exact. This is
-   the ONLY thing the roster is read for; it decides nothing about the gate. Two exceptions: a name the
-   roster gives to two logins is not used, and a name that is another entry's login cannot be told apart
-   — `yad doctor` warns `people:roster-ambiguous` for both. A record an older release marked
-   `unverified` already names a login and is never translated.
+   the ONLY thing the roster is read for; it decides nothing about the gate. A name equal to another
+   entry's login is still exact (the older record under a name was written from that entry). The one
+   exception is a name the roster gives to TWO logins: a record under it could be either person, so it is
+   treated like a record no name can place (step 2), and `yad doctor` warns `people:roster-ambiguous`. A
+   record an older release marked `unverified` already names a login and is never translated.
 2. **Without a roster** — a record is continued only when nothing else could be it: the same submission
    time (GitHub), or — on an open step only — exactly one unmatched approval against exactly one
    unmatched older approver of that PR (GitLab, which has no submission time). People are never matched
