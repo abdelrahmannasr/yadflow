@@ -13459,7 +13459,7 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
       input: payload, encoding: 'utf8', cwd: T,
       env: { ...GIT_ENV, CLAUDE_PROJECT_DIR: T, YAD_NO_UPDATE_NOTIFIER: '1', YAD_CACHE_DIR: path.join(T, 'cache') },
     });
-    return { code: r.status, stderr: r.stderr || '' };
+    return { code: r.status, stderr: r.stderr || '', stdout: (r.stdout || '').trim() };
   };
   try {
     git(T, 'init', '-q');
@@ -13505,6 +13505,32 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     // An unknown hook name is a usage error (1), never a block (2).
     const bad = spawnSync(process.execPath, [yad, 'hook', 'nope'], { input: '', encoding: 'utf8', cwd: T, env: { ...GIT_ENV, YAD_NO_UPDATE_NOTIFIER: '1' } });
     assert.equal(bad.status, 1);
+
+    // ---- the SECOND protocol (E11): a verdict on stdout, for a harness that reads JSON ----
+    //
+    // Cursor's `preToolUse` is a PERMISSION hook, and its docs say invalid JSON or an off-schema
+    // response BLOCKS the action. The exit protocol above prints nothing when it allows, and empty
+    // stdout is invalid JSON — so wiring it straight into Cursor would have blocked every file write
+    // in a verified project. Fail-CLOSED on everything is the one outcome this design forbids.
+    assert.equal(runHook('{"tool_input":{"file_path":"epics/EP-a/epic.md"}}').stdout, '', 'the exit protocol stays silent on an allow');
+
+    const jsonAllow = runHook('{"tool_input":{"file_path":"epics/EP-a/epic.md"}}', ['--format', 'cursor']);
+    assert.equal(jsonAllow.stdout, '{"permission":"allow"}', 'a fixed literal — a malformed ALLOW is a block');
+    assert.equal(jsonAllow.code, 0);
+
+    const jsonDeny = runHook('{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', ['--format', 'cursor']);
+    const verdict = JSON.parse(jsonDeny.stdout);
+    assert.equal(verdict.permission, 'deny');
+    assert.match(verdict.agentMessage, /yad gate open EP-a/, 'the command that owns the transition reaches the model');
+    // A deny EXITS 0: the JSON is the authoritative answer and exit 0 is what tells Cursor to read it.
+    // Exit 2 blocks too, but is documented as "no JSON to read" — it would throw the reason away.
+    assert.equal(jsonDeny.code, 0);
+    assert.match(jsonDeny.stderr, /Blocked/, 'and the reason is on stderr too, where Cursor logs it');
+    // An unknown format falls back to the exit protocol instead of erroring: this runs inside an
+    // agent's tool loop, where a usage error would be a non-zero exit on every single call.
+    const unknown = runHook('{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', ['--format', 'nope']);
+    assert.equal(unknown.code, 2);
+    assert.equal(unknown.stdout, '');
   } finally {
     fs.rmSync(T, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
@@ -13752,18 +13778,23 @@ test('hookActions wires every target that has a hook protocol, and only those', 
     fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
     const both = hookActions(T, ['.claude', '.cursor', '.agents']);
-    assert.deepEqual(both.map((a) => a.item), ['hooks/ledger-guard.sh', 'settings.json', 'hooks.json']);
-    assert.deepEqual(both.map((a) => a.scope), ['hub', '.claude', '.cursor']);
+    assert.deepEqual(both.map((a) => a.item),
+      ['hooks/ledger-guard.sh', 'settings.json', 'hooks/ledger-guard-cursor.sh', 'hooks.json']);
+    assert.deepEqual(both.map((a) => a.scope), ['hub', '.claude', 'hub', '.cursor']);
     for (const a of both) a.apply();
-    assert.deepEqual(hookActions(T, ['.claude', '.cursor', '.agents']).map((a) => a.status), ['ok', 'ok', 'ok']);
-    // The script both entries point at is installed ONCE, at the Product root, and Cursor's relative
-    // command is written as seen from there.
+    assert.deepEqual(hookActions(T, ['.claude', '.cursor', '.agents']).map((a) => a.status), ['ok', 'ok', 'ok', 'ok']);
+    // Cursor's relative command is written as seen from the project root, which is where its docs say
+    // a project hook runs from — so the file it names has to be there.
     assert.ok(fs.existsSync(path.join(T, CURSOR.command)), 'the relative command resolves from the project root');
+    assert.ok(fs.statSync(path.join(T, CURSOR.command)).mode & 0o111, 'the wrapper is executable');
+    // The wrapper is installed ONLY for the target that needs it: an unused adapter script in a
+    // `.claude`-only tree is a file nobody can explain.
+    assert.ok(!hookActions(T, ['.claude']).some((a) => a.item.includes('cursor')), 'no Cursor wrapper without .cursor');
     const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
     assert.equal(cursor.hooks.preToolUse[0].command, CURSOR.command);
     // Cursor's file is the team's too — never in the `--push` staging allowlist.
     assert.deepEqual(both.find((a) => a.item === 'hooks.json').paths, []);
-    // A target with no protocol still gets the script, and no wiring.
+    // A target with no protocol still gets the shared script, and no wiring.
     assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });

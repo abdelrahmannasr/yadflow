@@ -673,7 +673,15 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   );
   for (const ide of safeIdeTargetsFor(root, ideTargets)) {
     const adapter = HOOK_ADAPTERS[ide];
-    if (adapter) actions.push(hookSettingsAction(root, adapter));
+    if (!adapter) continue;
+    // A harness whose protocol the shared script cannot speak brings its own wrapper, and it is
+    // installed ONLY for a project that selected that target — an unused adapter script in a
+    // `.claude`-only tree is a file nobody can explain. It is pushed BEFORE the settings entry that
+    // points at it, so the two land in the order `asNew` already guarantees they land together.
+    for (const w of adapter.wiring) {
+      actions.push(wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }));
+    }
+    actions.push(hookSettingsAction(root, adapter));
   }
   // The two halves must land TOGETHER, so `missing` is relabelled `new` — the same relabel a new
   // first-party skill gets, and for the same reason: `yad update` (--scope=changed) excludes only

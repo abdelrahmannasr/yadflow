@@ -366,7 +366,7 @@ async function main() {
         process.exitCode = 1;
         break;
       }
-      runLedgerGuardHook({ paths: o.path ? [o.path] : [] });
+      runLedgerGuardHook({ paths: o.path ? [o.path] : [], format: o.format });
       break;
     }
     case 'report':

@@ -273,9 +273,35 @@ function readPayload() {
   }
 }
 
+// HOW A HARNESS IS TOLD THE VERDICT. Two protocols, because the second harness does not accept the
+// first (E11).
+//
+// `exit` is the original and the default: exit 0 allows, exit 2 denies, the reason goes to stderr for
+// the model to read. Claude Code reads exactly that.
+//
+// `cursor` is for a harness whose PERMISSION hooks are answered in JSON on stdout. Cursor's docs are
+// explicit that for a permission hook — and `preToolUse` is one — "invalid JSON or a response that
+// doesn't match the hook's schema blocks the action". Printing nothing, which is what `exit` does on
+// an allow, is invalid JSON. So the exit protocol under Cursor would have blocked EVERY file write in
+// a verified project: fail-CLOSED on everything, the one outcome this guard's whole design forbids.
+//
+// The allow response is a fixed literal with nothing interpolated into it, because a malformed allow
+// is a block. The deny response carries the reason, and if that extra field were ever rejected as
+// off-schema the response is invalid — which blocks, which is what a deny wanted anyway. Both
+// failure directions are therefore safe, and they are safe in opposite ways on purpose.
+//
+// A deny exits 0, not 2: the JSON is the authoritative answer and exit 0 is what tells Cursor to read
+// it. Exit 2 would also block, but it is documented as the code for "no JSON to read", so it would
+// throw away the reason — and naming the command that owns the transition is the entire point of
+// speaking at edit time instead of leaving it to CI. The reason also goes to stderr, where Cursor
+// logs it, so it is never only in a channel we cannot confirm.
+export const HOOK_FORMATS = ['exit', 'cursor'];
+const CURSOR_ALLOW = '{"permission":"allow"}';
+const cursorDeny = (message) => JSON.stringify({ permission: 'deny', agentMessage: message });
+
 // The `yad hook ledger-guard` entry point. `paths` (from `--path`) is additive to the payload, so
 // a harness with no JSON contract can call the guard directly.
-export function runLedgerGuardHook({ paths = [] } = {}) {
+export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
   // Only read stdin when there is nothing else to go on. `readFileSync(0)` blocks until EOF, and a
   // caller that passes `--path` (the documented stdin-free alternative) may well have inherited an
   // open pipe from a long-lived parent — `isTTY` is false there, so the TTY guard does not trip and
@@ -283,6 +309,17 @@ export function runLedgerGuardHook({ paths = [] } = {}) {
   const payload = paths.length ? null : readPayload();
   const all = [...new Set([...payloadPaths(payload), ...paths])];
   const verdict = ledgerGuardDecision(all);
+  // An unknown format is treated as `exit` rather than refused: this runs inside an agent's tool loop,
+  // and a usage error there would be a non-zero exit on every single call.
+  if (format === 'cursor') {
+    if (verdict.allow) {
+      process.stdout.write(`${CURSOR_ALLOW}\n`);
+      return 0;
+    }
+    process.stdout.write(`${cursorDeny(verdict.message)}\n`);
+    console.error(verdict.message);
+    return 0;
+  }
   if (verdict.allow) return 0;
   console.error(verdict.message);
   process.exitCode = 2;

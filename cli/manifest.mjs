@@ -519,8 +519,9 @@ export const HOOK_WIRING = [
 //
 // A harness qualifies for an entry here ONLY if it can run a command BEFORE a file is written and
 // refuse it. That is the whole point of the guard: saying "that edit was wrong" after the write has
-// landed is what CI already does. Two harnesses qualify today, checked against their own docs on
-// 2026-09-16:
+// landed is what CI already does. Two harnesses are wired, both read from their own docs on
+// 2026-09-16. The other install targets were NOT examined for a hook protocol — the scope closed at
+// Cursor — so "no entry here" means "not wired", never "checked and found wanting":
 //
 //   .claude   Claude Code — `PreToolUse` in `.claude/settings.json`, exit 2 blocks the call.
 //   .cursor   Cursor — `preToolUse` in `.cursor/hooks.json`, exit 2 is equivalent to `deny`.
@@ -567,6 +568,8 @@ export const HOOK_ADAPTERS = Object.freeze({
     // both.)
     projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
     command: guardCommand(CLAUDE_PROJECT_DIR_ENV),
+    // Claude Code reads the exit code, so the shared script needs no wrapper here.
+    wiring: Object.freeze([]),
     // Spellings a previous yadflow wrote for the SAME hook. An installed entry matching one of these
     // is ours to normalise; anything else is the team's, even if it names a similar path. Never widen
     // this to a substring test — a team keeping its own wrapper at `.claude/hooks/ledger-guard.sh`
@@ -586,6 +589,14 @@ export const HOOK_ADAPTERS = Object.freeze({
     // tools. It is kept anyway: a name too many costs one regex alternative that never matches, and a
     // name too few is a write nothing intercepts.
     matcher: 'Write|Edit|Delete',
+    // Cursor's `preToolUse` is a PERMISSION hook: it answers in JSON on stdout, and empty stdout is
+    // invalid JSON, which BLOCKS. So the plain guard cannot be wired here — it prints nothing when it
+    // allows, which would have blocked every file write in a verified project. This wrapper, installed
+    // with the adapter below, always prints a permission answer. It takes no arguments on purpose:
+    // Cursor holds one command STRING and does not document whether it is split by a shell.
+    wiring: Object.freeze([
+      Object.freeze({ src: 'skills/yad-checks/templates/hooks/ledger-guard-cursor.sh', dest: 'hooks/ledger-guard-cursor.sh', exec: true }),
+    ]),
     // RELATIVE, and deliberately not `$CURSOR_PROJECT_DIR/…` — the opposite of the Claude entry above,
     // for a documented reason. Cursor's docs say a project hook RUNS FROM THE PROJECT ROOT, which is
     // the directory holding the `.cursor/hooks.json` this entry lives in, and the same directory
@@ -599,7 +610,7 @@ export const HOOK_ADAPTERS = Object.freeze({
     // — which matters, because every one of those failures is silent, fails OPEN, and leaves
     // `yad doctor` truthfully reporting the entry as wired while nothing is ever refused.
     projectDirEnv: CURSOR_PROJECT_DIR_ENV,
-    command: 'hooks/ledger-guard.sh',
+    command: 'hooks/ledger-guard-cursor.sh',
     // Nothing shipped before this release, so there is no past spelling of ours to normalise.
     legacyCommands: Object.freeze([]),
   }),

@@ -434,11 +434,39 @@ Two harnesses match that contract, and `yad check --fix` wires both:
 | Harness | File | Event | Command |
 |---|---|---|---|
 | Claude Code | `.claude/settings.json` | `PreToolUse` | `"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"` |
-| Cursor | `.cursor/hooks.json` | `preToolUse` | `hooks/ledger-guard.sh` |
+| Cursor | `.cursor/hooks.json` | `preToolUse` | `hooks/ledger-guard-cursor.sh` |
 
-Exit 2 blocks the call in both (in Cursor it is equivalent to `permission: "deny"`) and the reason on
-stderr goes back to the model. Any other harness that can run a command and read those two exit codes
-can use the same script by hand.
+Any other harness that can run a command and read those two exit codes can use `ledger-guard.sh` by
+hand.
+
+**Cursor needs a second protocol, and this is the trap.** Its `preToolUse` is a *permission hook*:
+Cursor's docs say that for a permission hook, "invalid JSON or a response that doesn't match the
+hook's schema blocks the action". `ledger-guard.sh` prints **nothing** when it allows — and empty
+stdout is invalid JSON. Wiring it straight into Cursor would therefore have blocked **every** file
+write in a verified project: fail-closed on everything, the opposite of this guard's whole design, and
+invisible to any test that only checks that a deny denies.
+
+So Cursor gets `hooks/ledger-guard-cursor.sh`, installed only for a project whose targets include
+`.cursor`. It calls `yad hook ledger-guard --format cursor` through the shared script and guarantees a
+permission answer on stdout, whatever happens:
+
+| | stdout | exit |
+|---|---|---|
+| allow | `{"permission":"allow"}` | 0 |
+| deny | `{"permission":"deny","agentMessage":"<reason>"}` | 0 |
+
+The allow response is a fixed literal with nothing interpolated into it, because a malformed *allow*
+is a block. The deny response carries the reason, and if that field were ever rejected as off-schema
+the response is invalid — which blocks, which is what a deny wanted anyway. Both failure directions
+are safe, in opposite ways, on purpose. A deny exits **0**, not 2, because the JSON is the
+authoritative answer and exit 0 is what tells Cursor to read it; exit 2 blocks too but is documented
+as the code for "no JSON to read", so it would discard the reason — and naming the command that owns
+the transition is the entire point of speaking at edit time. The reason also goes to stderr, where
+Cursor logs it.
+
+The wrapper takes **no arguments**, and every fail-open branch of the shared script (no `yad` on
+PATH, an install it cannot resolve) is converted into an explicit `allow` answer rather than the
+empty stdout that would block.
 
 The two commands are spelled differently on purpose. Claude Code runs the string through a shell, so
 its entry uses `$CLAUDE_PROJECT_DIR` and is quoted against a project path containing a space. Cursor

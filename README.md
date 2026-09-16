@@ -137,6 +137,11 @@ failed pipeline. It needs a hook that can run *before* a write and refuse it. Tw
 | Claude Code | `.claude/settings.json` | `PreToolUse` |
 | Cursor | `.cursor/hooks.json` | `preToolUse` |
 
+Cursor answers this kind of hook in JSON rather than by exit code, and treats an empty answer as a
+refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.sh`,
+which always replies properly. Without it the guard would have blocked every file write instead of
+just the gate files.
+
 Every other directory gets the script (`hooks/ledger-guard.sh`) and no wiring — they have no such
 hook, so those agents are guarded by CI alone. `yad doctor` says so by name rather than staying
 silent. The Cursor wiring follows Cursor's published hook protocol and has not yet been exercised
