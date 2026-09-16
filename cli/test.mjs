@@ -507,7 +507,50 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 // the module config, which E3 moved to `.sdlc/config.yaml` — `new` (not `missing`) so the scope=changed
 // filter keeps it, while repo+Product wiring stays `missing` and remains excluded from update (no one-time
 // setup on update). Nothing is planned under `_bmad/` any more.
-const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
+const { moduleActions, ideTargetStateFor, detectedIdeTargetStateFor, safeIdeTargetsFor } = await import('./plan.mjs');
+// The fresh-setup default, read by the two tests below and by the setup prompt test far later.
+const { DEFAULT_IDE_TARGETS } = await import('./manifest.mjs');
+
+// The two agent directories E11 added. Both are folder-copy targets, like `.claude` and unlike
+// `.opencode`, whose install is a flat `commands/<skill>.md`.
+test('the Cursor and Gemini targets install skills as folder copies (E11)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-agents-'));
+  try {
+    for (const ide of ['.cursor', '.gemini']) {
+      const acts = moduleActions(T, [ide]).filter((a) => a.scope === ide);
+      assert.ok(acts.length, `${ide} plans no skills`);
+      for (const a of acts) a.apply();
+      assert.ok(fs.existsSync(path.join(T, ide, 'skills/yad-epic/SKILL.md')), `${ide} gets a skill FOLDER`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// A RECOVERY is not an upgrade. A project whose stamp is missing or unreadable falls back to the
+// minimum it can be sure of, never to the newer default — enrolling it in `.agents` would write forty
+// skill folders the team never asked for, on a path they did not choose to walk.
+test('a project with a broken stamp recovers to .claude alone, not to the fresh-setup default (E11)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-recover-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), '{ "ideTargets": "junk" }');
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.claude']);
+    assert.notDeepEqual(ideTargetStateFor(T).targets, [...DEFAULT_IDE_TARGETS]);
+    // A bare `.cursor/` is NOT a target. It is an ordinary sight in a repo that uses Cursor for rules
+    // alone, and detecting on the directory meant that merely ADDING `.cursor` to the supported list
+    // enrolled every such project: no stamp, so this fallback runs, and the next `yad check --fix`
+    // writes 38 skill folders and a hooks.json for a team that never asked.
+    fs.mkdirSync(path.join(T, '.cursor/rules'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.claude'], 'a rules-only .cursor/ is not an install target');
+    // The install container is what makes it one — a directory yad already installs into.
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor']);
+    // Same rule for opencode, whose container is `commands/`, not `skills/`.
+    fs.mkdirSync(path.join(T, '.opencode'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor'], 'a bare .opencode/ is not a target either');
+    fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor', '.opencode']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
 test('moduleActions: an uninstalled skill and the module config are "new"; nothing goes to _bmad (E3)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
   const acts = moduleActions(T, ['.claude']);
@@ -556,8 +599,15 @@ test('ideTargetStateFor: normalizes order/deduplication and safely falls back fr
   assert.deepEqual(mixed.repaired, [{ from: '.cluade', to: '.claude' }]);
   assert.equal(mixed.needsRepair, true);
 
+  // A BARE `.opencode/` is not a detected target: detection looks for the install container, so a
+  // directory a team keeps for their own reasons is never mistaken for an install of ours (E11).
   fs.mkdirSync(path.join(T, '.opencode'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: '../escape' }));
+  const bare = ideTargetStateFor(T);
+  assert.equal(bare.shapeValid, false);
+  assert.deepEqual(bare.targets, ['.claude'], 'a bare .opencode/ falls back to the recovery target');
+
+  fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
   const malformed = ideTargetStateFor(T);
   assert.equal(malformed.shapeValid, false);
   assert.deepEqual(malformed.targets, ['.opencode'], 'wrong-shaped state falls back to a detected supported root');
@@ -788,6 +838,35 @@ test('update leaves a user-authored file at an old wired path alone', async () =
   assert.ok(fs.existsSync(userFile), 'user file untouched');
   assert.equal(fs.readFileSync(userFile, 'utf8'), 'name: my-own-workflow\non: push\n');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// `--ide-targets` is a PRE-ANSWER for CI/scripts, like `--solo` and `--greenfield` beside it. It
+// exists because of what the E11 default change did to a non-interactive run: `ask` returns the
+// default under SDLC_NONINTERACTIVE, `ideTargets` was reachable only programmatically, and the
+// default went from one directory to two — so a scripted setup would have written a second full copy
+// of the skills with no way on the command line to decline.
+test('yad setup --ide-targets: a scripted run can choose its agent directories (E11)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-idetargets-'));
+  const yadBin = path.join(ROOT, 'bin/yad.mjs');
+  const setup = (args) => spawnSync(process.execPath, [yadBin, 'setup', '--solo', '--greenfield', '--monorepo', ...args], {
+    cwd: T, encoding: 'utf8', env: { ...GIT_ENV, SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1' },
+  });
+  try {
+    git(T, 'init', '-q');
+    git(T, 'config', 'user.email', 'a@b.c');
+    git(T, 'config', 'user.name', 'a');
+
+    // An unsupported target FAILS, and fails before anything is written — never a silent fall back to
+    // the default, which would install the very directories the caller was trying to avoid.
+    const bad = setup(['--ide-targets', '.nope']);
+    assert.match(bad.stdout + bad.stderr, /unsupported IDE target/);
+    assert.ok(!fs.existsSync(path.join(T, '.claude')), 'nothing installed on a bad target');
+
+    setup(['--ide-targets', '.claude']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/cli-version.json'), 'utf8')).ideTargets, ['.claude']);
+    assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')));
+    assert.ok(!fs.existsSync(path.join(T, '.agents')), 'the two-directory default is declinable');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('CLI --version matches manifest', () => {
@@ -2667,6 +2746,22 @@ test('selectIdeTargets: interactive input re-prompts, then trims and deduplicate
     /selection ended before a valid choice/,
     'EOF/cancel does not loop forever',
   );
+
+  // A project with NO agent directory is the only one shown the default, and the default is Claude
+  // Code plus the cross-agent directory — together they cover every agent the menu names (E11).
+  let offered = null;
+  let menu = null;
+  await selectIdeTargets(T, undefined, async (prompt, def) => { menu = prompt; offered = def; return '.claude'; });
+  assert.equal(offered, DEFAULT_IDE_TARGETS.join(','));
+  // The menu names the AGENTS, not just the directories: `.agents` says nothing to a Codex user.
+  assert.match(menu, /\.agents = .*Codex CLI/);
+  assert.match(menu, /\.cursor = .*Cursor/);
+  // An EXISTING INSTALL is offered back instead — detection beats the default, so nobody is talked
+  // into a target they did not choose. It takes the install container, not a bare directory: plenty of
+  // repos keep a `.cursor/` for rules alone and have never installed a skill in their lives.
+  fs.mkdirSync(path.join(T, '.zencoder/skills'), { recursive: true });
+  await selectIdeTargets(T, undefined, async (_p, def) => { offered = def; return '.zencoder'; });
+  assert.equal(offered, '.zencoder');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -13169,8 +13264,11 @@ test('yad still succeeds on a runtime with no global fetch (--no-experimental-fe
 const {
   ledgerGuardDecision, protectedLedgerPath, payloadPaths, hubRootFor, seededSlugs, resolveHookBase,
 } = await import('./hook.mjs');
-const { hookActions, mergeHookSettings, hookMatcherFires } = await import('./plan.mjs');
-const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER } = await import('./manifest.mjs');
+const { hookActions, mergeHookSettings, hookMatcherFires, orphanHookActions } = await import('./plan.mjs');
+const { collectDoctor: collectDoctorSync } = await import('./doctor.mjs');
+const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER, HOOK_ADAPTERS, IDE_AGENTS, IDE_TARGETS: HOOK_IDE_TARGETS } = await import('./manifest.mjs');
+const { baseDirFor } = await import('./hook.mjs');
+const CURSOR = HOOK_ADAPTERS['.cursor'];
 
 // A Product with two epics on disk. Which of them the BASE REF carries is the fake git's business, not
 // the filesystem's — the whole point of the seeding rule is that it reads the base, never the tree.
@@ -13410,6 +13508,15 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
       input: payload, encoding: 'utf8', cwd: T,
       env: { ...GIT_ENV, CLAUDE_PROJECT_DIR: T, YAD_NO_UPDATE_NOTIFIER: '1', YAD_CACHE_DIR: path.join(T, 'cache') },
     });
+    return { code: r.status, stderr: r.stderr || '', stdout: (r.stdout || '').trim() };
+  };
+  // The same hook run from somewhere else entirely, with NO harness project-root variable set — the
+  // case where the anchor for a relative payload path has to come from the payload itself.
+  const runHookAt = (cwd, payload) => {
+    const r = spawnSync(process.execPath, [yad, 'hook', 'ledger-guard'], {
+      input: payload, encoding: 'utf8', cwd,
+      env: { ...GIT_ENV, YAD_NO_UPDATE_NOTIFIER: '1', YAD_CACHE_DIR: path.join(T, 'cache3') },
+    });
     return { code: r.status, stderr: r.stderr || '' };
   };
   try {
@@ -13456,6 +13563,57 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     // An unknown hook name is a usage error (1), never a block (2).
     const bad = spawnSync(process.execPath, [yad, 'hook', 'nope'], { input: '', encoding: 'utf8', cwd: T, env: { ...GIT_ENV, YAD_NO_UPDATE_NOTIFIER: '1' } });
     assert.equal(bad.status, 1);
+
+    // A READ of the ledger is never refused, however wide the team made their matcher. Both harnesses
+    // document `''` and `*` as matching every tool, so a widened matcher sends Read/Grep calls here
+    // too — and refusing those would break `yad status`, the review-gate skill, and an agent's
+    // ability to read the very file it was just told to stop writing. An allowlist of READS, never a
+    // check that the tool is a write: an unknown tool name from an unknown harness is still judged.
+    for (const tool of ['Read', 'Grep', 'Glob', 'WebFetch']) {
+      assert.equal(runHook(`{"tool_name":"${tool}","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}`).code, 0, tool);
+    }
+    for (const tool of ['Write', 'Edit', 'Delete', 'str_replace_editor', '']) {
+      assert.equal(runHook(`{"tool_name":"${tool}","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}`).code, 2,
+        `${tool || '(none)'} is a write or unknown — judged, not waved through`);
+    }
+
+    // A RELATIVE path is anchored on the payload's own `cwd` when the harness sends one. Without it,
+    // a Product in a subdirectory of its repo fell back to the git toplevel, `hubRootFor` found no
+    // hub.json above it, and the edit was ALLOWED.
+    assert.equal(runHookAt(path.dirname(T), '{"cwd":"' + T + '","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}').code, 2,
+      'the payload cwd anchors the relative path');
+
+    // ---- the SECOND protocol (E11): a verdict on stdout, for a harness that reads JSON ----
+    //
+    // Cursor's `preToolUse` is a PERMISSION hook, and its docs say invalid JSON or an off-schema
+    // response BLOCKS the action. The exit protocol above prints nothing when it allows, and empty
+    // stdout is invalid JSON — so wiring it straight into Cursor would have blocked every file write
+    // in a verified project. Fail-CLOSED on everything is the one outcome this design forbids.
+    assert.equal(runHook('{"tool_input":{"file_path":"epics/EP-a/epic.md"}}').stdout, '', 'the exit protocol stays silent on an allow');
+
+    const jsonAllow = runHook('{"tool_input":{"file_path":"epics/EP-a/epic.md"}}', ['--format', 'cursor']);
+    assert.equal(jsonAllow.stdout, '{"permission":"allow"}', 'a fixed literal — a malformed ALLOW is a block');
+    assert.equal(jsonAllow.code, 0);
+
+    const jsonDeny = runHook('{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', ['--format', 'cursor']);
+    const verdict = JSON.parse(jsonDeny.stdout);
+    assert.equal(verdict.permission, 'deny');
+    // Cursor's documented schema is snake_case: `permission`, `user_message`, `agent_message`. A
+    // camelCase field is off-schema, and an off-schema response still BLOCKS — so the write is refused
+    // and a test that only checks "a deny denies" passes, while the text naming the command the agent
+    // should run is silently discarded. That text is the only reason to speak at edit time at all.
+    assert.deepEqual(Object.keys(verdict).sort(), ['agent_message', 'permission', 'user_message']);
+    assert.match(verdict.agent_message, /yad gate open EP-a/, 'the command that owns the transition reaches the model');
+    assert.match(verdict.user_message, /yad gate open EP-a/, 'and the person sees why their agent stopped');
+    // A deny EXITS 0: the JSON is the authoritative answer and exit 0 is what tells Cursor to read it.
+    // Exit 2 blocks too, but is documented as "no JSON to read" — it would throw the reason away.
+    assert.equal(jsonDeny.code, 0);
+    assert.match(jsonDeny.stderr, /Blocked/, 'and the reason is on stderr too, where Cursor logs it');
+    // An unknown format falls back to the exit protocol instead of erroring: this runs inside an
+    // agent's tool loop, where a usage error would be a non-zero exit on every single call.
+    const unknown = runHook('{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', ['--format', 'nope']);
+    assert.equal(unknown.code, 2);
+    assert.equal(unknown.stdout, '');
   } finally {
     fs.rmSync(T, { recursive: true, force: true });
     fs.rmSync(remote, { recursive: true, force: true });
@@ -13496,9 +13654,17 @@ test('mergeHookSettings adds our entry once and never touches anything else', ()
   const narrowed = JSON.parse(JSON.stringify(first.settings));
   narrowed.hooks.PreToolUse[1].matcher = 'Write';
   assert.equal(mergeHookSettings(narrowed).changed, false);
-  // Junk in either position is replaced by a valid shape rather than throwing.
-  for (const junk of [null, 'x', [], { hooks: 'x' }, { hooks: { PreToolUse: 'x' } }]) {
+  // An input that is not an object at all has nothing to lose, so it is synthesized.
+  for (const junk of [null, 'x', []]) {
     assert.equal(mergeHookSettings(junk).settings.hooks.PreToolUse.length, 1, JSON.stringify(junk));
+  }
+  // But a shape we cannot READ is refused, never rebuilt. Rebuilding deletes whatever the team had,
+  // on the `outdated` path that takes no backup, in a file we own exactly one entry of.
+  for (const [odd, why] of [[{ hooks: 'x' }, /hooks is not an object/], [{ hooks: { PreToolUse: 'x' } }, /not a list/]]) {
+    const r = mergeHookSettings(odd);
+    assert.equal(r.changed, false, JSON.stringify(odd));
+    assert.match(r.unreadable, why);
+    assert.deepEqual(r.settings, odd, 'returned untouched');
   }
 });
 
@@ -13612,13 +13778,353 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     // whose persisted targets do not include it.
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.agents'] }));
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
-    assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
+    // The stray `.claude/` is still not a gap: the report names `.agents`, and never sends anyone to
+    // fix a `.claude` this project does not target. (The status is `warn` for a different reason, one
+    // assertion down — nothing local guards a project whose only target can carry no hook.)
+    assert.doesNotMatch(hooksCheck().message, /\.claude/, 'a stray .claude/ is not named when it is not a target');
+    // ...but a target with NO pre-edit hook protocol is NAMED, on the healthy line too. Saying
+    // "guard wired" and nothing else, to a project whose only agent directory can carry no guard at
+    // all, is how an unguarded setup reads as a guarded one (E11).
+    // NOTHING local guards this Product: every target it has is one no harness can hook. Reporting
+    // `ok` there was a half-fix — `status` is the only machine-readable signal, the release check
+    // filters on `fail`, and a dashboard reading `--json` saw green on a verified project with no
+    // local guard at all. A warn, not a fail: it is a reasonable setup, and CI still fails closed.
+    assert.equal(hooksCheck().status, 'warn');
+    assert.match(hooksCheck().message, /attached to nothing/);
+    assert.match(hooksCheck().hint, /`\.claude` or `\.cursor`/);
+    // With both, the wired one is reported AND the unguarded one is still named.
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor', '.agents'] }));
+    fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
+    assert.match(hooksCheck().message, /not wired: .*\.cursor\/hooks\.json.*no pre-edit hook protocol on \.agents/);
+    for (const a of hookActions(T, ['.cursor', '.agents'])) a.apply();
+    assert.equal(hooksCheck().status, 'ok');
+    assert.match(hooksCheck().message, /guard wired.*no pre-edit hook protocol on \.agents/);
+    // The healthy line names the script Cursor actually invokes, not just the shared one.
+    assert.match(hooksCheck().message, /hooks\/ledger-guard-cursor\.sh/);
+    // ...and losing that wrapper is a gap. `.cursor/hooks.json` names it, so a project that lost it to
+    // a gitignore or a partial checkout has Cursor invoking a command that does not exist on every
+    // file write — while the shared `hooks/ledger-guard.sh` sits there making the check look green.
+    fs.rmSync(path.join(T, 'hooks/ledger-guard-cursor.sh'));
+    assert.equal(hooksCheck().status, 'warn');
+    assert.match(hooksCheck().message, /not wired: hooks\/ledger-guard-cursor\.sh/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // with a local ledger there is nothing to guard, so the check is silent rather than ok.
   const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
     assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);
   } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }
+});
+
+// ---- a SECOND harness behind the same guard (E11) ------------------------------------------------
+//
+// The tests below all exist because the adapter table made "the hook" plural. Every one of them is a
+// way the second entry could be written, reported healthy, and never refuse anything.
+
+test('mergeHookSettings writes Cursor its own file shape, and never claims an entry that is not ours', () => {
+  // Cursor's file is flat (`command` on the entry) and needs a `version`, where Claude's nests the
+  // command inside `hooks[]` and needs no preamble. One merge, two shapes.
+  const fresh = mergeHookSettings(null, CURSOR);
+  assert.equal(fresh.changed, true);
+  assert.equal(fresh.settings.version, 1, 'Cursor rejects a hooks.json with no version');
+  assert.equal(fresh.settings.hooks.preToolUse.length, 1);
+  assert.equal(fresh.settings.hooks.preToolUse[0].command, CURSOR.command);
+  assert.equal(fresh.settings.hooks.preToolUse[0].failClosed, false, 'only an explicit deny blocks');
+  assert.equal(fresh.settings.hooks.PreToolUse, undefined, "Claude's event key is not written here");
+  // The command is RELATIVE, unquoted and variable-free. Cursor does not document whether it runs the
+  // string through a shell, so `$CURSOR_PROJECT_DIR` could stay unexpanded and quotes could land in
+  // the filename — either way a command not found, which fails OPEN while doctor reports it wired.
+  assert.doesNotMatch(CURSOR.command, /[$"']/, 'no variable and no quotes to survive either execution model');
+  assert.doesNotMatch(CURSOR.command, /^\//, 'relative — Cursor runs a project hook from the project root');
+
+  assert.equal(mergeHookSettings(fresh.settings, CURSOR).changed, false, 'idempotent');
+
+  // A version the team pinned is THEIRS. The preamble fills a missing key; it never overwrites one.
+  const pinned = mergeHookSettings({ version: 2 }, CURSOR);
+  assert.equal(pinned.settings.version, 2);
+
+  // Their own flat entry survives beside ours, and ours is added rather than replacing it.
+  const theirs = { version: 1, hooks: { preToolUse: [{ matcher: 'Shell', command: './scripts/audit.sh' }] } };
+  const merged = mergeHookSettings(theirs, CURSOR);
+  assert.equal(merged.settings.hooks.preToolUse.length, 2);
+  assert.equal(merged.settings.hooks.preToolUse[0].command, './scripts/audit.sh');
+
+  // THE PER-HARNESS POINT: a `.cursor` entry spelled with Claude's command is not an old one of ours
+  // to normalise — it is someone else's. Claiming it would rewrite a hook we never wrote.
+  const claudeSpelled = { hooks: { preToolUse: [{ matcher: 'Write', command: HOOK_COMMAND }] } };
+  const untouched = mergeHookSettings(claudeSpelled, CURSOR);
+  assert.equal(untouched.settings.hooks.preToolUse[0].command, HOOK_COMMAND, 'left alone');
+  assert.equal(untouched.settings.hooks.preToolUse.length, 2, 'ours added beside it');
+
+  // Junk in either position is replaced by a valid shape rather than throwing — as for Claude.
+  for (const junk of [null, 'x', []]) {
+    assert.equal(mergeHookSettings(junk, CURSOR).settings.hooks.preToolUse.length, 1, JSON.stringify(junk));
+  }
+  // The destructive case this file is most exposed to: `.cursor/hooks.json` is a file yadflow has
+  // never written before, so anything already in it is entirely the team's.
+  const objectEvent = { version: 1, hooks: { preToolUse: { matcher: 'Shell', command: './audit.sh' }, afterFileEdit: [] } };
+  const refused = mergeHookSettings(objectEvent, CURSOR);
+  assert.equal(refused.changed, false);
+  assert.match(refused.unreadable, /hooks\.preToolUse is not a list/);
+  assert.deepEqual(refused.settings.hooks.preToolUse, { matcher: 'Shell', command: './audit.sh' }, 'their hook survives');
+});
+
+test('hookMatcherFires tests each harness against ITS OWN tool names', () => {
+  const armed = mergeHookSettings({}, CURSOR).settings;
+  assert.equal(hookMatcherFires(armed, CURSOR), true);
+  // Cursor's `Delete` is a file write and Claude has no such tool; Claude's `MultiEdit` is a tool
+  // Cursor does not have. One shared tool list would misreport one harness or the other.
+  for (const [matcher, fires] of [['Write', true], ['Delete', true], ['MultiEdit', false], ['Shell', false], ['(', false]]) {
+    const entry = JSON.parse(JSON.stringify(armed));
+    entry.hooks.preToolUse[0].matcher = matcher;
+    assert.equal(hookMatcherFires(entry, CURSOR), fires, matcher);
+  }
+  for (const all of ['', '*']) {
+    const wide = JSON.parse(JSON.stringify(armed));
+    wide.hooks.preToolUse[0].matcher = all;
+    // Cursor documents BOTH as match-all. `*` is not a valid regex on its own — `new RegExp('*')`
+    // throws — so testing it as one reported a correctly configured project as an installed-but-dead
+    // guard, a warning the team could only clear by breaking their own config.
+    assert.equal(hookMatcherFires(wide, CURSOR), true, `matcher ${JSON.stringify(all)} matches every tool`);
+  }
+  // Reading a Cursor file with Claude's adapter finds nothing: the event key alone rules it out.
+  assert.equal(hookMatcherFires(armed), false, "Claude's adapter does not read Cursor's event");
+});
+
+test('hookActions wires every target that has a hook protocol, and only those', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
+    const both = hookActions(T, ['.claude', '.cursor', '.agents']);
+    assert.deepEqual(both.map((a) => a.item),
+      ['hooks/ledger-guard.sh', 'settings.json', 'hooks/ledger-guard-cursor.sh', 'hooks.json']);
+    assert.deepEqual(both.map((a) => a.scope), ['hub', '.claude', 'hub', '.cursor']);
+    for (const a of both) a.apply();
+    assert.deepEqual(hookActions(T, ['.claude', '.cursor', '.agents']).map((a) => a.status), ['ok', 'ok', 'ok', 'ok']);
+    // Cursor's relative command is written as seen from the project root, which is where its docs say
+    // a project hook runs from — so the file it names has to be there.
+    assert.ok(fs.existsSync(path.join(T, CURSOR.command)), 'the relative command resolves from the project root');
+    assert.ok(fs.statSync(path.join(T, CURSOR.command)).mode & 0o111, 'the wrapper is executable');
+    // The wrapper is installed ONLY for the target that needs it: an unused adapter script in a
+    // `.claude`-only tree is a file nobody can explain.
+    assert.ok(!hookActions(T, ['.claude']).some((a) => a.item.includes('cursor')), 'no Cursor wrapper without .cursor');
+    const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
+    assert.equal(cursor.hooks.preToolUse[0].command, CURSOR.command);
+    // Cursor's file is the team's too — never in the `--push` staging allowlist.
+    assert.deepEqual(both.find((a) => a.item === 'hooks.json').paths, []);
+    // A target with no protocol still gets the shared script, and no wiring.
+    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('baseDirFor anchors a relative payload path on the best thing available, in order', () => {
+  const noGit = () => ({ ok: false, stdout: '' });
+  const repoToplevel = () => ({ ok: true, stdout: '/w/backend' });
+  // 1. Any harness's project-root variable. Reading only Claude's meant that under any other harness
+  //    this fell straight through to the git toplevel.
+  assert.equal(baseDirFor({ CURSOR_PROJECT_DIR: '/w/product' }, repoToplevel), '/w/product');
+  assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/w/product' }, repoToplevel), '/w/product');
+  assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/c', CURSOR_PROJECT_DIR: '/x' }, noGit), '/c', 'declared order decides');
+  // 2. Then the payload's own cwd — the directory a relative path in that same payload is relative to.
+  assert.equal(baseDirFor({}, repoToplevel, '/w/product'), '/w/product');
+  // 3. Then the process cwd, and the git TOPLEVEL last. That order is the fix, not an accident: the
+  //    documented layout puts the Product in a subdirectory of its repo, so the toplevel is the repo,
+  //    the walk-up finds no hub.json above it, and a ledger edit is ALLOWED that must be refused.
+  assert.equal(baseDirFor({}, repoToplevel), process.cwd(), 'the toplevel no longer wins over the cwd');
+});
+
+test('payloadPaths finds the edited file under a key no harness bothered to document', () => {
+  // Cursor publishes the payload envelope but not what tool_input is called inside it. A guessed
+  // vendor spelling that turned out wrong would read a key that is not there, find no path, and
+  // allow every ledger edit — wired, reported healthy, dead. So the rule is structural.
+  const led = 'epics/EP-x/.sdlc/state.json';
+  for (const input of [{ file_path: led }, { target_file: led }, { filePath: led }, { path: led }, { paths: [led] }]) {
+    assert.deepEqual(payloadPaths({ tool_input: input }), [led], JSON.stringify(input));
+  }
+  // It matches the KEY, never the value. A document that merely QUOTES a ledger path is an ordinary
+  // edit, and refusing it would be a false deny — far worse here than a miss, since the whole hook
+  // fails open on purpose and CI is what fails closed.
+  assert.deepEqual(payloadPaths({ tool_input: { content: `see ${led}`, command: `cat ${led}` } }), []);
+  // A word merely ENDING in "file" is not a path key.
+  assert.deepEqual(payloadPaths({ tool_input: { profile: led } }), []);
+  // The multi-edit shape still names every file it touches.
+  assert.deepEqual(payloadPaths({ tool_input: { edits: [{ file_path: led }, { target_file: 'b.json' }] } }), [led, 'b.json']);
+  assert.deepEqual(payloadPaths({ tool_input: null }), []);
+});
+
+test('payloadPaths: the structural rule survives a harness that names things differently', () => {
+  const L = 'epics/EP-x/.sdlc/state.json';
+  // Every one of these was VERIFIED to be allowed before the rule read words instead of suffixes,
+  // or before it walked past the top level. Each miss is the failure the design forbids: wired,
+  // reported healthy, reading a key that is not there, and permitting every ledger edit.
+  for (const input of [
+    { file_path: L }, { target_file: L }, { filePath: L }, { path: L }, { notebook_path: L },
+    { filename: L }, { file_name: L }, { fileName: L }, { filepath: L }, { dest: L },
+    { paths: [L] }, { args: { file_path: L } }, { files: [{ path: L, content: 'x' }] },
+  ]) assert.deepEqual(payloadPaths({ tool_input: input }), [L], JSON.stringify(input));
+  assert.deepEqual(payloadPaths({ tool_input: { edits: [{ file_path: L }, { target_file: 'b.json' }] } }), [L, 'b.json']);
+
+  // It matches the KEY, never the value — a document quoting a ledger path is an ordinary edit, and
+  // a false deny is worse than a miss in a guard that fails open by design.
+  assert.deepEqual(payloadPaths({ tool_input: { content: `see ${L}`, command: `cat ${L}` } }), []);
+  // A word merely CONTAINING one is not a path key: `profile` is one word, and it is not `file`.
+  for (const k of ['profile', 'description']) {
+    assert.deepEqual(payloadPaths({ tool_input: { [k]: L } }), [], k);
+  }
+  // `uri`/`url` are read only when the VALUE says it is a local file. A `url` is usually somewhere to
+  // fetch, and claiming one as a path would be a false deny — the worse error in a guard that fails
+  // open by design. A `file://` URL is unambiguous, so it is decoded and the scheme dropped.
+  assert.deepEqual(payloadPaths({ tool_input: { uri: `file:///w/${L}` } }), [`/w/${L}`]);
+  assert.deepEqual(payloadPaths({ tool_input: { urls: [`file:///w/${L}`] } }), [`/w/${L}`]);
+  assert.deepEqual(payloadPaths({ tool_input: { uri: 'file:///w/a%20b/state.json' } }), ['/w/a b/state.json'], 'escapes decoded');
+  for (const notAFile of ['https://example.com/x', '/plain/path.json', 'file:/malformed']) {
+    assert.deepEqual(payloadPaths({ tool_input: { url: notAFile } }), [], notAFile);
+  }
+  // Depth is bounded — this runs inside the agent's tool loop on every call.
+  let deep = { file_path: L };
+  for (let i = 0; i < 12; i++) deep = { wrap: deep };
+  assert.deepEqual(payloadPaths({ tool_input: deep }), []);
+});
+
+test('a wired script that lost its execute bit is outdated, not ok (E11 review)', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor'] }));
+    for (const a of hookActions(T, ['.cursor'])) a.apply();
+    assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'));
+
+    // Right bytes, no execute bit: the harness entry runs a command that cannot start. It fails, and
+    // both harnesses fail OPEN on a failure that is not an explicit deny — so every ledger edit is
+    // permitted while the bytes still match and nothing reports a thing. `chmod` lives inside
+    // `apply()`, which an `ok` action never reaches, so this had to become a status.
+    for (const rel of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']) {
+      fs.chmodSync(path.join(T, rel), 0o644);
+      const act = hookActions(T, ['.cursor']).find((a) => a.item === rel);
+      assert.equal(act.status, 'outdated', rel);
+      act.apply();
+      assert.ok(fs.statSync(path.join(T, rel)).mode & 0o111, `${rel} restored`);
+    }
+    assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'), 'and back to ok');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a project root that is not a directory is refused, on both paths into the planner', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-rootfile-'));
+  const notADir = path.join(base, 'notadir');
+  try {
+    fs.writeFileSync(notADir, 'x');
+    // Swallowing ENOTDIR (so an unreadable `.cursor/` could not abort `yad check`) also made a
+    // non-directory root read as "nothing here" — and the planner then built a 39-action install plan
+    // against a regular file. It used to abort by accident on the raw errno; it must abort on purpose.
+    for (const call of [
+      () => detectedIdeTargetStateFor(notADir),
+      () => safeIdeTargetsFor(notADir, ['.claude']),
+      () => moduleActions(notADir, ['.claude']),
+    ]) assert.throws(call, /not a directory/);
+    // A real directory is untouched by the guard, including one with nothing in it yet.
+    assert.ok(moduleActions(base, ['.claude']).length > 0);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+test('detection counts an ARMED hook entry as an install, so an upgrade does not drop it (E11 review)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-detect-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    // A stamp written before `ideTargets` existed, skills kept in `.agents/`, and a `.claude/` holding
+    // only the PreToolUse entry a previous `yad check --fix` armed.
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.18.0' }));
+    fs.mkdirSync(path.join(T, '.agents/skills'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify(mergeHookSettings({}).settings));
+    // Requiring a skills container alone would DROP `.claude` here and `needsRepair` would write the
+    // loss into the stamp — while Claude Code went on running that entry on every edit, unupdated,
+    // its legacy spelling unnormalised, and reported by nothing.
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.claude', '.agents']);
+    // A `.claude/` that only ever held permissions is still not an install.
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify({ permissions: { allow: [] } }));
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.agents']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('dropping a target unwires it: our entry comes out, and an orphan wrapper goes (E11 review)', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.claude/skills'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.claude', '.cursor'] }));
+    // A hook of the team's own, which must survive all of this.
+    for (const a of hookActions(T, ['.claude', '.cursor'])) a.apply();
+    const cursorPath = path.join(T, '.cursor/hooks.json');
+    const withTheirs = JSON.parse(fs.readFileSync(cursorPath, 'utf8'));
+    withTheirs.hooks.preToolUse.push({ matcher: 'Shell', command: './scripts/audit.sh' });
+    fs.writeFileSync(cursorPath, JSON.stringify(withTheirs));
+    assert.deepEqual(orphanHookActions(T, ['.claude', '.cursor']), [], 'nothing orphaned while it is still a target');
+
+    // `.cursor` leaves. The entry still fires on every write, and every check here is keyed on the
+    // CURRENT targets — so without this the wrapper is frozen and nothing reports it again.
+    const orphans = orphanHookActions(T, ['.claude']);
+    assert.deepEqual(orphans.map((a) => [a.item, a.status]),
+      [['hooks.json (removed)', 'removed'], ['hooks/ledger-guard-cursor.sh (removed)', 'removed']]);
+    assert.deepEqual(orphans.find((a) => a.item.startsWith('hooks.json')).paths, [], 'co-owned: never staged by --push');
+    for (const a of orphans) a.apply();
+
+    assert.ok(!fs.existsSync(path.join(T, 'hooks/ledger-guard-cursor.sh')), 'the orphan wrapper is gone');
+    assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')), 'the shared script stays — .claude still needs it');
+    const after = JSON.parse(fs.readFileSync(cursorPath, 'utf8'));
+    assert.deepEqual(after.hooks.preToolUse, [{ matcher: 'Shell', command: './scripts/audit.sh' }], 'only OURS came out');
+    assert.equal(after.version, 1, 'a version we may not have written is not ours to delete');
+    // Idempotent, and `.claude` is untouched throughout.
+    assert.deepEqual(orphanHookActions(T, ['.claude']), []);
+    assert.ok(hookMatcherFires(JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'))));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a hand-wired command that would refuse every write is named, not rewritten (E11 review)', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor'] }));
+    for (const a of hookActions(T, ['.cursor'])) a.apply();
+    const p = path.join(T, '.cursor/hooks.json');
+    const base = fs.readFileSync(p, 'utf8');
+    const hooksCheck = () => collectDoctorSync(T).checks.find((c) => c.id === 'hooks');
+    assert.equal(hooksCheck().status, 'ok');
+
+    // `check-gates.md` invites people to hand-wire other harnesses, so this path has a handrail. The
+    // mistake is silent and total: an exit-code command on a permission hook answers with empty
+    // stdout, which this harness reads as a deny, blocking EVERY write with nothing saying why.
+    for (const bad of ['hooks/ledger-guard.sh', 'bash hooks/ledger-guard-cursor.sh']) {
+      const s2 = JSON.parse(base); s2.hooks.preToolUse[0].command = bad;
+      fs.writeFileSync(p, JSON.stringify(s2));
+      const c = hooksCheck();
+      assert.equal(c.status, 'warn', bad);
+      assert.match(c.message, /refuse every write/, bad);
+      // It must beat the `not wired` branch, whose remedy is wrong here: `yad check --fix` would add
+      // our entry BESIDE theirs, leaving the one that blocks everything in place.
+      assert.doesNotMatch(c.message, /not wired/, bad);
+    }
+    // A command of the team's that has nothing to do with our guard is theirs, and is left alone.
+    const mine = JSON.parse(base);
+    mine.hooks.preToolUse.push({ matcher: 'Shell', command: './scripts/audit.sh' });
+    fs.writeFileSync(p, JSON.stringify(mine));
+    assert.equal(hooksCheck().status, 'ok');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('every install target names the agents that read it, and each installs its own way', () => {
+  // The setup menu, the docs and `yad doctor` all read IDE_AGENTS. A target with no entry would be
+  // offered to a user as a bare directory name that says nothing about which agent it is for.
+  for (const t of HOOK_IDE_TARGETS) {
+    assert.ok(IDE_AGENTS[t]?.length, `${t} names no agent`);
+  }
+  assert.deepEqual(Object.keys(IDE_AGENTS).sort(), [...HOOK_IDE_TARGETS].sort(), 'no agent row for a target that does not exist');
+  // Checked against each agent's own docs on 2026-09-16 — `.agents/skills/` is the directory Codex
+  // CLI, Gemini CLI, Cursor and Copilot agreed to read, which is why one install covers them all.
+  assert.ok(IDE_AGENTS['.agents'].includes('Codex CLI') && IDE_AGENTS['.agents'].includes('Gemini CLI'));
+  // Every harness with a hook adapter must be a real install target, or nothing installs its skills.
+  for (const t of Object.keys(HOOK_ADAPTERS)) assert.ok(HOOK_IDE_TARGETS.includes(t), t);
 });
 
 // ---- doctor: the two dials disagreeing (E28) ------------------------------------------------------

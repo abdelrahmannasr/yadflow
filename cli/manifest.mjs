@@ -116,10 +116,53 @@ export const LEGACY_PRODUCT_FILES = {
 };
 
 // IDE install targets (relative to the target project root).
-export const IDE_FOLDER_TARGETS = Object.freeze(['.claude', '.agents', '.zencoder']); // <ide>/skills/<skill>/ (folder copy)
+export const IDE_FOLDER_TARGETS = Object.freeze(['.claude', '.agents', '.cursor', '.gemini', '.zencoder']); // <ide>/skills/<skill>/ (folder copy)
 export const IDE_OPENCODE_TARGET = '.opencode';
 export const IDE_TARGETS = Object.freeze([...IDE_FOLDER_TARGETS, IDE_OPENCODE_TARGET]);
 export const IDE_OPENCODE_DIR = `${IDE_OPENCODE_TARGET}/commands`; // <skill>.md (flat SKILL.md copy)
+
+// WHICH AGENT READS WHICH TARGET (E11). A target is a DIRECTORY, never an agent name — that is the
+// closed decision, and it is the reason nothing here needs a migration: the stamped value in
+// `.sdlc/cli-version.json` keeps meaning exactly what it always meant.
+//
+// This table exists because the mapping is not one-to-one and the docs were wrong about it. `SKILL.md`
+// became a cross-agent format, and `.agents/skills/` the directory several agents agreed to read, so
+// yadflow has been installing for Codex, Gemini CLI, Cursor and Copilot since long before this row —
+// it just never said so, and a Codex user reading "Claude Code (plus .agents…)" had no way to know.
+//
+// Checked against each agent's own documentation on 2026-09-16, NOT from memory; every entry below is
+// a directory that agent's docs name. Re-check before adding one — a guessed path installs in silence
+// and is never read.
+//
+//   .claude    Claude Code. Cursor also reads it for compatibility.
+//   .agents    the cross-agent directory: Codex CLI (repo root), Gemini CLI (alias), Cursor, Copilot.
+//   .cursor    Cursor's own. Redundant beside `.agents`, offered for a Cursor-only project.
+//   .gemini    Gemini CLI's own. Redundant beside `.agents`, same reason.
+//   .zencoder  Zencoder.
+//   .opencode  opencode — a FLAT `commands/<skill>.md` copy, not a folder (see IDE_OPENCODE_DIR).
+//
+// Used by the `yad setup` prompt, `yad doctor` and the docs, so the list a user is shown and the list
+// the installer honours can never drift apart.
+export const IDE_AGENTS = Object.freeze({
+  '.claude': Object.freeze(['Claude Code', 'Cursor']),
+  '.agents': Object.freeze(['Codex CLI', 'Gemini CLI', 'Cursor', 'GitHub Copilot']),
+  '.cursor': Object.freeze(['Cursor']),
+  '.gemini': Object.freeze(['Gemini CLI']),
+  '.zencoder': Object.freeze(['Zencoder']),
+  '.opencode': Object.freeze(['opencode']),
+});
+
+// What a FRESH `yad setup` offers when the project has no agent directory yet: Claude Code plus the
+// cross-agent directory, which together cover every agent named above. The cost is honest and small —
+// the skills are written twice, once per directory.
+//
+// NOT the same value as IDE_RECOVERY_TARGET below, and the difference is deliberate. This is a CHOICE
+// offered to someone setting up; that one is what a project falls back to when its stamp is missing or
+// unreadable. Installing `.agents` into an existing `.claude`-only project because its stamp went
+// sideways would write forty skill folders the team never asked for, on a recovery path they did not
+// choose to walk. A recovery restores the minimum; it does not upgrade anyone.
+export const DEFAULT_IDE_TARGETS = Object.freeze(['.claude', '.agents']);
+export const IDE_RECOVERY_TARGET = '.claude';
 
 // The module config, copied from skills/sdlc/config.yaml into the project, where the skills read it (E3).
 // Until E3 it went to `_bmad/sdlc/`, beside `module-help.csv`, because yadflow was packaged as a BMAD
@@ -472,23 +515,128 @@ export const HOOK_WIRING = [
   { src: 'skills/yad-checks/templates/hooks/ledger-guard.sh', dest: 'hooks/ledger-guard.sh', exec: true },
 ];
 
-// Per-harness adapter config: which IDE target gets a hook entry written, and where.
-// `.claude` alone — it is the only supported target with a defined hook protocol (`.agents`,
-// `.zencoder` and `.opencode` carry skills only). The others simply get the script and no wiring;
-// the contract in the script header is what they would wire by hand.
-export const HOOK_SETTINGS = { '.claude': '.claude/settings.json' };
-// The tools that can write a file. A `Bash` call (`sed -i epics/…`) is deliberately NOT matched:
-// matching it would mean parsing shell, and CI's ledger-guard already fails closed on the result.
-export const HOOK_TOOL_MATCHER = 'Edit|Write|MultiEdit|NotebookEdit';
-// `$CLAUDE_PROJECT_DIR` so the entry works whatever the harness's working directory is — QUOTED,
-// because the harness runs this through a shell: unquoted, a project path containing a space
-// word-splits, the command is not found, and the guard is silently off while `check` and `doctor`
-// both still report it wired.
-export const HOOK_COMMAND = '"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"';
-// Spellings a previous yadflow wrote for the SAME hook. An installed entry matching one of these is
-// ours to normalise; anything else is the team's, even if it names a similar path. Never widen this
-// to a substring test — a team keeping its own wrapper at `.claude/hooks/ledger-guard.sh` would have
-// their hook silently rewritten to ours.
-export const HOOK_COMMAND_LEGACY = Object.freeze([
-  '$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh', // 3.16.x, pre-quoting
-]);
+// Per-harness adapter config: which IDE target gets a hook entry written, where, and in what shape.
+//
+// A harness qualifies for an entry here ONLY if it can run a command BEFORE a file is written and
+// refuse it. That is the whole point of the guard: saying "that edit was wrong" after the write has
+// landed is what CI already does. Two harnesses are wired, both read from their own docs on
+// 2026-09-16. The other install targets were NOT examined for a hook protocol — the scope closed at
+// Cursor — so "no entry here" means "not wired", never "checked and found wanting":
+//
+//   .claude   Claude Code — `PreToolUse` in `.claude/settings.json`, reading the EXIT CODE, so the
+//             entry points straight at the shared `hooks/ledger-guard.sh`.
+//   .cursor   Cursor — `preToolUse` in `.cursor/hooks.json`, a PERMISSION hook that reads a JSON
+//             verdict on STDOUT and treats an empty answer as a refusal. The shared script prints
+//             nothing when it allows, so this entry points at `hooks/ledger-guard-cursor.sh`
+//             instead (the `wiring` below), which speaks that protocol.
+//
+// Cursor's `afterFileEdit` is deliberately NOT used: it fires once the edit is already on disk, so it
+// could report but never refuse, and a guard that reports is the CI gate we already have.
+//
+// `.agents`, `.gemini`, `.zencoder` and `.opencode` carry skills only. They get the script and no
+// wiring; the contract in the script header is what they would wire by hand, and `yad doctor` NAMES
+// them rather than staying silent — an unguarded target that nothing mentions reads as a guarded one.
+//
+// THE TWO FILE SHAPES, which is what `nested` selects:
+//   Claude  { hooks: { PreToolUse: [ { matcher, hooks: [ { type: 'command', command } ] } ] } }
+//   Cursor  { version: 1, hooks: { preToolUse: [ { matcher, command, failClosed } ] } }
+//
+// `preamble` is the keys the FILE itself requires beside `hooks` — Cursor's `version`, which its
+// loader rejects the file without. Written only when the key is ABSENT: a team that pinned a
+// different version has made a choice, and this owns one entry, not their file.
+// The harness's own name for the project root. Two things use it, and only one of them is the wiring:
+// `yad hook ledger-guard` reads it to anchor a RELATIVE path out of the tool-call payload (see
+// `baseDirFor`), and Claude Code's entry also builds its command from it. Cursor's entry does not —
+// see the note on that command — but the variable is still what its guard reads, so it belongs here.
+// Anchoring a payload path against the wrong root walks up to no Product and fails open, which is a
+// guard that is off while every report says it is on.
+const CLAUDE_PROJECT_DIR_ENV = 'CLAUDE_PROJECT_DIR';
+const CURSOR_PROJECT_DIR_ENV = 'CURSOR_PROJECT_DIR';
+const guardCommand = (envVar) => `"$${envVar}/hooks/ledger-guard.sh"`;
+
+export const HOOK_ADAPTERS = Object.freeze({
+  '.claude': Object.freeze({
+    target: '.claude',
+    settings: '.claude/settings.json',
+    event: 'PreToolUse',
+    nested: true,
+    preamble: null,
+    // The tools that can write a file. A `Bash` call (`sed -i epics/…`) is deliberately NOT matched:
+    // matching it would mean parsing shell, and CI's ledger-guard already fails closed on the result.
+    matcher: 'Edit|Write|MultiEdit|NotebookEdit',
+    // `$CLAUDE_PROJECT_DIR` so the entry works whatever the harness's working directory is — QUOTED,
+    // because the harness runs this through a shell: unquoted, a project path containing a space
+    // word-splits, the command is not found, and the guard is silently off while `check` and `doctor`
+    // both still report it wired. (Cursor's command below is spelled the opposite way, and the note
+    // there says why — the two harnesses document different guarantees, so one spelling cannot serve
+    // both.)
+    projectDirEnv: CLAUDE_PROJECT_DIR_ENV,
+    command: guardCommand(CLAUDE_PROJECT_DIR_ENV),
+    // Claude Code reads the exit code, so the shared script needs no wrapper here.
+    wiring: Object.freeze([]),
+    // Spellings a previous yadflow wrote for the SAME hook. An installed entry matching one of these
+    // is ours to normalise; anything else is the team's, even if it names a similar path. Never widen
+    // this to a substring test — a team keeping its own wrapper at `.claude/hooks/ledger-guard.sh`
+    // would have their hook silently rewritten to ours.
+    legacyCommands: Object.freeze(['$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh']), // 3.16.x, pre-quoting
+  }),
+  '.cursor': Object.freeze({
+    target: '.cursor',
+    settings: '.cursor/hooks.json',
+    event: 'preToolUse',
+    nested: false,
+    preamble: Object.freeze({ version: 1 }),
+    // Cursor's file-writing tool names, which are NOT Claude's — copying `Edit|Write|MultiEdit` across
+    // would leave `Delete` unmatched and `MultiEdit` matching a tool Cursor does not have. `Shell` is
+    // left out for the same reason `Bash` is above. `Write` and `Delete` are named in Cursor's docs;
+    // `Edit` is not, because that list is written as "values include" and does not enumerate the edit
+    // tools. It is kept anyway: a name too many costs one regex alternative that never matches, and a
+    // name too few is a write nothing intercepts.
+    matcher: 'Write|Edit|Delete',
+    // Cursor's `preToolUse` is a PERMISSION hook: it answers in JSON on stdout, and empty stdout is
+    // invalid JSON, which BLOCKS. So the plain guard cannot be wired here — it prints nothing when it
+    // allows, which would have blocked every file write in a verified project. This wrapper, installed
+    // with the adapter below, always prints a permission answer. It takes no arguments on purpose:
+    // Cursor holds one command STRING and does not document whether it is split by a shell.
+    wiring: Object.freeze([
+      Object.freeze({ src: 'skills/yad-checks/templates/hooks/ledger-guard-cursor.sh', dest: 'hooks/ledger-guard-cursor.sh', exec: true }),
+    ]),
+    // RELATIVE, and deliberately not `$CURSOR_PROJECT_DIR/…` — the opposite of the Claude entry above,
+    // for a documented reason. Cursor's docs say a project hook RUNS FROM THE PROJECT ROOT, which is
+    // the directory holding the `.cursor/hooks.json` this entry lives in, and the same directory
+    // holding `hooks/ledger-guard.sh`. So the relative path always resolves, whatever the harness's
+    // notion of cwd elsewhere.
+    //
+    // What they do NOT say is whether the command runs through a shell. That is exactly why there is
+    // no variable and no quotes here: `$CURSOR_PROJECT_DIR` never expanded would be a command not
+    // found, and quotes taken literally by a non-shell exec would be part of the filename. An
+    // unquoted relative path with no variable and no space is the one spelling that works either way
+    // — which matters, because every one of those failures is silent, fails OPEN, and leaves
+    // `yad doctor` truthfully reporting the entry as wired while nothing is ever refused.
+    projectDirEnv: CURSOR_PROJECT_DIR_ENV,
+    command: 'hooks/ledger-guard-cursor.sh',
+    // This harness answers with a JSON verdict and treats an empty or off-schema answer as a REFUSAL.
+    // `yad doctor` uses the flag to catch a hand-wired command that would fail closed — see
+    // `miswiredGuardCommand`. An adapter without it reads the exit code, where a silent command is
+    // simply a guard that never fires.
+    requiresJsonVerdict: true,
+    // Nothing shipped before this release, so there is no past spelling of ours to normalise.
+    legacyCommands: Object.freeze([]),
+  }),
+});
+
+// The Claude adapter's fields under their original names. Kept because they are what the shipped
+// error text and the existing tests name, and renaming a constant buys nothing; new code should read
+// the adapter, since these three describe ONE harness and the engine now supports two.
+//
+// `HOOK_SETTINGS` used to live here and is deliberately GONE, not re-derived. It meant "the one
+// wired target and its file", and the obvious re-derivation would have silently changed it to "every
+// adapter's file" — a constant whose meaning moved under callers that never read it again. Nothing
+// imported it; anything that needs a settings path reads it off the adapter.
+export const CLAUDE_HOOK_ADAPTER = HOOK_ADAPTERS['.claude'];
+// Every harness variable that names the project root, for `baseDirFor` in `hook.mjs` to try in turn.
+// Derived from the adapters, so adding a harness up there arms the guard's path resolution too.
+export const HOOK_PROJECT_DIR_ENVS = Object.freeze(Object.values(HOOK_ADAPTERS).map((a) => a.projectDirEnv));
+export const HOOK_TOOL_MATCHER = CLAUDE_HOOK_ADAPTER.matcher;
+export const HOOK_COMMAND = CLAUDE_HOOK_ADAPTER.command;
+export const HOOK_COMMAND_LEGACY = CLAUDE_HOOK_ADAPTER.legacyCommands;

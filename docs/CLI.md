@@ -51,7 +51,7 @@ no clone needed.
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
 | `yad thread [<epic>]` | **Feature threads.** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling, where each node carries its work-item `type`, its grouping `theme` and the lifecycle `phase` its current step is in. Read-only. |
 | `yad reconcile [check\|refresh\|wire]` | Sweep threads for **drift / orphans / open hotfix debt** and report which thread drifted and why (mirrors `yad docs sync`; advisory — the CI gates block at merge). |
-| `yad hook ledger-guard` | **Harness-invoked, never typed.** The local half of the `ledger-guard` rule: in verified mode the gate ledger is CI-owned, so an agent that hand-edits `epics/*/.sdlc/state.json` is refused **at the moment of the edit** and told the command that owns the transition (`yad gate open`) — instead of discovering it twenty minutes later in a failed pipeline (#171). Reads a tool-call payload as JSON on **stdin** (or `--path <p>`); **exit 0 allows, exit 2 denies** with the reason on stderr, which is Claude Code's `PreToolUse` contract and any other harness's too. Same scope as the CI gate, including the new-epic seed exemption (#162); a **no-op** with a local ledger. **Fails open** — no `yad`, no Product, an unreadable config all allow, because the CI gate is the one that fails closed. `YAD_HOOK_DISABLE=1` skips it. Wired by `setup` / `check --fix`; `yad doctor` reports whether it is armed. |
+| `yad hook ledger-guard` | **Harness-invoked, never typed.** The local half of the `ledger-guard` rule: in verified mode the gate ledger is CI-owned, so an agent that hand-edits `epics/*/.sdlc/state.json` is refused **at the moment of the edit** and told the command that owns the transition (`yad gate open`) — instead of discovering it twenty minutes later in a failed pipeline (#171). Reads a tool-call payload as JSON on **stdin** (or `--path <p>`). Two answer protocols: by default **exit 0 allows, exit 2 denies** with the reason on stderr, which is Claude Code's `PreToolUse` contract; with `--format cursor` the verdict is JSON on **stdout** instead (`{"permission":"allow"}`, or `{"permission":"deny","user_message":…,"agent_message":…}`, both exiting 0), because Cursor's `preToolUse` is a permission hook that treats an empty or off-schema answer as a refusal — the exit protocol there would block every file write. The `.cursor` wiring points at `hooks/ledger-guard-cursor.sh`, which speaks it; never wire `hooks/ledger-guard.sh` into Cursor directly. Same scope as the CI gate, including the new-epic seed exemption (#162); a **no-op** with a local ledger. **Fails open** — no `yad`, no Product, an unreadable config all allow, because the CI gate is the one that fails closed. `YAD_HOOK_DISABLE=1` skips it. Wired by `setup` / `check --fix`; `yad doctor` reports whether it is armed. |
 | `npx yadflow --version` | Print the installed CLI version. |
 
 Flags: `--dir <path>` targets a project other than the cwd; `--force` re-copies unchanged files (or
@@ -160,10 +160,27 @@ branch the rest so you only answer what your situation needs. Each step prints i
 does / why / what to enter / what skipping means), and the step count adapts.
 
 0. **Profile** — the three questions above, plus "configure optional tools now?". Pre-answer for
-   CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
+   CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`,
+   and `--ide-targets <a,b>` for step 2's directories (an unsupported name fails before anything is written).
 1. **Preflight** — confirm the Product is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy the `yad-*` skills into the IDE skill dirs you pick
-   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and copy the module config to `.sdlc/config.yaml`.
+2. **Install the module** — copy the `yad-*` skills into the agent skill dirs you pick, and copy the
+   module config to `.sdlc/config.yaml`. The prompt names the agents that read each directory:
+
+   | Directory | Agents that read it |
+   | --- | --- |
+   | `.claude/` | Claude Code (Cursor also reads it) |
+   | `.agents/` | Codex CLI, Gemini CLI, Cursor, GitHub Copilot |
+   | `.cursor/` | Cursor |
+   | `.gemini/` | Gemini CLI |
+   | `.zencoder/` | Zencoder |
+   | `.opencode/` | opencode — flat `commands/<skill>.md`, not skill folders |
+
+   A project with none of them is offered `.claude,.agents`, which covers every agent listed. A
+   project that already has an INSTALL in one of them — a `skills/` folder, or an armed hook entry —
+   is offered that one; a `.cursor/` holding only Cursor rules is not an install. `--ide-targets`
+   overrides all of it. A project whose stamp
+   (`.sdlc/cli-version.json`) is missing or unreadable falls back to `.claude` alone — a recovery
+   restores the minimum, it does not enrol you in a newer default.
 3. **Product platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
 4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).

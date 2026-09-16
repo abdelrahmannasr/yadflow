@@ -15,8 +15,23 @@
 #   exit 0  allow
 #   exit 2  deny, reason on stderr
 #
-# Wired for Claude Code as a `PreToolUse` hook in `.claude/settings.json` (`yad check --fix` writes
-# that entry). Any harness that can run a command and read those two exit codes can use it.
+# Wired by `yad check --fix` for every harness that can refuse a write BEFORE it lands:
+#   Claude Code  a `PreToolUse` hook in `.claude/settings.json`, pointing straight at THIS script
+#   Cursor       a `preToolUse` hook in `.cursor/hooks.json`, pointing at `ledger-guard-cursor.sh`
+#
+# DO NOT WIRE THIS SCRIPT INTO CURSOR DIRECTLY, and check the same thing before wiring it into any
+# other harness by hand. Cursor's `preToolUse` is a PERMISSION hook: it wants a JSON verdict on
+# stdout, and treats an empty or off-schema answer as a refusal. This script prints NOTHING when it
+# allows — so wired there directly it would block every file write in the project, which is the
+# opposite of the fail-open stance below. `ledger-guard-cursor.sh` exists to speak that protocol.
+#
+# A harness that reads the EXIT CODE can use this script as it stands. A hook that only fires AFTER
+# the write — Cursor's `afterFileEdit`, for one — is deliberately not used: it could report the edit
+# but never refuse it, and reporting is what the CI gate already does.
+#
+# The project root is resolved from this script's own location below, so it does not matter which
+# variable the harness sets ($CLAUDE_PROJECT_DIR, $CURSOR_PROJECT_DIR) or where it runs the command
+# from; those variables appear only in the wiring, to point at this file.
 #
 # FAIL-OPEN: if no `yad` can be found, this ALLOWS and says why on stderr. A guardrail that blocked
 # every edit the moment an install went sideways would be worse than the problem. The CI gate fails
@@ -25,7 +40,22 @@ set -uo pipefail
 
 # The Product root is this script's grandparent — hooks/ledger-guard.sh — so the resolution below does
 # not depend on the harness's working directory.
-HOOK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# `CDPATH=` is load-bearing, and the Cursor entry is what makes it so: that entry invokes the script
+# by a RELATIVE path, so `${BASH_SOURCE[0]}` is relative and `cd` consults $CDPATH before the current
+# directory. An exported CDPATH in a login profile — an ordinary thing to have, and inherited by the
+# harness — would resolve `hooks` to some other tree entirely, and the guard would fail open on every
+# write for as long as that profile lived.
+#
+# The loop resolves a symlinked SCRIPT, which `cd -P` does not: `-P` resolves the directory path, and
+# a script reached through a link in another directory would otherwise look for its sibling beside the
+# LINK and not find it. `readlink` without `-f` because `-f` is not portable to macOS.
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"
+  _src="$(readlink -- "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+HOOK_DIR="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"
 HUB_ROOT="$(dirname -- "$HOOK_DIR")"
 
 # Resolution order, cheapest and most specific first: an explicit override, then the copy installed

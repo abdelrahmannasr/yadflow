@@ -13,7 +13,8 @@ AI builds and a human clears every gate.**
 > Yadflow doesn't write your code; it governs how AI-written code ships. Keep Cursor, GitHub Copilot,
 > Claude Code, Continue — or hand-written commits. The zero-dependency `yad` CLI and the CI gates
 > review the work **no matter who or what produced it.** The workflow skills run today in
-> **Claude Code** (plus `.agents`, Zencoder, and OpenCode).
+> **Claude Code, Codex CLI, Cursor, Gemini CLI, GitHub Copilot, Zencoder and opencode** — see
+> [which agent reads which directory](#which-ai-agents-are-supported).
 
 ## The problem
 
@@ -79,8 +80,9 @@ In one pass it produces:
 
 - **The `yad` CLI** — zero-dependency Node (`setup`, `gate`, `commit`, `open-pr`, `ship`, `repo`,
   `thread`, `reconcile`, `usage`, `doctor`), run via `npx` or a global install.
-- **38 workflow skills** installed into your AI assistant — **Claude Code** (`.claude/`) first-class,
-  plus `.agents`, Zencoder, and OpenCode.
+- **38 workflow skills** installed into your AI assistant — Claude Code, Codex CLI, Cursor,
+  Gemini CLI, GitHub Copilot, Zencoder and opencode. See
+  [which agent reads which directory](#which-ai-agents-are-supported).
 - **`.sdlc/` config** — the Product, connected repos, reviewer roster, and tool connections
   (design, testing, learning), all as plain JSON you can read and diff.
 - **CI gates**, wired into every connected repo and the Product as **GitHub Actions or GitLab CI** —
@@ -102,6 +104,49 @@ Before any epic, you can also frame the whole product once: `yad foundation new`
 **Foundation** — the Product level, in `foundation/` — and the `yad-discovery` skill writes its
 sections (purpose, scope, MVP, roadmap, stack, repos). It is optional, and each epic reads its approved
 roadmap.
+
+## Which AI agents are supported
+
+An **agent skill** is a folder holding a `SKILL.md` file — instructions the agent loads when the task
+matches. `SKILL.md` is now a format several agents read, and `.agents/skills/` is the directory
+several of them agreed to look in. So one install can serve more than one agent.
+
+`yad setup` asks which directories to install into. Pick by the agent you use:
+
+| Directory | Agents that read it |
+| --- | --- |
+| `.claude/` | Claude Code. Cursor also reads it for compatibility. |
+| `.agents/` | Codex CLI, Gemini CLI, Cursor, GitHub Copilot |
+| `.cursor/` | Cursor — its own directory. Not needed if you install `.agents/`. |
+| `.gemini/` | Gemini CLI — its own directory. Not needed if you install `.agents/`. |
+| `.zencoder/` | Zencoder |
+| `.opencode/` | opencode — installed as flat `commands/<skill>.md` files, not folders |
+
+A fresh setup offers **`.claude,.agents`**, which together cover every agent in the table. A project that already
+has an INSTALL in one of them — a `skills/` folder, or an armed hook entry — is offered that one
+instead; a `.cursor/` holding only Cursor rules is not an install, and is offered the default. Checked against each agent's
+own documentation on 2026-09-16; `yad doctor` prints the same table's verdict for your project.
+
+### The local ledger guard, per agent
+
+In **verified mode** — where CI owns the gate ledger — yadflow installs a local guardrail that stops
+an agent hand-editing the gate files, at the moment of the edit rather than twenty minutes later in a
+failed pipeline. It needs a hook that can run *before* a write and refuse it. Two agents have one:
+
+| Agent | Wired into | Event |
+| --- | --- | --- |
+| Claude Code | `.claude/settings.json` | `PreToolUse` |
+| Cursor | `.cursor/hooks.json` | `preToolUse` |
+
+Cursor answers this kind of hook in JSON rather than by exit code, and treats an empty answer as a
+refusal — so a `.cursor` project also gets a small adapter script, `hooks/ledger-guard-cursor.sh`,
+which always replies properly. Without it the guard would have blocked every file write instead of
+just the gate files.
+
+Every other directory gets the script (`hooks/ledger-guard.sh`) and no wiring — they have no such
+hook, so those agents are guarded by CI alone. `yad doctor` says so by name rather than staying
+silent. The Cursor wiring follows Cursor's published hook protocol and has not yet been exercised
+against a live Cursor session.
 
 ## Your first five minutes
 

@@ -8,6 +8,8 @@ _bmad-output/
 # IDE skill mirrors (regenerable via `yad check --fix`)
 # .claude/ is already covered by the global gitignore.
 .agents/
+.cursor/
+.gemini/
 .opencode/
 .zencoder/
 

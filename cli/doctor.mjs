@@ -6,8 +6,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
@@ -177,16 +177,45 @@ export function projectChecks(checks, root) {
   if (isVerifiedLedger(hubForHooks)) {
     const unwired = [];
     const broken = [];
-    if (!exists(path.join(root, 'hooks', 'ledger-guard.sh'))) unwired.push('hooks/ledger-guard.sh');
+    // PRESENT AND EXECUTABLE. A script at mode 644 has the right bytes and cannot run: the harness
+    // entry pointing at it fails, fails OPEN, and every ledger edit is permitted while this check and
+    // `yad check` both call the guard healthy. Reachable from a zip download, `cp` without `-p`, or a
+    // restrictive umask, with nobody having done anything unusual.
+    if (!hookScriptReady(root, 'hooks/ledger-guard.sh')) unwired.push('hooks/ledger-guard.sh');
     // The SAME target list `hookActions` wires — the persisted `ideTargets`, not "does the directory
     // exist". Keyed on the directory, a project whose targets are `['.agents']` but which also has a
     // stray `.claude/` would be told to run `yad check --fix` forever, while that command builds no
     // action for `.claude` and correctly reports "already up to date". Never name a remedy that
     // cannot reach the thing being reported.
     const unreadable = [];
-    for (const ide of ideTargetsFor(root)) {
-      const relDest = HOOK_SETTINGS[ide];
-      if (!relDest) continue;
+    // Targets with no pre-edit hook protocol at all. Collected rather than skipped: a project whose
+    // only target is `.agents` had this whole section report `ok` — "agent ledger guard wired" — while
+    // nothing local guarded anything, because the loop found no adapter and said nothing. Silence
+    // about an unguarded target reads as a guarded one (E11).
+    const noProtocol = [];
+    // Targets whose directory is unsafe (a symlink, or a file). `hookActions` filters these through
+    // `safeIdeTargetsFor` and THROWS on them, so reporting one as "not wired — run `yad check --fix`"
+    // names a remedy that aborts instead of fixing it. The rule ten lines above is the same one:
+    // never name a remedy that cannot reach the thing being reported.
+    const unsafeTargets = [];
+    const miswired = [];
+    // Read ONCE, like the settings files below — the block's own rule, and two reads can disagree.
+    const targets = ideTargetsFor(root);
+    const safe = new Set(safeIdeTargetStateFor(root, targets).targets);
+    for (const ide of targets) {
+      if (!safe.has(ide)) { unsafeTargets.push(ide); continue; }
+      const adapter = HOOK_ADAPTERS[ide];
+      if (!adapter) { noProtocol.push(ide); continue; }
+      // The SCRIPT THE ENTRY POINTS AT, which is not always the shared one. `.cursor`'s entry names
+      // `hooks/ledger-guard-cursor.sh`, and only the shared `hooks/ledger-guard.sh` was checked above
+      // — so a project whose wrapper was deleted, gitignored or lost in a partial checkout had
+      // `yad check` calling it `new` while `yad doctor` printed a green "guard wired". The two
+      // commands disagreeing about one project is the worst version of this: whichever the human
+      // believes, Cursor is invoking a command that does not exist on every single file write.
+      for (const w of adapter.wiring) {
+        if (!hookScriptReady(root, w.dest)) unwired.push(w.dest);
+      }
+      const relDest = adapter.settings;
       const settingsPath = path.join(root, relDest);
       // A file that exists but does not parse is its OWN report. `readJSON` returns null for both
       // "absent" and "broken", and null merges as "not wired" — which would send the human to
@@ -201,24 +230,59 @@ export function projectChecks(checks, root) {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
         settings = parsed;
       }
-      if (mergeHookSettings(settings).changed) { unwired.push(relDest); continue; }
+      // BEFORE the merge check, which `continue`s: a miswired command reads as "ours is absent", so
+      // the scan would never run on the very file that needs it.
+      for (const entry of settings?.hooks?.[adapter.event] || []) {
+        const why = miswiredGuardCommand(entry, adapter);
+        if (why) miswired.push(`${relDest}: ${why}`);
+      }
+      if (mergeHookSettings(settings, adapter).changed) { unwired.push(relDest); continue; }
       // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
       // deliberately leaves it alone), but one that no longer selects any file-editing tool means
       // nothing is intercepted — and reporting that as `ok` is how a disarmed guard passes for
       // healthy until a ledger edit fails in CI.
-      if (!hookMatcherFires(settings)) broken.push(relDest);
+      if (!hookMatcherFires(settings, adapter)) broken.push(`${relDest} (expected \`${adapter.matcher}\`)`);
     }
-    if (unreadable.length) {
-      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]`,
+    // One clause, appended to whichever verdict below is reached, so the unguarded targets are named
+    // on the healthy path too — which is the path they are most likely to be read on.
+    const alsoUnguarded = noProtocol.length
+      ? ` — no pre-edit hook protocol on ${noProtocol.join(', ')}, so an agent using ${noProtocol.length > 1 ? 'those directories are' : 'that directory is'} guarded by CI only`
+      : '';
+    // NOTHING local guards this Product. Every target it has is one no harness can hook, so the
+    // script is installed and attached to no event anywhere. Naming that while reporting `ok` was a
+    // half-fix: `status` is the only machine-readable signal, the release check filters on `fail`,
+    // and a dashboard reading `--json` saw green on a verified project with no local guard at all.
+    // It is a warn, not a fail, because it is a real and reasonable setup — CI still fails closed.
+    const nothingWired = noProtocol.length > 0 && noProtocol.length === targets.length;
+    if (unsafeTargets.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unsafeTargets.join(', ')} is not a usable directory${alsoUnguarded}`,
+        'the target is a symbolic link or a file; `yad check --fix` refuses to write through it, so make it a real directory or drop it from `ideTargets` in `.sdlc/cli-version.json`');
+    } else if (unreadable.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
+    } else if (miswired.length) {
+      // BEFORE `unwired`, though a miswired command also reads as "ours is absent". It is the more
+      // specific fact and by far the more damaging one, and the `unwired` remedy is wrong here: a
+      // `yad check --fix` would add our entry BESIDE theirs, leaving the one that refuses everything
+      // still in place, while the report said the guard was simply missing.
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard wired with a command that will refuse every write: ${miswired.join('; ')}`,
+        'this harness answers with a JSON verdict and reads an empty answer as a deny; replace that command with `hooks/ledger-guard-cursor.sh`, which `yad check --fix` installs, or have your own wrapper run `yad hook ledger-guard --format cursor` and pass its stdout through');
     } else if (unwired.length) {
-      check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}`,
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}${alsoUnguarded}`,
         'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
     } else if (broken.length) {
-      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}`,
-        `restore the matcher to \`${HOOK_TOOL_MATCHER}\` — as it stands the hook is wired but never fires`);
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}${alsoUnguarded}`,
+        'restore the matcher named beside each file — as it stands the hook is wired but never fires');
+    } else if (nothingWired) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but attached to nothing: no target (${noProtocol.join(', ')}) has a pre-edit hook protocol, so nothing local guards the ledger`,
+        'add a target whose agent can refuse a write before it lands (`.claude` or `.cursor`) if you want the local half; otherwise CI is the only guard, and it only speaks at merge time');
     } else {
-      check(checks, 'hooks', 'project', 'ok', 'agent ledger guard wired (hooks/ledger-guard.sh)');
+      // Name every script that is actually wired, not just the shared one — on a `.cursor` project the
+      // file Cursor invokes is the wrapper, and a health line that never mentions it is a health line
+      // about something else.
+      const wiredScripts = ['hooks/ledger-guard.sh',
+        ...targets.flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest))];
+      check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (${[...new Set(wiredScripts)].join(', ')})${alsoUnguarded}`);
     }
   }
 
@@ -239,7 +303,7 @@ export function projectChecks(checks, root) {
     else if (!DESIGN_TOOLS.includes(design.tool)) check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig}: unknown or missing design tool '${design.tool}' [YAD-CFG-002]`, `expected one of ${DESIGN_TOOLS.join(', ')}, or none`);
     else if (design.source && design.source !== 'unavailable') check(checks, 'design', 'project', 'ok', `design: ${design.tool} (${design.source})`);
     else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} MCP unavailable — yad-ui runs markdown-only`, 'connect the MCP, then run `yad-connect-design` (action: refresh)');
-    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-design` in Claude Code to detect the MCP');
+    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-design` in your AI agent to detect the MCP');
   }
 
   // testing.json: parse + shape + tool + MCP confirmation (absent is the normal artifacts-only default —
@@ -259,7 +323,7 @@ export function projectChecks(checks, root) {
     else if (!TESTING_TOOLS.includes(testing.tool)) check(checks, 'testing', 'project', 'fail', `${PROJECT_FILES.testingConfig}: unknown or missing testing tool '${testing.tool}' [YAD-CFG-003]`, `expected one of ${TESTING_TOOLS.join(', ')}, or none`);
     else if (testing.source && testing.source !== 'unavailable') check(checks, 'testing', 'project', 'ok', `testing: ${testing.tool} (${testing.source})`);
     else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} MCP unavailable — yad-test-cases runs artifacts-only`, 'connect the MCP, then run `yad-connect-testing` (action: refresh)');
-    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-testing` in Claude Code to detect the MCP');
+    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-testing` in your AI agent to detect the MCP');
   }
 
   // learning.json: parse + shape + tool + CLI confirmation (absent is the normal harness-native default —
@@ -280,7 +344,7 @@ export function projectChecks(checks, root) {
     else if (!LEARNING_TOOLS.includes(learning.tool)) check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown or missing learning tool '${learning.tool}' [YAD-CFG-004]`, `expected one of ${LEARNING_TOOLS.join(', ')}, or none`);
     else if (learning.source === 'deeptutor-cli') check(checks, 'learning', 'project', 'ok', `learning: ${learning.tool} (${learning.source})`);
     else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} CLI unavailable — yad-learn tutors harness-native`, 'install the deeptutor CLI, then run `yad-connect-learning` (action: refresh)');
-    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in Claude Code to detect the CLI');
+    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in your AI agent to detect the CLI');
     else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
 
