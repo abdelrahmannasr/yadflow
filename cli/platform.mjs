@@ -56,17 +56,25 @@ export function platformReady(platform) {
 //
 // Asked once per platform and directory per process: a command that writes several records pays for
 // one call. The timeout keeps a hung network from holding a command that only wanted a name.
-const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\[bot\])?$/;
+//
+// ON GITHUB THE HOST IS PASSED. `gh api` asks github.com unless told otherwise, so someone logged in to
+// both github.com and a GitHub Enterprise server would be recorded under the wrong account. `host` is the
+// caller's (the Product's `git_url`), else the directory's origin remote. `glab api` already resolves the
+// host from the repo.
+const LOGIN_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]*(\[bot\])?$/; // GitLab allows a leading underscore
 const loginCache = new Map();
-export function platformLogin(cwd, platform, { runner = run, env = process.env } = {}) {
+export function platformLogin(cwd, platform, { runner = run, env = process.env, host } = {}) {
   if (env.YAD_PLATFORM_LOGIN === '0') return null;
   const cli = cliFor(platform);
   if (!cli) return null;
-  const key = `${platform}\0${cwd}`;
+  const ghHost = platform === 'github'
+    ? (host || hostFromGitUrl(runner('git', ['remote', 'get-url', 'origin'], { cwd }).stdout) || null)
+    : null;
+  const key = `${platform}\0${cwd}\0${ghHost || ''}`;
   if (runner === run && loginCache.has(key)) return loginCache.get(key);
   let login = null;
   if (platform === 'github') {
-    const r = runner('gh', ['api', 'user', '--jq', '.login'], { cwd, timeout: 10000 });
+    const r = runner('gh', ['api', ...(ghHost ? ['--hostname', ghHost] : []), 'user', '--jq', '.login'], { cwd, timeout: 10000 });
     if (r.ok) login = r.stdout.trim();
   } else {
     const r = runner('glab', ['api', 'user'], { cwd, timeout: 10000 });

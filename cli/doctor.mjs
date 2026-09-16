@@ -95,7 +95,8 @@ export function projectChecks(checks, root) {
       // E62 removed the roster. A list an older release wrote is kept on disk and never read, so say so
       // — a team that still edits it would otherwise believe it decides something. An empty list (what a
       // solo setup used to write) says nothing about people and is left quiet.
-      const listed = Array.isArray(hub.roster) ? hub.roster.length > 0 : (hub.roster !== undefined && hub.roster !== null);
+      const r = hub.roster;
+      const listed = Array.isArray(r) ? r.length > 0 : (r && typeof r === 'object' ? Object.keys(r).length > 0 : !!r);
       if (listed) {
         check(checks, 'people:roster-unused', 'project', 'warn',
           `${PROJECT_FILES.hubConfig} has a \`roster\` that nothing reads any more — a gate needs one approval from anyone with access`,

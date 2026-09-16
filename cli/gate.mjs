@@ -160,6 +160,24 @@ export const isSolo = (hub) => !!(hub && (hub.solo === true || hub.review_gate?.
 // but is recorded `engagement: none` and draws the friendly nudge.
 export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngagement === true));
 
+// The name → login pairs of a roster an older release left on disk (E62). Read for ONE job: recognising
+// the person an older approval or comment record names, so the first sync after the upgrade continues
+// that record instead of guessing. The roster decides nothing else and nothing writes it; `yad doctor`
+// still names it as unused. The user chose this over matching by order (2026-09-16), which swapped two
+// people's fingerprints on GitLab. A name the roster gives to two logins cannot be told apart and is
+// left out.
+export function legacyLogins(hub) {
+  const out = new Map();
+  const clash = new Set();
+  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+    if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
+    if (out.has(e.name) && out.get(e.name) !== e.login) clash.add(e.name);
+    out.set(e.name, e.login);
+  }
+  for (const n of clash) out.delete(n);
+  return out;
+}
+
 // Re-add this step's bridge approvals from the current platform state (drop+re-add => dismissals and
 // revocations vanish idempotently; manual approvals are never touched). Preserve the artifactHash a
 // reviewer first approved against unless their review is newer (a genuine re-approval) — that is what
@@ -173,45 +191,74 @@ export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngageme
 //
 // ONE RECORD PER PERSON (E62). An approval is keyed by who gave it and nothing else. Before E62 the key
 // also held the role and domain the roster gave that person, so one approval could be several records;
-// such a person's older records match here by name and are replaced by one, keeping the hash and dates
-// they carried. The `role`/`domain` fields are not carried forward — nothing reads them any more.
+// such a person's older records are replaced by one, which keeps the fingerprint and dates they carried
+// — a STALE one when their records disagree, so the merge leans stale. Stale means not among
+// `accepted` (`acceptedHashes`), never merely "not today's exact hash": every approval a released
+// yadflow wrote carries an older fingerprint form the gate still reads as live, and treating those as
+// stale picked the wrong record and passed a gate on a stale approval (E62 review). The
+// `role`/`domain` fields are not carried forward — nothing reads them any more.
 //
-// AN OLDER RECORD MAY NOT MATCH BY NAME AT ALL. It names the person as the roster named them, and the
-// platform now reports their LOGIN — `alice` against `al`. Unmatched, the first sync after the upgrade
-// treated every such approval as new and bound it to TODAY's content: an approval of the old text would
-// read as an approval of whatever the artifact says now, which is the revoke-on-change hole #156 is
-// about. So a record still carrying a `role` (only the roster wrote one) that no login matched is looked
-// for as the SAME REVIEW instead: same PR, and — where the platform gives a submission time (GitHub) —
-// the same one. Adopted, it hands its fingerprint and dates to the new record and is replaced by it.
-// Where nothing tells two such reviews apart (GitLab has no submission time), a fingerprint that is NOT
-// today's is preferred: at worst a real approval reads as stale and is re-given, never the reverse.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false }) {
-  const keyOf = (name) => `${stepId}|${name}`;
+// AN OLDER RECORD NAMES THE PERSON AS THE ROSTER DID (`alice`), and the platform now reports their LOGIN
+// (`al`). Unmatched, the first sync after the upgrade treated the approval as new and bound it to
+// TODAY's content — an approval of the old text read as approval of the edited one, the hole #156 is
+// about — and on a closed step it listed one person twice. `aliases` is the roster's own name → login
+// table (`legacyLogins`), read for this recognition ONLY; it decides nothing about the gate. With it the
+// match is exact. Without it (the roster was deleted) an older record is matched only when nothing else
+// could be it: the same submission time on GitHub, or the single unmatched approval against the single
+// unmatched older approver of this PR on GitLab. Guessing by order is how two people's fingerprints got
+// swapped. Where it stays ambiguous, a closed step adds nothing (its record is history, and a second
+// entry for the same review would count one person twice), and an open step records the approval
+// against a STALE fingerprint from those older records when one exists — the approval must be given
+// again, on a new review, rather than pass on content one of those people may never have seen.
+function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), accepted = null }) {
+  const live = accepted ?? (curHash ? [curHash] : []);
+  const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
+  const isLegacy = (a) => a.role !== undefined || a.domain !== undefined;
+  const personOf = (a) => (isLegacy(a) && aliases.has(a.approver) ? aliases.get(a.approver) : a.approver);
   const bridge = approvals.filter((a) => a.step === stepId && a.source === 'bridge');
-  const prior = new Map(bridge.map((a) => [keyOf(a.approver), a]));
-  const seen = new Set(recs.map((r) => keyOf(r.name)));
-  const legacy = prNumber == null ? [] : bridge.filter((a) => a.role !== undefined && a.pr === prNumber && !seen.has(keyOf(a.approver)));
-  const adopted = new Set();   // the older records a new one replaced
-  const matchOf = new Map();   // rec -> the record it continues
-  for (const r of recs) {
-    const byName = prior.get(keyOf(r.name));
-    if (byName) { matchOf.set(r, byName); continue; }
-    const pool = legacy.filter((a) => !adopted.has(a) && (!r.submittedAt || a.approvedAt === r.submittedAt));
-    if (!pool.length) continue;
-    // One person with several roles left several records for one review; they are adopted together.
-    const pick = pool.find((a) => a.artifactHash && a.artifactHash !== curHash) || pool[0];
-    for (const a of pool) if (a.approver === pick.approver) adopted.add(a);
-    matchOf.set(r, pick);
+  const groups = new Map();   // person -> their records
+  for (const a of bridge) {
+    const k = personOf(a);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(a);
   }
+  const repOf = (list) => list.find(stale) || list[0];
+  const seen = new Set(recs.map((r) => r.name));
+  const matchOf = new Map();  // rec -> the record it continues
+  const replaced = new Set(); // people whose records a rec replaces
+  for (const r of recs) {
+    if (groups.has(r.name)) { matchOf.set(r, repOf(groups.get(r.name))); replaced.add(r.name); }
+  }
+  // Older approvers nobody could name: legacy records with no alias, recorded against THIS review (a
+  // record with no `pr` predates PR provenance and is taken as the pointer's, as `stampLegacyPr` does).
+  const orphans = prNumber == null ? [] : [...groups.keys()].filter((k) => !seen.has(k)
+    && groups.get(k).every((a) => isLegacy(a) && !aliases.has(a.approver) && (a.pr == null || a.pr === prNumber)));
+  const unmatched = recs.filter((r) => !matchOf.has(r));
+  const ambiguous = new Set();
+  for (const r of unmatched) {
+    const candidates = r.submittedAt
+      ? orphans.filter((k) => !replaced.has(k) && groups.get(k).some((a) => a.approvedAt === r.submittedAt))
+      : (unmatched.length === 1 && orphans.length === 1 ? orphans : []);
+    const rivals = r.submittedAt ? unmatched.filter((x) => x.submittedAt === r.submittedAt).length : unmatched.length;
+    if (candidates.length === 1 && rivals === 1) {
+      matchOf.set(r, repOf(groups.get(candidates[0])));
+      replaced.add(candidates[0]);
+    } else if (orphans.some((k) => !replaced.has(k))) {
+      ambiguous.add(r);
+    }
+  }
+  const staleOrphan = orphans.filter((k) => !replaced.has(k)).flatMap((k) => groups.get(k)).find(stale) || null;
   const kept = approvals.filter((a) => {
     if (!(a.step === stepId && a.source === 'bridge')) return true;
-    if (adopted.has(a)) return false;
+    if (replaced.has(personOf(a))) return false;
     // Closed step: keep a prior approval the platform no longer reports. It is history, not state.
-    return closed && !seen.has(keyOf(a.approver));
+    return closed && !seen.has(personOf(a));
   });
   for (const r of recs) {
+    if (closed && ambiguous.has(r)) continue;
     const was = matchOf.get(r);
-    let artHash = curHash;            // first time we see this approval => bind to current content
+    // first time we see this approval => bind to current content; an ambiguous one => to the stale print
+    let artHash = ambiguous.has(r) && staleOrphan ? staleOrphan.artifactHash : curHash;
     let approvedAt = r.submittedAt || today;
     let recordedOn = today;
     if (was) {
@@ -279,9 +326,13 @@ function writeComments(epicDir, base, today, blocking) {
 // markdown side file) so the ledger — not just reviews/*.md — reflects platform thread state. One
 // record per (step, commenter, round); `round` is the count of prior synced rounds for the step.
 // The commenter is the platform login (E62) — there is no stored list to turn it into another name.
-function recordComments(comments, { artifact, stepId, today, blocking }) {
+// A round an older release wrote names the roster's name for a person; `aliases` (see `legacyLogins`)
+// reads it as their login, so the first sync after the upgrade does not open a new round for the same
+// threads.
+function recordComments(comments, { artifact, stepId, today, blocking, aliases = new Map() }) {
   if (!blocking.length) return comments;
   const byName = (login) => login || 'reviewer';
+  const personOf = (cm) => (cm.role !== undefined && aliases.has(cm.commenter) ? aliases.get(cm.commenter) : cm.commenter);
   const counts = new Map();
   for (const t of blocking) counts.set(t.login, (counts.get(t.login) || 0) + 1);
   // A round is a CHANGE in the thread state, not a sync. Allocating max+1 on every call made an
@@ -294,13 +345,13 @@ function recordComments(comments, { artifact, stepId, today, blocking }) {
   const latest = rounds.reduce((m, cm) => Math.max(m, cm.round || 0), 0);
   const prior = rounds.filter((cm) => cm.round === latest);
   const now = new Map([...counts].map(([login, count]) => [byName(login), count]));
-  const same = latest > 0 && prior.length === now.size && prior.every((cm) => now.get(cm.commenter) === cm.count);
+  const same = latest > 0 && prior.length === now.size && prior.every((cm) => now.get(personOf(cm)) === cm.count);
   const round = same ? latest : latest + 1;
   const kept = comments.filter((cm) => !(cm.step === stepId && cm.round === round));
   for (const [login, count] of counts) {
     // An unchanged round keeps its original date, so re-syncing it is byte-identical rather than a
     // daily one-line churn (the same rule upsertBridge applies to an unchanged approval).
-    const was = prior.find((cm) => cm.commenter === byName(login));
+    const was = prior.find((cm) => personOf(cm) === byName(login));
     kept.push({ artifact, step: stepId, commenter: byName(login), round, count, date: (same && was?.date) || today });
   }
   return canonicalComments(kept); // same drop-and-re-append churn as approvals — see canonicalApprovals
@@ -362,6 +413,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   const { hub } = loadProduct(root);
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
+  const aliases = legacyLogins(hub);
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
   // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
@@ -435,7 +487,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     warnIncompleteDiscovery(epicDir, pr.artifact);
     const approvalsBefore = JSON.stringify(approvals);
     const recs = mapApprovers(pull.reviews, { headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone, aliases, accepted: acceptedHashes(epicDir, pr.artifact) });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
@@ -457,7 +509,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // That is the same churn the resource_group fix exists to stop, so it must not be reintroduced here.
     if (!alreadyDone) {
       if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
-      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, blocking });
+      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, blocking, aliases });
     }
 
     // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
@@ -901,7 +953,7 @@ export async function gateStatus(root, { epic } = {}) {
     // step the engine deliberately waives.
     const counted = reqEng ? live.filter((a) => a.engagement === 'verified') : live;
     const unengaged = live.length - counted.length;
-    const people = new Set(counted.map((a) => a.approver)).size;
+    const people = new Set(counted.filter((a) => typeof a.approver === 'string' && a.approver.trim()).map((a) => a.approver)).size; // as gatePredicate counts
     const from = `from ${people} ${people === 1 ? 'person' : 'people'}${unengaged ? `, ${unengaged} not engagement-verified (not counted)` : ''}`;
     // A `skipped` flag is honoured here on exactly the terms `gatePredicate` honours it: only on a step
     // THIS epic's route marks optional (`isSkippableStep`). Without that guard a hand-edited
@@ -1079,12 +1131,13 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     // people act on. This repo's own e2e fixture is exactly that shape.
     hasArchitecture: !routeLacksStep(ledger.state, 'architecture'),
   });
-  // Assignee = whoever opens the review PR (the login the platform CLI reports; `gh` falls back to @me).
+  // Assignee = whoever opens the review PR: `@me` on GitHub, which `gh` resolves on the right host
+  // (buildPrArgs sends it when no assignee is named), and the login `glab` reports on GitLab.
   // NO REVIEWERS ARE REQUESTED (E62): they used to come from the roster's reviewer and domain-owner
   // roles, and there is no stored list to pick them from any more. The team requests them on the PR,
   // and E68 will suggest them from history. Said on the way out, so nobody waits for a request that
   // was never sent.
-  const committer = platformLogin(root, hub.platform);
+  const committer = hub.platform === 'gitlab' ? platformLogin(root, hub.platform) : null;
   const assignees = committer ? [committer] : [];
   const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);

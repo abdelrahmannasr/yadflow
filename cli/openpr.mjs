@@ -179,10 +179,10 @@ export async function runOpenPr(root, opts = {}) {
     task, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
   });
 
-  // Assignee = the committer, the login the platform CLI reports (gh self-assigns via @me when there is
-  // none). No reviewers are requested (E62): the roster that named them is gone. The team requests them
+  // Assignee = the committer: `@me` on GitHub (buildPrArgs sends it when no assignee is named, and `gh`
+  // resolves it on the repo's own host), the login `glab` reports on GitLab. No reviewers are requested (E62): the roster that named them is gone. The team requests them
   // on the PR, and E68 will suggest them from history.
-  const committer = platformLogin(repoRoot, platform);
+  const committer = platform === 'gitlab' ? platformLogin(repoRoot, platform) : null;
   const assignees = committer ? [committer] : [];
 
   // `creator` is injectable (mirrors gateOpen's) so a test can assert the base that reaches the

@@ -372,7 +372,7 @@ export async function runSetup(root, opts = {}) {
       'Your hub is this repo on GitHub/GitLab; reviewers approve artifacts there.',
       'yad keeps no list of people: anyone with access to the repo can approve, and the platform records who did.',
       'A gate needs one approval from someone other than the author.',
-      'It also reports how many people it would like: 3 on a contract review, 1 elsewhere. That extra number is advisory — it never blocks.',
+      'It also reports how many people it would like: 3 on a contract review, 2 where auth or payments is touched, 1 elsewhere. That extra number is advisory for now.',
     ]);
   const productPath = productConfigPath(root);
   if (exists(productPath) && !(await askYesNo('hub.json exists — reconfigure?', false))) {

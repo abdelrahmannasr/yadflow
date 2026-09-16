@@ -1455,8 +1455,10 @@ export function gatePredicate({
   const unengaged = requireEngagement ? live.filter((a) => a.engagement !== 'verified').length : 0;
 
   // How many DISTINCT humans approved. An older record may name one person several times, once per
-  // role the roster gave them; that is still one approver.
-  const approvers = uniqueBy(counted, 'approver').length;
+  // role the roster gave them; that is still one approver. A record naming nobody is nobody: before E62
+  // it carried no role and counted for nothing, and with only the base enforced one such hand-written
+  // line would otherwise pass a team gate on its own (`mapApprovers` refuses one the same way).
+  const approvers = uniqueBy(counted.filter((a) => typeof a.approver === 'string' && a.approver.trim()), 'approver').length;
   const gateRule = gateRuleFor(step);
 
   const missing = [];

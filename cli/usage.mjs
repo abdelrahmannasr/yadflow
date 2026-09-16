@@ -58,11 +58,13 @@ const ARTIFACT_FILES = new Set([
 // The platform login a noreply commit address carries — `12345+octocat@users.noreply.github.com`,
 // `octocat@users.noreply.github.com`, `12345-tanuki@users.noreply.gitlab.com` — else null. The address
 // itself is never emitted; only the login, which the ledgers already record.
+// The login keeps the case the address carries: a platform login is case-insensitive, but it is shown
+// as written. Rows are joined case-insensitively in `analyze`.
 export function loginFromEmail(email) {
-  const e = String(email || '').toLowerCase();
-  const gh = e.match(/^(?:\d+\+)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)@users\.noreply\.github\.com$/);
+  const e = String(email || '');
+  const gh = e.match(/^(?:\d+\+)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)@users\.noreply\.github\.com$/i);
   if (gh) return gh[1];
-  const gl = e.match(/^\d+-([a-z0-9._-]+)@users\.noreply\.gitlab\.com$/);
+  const gl = e.match(/^\d+-([a-z0-9._-]+)@users\.noreply\.gitlab\.com$/i);
   return gl ? gl[1] : null;
 }
 
@@ -200,7 +202,9 @@ export function analyze(events, window = { since: null, until: null }) {
     return m;
   };
   for (const e of events) {
-    const m = seed(e.login || e.actor, e.actor, e.login);
+    // Keyed case-insensitively: GitHub and GitLab logins are, so `OctoCat` on an approval and `octocat`
+    // in a noreply address are one person.
+    const m = seed(String(e.login || e.actor).toLowerCase(), e.actor, e.login);
     m.counts[e.action] = (m.counts[e.action] || 0) + 1;
     m.total += 1;
     if (e.epic) m.epics.add(e.epic);
@@ -225,7 +229,9 @@ export function analyze(events, window = { since: null, until: null }) {
 function memberFlags(m) {
   const flags = [];
   const reviews = m.counts.commented + m.counts.approved;
-  if (m.total > 0 && m.counts.authored > 0 && reviews === 0) flags.push('no-review-participation'); // authors but never reviews
+  // Only on a row whose person is known by LOGIN. A row built from a bare git name cannot see that
+  // person's approvals, which are recorded under their login, so "never reviews" would be a false claim.
+  if (m.login && m.total > 0 && m.counts.authored > 0 && reviews === 0) flags.push('no-review-participation'); // authors but never reviews
   return flags;
 }
 
