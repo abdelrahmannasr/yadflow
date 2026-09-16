@@ -3354,6 +3354,51 @@ test('legacyLogins: the roster\'s name → login pairs, and a name given to two 
   assert.deepEqual([...legacyLogins(null)], []);
 });
 
+// ---- E64: approvals record the platform's evidence; GitLab's approval time is read ----
+test('E64: a GitHub approval records the review\'s commit, url and id; a read that gave none leaves the keys off', async () => {
+  const r = await legacySync({ roster: null, approvals: [], reviews: [
+    { login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T10:00:00Z', commit: 'abc123', url: 'https://github.com/o/r/pull/7#pullrequestreview-1', id: 'PRR_kw1' },
+    { login: 'bo', state: 'APPROVED', submittedAt: '2026-09-16T11:00:00Z' },
+  ] });
+  try {
+    const [al, bo] = r.read();
+    assert.deepEqual([al.approver, al.commit, al.url, al.reviewId, al.approvedAt], ['al', 'abc123', 'https://github.com/o/r/pull/7#pullrequestreview-1', 'PRR_kw1', '2026-09-16T10:00:00Z']);
+    assert.equal(bo.approver, 'bo');
+    for (const k of ['commit', 'url', 'reviewId']) assert.equal(k in bo, false, `no ${k} key when the platform gave none — never null`);
+  } finally { r.done(); }
+});
+
+test('E64 trap: a GitLab record holding only a DATE is "time unknown" — the first read of approved_at keeps its fingerprint and takes the time once', async () => {
+  // As text, `2026-09-16T10:00:00Z` sorts after `2026-09-16`. Compared that way, every same-day GitLab approval
+  // read as a newer review on the first E64 sync and was bound to today's content (#156).
+  const rec = { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-09-16', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-09-16', pr: 7, engagement: 'none' };
+  const revs = [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T10:00:00.000Z' }];
+  const r = await legacySync({ roster: null, approvals: [rec], reviews: revs });
+  try {
+    const [after] = r.read();
+    assert.equal(after.artifactHash, 'sha256:old', 'the approval of old content stays stale');
+    assert.equal(after.approvedAt, '2026-09-16T10:00:00.000Z', 'the platform time is adopted as evidence');
+    const first = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    await r.sync(revs);
+    assert.equal(fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8'), first, 'then an unchanged re-sync is byte-identical');
+    // A genuinely later approval (GitLab: unapprove, then approve again) is now provably newer.
+    await r.sync([{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-17T08:00:00.000Z' }]);
+    assert.equal(r.read()[0].artifactHash, r.cur, 'a later time on both sides is a real re-approval');
+  } finally { r.done(); }
+});
+
+test('E64: with approved_at read, the no-roster GitLab one-to-one rule still continues a pre-E64 record that holds only a date', async () => {
+  const r = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T09:00:00Z' }] });
+  try {
+    const [al] = r.read();
+    // Continued, not merely bound to a stale print: it keeps the date it was first recorded on.
+    assert.deepEqual([al.approver, al.artifactHash, al.date, al.approvedAt], ['al', 'sha256:old', '2026-06-01', '2026-09-16T09:00:00Z']);
+  } finally { r.done(); }
+  // …and on a CLOSED step it still guesses nothing: history stays as it was.
+  const c = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'dan', state: 'APPROVED', submittedAt: '2026-09-16T09:00:00Z' }], status: 'done', merged: true });
+  try { assert.deepEqual(c.read().map((a) => [a.approver, a.artifactHash]), [['alice', 'sha256:old']], 'alice stays; dan is not given her record'); } finally { c.done(); }
+});
+
 test('gate sync: a step whose approvals live elsewhere reports no head count at all', async () => {
   const { T, ep } = scaffoldEpic();
   // An inherited step (a change-epic carrying its parent's artifact by reference) is counted nowhere, so
@@ -7858,6 +7903,38 @@ test('readPr (GitLab): merge_user, then the older merged_by; merge_commit_sha, t
 
   const open = readPr('gitlab', 5, { runner: view({ iid: 5, state: 'opened', sha: 'ghi' }) });
   assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit], [false, null, null, null]);
+});
+
+test('readPr (GitHub): the review read carries each review\'s id and url beside its commit, and mapApprovers keeps them (E64)', async () => {
+  const { readPr } = await import('./platform.mjs');
+  const q = 'gh api graphql -f query=query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews';
+  const runner = fakeRunner({
+    'gh pr view 7 --json state': JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-16T12:00:00Z', headRefOid: 'abc' }),
+    'gh repo view --json owner,name': JSON.stringify({ owner: { login: 'o' }, name: 'r' }),
+    [q]: JSON.stringify({ data: { repository: { pullRequest: { latestReviews: { pageInfo: { hasNextPage: false }, nodes: [
+      { id: 'PRR_1', url: 'https://github.com/o/r/pull/7#pullrequestreview-1', author: { login: 'al' }, state: 'APPROVED', submittedAt: '2026-09-16T10:00:00Z', body: '', commit: { oid: 'abc' } },
+    ] } } } } }),
+  });
+  const pr = readPr('github', 7, { runner });
+  assert.ok(runner.calls.some((c) => c.startsWith(q) && c.includes('nodes{id url author{login}')), runner.calls.join('\n'));
+  assert.deepEqual(pr.reviews, [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T10:00:00Z', body: '', commit: 'abc', id: 'PRR_1', url: 'https://github.com/o/r/pull/7#pullrequestreview-1' }]);
+  assert.deepEqual(mapApprovers(pr.reviews, { headOid: pr.headOid }), [{ name: 'al', submittedAt: '2026-09-16T10:00:00Z', engagement: 'none', commit: 'abc', url: 'https://github.com/o/r/pull/7#pullrequestreview-1', reviewId: 'PRR_1' }]);
+});
+
+test('readPr (GitLab): approved_at becomes the approval\'s submission time; an instance that does not send it gives none, and no commit is invented (E64)', async () => {
+  const { readPr } = await import('./platform.mjs');
+  const runner = (approvedBy) => fakeRunner({
+    'glab mr view 3 -F json': JSON.stringify({ iid: 3, state: 'opened', sha: 'head1' }),
+    'glab api projects/:id/merge_requests/3/approvals': JSON.stringify({ approved_by: approvedBy }),
+    'glab api projects/:id/merge_requests/3/discussions': '[]',
+  });
+  const timed = readPr('gitlab', 3, { runner: runner([{ user: { username: 'al' }, approved_at: '2026-09-16T10:00:00.000Z' }, { user: { username: 'bo' } }]) });
+  assert.deepEqual(timed.reviews, [
+    { login: 'al', state: 'APPROVED', body: undefined, submittedAt: '2026-09-16T10:00:00.000Z' },
+    { login: 'bo', state: 'APPROVED', body: undefined },
+  ]);
+  assert.deepEqual(mapApprovers(timed.reviews, { headOid: timed.headOid }).map((r) => [r.name, r.submittedAt, 'commit' in r]),
+    [['al', '2026-09-16T10:00:00.000Z', false], ['bo', null, false]], 'no commit key: the MR head is not the approval\'s commit');
 });
 
 test('yad-review-gate, passing a gate by hand on a Product with no platform, writes the closing records advanceState would (E18 review)', async () => {

@@ -109,6 +109,9 @@ export function ambiguousLegacyNames(hub) {
 
 // Normalized PR reviews -> approval records (only APPROVED states count). `submittedAt` rides along
 // so the gate can tell a fresh re-approval from a stale one (revoke-on-change).
+// The platform's own evidence rides along too, for the record only (E64): the review's `commit`, `url` and
+// node id (`reviewId`) on GitHub. Each is left off when the read did not give it — never written `null`,
+// because a `null` commit means a degraded read below. The gate decides on the login and the fingerprint.
 // The record names the PLATFORM LOGIN that approved (E62). There is no stored list to look it up in and
 // no role to give it: the platform's record of who approved is the evidence, and the gate counts
 // people, not roles. A review with no login cannot be told apart from another one, so it is not counted.
@@ -131,7 +134,12 @@ export function mapApprovers(reviews = [], { headOid } = {}) {
     // click has no marker → 'none'. Gameable by design (it makes review quality visible, not provable).
     const engagement = parseEngagement(r.body);
     if (!r.login) continue;
-    out.push({ name: r.login, submittedAt: r.submittedAt || null, engagement });
+    out.push({
+      name: r.login, submittedAt: r.submittedAt || null, engagement,
+      ...(typeof r.commit === 'string' && r.commit ? { commit: r.commit } : {}),
+      ...(typeof r.url === 'string' && r.url ? { url: r.url } : {}),
+      ...(typeof r.id === 'string' && r.id ? { reviewId: r.id } : {}),
+    });
   }
   return out;
 }
@@ -155,7 +163,7 @@ function readPrGitHub(n, { cwd, runner = run } = {}) {
     // latestReviews` does not expose the commit, so read it via GraphQL. Paginate so a PR with >100
     // reviewers never silently omits one; any page failure aborts to the commitless fallback below,
     // which fails closed rather than advancing on a partial read.
-    const rq = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{author{login} state submittedAt body commit{oid}}}}}}`;
+    const rq = `query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id url author{login} state submittedAt body commit{oid}}}}}}`;
     let rcursor = null;
     reviewsOk = true;
     for (let guard = 0; guard < 50; guard++) {
@@ -165,7 +173,7 @@ function readPrGitHub(n, { cwd, runner = run } = {}) {
       if (!rg.ok) { reviewsOk = false; reviews = []; break; }
       const conn = JSON.parse(rg.stdout)?.data?.repository?.pullRequest?.latestReviews;
       for (const x of conn?.nodes || []) {
-        reviews.push({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, body: x.body, commit: x.commit?.oid || null });
+        reviews.push({ login: x.author?.login, state: x.state, submittedAt: x.submittedAt, body: x.body, commit: x.commit?.oid || null, id: x.id, url: x.url });
       }
       if (!conn?.pageInfo?.hasNextPage) break;
       rcursor = conn.pageInfo.endCursor;
@@ -231,7 +239,13 @@ function readPrGitLab(n, { cwd, runner = run } = {}) {
       if (/<!--\s*yad:engagement\s+\w+\s*-->/i.test(nt.body || '')) engagementByUser.set(nt.author?.username, nt.body);
     }
   }
-  const reviews = approvedBy.map((a) => ({ login: a.user?.username, state: 'APPROVED', body: engagementByUser.get(a.user?.username) }));
+  // `approved_at` is the time GitLab records for each approval (E64). An older self-managed instance may not
+  // send it; the approval then has no time, as every GitLab approval had before E64 read it. There is no
+  // per-approval commit on GitLab — the MR head is not the commit an approval was given on — so none is set.
+  const reviews = approvedBy.map((a) => ({
+    login: a.user?.username, state: 'APPROVED', body: engagementByUser.get(a.user?.username),
+    ...(typeof a.approved_at === 'string' && a.approved_at ? { submittedAt: a.approved_at } : {}),
+  }));
   const threads = discussions
     .filter((d) => d.notes?.some((nt) => nt.resolvable))
     .map((d, i) => ({

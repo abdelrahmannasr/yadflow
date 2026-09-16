@@ -215,6 +215,11 @@ export function legacyLogins(hub) {
 function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
   const live = accepted ?? (curHash ? [curHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
+  // A submission TIME, not a date. Every GitLab record written before E64 read `approved_at` holds the
+  // day it was synced (`today`), and as text `2026-09-15T10:00:00Z` sorts after `2026-09-15` — so a
+  // date-only value compared as a time made the first E64 sync read every same-day GitLab approval as a
+  // newer review and bind it to today's content (#156). A date is "time unknown".
+  const hasTime = (t) => typeof t === 'string' && t.includes('T') && !Number.isNaN(Date.parse(t));
   const isLegacy = (a) => a.role !== undefined || a.domain !== undefined;
   // An `unverified` record already names a LOGIN — an older release wrote one for a reviewer the roster did
   // not list — so it is never translated through the roster's names, where it could collide with a name.
@@ -271,12 +276,15 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // history to another. Two approvals that would continue the same older record continue neither.
   const picks = new Map();
   for (const r of unmatched) {
-    if (closed && !r.submittedAt) continue;
     const mine = orphans.filter((k) => eligible(k, r));
-    const candidates = r.submittedAt
+    // Match by time only when the older records hold one to match. A GitLab record from before E64 holds a
+    // date, so an approval that now carries `approved_at` still takes the one-to-one rule against it.
+    const byTimeOnly = !!r.submittedAt && mine.some((k) => groups.get(k).some((a) => hasTime(a.approvedAt)));
+    if (closed && !byTimeOnly) continue;
+    const candidates = byTimeOnly
       ? mine.filter((k) => groups.get(k).some((a) => a.approvedAt === r.submittedAt))
       : (mine.length === 1 ? mine : []);
-    const rivals = r.submittedAt
+    const rivals = byTimeOnly
       ? unmatched.filter((x) => x.submittedAt === r.submittedAt && candidates.some((k) => eligible(k, x))).length
       : unmatched.filter((x) => candidates.some((k) => eligible(k, x))).length;
     if (candidates.length === 1 && rivals === 1) picks.set(r, candidates[0]);
@@ -312,16 +320,19 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       // We only adopt the new hash when the platform PROVES a genuinely newer review. Otherwise —
       // the same review read again — we KEEP the hash they originally approved, so a later artifact
       // change still revokes the approval. Two independent proofs, because one platform lacks each:
-      //   - a later submittedAt (GitHub; GitLab approvals carry no timestamp at all), or
+      //   - a later submission TIME on both sides (GitHub always; GitLab when it sends `approved_at` and the
+      //     record already holds a time — a date-only record is "time unknown", see `hasTime`), or
       //   - a DIFFERENT PR/MR than the one this approval was recorded against. A re-opened review is
       //     always a new PR, so an approval arriving on it cannot be the old one read again. Without
       //     this, a GitLab re-review after a re-lock re-recorded the pre-edit hash and stayed
       //     permanently stale — the step read `done` with zero live approvals (issue #156).
-      const newerReview = r.submittedAt && was.approvedAt && r.submittedAt > was.approvedAt;
+      const newerReview = hasTime(r.submittedAt) && hasTime(was.approvedAt) && Date.parse(r.submittedAt) > Date.parse(was.approvedAt);
       const newerPr = prNumber != null && was.pr != null && was.pr !== prNumber;
       if (!newerReview && !newerPr) {
         artHash = was.artifactHash ?? curHash;
-        approvedAt = was.approvedAt ?? approvedAt;
+        // A record holding only a date takes the platform's time once (E64) and keeps its fingerprint: the
+        // time is evidence of when, the fingerprint is what the gate decides on. Then it is byte-stable.
+        approvedAt = !hasTime(was.approvedAt) && hasTime(r.submittedAt) ? r.submittedAt : (was.approvedAt ?? approvedAt);
         // Same review, re-read: keep the date it was RECORDED too, so re-syncing an unchanged
         // approval is a byte-identical no-op instead of a daily one-line ledger commit.
         recordedOn = was.date ?? recordedOn;
@@ -332,6 +343,10 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       status: 'approved', date: recordedOn, source: 'bridge',
       artifactHash: artHash, approvedAt,
       ...(prNumber != null ? { pr: prNumber } : {}),
+      // The platform's evidence for this review, when it gave any (E64, see mapApprovers). Audit only.
+      ...(r.commit ? { commit: r.commit } : {}),
+      ...(r.url ? { url: r.url } : {}),
+      ...(r.reviewId ? { reviewId: r.reviewId } : {}),
       engagement: r.engagement === 'verified' ? 'verified' : 'none',
     });
   }
@@ -1208,7 +1223,8 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     // A re-opened review replaces the pointer. Stamp the OLD number on this step's approvals that predate
     // PR provenance first, exactly as `gateCi` does at merge: once the pointer names the new PR, the next
     // sync would stamp THAT number on them, so an approval given again on the new PR could never be told
-    // from a re-read of the old one and, on GitLab (no submission time), would stay stale for good.
+    // from a re-read of the old one and, on GitLab (whose older records hold no submission time), would stay
+    // stale for good.
     const previous = (ledger.hubPrs || []).find((x) => x.artifact === artifact)?.number ?? null;
     // Also when the new URL carries no number: the old pointer is about to be overwritten either way.
     if (previous != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {
