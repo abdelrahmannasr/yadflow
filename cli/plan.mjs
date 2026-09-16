@@ -222,6 +222,12 @@ export function safeIdeTargetsFor(root, input) {
 // `.cursor/hooks.json`, and stamps the target permanently — for a team that never asked. Requiring
 // `<ide>/skills/` (or `.opencode/commands/`) means detection finds only a directory yad already
 // installs into, which is the question this function was always trying to answer.
+//
+// A `.claude/` holding only `settings.json` is therefore no longer DETECTED — and still ends up as
+// `.claude`, because that is `IDE_RECOVERY_TARGET`, the fallback when detection finds nothing. The
+// outcome is unchanged only while those two happen to be the same directory; if the recovery target
+// ever moves, this stops being a coincidence and starts being a behaviour change. The test named
+// "a project with a broken stamp recovers to .claude alone" is what would catch it.
 const hasInstallContainer = (root, ide) => {
   const container = ide === IDE_OPENCODE_TARGET ? IDE_OPENCODE_DIR : path.join(ide, 'skills');
   return !!lstatIfPresent(path.join(root, container));

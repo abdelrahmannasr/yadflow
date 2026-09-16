@@ -285,22 +285,21 @@ function readPayload() {
 // an allow, is invalid JSON. So the exit protocol under Cursor would have blocked EVERY file write in
 // a verified project: fail-CLOSED on everything, the one outcome this guard's whole design forbids.
 //
-// The field names are Cursor's documented permission-hook schema — `permission`, `user_message`,
-// `agent_message`, all snake_case. Getting that wrong is quiet in the worst way: an off-schema
-// response still BLOCKS, so the write is refused and the test suite is happy, while the text naming
-// `yad gate open` is discarded and the agent is told only "no". Speaking at edit time instead of
-// leaving it to CI is worth doing only because of that text.
+// WHAT THE REASON IS FOR, since three decisions below turn on it. A block alone is what CI already
+// delivers, twenty minutes later. The only thing this hook adds is the sentence naming `yad gate
+// open` at the moment of the edit — so a choice that keeps the block but loses the sentence has given
+// up everything the hook was built for, while still passing any test that asks whether a deny denies.
 //
-// The allow response is a fixed literal with nothing interpolated into it, because a malformed allow
-// is a block. The deny response carries the reason, and if a field were ever rejected as off-schema
-// the response is invalid — which blocks, which is what a deny wanted anyway. Both failure
-// directions are therefore safe, and they are safe in opposite ways on purpose.
-//
-// A deny exits 0, not 2: the JSON is the authoritative answer and exit 0 is what tells Cursor to read
-// it. Exit 2 would also block, but it is documented as the code for "no JSON to read", so it would
-// throw away the reason — and naming the command that owns the transition is the entire point of
-// speaking at edit time instead of leaving it to CI. The reason also goes to stderr, where Cursor
-// logs it, so it is never only in a channel we cannot confirm.
+// 1. THE FIELD NAMES are Cursor's documented permission-hook schema: `permission`, `user_message`,
+//    `agent_message`, all snake_case. An off-schema response still BLOCKS, so a camelCase field would
+//    refuse the write and discard the sentence, silently.
+// 2. A DENY EXITS 0, not 2. The JSON is the authoritative answer and exit 0 is what tells Cursor to
+//    read it; exit 2 blocks too, but is documented as the code for "no JSON to read". The reason also
+//    goes to stderr, where Cursor logs it, so it is never only in a channel we cannot confirm.
+// 3. THE ALLOW RESPONSE is a fixed literal with nothing interpolated into it, because a malformed
+//    allow is a block. The deny response does carry text, and if a field there were ever rejected as
+//    off-schema the response is invalid — which blocks, which is what a deny wanted anyway. Both
+//    failure directions are safe, in opposite ways, on purpose.
 export const HOOK_FORMATS = ['exit', 'cursor'];
 const CURSOR_ALLOW = '{"permission":"allow"}';
 // `user_message` is what the person sees in the client, `agent_message` what the model reads. The
