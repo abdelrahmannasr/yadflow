@@ -693,6 +693,63 @@ export function mergeHookSettings(input, adapter = CLAUDE_HOOK_ADAPTER) {
   return { settings, changed };
 }
 
+// The inverse of the merge: take OUR entry out and leave everything else exactly as it was. Returns
+// `{ settings, changed }`, and `changed: false` when there was nothing of ours to remove.
+//
+// An entry is removed whole only when it carried nothing but our command. Claude Code's shape lets a
+// single matcher entry hold several commands, so a team that added theirs beside ours keeps their
+// entry, minus our line. The same refusal as the merge applies to a shape we cannot read: it is not
+// ours to rewrite.
+export function unmergeHookSettings(input, adapter = CLAUDE_HOOK_ADAPTER) {
+  if (!isPlainObject(input) || !isPlainObject(input.hooks)) return { settings: input, changed: false };
+  const entries = input.hooks[adapter.event];
+  if (!Array.isArray(entries)) return { settings: input, changed: false };
+  let changed = false;
+  const kept = [];
+  for (const entry of entries) {
+    if (!entryIsOurs(adapter, entry)) { kept.push(entry); continue; }
+    changed = true;
+    if (!adapter.nested) continue;                       // flat entry: ours entirely, drop it
+    const others = entry.hooks.filter((h) => !isOurCommand(adapter, h?.command));
+    if (others.length) kept.push({ ...entry, hooks: others });
+  }
+  if (!changed) return { settings: input, changed: false };
+  const hooks = { ...input.hooks };
+  // Leave no empty array behind where the team had no such key before us.
+  if (kept.length) hooks[adapter.event] = kept; else delete hooks[adapter.event];
+  const settings = { ...input };
+  if (Object.keys(hooks).length) settings.hooks = hooks; else delete settings.hooks;
+  return { settings, changed: true };
+}
+
+// A hand-wired command that names OUR guard but would not work — returned as a sentence, or null.
+//
+// The discipline everywhere else is that a command we did not write is the team's, and we leave it
+// alone. This is the one exception, and it is narrow on purpose: it fires only on a command that
+// references our own script names, only for a harness whose hook answers with a JSON verdict, and it
+// only REPORTS. The reason it earns the exception is that the mistake is catastrophic and silent —
+// wiring `ledger-guard.sh` straight into Cursor, or adding `--format cursor` in a spelling the
+// command string never splits, makes the guard answer with empty stdout, which Cursor reads as
+// "deny", which blocks EVERY file write in the project with nothing saying why.
+//
+// `check-gates.md` documents hand-wiring for other harnesses, so this is a path people are invited
+// down; it should have a handrail.
+export function miswiredGuardCommand(entry, adapter) {
+  if (!adapter?.requiresJsonVerdict) return null;
+  const command = adapter.nested
+    ? (Array.isArray(entry?.hooks) ? entry.hooks.map((h) => h?.command).find((cmdStr) => typeof cmdStr === 'string' && /ledger-guard/.test(cmdStr)) : undefined)
+    : entry?.command;
+  if (typeof command !== 'string' || !/ledger-guard/.test(command)) return null;
+  if (command === adapter.command) return null;
+  if (adapter.legacyCommands.includes(command)) return null;
+  // Names the shared script rather than the adapter's wrapper.
+  if (!/ledger-guard-cursor/.test(command) && !/--format[= ]cursor/.test(command)) {
+    return `${command} answers with an exit code, not the JSON verdict this harness needs — it will block every file write`;
+  }
+  // Names the right protocol but through a spelling we do not own, so we cannot vouch for it.
+  return `${command} is not the command yad wires (${adapter.command}) — check it answers with a JSON verdict, or it will block every file write`;
+}
+
 // Does the installed entry still select at least one file-editing tool? The merge deliberately
 // leaves a narrowed `matcher` alone — it is the team's — but a matcher narrowed to nothing (blanked,
 // or pointed at `Bash`) means the guard is installed and never fires, which must not read as healthy.
@@ -828,6 +885,72 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
   // the entry (`outdated`) while skipping the script (`missing`), leaving every file edit firing a
   // PreToolUse command that does not exist — a hook error per edit, and no guarding at all.
   return actions.map(asNew);
+}
+
+// A target that has LEFT `ideTargets`, but whose wiring is still on disk and still running.
+//
+// Dropping `.cursor` used to leave `hooks/ledger-guard-cursor.sh` behind AND `.cursor/hooks.json`
+// still invoking it on every write. That is not merely untidy: the entry keeps firing while nothing
+// checks it for drift any more (every check here is keyed on the current targets), so the next
+// release that changes the wrapper's protocol leaves that project running the old one, silently. The
+// entry goes first and the script follows, and only a script no REMAINING target still needs is
+// removed.
+//
+// Verified-only, like `hookActions`, and for the same reason: with a local ledger none of this was
+// installed in the first place.
+export function orphanHookActions(root, ideTargets = ideTargetsFor(root)) {
+  const hub = readJSON(productConfigPath(root));
+  if (!isVerifiedLedger(hub)) return [];
+  const kept = new Set(safeIdeTargetsFor(root, ideTargets));
+  const stillNeeded = new Set(
+    [...kept].flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest)),
+  );
+  const actions = [];
+  for (const adapter of Object.values(HOOK_ADAPTERS)) {
+    if (kept.has(adapter.target)) continue;
+    const settingsPath = path.join(root, adapter.settings);
+    if (exists(settingsPath)) {
+      // Read STRICTLY. A file that will not parse is the team's to fix, and rewriting it from a
+      // default would throw their whole harness config away — the same refusal the merge makes.
+      //
+      // Only OUR entry comes out. A `version` the merge added stays, because nothing on disk records
+      // whether we wrote it or the team did, and a key that might be theirs is not ours to delete —
+      // so a hooks.json we emptied is left as `{"version": 1}` rather than removed.
+      let parsed;
+      try { parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { /* refused below */ }
+      if (isPlainObject(parsed) && unmergeHookSettings(parsed, adapter).changed) {
+        actions.push({
+          scope: adapter.target,
+          item: `${path.basename(adapter.settings)} (removed)`,
+          status: 'removed',
+          root,
+          // Co-owned, exactly like the merge side: never staged into a `yad update --push` commit.
+          paths: [],
+          apply: () => {
+            let current;
+            try { current = JSON.parse(fs.readFileSync(settingsPath, 'utf8')); } catch { return; }
+            if (!isPlainObject(current)) return;
+            const { settings, changed } = unmergeHookSettings(current, adapter);
+            if (changed) writeJSON(settingsPath, settings);
+          },
+        });
+      }
+    }
+    for (const w of adapter.wiring) {
+      if (stillNeeded.has(w.dest)) continue;
+      const dest = path.join(root, w.dest);
+      if (!exists(dest)) continue;
+      actions.push({
+        scope: 'hub',
+        item: `${w.dest} (removed)`,
+        status: 'removed',
+        root,
+        paths: [w.dest],
+        apply: () => fs.rmSync(dest, { force: true }),
+      });
+    }
+  }
+  return actions;
 }
 
 // Every email the verified-commits gate should accept as a known author: the Product roster's `email`

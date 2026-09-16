@@ -13,7 +13,7 @@ import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, authorsActions,
-  legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
+  legacyModuleActions, removedModuleActions, orphanHookActions, legacyRepoActions, legacyHubActions,
   ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
 import { gitHead, packRepo } from './setup.mjs';
@@ -49,6 +49,7 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     ...productActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
+    ...orphanHookActions(root, ideTargets),
     ...authorsActions(root, registry.repos),
   ];
   if (ideState.needsRepair) {

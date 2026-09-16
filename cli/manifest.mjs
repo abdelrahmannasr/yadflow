@@ -615,6 +615,11 @@ export const HOOK_ADAPTERS = Object.freeze({
     // `yad doctor` truthfully reporting the entry as wired while nothing is ever refused.
     projectDirEnv: CURSOR_PROJECT_DIR_ENV,
     command: 'hooks/ledger-guard-cursor.sh',
+    // This harness answers with a JSON verdict and treats an empty or off-schema answer as a REFUSAL.
+    // `yad doctor` uses the flag to catch a hand-wired command that would fail closed — see
+    // `miswiredGuardCommand`. An adapter without it reads the exit code, where a silent command is
+    // simply a guard that never fires.
+    requiresJsonVerdict: true,
     // Nothing shipped before this release, so there is no past spelling of ours to normalise.
     legacyCommands: Object.freeze([]),
   }),

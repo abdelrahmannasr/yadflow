@@ -24,6 +24,7 @@
 // design: `ledger-guard` in CI fails closed and is what actually protects the ledger.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { note, readJSON, run } from './lib.mjs';
 import { isVerifiedLedger , productConfigPath, HOOK_PROJECT_DIR_ENVS } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
@@ -88,8 +89,21 @@ export function protectedLedgerPath(rel) {
 // claim it, and a false path is a false DENY, which is the worse error in a guard that fails open by
 // design. `filename`/`filepath` are single words, so they are in the set in their own right.
 const PATH_WORDS = new Set(['file', 'files', 'filename', 'filenames', 'filepath', 'filepaths', 'path', 'paths', 'dest', 'destination']);
+
+// `uri` and `url` are deliberately NOT path words — a `url` is usually somewhere to fetch, and
+// claiming one as a file would be a false path, which is a false DENY. But a `file://` URL is
+// unambiguously a local file, and some editors send exactly that. So those keys are read only when
+// the VALUE says it is a file, and the scheme is stripped so the rest of the guard sees a path.
+// `decodeURIComponent` because a URL escapes the spaces and other characters a real path may hold.
+const LOCATOR_WORDS = new Set(['uri', 'url', 'uris', 'urls']);
+const FILE_URL = /^file:\/\//i;
+const fileUrlToPath = (value) => {
+  if (!FILE_URL.test(value)) return null;
+  try { return fileURLToPath(value); } catch { return null; }
+};
 const keyWords = (key) => String(key).split(/[_\-\s]+|(?=[A-Z])/).map((w) => w.toLowerCase()).filter(Boolean);
 const isPathKey = (key) => keyWords(key).some((w) => PATH_WORDS.has(w));
+const isLocatorKey = (key) => keyWords(key).some((w) => LOCATOR_WORDS.has(w));
 
 // Walk the tool input for path-shaped keys, a bounded distance down. Harnesses nest: an `args` or
 // `parameters` wrapper, a `files: [{ path, content }]` batch. A top-level-only scan missed all of it
@@ -101,14 +115,21 @@ function pathsFromInput(input, out, depth = 0) {
   if (!input || typeof input !== 'object' || depth > MAX_PAYLOAD_DEPTH) return;
   for (const [key, value] of Object.entries(input)) {
     if (typeof value === 'string') {
-      if (value && isPathKey(key)) out.push(value);
+      if (!value) continue;
+      if (isPathKey(key)) out.push(value);
+      else if (isLocatorKey(key)) { const p = fileUrlToPath(value); if (p) out.push(p); }
       continue;
     }
     if (Array.isArray(value)) {
       for (const v of value) {
         // A string in a path-shaped list (`paths`, `files`) is a path; an object in ANY list may hold
         // one under a key of its own, which is the `files: [{ path }]` batch shape.
-        if (typeof v === 'string') { if (v && isPathKey(key)) out.push(v); continue; }
+        if (typeof v === 'string') {
+          if (!v) continue;
+          if (isPathKey(key)) out.push(v);
+          else if (isLocatorKey(key)) { const p = fileUrlToPath(v); if (p) out.push(p); }
+          continue;
+        }
         pathsFromInput(v, out, depth + 1);
       }
       continue;

@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady, miswiredGuardCommand } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
@@ -198,6 +198,7 @@ export function projectChecks(checks, root) {
     // names a remedy that aborts instead of fixing it. The rule ten lines above is the same one:
     // never name a remedy that cannot reach the thing being reported.
     const unsafeTargets = [];
+    const miswired = [];
     // Read ONCE, like the settings files below — the block's own rule, and two reads can disagree.
     const targets = ideTargetsFor(root);
     const safe = new Set(safeIdeTargetStateFor(root, targets).targets);
@@ -229,6 +230,12 @@ export function projectChecks(checks, root) {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
         settings = parsed;
       }
+      // BEFORE the merge check, which `continue`s: a miswired command reads as "ours is absent", so
+      // the scan would never run on the very file that needs it.
+      for (const entry of settings?.hooks?.[adapter.event] || []) {
+        const why = miswiredGuardCommand(entry, adapter);
+        if (why) miswired.push(`${relDest}: ${why}`);
+      }
       if (mergeHookSettings(settings, adapter).changed) { unwired.push(relDest); continue; }
       // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
       // deliberately leaves it alone), but one that no longer selects any file-editing tool means
@@ -253,6 +260,13 @@ export function projectChecks(checks, root) {
     } else if (unreadable.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
+    } else if (miswired.length) {
+      // BEFORE `unwired`, though a miswired command also reads as "ours is absent". It is the more
+      // specific fact and by far the more damaging one, and the `unwired` remedy is wrong here: a
+      // `yad check --fix` would add our entry BESIDE theirs, leaving the one that refuses everything
+      // still in place, while the report said the guard was simply missing.
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard wired with a command that will refuse every write: ${miswired.join('; ')}`,
+        'this harness answers with a JSON verdict and reads an empty answer as a deny; replace that command with `hooks/ledger-guard-cursor.sh`, which `yad check --fix` installs, or have your own wrapper run `yad hook ledger-guard --format cursor` and pass its stdout through');
     } else if (unwired.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}${alsoUnguarded}`,
         'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');

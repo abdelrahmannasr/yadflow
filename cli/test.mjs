@@ -13264,7 +13264,8 @@ test('yad still succeeds on a runtime with no global fetch (--no-experimental-fe
 const {
   ledgerGuardDecision, protectedLedgerPath, payloadPaths, hubRootFor, seededSlugs, resolveHookBase,
 } = await import('./hook.mjs');
-const { hookActions, mergeHookSettings, hookMatcherFires } = await import('./plan.mjs');
+const { hookActions, mergeHookSettings, hookMatcherFires, orphanHookActions } = await import('./plan.mjs');
+const { collectDoctor: collectDoctorSync } = await import('./doctor.mjs');
 const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER, HOOK_ADAPTERS, IDE_AGENTS, IDE_TARGETS: HOOK_IDE_TARGETS } = await import('./manifest.mjs');
 const { baseDirFor } = await import('./hook.mjs');
 const CURSOR = HOOK_ADAPTERS['.cursor'];
@@ -13968,8 +13969,17 @@ test('payloadPaths: the structural rule survives a harness that names things dif
   // a false deny is worse than a miss in a guard that fails open by design.
   assert.deepEqual(payloadPaths({ tool_input: { content: `see ${L}`, command: `cat ${L}` } }), []);
   // A word merely CONTAINING one is not a path key: `profile` is one word, and it is not `file`.
-  for (const k of ['profile', 'uri', 'url', 'description']) {
+  for (const k of ['profile', 'description']) {
     assert.deepEqual(payloadPaths({ tool_input: { [k]: L } }), [], k);
+  }
+  // `uri`/`url` are read only when the VALUE says it is a local file. A `url` is usually somewhere to
+  // fetch, and claiming one as a path would be a false deny — the worse error in a guard that fails
+  // open by design. A `file://` URL is unambiguous, so it is decoded and the scheme dropped.
+  assert.deepEqual(payloadPaths({ tool_input: { uri: `file:///w/${L}` } }), [`/w/${L}`]);
+  assert.deepEqual(payloadPaths({ tool_input: { urls: [`file:///w/${L}`] } }), [`/w/${L}`]);
+  assert.deepEqual(payloadPaths({ tool_input: { uri: 'file:///w/a%20b/state.json' } }), ['/w/a b/state.json'], 'escapes decoded');
+  for (const notAFile of ['https://example.com/x', '/plain/path.json', 'file:/malformed']) {
+    assert.deepEqual(payloadPaths({ tool_input: { url: notAFile } }), [], notAFile);
   }
   // Depth is bounded — this runs inside the agent's tool loop on every call.
   let deep = { file_path: L };
@@ -14035,6 +14045,71 @@ test('detection counts an ARMED hook entry as an install, so an upgrade does not
     // A `.claude/` that only ever held permissions is still not an install.
     fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify({ permissions: { allow: [] } }));
     assert.deepEqual(ideTargetStateFor(T).targets, ['.agents']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('dropping a target unwires it: our entry comes out, and an orphan wrapper goes (E11 review)', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.claude/skills'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.claude', '.cursor'] }));
+    // A hook of the team's own, which must survive all of this.
+    for (const a of hookActions(T, ['.claude', '.cursor'])) a.apply();
+    const cursorPath = path.join(T, '.cursor/hooks.json');
+    const withTheirs = JSON.parse(fs.readFileSync(cursorPath, 'utf8'));
+    withTheirs.hooks.preToolUse.push({ matcher: 'Shell', command: './scripts/audit.sh' });
+    fs.writeFileSync(cursorPath, JSON.stringify(withTheirs));
+    assert.deepEqual(orphanHookActions(T, ['.claude', '.cursor']), [], 'nothing orphaned while it is still a target');
+
+    // `.cursor` leaves. The entry still fires on every write, and every check here is keyed on the
+    // CURRENT targets — so without this the wrapper is frozen and nothing reports it again.
+    const orphans = orphanHookActions(T, ['.claude']);
+    assert.deepEqual(orphans.map((a) => [a.item, a.status]),
+      [['hooks.json (removed)', 'removed'], ['hooks/ledger-guard-cursor.sh (removed)', 'removed']]);
+    assert.deepEqual(orphans.find((a) => a.item.startsWith('hooks.json')).paths, [], 'co-owned: never staged by --push');
+    for (const a of orphans) a.apply();
+
+    assert.ok(!fs.existsSync(path.join(T, 'hooks/ledger-guard-cursor.sh')), 'the orphan wrapper is gone');
+    assert.ok(fs.existsSync(path.join(T, 'hooks/ledger-guard.sh')), 'the shared script stays — .claude still needs it');
+    const after = JSON.parse(fs.readFileSync(cursorPath, 'utf8'));
+    assert.deepEqual(after.hooks.preToolUse, [{ matcher: 'Shell', command: './scripts/audit.sh' }], 'only OURS came out');
+    assert.equal(after.version, 1, 'a version we may not have written is not ours to delete');
+    // Idempotent, and `.claude` is untouched throughout.
+    assert.deepEqual(orphanHookActions(T, ['.claude']), []);
+    assert.ok(hookMatcherFires(JSON.parse(fs.readFileSync(path.join(T, '.claude/settings.json'), 'utf8'))));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('a hand-wired command that would refuse every write is named, not rewritten (E11 review)', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor'] }));
+    for (const a of hookActions(T, ['.cursor'])) a.apply();
+    const p = path.join(T, '.cursor/hooks.json');
+    const base = fs.readFileSync(p, 'utf8');
+    const hooksCheck = () => collectDoctorSync(T).checks.find((c) => c.id === 'hooks');
+    assert.equal(hooksCheck().status, 'ok');
+
+    // `check-gates.md` invites people to hand-wire other harnesses, so this path has a handrail. The
+    // mistake is silent and total: an exit-code command on a permission hook answers with empty
+    // stdout, which this harness reads as a deny, blocking EVERY write with nothing saying why.
+    for (const bad of ['hooks/ledger-guard.sh', 'bash hooks/ledger-guard-cursor.sh']) {
+      const s2 = JSON.parse(base); s2.hooks.preToolUse[0].command = bad;
+      fs.writeFileSync(p, JSON.stringify(s2));
+      const c = hooksCheck();
+      assert.equal(c.status, 'warn', bad);
+      assert.match(c.message, /refuse every write/, bad);
+      // It must beat the `not wired` branch, whose remedy is wrong here: `yad check --fix` would add
+      // our entry BESIDE theirs, leaving the one that blocks everything in place.
+      assert.doesNotMatch(c.message, /not wired/, bad);
+    }
+    // A command of the team's that has nothing to do with our guard is theirs, and is left alone.
+    const mine = JSON.parse(base);
+    mine.hooks.preToolUse.push({ matcher: 'Shell', command: './scripts/audit.sh' });
+    fs.writeFileSync(p, JSON.stringify(mine));
+    assert.equal(hooksCheck().status, 'ok');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
