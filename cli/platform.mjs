@@ -106,28 +106,6 @@ export function hasAnyRole(entry, scopes = [], wanted = []) {
   return false;
 }
 
-// Platform logins to auto-request as reviewers for the given scopes: everyone holding a `reviewer`
-// or `domain-owner` role in any scope, minus `excludeLogin` (you don't review your own PR), deduped.
-// `repos` (the registry) is consulted so a repo whose domain ownership lives ONLY in the legacy
-// `repos.json` `domain_owner`/`domain_owners` field — not the roster roles map — is still requested
-// as a reviewer for any scope that is its repo name. Without this the read side credits that login as
-// a domain-owner (resolveLogin's legacy fallback) but the open side never asks them, so an escalated
-// gate becomes structurally unsatisfiable through platform routing (BUG-1).
-export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = null, repos = [] } = {}) {
-  const out = [];
-  const add = (login) => { if (login && login !== excludeLogin && !out.includes(login)) out.push(login); };
-  for (const entry of roster) {
-    if (hasAnyRole(entry, scopes, ['reviewer', 'domain-owner'])) add(entry.login);
-  }
-  for (const scope of scopes) {
-    const repo = repos.find((r) => r.name === scope);
-    if (!repo) continue;
-    const names = repo.domain_owners || (repo.domain_owner ? [repo.domain_owner] : []);
-    for (const name of names) add(roster.find((r) => r.name === name)?.login);
-  }
-  return out;
-}
-
 // ---- who is running this command ------------------------------------------------------------
 // The platform login of whoever runs this command, asked of the platform's own CLI (`gh api user`,
 // `glab api user`) rather than looked up in a stored list (E62). A list is a claim that goes stale; the
@@ -514,8 +492,9 @@ export function resolveBaseBranch(platform, {
 
 // ---- create a PR/MR -----------------------------------------------------------------------------
 // `assignees` = the committer/PR-opener (always set, so the PR is owned by whoever pushed it);
-// `reviewers` = the scope's reviewers + domain-owners (computed by reviewersForScopes). On GitHub an
-// empty assignee list falls back to `@me` so the opener still self-assigns even without a roster.
+// `reviewers` = logins to request. No caller passes any since E62 removed the roster that chose them;
+// the parameter stays for E68, which suggests reviewers from history. On GitHub an empty assignee list
+// falls back to `@me` so the opener still self-assigns when the platform login is unknown.
 // Pure argv builder for the create command — exported so the reviewer/assignee/label wiring is
 // unit-testable without shelling out. gh always self-assigns (@me) when no assignee resolved.
 export function buildPrArgs(platform, { title, body, base, head, reviewers = [], labels = [], assignees = [] } = {}) {

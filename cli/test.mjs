@@ -1475,11 +1475,12 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain labels (BUG-1/BUG-3)', async () => {
+test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG-3)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  // bob is a Product reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
+  // A roster with a reviewer and a repos.json domain owner — both left on disk from an older release.
+  // Before E62 both were requested; now neither is read.
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
     platform: 'github', default_branch: 'main',
     roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
@@ -1495,9 +1496,10 @@ test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain la
   fs.writeFileSync(path.join(T, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nrepos: [backend]\n---\n');
   let seen;
   const creator = (_p, opts) => { seen = opts; return { ok: true, url: 'https://x/pr/1' }; };
-  await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator });
-  assert.deepEqual(seen.reviewers.sort(), ['bo', 'ca']); // carol requested via repos.json (BUG-1)
-  assert.deepEqual(seen.labels, ['domain:backend']);     // escalated step labels the touched domain
+  const { out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator }));
+  assert.equal(seen.reviewers, undefined, 'no reviewer is requested — there is no roster to choose them from');
+  assert.match(out, /no reviewers were requested — ask them on the PR itself/, 'and the opener is told so');
+  assert.deepEqual(seen.labels, ['domain:backend']);     // the stories review still labels the touched repos
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4920,7 +4922,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, platformLogin, actorName, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, rolesForScope, hasAnyRole, platformLogin, actorName, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
 
 test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
   assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
@@ -5042,33 +5044,6 @@ test('hasAnyRole searches the requested roles across scopes', () => {
   assert.equal(hasAnyRole(e, ['hub'], ['owner']), false);
   assert.equal(hasAnyRole(e, ['hub', 'backend'], ['domain-owner']), true);
   assert.equal(hasAnyRole(e, ['frontend'], ['reviewer']), false);
-});
-
-test('reviewersForScopes picks reviewers + domain-owners and excludes the committer', () => {
-  const roster = [
-    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },              // owner-only => not requested
-    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
-    { login: 'ca', name: 'carol', roles: { hub: ['reviewer'], backend: ['domain-owner'] } },
-    { login: 'dv', name: 'dave', roles: { backend: ['domain-owner'] } },
-  ];
-  assert.deepEqual(reviewersForScopes(roster, ['hub'], {}).sort(), ['bo', 'ca']);
-  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { excludeLogin: 'bo' }).sort(), ['ca', 'dv']);
-});
-
-test('reviewersForScopes requests a repos.json-only domain owner (BUG-1 regression)', () => {
-  // carol owns backend ONLY via repos.json domain_owner — no roster role for the backend scope.
-  const roster = [
-    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },
-    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
-    { login: 'ca', name: 'carol' },                       // identity only, no roles map
-  ];
-  const repos = [{ name: 'backend', domain_owner: 'carol' }];
-  // Without repos: carol is never requested (the bug). With repos: she is.
-  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], {}).sort(), ['bo']);
-  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { repos }).sort(), ['bo', 'ca']);
-  // domain_owners[] (plural) is honored too, and excludeLogin still applies.
-  const repos2 = [{ name: 'backend', domain_owners: ['carol', 'bob'] }];
-  assert.deepEqual(reviewersForScopes(roster, ['backend'], { repos: repos2, excludeLogin: 'bo' }).sort(), ['ca']);
 });
 
 test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {

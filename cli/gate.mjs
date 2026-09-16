@@ -19,7 +19,7 @@ import {
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
-  readPr, mapApprovers, createPr, reviewersForScopes, platformLogin, actorName,
+  readPr, mapApprovers, createPr, platformLogin, actorName,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
@@ -1008,7 +1008,7 @@ export async function gateRepair(root, { epic, push = false, allowBranch = false
 // the branch this would otherwise recompute (artifactFromBase collapses stories-S01 → stories/). Pass
 // the real pushed head so the PR targets a branch that exists. `creator` is injected in tests.
 export async function gateOpen(root, { epic, artifact, head, creator = createPr, hasBranch = branchExists, today = new Date().toISOString().slice(0, 10) } = {}) {
-  const { hub, repos } = loadProduct(root);
+  const { hub } = loadProduct(root);
   const epicDir = epicRoot(root, epic);
   const ledger = loadLedger(epicDir);
   if (!ledger.state) { fail(`no epic state at ${epicDir}`); process.exitCode = 1; return; }
@@ -1079,20 +1079,17 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     // people act on. This repo's own e2e fixture is exactly that shape.
     hasArchitecture: !routeLacksStep(ledger.state, 'architecture'),
   });
-  // Assignee = whoever opens the review PR (the committer); reviewers = the Product's reviewers +
-  // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
-  // to review their own artifact). Scope is the Product plus every touched domain.
+  // Assignee = whoever opens the review PR (the login the platform CLI reports; `gh` falls back to @me).
+  // NO REVIEWERS ARE REQUESTED (E62): they used to come from the roster's reviewer and domain-owner
+  // roles, and there is no stored list to pick them from any more. The team requests them on the PR,
+  // and E68 will suggest them from history. Said on the way out, so nobody waits for a request that
+  // was never sent.
   const committer = platformLogin(root, hub.platform);
-  const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer, repos });
   const assignees = committer ? [committer] : [];
   const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
-  const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
+  const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, assignees, labels, cwd: root });
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`); return; }
-  // Surface routing: who was assigned as a reviewer, who was @-mentioned (GitLab field cap), and any
-  // login the platform could not add (dropped) so a partial roster is visible, not silent.
-  if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);
-  if (r.dropped?.length) warn(`could not request as reviewer (unknown/non-collaborator login): ${r.dropped.join(', ')}`);
 
   if (!verified) {
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
@@ -1107,6 +1104,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     }
   }
   ok(`opened ${r.url}`);
+  hand('no reviewers were requested — ask them on the PR itself');
   hand(verified
     ? 'reviewers approve/comment there; CI advances the gate on the default branch when it is merged'
     : `reviewers approve/comment there; then run \`yad gate sync ${epic} ${artifact}\``);

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import {
-  detectPlatform, createPr, reviewersForScopes, platformLogin, resolveBaseBranch,
+  detectPlatform, createPr, platformLogin, resolveBaseBranch,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase } from './epic-state.mjs';
@@ -128,12 +128,12 @@ export async function runOpenPr(root, opts = {}) {
     return res;
   }
 
-  // The Product roster + its default_branch. The latter only applies when the PR targets the Product ITSELF
+  // The Product's default_branch, which only applies when the PR targets the Product ITSELF
   // (a hub-tooling branch) — for a connected code repo the Product's trunk belongs to a different repo and
   // must never leak in. Resolved AFTER the hub-shape hand-off above, which delegates its own base to
   // `yad gate open`: resolving before it would spend a platform round-trip and print a base that the
   // delegated path then ignores.
-  const hub = readJSON(productConfigPath(root), { roster: [] });
+  const hub = readJSON(productConfigPath(root), {});
 
   // Resolve the base rather than assume it (#168). Hardcoding 'main' mis-based every PR on a repo
   // whose trunk is something else — and CodeRabbit decides auto-review eligibility from the base at
@@ -179,25 +179,19 @@ export async function runOpenPr(root, opts = {}) {
     task, summary, risk: opts.risk || 'low', contract: !!opts.contractChange, domains: meta?.name, stage,
   });
 
-  // Auto-assign from the Product roster, scoped to this repo: assignee = the committer (resolved from
-  // local git identity), reviewers = the repo's reviewers + domain-owners, minus the committer.
-  // Degrades cleanly when there is no roster / the committer is unmapped (gh self-assigns via @me).
-  const roster = hub.roster || [];
+  // Assignee = the committer, the login the platform CLI reports (gh self-assigns via @me when there is
+  // none). No reviewers are requested (E62): the roster that named them is gone. The team requests them
+  // on the PR, and E68 will suggest them from history.
   const committer = platformLogin(repoRoot, platform);
-  const scope = meta?.name ? [meta.name] : [];
-  // Pass the repo registry entry so a domain owner declared only in repos.json (not the roster roles
-  // map) is still requested as a reviewer (BUG-1).
-  const reviewers = reviewersForScopes(roster, scope, { excludeLogin: committer, repos: meta ? [meta] : [] });
   const assignees = committer ? [committer] : [];
 
   // `creator` is injectable (mirrors gateOpen's) so a test can assert the base that reaches the
   // platform CLI without shelling out to gh/glab.
   const creator = opts.creator || createPr;
-  const r = creator(platform, { title, body, base: baseBranch, head: branch, reviewers, assignees, cwd: repoRoot });
+  const r = creator(platform, { title, body, base: baseBranch, head: branch, assignees, cwd: repoRoot });
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
-  if (r.mentioned?.length) info(`@-mentioned (GitLab single-reviewer field): ${r.mentioned.join(', ')}`);
-  if (r.dropped?.length) hand(`could not request as reviewer (unknown/non-collaborator login): ${r.dropped.join(', ')}`);
-  if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` for required reviewers');
+  hand('no reviewers were requested — ask them on the PR itself');
+  if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
   return { url: r.url };
 }
