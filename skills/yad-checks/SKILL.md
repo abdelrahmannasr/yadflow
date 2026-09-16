@@ -186,8 +186,14 @@ file-editing tool call and refuses the write up front, naming the command that o
 
 - **Harness-agnostic by contract.** The script only locates `yad` and hands the tool payload to
   `yad hook ledger-guard`: **stdin** is a JSON tool-call payload, **exit 0** allows, **exit 2**
-  denies with the reason on stderr. Claude Code's `PreToolUse` protocol is exactly that, so no
-  adapter logic is needed; another harness needs only those two exit codes.
+  denies with the reason on stderr. Two harnesses match that contract and are wired automatically —
+  Claude Code (`PreToolUse` in `.claude/settings.json`) and Cursor (`preToolUse` in
+  `.cursor/hooks.json`, where exit 2 is its `deny`). Any other harness needs only those two exit
+  codes; a hook that fires only AFTER the write, such as Cursor's `afterFileEdit`, is not used,
+  because it could report the edit but never refuse it — and reporting is what the CI gate does.
+- **Targets with no such hook are named, not skipped.** `.agents`, `.gemini`, `.zencoder` and
+  `.opencode` get the script and no wiring, and `yad doctor` says which of a project's targets are
+  guarded by CI alone. Silence about an unguarded target reads as a guarded one.
 - **Same scope as the CI gate**, deliberately: guarded are `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json`
   and `epics/*/reviews/*.md` (at the gate's own glob depth, which spans `/`); exempt are
   `contract-lock.json`, `change.json`, and every artifact. A **new** epic's ledger is exempt too —

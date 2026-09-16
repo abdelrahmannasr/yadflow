@@ -429,9 +429,32 @@ be reverted before the review PR/MR can go green.
 | exit 0 | allow |
 | exit 2 | deny — the reason is on stderr, for the agent to read |
 
-Claude Code's `PreToolUse` protocol is exactly that (exit 2 blocks the call and feeds stderr back to
-the model), so `.claude/settings.json` wires it with no adapter logic. Any harness that can run a
-command and read those two exit codes can use the same script.
+Two harnesses match that contract, and `yad check --fix` wires both:
+
+| Harness | File | Event | Command |
+|---|---|---|---|
+| Claude Code | `.claude/settings.json` | `PreToolUse` | `"$CLAUDE_PROJECT_DIR/hooks/ledger-guard.sh"` |
+| Cursor | `.cursor/hooks.json` | `preToolUse` | `hooks/ledger-guard.sh` |
+
+Exit 2 blocks the call in both (in Cursor it is equivalent to `permission: "deny"`) and the reason on
+stderr goes back to the model. Any other harness that can run a command and read those two exit codes
+can use the same script by hand.
+
+The two commands are spelled differently on purpose. Claude Code runs the string through a shell, so
+its entry uses `$CLAUDE_PROJECT_DIR` and is quoted against a project path containing a space. Cursor
+documents that a project hook runs **from the project root** but not whether the command goes through
+a shell — so its entry is a relative path with no variable and no quotes, the one spelling that works
+either way. Every failure mode here is silent and fails open, which would leave `yad doctor`
+truthfully reporting an entry that never refuses anything.
+
+Cursor does not document the field names inside `tool_input`, so `payloadPaths` reads any key *named*
+like a path (`file_path`, `target_file`, `filePath`, `paths`) rather than guessing a vendor spelling.
+It matches the key and never the value: scanning values for something shaped like a ledger path would
+refuse an ordinary edit to a document that merely quotes one, and a false deny is worse than a miss in
+a guard that fails open by design.
+
+Cursor's wiring follows Cursor's published protocol and has not yet been exercised against a live
+Cursor session.
 
 **Layering.** `hooks/ledger-guard.sh` is only the adapter: it locates `yad` (`$YAD_BIN` → the Product's
 `node_modules/yadflow` → `PATH` → `npx --no-install`) and passes the payload to `yad hook

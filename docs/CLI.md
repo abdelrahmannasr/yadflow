@@ -162,8 +162,22 @@ does / why / what to enter / what skipping means), and the step count adapts.
 0. **Profile** — the three questions above, plus "configure optional tools now?". Pre-answer for
    CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
 1. **Preflight** — confirm the Product is a git repo (offers `git init`); check `git`/`node`/`npx`.
-2. **Install the module** — copy the `yad-*` skills into the IDE skill dirs you pick
-   (`.claude/`, `.agents/`, `.zencoder/`, `.opencode/`) and copy the module config to `.sdlc/config.yaml`.
+2. **Install the module** — copy the `yad-*` skills into the agent skill dirs you pick, and copy the
+   module config to `.sdlc/config.yaml`. The prompt names the agents that read each directory:
+
+   | Directory | Agents that read it |
+   | --- | --- |
+   | `.claude/` | Claude Code (Cursor also reads it) |
+   | `.agents/` | Codex CLI, Gemini CLI, Cursor, GitHub Copilot |
+   | `.cursor/` | Cursor |
+   | `.gemini/` | Gemini CLI |
+   | `.zencoder/` | Zencoder |
+   | `.opencode/` | opencode — flat `commands/<skill>.md`, not skill folders |
+
+   A project with none of them is offered `.claude,.agents`, which covers every agent listed. A
+   project that already has one is offered that one. A project whose stamp
+   (`.sdlc/cli-version.json`) is missing or unreadable falls back to `.claude` alone — a recovery
+   restores the minimum, it does not enrol you in a newer default.
 3. **Product platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
    **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
 4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).
