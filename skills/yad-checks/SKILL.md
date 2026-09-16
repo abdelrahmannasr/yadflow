@@ -84,7 +84,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the
     local half of `checks/ledger-guard.sh` (#171). Installed to `<product>/hooks/ledger-guard.sh` with the
-    `PreToolUse` entry in `.claude/settings.json`. Fails OPEN; see "Step 2b" below.
+    `PreToolUse` entry in `.claude/settings.json`; a `.cursor` project also gets
+    `templates/hooks/ledger-guard-cursor.sh` and a `preToolUse` entry in `.cursor/hooks.json`.
+    Fails OPEN; see "Step 2b" below.
   - `templates/github/yad-verified-commits.yml` + `templates/gitlab/yad-verified-commits.gitlab-ci.yml`
     → the standalone Product-side verified-commits CI (installed by `yad check --fix` with the Product wiring)
   - `templates/github/yad-checks.yml` → installs to `.github/workflows/yad-checks.yml` (marked `# yad-managed: yad-checks`);
@@ -170,8 +172,9 @@ Commit the wiring on the repo's default branch (it is shared infrastructure, not
 with a Product-flavored gate set — see "Wiring the Product" in `references/check-gates.md`.
 
 **The Product also gets the agent guardrail** (see below): `templates/hooks/ledger-guard.sh` →
-`<product>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. `yad setup`
-and `yad check --fix` install both; there is nothing to do by hand.
+`<product>/hooks/ledger-guard.sh`, plus the `PreToolUse` entry in `.claude/settings.json`. A project
+whose targets include `.cursor` also gets `templates/hooks/ledger-guard-cursor.sh` and a `preToolUse`
+entry in `.cursor/hooks.json`. `yad setup` and `yad check --fix` install them; nothing by hand.
 
 ### Step 2b — the agent guardrail (harness hooks, verified mode only)
 The CI gates speak at CI time. That is too late for one failure the field kept hitting (#171): in
@@ -186,11 +189,16 @@ file-editing tool call and refuses the write up front, naming the command that o
 
 - **Harness-agnostic by contract.** The script only locates `yad` and hands the tool payload to
   `yad hook ledger-guard`: **stdin** is a JSON tool-call payload, **exit 0** allows, **exit 2**
-  denies with the reason on stderr. Two harnesses match that contract and are wired automatically —
-  Claude Code (`PreToolUse` in `.claude/settings.json`) and Cursor (`preToolUse` in
-  `.cursor/hooks.json`, where exit 2 is its `deny`). Any other harness needs only those two exit
-  codes; a hook that fires only AFTER the write, such as Cursor's `afterFileEdit`, is not used,
-  because it could report the edit but never refuse it — and reporting is what the CI gate does.
+  denies with the reason on stderr. Claude Code's `PreToolUse` reads exactly that, so its entry points
+  straight at the script. Cursor does NOT: its `preToolUse` is a **permission hook**, which wants a
+  JSON verdict on stdout and treats an empty or off-schema answer as a refusal — and this script
+  prints nothing when it allows, so wiring it there directly would block every file write in the
+  project. Cursor's entry points at `hooks/ledger-guard-cursor.sh` instead, which runs
+  `yad hook ledger-guard --format cursor` and always answers `{"permission":"allow"}` or
+  `{"permission":"deny","user_message":…,"agent_message":…}`. **Check which kind a harness is
+  before wiring it by hand.** A hook that fires only AFTER the write, such as Cursor's
+  `afterFileEdit`, is not used: it could report the edit but never refuse it, and reporting is what
+  the CI gate already does.
 - **Targets with no such hook are named, not skipped.** `.agents`, `.gemini`, `.zencoder` and
   `.opencode` get the script and no wiring, and `yad doctor` says which of a project's targets are
   guarded by CI alone. Silence about an unguarded target reads as a guarded one.

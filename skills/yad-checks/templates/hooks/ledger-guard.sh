@@ -40,7 +40,22 @@ set -uo pipefail
 
 # The Product root is this script's grandparent — hooks/ledger-guard.sh — so the resolution below does
 # not depend on the harness's working directory.
-HOOK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# `CDPATH=` is load-bearing, and the Cursor entry is what makes it so: that entry invokes the script
+# by a RELATIVE path, so `${BASH_SOURCE[0]}` is relative and `cd` consults $CDPATH before the current
+# directory. An exported CDPATH in a login profile — an ordinary thing to have, and inherited by the
+# harness — would resolve `hooks` to some other tree entirely, and the guard would fail open on every
+# write for as long as that profile lived.
+#
+# The loop resolves a symlinked SCRIPT, which `cd -P` does not: `-P` resolves the directory path, and
+# a script reached through a link in another directory would otherwise look for its sibling beside the
+# LINK and not find it. `readlink` without `-f` because `-f` is not portable to macOS.
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"
+  _src="$(readlink -- "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+HOOK_DIR="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"
 HUB_ROOT="$(dirname -- "$HOOK_DIR")"
 
 # Resolution order, cheapest and most specific first: an explicit override, then the copy installed

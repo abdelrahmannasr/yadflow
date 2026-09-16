@@ -7,7 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
 import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
-import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
+import { mergeHookSettings, hookMatcherFires, ideTargetsFor, safeIdeTargetStateFor, hookScriptReady } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
 import { loadDebt } from './thread.mjs';
@@ -177,7 +177,11 @@ export function projectChecks(checks, root) {
   if (isVerifiedLedger(hubForHooks)) {
     const unwired = [];
     const broken = [];
-    if (!exists(path.join(root, 'hooks', 'ledger-guard.sh'))) unwired.push('hooks/ledger-guard.sh');
+    // PRESENT AND EXECUTABLE. A script at mode 644 has the right bytes and cannot run: the harness
+    // entry pointing at it fails, fails OPEN, and every ledger edit is permitted while this check and
+    // `yad check` both call the guard healthy. Reachable from a zip download, `cp` without `-p`, or a
+    // restrictive umask, with nobody having done anything unusual.
+    if (!hookScriptReady(root, 'hooks/ledger-guard.sh')) unwired.push('hooks/ledger-guard.sh');
     // The SAME target list `hookActions` wires — the persisted `ideTargets`, not "does the directory
     // exist". Keyed on the directory, a project whose targets are `['.agents']` but which also has a
     // stray `.claude/` would be told to run `yad check --fix` forever, while that command builds no
@@ -189,7 +193,16 @@ export function projectChecks(checks, root) {
     // nothing local guarded anything, because the loop found no adapter and said nothing. Silence
     // about an unguarded target reads as a guarded one (E11).
     const noProtocol = [];
-    for (const ide of ideTargetsFor(root)) {
+    // Targets whose directory is unsafe (a symlink, or a file). `hookActions` filters these through
+    // `safeIdeTargetsFor` and THROWS on them, so reporting one as "not wired — run `yad check --fix`"
+    // names a remedy that aborts instead of fixing it. The rule ten lines above is the same one:
+    // never name a remedy that cannot reach the thing being reported.
+    const unsafeTargets = [];
+    // Read ONCE, like the settings files below — the block's own rule, and two reads can disagree.
+    const targets = ideTargetsFor(root);
+    const safe = new Set(safeIdeTargetStateFor(root, targets).targets);
+    for (const ide of targets) {
+      if (!safe.has(ide)) { unsafeTargets.push(ide); continue; }
       const adapter = HOOK_ADAPTERS[ide];
       if (!adapter) { noProtocol.push(ide); continue; }
       // The SCRIPT THE ENTRY POINTS AT, which is not always the shared one. `.cursor`'s entry names
@@ -199,7 +212,7 @@ export function projectChecks(checks, root) {
       // commands disagreeing about one project is the worst version of this: whichever the human
       // believes, Cursor is invoking a command that does not exist on every single file write.
       for (const w of adapter.wiring) {
-        if (!exists(path.join(root, w.dest))) unwired.push(w.dest);
+        if (!hookScriptReady(root, w.dest)) unwired.push(w.dest);
       }
       const relDest = adapter.settings;
       const settingsPath = path.join(root, relDest);
@@ -226,9 +239,18 @@ export function projectChecks(checks, root) {
     // One clause, appended to whichever verdict below is reached, so the unguarded targets are named
     // on the healthy path too — which is the path they are most likely to be read on.
     const alsoUnguarded = noProtocol.length
-      ? ` — no pre-edit hook protocol on ${noProtocol.join(', ')}, so an agent using ${noProtocol.length > 1 ? 'those' : 'that'} directory is guarded by CI only`
+      ? ` — no pre-edit hook protocol on ${noProtocol.join(', ')}, so an agent using ${noProtocol.length > 1 ? 'those directories are' : 'that directory is'} guarded by CI only`
       : '';
-    if (unreadable.length) {
+    // NOTHING local guards this Product. Every target it has is one no harness can hook, so the
+    // script is installed and attached to no event anywhere. Naming that while reporting `ok` was a
+    // half-fix: `status` is the only machine-readable signal, the release check filters on `fail`,
+    // and a dashboard reading `--json` saw green on a verified project with no local guard at all.
+    // It is a warn, not a fail, because it is a real and reasonable setup — CI still fails closed.
+    const nothingWired = noProtocol.length > 0 && noProtocol.length === targets.length;
+    if (unsafeTargets.length) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unsafeTargets.join(', ')} is not a usable directory${alsoUnguarded}`,
+        'the target is a symbolic link or a file; `yad check --fix` refuses to write through it, so make it a real directory or drop it from `ideTargets` in `.sdlc/cli-version.json`');
+    } else if (unreadable.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
     } else if (unwired.length) {
@@ -237,12 +259,15 @@ export function projectChecks(checks, root) {
     } else if (broken.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}${alsoUnguarded}`,
         'restore the matcher named beside each file — as it stands the hook is wired but never fires');
+    } else if (nothingWired) {
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but attached to nothing: no target (${noProtocol.join(', ')}) has a pre-edit hook protocol, so nothing local guards the ledger`,
+        'add a target whose agent can refuse a write before it lands (`.claude` or `.cursor`) if you want the local half; otherwise CI is the only guard, and it only speaks at merge time');
     } else {
       // Name every script that is actually wired, not just the shared one — on a `.cursor` project the
       // file Cursor invokes is the wrapper, and a health line that never mentions it is a health line
       // about something else.
       const wiredScripts = ['hooks/ledger-guard.sh',
-        ...ideTargetsFor(root).flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest))];
+        ...targets.flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest))];
       check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (${[...new Set(wiredScripts)].join(', ')})${alsoUnguarded}`);
     }
   }

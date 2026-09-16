@@ -65,8 +65,11 @@ ${c.bold('Setup & maintenance')}
   yad hook ledger-guard    ${c.dim('harness-invoked, not typed')} — refuse an agent's edit to the
                        CI-owned gate ledger in verified mode and name the command that owns
                        the transition. Reads a tool-call payload on stdin (or --path <p>);
-                       exit 0 allows, exit 2 denies with the reason on stderr. Wired into
-                       .claude/settings.json by setup / check --fix. YAD_HOOK_DISABLE=1 skips.
+                       exit 0 allows, exit 2 denies with the reason on stderr. With
+                       --format cursor the verdict is JSON on stdout instead, for a harness
+                       whose pre-edit hook asks for permission rather than reading an exit
+                       code. Wired into .claude/settings.json and .cursor/hooks.json by
+                       setup / check --fix. YAD_HOOK_DISABLE=1 skips.
 
 ${c.bold('Reviewer roster')}
   yad roster list                      Show every member + their roles per scope (hub + each repo)
@@ -314,7 +317,17 @@ function parseArgs(argv) {
     else if (a.startsWith('--scope=')) o.scope = a.slice('--scope='.length);
     else if (a === '-m' || a === '--message') o.message = takeValue(argv, ++i, a);
     else if (VALUE_FLAGS.has(a)) o[a.replace(/^--/, '')] = takeValue(argv, ++i, a);
-    else o._.push(a);
+    // `--flag=value` for the same flags. Without it the token matched nothing and fell through to the
+    // positionals, where it was silently ignored — and for `yad hook ledger-guard --format=cursor`
+    // that is not a cosmetic miss: the format goes undefined, the exit protocol is selected, and under
+    // Cursor an empty stdout on an allow BLOCKS every file write. A flag spelling that silently
+    // inverts a guard is worth accepting rather than quietly dropping.
+    else if (a.startsWith('--') && a.includes('=') && VALUE_FLAGS.has(a.slice(0, a.indexOf('=')))) {
+      const eq = a.indexOf('=');
+      const value = a.slice(eq + 1);
+      if (!value) throw new Error(`${a.slice(0, eq)} expects a value`);
+      o[a.slice(2, eq)] = value;
+    } else o._.push(a);
   }
   return o;
 }

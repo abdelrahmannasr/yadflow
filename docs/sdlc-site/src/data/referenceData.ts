@@ -216,8 +216,8 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'ledger-guard (agent hook)',
     queue: 'harness hook',
     timing: 'before an agent\'s file edit',
-    description: 'The local half of the rule above (#171): a PreToolUse hook that refuses an agent the CI-owned ledger write at the moment it is attempted and names the command that owns the transition (yad gate open), instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic by contract — stdin takes the tool payload, exit 0 allows, exit 2 denies with the reason on stderr. Fails OPEN (no yad, no Product, bad config all allow); the CI gate is the authority. Installed by yad setup / check --fix on verified Products.',
-    triggeredBy: 'the agent harness (.claude/settings.json → hooks/ledger-guard.sh)',
+    description: 'The local half of the rule above (#171): a PreToolUse hook that refuses an agent the CI-owned ledger write at the moment it is attempted and names the command that owns the transition (yad gate open), instead of letting it surface as a CI failure twenty minutes later. Harness-agnostic by contract — stdin takes the tool payload, exit 0 allows, exit 2 denies with the reason on stderr; with --format cursor the verdict is JSON on stdout instead, for a permission-style hook that treats an empty answer as a refusal. Fails OPEN (no yad, no Product, bad config all allow); the CI gate is the authority. Installed by yad setup / check --fix on verified Products.',
+    triggeredBy: 'the agent harness (.claude/settings.json → hooks/ledger-guard.sh; .cursor/hooks.json → hooks/ledger-guard-cursor.sh)',
     visibleTo: ALL,
   },
 ];

@@ -13509,6 +13509,15 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     });
     return { code: r.status, stderr: r.stderr || '', stdout: (r.stdout || '').trim() };
   };
+  // The same hook run from somewhere else entirely, with NO harness project-root variable set — the
+  // case where the anchor for a relative payload path has to come from the payload itself.
+  const runHookAt = (cwd, payload) => {
+    const r = spawnSync(process.execPath, [yad, 'hook', 'ledger-guard'], {
+      input: payload, encoding: 'utf8', cwd,
+      env: { ...GIT_ENV, YAD_NO_UPDATE_NOTIFIER: '1', YAD_CACHE_DIR: path.join(T, 'cache3') },
+    });
+    return { code: r.status, stderr: r.stderr || '' };
+  };
   try {
     git(T, 'init', '-q');
     git(T, 'config', 'user.email', 'a@b.c');
@@ -13553,6 +13562,25 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     // An unknown hook name is a usage error (1), never a block (2).
     const bad = spawnSync(process.execPath, [yad, 'hook', 'nope'], { input: '', encoding: 'utf8', cwd: T, env: { ...GIT_ENV, YAD_NO_UPDATE_NOTIFIER: '1' } });
     assert.equal(bad.status, 1);
+
+    // A READ of the ledger is never refused, however wide the team made their matcher. Both harnesses
+    // document `''` and `*` as matching every tool, so a widened matcher sends Read/Grep calls here
+    // too — and refusing those would break `yad status`, the review-gate skill, and an agent's
+    // ability to read the very file it was just told to stop writing. An allowlist of READS, never a
+    // check that the tool is a write: an unknown tool name from an unknown harness is still judged.
+    for (const tool of ['Read', 'Grep', 'Glob', 'WebFetch']) {
+      assert.equal(runHook(`{"tool_name":"${tool}","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}`).code, 0, tool);
+    }
+    for (const tool of ['Write', 'Edit', 'Delete', 'str_replace_editor', '']) {
+      assert.equal(runHook(`{"tool_name":"${tool}","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}`).code, 2,
+        `${tool || '(none)'} is a write or unknown — judged, not waved through`);
+    }
+
+    // A RELATIVE path is anchored on the payload's own `cwd` when the harness sends one. Without it,
+    // a Product in a subdirectory of its repo fell back to the git toplevel, `hubRootFor` found no
+    // hub.json above it, and the edit was ALLOWED.
+    assert.equal(runHookAt(path.dirname(T), '{"cwd":"' + T + '","tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}').code, 2,
+      'the payload cwd anchors the relative path');
 
     // ---- the SECOND protocol (E11): a verdict on stdout, for a harness that reads JSON ----
     //
@@ -13625,9 +13653,17 @@ test('mergeHookSettings adds our entry once and never touches anything else', ()
   const narrowed = JSON.parse(JSON.stringify(first.settings));
   narrowed.hooks.PreToolUse[1].matcher = 'Write';
   assert.equal(mergeHookSettings(narrowed).changed, false);
-  // Junk in either position is replaced by a valid shape rather than throwing.
-  for (const junk of [null, 'x', [], { hooks: 'x' }, { hooks: { PreToolUse: 'x' } }]) {
+  // An input that is not an object at all has nothing to lose, so it is synthesized.
+  for (const junk of [null, 'x', []]) {
     assert.equal(mergeHookSettings(junk).settings.hooks.PreToolUse.length, 1, JSON.stringify(junk));
+  }
+  // But a shape we cannot READ is refused, never rebuilt. Rebuilding deletes whatever the team had,
+  // on the `outdated` path that takes no backup, in a file we own exactly one entry of.
+  for (const [odd, why] of [[{ hooks: 'x' }, /hooks is not an object/], [{ hooks: { PreToolUse: 'x' } }, /not a list/]]) {
+    const r = mergeHookSettings(odd);
+    assert.equal(r.changed, false, JSON.stringify(odd));
+    assert.match(r.unreadable, why);
+    assert.deepEqual(r.settings, odd, 'returned untouched');
   }
 });
 
@@ -13741,12 +13777,20 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     // whose persisted targets do not include it.
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.agents'] }));
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
-    assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
+    // The stray `.claude/` is still not a gap: the report names `.agents`, and never sends anyone to
+    // fix a `.claude` this project does not target. (The status is `warn` for a different reason, one
+    // assertion down — nothing local guards a project whose only target can carry no hook.)
+    assert.doesNotMatch(hooksCheck().message, /\.claude/, 'a stray .claude/ is not named when it is not a target');
     // ...but a target with NO pre-edit hook protocol is NAMED, on the healthy line too. Saying
     // "guard wired" and nothing else, to a project whose only agent directory can carry no guard at
     // all, is how an unguarded setup reads as a guarded one (E11).
-    assert.match(hooksCheck().message, /no pre-edit hook protocol on \.agents/);
-    assert.match(hooksCheck().message, /guarded by CI only/);
+    // NOTHING local guards this Product: every target it has is one no harness can hook. Reporting
+    // `ok` there was a half-fix — `status` is the only machine-readable signal, the release check
+    // filters on `fail`, and a dashboard reading `--json` saw green on a verified project with no
+    // local guard at all. A warn, not a fail: it is a reasonable setup, and CI still fails closed.
+    assert.equal(hooksCheck().status, 'warn');
+    assert.match(hooksCheck().message, /attached to nothing/);
+    assert.match(hooksCheck().hint, /`\.claude` or `\.cursor`/);
     // With both, the wired one is reported AND the unguarded one is still named.
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor', '.agents'] }));
     fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
@@ -13811,9 +13855,16 @@ test('mergeHookSettings writes Cursor its own file shape, and never claims an en
   assert.equal(untouched.settings.hooks.preToolUse.length, 2, 'ours added beside it');
 
   // Junk in either position is replaced by a valid shape rather than throwing — as for Claude.
-  for (const junk of [null, 'x', [], { hooks: 'x' }, { hooks: { preToolUse: 'x' } }]) {
+  for (const junk of [null, 'x', []]) {
     assert.equal(mergeHookSettings(junk, CURSOR).settings.hooks.preToolUse.length, 1, JSON.stringify(junk));
   }
+  // The destructive case this file is most exposed to: `.cursor/hooks.json` is a file yadflow has
+  // never written before, so anything already in it is entirely the team's.
+  const objectEvent = { version: 1, hooks: { preToolUse: { matcher: 'Shell', command: './audit.sh' }, afterFileEdit: [] } };
+  const refused = mergeHookSettings(objectEvent, CURSOR);
+  assert.equal(refused.changed, false);
+  assert.match(refused.unreadable, /hooks\.preToolUse is not a list/);
+  assert.deepEqual(refused.settings.hooks.preToolUse, { matcher: 'Shell', command: './audit.sh' }, 'their hook survives');
 });
 
 test('hookMatcherFires tests each harness against ITS OWN tool names', () => {
@@ -13866,15 +13917,20 @@ test('hookActions wires every target that has a hook protocol, and only those', 
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
-test('baseDirFor anchors a relative payload path with ANY harness project-root variable', () => {
+test('baseDirFor anchors a relative payload path on the best thing available, in order', () => {
   const noGit = () => ({ ok: false, stdout: '' });
-  assert.equal(baseDirFor({ CURSOR_PROJECT_DIR: '/w/product' }, noGit), '/w/product');
-  assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/w/product' }, noGit), '/w/product');
-  // Reading only Claude's meant that under any other harness this fell through to the git toplevel —
-  // in the documented multi-repo layout a CODE REPO, not the Product, so the walk-up found no
-  // hub.json and the guard allowed an edit it should have refused.
-  assert.equal(baseDirFor({}, () => ({ ok: true, stdout: '/w/backend' })), '/w/backend');
+  const repoToplevel = () => ({ ok: true, stdout: '/w/backend' });
+  // 1. Any harness's project-root variable. Reading only Claude's meant that under any other harness
+  //    this fell straight through to the git toplevel.
+  assert.equal(baseDirFor({ CURSOR_PROJECT_DIR: '/w/product' }, repoToplevel), '/w/product');
+  assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/w/product' }, repoToplevel), '/w/product');
   assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/c', CURSOR_PROJECT_DIR: '/x' }, noGit), '/c', 'declared order decides');
+  // 2. Then the payload's own cwd — the directory a relative path in that same payload is relative to.
+  assert.equal(baseDirFor({}, repoToplevel, '/w/product'), '/w/product');
+  // 3. Then the process cwd, and the git TOPLEVEL last. That order is the fix, not an accident: the
+  //    documented layout puts the Product in a subdirectory of its repo, so the toplevel is the repo,
+  //    the walk-up finds no hub.json above it, and a ledger edit is ALLOWED that must be refused.
+  assert.equal(baseDirFor({}, repoToplevel), process.cwd(), 'the toplevel no longer wins over the cwd');
 });
 
 test('payloadPaths finds the edited file under a key no harness bothered to document', () => {
@@ -13894,6 +13950,74 @@ test('payloadPaths finds the edited file under a key no harness bothered to docu
   // The multi-edit shape still names every file it touches.
   assert.deepEqual(payloadPaths({ tool_input: { edits: [{ file_path: led }, { target_file: 'b.json' }] } }), [led, 'b.json']);
   assert.deepEqual(payloadPaths({ tool_input: null }), []);
+});
+
+test('payloadPaths: the structural rule survives a harness that names things differently', () => {
+  const L = 'epics/EP-x/.sdlc/state.json';
+  // Every one of these was VERIFIED to be allowed before the rule read words instead of suffixes,
+  // or before it walked past the top level. Each miss is the failure the design forbids: wired,
+  // reported healthy, reading a key that is not there, and permitting every ledger edit.
+  for (const input of [
+    { file_path: L }, { target_file: L }, { filePath: L }, { path: L }, { notebook_path: L },
+    { filename: L }, { file_name: L }, { fileName: L }, { filepath: L }, { dest: L },
+    { paths: [L] }, { args: { file_path: L } }, { files: [{ path: L, content: 'x' }] },
+  ]) assert.deepEqual(payloadPaths({ tool_input: input }), [L], JSON.stringify(input));
+  assert.deepEqual(payloadPaths({ tool_input: { edits: [{ file_path: L }, { target_file: 'b.json' }] } }), [L, 'b.json']);
+
+  // It matches the KEY, never the value — a document quoting a ledger path is an ordinary edit, and
+  // a false deny is worse than a miss in a guard that fails open by design.
+  assert.deepEqual(payloadPaths({ tool_input: { content: `see ${L}`, command: `cat ${L}` } }), []);
+  // A word merely CONTAINING one is not a path key: `profile` is one word, and it is not `file`.
+  for (const k of ['profile', 'uri', 'url', 'description']) {
+    assert.deepEqual(payloadPaths({ tool_input: { [k]: L } }), [], k);
+  }
+  // Depth is bounded — this runs inside the agent's tool loop on every call.
+  let deep = { file_path: L };
+  for (let i = 0; i < 12; i++) deep = { wrap: deep };
+  assert.deepEqual(payloadPaths({ tool_input: deep }), []);
+});
+
+test('a wired script that lost its execute bit is outdated, not ok (E11 review)', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor'] }));
+    for (const a of hookActions(T, ['.cursor'])) a.apply();
+    assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'));
+
+    // Right bytes, no execute bit: the harness entry runs a command that cannot start. It fails, and
+    // both harnesses fail OPEN on a failure that is not an explicit deny — so every ledger edit is
+    // permitted while the bytes still match and nothing reports a thing. `chmod` lives inside
+    // `apply()`, which an `ok` action never reaches, so this had to become a status.
+    for (const rel of ['hooks/ledger-guard.sh', 'hooks/ledger-guard-cursor.sh']) {
+      fs.chmodSync(path.join(T, rel), 0o644);
+      const act = hookActions(T, ['.cursor']).find((a) => a.item === rel);
+      assert.equal(act.status, 'outdated', rel);
+      act.apply();
+      assert.ok(fs.statSync(path.join(T, rel)).mode & 0o111, `${rel} restored`);
+    }
+    assert.ok(hookActions(T, ['.cursor']).every((a) => a.status === 'ok'), 'and back to ok');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('detection counts an ARMED hook entry as an install, so an upgrade does not drop it (E11 review)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-detect-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    // A stamp written before `ideTargets` existed, skills kept in `.agents/`, and a `.claude/` holding
+    // only the PreToolUse entry a previous `yad check --fix` armed.
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ version: '3.18.0' }));
+    fs.mkdirSync(path.join(T, '.agents/skills'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify(mergeHookSettings({}).settings));
+    // Requiring a skills container alone would DROP `.claude` here and `needsRepair` would write the
+    // loss into the stamp — while Claude Code went on running that entry on every edit, unupdated,
+    // its legacy spelling unnormalised, and reported by nothing.
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.claude', '.agents']);
+    // A `.claude/` that only ever held permissions is still not an install.
+    fs.writeFileSync(path.join(T, '.claude/settings.json'), JSON.stringify({ permissions: { allow: [] } }));
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.agents']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('every install target names the agents that read it, and each installs its own way', () => {

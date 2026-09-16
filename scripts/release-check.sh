@@ -118,7 +118,11 @@ git init -q "$HUB"
 git -C "$HUB" config user.name  release-check
 git -C "$HUB" config user.email release-check@local
 ( cd "$HUB" && echo "# hub" > README.md && git add -A && git commit -qm "init" )
-SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" --solo --greenfield --separate >"$WORK/setup.log" 2>&1 \
+# `--ide-targets .claude` is deliberate, not a default. Without it this step takes whatever
+# DEFAULT_IDE_TARGETS currently is — which became two directories — so the gate would install 76 skill
+# folders instead of 38, double its slowest step, and quietly stop exercising the single-target shape
+# that every existing project upgrades from.
+SDLC_NONINTERACTIVE=1 yad setup --dir "$HUB" --solo --greenfield --separate --ide-targets .claude >"$WORK/setup.log" 2>&1 \
   || { cat "$WORK/setup.log"; die "a fresh \`yad setup\` failed with this release"; }
 [ -f "$HUB/.sdlc/cli-version.json" ] || die "setup left no .sdlc/cli-version.json"
 pass "a new project can be created by this release"

@@ -10,10 +10,13 @@
 //   stdin   a harness tool-call payload as JSON (optional; `--path <p>` works instead)
 //   exit 0  allow
 //   exit 2  deny — the reason is on stderr, for the agent to read
-// Claude Code's `PreToolUse` protocol is exactly that (exit 2 blocks the call and feeds stderr back to
-// the model), and Cursor's `preToolUse` is too (exit 2 is its `deny`), so `hooks/ledger-guard.sh`
-// wires BOTH with no adapter logic — the per-harness difference is the settings file it goes in, and
-// that lives in `HOOK_ADAPTERS`, not here. Any other harness needs only the same two exit codes.
+// Claude Code's `PreToolUse` protocol is exactly that — exit 2 blocks the call and feeds stderr back
+// to the model — so `hooks/ledger-guard.sh` wires it with no adapter logic.
+//
+// Cursor's `preToolUse` is NOT that. It is a permission hook: it wants a JSON verdict on stdout and
+// treats an empty or off-schema answer as a refusal, so the contract above would block every write.
+// `--format cursor` below answers in that protocol instead, and `hooks/ledger-guard-cursor.sh` is
+// what Cursor's entry points at. Check which kind a harness is before wiring a new one.
 //
 // FAIL-OPEN, deliberately. No Product, unreadable config, an unparseable payload, no git — every one of
 // those ALLOWS, with a note on stderr. This is a local guardrail, and one that failed closed would
@@ -79,19 +82,38 @@ export function protectedLedgerPath(rel) {
 // on purpose and CI is what fails closed.
 //
 // An unrecognised payload still yields nothing, which allows — see the fail-open note above.
-const PATH_KEY = /(^|_)(path|file|paths|files)$|[a-z](Path|File|Paths|Files)$/;
+// A key is path-shaped when one of its WORDS is. Splitting on `_` and on camelCase humps is what
+// makes `target_file`, `filePath`, `notebook_path` and `dest_path` all match while `profile` does not
+// — `profile` is one word, and that word is not in the set. Matching a bare suffix instead would
+// claim it, and a false path is a false DENY, which is the worse error in a guard that fails open by
+// design. `filename`/`filepath` are single words, so they are in the set in their own right.
+const PATH_WORDS = new Set(['file', 'files', 'filename', 'filenames', 'filepath', 'filepaths', 'path', 'paths', 'dest', 'destination']);
+const keyWords = (key) => String(key).split(/[_\-\s]+|(?=[A-Z])/).map((w) => w.toLowerCase()).filter(Boolean);
+const isPathKey = (key) => keyWords(key).some((w) => PATH_WORDS.has(w));
 
-function pathsFromInput(input, out) {
-  if (!input || typeof input !== 'object') return;
+// Walk the tool input for path-shaped keys, a bounded distance down. Harnesses nest: an `args` or
+// `parameters` wrapper, a `files: [{ path, content }]` batch. A top-level-only scan missed all of it
+// and allowed the edit, which is the failure this rule exists to avoid. The depth cap keeps a
+// pathological payload from costing anything — this runs inside the agent's tool loop, on every call.
+const MAX_PAYLOAD_DEPTH = 4;
+
+function pathsFromInput(input, out, depth = 0) {
+  if (!input || typeof input !== 'object' || depth > MAX_PAYLOAD_DEPTH) return;
   for (const [key, value] of Object.entries(input)) {
     if (typeof value === 'string') {
-      if (value && PATH_KEY.test(key)) out.push(value);
+      if (value && isPathKey(key)) out.push(value);
       continue;
     }
-    // A list under a path-shaped key (`paths`, `files`) is a list OF paths; anything else is not.
-    if (Array.isArray(value) && PATH_KEY.test(key)) {
-      for (const v of value) if (typeof v === 'string' && v) out.push(v);
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        // A string in a path-shaped list (`paths`, `files`) is a path; an object in ANY list may hold
+        // one under a key of its own, which is the `files: [{ path }]` batch shape.
+        if (typeof v === 'string') { if (v && isPathKey(key)) out.push(v); continue; }
+        pathsFromInput(v, out, depth + 1);
+      }
+      continue;
     }
+    pathsFromInput(value, out, depth + 1);
   }
 }
 
@@ -99,18 +121,10 @@ export function payloadPaths(payload) {
   const out = [];
   const input = payload?.tool_input;
   if (!input || typeof input !== 'object') return out;
-  for (const key of ['file_path', 'notebook_path', 'path']) {
-    if (typeof input[key] === 'string' && input[key]) out.push(input[key]);
-  }
+  // One walk. Claude's documented `file_path` / `notebook_path` / `path`, and its `edits[]` array,
+  // are all path-shaped keys under the rule above, so naming them separately would only be a second
+  // list to forget to update.
   pathsFromInput(input, out);
-  // `edits[]` is the one nested shape worth walking: it is how a multi-edit call names several files
-  // in one payload, and a top-level scan would never see them. Each edit is scanned by the same rule.
-  if (Array.isArray(input.edits)) {
-    for (const edit of input.edits) {
-      if (typeof edit?.file_path === 'string' && edit.file_path) out.push(edit.file_path);
-      pathsFromInput(edit, out);
-    }
-  }
   return [...new Set(out)];
 }
 
@@ -140,10 +154,19 @@ export function hubRootFor(abs) {
 // documented multi-repo layout is a code repo, not the Product, so the walk-up found no `hub.json`
 // and the guard allowed an edit it should have refused. `env` is a parameter precisely so a test can
 // pin that, one harness at a time, without setting real environment variables.
-export function baseDirFor(env = process.env, runner = run) {
+export function baseDirFor(env = process.env, runner = run, payloadCwd = null) {
   for (const name of HOOK_PROJECT_DIR_ENVS) {
     if (env[name]) return env[name];
   }
+  // The harness's own working directory for this tool call, when the payload carries one. It is the
+  // directory a relative path in that same payload is relative TO, so it beats any guess.
+  if (typeof payloadCwd === 'string' && payloadCwd) return payloadCwd;
+  // `process.cwd()` BEFORE the git toplevel, which is the opposite of the old order and fixes a real
+  // miss: the documented layout puts the Product in a subdirectory of its repo, so the toplevel is the
+  // repo, `hubRootFor` walks up from there, finds no `hub.json`, and ALLOWS a ledger edit it must
+  // refuse. Anchoring too deep still tends to resolve into the Product and deny; anchoring too
+  // shallow misses entirely, so the shallower guess goes last.
+  if (process.cwd()) return process.cwd();
   const top = runner('git', ['rev-parse', '--show-toplevel']);
   return top.ok && top.stdout ? top.stdout : process.cwd();
 }
@@ -232,10 +255,10 @@ export function denyMessage({ epic, rel, productRoot }) {
 
 // The decision, with git injectable so the tests can drive every branch. Returns
 // `{ allow: true }` or `{ allow: false, message, epic, rel }`.
-export function ledgerGuardDecision(paths, { env = process.env, runner = run } = {}) {
+export function ledgerGuardDecision(paths, { env = process.env, runner = run, payloadCwd = null } = {}) {
   if (env.YAD_HOOK_DISABLE) return { allow: true, skipped: 'YAD_HOOK_DISABLE' };
   if (!paths.length) return { allow: true };
-  const base = baseDirFor(env, runner);
+  const base = baseDirFor(env, runner, payloadCwd);
   // One `ls-tree` per Product, not one per candidate path: a MultiEdit carries many paths and this runs
   // inside the agent's tool loop.
   const seededByHub = new Map();
@@ -309,16 +332,44 @@ const cursorDeny = (message) => JSON.stringify({ permission: 'deny', user_messag
 
 // The `yad hook ledger-guard` entry point. `paths` (from `--path`) is additive to the payload, so
 // a harness with no JSON contract can call the guard directly.
+// Tool names that cannot write a file, in either harness's vocabulary. A call naming one of these is
+// allowed without being judged.
+//
+// AN ALLOWLIST OF READS, never a check that the tool IS a write, and the asymmetry is the point: a
+// harness this code has never heard of sends a tool name nobody here recognises, and that call must
+// still be judged. Recognising only known writers would wave it straight through.
+//
+// It exists because the write/read distinction otherwise lives entirely in the `matcher` inside the
+// team's settings file — which the merge deliberately refuses to correct, and which both harnesses
+// document `""` and `*` as widening to everything. A team that widens it gets a refusal on every READ
+// of `state.json`, which `yad status` and the review-gate skill do routinely, and which an agent has
+// to do to obey the deny message it was just handed. The code's own stance is that a false deny is
+// far worse than a miss.
+const READ_ONLY_TOOLS = new Set(['read', 'grep', 'glob', 'search', 'list', 'ls', 'webfetch', 'websearch']);
+const isReadOnlyCall = (payload) => {
+  const name = payload?.tool_name;
+  return typeof name === 'string' && READ_ONLY_TOOLS.has(name.toLowerCase());
+};
+
 export function runLedgerGuardHook({ paths = [], format = 'exit' } = {}) {
   // Only read stdin when there is nothing else to go on. `readFileSync(0)` blocks until EOF, and a
   // caller that passes `--path` (the documented stdin-free alternative) may well have inherited an
   // open pipe from a long-lived parent — `isTTY` is false there, so the TTY guard does not trip and
   // the hook would hang forever. A hang is strictly worse for an agent than a block.
   const payload = paths.length ? null : readPayload();
-  const all = [...new Set([...payloadPaths(payload), ...paths])];
-  const verdict = ledgerGuardDecision(all);
+  const all = isReadOnlyCall(payload) ? [...paths] : [...new Set([...payloadPaths(payload), ...paths])];
+  const verdict = ledgerGuardDecision(all, {
+    // `cwd` is what the harness says this tool call ran in, and it is what a relative path in the same
+    // payload is relative to. It was already being parsed and thrown away.
+    payloadCwd: typeof payload?.cwd === 'string' ? payload.cwd : null,
+  });
   // An unknown format is treated as `exit` rather than refused: this runs inside an agent's tool loop,
-  // and a usage error there would be a non-zero exit on every single call.
+  // and a usage error there would be a non-zero exit on every single call. It is SAID on stderr
+  // though, because the fallback is not harmless everywhere — a harness that needed `cursor` and got
+  // `exit` sees an empty stdout on an allow and blocks the write, with nothing else to explain it.
+  if (!HOOK_FORMATS.includes(format)) {
+    note(`yad hook: unknown --format '${format}' — using '${HOOK_FORMATS[0]}' (known: ${HOOK_FORMATS.join(', ')})`);
+  }
   if (format === 'cursor') {
     if (verdict.allow) {
       process.stdout.write(`${CURSOR_ALLOW}\n`);

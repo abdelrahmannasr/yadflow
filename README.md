@@ -122,8 +122,9 @@ several of them agreed to look in. So one install can serve more than one agent.
 | `.zencoder/` | Zencoder |
 | `.opencode/` | opencode — installed as flat `commands/<skill>.md` files, not folders |
 
-A fresh setup offers **`.claude,.agents`**, which together cover every agent in the table. A project
-that already has one of these directories is offered that one instead. Checked against each agent's
+A fresh setup offers **`.claude,.agents`**, which together cover every agent in the table. A project that already
+has an INSTALL in one of them — a `skills/` folder, or an armed hook entry — is offered that one
+instead; a `.cursor/` holding only Cursor rules is not an install, and is offered the default. Checked against each agent's
 own documentation on 2026-09-16; `yad doctor` prints the same table's verdict for your project.
 
 ### The local ledger guard, per agent

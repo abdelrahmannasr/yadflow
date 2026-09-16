@@ -176,7 +176,9 @@ does / why / what to enter / what skipping means), and the step count adapts.
    | `.opencode/` | opencode — flat `commands/<skill>.md`, not skill folders |
 
    A project with none of them is offered `.claude,.agents`, which covers every agent listed. A
-   project that already has one is offered that one. A project whose stamp
+   project that already has an INSTALL in one of them — a `skills/` folder, or an armed hook entry —
+   is offered that one; a `.cursor/` holding only Cursor rules is not an install. `--ide-targets`
+   overrides all of it. A project whose stamp
    (`.sdlc/cli-version.json`) is missing or unreadable falls back to `.claude` alone — a recovery
    restores the minimum, it does not enrol you in a newer default.
 3. **Product platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.

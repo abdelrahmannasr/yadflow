@@ -623,10 +623,12 @@ export const HOOK_ADAPTERS = Object.freeze({
 // The Claude adapter's fields under their original names. Kept because they are what the shipped
 // error text and the existing tests name, and renaming a constant buys nothing; new code should read
 // the adapter, since these three describe ONE harness and the engine now supports two.
+//
+// `HOOK_SETTINGS` used to live here and is deliberately GONE, not re-derived. It meant "the one
+// wired target and its file", and the obvious re-derivation would have silently changed it to "every
+// adapter's file" — a constant whose meaning moved under callers that never read it again. Nothing
+// imported it; anything that needs a settings path reads it off the adapter.
 export const CLAUDE_HOOK_ADAPTER = HOOK_ADAPTERS['.claude'];
-export const HOOK_SETTINGS = Object.freeze(
-  Object.fromEntries(Object.values(HOOK_ADAPTERS).map((a) => [a.target, a.settings])),
-);
 // Every harness variable that names the project root, for `baseDirFor` in `hook.mjs` to try in turn.
 // Derived from the adapters, so adding a harness up there arms the guard's path resolution too.
 export const HOOK_PROJECT_DIR_ENVS = Object.freeze(Object.values(HOOK_ADAPTERS).map((a) => a.projectDirEnv));

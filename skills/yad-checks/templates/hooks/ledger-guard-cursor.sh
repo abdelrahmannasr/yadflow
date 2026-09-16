@@ -21,7 +21,22 @@
 # program and argument — a command not found, silently, on every call.
 set -uo pipefail
 
-HOOK_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# `CDPATH=` is load-bearing, and the Cursor entry is what makes it so: that entry invokes the script
+# by a RELATIVE path, so `${BASH_SOURCE[0]}` is relative and `cd` consults $CDPATH before the current
+# directory. An exported CDPATH in a login profile — an ordinary thing to have, and inherited by the
+# harness — would resolve `hooks` to some other tree entirely, and the guard would fail open on every
+# write for as long as that profile lived.
+#
+# The loop resolves a symlinked SCRIPT, which `cd -P` does not: `-P` resolves the directory path, and
+# a script reached through a link in another directory would otherwise look for its sibling beside the
+# LINK and not find it. `readlink` without `-f` because `-f` is not portable to macOS.
+_src="${BASH_SOURCE[0]}"
+while [ -L "$_src" ]; do
+  _dir="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"
+  _src="$(readlink -- "$_src")"
+  case "$_src" in /*) ;; *) _src="$_dir/$_src" ;; esac
+done
+HOOK_DIR="$(CDPATH= cd -P -- "$(dirname -- "$_src")" && pwd)"
 ALLOW='{"permission":"allow"}'
 
 # Every failure below this line resolves to ALLOW, because this guard fails open by design and CI is
@@ -35,14 +50,24 @@ fi
 
 # stdout is CAPTURED (the JSON verdict), stderr is not (it flows through to Cursor's log). stdin is
 # inherited by the command substitution, so the tool-call payload still reaches the guard.
-verdict="$("$HOOK_DIR/ledger-guard.sh" --format cursor)"
+raw="$("$HOOK_DIR/ledger-guard.sh" --format cursor)"
 rc=$?
 
-# Only a well-formed permission answer is passed through. `ledger-guard.sh` has its own fail-open
-# branches that exit 0 with EMPTY stdout — no `yad` on PATH, an install it cannot resolve — and each
-# one of those would otherwise reach Cursor as invalid JSON and block the write.
+# THE VERDICT IS THE LAST NON-EMPTY LINE, not the whole of stdout, and it is recognised by containing
+# a `"permission"` key rather than by starting with one.
+#
+# Both halves of that matter. `yad`'s own top-level failure handler prints to STDOUT, so a usage error
+# or a crash banner can land in front of the JSON; a prefix test would then fail to recognise our own
+# deny and fall through to the allow below, turning a real refusal into a permitted write with nothing
+# on stderr to say so. And a containment test does not care what order the JSON's properties are in,
+# so the deny answer's shape on the other side of this language boundary is not silently load-bearing.
+verdict="$(printf '%s\n' "$raw" | awk 'NF { line = $0 } END { print line }')"
+
+# `ledger-guard.sh` has its own fail-open branches that exit 0 with EMPTY stdout — no `yad` on PATH,
+# an install it cannot resolve — and each one of those would otherwise reach Cursor as invalid JSON
+# and block the write.
 case "$verdict" in
-  '{"permission":'*) echo "$verdict"; exit 0 ;;
+  *'"permission"'*) echo "$verdict"; exit 0 ;;
 esac
 
 # EXIT 2 IS A DENY, even with nothing on stdout — and this branch is reached in a real, ordinary case.

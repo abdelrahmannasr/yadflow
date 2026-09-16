@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { err } from './errors.mjs';
 import {
-  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn,
+  asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn, isPlainObject,
 } from './lib.mjs';
 import {
   VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
@@ -22,10 +22,22 @@ const rel = (root, dest) => path.relative(root, dest).split(path.sep).join('/');
 
 // status: 'ok' | 'missing' | 'outdated'. `root` is the repo the write lands in (the Product for module
 // installs, a connected repo for its wiring); `paths` is the pathspec(s) touched, for the push stage.
+// An `exec` file whose execute bit is gone is OUTDATED, not ok — its bytes are right and it cannot
+// run. `chmod` lives inside `apply()`, which an `ok` action never reaches, so a content-only status
+// meant `yad check --fix` had nothing to do and the mode was never restored. For a gate script that
+// is a failed pipeline; for `hooks/ledger-guard*.sh` it is worse, because the harness entry pointing
+// at it carries fail-open semantics, so every ledger edit is quietly PERMITTED while `yad check` and
+// `yad doctor` both report the guard healthy. Reachable without anyone doing anything odd: a zip or
+// tarball download, `cp` without `-p`, a restrictive umask, `core.fileMode=false`.
+const isExecutable = (dest) => {
+  try { return !!(fs.statSync(dest).mode & 0o111); } catch { return false; }
+};
 const fileAction = (scope, item, src, dest, { root, exec = false } = {}) => ({
   scope,
   item,
-  status: !exists(dest) ? 'missing' : sameContent(src, dest) ? 'ok' : 'outdated',
+  status: !exists(dest) ? 'missing'
+    : sameContent(src, dest) && (!exec || isExecutable(dest)) ? 'ok'
+      : 'outdated',
   root,
   paths: root ? [rel(root, dest)] : [],
   apply: () => copyFile(src, dest, { exec }),
@@ -75,6 +87,9 @@ const wiredFileAction = (scope, item, src, dest, { root, exec = false, ledger = 
   const managed = { src, dest, root };
   if (base.status !== 'outdated') return { ...base, managed };
   const recorded = ledger[rel(root, dest)];
+  // Compares CONTENT. A file that is outdated only because its execute bit was lost still has the
+  // sha we recorded, so it reads as ours and is re-applied with no backup — which is right: nothing
+  // of the team's is being discarded, the mode is simply restored.
   const ours = !!recorded && recorded === fileSha(dest);
   const backup = ours ? null : backupPathFor(dest);
   return {
@@ -130,17 +145,25 @@ const lstatIfPresent = (full) => {
   try {
     return fs.lstatSync(full);
   } catch (e) {
-    // ENOTDIR means an ANCESTOR of this path is not a directory — `.agents` is a file, so
-    // `.agents/skills` cannot exist. That is "absent", exactly like ENOENT, and the caller that cares
-    // about the broken `.agents` itself reports it properly. Rethrowing turned an unsafe-target case
-    // that `assertSafeIdeContainers` handles into a crash.
-    if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return null;
+    // Every code here means "there is nothing I can read at this path", which is what the callers ask.
+    //   ENOENT   nothing there.
+    //   ENOTDIR  an ancestor is a file, so the child cannot exist — the caller that cares about the
+    //            broken ancestor reports it properly.
+    //   EACCES / EPERM  a directory we are not allowed to look inside. Newly reachable: `.cursor/` is
+    //            an install target now, so a repo holding one at mode 000 would otherwise abort
+    //            `yad check` and `yad setup` outright, on a directory yad has no business reading.
+    //   ELOOP / ENAMETOOLONG  a symlink cycle or an unusable path; not a target either way.
+    // Not installing into something we cannot stat is the safe answer in all of them.
+    if (['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'ELOOP', 'ENAMETOOLONG'].includes(e?.code)) return null;
     throw e;
   }
 };
-const ideContainers = (ide) => ide === '.opencode'
-  ? [ide, IDE_OPENCODE_DIR]
-  : [ide, path.join(ide, 'skills')];
+// The directory yad installs INTO for a target — `.opencode`'s flat commands folder, everyone else's
+// `skills/`. One definition, because `ideContainers` (safety) and `hasInstallContainer` (detection)
+// asking the same question two different ways is how they drift: the second spelling of this already
+// had `'.opencode'` as a literal where the first had the constant.
+const installContainer = (ide) => (ide === IDE_OPENCODE_TARGET ? IDE_OPENCODE_DIR : path.join(ide, 'skills'));
+const ideContainers = (ide) => [ide, installContainer(ide)];
 
 function assertSafeIdeContainers(root, ide) {
   for (const relPath of ideContainers(ide)) {
@@ -210,6 +233,31 @@ export function safeIdeTargetsFor(root, input) {
   return targets;
 }
 
+// Is a wired hook script present AND runnable? Shared by the planner (via `fileAction`'s exec rule)
+// and `yad doctor`, so the two cannot disagree about whether the guard is installed.
+export const hookScriptReady = (root, relPath) => {
+  const full = path.join(root, relPath);
+  return !!lstatIfPresent(full) && isExecutable(full);
+};
+
+// Which of these targets are safe to write through, without throwing on the ones that are not.
+// `safeIdeTargetsFor` throws on the first bad target, which is right for an installer and wrong for a
+// report: `yad doctor` has to NAME the unusable one rather than die on it.
+export function safeIdeTargetStateFor(root, input) {
+  const targets = [];
+  const unsafe = [];
+  for (const ide of canonicalIdeTargets(input)) {
+    try {
+      assertSafeIdeContainers(root, ide);
+      targets.push(ide);
+    } catch (e) {
+      if (e?.code !== IDE_TARGET_ERROR_CODE) throw e;
+      unsafe.push({ target: ide, message: e.message });
+    }
+  }
+  return { targets, unsafe };
+}
+
 // Fallback discovery must not promote a supported-looking file/symlink into an install target.
 // Keep unsafe entries for diagnostics, while returning only real IDE directories with safe install
 // containers. Unexpected filesystem errors remain fatal instead of being mistaken for bad input.
@@ -228,9 +276,26 @@ export function safeIdeTargetsFor(root, input) {
 // outcome is unchanged only while those two happen to be the same directory; if the recovery target
 // ever moves, this stops being a coincidence and starts being a behaviour change. The test named
 // "a project with a broken stamp recovers to .claude alone" is what would catch it.
-const hasInstallContainer = (root, ide) => {
-  const container = ide === IDE_OPENCODE_TARGET ? IDE_OPENCODE_DIR : path.join(ide, 'skills');
-  return !!lstatIfPresent(path.join(root, container));
+const hasInstallContainer = (root, ide) => !!lstatIfPresent(path.join(root, installContainer(ide)));
+
+// The OTHER evidence that a directory is an install of ours: its harness settings file names a hook
+// command we wrote. Without this, requiring a skills container was an upgrade REGRESSION rather than
+// a tightening — a project that keeps its skills in `.agents/` and has an armed `.claude/settings.json`
+// (which a previous `yad check --fix` put there) lost `.claude` from detection, and `needsRepair`
+// then wrote the loss into the stamp. The live entry would still fire on every edit while nothing
+// updated it, normalised its legacy spelling, or reported it. Reading the FILE, not just its
+// existence, is what keeps this from re-admitting a `.claude/` that only ever held permissions.
+const hasOurHookEntry = (root, ide) => {
+  const adapter = HOOK_ADAPTERS[ide];
+  if (!adapter) return false;
+  const full = path.join(root, adapter.settings);
+  if (!lstatIfPresent(full)) return false;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
+    const entries = parsed?.hooks?.[adapter.event];
+    if (!Array.isArray(entries)) return false;
+    return entries.some((entry) => entryIsOurs(adapter, entry));
+  } catch { return false; }
 };
 
 export function detectedIdeTargetStateFor(root) {
@@ -243,7 +308,7 @@ export function detectedIdeTargetStateFor(root) {
       // this function must report, not something to quietly skip because no `skills/` could be found
       // underneath it — the diagnostic is the whole reason `unsafe` exists.
       assertSafeIdeContainers(root, ide);
-      if (!hasInstallContainer(root, ide)) continue;
+      if (!hasInstallContainer(root, ide) && !hasOurHookEntry(root, ide)) continue;
       targets.push(ide);
     } catch (e) {
       if (e?.code !== IDE_TARGET_ERROR_CODE) throw e;
@@ -531,8 +596,6 @@ export function productActions(root) {
 // file, which event key, which tool-name matcher, which command, and which of the two entry shapes.
 // It defaults to Claude Code's, so the callers and tests written when there was only one harness read
 // exactly as they did. What changed is that "the hook" is no longer a single spelling compiled in.
-const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
-
 // The desired hook entry, in the shape THIS harness reads it. `nested: true` is Claude Code's, where
 // one matcher entry carries a list of commands; `false` is Cursor's flat entry. `failClosed: false`
 // is written once, on a new entry, to state the stance the script already takes — only an explicit
@@ -561,6 +624,24 @@ const entryIsOurs = (adapter, entry) => (adapter.nested
 // A matcher the team NARROWED is left alone (only the command is normalised) — the same respect for
 // a local edit that `modified` gives a managed file. Widening it back would silently undo their choice.
 export function mergeHookSettings(input, adapter = CLAUDE_HOOK_ADAPTER) {
+  // A SHAPE WE DO NOT RECOGNISE IS REFUSED, not overwritten. `hooks` that is not an object, or an
+  // event whose value is not a list, means the team's file says something this merge cannot read —
+  // and rebuilding it from our own entry would delete whatever was there. That runs on the `outdated`
+  // path, which takes no backup, in a file yadflow has never written before and does not own.
+  //
+  // `unreadable` is returned rather than thrown so the caller can report it exactly as it reports a
+  // file that will not parse: warn, status `modified`, write nothing, and let a human look at it.
+  // (An input that is not an object at all is a different case — there is nothing to lose, so it is
+  // synthesized as before.)
+  if (isPlainObject(input)) {
+    if (Object.hasOwn(input, 'hooks') && !isPlainObject(input.hooks)) {
+      return { settings: input, changed: false, unreadable: 'hooks is not an object' };
+    }
+    const existing = isPlainObject(input.hooks) ? input.hooks[adapter.event] : undefined;
+    if (existing !== undefined && !Array.isArray(existing)) {
+      return { settings: input, changed: false, unreadable: `hooks.${adapter.event} is not a list` };
+    }
+  }
   const settings = { ...(isPlainObject(input) ? input : {}) };
   let changed = false;
   // Keys the FILE requires beside `hooks` (Cursor's `version`), added only when absent — see the
@@ -660,7 +741,13 @@ function hookSettingsAction(root, adapter) {
     warn(`${relDest} does not parse — the ledger guard cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', apply: () => {} };
   }
-  const { changed } = mergeHookSettings(parsed, adapter);
+  const { changed, unreadable: unmergeable } = mergeHookSettings(parsed, adapter);
+  // Same treatment as a file that does not parse, and for the same reason: everything in it is the
+  // team's, there is no shipped template to restore, and `--overwrite-local` must not invent one.
+  if (unmergeable) {
+    warn(`${relDest}: ${unmergeable} — the ledger guard cannot be wired without discarding what is there; fix it by hand, then re-run \`yad check --fix\``);
+    return { ...base, status: 'modified', apply: () => {} };
+  }
   return {
     ...base,
     status: raw === null ? 'missing' : changed ? 'outdated' : 'ok',
@@ -684,7 +771,12 @@ function hookSettingsAction(root, adapter) {
           warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
           return;
         }
-        writeJSON(dest, mergeHookSettings(current, adapter).settings);
+        const merged = mergeHookSettings(current, adapter);
+        if (merged.unreadable) {
+          warn(`${relDest}: ${merged.unreadable} — left untouched; fix it by hand, then re-run \`yad check --fix\``);
+          return;
+        }
+        writeJSON(dest, merged.settings);
         return;
       }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
