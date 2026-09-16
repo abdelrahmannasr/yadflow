@@ -6,7 +6,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { c, log, ok, info, warn, fail, hand, run, has, exists, isPlainObject, readJSON, readJSONStrict } from './lib.mjs';
-import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_SETTINGS, HOOK_TOOL_MATCHER, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
+import { VERSION, BACKUP_SUFFIX, MIRRORED_FILES, PROJECT_FILES, MODULE_CONFIG, epicFiles, DESIGN_TOOLS, TESTING_TOOLS, LEARNING_TOOLS, HOOK_ADAPTERS, isVerifiedLedger , productConfigPath, ADVANCE_FROM_AUTOMATION, DRIVER_FROM_ASSISTANCE } from './manifest.mjs';
 import { mergeHookSettings, hookMatcherFires, ideTargetsFor } from './plan.mjs';
 import { planMigration } from './migrate.mjs';
 import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as catalogueStep, loadLedger, owedSteps, epicIds, epicRel, epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, DISCOVERY_EPIC, staleFoundationGuards, unwrittenSections, artifactBase, artifactAgrees, epicStories, laneStarted, isValidEpicId, epicLineage, isGenesisType, readFrontmatter, resolveThread, stateInvariants, contractSurfaceHash, acceptedHashes, isStaleHash, workItemType, WORK_ITEM_TYPES, themeOf, themeKey, stepPhase, stepDef, matchLifecycleProfile, lifecycleProfile, LIFECYCLE_PROFILES, SENTINELS, normalizeBindings, optionalStepsFor, isSkippableStep, recordedRouteDisagrees, isPassed, stepStatus, claimsSkipped, STEP_STATES, isStepRecord, RECORDED_STEP_STATES } from './epic-state.mjs';
@@ -184,9 +184,15 @@ export function projectChecks(checks, root) {
     // action for `.claude` and correctly reports "already up to date". Never name a remedy that
     // cannot reach the thing being reported.
     const unreadable = [];
+    // Targets with no pre-edit hook protocol at all. Collected rather than skipped: a project whose
+    // only target is `.agents` had this whole section report `ok` — "agent ledger guard wired" — while
+    // nothing local guarded anything, because the loop found no adapter and said nothing. Silence
+    // about an unguarded target reads as a guarded one (E11).
+    const noProtocol = [];
     for (const ide of ideTargetsFor(root)) {
-      const relDest = HOOK_SETTINGS[ide];
-      if (!relDest) continue;
+      const adapter = HOOK_ADAPTERS[ide];
+      if (!adapter) { noProtocol.push(ide); continue; }
+      const relDest = adapter.settings;
       const settingsPath = path.join(root, relDest);
       // A file that exists but does not parse is its OWN report. `readJSON` returns null for both
       // "absent" and "broken", and null merges as "not wired" — which would send the human to
@@ -201,24 +207,29 @@ export function projectChecks(checks, root) {
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { unreadable.push(relDest); continue; }
         settings = parsed;
       }
-      if (mergeHookSettings(settings).changed) { unwired.push(relDest); continue; }
+      if (mergeHookSettings(settings, adapter).changed) { unwired.push(relDest); continue; }
       // Present is not the same as armed. The entry's matcher is the team's to narrow (the merge
       // deliberately leaves it alone), but one that no longer selects any file-editing tool means
       // nothing is intercepted — and reporting that as `ok` is how a disarmed guard passes for
       // healthy until a ledger edit fails in CI.
-      if (!hookMatcherFires(settings)) broken.push(relDest);
+      if (!hookMatcherFires(settings, adapter)) broken.push(`${relDest} (expected \`${adapter.matcher}\`)`);
     }
+    // One clause, appended to whichever verdict below is reached, so the unguarded targets are named
+    // on the healthy path too — which is the path they are most likely to be read on.
+    const alsoUnguarded = noProtocol.length
+      ? ` — no pre-edit hook protocol on ${noProtocol.join(', ')}, so an agent using ${noProtocol.length > 1 ? 'those' : 'that'} directory is guarded by CI only`
+      : '';
     if (unreadable.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
     } else if (unwired.length) {
-      check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}`,
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}${alsoUnguarded}`,
         'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
     } else if (broken.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}`,
-        `restore the matcher to \`${HOOK_TOOL_MATCHER}\` — as it stands the hook is wired but never fires`);
+        'restore the matcher named beside each file — as it stands the hook is wired but never fires');
     } else {
-      check(checks, 'hooks', 'project', 'ok', 'agent ledger guard wired (hooks/ledger-guard.sh)');
+      check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (hooks/ledger-guard.sh)${alsoUnguarded}`);
     }
   }
 
@@ -239,7 +250,7 @@ export function projectChecks(checks, root) {
     else if (!DESIGN_TOOLS.includes(design.tool)) check(checks, 'design', 'project', 'fail', `${PROJECT_FILES.designConfig}: unknown or missing design tool '${design.tool}' [YAD-CFG-002]`, `expected one of ${DESIGN_TOOLS.join(', ')}, or none`);
     else if (design.source && design.source !== 'unavailable') check(checks, 'design', 'project', 'ok', `design: ${design.tool} (${design.source})`);
     else if (design.source === 'unavailable') check(checks, 'design', 'project', 'warn', `design: ${design.tool} MCP unavailable — yad-ui runs markdown-only`, 'connect the MCP, then run `yad-connect-design` (action: refresh)');
-    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-design` in Claude Code to detect the MCP');
+    else check(checks, 'design', 'project', 'warn', `design: ${design.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-design` in your AI agent to detect the MCP');
   }
 
   // testing.json: parse + shape + tool + MCP confirmation (absent is the normal artifacts-only default —
@@ -259,7 +270,7 @@ export function projectChecks(checks, root) {
     else if (!TESTING_TOOLS.includes(testing.tool)) check(checks, 'testing', 'project', 'fail', `${PROJECT_FILES.testingConfig}: unknown or missing testing tool '${testing.tool}' [YAD-CFG-003]`, `expected one of ${TESTING_TOOLS.join(', ')}, or none`);
     else if (testing.source && testing.source !== 'unavailable') check(checks, 'testing', 'project', 'ok', `testing: ${testing.tool} (${testing.source})`);
     else if (testing.source === 'unavailable') check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} MCP unavailable — yad-test-cases runs artifacts-only`, 'connect the MCP, then run `yad-connect-testing` (action: refresh)');
-    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-testing` in Claude Code to detect the MCP');
+    else check(checks, 'testing', 'project', 'warn', `testing: ${testing.tool} recorded but the MCP is not confirmed`, 'run `yad-connect-testing` in your AI agent to detect the MCP');
   }
 
   // learning.json: parse + shape + tool + CLI confirmation (absent is the normal harness-native default —
@@ -280,7 +291,7 @@ export function projectChecks(checks, root) {
     else if (!LEARNING_TOOLS.includes(learning.tool)) check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown or missing learning tool '${learning.tool}' [YAD-CFG-004]`, `expected one of ${LEARNING_TOOLS.join(', ')}, or none`);
     else if (learning.source === 'deeptutor-cli') check(checks, 'learning', 'project', 'ok', `learning: ${learning.tool} (${learning.source})`);
     else if (learning.source === 'harness-native') check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} CLI unavailable — yad-learn tutors harness-native`, 'install the deeptutor CLI, then run `yad-connect-learning` (action: refresh)');
-    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in Claude Code to detect the CLI');
+    else if (learning.source == null) check(checks, 'learning', 'project', 'warn', `learning: ${learning.tool} recorded but the CLI is not confirmed`, 'run `yad-connect-learning` in your AI agent to detect the CLI');
     else check(checks, 'learning', 'project', 'fail', `${PROJECT_FILES.learningConfig}: unknown source '${learning.source}' [YAD-STATE-002]`, 'expected deeptutor-cli, harness-native, or null');
   }
 

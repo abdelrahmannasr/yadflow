@@ -508,6 +508,38 @@ test('update migrates pre-2.0 sdlc-* skill copies and wired CI to yad-*', async 
 // filter keeps it, while repo+Product wiring stays `missing` and remains excluded from update (no one-time
 // setup on update). Nothing is planned under `_bmad/` any more.
 const { moduleActions, ideTargetStateFor } = await import('./plan.mjs');
+// The fresh-setup default, read by the two tests below and by the setup prompt test far later.
+const { DEFAULT_IDE_TARGETS } = await import('./manifest.mjs');
+
+// The two agent directories E11 added. Both are folder-copy targets, like `.claude` and unlike
+// `.opencode`, whose install is a flat `commands/<skill>.md`.
+test('the Cursor and Gemini targets install skills as folder copies (E11)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-agents-'));
+  try {
+    for (const ide of ['.cursor', '.gemini']) {
+      const acts = moduleActions(T, [ide]).filter((a) => a.scope === ide);
+      assert.ok(acts.length, `${ide} plans no skills`);
+      for (const a of acts) a.apply();
+      assert.ok(fs.existsSync(path.join(T, ide, 'skills/yad-epic/SKILL.md')), `${ide} gets a skill FOLDER`);
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// A RECOVERY is not an upgrade. A project whose stamp is missing or unreadable falls back to the
+// minimum it can be sure of, never to the newer default — enrolling it in `.agents` would write forty
+// skill folders the team never asked for, on a path they did not choose to walk.
+test('a project with a broken stamp recovers to .claude alone, not to the fresh-setup default (E11)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-recover-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), '{ "ideTargets": "junk" }');
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.claude']);
+    assert.notDeepEqual(ideTargetStateFor(T).targets, [...DEFAULT_IDE_TARGETS]);
+    // A directory already present still wins over the fallback — that is detection, not a default.
+    fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
 test('moduleActions: an uninstalled skill and the module config are "new"; nothing goes to _bmad (E3)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-newskill-'));
   const acts = moduleActions(T, ['.claude']);
@@ -2667,6 +2699,21 @@ test('selectIdeTargets: interactive input re-prompts, then trims and deduplicate
     /selection ended before a valid choice/,
     'EOF/cancel does not loop forever',
   );
+
+  // A project with NO agent directory is the only one shown the default, and the default is Claude
+  // Code plus the cross-agent directory — together they cover every agent the menu names (E11).
+  let offered = null;
+  let menu = null;
+  await selectIdeTargets(T, undefined, async (prompt, def) => { menu = prompt; offered = def; return '.claude'; });
+  assert.equal(offered, DEFAULT_IDE_TARGETS.join(','));
+  // The menu names the AGENTS, not just the directories: `.agents` says nothing to a Codex user.
+  assert.match(menu, /\.agents = .*Codex CLI/);
+  assert.match(menu, /\.cursor = .*Cursor/);
+  // A directory already present is offered back instead — detection beats the default, so nobody is
+  // talked into a target they did not choose.
+  fs.mkdirSync(path.join(T, '.zencoder'), { recursive: true });
+  await selectIdeTargets(T, undefined, async (_p, def) => { offered = def; return '.zencoder'; });
+  assert.equal(offered, '.zencoder');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -13170,7 +13217,9 @@ const {
   ledgerGuardDecision, protectedLedgerPath, payloadPaths, hubRootFor, seededSlugs, resolveHookBase,
 } = await import('./hook.mjs');
 const { hookActions, mergeHookSettings, hookMatcherFires } = await import('./plan.mjs');
-const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER } = await import('./manifest.mjs');
+const { HOOK_COMMAND, HOOK_COMMAND_LEGACY, HOOK_TOOL_MATCHER, HOOK_ADAPTERS, IDE_AGENTS, IDE_TARGETS: HOOK_IDE_TARGETS } = await import('./manifest.mjs');
+const { baseDirFor } = await import('./hook.mjs');
+const CURSOR = HOOK_ADAPTERS['.cursor'];
 
 // A Product with two epics on disk. Which of them the BASE REF carries is the fake git's business, not
 // the filesystem's — the whole point of the seeding rule is that it reads the base, never the tree.
@@ -13613,12 +13662,154 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.agents'] }));
     fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
     assert.equal(hooksCheck().status, 'ok', 'a stray .claude/ is not a gap when it is not a target');
+    // ...but a target with NO pre-edit hook protocol is NAMED, on the healthy line too. Saying
+    // "guard wired" and nothing else, to a project whose only agent directory can carry no guard at
+    // all, is how an unguarded setup reads as a guarded one (E11).
+    assert.match(hooksCheck().message, /no pre-edit hook protocol on \.agents/);
+    assert.match(hooksCheck().message, /guarded by CI only/);
+    // With both, the wired one is reported AND the unguarded one is still named.
+    fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor', '.agents'] }));
+    fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
+    assert.match(hooksCheck().message, /not wired: \.cursor\/hooks\.json.*no pre-edit hook protocol on \.agents/);
+    for (const a of hookActions(T, ['.cursor', '.agents'])) a.apply();
+    assert.equal(hooksCheck().status, 'ok');
+    assert.match(hooksCheck().message, /guard wired.*no pre-edit hook protocol on \.agents/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // with a local ledger there is nothing to guard, so the check is silent rather than ok.
   const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });
   try {
     assert.equal(collectDoctor(fileOnly).checks.find((c) => c.id === 'hooks'), undefined);
   } finally { fs.rmSync(fileOnly, { recursive: true, force: true }); }
+});
+
+// ---- a SECOND harness behind the same guard (E11) ------------------------------------------------
+//
+// The tests below all exist because the adapter table made "the hook" plural. Every one of them is a
+// way the second entry could be written, reported healthy, and never refuse anything.
+
+test('mergeHookSettings writes Cursor its own file shape, and never claims an entry that is not ours', () => {
+  // Cursor's file is flat (`command` on the entry) and needs a `version`, where Claude's nests the
+  // command inside `hooks[]` and needs no preamble. One merge, two shapes.
+  const fresh = mergeHookSettings(null, CURSOR);
+  assert.equal(fresh.changed, true);
+  assert.equal(fresh.settings.version, 1, 'Cursor rejects a hooks.json with no version');
+  assert.equal(fresh.settings.hooks.preToolUse.length, 1);
+  assert.equal(fresh.settings.hooks.preToolUse[0].command, CURSOR.command);
+  assert.equal(fresh.settings.hooks.preToolUse[0].failClosed, false, 'only an explicit deny blocks');
+  assert.equal(fresh.settings.hooks.PreToolUse, undefined, "Claude's event key is not written here");
+  // The command is RELATIVE, unquoted and variable-free. Cursor does not document whether it runs the
+  // string through a shell, so `$CURSOR_PROJECT_DIR` could stay unexpanded and quotes could land in
+  // the filename — either way a command not found, which fails OPEN while doctor reports it wired.
+  assert.doesNotMatch(CURSOR.command, /[$"']/, 'no variable and no quotes to survive either execution model');
+  assert.doesNotMatch(CURSOR.command, /^\//, 'relative — Cursor runs a project hook from the project root');
+
+  assert.equal(mergeHookSettings(fresh.settings, CURSOR).changed, false, 'idempotent');
+
+  // A version the team pinned is THEIRS. The preamble fills a missing key; it never overwrites one.
+  const pinned = mergeHookSettings({ version: 2 }, CURSOR);
+  assert.equal(pinned.settings.version, 2);
+
+  // Their own flat entry survives beside ours, and ours is added rather than replacing it.
+  const theirs = { version: 1, hooks: { preToolUse: [{ matcher: 'Shell', command: './scripts/audit.sh' }] } };
+  const merged = mergeHookSettings(theirs, CURSOR);
+  assert.equal(merged.settings.hooks.preToolUse.length, 2);
+  assert.equal(merged.settings.hooks.preToolUse[0].command, './scripts/audit.sh');
+
+  // THE PER-HARNESS POINT: a `.cursor` entry spelled with Claude's command is not an old one of ours
+  // to normalise — it is someone else's. Claiming it would rewrite a hook we never wrote.
+  const claudeSpelled = { hooks: { preToolUse: [{ matcher: 'Write', command: HOOK_COMMAND }] } };
+  const untouched = mergeHookSettings(claudeSpelled, CURSOR);
+  assert.equal(untouched.settings.hooks.preToolUse[0].command, HOOK_COMMAND, 'left alone');
+  assert.equal(untouched.settings.hooks.preToolUse.length, 2, 'ours added beside it');
+
+  // Junk in either position is replaced by a valid shape rather than throwing — as for Claude.
+  for (const junk of [null, 'x', [], { hooks: 'x' }, { hooks: { preToolUse: 'x' } }]) {
+    assert.equal(mergeHookSettings(junk, CURSOR).settings.hooks.preToolUse.length, 1, JSON.stringify(junk));
+  }
+});
+
+test('hookMatcherFires tests each harness against ITS OWN tool names', () => {
+  const armed = mergeHookSettings({}, CURSOR).settings;
+  assert.equal(hookMatcherFires(armed, CURSOR), true);
+  // Cursor's `Delete` is a file write and Claude has no such tool; Claude's `MultiEdit` is a tool
+  // Cursor does not have. One shared tool list would misreport one harness or the other.
+  for (const [matcher, fires] of [['Write', true], ['Delete', true], ['MultiEdit', false], ['Shell', false], ['(', false]]) {
+    const entry = JSON.parse(JSON.stringify(armed));
+    entry.hooks.preToolUse[0].matcher = matcher;
+    assert.equal(hookMatcherFires(entry, CURSOR), fires, matcher);
+  }
+  const blank = JSON.parse(JSON.stringify(armed));
+  blank.hooks.preToolUse[0].matcher = '';
+  assert.equal(hookMatcherFires(blank, CURSOR), true, 'an empty matcher matches every tool');
+  // Reading a Cursor file with Claude's adapter finds nothing: the event key alone rules it out.
+  assert.equal(hookMatcherFires(armed), false, "Claude's adapter does not read Cursor's event");
+});
+
+test('hookActions wires every target that has a hook protocol, and only those', () => {
+  const T = hookProduct();
+  try {
+    fs.mkdirSync(path.join(T, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
+    fs.mkdirSync(path.join(T, '.agents'), { recursive: true });
+    const both = hookActions(T, ['.claude', '.cursor', '.agents']);
+    assert.deepEqual(both.map((a) => a.item), ['hooks/ledger-guard.sh', 'settings.json', 'hooks.json']);
+    assert.deepEqual(both.map((a) => a.scope), ['hub', '.claude', '.cursor']);
+    for (const a of both) a.apply();
+    assert.deepEqual(hookActions(T, ['.claude', '.cursor', '.agents']).map((a) => a.status), ['ok', 'ok', 'ok']);
+    // The script both entries point at is installed ONCE, at the Product root, and Cursor's relative
+    // command is written as seen from there.
+    assert.ok(fs.existsSync(path.join(T, CURSOR.command)), 'the relative command resolves from the project root');
+    const cursor = JSON.parse(fs.readFileSync(path.join(T, '.cursor/hooks.json'), 'utf8'));
+    assert.equal(cursor.hooks.preToolUse[0].command, CURSOR.command);
+    // Cursor's file is the team's too — never in the `--push` staging allowlist.
+    assert.deepEqual(both.find((a) => a.item === 'hooks.json').paths, []);
+    // A target with no protocol still gets the script, and no wiring.
+    assert.deepEqual(hookActions(T, ['.agents']).map((a) => a.item), ['hooks/ledger-guard.sh']);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('baseDirFor anchors a relative payload path with ANY harness project-root variable', () => {
+  const noGit = () => ({ ok: false, stdout: '' });
+  assert.equal(baseDirFor({ CURSOR_PROJECT_DIR: '/w/product' }, noGit), '/w/product');
+  assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/w/product' }, noGit), '/w/product');
+  // Reading only Claude's meant that under any other harness this fell through to the git toplevel —
+  // in the documented multi-repo layout a CODE REPO, not the Product, so the walk-up found no
+  // hub.json and the guard allowed an edit it should have refused.
+  assert.equal(baseDirFor({}, () => ({ ok: true, stdout: '/w/backend' })), '/w/backend');
+  assert.equal(baseDirFor({ CLAUDE_PROJECT_DIR: '/c', CURSOR_PROJECT_DIR: '/x' }, noGit), '/c', 'declared order decides');
+});
+
+test('payloadPaths finds the edited file under a key no harness bothered to document', () => {
+  // Cursor publishes the payload envelope but not what tool_input is called inside it. A guessed
+  // vendor spelling that turned out wrong would read a key that is not there, find no path, and
+  // allow every ledger edit — wired, reported healthy, dead. So the rule is structural.
+  const led = 'epics/EP-x/.sdlc/state.json';
+  for (const input of [{ file_path: led }, { target_file: led }, { filePath: led }, { path: led }, { paths: [led] }]) {
+    assert.deepEqual(payloadPaths({ tool_input: input }), [led], JSON.stringify(input));
+  }
+  // It matches the KEY, never the value. A document that merely QUOTES a ledger path is an ordinary
+  // edit, and refusing it would be a false deny — far worse here than a miss, since the whole hook
+  // fails open on purpose and CI is what fails closed.
+  assert.deepEqual(payloadPaths({ tool_input: { content: `see ${led}`, command: `cat ${led}` } }), []);
+  // A word merely ENDING in "file" is not a path key.
+  assert.deepEqual(payloadPaths({ tool_input: { profile: led } }), []);
+  // The multi-edit shape still names every file it touches.
+  assert.deepEqual(payloadPaths({ tool_input: { edits: [{ file_path: led }, { target_file: 'b.json' }] } }), [led, 'b.json']);
+  assert.deepEqual(payloadPaths({ tool_input: null }), []);
+});
+
+test('every install target names the agents that read it, and each installs its own way', () => {
+  // The setup menu, the docs and `yad doctor` all read IDE_AGENTS. A target with no entry would be
+  // offered to a user as a bare directory name that says nothing about which agent it is for.
+  for (const t of HOOK_IDE_TARGETS) {
+    assert.ok(IDE_AGENTS[t]?.length, `${t} names no agent`);
+  }
+  assert.deepEqual(Object.keys(IDE_AGENTS).sort(), [...HOOK_IDE_TARGETS].sort(), 'no agent row for a target that does not exist');
+  // Checked against each agent's own docs on 2026-09-16 — `.agents/skills/` is the directory Codex
+  // CLI, Gemini CLI, Cursor and Copilot agreed to read, which is why one install covers them all.
+  assert.ok(IDE_AGENTS['.agents'].includes('Codex CLI') && IDE_AGENTS['.agents'].includes('Gemini CLI'));
+  // Every harness with a hook adapter must be a real install target, or nothing installs its skills.
+  for (const t of Object.keys(HOOK_ADAPTERS)) assert.ok(HOOK_IDE_TARGETS.includes(t), t);
 });
 
 // ---- doctor: the two dials disagreeing (E28) ------------------------------------------------------

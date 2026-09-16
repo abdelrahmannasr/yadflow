@@ -10,9 +10,10 @@
 //   stdin   a harness tool-call payload as JSON (optional; `--path <p>` works instead)
 //   exit 0  allow
 //   exit 2  deny — the reason is on stderr, for the agent to read
-// Claude Code's PreToolUse protocol is exactly that (exit 2 blocks the call and feeds stderr back to
-// the model), so `hooks/ledger-guard.sh` wires it with no adapter logic; another harness needs only
-// the same two exit codes.
+// Claude Code's `PreToolUse` protocol is exactly that (exit 2 blocks the call and feeds stderr back to
+// the model), and Cursor's `preToolUse` is too (exit 2 is its `deny`), so `hooks/ledger-guard.sh`
+// wires BOTH with no adapter logic — the per-harness difference is the settings file it goes in, and
+// that lives in `HOOK_ADAPTERS`, not here. Any other harness needs only the same two exit codes.
 //
 // FAIL-OPEN, deliberately. No Product, unreadable config, an unparseable payload, no git — every one of
 // those ALLOWS, with a note on stderr. This is a local guardrail, and one that failed closed would
@@ -21,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { note, readJSON, run } from './lib.mjs';
-import { isVerifiedLedger , productConfigPath } from './manifest.mjs';
+import { isVerifiedLedger , productConfigPath, HOOK_PROJECT_DIR_ENVS } from './manifest.mjs';
 import { DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC } from './epic-state.mjs';
 
 // The CI-owned files, exactly as `templates/checks/ledger-guard.sh` lists them. NOT `contract-lock.json`
@@ -57,9 +58,43 @@ export function protectedLedgerPath(rel) {
   return classify(epic);
 }
 
-// Every path a tool call would write. Covers the shapes harnesses actually send: a single
-// `file_path` (Edit/Write), `notebook_path` (NotebookEdit), and a `MultiEdit`-style `edits[]` array.
-// An unrecognised payload yields nothing, which allows — see the fail-open note above.
+// Every path a tool call would write.
+//
+// The named keys are Claude Code's, and they are checked first because they are documented and exact:
+// `file_path` (Edit/Write), `notebook_path` (NotebookEdit), `path`, and a `MultiEdit`-style `edits[]`
+// array of `file_path`.
+//
+// THE SHAPE RULE EXISTS BECAUSE THE SECOND HARNESS DOES NOT DOCUMENT ITS KEYS (E11). Cursor publishes
+// the payload envelope — `tool_name`, `tool_input`, `cwd` — but not what `tool_input` is called
+// inside for Write, Edit or Delete. Inventing a name from memory would produce the worst outcome this
+// hook has: an entry wired, reported healthy by `yad doctor`, reading a key that does not exist,
+// finding no path, and allowing every ledger edit. So instead of guessing a vendor's spelling, any
+// key whose NAME ends in `path`, `file`, `paths` or `files` (in snake_case or camelCase) is read as
+// one — a structural rule, which `target_file`, `filePath` and `file_path` all satisfy without this
+// code having to know which harness sent them.
+//
+// It matches on the KEY, never on the value. A rule that scanned `tool_input`'s values for anything
+// shaped like `epics/…/state.json` would refuse an ordinary edit to a document that merely QUOTES a
+// ledger path — and a false deny is far worse here than a miss, because the whole design fails open
+// on purpose and CI is what fails closed.
+//
+// An unrecognised payload still yields nothing, which allows — see the fail-open note above.
+const PATH_KEY = /(^|_)(path|file|paths|files)$|[a-z](Path|File|Paths|Files)$/;
+
+function pathsFromInput(input, out) {
+  if (!input || typeof input !== 'object') return;
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string') {
+      if (value && PATH_KEY.test(key)) out.push(value);
+      continue;
+    }
+    // A list under a path-shaped key (`paths`, `files`) is a list OF paths; anything else is not.
+    if (Array.isArray(value) && PATH_KEY.test(key)) {
+      for (const v of value) if (typeof v === 'string' && v) out.push(v);
+    }
+  }
+}
+
 export function payloadPaths(payload) {
   const out = [];
   const input = payload?.tool_input;
@@ -67,8 +102,14 @@ export function payloadPaths(payload) {
   for (const key of ['file_path', 'notebook_path', 'path']) {
     if (typeof input[key] === 'string' && input[key]) out.push(input[key]);
   }
+  pathsFromInput(input, out);
+  // `edits[]` is the one nested shape worth walking: it is how a multi-edit call names several files
+  // in one payload, and a top-level scan would never see them. Each edit is scanned by the same rule.
   if (Array.isArray(input.edits)) {
-    for (const edit of input.edits) if (typeof edit?.file_path === 'string' && edit.file_path) out.push(edit.file_path);
+    for (const edit of input.edits) {
+      if (typeof edit?.file_path === 'string' && edit.file_path) out.push(edit.file_path);
+      pathsFromInput(edit, out);
+    }
   }
   return [...new Set(out)];
 }
@@ -92,8 +133,17 @@ export function hubRootFor(abs) {
 
 // Where a RELATIVE path in the payload is anchored. Only used to make such a path absolute, so the
 // Product walk-up above has somewhere to start.
+//
+// Every harness's project-root variable is tried, in the order the adapters declare them, before git
+// is asked (E11). Reading only Claude Code's meant that under any other harness the FIRST branch
+// never fired, and a relative payload path was anchored at the git toplevel instead — which in the
+// documented multi-repo layout is a code repo, not the Product, so the walk-up found no `hub.json`
+// and the guard allowed an edit it should have refused. `env` is a parameter precisely so a test can
+// pin that, one harness at a time, without setting real environment variables.
 export function baseDirFor(env = process.env, runner = run) {
-  if (env.CLAUDE_PROJECT_DIR) return env.CLAUDE_PROJECT_DIR;
+  for (const name of HOOK_PROJECT_DIR_ENVS) {
+    if (env[name]) return env[name];
+  }
   const top = runner('git', ['rev-parse', '--show-toplevel']);
   return top.ok && top.stdout ? top.stdout : process.cwd();
 }

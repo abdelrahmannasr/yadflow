@@ -8,8 +8,8 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn,
 } from './lib.mjs';
 import {
-  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
-  HOOK_WIRING, HOOK_SETTINGS, HOOK_TOOL_MATCHER, HOOK_COMMAND, HOOK_COMMAND_LEGACY,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
+  HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath,
 } from './manifest.mjs';
@@ -226,7 +226,10 @@ export function detectedIdeTargetStateFor(root) {
 }
 
 // Which IDE targets this project wants. Persisted values are recovery-oriented: repair the one known
-// alias, filter everything else, then fall back to supported IDE dirs already present (or .claude).
+// alias, filter everything else, then fall back to supported IDE dirs already present (or, with none,
+// `IDE_RECOVERY_TARGET`). That last fallback is deliberately the MINIMUM and not `DEFAULT_IDE_TARGETS`
+// — a recovery restores a project to a working state, it does not enrol it in a newer default and
+// write skill folders nobody asked for. A fresh `yad setup` is where the default applies.
 // The full state lets reconcile report drift without mutating during a read-only check.
 export function ideTargetStateFor(root) {
   const stampPath = path.join(root, PROJECT_FILES.version);
@@ -241,7 +244,7 @@ export function ideTargetStateFor(root) {
   let unsafeDetected = [];
   if (!targets.length) {
     const detected = detectedIdeTargetStateFor(root);
-    targets = detected.targets.length ? detected.targets : ['.claude'];
+    targets = detected.targets.length ? detected.targets : [IDE_RECOVERY_TARGET];
     unsafeDetected = detected.unsafe;
     usedFallback = true;
   }
@@ -494,44 +497,74 @@ export function productActions(root) {
   );
 }
 
-// ---- harness hooks (#171) --------------------------------------------------------------------
-// The desired hook entry, in the shape a harness reads it.
-export const hookEntry = () => ({
-  matcher: HOOK_TOOL_MATCHER,
-  hooks: [{ type: 'command', command: HOOK_COMMAND }],
-});
+// ---- harness hooks (#171, two harnesses since E11) ---------------------------------------------
+//
+// Every function here takes an ADAPTER — the per-harness record in `HOOK_ADAPTERS` that says which
+// file, which event key, which tool-name matcher, which command, and which of the two entry shapes.
+// It defaults to Claude Code's, so the callers and tests written when there was only one harness read
+// exactly as they did. What changed is that "the hook" is no longer a single spelling compiled in.
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+// The desired hook entry, in the shape THIS harness reads it. `nested: true` is Claude Code's, where
+// one matcher entry carries a list of commands; `false` is Cursor's flat entry. `failClosed: false`
+// is written once, on a new entry, to state the stance the script already takes — only an explicit
+// deny blocks. It is never enforced afterwards: a team that turns it on has made a choice.
+export const hookEntry = (adapter = CLAUDE_HOOK_ADAPTER) => (adapter.nested
+  ? { matcher: adapter.matcher, hooks: [{ type: 'command', command: adapter.command }] }
+  : { matcher: adapter.matcher, command: adapter.command, failClosed: false });
 
 // Ours is a hook command EXACTLY equal to one we have written — the current spelling or a
-// documented past one. Never "the entry at index N", never "the entry with our matcher", and
-// deliberately never a substring test: `includes('hooks/ledger-guard.sh')` would also claim a team's
-// own wrapper at `.claude/hooks/ledger-guard.sh` and silently rewrite it to ours, on the `outdated`
-// path that takes no backup. Matching exactly means the worst case is a second entry (the guard runs
-// twice — harmless) instead of someone else's hook disappearing.
-const OWNED_COMMANDS = new Set([HOOK_COMMAND, ...HOOK_COMMAND_LEGACY]);
-const OURS = (h) => typeof h?.command === 'string' && OWNED_COMMANDS.has(h.command);
+// documented past one, FOR THIS HARNESS. Never "the entry at index N", never "the entry with our
+// matcher", and deliberately never a substring test: `includes('hooks/ledger-guard.sh')` would also
+// claim a team's own wrapper at `.claude/hooks/ledger-guard.sh` and silently rewrite it to ours, on
+// the `outdated` path that takes no backup. Matching exactly means the worst case is a second entry
+// (the guard runs twice — harmless) instead of someone else's hook disappearing.
+//
+// Per-harness and not one shared set: the two commands name different variables, and a `.cursor`
+// entry spelled with `$CLAUDE_PROJECT_DIR` is someone else's, not an old one of ours to normalise.
+const isOurCommand = (adapter, command) => typeof command === 'string'
+  && (command === adapter.command || adapter.legacyCommands.includes(command));
+const entryIsOurs = (adapter, entry) => (adapter.nested
+  ? Array.isArray(entry?.hooks) && entry.hooks.some((h) => isOurCommand(adapter, h?.command))
+  : isOurCommand(adapter, entry?.command));
 
-// Additive merge of our PreToolUse entry into a parsed settings object. Returns
-// `{ settings, changed }`; `settings` is a new object, so a caller can compare without mutating.
+// Additive merge of our pre-edit entry into a parsed settings object. Returns `{ settings, changed }`;
+// `settings` is a new object, so a caller can compare without mutating.
 // A matcher the team NARROWED is left alone (only the command is normalised) — the same respect for
 // a local edit that `modified` gives a managed file. Widening it back would silently undo their choice.
-export function mergeHookSettings(input) {
-  const settings = { ...(input && typeof input === 'object' && !Array.isArray(input) ? input : {}) };
-  const hooks = { ...(settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks) ? settings.hooks : {}) };
-  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.map((e) => ({ ...e })) : [];
+export function mergeHookSettings(input, adapter = CLAUDE_HOOK_ADAPTER) {
+  const settings = { ...(isPlainObject(input) ? input : {}) };
   let changed = false;
-  let found = false;
-  for (const entry of pre) {
-    if (!Array.isArray(entry.hooks)) continue;
-    entry.hooks = entry.hooks.map((h) => {
-      if (!OURS(h)) return h;
-      found = true;
-      if (h.command === HOOK_COMMAND && h.type === 'command') return h;
-      changed = true;
-      return { ...h, type: 'command', command: HOOK_COMMAND };
-    });
+  // Keys the FILE requires beside `hooks` (Cursor's `version`), added only when absent — see the
+  // `preamble` note in the manifest. A file we create gets them; a file the team wrote keeps theirs.
+  for (const [key, value] of Object.entries(adapter.preamble || {})) {
+    if (Object.hasOwn(settings, key)) continue;
+    settings[key] = value;
+    changed = true;
   }
-  if (!found) { pre.push(hookEntry()); changed = true; }
-  hooks.PreToolUse = pre;
+  const hooks = { ...(isPlainObject(settings.hooks) ? settings.hooks : {}) };
+  const entries = Array.isArray(hooks[adapter.event]) ? hooks[adapter.event].map((e) => ({ ...e })) : [];
+  let found = false;
+  for (const entry of entries) {
+    if (adapter.nested) {
+      if (!Array.isArray(entry.hooks)) continue;
+      entry.hooks = entry.hooks.map((h) => {
+        if (!isOurCommand(adapter, h?.command)) return h;
+        found = true;
+        if (h.command === adapter.command && h.type === 'command') return h;
+        changed = true;
+        return { ...h, type: 'command', command: adapter.command };
+      });
+    } else {
+      if (!isOurCommand(adapter, entry.command)) continue;
+      found = true;
+      if (entry.command === adapter.command) continue;
+      entry.command = adapter.command;
+      changed = true;
+    }
+  }
+  if (!found) { entries.push(hookEntry(adapter)); changed = true; }
+  hooks[adapter.event] = entries;
   settings.hooks = hooks;
   return { settings, changed };
 }
@@ -540,16 +573,17 @@ export function mergeHookSettings(input) {
 // leaves a narrowed `matcher` alone — it is the team's — but a matcher narrowed to nothing (blanked,
 // or pointed at `Bash`) means the guard is installed and never fires, which must not read as healthy.
 // The matcher is a regex the harness tests tool names against, so test it as one; an invalid regex
-// cannot fire either.
-export function hookMatcherFires(settings) {
-  const pre = settings?.hooks?.PreToolUse;
-  if (!Array.isArray(pre)) return false;
-  const tools = HOOK_TOOL_MATCHER.split('|');
-  for (const entry of pre) {
-    if (!Array.isArray(entry?.hooks) || !entry.hooks.some(OURS)) continue;
+// cannot fire either. The tool names tested are the ADAPTER's: Cursor's `Delete` is a file write and
+// Claude's `MultiEdit` is a tool Cursor does not have, so one shared list would be wrong for both.
+export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
+  const entries = settings?.hooks?.[adapter.event];
+  if (!Array.isArray(entries)) return false;
+  const tools = adapter.matcher.split('|');
+  for (const entry of entries) {
+    if (!entryIsOurs(adapter, entry)) continue;
     let re;
     try { re = new RegExp(entry.matcher ?? ''); } catch { continue; }
-    // An empty matcher matches every tool name in Claude Code, so it is armed, not blank.
+    // An empty matcher matches every tool name in both harnesses, so it is armed, not blank.
     if (!entry.matcher || tools.some((t) => re.test(t))) return true;
   }
   return false;
@@ -559,7 +593,9 @@ export function hookMatcherFires(settings) {
 // bytes against — the file belongs to the team and we own exactly one entry inside it. So it is also
 // deliberately NOT recorded in `.sdlc/managed.json` (recordManagedWrites only records a dest that
 // byte-matches its src); the marker above is its provenance instead.
-function hookSettingsAction(root, ide, relDest) {
+function hookSettingsAction(root, adapter) {
+  const ide = adapter.target;
+  const relDest = adapter.settings;
   const dest = path.join(root, relDest);
   const raw = exists(dest) ? fs.readFileSync(dest, 'utf8') : null;
   let parsed = null;
@@ -592,7 +628,7 @@ function hookSettingsAction(root, ide, relDest) {
     warn(`${relDest} does not parse — the ledger guard cannot be wired; fix the JSON, then re-run \`yad check --fix\``);
     return { ...base, status: 'modified', apply: () => {} };
   }
-  const { changed } = mergeHookSettings(parsed);
+  const { changed } = mergeHookSettings(parsed, adapter);
   return {
     ...base,
     status: raw === null ? 'missing' : changed ? 'outdated' : 'ok',
@@ -616,11 +652,11 @@ function hookSettingsAction(root, ide, relDest) {
           warn(`${relDest} does not parse — left untouched; fix the JSON, then re-run \`yad check --fix\``);
           return;
         }
-        writeJSON(dest, mergeHookSettings(current).settings);
+        writeJSON(dest, mergeHookSettings(current, adapter).settings);
         return;
       }
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      writeJSON(dest, mergeHookSettings({}).settings);
+      writeJSON(dest, mergeHookSettings({}, adapter).settings);
     },
   };
 }
@@ -636,8 +672,8 @@ export function hookActions(root, ideTargets = ideTargetsFor(root)) {
     wiredFileAction('hub', w.dest, asset(w.src), path.join(root, w.dest), { root, exec: !!w.exec, ledger }),
   );
   for (const ide of safeIdeTargetsFor(root, ideTargets)) {
-    const relDest = HOOK_SETTINGS[ide];
-    if (relDest) actions.push(hookSettingsAction(root, ide, relDest));
+    const adapter = HOOK_ADAPTERS[ide];
+    if (adapter) actions.push(hookSettingsAction(root, adapter));
   }
   // The two halves must land TOGETHER, so `missing` is relabelled `new` — the same relabel a new
   // first-party skill gets, and for the same reason: `yad update` (--scope=changed) excludes only

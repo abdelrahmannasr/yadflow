@@ -7,7 +7,7 @@ import {
   exists, readJSON, readJSONStrict, writeJSON,
   writeProductConfig,
 } from './lib.mjs';
-import { VERSION, IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
+import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
   moduleActions, repoActions, productActions, hookActions, authorsActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
@@ -46,9 +46,14 @@ export async function selectIdeTargets(root, provided, asker = ask) {
   const detected = detectedIdeTargetStateFor(root);
   const present = detected.targets;
   for (const unsafe of detected.unsafe) warn(`${unsafe.message}; excluded from IDE defaults`);
-  const def = (present.length ? present : ['.claude']).join(',');
+  // Detected directories win: a project that already has `.cursor/` gets it offered back, and is not
+  // talked into a default it did not choose. Only a project with NO agent directory sees the default.
+  const def = (present.length ? present : DEFAULT_IDE_TARGETS).join(',');
   for (;;) {
-    const answer = await asker(`IDE targets to install ${c.dim('(comma-separated: ' + IDE_TARGETS.join(', ') + ')')}`, def);
+    // Each target is listed with the agents that actually read it, because the directory name does not
+    // say. A Codex or Gemini CLI user shown a bare `.agents` has no way to know it is the one for them.
+    const menu = IDE_TARGETS.map((t) => `${t} = ${(IDE_AGENTS[t] || []).join(', ')}`).join('; ');
+    const answer = await asker(`IDE targets to install ${c.dim('(comma-separated — ' + menu + ')')}`, def);
     if (answer === undefined || answer === null) throw new Error('IDE target selection ended before a valid choice was provided');
     const values = String(answer ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     try {
@@ -455,7 +460,7 @@ export async function runSetup(root, opts = {}) {
   // Install the module
   S('Install the module (skills + .sdlc/config.yaml)');
   guide([
-    'Copies the yad-* skills into your AI tool(s) so they appear in Claude Code / agents / opencode.',
+    'Copies the yad-* skills into your AI tool(s) so they appear in Claude Code, Codex CLI, Cursor, Gemini CLI, Copilot, Zencoder or opencode.',
     'Enter the IDE folders to install into, comma-separated; default = whatever is already present.',
   ]);
   const ideTargets = await selectIdeTargets(root, opts.ideTargets);
@@ -815,7 +820,7 @@ export async function runSetup(root, opts = {}) {
     hand('add reviewers when ready: `yad roster add <login>` (an owner + 1 reviewer passes a gate; a contract review also reports an advisory count of 3, which never blocks)');
   }
   log('');
-  log(c.bold('Then — AI-only steps (run in Claude Code):'));
+  log(c.bold('Then — AI-only steps (run in your AI agent):'));
   if (registry.repos.length) hand('generate code-maps: run `yad-connect-repos` for each connected repo');
   const design = readJSON(designPath, null);
   if (design && design.tool && design.tool !== 'none') {
@@ -869,7 +874,7 @@ export function packRepo(root, repo) {
   ensurePackIgnored(root); // keep the pack out of git before it is (re)written — see repo-publish.mjs invariant 1
   info(`${repo.name}: packing with repomix …`);
   const r = run('npx', ['repomix@latest', '--compress', '--include-logs', '--style', 'markdown', '-o', out], { cwd: repoRoot });
-  if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in Claude Code (yad-connect-repos)`); return true; }
+  if (r.ok) { ok(`${repo.name}: cached ${repo.contextPack}`); hand(`${repo.name}: generate the code-map in your AI agent (yad-connect-repos)`); return true; }
   fail(`${repo.name}: repomix failed — ${r.stderr.split('\n')[0] || 'unknown error'}`);
   return false;
 }

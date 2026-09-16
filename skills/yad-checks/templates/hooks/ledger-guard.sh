@@ -15,8 +15,16 @@
 #   exit 0  allow
 #   exit 2  deny, reason on stderr
 #
-# Wired for Claude Code as a `PreToolUse` hook in `.claude/settings.json` (`yad check --fix` writes
-# that entry). Any harness that can run a command and read those two exit codes can use it.
+# Wired by `yad check --fix` for every harness that can refuse a write BEFORE it lands:
+#   Claude Code  a `PreToolUse` hook in `.claude/settings.json`
+#   Cursor       a `preToolUse` hook in `.cursor/hooks.json` (exit 2 is its `deny`)
+# Any other harness that can run a command and read those two exit codes can use it by hand. A hook
+# that only fires AFTER the write — Cursor's `afterFileEdit`, for one — is deliberately not used: it
+# could report the edit but never refuse it, and reporting is what the CI gate already does.
+#
+# The project root is resolved from this script's own location below, so it does not matter which
+# variable the harness sets ($CLAUDE_PROJECT_DIR, $CURSOR_PROJECT_DIR) or where it runs the command
+# from; those variables appear only in the wiring, to point at this file.
 #
 # FAIL-OPEN: if no `yad` can be found, this ALLOWS and says why on stderr. A guardrail that blocked
 # every edit the moment an install went sideways would be worse than the problem. The CI gate fails

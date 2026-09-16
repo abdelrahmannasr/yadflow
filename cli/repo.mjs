@@ -78,7 +78,7 @@ export async function runRepo(root, { action = 'list', name, today, push = false
       // then `yad repo refresh --push` lands it.
       await publishCodeContext(root, { push: true, allowBranch, name });
     } else {
-      hand('regenerate the code-map in Claude Code (yad-connect-repos) — the pack is cached, the map is the AI step');
+      hand('regenerate the code-map in your AI agent (yad-connect-repos) — the pack is cached, the map is the AI step');
       hand('then publish it to the Product default branch with `yad repo refresh --push`');
     }
     return { refreshed };
