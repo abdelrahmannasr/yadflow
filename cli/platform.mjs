@@ -93,16 +93,18 @@ export function actorName(cwd, platform, opts = {}) {
     || null;
 }
 
-// The roster names `legacyLogins` (cli/gate.mjs) leaves out because two logins share them. An older record under such a
+// The roster names `legacyLogins` (cli/gate.mjs) leaves out because two logins share them, each with the
+// logins that share it. An older record under such a
 // name could be either person, so it is never matched by name — only as `upsertBridge` matches a record
 // no name can place (an exact submission time, or an open step's one-to-one).
 export function ambiguousLegacyNames(hub) {
   const logins = new Map();
   for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
     if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
-    logins.set(e.name, new Set([...(logins.get(e.name) || []), e.login]));
+    if (!logins.has(e.name)) logins.set(e.name, new Set());
+    logins.get(e.name).add(e.login);
   }
-  return new Set([...logins].filter(([, set]) => set.size > 1).map(([name]) => name));
+  return new Map([...logins].filter(([, set]) => set.size > 1));
 }
 
 // Normalized PR reviews -> approval records (only APPROVED states count). `submittedAt` rides along
@@ -430,7 +432,8 @@ export function resolveBaseBranch(platform, {
 }
 
 // ---- create a PR/MR -----------------------------------------------------------------------------
-// `assignees` = the committer/PR-opener (always set, so the PR is owned by whoever pushed it);
+// `assignees` = the committer/PR-opener on GitLab (empty when `glab` cannot say who is logged in);
+// GitHub callers pass none and get `@me`, so the PR is owned by whoever pushed it;
 // `reviewers` = logins to request. No caller passes any since E62 removed the roster that chose them;
 // the parameter stays for E68, which suggests reviewers from history. On GitHub an empty assignee list
 // falls back to `@me` so the opener still self-assigns when the platform login is unknown.

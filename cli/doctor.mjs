@@ -103,14 +103,16 @@ export function projectChecks(checks, root) {
           `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval from anyone with access`,
           'keep it until every review with older approvals is closed (the first sync uses its name → login pairs to recognise them), then delete the `roster` key');
         // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
-        // older record means. Named here, because on an open review that approval then has to be given again.
-        // (A name equal to ANOTHER entry's login is exact — a record under a name was written from that
-        // entry, and an unlisted login was written `unverified` — so it is not warned about.)
-        const unclear = [...ambiguousLegacyNames(hub)];
+        // older record means. Named here, because on an open review that approval may then have to be given
+        // again. (A name equal to ANOTHER entry's login is exact — a record under a name was written from
+        // that entry, and an unlisted login was written `unverified` — so it is not warned about.) The hint
+        // does NOT say "rename it": renaming one entry hands every older record under the name to whoever
+        // keeps it, which can put someone's approval of old content on a person who never gave it.
+        const unclear = [...ambiguousLegacyNames(hub).keys()];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} are given to more than one login — an older approval under that name cannot be recognised exactly`,
-            'an open review with such approvals must be approved again on a new PR; fixing the name in the roster lets the first sync recognise it');
+            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
+            'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
         }
       }
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');

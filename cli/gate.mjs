@@ -19,7 +19,7 @@ import {
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
-  readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames,
+  readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames, prNumberFromUrl,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
@@ -212,19 +212,25 @@ export function legacyLogins(hub) {
 // entry for the same review would count one person twice), and an open step records the approval
 // against a STALE fingerprint from those older records when one exists — the approval must be given
 // again, on a new review, rather than pass on content one of those people may never have seen.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Set(), accepted = null }) {
+function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
   const live = accepted ?? (curHash ? [curHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
   const isLegacy = (a) => a.role !== undefined || a.domain !== undefined;
   // An `unverified` record already names a LOGIN — an older release wrote one for a reviewer the roster did
   // not list — so it is never translated through the roster's names, where it could collide with a name.
   // A record under a roster name two logins share is keyed apart from every login (a NUL-prefixed key no
-  // platform login can equal), so it is never name-matched and, on a closed step, stays as history.
+  // platform login can equal), so it is never name-matched and, on a closed step, stays as history. The
+  // key also carries the submission time: an older release wrote one record per login under that one
+  // name, so a single key would lump two people together, and continuing one would delete the other.
   const personOf = (a) => {
     if (!isLegacy(a) || a.unverified) return a.approver;
     if (aliases.has(a.approver)) return aliases.get(a.approver);
-    return clashed.has(a.approver) ? `\u0000${a.approver}` : a.approver;
+    return clashed.has(a.approver) ? `\u0000${a.approver}\u0000${a.approvedAt ?? ''}` : a.approver;
   };
+  // Who could own a group: anyone for a record no name places; only the logins the roster gives that
+  // name for a shared-name group — a login that merely EQUALS the shared name is someone else.
+  const nameOfKey = (k) => (k.startsWith('\u0000') ? k.split('\u0000')[1] : null);
+  const eligible = (k, r) => { const n = nameOfKey(k); return n === null || !!clashed.get(n)?.has(r.name); };
   const bridge = approvals.filter((a) => a.step === stepId && a.source === 'bridge');
   const groups = new Map();   // person -> their records
   for (const a of bridge) {
@@ -253,10 +259,13 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   const picks = new Map();
   for (const r of unmatched) {
     if (closed && !r.submittedAt) continue;
+    const mine = orphans.filter((k) => eligible(k, r));
     const candidates = r.submittedAt
-      ? orphans.filter((k) => groups.get(k).some((a) => a.approvedAt === r.submittedAt))
-      : (unmatched.length === 1 && orphans.length === 1 ? orphans : []);
-    const rivals = r.submittedAt ? unmatched.filter((x) => x.submittedAt === r.submittedAt).length : unmatched.length;
+      ? mine.filter((k) => groups.get(k).some((a) => a.approvedAt === r.submittedAt))
+      : (mine.length === 1 ? mine : []);
+    const rivals = r.submittedAt
+      ? unmatched.filter((x) => x.submittedAt === r.submittedAt && candidates.some((k) => eligible(k, x))).length
+      : unmatched.filter((x) => candidates.some((k) => eligible(k, x))).length;
     if (candidates.length === 1 && rivals === 1) picks.set(r, candidates[0]);
   }
   const claims = new Map();
@@ -267,8 +276,11 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
     replaced.add(k);
   }
   const unclaimed = orphans.filter((k) => !replaced.has(k));
-  const ambiguous = new Set(unclaimed.length ? unmatched.filter((r) => !picks.has(r)) : []);
-  const staleOrphan = unclaimed.flatMap((k) => groups.get(k)).find(stale) || null;
+  // Ambiguous: an unmatched approval that one of the older approvers still left could be. Each is bound to
+  // a stale fingerprint from the records IT could be, never from someone it cannot be.
+  const couldBe = (r) => unclaimed.filter((k) => eligible(k, r));
+  const ambiguous = new Set(unmatched.filter((r) => !picks.has(r) && couldBe(r).length));
+  const staleFor = (r) => couldBe(r).flatMap((k) => groups.get(k)).find(stale) || null;
   const kept = approvals.filter((a) => {
     if (!(a.step === stepId && a.source === 'bridge')) return true;
     if (replaced.has(personOf(a))) return false;
@@ -279,7 +291,8 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
     if (closed && ambiguous.has(r)) continue;
     const was = matchOf.get(r);
     // first time we see this approval => bind to current content; an ambiguous one => to the stale print
-    let artHash = ambiguous.has(r) && staleOrphan ? staleOrphan.artifactHash : curHash;
+    const staleOrphan = ambiguous.has(r) ? staleFor(r) : null;
+    let artHash = staleOrphan ? staleOrphan.artifactHash : curHash;
     let approvedAt = r.submittedAt || today;
     let recordedOn = today;
     if (was) {
@@ -350,10 +363,15 @@ function writeComments(epicDir, base, today, blocking) {
 // A round an older release wrote names the roster's name for a person; `aliases` (see `legacyLogins`)
 // reads it as their login, so the first sync after the upgrade does not open a new round for the same
 // threads.
-function recordComments(comments, { artifact, stepId, today, blocking, aliases = new Map() }) {
+function recordComments(comments, { artifact, stepId, today, blocking, aliases = new Map(), clashed = new Map() }) {
   if (!blocking.length) return comments;
   const byName = (login) => login || 'reviewer';
-  const personOf = (cm) => (cm.role !== undefined && aliases.has(cm.commenter) ? aliases.get(cm.commenter) : cm.commenter);
+  // As `upsertBridge` reads approvals: a shared roster name is nobody's login, so its round is not "the same".
+  const personOf = (cm) => {
+    if (cm.role === undefined) return cm.commenter;
+    if (aliases.has(cm.commenter)) return aliases.get(cm.commenter);
+    return clashed.has(cm.commenter) ? `\u0000${cm.commenter}` : cm.commenter;
+  };
   const counts = new Map();
   for (const t of blocking) counts.set(t.login, (counts.get(t.login) || 0) + 1);
   // A round is a CHANGE in the thread state, not a sync. Allocating max+1 on every call made an
@@ -366,7 +384,9 @@ function recordComments(comments, { artifact, stepId, today, blocking, aliases =
   const latest = rounds.reduce((m, cm) => Math.max(m, cm.round || 0), 0);
   const prior = rounds.filter((cm) => cm.round === latest);
   const now = new Map([...counts].map(([login, count]) => [byName(login), count]));
-  const same = latest > 0 && prior.length === now.size && prior.every((cm) => now.get(personOf(cm)) === cm.count);
+  // The same people, each once, with the same counts — two older records that map to one person are not.
+  const same = latest > 0 && prior.length === now.size && new Set(prior.map(personOf)).size === prior.length
+    && prior.every((cm) => now.get(personOf(cm)) === cm.count);
   const round = same ? latest : latest + 1;
   const kept = comments.filter((cm) => !(cm.step === stepId && cm.round === round));
   for (const [login, count] of counts) {
@@ -531,7 +551,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // That is the same churn the resource_group fix exists to stop, so it must not be reintroduced here.
     if (!alreadyDone) {
       if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
-      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, blocking, aliases });
+      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, blocking, aliases, clashed });
     }
 
     // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
@@ -1089,6 +1109,9 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   if (!artifact) { fail('artifact is required: `yad gate open <epic> <artifact>`'); process.exitCode = 1; return; }
   const step = findReviewStep(ledger.state, artifact);
   if (!step) { fail(`no review step for ${artifact}`); process.exitCode = 1; return; }
+  // The step's own spelling from here on: `stories` and `stories/` name one review, and a pointer
+  // recorded under the other spelling would be a second pointer that nothing stamps or replaces.
+  artifact = step.artifact || artifact;
   // A step SET ASIDE — skipped or deferred — has no review to open. The chain already walks past it, so
   // `markInReview` would leave the ledger alone while the PR opened anyway: a live review of a step the
   // chain has walked past, which no merge can advance. Put the step back first (E37).
@@ -1167,13 +1190,15 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`); return; }
 
   if (!verified) {
-    const opened = Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null;
+    // The PR number from its path segment — the first number in the URL can be the repo (`acme/2048/pull/9`).
+    const opened = Number(prNumberFromUrl(r.url)) || null;
     // A re-opened review replaces the pointer. Stamp the OLD number on this step's approvals that predate
     // PR provenance first, exactly as `gateCi` does at merge: once the pointer names the new PR, the next
     // sync would stamp THAT number on them, so an approval given again on the new PR could never be told
     // from a re-read of the old one and, on GitLab (no submission time), would stay stale for good.
     const previous = (ledger.hubPrs || []).find((x) => x.artifact === artifact)?.number ?? null;
-    if (previous != null && opened != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {
+    // Also when the new URL carries no number: the old pointer is about to be overwritten either way.
+    if (previous != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {
       writeJSON(ledger.files.approvals, canonicalApprovals(ledger.approvals));
     }
     ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: opened, url: r.url, branch, lastSyncedAt: null });

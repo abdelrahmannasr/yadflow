@@ -1485,7 +1485,8 @@ test('gateOpen: re-opening a review on a new PR stamps the OLD number on older a
     fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
       { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-06-01', engagement: 'none' },
     ]));
-    const creator = () => ({ ok: true, url: 'https://gitlab.example/g/p/-/merge_requests/9' });
+    // The group path holds a number too: the PR number is read from its own segment, never the first number.
+    const creator = () => ({ ok: true, url: 'https://gitlab.example/123/p/-/merge_requests/9' });
     await captureConsole(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', creator, hasBranch: () => true }));
     const stamped = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
     assert.equal(stamped[0].pr, 7, 'the approval is stamped with the PR it came from, before the pointer moves');
@@ -1496,6 +1497,20 @@ test('gateOpen: re-opening a review on a new PR stamps the OLD number on older a
       reader: () => ({ ok: true, state: 'opened', merged: false, reviews: [{ login: 'al', state: 'APPROVED' }], threads: [] }) }));
     const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
     assert.equal(after.find((a) => a.approver === 'al').artifactHash, artifactHash(ep, 'architecture.md'), 'a re-approval on the new MR is live');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: a new URL with no PR number still stamps the old number before the pointer is overwritten', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
+      { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-06-01', engagement: 'none' },
+    ]));
+    await captureConsole(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture', creator: () => ({ ok: true, url: 'https://github.com/acme/app/pull/new' }), hasBranch: () => true }));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'))[0].pr, 7);
+    const ptrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'));
+    assert.equal(ptrs.length, 1, '`architecture` and `architecture.md` are one review — one pointer, not two');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -3273,6 +3288,48 @@ test('E62 upgrade: a roster name equal to ANOTHER entry\'s login is still exact 
     reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bob', state: 'APPROVED' }] });
   try {
     assert.deepEqual(hashesByApprover(r.read()), { al: r.cur, bob: 'sha256:old' });
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: two people under one shared name are two groups — continuing one never deletes or restamps the other', async () => {
+  const roster = [{ login: 's1', name: 'sam' }, { login: 's2', name: 'sam' }];
+  const T1 = '2026-06-01T10:00:00Z'; const T2 = '2026-06-02T10:00:00Z';
+  const recs = (cur) => [legacyAppr('sam', 'owner', cur, { approvedAt: T1 }), legacyAppr('sam', 'reviewer', 'sha256:old', { approvedAt: T2, date: '2026-06-02' })];
+  // closed, GitHub: only s1 is re-reported (s2's review was dismissed) — s1 continues T1; s2's record stays
+  let r = await legacySync({ roster, approvals: recs, reviews: [{ login: 's1', state: 'APPROVED', submittedAt: T1 }], status: 'done', merged: true });
+  try {
+    const after = r.read();
+    assert.deepEqual(after.map((a) => [a.approver, a.artifactHash === r.cur ? 'CUR' : a.artifactHash, a.approvedAt]).sort(),
+      [['s1', 'CUR', T1], ['sam', 'sha256:old', T2]], 's1 keeps its own live print; s2\'s history is untouched');
+  } finally { r.done(); }
+  // open, both re-reported: each continues its own record — s1 stays live, s2 stays stale
+  r = await legacySync({ roster, approvals: recs, reviews: [{ login: 's1', state: 'APPROVED', submittedAt: T1 }, { login: 's2', state: 'APPROVED', submittedAt: T2 }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { s1: r.cur, s2: 'sha256:old' });
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: a login that merely EQUALS a shared name is not one of the people under it', async () => {
+  const roster = [{ login: 's1', name: 'sam' }, { login: 's2', name: 'sam' }, { login: 'sam', name: 'x' }];
+  let r = await legacySync({ roster, approvals: [legacyAppr('sam', 'owner', 'sha256:old', { approvedAt: '2026-06-01T10:00:00Z' })],
+    reviews: [{ login: 'sam', state: 'APPROVED', submittedAt: '2026-09-09T10:00:00Z' }] });
+  try {
+    assert.equal(r.read().find((a) => a.approver === 'sam' && a.source === 'bridge' && a.role === undefined)?.artifactHash, r.cur, 'person x\'s own new approval is live');
+  } finally { r.done(); }
+  r = await legacySync({ roster, approvals: [legacyAppr('sam', 'owner', 'sha256:old', { approvedAt: '2026-06-01T10:00:00Z' })],
+    reviews: [{ login: 'sam', state: 'APPROVED', submittedAt: '2026-09-09T10:00:00Z' }], status: 'done', merged: true });
+  try {
+    assert.ok(r.read().some((a) => a.approver === 'sam' && a.role === undefined), 'and on a closed step it is recorded, beside the older record');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: an older comment round under a shared name is not "the same round" as a login equal to that name', async () => {
+  const r = await legacySync({ roster: [{ login: 's1', name: 'sam' }, { login: 's2', name: 'sam' }], approvals: [],
+    comments: [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'sam', role: 'reviewer', round: 1, count: 1, date: '2026-06-01' }],
+    reviews: [], threads: [{ id: 't1', resolved: false, login: 'sam', body: 'x' }] });
+  try {
+    const comments = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/comments.json'), 'utf8'));
+    assert.deepEqual(comments.map((cm) => [cm.commenter, cm.round]).sort(), [['sam', 1], ['sam', 2]], 'a new round, the older one kept');
   } finally { r.done(); }
 });
 
