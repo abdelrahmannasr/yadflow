@@ -1354,7 +1354,7 @@ const body = (T, text) => {
   return p;
 };
 
-test('risk-route: low risk, no contract -> base rule', () => {
+test('risk-route: low risk, no contract -> one approver, no risk step', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-risk-'));
   const p = body(T, [
     '## Impact & Risk',
@@ -1364,11 +1364,12 @@ test('risk-route: low risk, no contract -> base rule', () => {
   ].join('\n'));
   const r = runGate(RISK_ROUTE, T, [p]);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /ROUTE: base rule -> owner \+ 1 reviewer/);
+  assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/);
+  assert.doesNotMatch(r.out, /owner|domain-owner|reviewer approval/, 'no role is named anywhere (E62)');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('risk-route: high risk escalates and lists domain owners', () => {
+test('risk-route: high risk adds one to the count and lists the touched domains to ask', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-risk-'));
   const p = body(T, [
     '- Risk level: **High**',
@@ -1377,13 +1378,14 @@ test('risk-route: high risk escalates and lists domain owners', () => {
   ].join('\n'));
   const r = runGate(RISK_ROUTE, T, [p]);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /ROUTE: ESCALATED \(risk: high\)/);
-  assert.match(r.out, /- domain-owner: auth/);
-  assert.match(r.out, /- domain-owner: payments/);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk: high\)/);
+  assert.match(r.out, /Only the base holds the merge until the capacity cap/);
+  assert.match(r.out, /\n {2}- auth\n {2}- payments/);
+  assert.doesNotMatch(r.out, /domain-owner/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('risk-route: contract surface touched escalates even at low risk', () => {
+test('risk-route: a contract surface adds two even at low risk, and high + contract is the larger, never the sum', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-risk-'));
   const p = body(T, [
     '- Risk level: low',
@@ -1392,8 +1394,11 @@ test('risk-route: contract surface touched escalates even at low risk', () => {
   ].join('\n'));
   const r = runGate(RISK_ROUTE, T, [p]);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /ROUTE: ESCALATED \(contract surface touched\)/);
+  assert.match(r.out, /ROUTE: 3 approvers = base 1 \+ contract risk 2 \(contract surface touched\)/);
   assert.match(r.out, /Domains line not filled in/);
+  const both = body(T, ['- Risk level: high', '- Contract surface touched: yes', '- Domains touched: backend'].join('\n'));
+  const b = runGate(RISK_ROUTE, T, [both]);
+  assert.match(b.out, /ROUTE: 3 approvers = base 1 \+ contract risk 2 \(risk: high, contract surface touched\)/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1403,7 +1408,25 @@ test('risk-route: half-filled body still routes (advisory, never aborts)', () =>
   const r = runGate(RISK_ROUTE, T, [p]);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /Risk level: unspecified/);
-  assert.match(r.out, /ROUTE: base rule/);
+  assert.match(r.out, /ROUTE: 1 approver = base 1/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---------- hub-route.sh (the Shape analogue) ----------
+const HUB_ROUTE = path.join(ROOT, 'skills/yad-hub-bridge/templates/checks/hub-route.sh');
+
+test('hub-route: prints the gate count from the risk tags — no roles, and stories no longer route by name (E62)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-hubroute-'));
+  const run = (lines) => runGate(HUB_ROUTE, T, [body(T, lines.join('\n'))]);
+  let r = run(['- Artifact: `stories/`', '- **Risk tags:** none', '- **Domains / repos touched:** backend, mobile']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/, 'the stories review is an ordinary count gate');
+  r = run(['- **Risk tags:** auth, payments', '- **Domains / repos touched:** backend']);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk tag: auth, risk tag: payments\)/, 'two high tags are one step');
+  r = run(['- **Risk tags:** contract, auth', '- **Domains / repos touched:** backend, mobile']);
+  assert.match(r.out, /ROUTE: 3 approvers = base 1 \+ contract risk 2/);
+  assert.match(r.out, /\n {2}- backend\n {2}- mobile/);
+  assert.doesNotMatch(r.out, /owner|domain_owner|repos\.json/, 'no role and no stored owner is named');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
