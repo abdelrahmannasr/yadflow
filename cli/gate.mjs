@@ -19,7 +19,7 @@ import {
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
-  readPr, mapApprovers, createPr, platformLogin, actorName,
+  readPr, mapApprovers, createPr, platformLogin, actorName, ambiguousLegacyNames,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
@@ -212,13 +212,19 @@ export function legacyLogins(hub) {
 // entry for the same review would count one person twice), and an open step records the approval
 // against a STALE fingerprint from those older records when one exists — the approval must be given
 // again, on a new review, rather than pass on content one of those people may never have seen.
-function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), accepted = null }) {
+function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Set(), accepted = null }) {
   const live = accepted ?? (curHash ? [curHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
   const isLegacy = (a) => a.role !== undefined || a.domain !== undefined;
   // An `unverified` record already names a LOGIN — an older release wrote one for a reviewer the roster did
   // not list — so it is never translated through the roster's names, where it could collide with a name.
-  const personOf = (a) => (isLegacy(a) && !a.unverified && aliases.has(a.approver) ? aliases.get(a.approver) : a.approver);
+  // A record under a roster name two logins share is keyed apart from every login (a NUL-prefixed key no
+  // platform login can equal), so it is never name-matched and, on a closed step, stays as history.
+  const personOf = (a) => {
+    if (!isLegacy(a) || a.unverified) return a.approver;
+    if (aliases.has(a.approver)) return aliases.get(a.approver);
+    return clashed.has(a.approver) ? `\u0000${a.approver}` : a.approver;
+  };
   const bridge = approvals.filter((a) => a.step === stepId && a.source === 'bridge');
   const groups = new Map();   // person -> their records
   for (const a of bridge) {
@@ -237,6 +243,7 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // record with no `pr` predates PR provenance and is taken as the pointer's, as `stampLegacyPr` does).
   const orphans = prNumber == null ? [] : [...groups.keys()].filter((k) => !seen.has(k)
     && groups.get(k).every((a) => isLegacy(a) && !a.unverified && !aliases.has(a.approver) && (a.pr == null || a.pr === prNumber)));
+  // (a clashed-name group's key starts with NUL, so `seen` never holds it and it is always eligible here)
   const unmatched = recs.filter((r) => !matchOf.has(r));
   // Every approval is judged against the SAME set of older approvers, and only then are the matches taken:
   // deciding them one at a time made the result depend on the order the platform lists reviews, so an
@@ -428,6 +435,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
   const aliases = legacyLogins(hub);
+  const clashed = ambiguousLegacyNames(hub);
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
   // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
@@ -501,7 +509,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     warnIncompleteDiscovery(epicDir, pr.artifact);
     const approvalsBefore = JSON.stringify(approvals);
     const recs = mapApprovers(pull.reviews, { headOid: pull.headOid });
-    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone, aliases, accepted: acceptedHashes(epicDir, pr.artifact) });
+    approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone, aliases, clashed, accepted: acceptedHashes(epicDir, pr.artifact) });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
     // 2f: companion scaffolding + nudge threads carry the noblock marker and are EXCLUDED from the
@@ -1159,7 +1167,16 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`); return; }
 
   if (!verified) {
-    ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null, url: r.url, branch, lastSyncedAt: null });
+    const opened = Number((r.url.match(/\/(\d+)(?:[/?#]|$)/) || [])[1]) || null;
+    // A re-opened review replaces the pointer. Stamp the OLD number on this step's approvals that predate
+    // PR provenance first, exactly as `gateCi` does at merge: once the pointer names the new PR, the next
+    // sync would stamp THAT number on them, so an approval given again on the new PR could never be told
+    // from a re-read of the old one and, on GitLab (no submission time), would stay stale for good.
+    const previous = (ledger.hubPrs || []).find((x) => x.artifact === artifact)?.number ?? null;
+    if (previous != null && opened != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {
+      writeJSON(ledger.files.approvals, canonicalApprovals(ledger.approvals));
+    }
+    ledger.hubPrs = upsertHubPr(ledger.hubPrs, { step: step.id, artifact, platform: hub.platform, number: opened, url: r.url, branch, lastSyncedAt: null });
     writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, ledger.hubPrs);
     // The record was written before the PR existed, and the first close wins, so no later sync can add
     // the number. Add it here, to the record this run wrote and to nothing older (E18).

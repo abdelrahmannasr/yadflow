@@ -1475,6 +1475,30 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('gateOpen: re-opening a review on a new PR stamps the OLD number on older approvals first, so a re-approval can go live (E62 review)', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: 'gitlab' }));
+    // approvals recorded before PR provenance existed: no `pr`, bound to content that has since changed
+    fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
+      { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-06-01', engagement: 'none' },
+    ]));
+    const creator = () => ({ ok: true, url: 'https://gitlab.example/g/p/-/merge_requests/9' });
+    await captureConsole(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', creator, hasBranch: () => true }));
+    const stamped = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+    assert.equal(stamped[0].pr, 7, 'the approval is stamped with the PR it came from, before the pointer moves');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'))[0].number, 9);
+    // the same person approves again on #9 (GitLab: no submission time) — it is a new review, so it goes live
+    const { gateSync: sync } = await import('./gate.mjs');
+    await captureConsole(() => sync(T, { epic: 'EP-test', today: '2026-09-16',
+      reader: () => ({ ok: true, state: 'opened', merged: false, reviews: [{ login: 'al', state: 'APPROVED' }], threads: [] }) }));
+    const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+    assert.equal(after.find((a) => a.approver === 'al').artifactHash, artifactHash(ep, 'architecture.md'), 'a re-approval on the new MR is live');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG-3)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
@@ -3223,6 +3247,33 @@ test('E62 upgrade: the result does not depend on the order the platform lists re
   }
   assert.deepEqual(outcomes[0], outcomes[1], 'both orders record the same approvals');
   assert.equal(outcomes[0].al, 'sha256:old', 'al continues alice by exact submission time');
+});
+
+test('E62 upgrade: a roster name two logins share is never matched by name — no false pass, history kept on a closed step', async () => {
+  // bob's roster name was `al`, and so was the name of the entry whose login is `al`. The older record `al`
+  // could be either person, so neither inherits it by name.
+  const roster = [{ login: 'al', name: 'al' }, { login: 'bob', name: 'al' }];
+  let r = await legacySync({ roster, approvals: [legacyAppr('al', 'owner', 'sha256:old')], reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bob', state: 'APPROVED' }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old', bob: 'sha256:old' }, 'ambiguous on an open step: both must approve again');
+    await r.sync([{ login: 'bob', state: 'APPROVED' }], { merged: true, state: 'MERGED' });
+    const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review');
+  } finally { r.done(); }
+  r = await legacySync({ roster, approvals: [legacyAppr('al', 'owner', 'X')], reviews: [{ login: 'al', state: 'APPROVED' }], status: 'done', merged: true });
+  try {
+    assert.deepEqual(r.read().map((a) => [a.approver, a.role]), [['al', 'owner']], 'closed: the older record stays as it was, and nothing is added twice');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: a roster name equal to ANOTHER entry\'s login is still exact — each record stays with the person it was written for', async () => {
+  // entry {login: bob, name: al} wrote `al`; entry {login: al, name: alice} wrote `alice`.
+  const roster = [{ login: 'bob', name: 'al' }, { login: 'al', name: 'alice' }];
+  const r = await legacySync({ roster, approvals: (cur) => [legacyAppr('al', 'owner', 'sha256:old'), legacyAppr('alice', 'reviewer', cur)],
+    reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bob', state: 'APPROVED' }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { al: r.cur, bob: 'sha256:old' });
+  } finally { r.done(); }
 });
 
 test('legacyLogins: the roster\'s name → login pairs, and a name given to two logins is left out', async () => {
@@ -10034,9 +10085,9 @@ test('doctor: roster data an older release wrote is named as unused — empty ke
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'bob', name: 'al' }, { login: 'al', name: 'alice' }, { login: 'x', name: 'sam' }, { login: 'y', name: 'sam' }] }));
   const amb = (await doctorOn(T)).checks.find((x) => x.id === 'people:roster-ambiguous');
   assert.equal(amb?.status, 'warn');
-  assert.match(amb.message, /al, sam|sam, al/, 'a name that is another entry\'s login, and a name held twice');
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'al', name: 'al' }, { login: 'bo', name: 'bob' }] }));
-  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'people:roster-ambiguous'), 'a name equal to its OWN login is clear');
+  assert.match(amb.message, /roster name\(s\) sam are given to more than one login/, 'only a name held twice — a name equal to another entry\'s login is exact');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'al', name: 'al' }, { login: 'bo', name: 'bob' }, { login: 'bob', name: 'bobby' }] }));
+  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'people:roster-ambiguous'), 'no name held twice → clear');
   for (const empty of ['', {}, null]) {
     fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: empty }));
     assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'people:roster-unused'), `roster ${JSON.stringify(empty)} says nothing`);

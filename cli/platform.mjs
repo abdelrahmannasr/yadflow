@@ -93,6 +93,18 @@ export function actorName(cwd, platform, opts = {}) {
     || null;
 }
 
+// The roster names `legacyLogins` (cli/gate.mjs) leaves out because two logins share them. An older record under such a
+// name could be either person, so it is never matched by name — only as `upsertBridge` matches a record
+// no name can place (an exact submission time, or an open step's one-to-one).
+export function ambiguousLegacyNames(hub) {
+  const logins = new Map();
+  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+    if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
+    logins.set(e.name, new Set([...(logins.get(e.name) || []), e.login]));
+  }
+  return new Set([...logins].filter(([, set]) => set.size > 1).map(([name]) => name));
+}
+
 // Normalized PR reviews -> approval records (only APPROVED states count). `submittedAt` rides along
 // so the gate can tell a fresh re-approval from a stale one (revoke-on-change).
 // The record names the PLATFORM LOGIN that approved (E62). There is no stored list to look it up in and

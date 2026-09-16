@@ -13,7 +13,7 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
-import { cliFor, hostFromGitUrl } from './platform.mjs';
+import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 
 const MIN_NODE = 18;
 
@@ -102,17 +102,14 @@ export function projectChecks(checks, root) {
         check(checks, 'people:roster-unused', 'project', 'warn',
           `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval from anyone with access`,
           'keep it until every review with older approvals is closed (the first sync uses its name → login pairs to recognise them), then delete the `roster` key');
-        // Those pairs are exact only when the roster itself is: a name given to two logins is dropped, and a
-        // name that is ANOTHER entry's login cannot be told apart from that person on an older record. Named
-        // here, because on an open review that approval then has to be given again (E62 review).
-        const entries = Array.isArray(r) ? r.filter((e) => e && typeof e.name === 'string' && e.name && typeof e.login === 'string' && e.login) : [];
-        const loginsOf = new Map();
-        for (const e of entries) loginsOf.set(e.name, new Set([...(loginsOf.get(e.name) || []), e.login]));
-        const logins = new Set(entries.map((e) => e.login));
-        const unclear = [...loginsOf].filter(([name, set]) => set.size > 1 || (logins.has(name) && !set.has(name))).map(([name]) => name);
+        // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
+        // older record means. Named here, because on an open review that approval then has to be given again.
+        // (A name equal to ANOTHER entry's login is exact — a record under a name was written from that
+        // entry, and an unlisted login was written `unverified` — so it is not warned about.)
+        const unclear = [...ambiguousLegacyNames(hub)];
         if (unclear.length) {
           check(checks, 'people:roster-ambiguous', 'project', 'warn',
-            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} match more than one login or another entry's login — an older approval under that name cannot be recognised exactly`,
+            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} are given to more than one login — an older approval under that name cannot be recognised exactly`,
             'an open review with such approvals must be approved again on a new PR; fixing the name in the roster lets the first sync recognise it');
         }
       }
