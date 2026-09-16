@@ -19,7 +19,7 @@ import path from 'node:path';
 import { c, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { resolveCommitterLogin } from './platform.mjs';
+import { platformLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
@@ -214,7 +214,7 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   if (push) preflightGuardReadiness(root);
 
   const { label, basenames } = summarizeCodeContext(fileset);
-  const author = checkpointAuthor(resolveCommitterLogin(root, hub?.roster || []), git('config', 'user.name').stdout);
+  const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
   const message = buildCodeMapMessage({ label, author, basenames });
 
   // Untrack the packs by holding their bytes and removing the files across the --only commit, then

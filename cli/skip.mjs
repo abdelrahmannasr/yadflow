@@ -17,23 +17,22 @@
 // `deferStep` / `undeferStep` in epic-state.mjs; this is the thin file-load/save + attribution wrapper.
 import fs from 'node:fs';
 import path from 'node:path';
-import { ok, info, hand, fail, run, readJSON, readJSONStrict, warn, writeJSON } from './lib.mjs';
+import { ok, info, hand, fail, readJSON, readJSONStrict, warn, writeJSON } from './lib.mjs';
 import { epicRel, epicRoot, epicStories, loadLedger, skipLane, skipStep, unskipLane, unskipStep, deferStep, undeferStep, unblockStep, writeState, isReopenedStep, stepStatus } from './epic-state.mjs';
 import { epicFiles, isVerifiedLedger, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { loadProduct } from './gate.mjs';
 import { seededSlugs } from './hook.mjs';
-import { resolveCommitterLogin } from './platform.mjs';
+import { actorName } from './platform.mjs';
 
-// Best-effort auditable actor for a record's `by` — who WROTE the record: the roster login for the
-// local git identity, else the raw git user.name, else null. A malformed/absent Product degrades to the
-// raw name — attribution is a nicety on the audit trail, never a gate, so it must not block the verb.
+// Best-effort auditable actor for a record's `by` — who WROTE the record: the platform login the CLI
+// reports (`actorName`), else the raw git user.name, else null. A malformed/absent Product has no
+// platform to ask and degrades to the raw name — attribution is a nicety on the audit trail, never a
+// gate, so it must not block the verb.
 export function recordActor(root) {
-  let roster = [];
-  try { roster = loadProduct(root)?.hub?.roster || []; } catch { /* no Product / malformed — attribute by raw git name */ }
-  return resolveCommitterLogin(root, roster)
-    || (run('git', ['config', 'user.name'], { cwd: root }).stdout || '').trim()
-    || null;
+  let platform = null;
+  try { platform = loadProduct(root)?.hub?.platform || null; } catch { /* no Product / malformed — attribute by raw git name */ }
+  return actorName(root, platform);
 }
 
 // What differs between the two verbs, as a person reads it.

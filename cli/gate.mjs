@@ -19,7 +19,7 @@ import {
 import { applyProductMove, planProductMove } from './migrate.mjs';
 import { productGit, preflightGuardReadiness, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import {
-  readPr, mapApprovers, createPr, reviewersForScopes, resolveCommitterLogin,
+  readPr, mapApprovers, createPr, reviewersForScopes, platformLogin, actorName,
   getPrBody, editPrBody, postComment, findPrForBranch, prBranch, branchExists,
 } from './platform.mjs';
 import { isNoBlock, upsertTrailerBlock, nudgeMessage, parseEngagement } from './companion.mjs';
@@ -27,13 +27,12 @@ import { sequenceDiff } from './walkthrough.mjs';
 import { syncStatuses } from './artifact-status.mjs';
 import { err } from './errors.mjs';
 
-// Who WRITES a closing record (E18): the roster login for the local git identity, else the raw git
-// user.name, else null. On CI that is the bot. Best-effort, like every record's `by`: attribution never
-// blocks a gate. Kept here rather than imported from skip.mjs, which imports this file.
+// Who WRITES a closing record (E18): the platform login, else the raw git user.name, else null
+// (`actorName`). On CI that is usually the bot's git name — a job token cannot read `/user`. Best-effort,
+// like every record's `by`: attribution never blocks a gate. Kept here rather than imported from
+// skip.mjs, which imports this file.
 function closingActor(root, hub) {
-  return resolveCommitterLogin(root, Array.isArray(hub?.roster) ? hub.roster : [])
-    || (run('git', ['config', 'user.name'], { cwd: root }).stdout || '').trim()
-    || null;
+  return actorName(root, hub?.platform);
 }
 
 // One line for a review step's closing record in `yad gate status` (E18).
@@ -1083,7 +1082,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   // Assignee = whoever opens the review PR (the committer); reviewers = the Product's reviewers +
   // domain-owners of the touched repos, minus the committer (the owner/author is recorded, not asked
   // to review their own artifact). Scope is the Product plus every touched domain.
-  const committer = resolveCommitterLogin(root, hub.roster || []);
+  const committer = platformLogin(root, hub.platform);
   const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer, repos });
   const assignees = committer ? [committer] : [];
   const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)

@@ -244,7 +244,8 @@ ${c.bold('Options')}
 
 ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
-  YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
+  YAD_NO_REPORT=1            Never offer to file a bug report after a failure
+  YAD_PLATFORM_LOGIN=0       Name a record's author by git user.name; never ask gh/glab who is logged in`;
 
 const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets']);
 

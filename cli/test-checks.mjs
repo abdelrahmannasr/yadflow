@@ -10,6 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
+// account — the answer would differ per machine — so the lookup is off for every test in this file and
+// every CLI it spawns. The lookup's own tests pass `env` explicitly.
+process.env.YAD_PLATFORM_LOGIN = '0';
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CHECKS = path.join(ROOT, 'skills/yad-checks/templates/checks');
 const RISK_ROUTE = path.join(ROOT, 'skills/yad-pr-template/templates/checks/risk-route.sh');

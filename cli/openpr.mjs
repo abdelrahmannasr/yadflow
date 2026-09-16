@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import { c, log, ok, info, warn, hand, fail, run, exists, readJSON } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import {
-  detectPlatform, createPr, reviewersForScopes, resolveCommitterLogin, resolveBaseBranch,
+  detectPlatform, createPr, reviewersForScopes, platformLogin, resolveBaseBranch,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
 import { parseReviewBranch, artifactFromBase } from './epic-state.mjs';
@@ -183,7 +183,7 @@ export async function runOpenPr(root, opts = {}) {
   // local git identity), reviewers = the repo's reviewers + domain-owners, minus the committer.
   // Degrades cleanly when there is no roster / the committer is unmapped (gh self-assigns via @me).
   const roster = hub.roster || [];
-  const committer = resolveCommitterLogin(repoRoot, roster);
+  const committer = platformLogin(repoRoot, platform);
   const scope = meta?.name ? [meta.name] : [];
   // Pass the repo registry entry so a domain owner declared only in repos.json (not the roster roles
   // map) is still requested as a reviewer (BUG-1).

@@ -36,6 +36,10 @@ case "${1:-} ${2:-}" in
   "repo view")
     echo '{"owner":{"login":"acme"},"name":"hub"}'
     ;;
+  "api user")
+    # Who is logged in (`gh api user --jq .login`) — what a record's `by` names (E62).
+    echo "octo-ci"
+    ;;
   "api graphql")
     # readPrGitHub fires two GraphQL queries: latestReviews (with commit.oid) and reviewThreads.
     # Discriminate on the query text so each gets its matching shape. Commit oids equal headRefOid

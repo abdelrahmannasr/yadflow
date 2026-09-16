@@ -10,6 +10,11 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+// E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
+// account — the answer would differ per machine — so the lookup is off for every test in this file and
+// every CLI it spawns. The lookup's own tests pass `env` explicitly.
+process.env.YAD_PLATFORM_LOGIN = '0';
 // Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
 // and semantic-release exports them during `npm publish` (prepublishOnly runs this suite) — test
 // commits must carry the identity each test sets, not the publisher's.
@@ -4915,7 +4920,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, platformLogin, actorName, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
 
 test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
   assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
@@ -5075,14 +5080,31 @@ test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {
   assert.equal(gh[gh.indexOf('--reviewer') + 1], 'bo,ca');
 });
 
-test('resolveCommitterLogin maps git identity through the roster', () => {
-  const { backend } = scaffold();
-  git(backend, 'config', 'user.email', 'a@b.c');
-  git(backend, 'config', 'user.name', 'x');
-  const roster = [{ login: 'xx', name: 'x', email: 'a@b.c' }, { login: 'yy', name: 'y' }];
-  assert.equal(resolveCommitterLogin(backend, roster), 'xx');           // by email
-  assert.equal(resolveCommitterLogin(backend, [{ login: 'zz', name: 'x' }]), 'zz'); // by name
-  assert.equal(resolveCommitterLogin(backend, [{ login: 'no', name: 'other' }]), null);
+test('platformLogin asks the platform CLI who is logged in — never a stored list (E62)', () => {
+  const on = {}; // the lookup is ON here: the suite turns it off in process.env, so pass an env without the switch
+  const calls = [];
+  const fake = (out, ok = true) => (cmd, args) => { calls.push([cmd, ...args]); return { ok, stdout: out, stderr: '' }; };
+  assert.equal(platformLogin('/x', 'github', { runner: fake('octocat\n'), env: on }), 'octocat');
+  assert.deepEqual(calls.pop(), ['gh', 'api', 'user', '--jq', '.login']);
+  assert.equal(platformLogin('/x', 'gitlab', { runner: fake('{"username":"tanuki","id":1}'), env: on }), 'tanuki');
+  assert.deepEqual(calls.pop(), ['glab', 'api', 'user']);
+  assert.equal(platformLogin('/x', 'github', { runner: fake('octocat', false), env: on }), null, 'logged out / offline → no login');
+  assert.equal(platformLogin('/x', 'gitlab', { runner: fake('not json'), env: on }), null);
+  assert.equal(platformLogin('/x', 'github', { runner: fake('two words'), env: on }), null, 'an answer that is not a login is not recorded');
+  assert.equal(platformLogin('/x', 'github', { runner: fake('github-actions[bot]'), env: on }), 'github-actions[bot]');
+  calls.length = 0;
+  assert.equal(platformLogin('/x', null, { runner: fake('octocat'), env: on }), null, 'no platform → nothing to ask');
+  assert.equal(platformLogin('/x', 'github', { runner: fake('octocat'), env: { YAD_PLATFORM_LOGIN: '0' } }), null, 'the switch turns it off');
+  assert.deepEqual(calls, [], 'and neither asks anything');
+});
+
+test('actorName: the platform login, else git user.name, else null', () => {
+  const on = {};
+  const runner = (login, name) => (cmd) => (cmd === 'git' ? { ok: !!name, stdout: name || '' } : { ok: !!login, stdout: login || '' });
+  assert.equal(actorName('/x', 'github', { runner: runner('octocat', 'Octo Cat'), env: on }), 'octocat');
+  assert.equal(actorName('/x', 'github', { runner: runner(null, 'Octo Cat'), env: on }), 'Octo Cat');
+  assert.equal(actorName('/x', null, { runner: runner('octocat', 'Octo Cat'), env: on }), 'Octo Cat', 'no platform → git name');
+  assert.equal(actorName('/x', 'github', { runner: runner(null, ''), env: on }), null);
 });
 
 test('validateLogin returns checked:false when the platform CLI is unknown', () => {
@@ -11111,8 +11133,8 @@ const {
 } = await import('./checkpoint.mjs');
 const { productGit } = await import('./hubcommit.mjs');
 
-// A Product (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
-// exists. The roster email matches the git identity so resolveCommitterLogin yields @abdelrahmannasr.
+// A Product on the default branch, with a seed commit so HEAD exists. The roster it carries is left on
+// disk and never read (E62); with the platform lookup off in this suite the subject names the git user.
 function productForCheckpoint() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-'));
   git(T, 'init', '-q');
@@ -11183,7 +11205,7 @@ test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subje
   writeBuildLedgers(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by @abdelrahmannasr [skip ci]');
+  assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by abdelrahman [skip ci]');
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only Build: ${files.join()}`);
   assert.ok(!files.some((f) => f.endsWith('state.json')), 'Shape state.json must not be committed');
@@ -11330,7 +11352,7 @@ test('runCheckpoint carries the story status flip (approved → shipped) alongsi
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.deepEqual(files, ['epics/EP-a/stories/EP-a-S01.md'], 'the story flip rides in the checkpoint commit');
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.match(subject, /^chore\(hub\): sync Build state — EP-a\/EP-a-S01 by @abdelrahmannasr \[skip ci\]$/);
+  assert.match(subject, /^chore\(hub\): sync Build state — EP-a\/EP-a-S01 by abdelrahman \[skip ci\]$/);
   assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'nothing left uncommitted — no raw git-to-main needed');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
@@ -12139,7 +12161,7 @@ test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, co
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/build-log.json'))).ships.length, 1, 'S01 ship folded in');
   // the union reader still sees BOTH the folded S01 and the loose S02
   assert.equal(readTrustRuns(ep).length, 2, 'union: folded S01 + loose S02');
-  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy Build ledgers — EP-demo by @abdelrahmannasr [skip ci]');
+  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy Build ledgers — EP-demo by abdelrahman [skip ci]');
   const out = await grab(() => runTidy(T, {}));
   assert.match(out, /nothing to tidy/);
   assert.ok(!process.exitCode);
@@ -12283,7 +12305,7 @@ test('runCheckpoint commits trust-log/ + build-log/ shard files (allowlist widen
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.includes('epics/EP-demo/.sdlc/trust-log/EP-demo-S01-be-checks-a1.json'), 'trust shard committed');
   assert.ok(files.includes('epics/EP-demo/.sdlc/build-log/EP-demo-S01-T01-be.json'), 'build shard committed');
-  assert.match(git(T, 'log', '-1', '--format=%s').toString(), /EP-demo\/EP-demo-S01 by @abdelrahmannasr/, 'subject label derived from the shard filename');
+  assert.match(git(T, 'log', '-1', '--format=%s').toString(), /EP-demo\/EP-demo-S01 by abdelrahman/, 'subject label derived from the shard filename');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
 });

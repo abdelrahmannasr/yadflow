@@ -128,20 +128,47 @@ export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = nu
   return out;
 }
 
-// The committer/PR-opener's platform login, resolved from local git identity through the roster.
-// Match on commit email first (the stable key), then fall back to name/login. null when unresolved.
-export function resolveCommitterLogin(cwd, roster = []) {
-  const email = (run('git', ['config', 'user.email'], { cwd }).stdout || '').trim().toLowerCase();
-  const name = (run('git', ['config', 'user.name'], { cwd }).stdout || '').trim();
-  if (email) {
-    const byEmail = roster.find((r) => (r.email || '').toLowerCase() === email);
-    if (byEmail) return byEmail.login || null;
+// ---- who is running this command ------------------------------------------------------------
+// The platform login of whoever runs this command, asked of the platform's own CLI (`gh api user`,
+// `glab api user`) rather than looked up in a stored list (E62). A list is a claim that goes stale; the
+// CLI's answer is who is actually logged in. It is what a record's `by` names and what a commit subject
+// shows as `@login`.
+//
+// Best effort, and never a gate: null when there is no platform, the CLI is missing or logged out, the
+// network is down, the answer does not look like a login, or `YAD_PLATFORM_LOGIN=0` turns the lookup
+// off (offline work, and the test suite, which must never ask the developer's real account). Callers
+// then fall back to git `user.name` — see `actorName`. On CI the job token usually cannot read `/user`,
+// so the fallback is the bot's git name, exactly what it was before.
+//
+// Asked once per platform and directory per process: a command that writes several records pays for
+// one call. The timeout keeps a hung network from holding a command that only wanted a name.
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\[bot\])?$/;
+const loginCache = new Map();
+export function platformLogin(cwd, platform, { runner = run, env = process.env } = {}) {
+  if (env.YAD_PLATFORM_LOGIN === '0') return null;
+  const cli = cliFor(platform);
+  if (!cli) return null;
+  const key = `${platform}\0${cwd}`;
+  if (runner === run && loginCache.has(key)) return loginCache.get(key);
+  let login = null;
+  if (platform === 'github') {
+    const r = runner('gh', ['api', 'user', '--jq', '.login'], { cwd, timeout: 10000 });
+    if (r.ok) login = r.stdout.trim();
+  } else {
+    const r = runner('glab', ['api', 'user'], { cwd, timeout: 10000 });
+    if (r.ok) { try { login = String(JSON.parse(r.stdout).username || ''); } catch { /* not JSON — no login */ } }
   }
-  if (name) {
-    const byName = roster.find((r) => r.name === name || r.login === name);
-    if (byName) return byName.login || null;
-  }
-  return null;
+  if (!login || !LOGIN_RE.test(login)) login = null;
+  if (runner === run) loginCache.set(key, login);
+  return login;
+}
+
+// Who wrote a record: the platform login, else git `user.name`, else null. Attribution is a nicety on
+// the audit trail and never blocks the command that writes it.
+export function actorName(cwd, platform, opts = {}) {
+  return platformLogin(cwd, platform, opts)
+    || ((opts.runner || run)('git', ['config', 'user.name'], { cwd }).stdout || '').trim()
+    || null;
 }
 
 // Does this platform login exist on the Product? Warn-only (never throws): `checked:false` when the CLI

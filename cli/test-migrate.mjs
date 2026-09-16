@@ -13,6 +13,11 @@ import path from 'node:path';
 import { isEpicStatePath, MIGRATIONS, planMigration, projectJsonFiles, runMigrate } from './migrate.mjs';
 import { SCHEMA_VERSION as ENGINE_SHAPE } from './manifest.mjs';
 
+// E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
+// account — the answer would differ per machine — so the lookup is off for every test in this file and
+// every CLI it spawns. The lookup's own tests pass `env` explicitly.
+process.env.YAD_PLATFORM_LOGIN = '0';
+
 const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const write = (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s); };
 const rowFor = (rows, file) => rows.find((r) => r.file === file);

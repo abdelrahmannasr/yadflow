@@ -25,7 +25,7 @@ import path from 'node:path';
 import { c, log, ok, info, fail, hand, exists, readJSON, readJSONStrict, pushWithRebase } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { resolveCommitterLogin } from './platform.mjs';
+import { platformLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import { readShips, writeRetroShip } from './ledger.mjs';
 import { readFrontmatter, declaredRepos } from './epic-state.mjs';
@@ -130,7 +130,7 @@ export function summarizeStaged(files = []) {
 // path from breaking the one-line subject or injecting a fake trailer line.
 const oneLine = (s = '') => String(s).replace(/\s+/g, ' ').trim();
 
-// `@login` from the roster (the auditable handle the user asked for), else the raw git user.name,
+// `@login` from the platform CLI (the auditable handle the user asked for), else the raw git user.name,
 // else a stable placeholder so the subject is never empty.
 export function checkpointAuthor(login, name) {
   if (login) return `@${oneLine(login)}`;
@@ -375,7 +375,7 @@ export async function runCheckpoint(root, opts = {}) {
   const staged = git('diff', '--cached', '--name-only', '--', ...pathspecs).stdout.split('\n').filter(Boolean);
 
   const { label, basenames } = summarizeStaged(staged);
-  const author = checkpointAuthor(resolveCommitterLogin(root, hub?.roster || []), git('config', 'user.name').stdout);
+  const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
   const message = buildCheckpointMessage({ label, author, basenames });
 
   if (opts.dryRun) {

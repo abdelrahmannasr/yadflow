@@ -137,6 +137,8 @@ yad gate ci --branch review/EP-e2e/epic --pr 7 --merged --no-push --dir "$HUB" |
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
 # The platform login, with no role: the roster seeded above is left on disk and never read (E62).
 jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "alice" && a.role === undefined && a.status === "approved")'
+# The closing record names the login the platform CLI reports for whoever ran the merge sync (E62).
+jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").closed.by === "octo-ci"'
 fa_status "$EPIC/epic.md" approved
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
 
