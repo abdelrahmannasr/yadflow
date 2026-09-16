@@ -242,8 +242,21 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   const seen = new Set(recs.map((r) => r.name));
   const matchOf = new Map();  // rec -> the record it continues
   const replaced = new Set(); // people whose records a rec replaces
+  // AN EXACT SUBMISSION TIME BEATS THE NAME TABLE. On GitHub every review carries the second it was
+  // submitted, and an older record kept it as `approvedAt`; when exactly one older group holds that
+  // second, it is the same review whatever name the roster now gives it. The name table can be wrong —
+  // a team that renamed one of two people sharing a name hands the older records to whoever kept it,
+  // and trusting the name then dropped the right record and passed the gate on an approval of old content
+  // (E62 upgrade simulation). Only older (role-bearing) groups are matched this way.
+  const legacyGroup = (k) => groups.get(k).every((a) => isLegacy(a) && !a.unverified);
   for (const r of recs) {
-    if (groups.has(r.name)) { matchOf.set(r, repOf(groups.get(r.name))); replaced.add(r.name); }
+    if (!r.submittedAt || recs.some((x) => x !== r && x.submittedAt === r.submittedAt)) continue;
+    const byTime = [...groups.keys()].filter((k) => !replaced.has(k) && legacyGroup(k)
+      && groups.get(k).some((a) => a.approvedAt === r.submittedAt));
+    if (byTime.length === 1 && byTime[0] !== r.name) { matchOf.set(r, repOf(groups.get(byTime[0]))); replaced.add(byTime[0]); }
+  }
+  for (const r of recs) {
+    if (!matchOf.has(r) && groups.has(r.name) && !replaced.has(r.name)) { matchOf.set(r, repOf(groups.get(r.name))); replaced.add(r.name); }
   }
   // Older approvers nobody could name: legacy records with no alias, recorded against THIS review (a
   // record with no `pr` predates PR provenance and is taken as the pointer's, as `stampLegacyPr` does).

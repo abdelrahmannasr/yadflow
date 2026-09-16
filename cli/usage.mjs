@@ -18,14 +18,22 @@
 // the name a ledger records (the platform login since E62; the roster's name in older records) or the
 // git author. One join survives because it is evidence rather than a claim: a GitHub or GitLab noreply
 // commit address carries the login, so those commits land on the same row as that login's approvals.
-// A person whose git name, older ledger name and login all differ appears on more than one row, and the
-// report says so rather than guessing.
+// A person whose git name and login differ may appear on more than one row, and the report says so
+// rather than guessing.
+//
+// An older record (one still carrying the `role` the roster gave it) names the person by their ROSTER
+// name, which can be ANOTHER person's login — `al` was bob's roster name and alice's login. Read raw,
+// the two landed on one row once alice's records were re-synced under her login. So an older record is
+// read through the roster's name → login table (`legacyLogins`), the same one `yad gate sync` uses, and
+// only when the roster still holds that name for exactly one login; an `unverified` record already names
+// a login.
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, epicFiles } from './manifest.mjs';
+import { PROJECT_FILES, epicFiles, productConfigPath } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
+import { legacyLogins } from './gate.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -91,17 +99,19 @@ const inWindow = (date, since, until) => !!date && (!since || date >= since) && 
 
 // Ledger-sourced events for one epic: approvals, comments, and ship engineer-reviews, attributed to the
 // name the ledger records — as recorded, with nothing to translate it through.
-function ledgerEvents(root, epic) {
+function ledgerEvents(root, epic, aliases = new Map()) {
   const f = epicFiles(epicRoot(root, epic));
   const events = [];
-  const emit = (rawName, action, date, extra = {}) => {
+  const emit = (rec, rawName, action, date, extra = {}) => {
     if (!rawName || !date) return;
-    events.push({ ts: date, actor: rawName, login: null, action, epic, ...extra });
+    const older = (rec.role !== undefined || rec.domain !== undefined) && !rec.unverified;
+    const login = older && aliases.has(rawName) ? aliases.get(rawName) : null;
+    events.push({ ts: date, actor: login || rawName, login, action, epic, ...extra });
   };
-  for (const a of readLedger(f.approvals, []) || []) emit(a.approver, 'approved', a.date, { artifact: a.artifact });
-  for (const cm of readLedger(f.comments, []) || []) emit(cm.commenter, 'commented', cm.date, { artifact: cm.artifact });
+  for (const a of readLedger(f.approvals, []) || []) emit(a, a.approver, 'approved', a.date, { artifact: a.artifact });
+  for (const cm of readLedger(f.comments, []) || []) emit(cm, cm.commenter, 'commented', cm.date, { artifact: cm.artifact });
   for (const s of readShips(epicRoot(root, epic))) {
-    for (const er of s.engineer_review || []) emit(er.approver, 'shipped', s.shippedAt, { story: s.story, task: s.task, repo: s.repo, risk: s.risk });
+    for (const er of s.engineer_review || []) emit(er, er.approver, 'shipped', s.shippedAt, { story: s.story, task: s.task, repo: s.repo, risk: s.risk });
   }
   return events;
 }
@@ -176,7 +186,9 @@ function repoCommitEvents(root) {
 // The full, window-filtered event stream. Deterministic: sorted by (date, action, epic/repo, actor).
 export function deriveEvents(root, { since, until, repos = false } = {}) {
   const events = [...gitAuthoredEvents(root)];
-  for (const epic of listEpics(root)) events.push(...ledgerEvents(root, epic));
+  let aliases = new Map();
+  try { aliases = legacyLogins(readJSON(productConfigPath(root), null)); } catch { /* no Product — nothing to translate */ }
+  for (const epic of listEpics(root)) events.push(...ledgerEvents(root, epic, aliases));
   if (repos) events.push(...repoCommitEvents(root));
   return events
     .filter((e) => inWindow(e.ts, since, until))

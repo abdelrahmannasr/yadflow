@@ -553,8 +553,9 @@ async function main() {
       // Removed in E62. Kept as a word for one major so a script or a habit gets told where it went
       // instead of "unknown command".
       log(c.red('yad roster was removed — yadflow keeps no list of people'));
-      log('  A gate needs one approval from anyone with access to the repo; the platform records who approved.');
-      log('  Request reviewers on the PR itself. An existing `roster` in hub.json is left on disk and decides nothing.');
+      log('  A gate needs one approval (not the author\'s own) from anyone with access to the repo; the platform records who approved.');
+      log('  Request reviewers on the PR itself. Keep an existing `roster` in hub.json until every review with older approvals is closed:');
+      log('  it decides nothing, but the first sync uses its name → login pairs to recognise those approvals.');
       process.exitCode = 1;
       break;
     case 'docs': {

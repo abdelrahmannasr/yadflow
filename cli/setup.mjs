@@ -621,7 +621,7 @@ export async function runSetup(root, opts = {}) {
     hand(`author your first epic: run \`${epicSkill}\``);
   }
   hand('your single next action, anytime: `yad next`');
-  if (!solo) hand('reviewers need no setup: anyone with access approves on the platform, and one approval passes a gate');
+  if (!solo) hand('reviewers need no setup: anyone with access approves on the platform; a gate needs one approval (not the author\'s own), resolved threads and the merge');
   log('');
   log(c.bold('Then — AI-only steps (run in your AI agent):'));
   if (registry.repos.length) hand('generate code-maps: run `yad-connect-repos` for each connected repo');

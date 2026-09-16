@@ -3333,6 +3333,20 @@ test('E62 upgrade: an older comment round under a shared name is not "the same r
   } finally { r.done(); }
 });
 
+test('E62 upgrade: an exact submission time beats a roster name someone renamed — no pass on old content', async () => {
+  // `carol` used to be shared by ca and da. The team renamed ca to `caroline`, so the table now says
+  // `carol` → da — but the older record under `carol` was ca's approval of old content.
+  const T = '2026-06-06T10:00:00Z';
+  const r = await legacySync({ roster: [{ login: 'da', name: 'carol' }, { login: 'ca', name: 'caroline' }],
+    approvals: [legacyAppr('carol', 'reviewer', 'sha256:old', { approvedAt: T })],
+    reviews: [{ login: 'ca', state: 'APPROVED', submittedAt: T }], merged: true });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { ca: 'sha256:old' }, 'ca continues her own record by its exact time');
+    const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review');
+  } finally { r.done(); }
+});
+
 test('legacyLogins: the roster\'s name → login pairs, and a name given to two logins is left out', async () => {
   const { legacyLogins } = await import('./gate.mjs');
   assert.deepEqual([...legacyLogins({ roster: [{ login: 'al', name: 'alice' }, { login: 'x', name: 'sam' }, { login: 'y', name: 'sam' }, { login: 'bo' }, null] })], [['alice', 'al']]);
@@ -8733,6 +8747,12 @@ test('check --fix wires the verified-commits gate and generates NO author allowl
   assert.equal(d?.status, 'warn');
   assert.match(d.message, /`verified_authors` in .*hub\.json/);
   assert.match(d.message, /\.sdlc\/verified-authors in the Product/);
+  // An older wired gate script still enforces the list — named, because a local-ledger Product keeps it.
+  assert.ok(!collectDoctor(T).checks.some((x) => x.id === 'people:allowlist-gate-stale'), 'the refreshed script is not flagged');
+  fs.appendFileSync(path.join(T, 'checks/verified-commits.sh'), '\nALLOWLIST="${SDLC_VERIFIED_AUTHORS:-.sdlc/verified-authors}"\n');
+  const stale = collectDoctor(T).checks.find((x) => x.id === 'people:allowlist-gate-stale');
+  assert.equal(stale?.status, 'warn');
+  assert.match(stale.message, /checks\/verified-commits\.sh in the Product is an older copy that still enforces the author list/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -11040,11 +11060,13 @@ test('usage: people come from activity — the name each ledger records, never a
   const T = usageFixture();
   const model = buildModel(T, {});
   const by = Object.fromEntries(model.members.map((m) => [m.name, m]));
-  assert.equal(by.alice.counts.approved, 2, 'alice has both approvals all-time');
-  assert.equal(by.bob.counts.commented, 1, 'bob commented once');
-  assert.equal(by.bob.counts.shipped, 1, 'bob has one engineer-review ship');
+  // The fixture's records are older ones (they carry a role), so they are read through the roster's
+  // name → login table, exactly as `yad gate sync` reads them: alice is `al`, bob is `bo`.
+  assert.equal(by.al.counts.approved, 2, 'alice (al) has both approvals all-time');
+  assert.equal(by.bo.counts.commented, 1, 'bob (bo) commented once');
+  assert.equal(by.bo.counts.shipped, 1, 'bob (bo) has one engineer-review ship');
   assert.equal(by.dormant, undefined, 'a name only the old roster lists is not a row');
-  assert.deepEqual(model.members.map((m) => m.name), ['alice', 'bob']);
+  assert.deepEqual(model.members.map((m) => m.name), ['al', 'bo']);
   assert.ok(model.members.every((m) => m.role === undefined && m.rostered === undefined), 'no roster-derived fields');
   assert.equal(model.totals.approved, 2);
   fs.rmSync(T, { recursive: true, force: true });
@@ -11053,16 +11075,16 @@ test('usage: people come from activity — the name each ledger records, never a
 test('usage: --since/--until window trims out-of-range events', () => {
   const T = usageFixture();
   const jan = buildModel(T, { since: '2026-01-01', until: '2026-01-31' });
-  const alice = jan.members.find((m) => m.name === 'alice');
+  const alice = jan.members.find((m) => m.name === 'al');
   assert.equal(alice.counts.approved, 1, 'only the January approval is in range (May excluded)');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('usage: --member filters to one person', () => {
   const T = usageFixture();
-  const model = buildModel(T, { member: 'alice' });
+  const model = buildModel(T, { member: 'al' });
   assert.equal(model.members.length, 1);
-  assert.equal(model.members[0].name, 'alice');
+  assert.equal(model.members[0].name, 'al');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -11130,6 +11152,23 @@ test('usage: a noreply commit address joins a git author to their platform login
   assert.equal(loginFromEmail(''), null);
 });
 
+test('usage: an older record under a roster name that is ANOTHER person\'s login stays with its own person (E62 simulation)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-alias-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'bob', name: 'al' }, { login: 'al', name: 'alice' }] }));
+    const ep = path.join(T, 'epics/EP-x/.sdlc');
+    fs.mkdirSync(ep, { recursive: true });
+    fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([
+      { artifact: 'epic.md', step: 'epic-review', approver: 'al', role: 'owner', status: 'approved', date: '2026-06-01' },   // bob's, under his roster name
+      { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-09-16' }, // alice's, re-synced under her login
+      { artifact: 'epic.md', step: 'epic-review', approver: 'zed', role: 'reviewer', unverified: true, status: 'approved', date: '2026-06-01' },
+    ]));
+    const by = Object.fromEntries(buildModel(T, {}).members.map((m) => [m.name, m.counts.approved]));
+    assert.deepEqual(by, { al: 1, bob: 1, zed: 1 });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('usage: logins join case-insensitively and are shown as written', () => {
   const { analyze } = usageMod;
   const model = analyze([
@@ -11169,7 +11208,7 @@ test('usage: a noreply commit lands on the same row as that login\'s approvals',
   assert.ok(al, 'the commit is attributed to the login, not the git name');
   assert.equal(al.login, 'al');
   assert.equal(al.counts.authored, 1);
-  assert.equal(al.counts.approved, 1);
+  assert.equal(al.counts.approved, 3, 'the new login-named approval plus alice\'s two older ones, read through the roster');
   assert.ok(!model.members.some((m) => m.name === 'Al Ice'), 'no second row under the git name');
   assert.ok(!JSON.stringify(model).includes('noreply'), 'the address itself is never emitted');
   fs.rmSync(T, { recursive: true, force: true });
@@ -11181,7 +11220,7 @@ test('usage: a corrupt ledger warns and is skipped, never throws or under-counts
   let model;
   assert.doesNotThrow(() => { model = buildModel(T, {}); }, 'one corrupt ledger does not abort the view');
   // approvals are gone (the file was unreadable) but comments/ships from the other ledgers survive.
-  const bob = model.members.find((m) => m.name === 'bob');
+  const bob = model.members.find((m) => m.name === 'bo');
   assert.equal(bob.counts.commented, 1, 'the intact comments ledger still counts');
   assert.equal(bob.counts.shipped, 1, 'the intact build-log still counts');
   fs.rmSync(T, { recursive: true, force: true });
@@ -11197,7 +11236,7 @@ test('usage: runUsage --out creates missing parent directories', () => {
 
 test('usage: --member recomputes totals to the shown member only', () => {
   const T = usageFixture();
-  const model = buildModel(T, { member: 'alice' });
+  const model = buildModel(T, { member: 'al' });
   assert.equal(model.members.length, 1);
   assert.equal(model.totals.approved, 2, "totals reflect only alice's approvals");
   assert.equal(model.totals.commented, 0, "bob's comment is excluded from the filtered totals");
@@ -15180,7 +15219,8 @@ test('CLI: `yad roster` was removed, and says where the people model went instea
       const r = yadRun(T, ...args);
       assert.equal(r.code, 1, r.out);
       assert.match(r.out, /yad roster was removed — yadflow keeps no list of people/);
-      assert.match(r.out, /one approval from anyone with access/);
+      assert.match(r.out, /one approval \(not the author's own\) from anyone with access/);
+      assert.match(r.out, /Keep an existing `roster` in hub\.json until every review with older approvals is closed/);
     }
     assert.ok(!fs.existsSync(path.join(T, '.sdlc')), 'and it writes nothing');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }

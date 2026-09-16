@@ -100,7 +100,7 @@ export function projectChecks(checks, root) {
       const listed = Array.isArray(r) ? r.length > 0 : (r && typeof r === 'object' ? Object.keys(r).length > 0 : !!r);
       if (listed) {
         check(checks, 'people:roster-unused', 'project', 'warn',
-          `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval from anyone with access`,
+          `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
           'keep it until every review with older approvals is closed (the first sync uses its name → login pairs to recognise them), then delete the `roster` key');
         // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
         // older record means. Named here, because on an open review that approval may then have to be given
@@ -420,6 +420,18 @@ export function projectChecks(checks, root) {
       check(checks, 'people:verified-authors-unused', 'project', 'warn',
         `${what} — the verified-commits gate no longer reads an author list; it checks signatures only`,
         'delete them when convenient; write access to the repo decides who can author a commit');
+    }
+    // A wired `verified-commits.sh` from before E62 still ENFORCES the author list. On a verified ledger
+    // `yad check --fix` refreshes it; on a local ledger the Product's CI files are not managed, so an older
+    // copy stays and keeps failing commits from unlisted authors (E62 upgrade simulation). Named, not fixed.
+    const oldGates = [
+      { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
+      ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
+    ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
+    if (oldGates.length) {
+      check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
+        `checks/verified-commits.sh in ${oldGates.join(', ')} is an older copy that still enforces the author list`,
+        'run `yad check --fix` (it refreshes the gate on a verified ledger and on code repos); on a local-ledger Product, copy skills/yad-checks/templates/checks/verified-commits.sh over it');
     }
   }
 
