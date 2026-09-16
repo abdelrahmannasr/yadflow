@@ -135,7 +135,8 @@ jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").stat
 say "CI --merged advances on the default branch: step done + artifact status approved"
 yad gate ci --branch review/EP-e2e/epic --pr 7 --merged --no-push --dir "$HUB" || die "gate ci (merge) failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
-jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "Alice" && a.role === "owner" && a.status === "approved")'
+# The platform login, with no role: the roster seeded above is left on disk and never read (E62).
+jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "alice" && a.role === undefined && a.status === "approved")'
 fa_status "$EPIC/epic.md" approved
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
 

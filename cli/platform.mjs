@@ -161,41 +161,12 @@ export function validateLogin(platform, login) {
   return { ok: exists, exists, checked: true };
 }
 
-// ---- login -> yad identity (roster + derived domain-owner) -------------------------------------
-// Returns the records this login's APPROVED review contributes. Roles are read from the per-scope
-// map: Product roles plus, for each touched domain, that repo's scoped roles (domain-owner carries the
-// `domain` tag). The legacy `repos.json` `domain_owner === name` mapping is kept as a fallback so
-// pre per-scope projects still resolve domain owners.
-export function resolveLogin(login, roster = [], repos = [], touchedDomains = []) {
-  const entry = roster.find((r) => r.login === login);
-  if (!entry) return [{ name: login, role: 'reviewer', unverified: true }];
-  const records = [];
-  const push = (rec) => {
-    if (!records.some((x) => x.name === rec.name && x.role === rec.role && x.domain === rec.domain)) records.push(rec);
-  };
-  for (const role of rolesForScope(entry, 'hub')) push({ name: entry.name, role });
-  for (const d of touchedDomains) {
-    for (const role of rolesForScope(entry, d)) {
-      push(role === 'domain-owner' ? { name: entry.name, role, domain: d } : { name: entry.name, role });
-    }
-    // Legacy fallback: a repo whose domain_owner / domain_owners[] includes this name confers
-    // domain-owner for that domain. Both spellings are honored — symmetric with reviewersForScopes,
-    // which REQUESTS from both, so a person routed as a domain owner is also credited as one.
-    const legacy = repos.find((repo) => repo.name === d
-      && (repo.domain_owner === entry.name || (Array.isArray(repo.domain_owners) && repo.domain_owners.includes(entry.name))));
-    if (legacy) push({ name: entry.name, role: 'domain-owner', domain: d });
-  }
-  // An identity-only entry (no roles map and no legacy `role`) still contributes a base reviewer
-  // record so an approval from a known person is never silently dropped. An entry that DOES declare
-  // roles but none apply to these scopes contributes nothing here (it is scoped elsewhere).
-  const hasNoRoleInfo = !entry.role && !(entry.roles && (Array.isArray(entry.roles) ? entry.roles.length : Object.keys(entry.roles).length));
-  if (!records.length && hasNoRoleInfo) push({ name: entry.name, role: 'reviewer' });
-  return records;
-}
-
 // Normalized PR reviews -> approval records (only APPROVED states count). `submittedAt` rides along
 // so the gate can tell a fresh re-approval from a stale one (revoke-on-change).
-export function mapApprovers(reviews = [], { roster, repos, touchedDomains, headOid } = {}) {
+// The record names the PLATFORM LOGIN that approved (E62). There is no stored list to look it up in and
+// no role to give it: the platform's record of who approved is the evidence, and the gate counts
+// people, not roles. A review with no login cannot be told apart from another one, so it is not counted.
+export function mapApprovers(reviews = [], { headOid } = {}) {
   const out = [];
   for (const r of reviews) {
     if (r.state !== 'APPROVED') continue;
@@ -213,9 +184,8 @@ export function mapApprovers(reviews = [], { roster, repos, touchedDomains, head
     // engagement rides in the APPROVE review body (`<!-- yad:engagement verified -->`); a bare UI
     // click has no marker → 'none'. Gameable by design (it makes review quality visible, not provable).
     const engagement = parseEngagement(r.body);
-    for (const rec of resolveLogin(r.login, roster, repos, touchedDomains)) {
-      out.push({ ...rec, submittedAt: r.submittedAt || null, engagement });
-    }
+    if (!r.login) continue;
+    out.push({ name: r.login, submittedAt: r.submittedAt || null, engagement });
   }
   return out;
 }

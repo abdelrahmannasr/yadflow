@@ -1310,9 +1310,10 @@ test('fillHubTemplate: the generated review-PR body carries every section the Pr
   assert.match(b, /^## Impact & Risk \(front-half\)$/m);
   assert.match(b, /^## Checklist$/m);
   assert.match(b, /Risk tags:/);
-  // E7 (rule 6): the body says what the count asks of this step, labelled advisory so nobody reads it
-  // as the requirement. Pinned here because without it the line can be deleted with a green suite.
-  assert.match(b, /- \*\*Approver count \(advisory, not yet enforced\):\*\* 3 approvers = base 1 \+ contract risk 2$/m);
+  // E7 (rule 6): the body says what the count asks of this step, and which half of it holds the gate
+  // (E62: the base; the risk step is advisory until the cap), so nobody reads the full number as the
+  // requirement. Pinned here because without it the line can be deleted with a green suite.
+  assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory until the capacity cap\)$/m);
 });
 
 test('fillHubTemplate: an untagged step states the count too — the floor is still a number', () => {
@@ -1320,7 +1321,8 @@ test('fillHubTemplate: an untagged step states the count too — the floor is st
     epic: 'EP-demo', artifact: 'epic.md', step: { id: 'epic-review', risk_tags: [] },
     owner: 'alice', domains: ['backend'],
   });
-  assert.match(b, /- \*\*Approver count \(advisory, not yet enforced\):\*\* 1 approver = base 1$/m);
+  // No risk step, so nothing is advisory and the line says so by not mentioning it.
+  assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 1 approver = base 1$/m);
 });
 
 test('fillHubTemplate: the generated body passes the real pr-template hub gate (#103 regression)', () => {
@@ -1638,11 +1640,17 @@ const baseStep = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md
 const escStep = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
 const appr = (over) => ({ step: 'epic-review', status: 'approved', artifactHash: 'sha256:H1', ...over });
 
-test('gatePredicate: base pass needs owner + 1 reviewer, then merged + resolved', () => {
-  const approvals = [appr({ approver: 'alice', role: 'owner' }), appr({ approver: 'bob', role: 'reviewer' })];
-  const p = gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+test('gatePredicate: a team gate needs one approver, whoever they are, then merged + resolved (E62)', () => {
+  const none = gatePredicate({ step: baseStep, approvals: [], currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(none.passed, false);
+  assert.deepEqual(none.missing, ['1 approval(s)']);
+  // No role anywhere: the roster that gave one is gone, and the gate counts people.
+  const p = gatePredicate({ step: baseStep, approvals: [appr({ approver: 'al' })], currentHash: 'sha256:H1', merged: true, threadsResolved: true });
   assert.equal(p.passed, true);
-  assert.equal(p.rule, 'base');
+  assert.equal(p.rule, 'count');
+  // An approval an older release recorded still carries a role. It counts as the person, not the role.
+  const old = gatePredicate({ step: baseStep, approvals: [appr({ approver: 'bob', role: 'reviewer' })], currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(old.passed, true, 'a reviewer with no owner beside them passes now — the owner rule is gone');
 });
 
 test('gatePredicate: unresolved comments hold the gate in-review', () => {
@@ -1660,20 +1668,19 @@ test('gatePredicate: an approval against a stale hash is revoked', () => {
   assert.ok(p.missing.some((m) => /revoked/.test(m)));
 });
 
-test('gatePredicate: escalated step needs a domain-owner per touched repo', () => {
-  const approvals = [
-    { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
-    { step: 'architecture-review', status: 'approved', approver: 'bob', role: 'reviewer', artifactHash: 'sha256:C' },
-    { step: 'architecture-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: 'sha256:C' },
-  ];
-  const miss = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true });
-  assert.equal(miss.passed, false);
-  assert.ok(miss.missing.includes('domain-owner for mobile'));
-  assert.equal(miss.rule, 'escalated');
-
-  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'domain-owner', domain: 'mobile', artifactHash: 'sha256:C' });
-  const pass = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true });
-  assert.equal(pass.passed, true);
+test('gatePredicate: a contract step holds on the base alone — the risk step is reported, never enforced (E62)', () => {
+  // Until E72 caps it, a contract gate asking for three would lock out a two-person team. So one
+  // approver passes it, and the two it is short are said out loud rather than enforced.
+  const one = [{ step: 'architecture-review', status: 'approved', approver: 'al', artifactHash: 'sha256:C' }];
+  const p = gatePredicate({ step: escStep, approvals: one, currentHash: 'sha256:C', merged: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'count');
+  assert.equal(p.gateRule.needed, 3);
+  assert.equal(p.short, 2);
+  assert.deepEqual(p.missing, []);
+  const none = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', merged: true });
+  assert.equal(none.passed, false);
+  assert.deepEqual(none.missing, ['1 approval(s)'], 'the missing line asks for the base, not the full count');
 });
 
 test('gatePredicate: solo waives approvals — merged + resolved passes with zero approvals', () => {
@@ -1692,40 +1699,35 @@ test('gatePredicate: solo still requires the merge and resolved threads', () => 
 });
 
 test('gatePredicate: requireEngagement counts only verified approvals (soft default counts both)', () => {
-  const approvals = [
-    appr({ approver: 'alice', role: 'owner', engagement: 'verified' }),
-    appr({ approver: 'bob', role: 'reviewer', engagement: 'none' }),
-  ];
-  // soft (default): the bare reviewer still counts → passes.
+  const approvals = [appr({ approver: 'bob', engagement: 'none' })];
+  // soft (default): the bare approval still counts → passes.
   assert.equal(gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true }).passed, true);
-  // strict: bob's unengaged approval does not count → a reviewer is missing.
+  // strict: bob's unengaged approval does not count → the one approver is missing.
   const strict = gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
   assert.equal(strict.passed, false);
-  assert.ok(strict.missing.some((m) => /reviewer/.test(m)));
+  assert.ok(strict.missing.includes('1 approval(s)'));
   assert.ok(strict.missing.some((m) => /verified engagement/.test(m)));
   // once bob's approval is engagement-verified, strict passes.
   const ok = gatePredicate({
     step: baseStep, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true,
-    approvals: [approvals[0], appr({ approver: 'bob', role: 'reviewer', engagement: 'verified' })],
+    approvals: [appr({ approver: 'bob', engagement: 'verified' })],
   });
   assert.equal(ok.passed, true);
 });
 
-test('gatePredicate: solo passes an escalated step without any domain-owner approvals', () => {
-  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true, threadsResolved: true, solo: true });
+test('gatePredicate: solo passes an escalated step with no approvals at all', () => {
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', merged: true, threadsResolved: true, solo: true });
   assert.equal(p.passed, true);
   assert.equal(p.rule, 'solo');
 });
 
-test('gatePredicate: discovery-review is a base-rule gate (owner + 1 reviewer, no escalation)', () => {
+test('gatePredicate: discovery-review is an ordinary count gate (one approver, no risk step)', () => {
   const step = { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', risk_tags: [] };
-  const approvals = [
-    { step: 'discovery-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:D' },
-    { step: 'discovery-review', status: 'approved', approver: 'bob', role: 'reviewer', artifactHash: 'sha256:D' },
-  ];
+  const approvals = [{ step: 'discovery-review', status: 'approved', approver: 'al', artifactHash: 'sha256:D' }];
   const p = gatePredicate({ step, approvals, currentHash: 'sha256:D', merged: true, threadsResolved: true });
   assert.equal(p.passed, true);
-  assert.equal(p.rule, 'base');
+  assert.equal(p.rule, 'count');
+  assert.equal(p.gateRule.needed, 1);
 });
 
 test('gatePredicate: a SKIPPED step short-circuits — passes with zero approvals (rule: skipped)', () => {
@@ -1802,26 +1804,25 @@ test('gateRuleSum: one sentence of arithmetic, shared by every surface that prin
   assert.equal(gateRuleSum(gateRuleFor({ risk_tags: ['contract'] })), '3 approvers = base 1 + contract risk 2');
 });
 
-test('gatePredicate: the count reports a shortfall the role rule cannot see, and holds nothing', () => {
-  // The role rule is SATISFIED here: alice is both owner and reviewer (the roster gives a person every
-  // role they hold), and carol covers the one touched domain. Two people, though — and the count asks a
-  // contract step for three. THIS is the case that forced the count to ship advisory: a two-person team
-  // passes today and would be deadlocked by an uncapped count, with no escape until E72/E73.
+test('gatePredicate: the count counts people, not records, and its risk step holds nothing', () => {
+  // Three records an older release wrote, from two people: alice once per role the roster gave her.
+  // The count asks a contract step for three. THIS is the case that keeps the risk step advisory: a
+  // two-person team would be deadlocked by an uncapped count, with no escape until E72/E73.
   const approvals = [
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'reviewer', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: 'sha256:C' },
   ];
-  const p = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
-  assert.equal(p.passed, true, 'the role rule decides the gate, and it is satisfied');
+  const p = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', merged: true, threadsResolved: true });
+  assert.equal(p.passed, true, 'the base decides the gate, and it is satisfied');
   assert.equal(p.have, 2, 'two distinct people, though three approval records');
   assert.equal(p.gateRule.needed, 3);
   assert.equal(p.short, 1, 'the shortfall is reported — this is the value E72 will enforce on');
-  assert.deepEqual(p.missing, [], 'nothing the count says may hold a gate before the cap exists');
+  assert.deepEqual(p.missing, [], 'nothing the risk step says may hold a gate before the cap exists');
 
-  // A third human clears the shortfall, whatever role they hold.
-  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'reviewer', artifactHash: 'sha256:C' });
-  const full = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
+  // A third human clears the shortfall.
+  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', artifactHash: 'sha256:C' });
+  const full = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', merged: true, threadsResolved: true });
   assert.equal(full.have, 3);
   assert.equal(full.short, 0);
 });
@@ -1840,13 +1841,13 @@ test('gatePredicate: a hand-added risk tag raises what the count asks of an ordi
   const untagged = gatePredicate({ step: baseStep, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
   assert.equal(untagged.gateRule.needed, 1);
   assert.equal(untagged.short, 0);
-  // Neither verdict moved — the role rule decides both, and one person holds both roles.
+  // Neither verdict moved — the base decides both, and one person meets it.
   assert.equal(tagged.passed, true);
   assert.equal(untagged.passed, true);
 });
 
 test('gatePredicate: solo reports no shortfall, and still says what team mode would ask', () => {
-  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true, solo: true });
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', merged: true, threadsResolved: true, solo: true });
   assert.equal(p.passed, true);
   assert.equal(p.gateRule.needed, 3, 'the rule is a fact about the step, reported even where approvals are waived');
   assert.equal(p.have, 0);
@@ -1871,19 +1872,23 @@ test('gatePredicate: a waived path reports `have: null`, which is not the same a
 
 test('gatePredicate: an engagement-gated approval does not count as an approver either', () => {
   // requireEngagement filters the approvals BEFORE anything counts them, so a bare click cannot make
-  // up the head count any more than it can fill a role.
+  // up the head count.
   const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: ['payments'] };
   const approvals = [
-    appr({ approver: 'alice', role: 'owner', engagement: 'verified' }),
-    appr({ approver: 'bob', role: 'reviewer', engagement: 'none' }),
+    appr({ approver: 'alice', engagement: 'verified' }),
+    appr({ approver: 'bob', engagement: 'none' }),
   ];
   const strict = gatePredicate({ step, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
   assert.equal(strict.have, 1);
   assert.equal(strict.gateRule.needed, 2);
   assert.equal(strict.short, 1);
-  // The role rule is what fails here (bob's approval does not count as a reviewer either).
-  assert.equal(strict.passed, false);
-  assert.ok(strict.missing.some((m) => /reviewer/.test(m)));
+  // The base is met by alice alone, so the gate passes — and the risk step's shortfall is reported only.
+  assert.equal(strict.passed, true);
+  // Without alice, bob's bare approval cannot meet the base either.
+  const bare = gatePredicate({ step, approvals: [approvals[1]], currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
+  assert.equal(bare.have, 0);
+  assert.equal(bare.passed, false);
+  assert.ok(bare.missing.includes('1 approval(s)'));
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -3012,7 +3017,9 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
   assert.equal(state.currentStep, 'ui-design');
   const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
-  assert.ok(approvals.some((a) => a.role === 'domain-owner' && a.domain === 'backend' && a.source === 'bridge'));
+  // One record per approving LOGIN, with no role: the roster in this fixture is left on disk and not read (E62).
+  assert.deepEqual(approvals.filter((a) => a.source === 'bridge').map((a) => a.approver).sort(), ['al', 'bo', 'ca']);
+  assert.ok(approvals.every((a) => a.role === undefined && a.domain === undefined));
 
   // idempotent: a second identical sync does not duplicate bridge approvals
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
@@ -3023,29 +3030,26 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
 
 test('gate sync: the log line says who approved and what the count asks for (E7, rule 6)', async () => {
   const { T } = scaffoldEpic();
-  // Three logins approve the contract step, so the count is met and the role rule passes.
+  // Three logins approve the contract step, so the full count is met.
   const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }));
-  assert.match(out, /rule: escalated/);
-  assert.match(out, /3 approved; count \(advisory\): 3 approvers = base 1 \+ contract risk 2/);
+  assert.match(out, /rule: count/);
+  assert.match(out, /3 approved; count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory/);
   assert.ok(!/short/.test(out), `nothing is short here: ${out}`);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('gate sync: a shortfall is named on the log line, and it still advances the step', async () => {
   const { T, ep } = scaffoldEpic();
-  // TWO people approve a contract step: al as owner, bo as reviewer AND as the repo's domain owner. The
-  // role rule is satisfied, so the gate passes — and the count, which asks three, says how far short it
-  // is. This is the pairing the advisory decision exists for; without it the suffix is unpinned.
-  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
-    repos: [{ name: 'backend', path: 'demo/backend', domain_owner: 'bob', default_branch: 'main' }],
-  }));
+  // TWO people approve a contract step. The base is met, so the gate passes — and the count, which asks
+  // three, says how far short it is. This is the pairing the advisory risk step exists for; without it
+  // the suffix is unpinned.
   const twoPeople = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [
     { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
     { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
   ], threads: [] };
   const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => twoPeople }));
-  assert.match(out, /2 approved; count \(advisory\): 3 approvers = base 1 \+ contract risk 2 — 1 short/);
-  assert.match(out, /gate PASSED/, `the count must not hold the gate: ${out}`);
+  assert.match(out, /2 approved; count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory — 1 short/);
+  assert.match(out, /gate PASSED/, `the risk step must not hold the gate: ${out}`);
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review').status, 'done');
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -3106,8 +3110,8 @@ test('gate sync: records engagement per approval; a noblock companion thread nev
   const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done'); // noblock thread ignored
   const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
-  assert.equal(approvals.find((a) => a.approver === 'alice').engagement, 'verified');
-  assert.equal(approvals.find((a) => a.approver === 'bob').engagement, 'none');
+  assert.equal(approvals.find((a) => a.approver === 'al').engagement, 'verified');
+  assert.equal(approvals.find((a) => a.approver === 'bo').engagement, 'none');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3193,9 +3197,10 @@ test('review reconcile: stamps engagement onto the matching build-log ship recor
   assert.equal(res.written, true);
   const bl = JSON.parse(fs.readFileSync(path.join(ep, 'build-log.json')));
   const er = bl.ships[0].engineer_review;
-  assert.equal(er.find((e) => e.approver === 'amelia').engagement, 'verified');
-  assert.equal(er.find((e) => e.approver === 'carol').engagement, 'none');
-  assert.equal(er.find((e) => e.approver === 'amelia').role, 'owner');
+  // The platform login, with no role: the roster above is left on disk and never read (E62).
+  assert.equal(er.find((e) => e.approver === 'al').engagement, 'verified');
+  assert.equal(er.find((e) => e.approver === 'ca').engagement, 'none');
+  assert.equal(er.find((e) => e.approver === 'al').role, undefined);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3441,20 +3446,21 @@ test('gate sync: EP-foundation advances through the SAME gate at foundation/ to 
 test('gate sync: an approval on an older commit than the merged head is stale — gate holds (revoke-on-change in code)', async () => {
   const head = 'deadbeefcafe';
   const onHead = (login) => ({ login, state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: head });
-  // carol (the backend domain-owner) approved an EARLIER revision; the artifact moved before merge,
-  // so her review sits on an older commit than the merged head → dropped → escalated gate holds.
-  const staleCarol = { ok: true, state: 'MERGED', merged: true, headOid: head,
-    reviews: [onHead('al'), onHead('bo'), { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-08T00:00:00Z', commit: 'oldsha' }],
+  // The only approval is on an EARLIER revision; the artifact moved before merge, so the review sits
+  // on an older commit than the merged head → dropped → no approver is left and the gate holds.
+  const staleOnly = { ok: true, state: 'MERGED', merged: true, headOid: head,
+    reviews: [{ login: 'ca', state: 'APPROVED', submittedAt: '2026-06-08T00:00:00Z', commit: 'oldsha' }],
     threads: [] };
   const s1 = scaffoldEpic();
-  await gateSync(s1.T, { epic: 'EP-test', today: '2026-06-09', reader: () => staleCarol });
+  await gateSync(s1.T, { epic: 'EP-test', today: '2026-06-09', reader: () => staleOnly });
   assert.equal(JSON.parse(fs.readFileSync(path.join(s1.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
-    'in_review', 'stale domain-owner approval is dropped → escalated gate holds');
+    'in_review', 'a stale approval is dropped → the gate holds');
+  assert.ok(!JSON.parse(fs.readFileSync(path.join(s1.ep, '.sdlc/approvals.json'))).some((a) => a.approver === 'ca'), 'and it is not recorded');
   fs.rmSync(s1.T, { recursive: true, force: true });
 
-  // all three approved the merged head → all count → the escalated gate passes.
+  // the same person approved the merged head too → it counts → the gate passes.
   const allHead = { ok: true, state: 'MERGED', merged: true, headOid: head,
-    reviews: [onHead('al'), onHead('bo'), onHead('ca')], threads: [] };
+    reviews: [onHead('ca')], threads: [] };
   const s2 = scaffoldEpic();
   await gateSync(s2.T, { epic: 'EP-test', today: '2026-06-09', reader: () => allHead });
   assert.equal(JSON.parse(fs.readFileSync(path.join(s2.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
@@ -4071,13 +4077,15 @@ test('gate sync: unresolved comment holds in-review (no advance) and is recorded
   assert.ok(fs.existsSync(path.join(ep, 'reviews/architecture--2026-06-09--comments.md')));
   // ledger (not just the markdown side file) carries the participation record
   const comments = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/comments.json')));
-  const rec = comments.find((cm) => cm.step === 'architecture-review' && cm.commenter === 'bob');
-  assert.ok(rec, 'comments.json has a record for bob');
+  // the commenter is the platform login, with no role (E62)
+  const rec = comments.find((cm) => cm.step === 'architecture-review' && cm.commenter === 'bo');
+  assert.ok(rec, 'comments.json has a record for bo');
   assert.equal(rec.count, 1);
+  assert.equal(rec.role, undefined);
   // re-sync same round does not duplicate
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => withComment });
   const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/comments.json')));
-  assert.equal(after.filter((cm) => cm.commenter === 'bob' && cm.round === rec.round).length, 1);
+  assert.equal(after.filter((cm) => cm.commenter === 'bo' && cm.round === rec.round).length, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4357,10 +4365,10 @@ test('gate status says what the gate will ask for, and counts it the way the gat
     return lines.find((l) => l.includes('architecture-review') && l.includes('approval'));
   };
 
-  // The contract step's count, stated as arithmetic and labelled advisory — the roster rule alone would
-  // never print a number, and a number with no label would read as the requirement.
+  // The contract step's count, stated as arithmetic and labelled with which half holds the gate — a
+  // number with no label would read as the requirement.
   const line = await statusLines();
-  assert.match(line, /count \(advisory\): 3 approvers = base 1 \+ contract risk 2 — 1 short/);
+  assert.match(line, /count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory — 1 short/);
   assert.match(line, /from 2 people/);
 
   // With requireEngagement on, the predicate drops a bare approval BEFORE counting people. The status
@@ -4395,7 +4403,7 @@ test('gate status: a waived step says where its approvals live, and an unjustifi
   setStep({ inherited: true, inheritedFrom: 'EP-parent' });
   const inherited = await statusLine('architecture-review');
   assert.match(inherited, /inherited from EP-parent/);
-  assert.ok(!/count \(advisory\)/.test(inherited), `a waived step asks for nothing: ${inherited}`);
+  assert.ok(!/count:/.test(inherited), `a waived step asks for nothing: ${inherited}`);
 
   // A hand-edited `skipped: true` on a step this epic's route does NOT mark optional must not read as
   // waived here, because `gatePredicate` refuses to honour it either — two read-only views of one ledger
@@ -4403,7 +4411,7 @@ test('gate status: a waived step says where its approvals live, and an unjustifi
   setStep({ inherited: false, inheritedFrom: null, skipped: true });
   const forged = await statusLine('architecture-review');
   assert.ok(!/skipped/.test(forged), `an unjustified skip is not a waiver: ${forged}`);
-  assert.match(forged, /count \(advisory\): 3 approvers/);
+  assert.match(forged, /count: 3 approvers/);
 
   // A status this release cannot name is printed as itself and MARKED, never renamed to something it
   // is not — the line is the one view people read to see where a gate stands, and quietly calling an
@@ -4907,7 +4915,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
 
 test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
   assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
@@ -4918,11 +4926,6 @@ test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org
   assert.equal(prNumberFromUrl('nonsense'), null);
 });
 
-test('resolveLogin credits a domain owner declared via repos.json domain_owners[] (symmetry)', () => {
-  const roster = [{ login: 'ca', name: 'carol' }];
-  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owners: ['carol', 'bob'] }], ['backend']);
-  assert.ok(recs.some((r) => r.role === 'domain-owner' && r.domain === 'backend'));
-});
 const { parseEngagement, isNoBlock, upsertTrailerBlock, nudgeMessage, engagementBody, noBlock, NOBLOCK_MARK, PAIR_MARK, isPair, pairSessionBody } = await import('./companion.mjs');
 
 test('companion: engagement + noblock markers parse and round-trip', () => {
@@ -5005,25 +5008,18 @@ test('hostFromGitUrl parses https, ssh, and scp-like remotes', () => {
   assert.equal(hostFromGitUrl('not a url'), null);
 });
 
-test('resolveLogin derives a domain-owner record for a touched repo', () => {
-  const roster = [{ login: 'ca', name: 'carol', role: 'reviewer' }];
-  const repos = [{ name: 'backend', domain_owner: 'carol' }];
-  const recs = resolveLogin('ca', roster, repos, ['backend']);
-  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'reviewer']);
-  // unmapped login => flagged plain reviewer, never promoted
-  const unknown = resolveLogin('zz', roster, repos, ['backend']);
-  assert.deepEqual(unknown, [{ name: 'zz', role: 'reviewer', unverified: true }]);
-});
-
 test('mapApprovers only counts APPROVED and carries submittedAt', () => {
   const reviews = [
     { login: 'al', state: 'APPROVED', submittedAt: 't1' },
     { login: 'bo', state: 'CHANGES_REQUESTED', submittedAt: 't2' },
   ];
-  const recs = mapApprovers(reviews, { roster: [{ login: 'al', name: 'alice', role: 'owner' }], repos: [], touchedDomains: [] });
+  const recs = mapApprovers(reviews, {});
   assert.equal(recs.length, 1);
-  assert.equal(recs[0].name, 'alice');
+  assert.equal(recs[0].name, 'al', 'the platform login is the record — there is no roster to rename it (E62)');
+  assert.equal(recs[0].role, undefined);
   assert.equal(recs[0].submittedAt, 't1');
+  // An approval with no login cannot be told apart from another one, so it is not a person to count.
+  assert.equal(mapApprovers([{ state: 'APPROVED', submittedAt: 't3' }], {}).length, 0);
 });
 
 test('rolesForScope normalizes the per-scope map, the flat array, and the legacy single role', () => {
@@ -5041,24 +5037,6 @@ test('hasAnyRole searches the requested roles across scopes', () => {
   assert.equal(hasAnyRole(e, ['hub'], ['owner']), false);
   assert.equal(hasAnyRole(e, ['hub', 'backend'], ['domain-owner']), true);
   assert.equal(hasAnyRole(e, ['frontend'], ['reviewer']), false);
-});
-
-test('resolveLogin reads per-scope roles (owner+reviewer+domain-owner at once)', () => {
-  const roster = [{ login: 'ca', name: 'carol', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] } }];
-  const recs = resolveLogin('ca', roster, [], ['backend']);
-  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'owner', 'reviewer']);
-  assert.equal(recs.find((r) => r.role === 'domain-owner').domain, 'backend');
-  // a domain not touched contributes no domain-owner record
-  assert.ok(!resolveLogin('ca', roster, [], []).some((r) => r.role === 'domain-owner'));
-  // an entry scoped only to backend contributes nothing to an untouched scope
-  const scoped = [{ login: 'dv', name: 'dave', roles: { backend: ['domain-owner'] } }];
-  assert.deepEqual(resolveLogin('dv', scoped, [], []), []);
-});
-
-test('resolveLogin keeps the legacy repos.json domain_owner fallback', () => {
-  const roster = [{ login: 'ca', name: 'carol', role: 'reviewer' }];
-  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owner: 'carol' }], ['backend']);
-  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'reviewer']);
 });
 
 test('reviewersForScopes picks reviewers + domain-owners and excludes the committer', () => {
@@ -8370,9 +8348,13 @@ test('gate ci pre-merge: never writes approvals.json for the legacy-PR backfill'
   // reading `done` with zero live approvals (issue #156). Without the stamp, gateSync's own backfill
   // would write `pr: 9` first, the proof would never fire, and 'sha256:old' would survive.
   const stamped = JSON.parse(git(ci, 'show', 'HEAD:epics/EP-test/.sdlc/approvals.json').toString());
-  const alice = stamped.find((a) => a.approver === 'alice');
-  assert.ok(alice, 'the legacy approval survived the merge-phase sync');
-  assert.notEqual(alice.artifactHash, 'sha256:old', 'the deferred stamp still re-binds the legacy approval at merge');
+  // The approval now arrives under the LOGIN (`al`), which nothing on disk names — the older record says
+  // `alice`, the roster's name for them (E62). It came from #7, so it is not the same review as the one on
+  // #9 and is not adopted: the new record binds to the merged content, and the open step drops the old one.
+  const al = stamped.find((a) => a.approver === 'al');
+  assert.ok(al, 'the approval arriving on the replacement PR is recorded');
+  assert.notEqual(al.artifactHash, 'sha256:old', 'a review on a new PR binds to the merged content, never the pre-edit hash');
+  assert.ok(!stamped.some((a) => a.approver === 'alice' && a.source === 'bridge'), 'the older record from #7 is replaced, not kept beside it');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10041,13 +10023,14 @@ test('errors: readJSONStrict throws a YadError with code + hint on corrupt JSON'
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('doctor: non-array hub.roster fails (matches the gate shape check)', async () => {
+test('doctor and the gate: a malformed roster no longer fails anything — nothing reads it (E62)', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: 'oops' }));
   const r = await doctorOn(T);
-  assert.ok(!r.ok);
-  assert.ok(r.checks.some((x) => x.id === 'hub' && x.status === 'fail' && /roster/.test(x.message)));
+  assert.ok(!r.checks.some((x) => x.id === 'hub' && x.status === 'fail'), 'the hub check does not fail on a key nothing reads');
+  const { loadProduct } = await import('./gate.mjs');
+  assert.doesNotThrow(() => loadProduct(T), 'the gate loads the Product');
   fs.rmSync(T, { recursive: true, force: true });
 });
 

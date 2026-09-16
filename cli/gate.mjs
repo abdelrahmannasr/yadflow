@@ -11,7 +11,7 @@ import {
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
 import {
   epicIds, epicRel, epicRoot, loadLedger, findReviewStep, artifactBase, artifactHash, acceptedHashes, isStaleHash, gatePredicate,
-  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, parseReviewBranch, artifactFromBase,
+  advanceState, closingRecord, markInReview, isEscalated, gateRuleFor, gateRuleSum, gateRuleEnforced, parseReviewBranch, artifactFromBase,
   upsertHubPr, stateInvariants, repairState, DISCOVERY_FILES, FOUNDATION_REQUIRED, unwrittenSections,
   canonicalApprovals, canonicalComments, canonicalHubPrs, optionalStepsFor, isSkippableStep, writeState, routeLacksStep,
   isPassed, stepStatus, claimsSkipped, claimsInherited, DISCOVERY_EPIC, FOUNDATION_DIR, FOUNDATION_EPIC, staleFoundationGuards,
@@ -60,11 +60,11 @@ function frontmatter(file) {
   return out;
 }
 
-// Touched domains, resolved from files (gating.md): architecture => epic.repos; stories => union of
-// every story's repos; otherwise none.
+// Touched domains, resolved from files (gating.md): stories => union of every story's repos; a step
+// carrying a risk tag (architecture's `contract`) => epic.repos; otherwise none. The stories clause is
+// checked FIRST and on its own: it used to live inside `isEscalated`, which E62 narrowed to risk tags.
 export function touchedDomains(epicDir, step) {
-  if (!isEscalated(step)) return [];
-  if (step.id === 'stories-review') {
+  if (step?.id === 'stories-review') {
     const dir = path.join(epicDir, 'stories');
     if (!fs.existsSync(dir)) return [];
     const set = new Set();
@@ -73,6 +73,7 @@ export function touchedDomains(epicDir, step) {
     }
     return [...set];
   }
+  if (!isEscalated(step)) return [];
   return frontmatter(path.join(epicDir, 'epic.md')).repos || [];
 }
 
@@ -140,9 +141,6 @@ export function loadProduct(root) {
     if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) {
       throw err('YAD-CFG-001', `${hubFile}: unknown platform '${hub.platform}'`, 'expected github, gitlab, or null — fix the file or re-run `yad setup`');
     }
-    if (hub.roster !== undefined && !Array.isArray(hub.roster)) {
-      throw err('YAD-STATE-002', `${hubFile}: expected \`roster\` to be an array`, 'fix the file or re-run `yad setup`');
-    }
   }
   const registry = readJSONStrict(regFile, { repos: [] });
   if (!Array.isArray(registry?.repos)) throw err('YAD-STATE-002', `${regFile}: expected a \`repos\` array`, 'fix the file or re-run `yad setup`');
@@ -170,23 +168,50 @@ export const requireEngagement = (hub) => !!(hub && (hub.review?.requireEngageme
 // `closed`: the step already advanced. Drop-and-re-add is what makes a dismissal or revocation vanish
 // idempotently on an OPEN step — the platform is the live source of truth there. On a CLOSED step it
 // is destructive instead: the gate passed, and the approvals that passed it are the audit record of
-// why. A roster edit, a GitLab approval reset, or any degraded-but-`ok` read yields an empty `recs`
+// why. A GitLab approval reset, or any degraded-but-`ok` read yields an empty `recs`
 // and would erase them, leaving `done` with zero approvals — the very state issue #156 is about,
 // reached from the other side. So a closed step's record is only ever added to or refreshed in place.
+//
+// ONE RECORD PER PERSON (E62). An approval is keyed by who gave it and nothing else. Before E62 the key
+// also held the role and domain the roster gave that person, so one approval could be several records;
+// such a person's older records match here by name and are replaced by one, keeping the hash and dates
+// they carried. The `role`/`domain` fields are not carried forward — nothing reads them any more.
+//
+// AN OLDER RECORD MAY NOT MATCH BY NAME AT ALL. It names the person as the roster named them, and the
+// platform now reports their LOGIN — `alice` against `al`. Unmatched, the first sync after the upgrade
+// treated every such approval as new and bound it to TODAY's content: an approval of the old text would
+// read as an approval of whatever the artifact says now, which is the revoke-on-change hole #156 is
+// about. So a record still carrying a `role` (only the roster wrote one) that no login matched is looked
+// for as the SAME REVIEW instead: same PR, and — where the platform gives a submission time (GitHub) —
+// the same one. Adopted, it hands its fingerprint and dates to the new record and is replaced by it.
+// Where nothing tells two such reviews apart (GitLab has no submission time), a fingerprint that is NOT
+// today's is preferred: at worst a real approval reads as stale and is re-given, never the reverse.
 function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false }) {
-  const keyOf = (name, role, domain) => `${stepId}|${name}|${role}|${domain || ''}`;
-  const prior = new Map(
-    approvals.filter((a) => a.step === stepId && a.source === 'bridge')
-      .map((a) => [keyOf(a.approver, a.role, a.domain), a]),
-  );
-  const seen = new Set(recs.map((r) => keyOf(r.name, r.role, r.domain)));
+  const keyOf = (name) => `${stepId}|${name}`;
+  const bridge = approvals.filter((a) => a.step === stepId && a.source === 'bridge');
+  const prior = new Map(bridge.map((a) => [keyOf(a.approver), a]));
+  const seen = new Set(recs.map((r) => keyOf(r.name)));
+  const legacy = prNumber == null ? [] : bridge.filter((a) => a.role !== undefined && a.pr === prNumber && !seen.has(keyOf(a.approver)));
+  const adopted = new Set();   // the older records a new one replaced
+  const matchOf = new Map();   // rec -> the record it continues
+  for (const r of recs) {
+    const byName = prior.get(keyOf(r.name));
+    if (byName) { matchOf.set(r, byName); continue; }
+    const pool = legacy.filter((a) => !adopted.has(a) && (!r.submittedAt || a.approvedAt === r.submittedAt));
+    if (!pool.length) continue;
+    // One person with several roles left several records for one review; they are adopted together.
+    const pick = pool.find((a) => a.artifactHash && a.artifactHash !== curHash) || pool[0];
+    for (const a of pool) if (a.approver === pick.approver) adopted.add(a);
+    matchOf.set(r, pick);
+  }
   const kept = approvals.filter((a) => {
     if (!(a.step === stepId && a.source === 'bridge')) return true;
+    if (adopted.has(a)) return false;
     // Closed step: keep a prior approval the platform no longer reports. It is history, not state.
-    return closed && !seen.has(keyOf(a.approver, a.role, a.domain));
+    return closed && !seen.has(keyOf(a.approver));
   });
   for (const r of recs) {
-    const was = prior.get(keyOf(r.name, r.role, r.domain));
+    const was = matchOf.get(r);
     let artHash = curHash;            // first time we see this approval => bind to current content
     let approvedAt = r.submittedAt || today;
     let recordedOn = today;
@@ -210,13 +235,11 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       }
     }
     kept.push({
-      artifact, step: stepId, approver: r.name, role: r.role,
-      ...(r.domain ? { domain: r.domain } : {}),
+      artifact, step: stepId, approver: r.name,
       status: 'approved', date: recordedOn, source: 'bridge',
       artifactHash: artHash, approvedAt,
       ...(prNumber != null ? { pr: prNumber } : {}),
       engagement: r.engagement === 'verified' ? 'verified' : 'none',
-      ...(r.unverified ? { unverified: true } : {}),
     });
   }
   // Canonical order, not insertion order: this function re-appends at the tail, so without it the
@@ -256,10 +279,10 @@ function writeComments(epicDir, base, today, blocking) {
 // Upsert machine-readable participation records into the comments ledger (the counterpart to the
 // markdown side file) so the ledger — not just reviews/*.md — reflects platform thread state. One
 // record per (step, commenter, round); `round` is the count of prior synced rounds for the step.
-function recordComments(comments, { artifact, stepId, today, roster, blocking }) {
+// The commenter is the platform login (E62) — there is no stored list to turn it into another name.
+function recordComments(comments, { artifact, stepId, today, blocking }) {
   if (!blocking.length) return comments;
-  const byName = (login) => (roster.find((r) => r.login === login)?.name) || login || 'reviewer';
-  const roleOf = (login) => (roster.find((r) => r.login === login)?.role) || 'reviewer';
+  const byName = (login) => login || 'reviewer';
   const counts = new Map();
   for (const t of blocking) counts.set(t.login, (counts.get(t.login) || 0) + 1);
   // A round is a CHANGE in the thread state, not a sync. Allocating max+1 on every call made an
@@ -279,7 +302,7 @@ function recordComments(comments, { artifact, stepId, today, roster, blocking })
     // An unchanged round keeps its original date, so re-syncing it is byte-identical rather than a
     // daily one-line churn (the same rule upsertBridge applies to an unchanged approval).
     const was = prior.find((cm) => cm.commenter === byName(login));
-    kept.push({ artifact, step: stepId, commenter: byName(login), role: roleOf(login), round, count, date: (same && was?.date) || today });
+    kept.push({ artifact, step: stepId, commenter: byName(login), round, count, date: (same && was?.date) || today });
   }
   return canonicalComments(kept); // same drop-and-re-append churn as approvals — see canonicalApprovals
 }
@@ -337,11 +360,9 @@ function resolveTargets(hubPrs, { epic, artifact, state, platform, number, finde
 }
 
 export async function gateSync(root, { epic, artifact, today, reader = readPr, finder = findPrForBranch, branchOf = prBranch, poster = postComment, number = null, local = false, dryRun = false } = {}) {
-  const { hub, repos } = loadProduct(root);
+  const { hub } = loadProduct(root);
   if (!hub?.platform) { warn('no Product platform configured (.sdlc/hub.json) — local gate, nothing to sync'); return { synced: 0 }; }
   const platform = hub.platform;
-  const roster = hub.roster || [];
-  const defaultReviewers = 1;
   const solo = isSolo(hub);
   const reqEng = requireEngagement(hub);
   // Local invocation in verified mode is ADVISORY: CI is the sole ledger writer, so a human run reads
@@ -391,7 +412,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
 
   let synced = 0;
   let advanced = 0;
-  // Targets whose step is still open. The dated approval-roster file is regenerated only for these —
+  // Targets whose step is still open. The dated approval-record file is regenerated only for these —
   // an already-done step is re-synced for its approvals alone, and would otherwise drop a new
   // reviews/<artifact>--<today>--approved.md every time the scheduled sweep re-visits it.
   const open = [];
@@ -405,7 +426,6 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // and write nothing but the PR pointer. The step then read `done` while its approvals were all
     // stale: work proceeded on an audit trail saying the re-review never happened (issue #156).
     const alreadyDone = isPassed(step);
-    const domains = touchedDomains(epicDir, step);
     const pull = reader(platform, pr.number, { cwd: root });
     // A failed platform read must not pass as a green no-op: flag the run non-zero so CI surfaces it
     // (the wired workflow's reconcile/sweep aggregates this exit) instead of silently not advancing.
@@ -415,7 +435,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     warnUnlockedContract(epicDir, pr.artifact);
     warnIncompleteDiscovery(epicDir, pr.artifact);
     const approvalsBefore = JSON.stringify(approvals);
-    const recs = mapApprovers(pull.reviews, { roster, repos, touchedDomains: domains, headOid: pull.headOid });
+    const recs = mapApprovers(pull.reviews, { headOid: pull.headOid });
     approvals = upsertBridge(approvals, recs, { stepId: step.id, artifact: pr.artifact, curHash, today, prNumber: pr.number ?? null, closed: alreadyDone });
 
     const changeRequested = pull.reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
@@ -438,7 +458,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     // That is the same churn the resource_group fix exists to stop, so it must not be reintroduced here.
     if (!alreadyDone) {
       if (!readOnly) writeComments(epicDir, base(pr.artifact), today, blocking);
-      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, roster, repos, blocking });
+      comments = recordComments(comments, { artifact: pr.artifact, stepId: step.id, today, blocking });
     }
 
     // Social nudge: a bare APPROVE (no verified engagement) still counts (soft default), but the bot
@@ -455,21 +475,21 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     }
 
     const pred = gatePredicate({
-      step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact), touchedDomains: domains,
-      defaultReviewers, threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
+      step, approvals, currentHash: curHash, acceptedHashes: acceptedHashes(epicDir, pr.artifact),
+      threadsResolved, merged: pull.merged, solo, requireEngagement: reqEng,
       // Which steps may be skipped is a fact about THIS epic's route (E35), so it is resolved from the
       // ledger here rather than from a module-level set that answered the same for every epic.
       optional: optionalStepsFor(state),
     });
 
-    // Say the arithmetic, not just the verdict (rule 6): the roster-era rule that decides this gate, then
-    // E7's count — which is advisory until E72 caps it, and labelled that way so nobody reads a number
-    // the gate is not enforcing as the reason it did or did not pass.
+    // Say the arithmetic, not just the verdict (rule 6): the count, and which half of it holds the gate
+    // — only the base until E72 caps the risk step, and labelled that way so nobody reads a number the
+    // gate is not enforcing as the reason it did or did not pass.
     // `have: null` is a step whose approvals were never counted (inherited from a parent epic, or
     // skipped): there is no head count to report and no requirement to report either.
     const count = pred.have === null
       ? 'approvals not counted here'
-      : `${pred.have} approved; count (advisory): ${gateRuleSum(pred.gateRule)}${pred.short ? ` — ${pred.short} short` : ''}`;
+      : `${pred.have} approved; count: ${gateRuleSum(pred.gateRule)}${gateRuleEnforced(pred.gateRule)}${pred.short ? ` — ${pred.short} short` : ''}`;
     log(`  ${c.bold(pr.artifact)} ${c.dim(`(PR #${pr.number}, rule: ${pred.rule}, ${count})`)}`);
     if (alreadyDone) {
       // The step keeps its `done` status and the chain is untouched — re-advancing would reset the
@@ -526,7 +546,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   writeJSON(ledger.files.comments, comments);
   writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
   writeState(ledger.files.state, state);
-  refreshRoster(epicDir, open, approvals, today); // the dated side file lists them in the same order
+  refreshApprovalRecord(epicDir, open, approvals, today); // the dated side file lists them in the same order
   return { synced, advanced };
 }
 
@@ -866,7 +886,8 @@ export async function gateStatus(root, { epic } = {}) {
     const live = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && !isStaleHash(a.artifactHash, accepted));
     const stale = ledger.approvals.filter((a) => a.step === s.id && a.status === 'approved' && isStaleHash(a.artifactHash, accepted)).length;
     const tags = `${isEscalated(s) ? ', escalated' : ''}${stale ? `, ${stale} stale (revoked)` : ''}`;
-    // E7's count, per step, from the step's own risk tags — advisory until E72 caps it, and labelled so.
+    // E7's count, per step, from the step's own risk tags — only its base holds the gate until E72 caps
+    // the risk step, and it is labelled so.
     // Distinct PEOPLE, which is why it can differ from the approval count beside it: two approvals from
     // one person are one approver. Printed in solo mode too, where approvals are waived, so a reader who
     // later switches to team mode can see what each gate will then ask for.
@@ -902,7 +923,7 @@ export async function gateStatus(root, { epic } = {}) {
     // is half the fact.
     const rule = gateRuleFor(s);
     const short = Math.max(0, rule.needed - people);
-    const count = waived || `; count (advisory): ${gateRuleSum(rule)}${short && !solo ? ` — ${short} short` : ''}`;
+    const count = waived || `; count: ${gateRuleSum(rule)}${gateRuleEnforced(rule)}${short && !solo ? ` — ${short} short` : ''}`;
     // The CANONICAL state, not the raw field: a pre-shape-7 chain says `blocked` where it means
     // `todo`, and printing the file's word in the one view people read to see where a gate stands
     // would make the old vocabulary outlive the model. A status this release cannot name falls back
@@ -1065,7 +1086,7 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
   const committer = resolveCommitterLogin(root, hub.roster || []);
   const reviewers = reviewersForScopes(hub.roster || [], ['hub', ...domains], { excludeLogin: committer, repos });
   const assignees = committer ? [committer] : [];
-  const labels = isEscalated(step) ? domains.map((d) => `domain:${d}`) : [];
+  const labels = domains.map((d) => `domain:${d}`); // empty unless the step names its repos (touchedDomains)
   info(`opening review ${hub.platform === 'gitlab' ? 'MR' : 'PR'} on branch ${branch} …`);
   const r = creator(hub.platform, { title: `review: ${artifact} (${epic})`, body, base: hub.default_branch || 'main', head: branch, reviewers, assignees, labels, cwd: root });
   if (!r.ok) { warn(`could not open PR (${r.reason || 'unknown'})${verified ? ' — open it manually; CI records the gate on merge' : '; step is in_review locally'}`); return; }
@@ -1114,8 +1135,8 @@ function reviewBundle(root, { epic, artifact } = {}) {
     platform: hub?.platform || null,
     pr: pr ? { number: pr.number, url: pr.url } : null,
     // `gateRule` is E7's per-step rule — the number of distinct approvers the count asks for and the
-    // arithmetic behind it. It is advisory until E72 caps it. `escalated` is the roster-era rule beside
-    // it (a domain owner per touched domain), which is the rule that actually holds the gate today.
+    // arithmetic behind it. Only its base holds the gate until E72 caps the risk step. `escalated` says
+    // the step carries a risk tag that raises the count.
     step: step
       ? { id: step.id, riskTags: step.risk_tags || [], escalated: isEscalated(step), gateRule: gateRuleFor(step) }
       : null,
@@ -1203,10 +1224,9 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
     `- **Domains / repos touched:** ${domains.join(', ') || 'n/a'}`,
     `- **Risk tags:** ${(step.risk_tags || []).join(', ') || 'none'}`,
     // What the count asks for, stated on the artifact people are about to review rather than left for
-    // them to discover later (rule 6). Advisory: the rule that holds this gate is the roster rule (an
-    // owner, a reviewer, and a domain owner per touched repo on an escalated step), and the count starts
-    // holding gates when E72 caps it. Said plainly here so nobody treats the number as the requirement.
-    `- **Approver count (advisory, not yet enforced):** ${gateRuleSum(rule)}`,
+    // them to discover later (rule 6). Only the base holds this gate; the risk step starts holding gates
+    // when E72 caps it. Said plainly here so nobody treats the full number as the requirement.
+    `- **Approvals needed:** ${rule.base} (enforced) · full count ${gateRuleSum(rule)}${rule.riskStep ? ' (the risk step is advisory until the capacity cap)' : ''}`,
     '',
     '## How to review (this drives the gate)',
     '- **Approve** to record your approval; **comment / request changes** to hold the gate.',
@@ -1232,7 +1252,9 @@ export function fillHubTemplate({ epic, artifact, step, owner, domains, hasArchi
   ].join('\n');
 }
 
-function refreshRoster(epicDir, targets, approvals, today) {
+// The dated, human-readable approval record beside the ledger. An older approval still carries the
+// role the roster gave it (E62 left those fields on disk), and it is printed as recorded.
+function refreshApprovalRecord(epicDir, targets, approvals, today) {
   for (const pr of targets) {
     const stepApprovals = approvals.filter((a) => a.step === pr.step && a.status === 'approved');
     const file = path.join(epicDir, 'reviews', `${base(pr.artifact)}--${today}--approved.md`);
@@ -1240,7 +1262,7 @@ function refreshRoster(epicDir, targets, approvals, today) {
     const lines = [
       `# Approval record — ${pr.artifact} — ${today}`, '',
       '## Approved by',
-      ...stepApprovals.map((a) => `- ${a.approver} — ${a.role}${a.domain ? ` (${a.domain})` : ''} — approved ${a.date}${a.source ? ` (${a.source})` : ''}`),
+      ...stepApprovals.map((a) => `- ${a.approver}${a.role ? ` — ${a.role}` : ''}${a.domain ? ` (${a.domain})` : ''} — approved ${a.date}${a.source ? ` (${a.source})` : ''}`),
       '',
     ];
     fs.writeFileSync(file, lines.join('\n') + '\n');

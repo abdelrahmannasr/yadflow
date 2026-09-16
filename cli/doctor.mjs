@@ -90,8 +90,6 @@ export function projectChecks(checks, root) {
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
-    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a Product the gate would reject.
-    else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
       check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
