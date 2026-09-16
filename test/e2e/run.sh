@@ -70,7 +70,8 @@ git init -q "$BACKEND" && git_id "$BACKEND"
 ( cd "$BACKEND" && echo '{}' > package.json && git add -A && git commit -qm "init backend" && git branch -qM main )
 HEAD_BACKEND="$(git -C "$BACKEND" rev-parse HEAD)"
 
-# Pre-seed Product config + registry so the non-interactive setup keeps them (roster drives the gate).
+# Pre-seed Product config + registry so the non-interactive setup keeps them. The roster, emails and
+# domain_owner are what an older release wrote: left on disk, never read (E62).
 mkdir -p "$HUB/.sdlc"
 cat > "$HUB/.sdlc/hub.json" <<EOF
 {"platform":"github","bridge_enabled":true,"bridge":true,"default_branch":"main","roster":[
@@ -90,7 +91,8 @@ jassert "$HUB/.sdlc/hub.json" 'j.solo === false && j.profile.codebase === "brown
 [ -f "$HUB/.claude/skills/yad-epic/SKILL.md" ] || die "skills not installed"
 [ -f "$BACKEND/checks/spec-link.sh" ] || die "code repo not wired with check gates"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
-grep -q "alice@corp.io" "$HUB/.sdlc/verified-authors" || die "verified-authors not generated from roster"
+# No author allowlist is generated any more: the verified-commits gate checks signatures only (E62).
+[ ! -f "$HUB/.sdlc/verified-authors" ] || die "verified-authors must not be generated — the roster that fed it is gone"
 
 say "setup recorded the pluggable tool connections (design + testing)"
 jassert "$HUB/.sdlc/design.json" 'j.tool === "figma" && j.auth === "user" && j.source === null'

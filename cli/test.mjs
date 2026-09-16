@@ -8414,58 +8414,37 @@ test('check --fix wires the Product gate-sync CI only when the ledger is verifie
 });
 
 // ---------------------------------------------------------------------------------------------
-// verified-commits gate — author allowlist generation + the bash gate itself
+// verified-commits gate — signatures only; the author allowlist went with the roster (E62)
 // ---------------------------------------------------------------------------------------------
-const { verifiedAuthorEmails } = await import('./plan.mjs');
-
-test('verifiedAuthorEmails: roster emails + verified_authors, lower-cased, deduped, sorted', () => {
-  const hub = {
-    roster: [
-      { login: 'al', name: 'alice', role: 'owner', email: 'Alice@Corp.io' },
-      { login: 'bo', name: 'bob', role: 'reviewer', emails: ['bob@corp.io', 'bob@users.noreply.github.com'] },
-      { login: 'ca', name: 'carol', role: 'reviewer' }, // no email — contributes nothing
-    ],
-    verified_authors: ['dev@corp.io', 'alice@corp.io'], // dupe of the roster email
-  };
-  assert.deepEqual(verifiedAuthorEmails(hub), [
-    'alice@corp.io', 'bob@corp.io', 'bob@users.noreply.github.com', 'dev@corp.io',
-  ]);
-  assert.deepEqual(verifiedAuthorEmails({ roster: [{ login: 'x', name: 'x', role: 'owner' }] }), []);
-  assert.deepEqual(verifiedAuthorEmails(null), []);
-});
-
-test('check --fix generates .sdlc/verified-authors in hub + repos only when emails exist', async () => {
+test('check --fix wires the verified-commits gate and generates NO author allowlist, whatever hub.json lists (E62)', async () => {
   const { T } = scaffold();
-  // no hub.json / no emails -> no allowlist anywhere
-  await reconcile(T, { fix: true });
-  assert.ok(!fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'no emails => no hub allowlist');
-
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
     platform: 'github', bridge_enabled: true,
     roster: [{ login: 'al', name: 'alice', role: 'owner', email: 'alice@corp.io' }],
     verified_authors: ['dev@corp.io'],
   }));
   await reconcile(T, { fix: true });
-  for (const f of ['.sdlc/verified-authors', 'demo/backend/.sdlc/verified-authors', 'demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/yad-verified-commits.yml']) {
+  for (const f of ['demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/yad-verified-commits.yml']) {
     assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
   }
-  const list = fs.readFileSync(path.join(T, '.sdlc/verified-authors'), 'utf8');
-  assert.match(list, /alice@corp\.io\ndev@corp\.io\n$/);
-  assert.equal(list, fs.readFileSync(path.join(T, 'demo/backend/.sdlc/verified-authors'), 'utf8'), 'repo copy identical');
-
-  const again = await reconcile(T, { fix: false });
-  assert.equal(again.counts.missing, 0);
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'no Product allowlist');
+  assert.ok(!fs.existsSync(path.join(T, 'demo/backend/.sdlc/verified-authors')), 'no repo allowlist');
+  // One an older release generated is left where it is — and doctor names it, with the hub.json list.
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
+  const again = await reconcile(T, { fix: true });
+  assert.ok(fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'check --fix never deletes it');
   assert.equal(again.counts.outdated, 0);
-
-  // a hand-edited allowlist is drift-corrected back from hub.json
-  fs.appendFileSync(path.join(T, '.sdlc/verified-authors'), 'rogue@evil.io\n');
-  const drift = await reconcile(T, { fix: false });
-  assert.equal(drift.counts.outdated, 1, 'hand edit shows as outdated');
+  // collectDoctor, not doctorOn: that helper is declared further down, beside an import this test may run before.
+  const { collectDoctor } = await import('./doctor.mjs');
+  const d = collectDoctor(T).checks.find((x) => x.id === 'people:verified-authors-unused');
+  assert.equal(d?.status, 'warn');
+  assert.match(d.message, /`verified_authors` in .*hub\.json/);
+  assert.match(d.message, /\.sdlc\/verified-authors in the Product/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 // The gate script itself, against a real temp repo. No origin remote => the signature check is
-// SKIPPED with a warning, so this exercises the author-allowlist half hermetically.
+// SKIPPED with a warning, so these run hermetically.
 const GATE = path.join(ROOT, 'skills/yad-checks/templates/checks/verified-commits.sh');
 function scaffoldGateRepo() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-vc-'));
@@ -8477,8 +8456,6 @@ function scaffoldGateRepo() {
   git(T, 'commit', '-q', '-m', 'seed');
   git(T, 'branch', '-q', '-M', 'main');
   git(T, 'checkout', '-q', '-b', 'feature');
-  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
   return T;
 }
 const runGate = (cwd, env = {}) => {
@@ -8490,34 +8467,23 @@ const runGate = (cwd, env = {}) => {
   }
 };
 
-test('verified-commits gate: allowlisted author passes; unknown author fails', () => {
+test('verified-commits gate: any author passes — there is no author list; an old one is named, not read (E62)', () => {
   const T = scaffoldGateRepo();
   fs.writeFileSync(path.join(T, 'b.txt'), '2');
   git(T, 'add', '-A');
-  git(T, 'commit', '-q', '-m', 'by alice'); // .sdlc + b.txt authored by alice@corp.io
+  git(T, '-c', 'user.email=anyone@anywhere.io', '-c', 'user.name=zz', 'commit', '-q', '-m', 'by someone with write access');
   let r = runGate(T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /known identity/);
   assert.match(r.out, /signature verification SKIPPED/);
+  assert.doesNotMatch(r.out, /allowlist|known identity|unverified user/, 'nothing about authors is checked or claimed');
+  assert.doesNotMatch(r.out, /no longer read/, 'and nothing to say when no old list exists');
 
-  fs.writeFileSync(path.join(T, 'c.txt'), '3');
-  git(T, 'add', '-A');
-  git(T, '-c', 'user.email=mallory@evil.io', '-c', 'user.name=mallory', 'commit', '-q', '-m', 'by mallory');
+  // An allowlist an older release generated, NOT naming this author: still a pass, and said out loud.
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
   r = runGate(T);
-  assert.equal(r.code, 1, 'unknown author must fail the gate');
-  assert.match(r.out, /mallory@evil\.io.*unverified user/);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('verified-commits gate: missing allowlist warns (not enforced); empty range passes', () => {
-  const T = scaffoldGateRepo();
-  fs.rmSync(path.join(T, '.sdlc/verified-authors'));
-  fs.writeFileSync(path.join(T, 'b.txt'), '2');
-  git(T, 'add', '-A');
-  git(T, '-c', 'user.email=anyone@anywhere.io', '-c', 'user.name=zz', 'commit', '-q', '-m', 'x');
-  let r = runGate(T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /author allowlist NOT enforced/);
+  assert.match(r.out, /\.sdlc\/verified-authors is no longer read — write access to the repo decides who can author/);
 
   git(T, 'checkout', '-q', 'main');
   r = runGate(T);
@@ -8526,48 +8492,12 @@ test('verified-commits gate: missing allowlist warns (not enforced); empty range
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('verified-commits gate: the gate-sync bot is allowlist-waived (signature still governs)', () => {
-  const T = scaffoldGateRepo(); // allowlist has alice@corp.io only; no remote → signature skipped
-  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
-  git(T, 'add', '-A');
-  // bot author NOT in the allowlist — passes anyway because the bot is waived.
-  git(T, '-c', 'user.name=yad-gate-sync[bot]', '-c', 'user.email=yad-gate-sync[bot]@users.noreply.github.com',
-    'commit', '-q', '-m', 'chore(gate): sync [skip ci]');
-  const r = runGate(T);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /gate-sync bot — allowlist waived/);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('verified-commits gate: a merge commit is allowlist-waived (author = merger, not a roster human)', () => {
-  // The push-on-default yad-update-guard sees merge commits (the PR-triggered gates never do). A merge
-  // commit is authored by whoever pressed merge — often a platform noreply, not an allowlisted email —
-  // so it must be waived (signature still governs), else every routine PR merge reddens the branch.
-  const T = scaffoldGateRepo(); // on `feature`, allowlist = alice@corp.io only, no remote → sig skipped
-  git(T, 'checkout', '-q', '-b', 'topic');
-  fs.writeFileSync(path.join(T, 'd.txt'), '4');
-  git(T, 'add', '-A');
-  git(T, 'commit', '-q', '-m', 'feat: work on topic'); // alice-authored, allowlisted
-  git(T, 'checkout', '-q', 'main');
-  // a real 2-parent merge commit authored by a NON-allowlisted merger
-  git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub',
-    'merge', '-q', '--no-ff', '-m', 'Merge pull request #1 from topic', 'topic');
-  // runGate diffs main..HEAD, but here HEAD IS main — check the pushed range from the pre-merge tip.
-  const preMerge = git(T, 'rev-parse', 'HEAD^1').toString().trim();
-  const out = (() => { try { return execFileSync('bash', [GATE, preMerge], { cwd: T, stdio: 'pipe' }).toString(); }
-    catch (e) { return (e.stdout || '').toString() + `\nEXIT ${e.status}`; } })();
-  assert.match(out, /merge commit — allowlist waived/, out);
-  assert.doesNotMatch(out, /unverified user/, 'the merger email must NOT fail the allowlist');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
 test('verified-commits gate: an unsigned content-free merge is signature-waived; an evil merge fails (issue #138)', () => {
   // Self-hosted GitLab does not sign UI-created merge commits (the signature API returns 404). A merge
   // that introduces NO content of its own carries nothing an unverified author could smuggle in past
   // the per-parent checks, so the gate waives the signature (WARN) instead of blocking every merge.
   // An evil merge (content in neither parent) still requires a verified signature and fails closed.
-  const T = scaffoldGateRepo(); // on `feature`; allowlist = alice@corp.io
+  const T = scaffoldGateRepo(); // on `feature`
   // A shimmed `glab` that always fails simulates the 404/no-signature response hermetically (no
   // network). CI_* are cleared so the gate takes the glab path even when the suite runs in GitLab CI.
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bin-'));
@@ -8582,10 +8512,10 @@ test('verified-commits gate: an unsigned content-free merge is signature-waived;
   git(T, 'checkout', '-q', '-b', 'topic');
   fs.writeFileSync(path.join(T, 'd.txt'), '4');
   git(T, 'add', '-A');
-  git(T, 'commit', '-q', '-m', 'feat: topic work'); // alice-authored, allowlisted, unsigned
+  git(T, 'commit', '-q', '-m', 'feat: topic work'); // alice-authored, unsigned
   git(T, 'checkout', '-q', 'main');
   const base = git(T, 'rev-parse', 'HEAD').toString().trim(); // pre-merge main tip
-  // A trivial (clean auto) merge by a NON-allowlisted merger, unsigned.
+  // A trivial (clean auto) merge by the platform's merger identity, unsigned.
   git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub',
     'merge', '-q', '--no-ff', '-m', 'Merge topic', 'topic');
   const mergeSha = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
@@ -8619,19 +8549,14 @@ test('verified-commits gate: unresolvable base fails closed', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('verified-commits gate: unknown SDLC_PLATFORM override fails closed; CRLF allowlist tolerated', () => {
+test('verified-commits gate: unknown SDLC_PLATFORM override fails closed', () => {
   const T = scaffoldGateRepo();
   fs.writeFileSync(path.join(T, 'b.txt'), '2');
   git(T, 'add', '-A');
   git(T, 'commit', '-q', '-m', 'by alice');
-  let r = runGate(T, { SDLC_PLATFORM: 'bogus' });
+  const r = runGate(T, { SDLC_PLATFORM: 'bogus' });
   assert.equal(r.code, 1, 'unknown platform must fail closed');
   assert.match(r.out, /unknown platform 'bogus'/);
-  // CRLF + padded allowlist still matches
-  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\r\n  ALICE@corp.io  \r\n');
-  r = runGate(T);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /known identity/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 

@@ -12,7 +12,7 @@ const readFileSafe = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch {
 import { preflightGuardReadiness } from './hubcommit.mjs';
 import { VERSION, PROJECT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, authorsActions,
+  moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, orphanHookActions, legacyRepoActions, legacyHubActions,
   ideTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -43,14 +43,13 @@ export async function reconcile(root, { fix = false, scope = 'all', force = fals
     writeJSON(stampPath, { ...record, version: VERSION, ideTargets });
   };
 
-  // --- deterministic file actions (module + Product CI + author allowlists + every registered repo),
+  // --- deterministic file actions (module + Product CI + every registered repo),
   //     plus pre-2.0 sdlc-* -> yad-* migrations ('legacy': old name installed; rename in place)
   //     and purge of skills removed in a later release ('removed': delete the lingering install) ---
   const actions = [
     ...moduleActions(root, ideTargets), ...legacyModuleActions(root, ideTargets), ...removedModuleActions(root, ideTargets),
     ...productActions(root), ...legacyHubActions(root), ...hookActions(root, ideTargets),
     ...orphanHookActions(root, ideTargets),
-    ...authorsActions(root, registry.repos),
   ];
   if (ideState.needsRepair) {
     actions.push({

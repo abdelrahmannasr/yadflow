@@ -9,7 +9,7 @@ import {
 } from './lib.mjs';
 import { VERSION, IDE_TARGETS, IDE_AGENTS, DEFAULT_IDE_TARGETS, PROJECT_FILES, DESIGN_TOOLS, DESIGN_PRIMARY, TESTING_TOOLS, TESTING_PRIMARY, LEARNING_TOOLS, LEARNING_PRIMARY , productConfigPath } from './manifest.mjs';
 import {
-  moduleActions, repoActions, productActions, hookActions, authorsActions,
+  moduleActions, repoActions, productActions, hookActions,
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
@@ -590,8 +590,6 @@ export async function runSetup(root, opts = {}) {
   // After every write to a managed path has landed (including the legacy renames), so the recorded
   // sha is the file's final state.
   recordManagedWrites(wired);
-  // author allowlists for the verified-commits gate (Product + every repo), from the roster emails
-  applyActions(authorsActions(root, registry.repos), { force: true });
 
   // Optional CodeRabbit
   S('AI review (CodeRabbit)');

@@ -393,6 +393,20 @@ export function projectChecks(checks, root) {
         `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => r.name).join(', ')}`,
         'delete `domain_owner` / `domain_owners` when convenient; request reviewers on the PR itself');
     }
+    // The verified-commits author allowlist went with the roster too (E62): the gate checks signatures
+    // only, and write access decides who can author. Name what an older release left — the free-form
+    // list in hub.json and every generated file — so nobody maintains a list that no longer protects.
+    const allowFiles = [
+      { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
+      ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+    ].filter((x) => exists(x.file)).map((x) => x.where);
+    const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
+    if (allowFiles.length || listedAuthors) {
+      const what = [listedAuthors ? `\`verified_authors\` in ${PROJECT_FILES.hubConfig}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
+      check(checks, 'people:verified-authors-unused', 'project', 'warn',
+        `${what} — the verified-commits gate no longer reads an author list; it checks signatures only`,
+        'delete them when convenient; write access to the repo decides who can author a commit');
+    }
   }
 
   ciTagsChecks(checks, root, hub, registry);
