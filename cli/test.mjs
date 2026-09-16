@@ -13721,10 +13721,18 @@ test('doctor reports the ledger guard against what actually arms it', async () =
     // With both, the wired one is reported AND the unguarded one is still named.
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: ['.cursor', '.agents'] }));
     fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
-    assert.match(hooksCheck().message, /not wired: \.cursor\/hooks\.json.*no pre-edit hook protocol on \.agents/);
+    assert.match(hooksCheck().message, /not wired: .*\.cursor\/hooks\.json.*no pre-edit hook protocol on \.agents/);
     for (const a of hookActions(T, ['.cursor', '.agents'])) a.apply();
     assert.equal(hooksCheck().status, 'ok');
     assert.match(hooksCheck().message, /guard wired.*no pre-edit hook protocol on \.agents/);
+    // The healthy line names the script Cursor actually invokes, not just the shared one.
+    assert.match(hooksCheck().message, /hooks\/ledger-guard-cursor\.sh/);
+    // ...and losing that wrapper is a gap. `.cursor/hooks.json` names it, so a project that lost it to
+    // a gitignore or a partial checkout has Cursor invoking a command that does not exist on every
+    // file write — while the shared `hooks/ledger-guard.sh` sits there making the check look green.
+    fs.rmSync(path.join(T, 'hooks/ledger-guard-cursor.sh'));
+    assert.equal(hooksCheck().status, 'warn');
+    assert.match(hooksCheck().message, /not wired: hooks\/ledger-guard-cursor\.sh/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
   // with a local ledger there is nothing to guard, so the check is silent rather than ok.
   const fileOnly = hookProduct({ hub: { platform: 'gitlab', bridge_enabled: false } });

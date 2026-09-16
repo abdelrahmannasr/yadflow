@@ -523,8 +523,12 @@ export const HOOK_WIRING = [
 // 2026-09-16. The other install targets were NOT examined for a hook protocol — the scope closed at
 // Cursor — so "no entry here" means "not wired", never "checked and found wanting":
 //
-//   .claude   Claude Code — `PreToolUse` in `.claude/settings.json`, exit 2 blocks the call.
-//   .cursor   Cursor — `preToolUse` in `.cursor/hooks.json`, exit 2 is equivalent to `deny`.
+//   .claude   Claude Code — `PreToolUse` in `.claude/settings.json`, reading the EXIT CODE, so the
+//             entry points straight at the shared `hooks/ledger-guard.sh`.
+//   .cursor   Cursor — `preToolUse` in `.cursor/hooks.json`, a PERMISSION hook that reads a JSON
+//             verdict on STDOUT and treats an empty answer as a refusal. The shared script prints
+//             nothing when it allows, so this entry points at `hooks/ledger-guard-cursor.sh`
+//             instead (the `wiring` below), which speaks that protocol.
 //
 // Cursor's `afterFileEdit` is deliberately NOT used: it fires once the edit is already on disk, so it
 // could report but never refuse, and a guard that reports is the CI gate we already have.

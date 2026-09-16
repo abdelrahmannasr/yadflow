@@ -192,6 +192,15 @@ export function projectChecks(checks, root) {
     for (const ide of ideTargetsFor(root)) {
       const adapter = HOOK_ADAPTERS[ide];
       if (!adapter) { noProtocol.push(ide); continue; }
+      // The SCRIPT THE ENTRY POINTS AT, which is not always the shared one. `.cursor`'s entry names
+      // `hooks/ledger-guard-cursor.sh`, and only the shared `hooks/ledger-guard.sh` was checked above
+      // — so a project whose wrapper was deleted, gitignored or lost in a partial checkout had
+      // `yad check` calling it `new` while `yad doctor` printed a green "guard wired". The two
+      // commands disagreeing about one project is the worst version of this: whichever the human
+      // believes, Cursor is invoking a command that does not exist on every single file write.
+      for (const w of adapter.wiring) {
+        if (!exists(path.join(root, w.dest))) unwired.push(w.dest);
+      }
       const relDest = adapter.settings;
       const settingsPath = path.join(root, relDest);
       // A file that exists but does not parse is its OWN report. `readJSON` returns null for both
@@ -229,7 +238,12 @@ export function projectChecks(checks, root) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}${alsoUnguarded}`,
         'restore the matcher named beside each file — as it stands the hook is wired but never fires');
     } else {
-      check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (hooks/ledger-guard.sh)${alsoUnguarded}`);
+      // Name every script that is actually wired, not just the shared one — on a `.cursor` project the
+      // file Cursor invokes is the wrapper, and a health line that never mentions it is a health line
+      // about something else.
+      const wiredScripts = ['hooks/ledger-guard.sh',
+        ...ideTargetsFor(root).flatMap((ide) => (HOOK_ADAPTERS[ide]?.wiring || []).map((w) => w.dest))];
+      check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (${[...new Set(wiredScripts)].join(', ')})${alsoUnguarded}`);
     }
   }
 
