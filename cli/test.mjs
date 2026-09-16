@@ -10380,11 +10380,39 @@ test('doctor: roster data an older release wrote is named as unused — empty ke
   const owners = r.checks.find((x) => x.id === 'people:domain-owners-unused');
   assert.equal(roster?.status, 'warn');
   assert.match(roster.message, /no longer decides who approves/);
-  assert.match(roster.hint, /keep it until every review with older approvals is closed/);
+  assert.match(roster.hint, /nothing reads it on a Product with no platform/, 'no platform, no login to match — nothing needs it (E64)');
   assert.equal(owners?.status, 'warn');
   assert.match(owners.message, new RegExp(repos.repos[0].name));
   assert.ok(!r.checks.some((x) => x.id === 'people:roster-unused' && x.status === 'fail'), 'a warning, never a failure');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor E64: the roster warning says when it can go — counted with the same stamp the gate writes', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const hubFile = path.join(T, '.sdlc/hub.json');
+  const ep = path.join(T, 'epics/EP-a/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({ epicId: 'EP-a', currentStep: 'architecture', steps: [
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+  ] }));
+  const older = [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }];
+  fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(older));
+  const hint = async () => (await doctorOn(T)).checks.find((x) => x.id === 'people:roster-unused')?.hint;
+  try {
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    assert.match(await hint(), /keep it for now: 1 older approval\/comment record\(s\) in EP-a still name people by roster name\. The next gate write records their logins — `yad gate sync <epic>`/);
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', ledger: 'verified', roster: [{ login: 'al', name: 'alice' }] }));
+    assert.match(await hint(), /CI's run on the next merged review/, 'a verified Product is stamped by CI, not by a person');
+    // After the gate write: nothing waits. A record under a shared name is the one thing left.
+    const { stampLegacyLogins } = await import('./gate.mjs');
+    const stamped = stampLegacyLogins({ approvals: older }, { aliases: new Map([['alice', 'al']]) }).approvals;
+    fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(stamped));
+    assert.match(await hint(), /no older record needs it any more — delete the `roster` key/);
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([...stamped, { ...older[0], approver: 'kim' }]));
+    assert.match(await hint(), /every older record it can place names its login now; 1 it cannot place/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('doctor: hub with git_url present emits no hub-git-url warning', async () => {
