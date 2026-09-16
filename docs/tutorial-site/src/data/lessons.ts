@@ -192,7 +192,7 @@ export const MODULES: Module[] = [
             q: 'What does the setup wizard open with?',
             options: [
               'A license agreement',
-              'A short profile interview (solo/team, greenfield/brownfield, monorepo/separate)',
+              'A short profile interview (solo/team, greenfield/brownfield, monorepo/separate) — switch solo/team later with yad mode',
               'A request for an API key',
               'A choice of database',
             ],

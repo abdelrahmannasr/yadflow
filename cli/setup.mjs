@@ -13,6 +13,8 @@ import {
   legacyModuleActions, removedModuleActions, legacyRepoActions, legacyHubActions,
   safeIdeTargetsFor, detectedIdeTargetStateFor, recordManagedWrites,
 } from './plan.mjs';
+import { modeFields, modeOf } from './mode.mjs';
+import { recordActor } from './skip.mjs';
 import { validateLogin, rolesForScope, setScopeRoles, deleteScopeRoles } from './platform.mjs';
 import { loadSkillBindings, stepSkills } from './epic-state.mjs';
 
@@ -345,6 +347,18 @@ export function registerLearning(root, { tool, kb = null, today = null } = {}) {
   return learning;
 }
 
+// The solo switch as setup writes it: `solo` and `mode` in step, through the same `modeFields` `yad mode` uses
+// (E10). Setup records `mode_set` only when it CHANGES the mode of a Product that already had a config — a
+// first run is not a switch. It takes no reason, because an interview answer or a `--solo` / `--team` flag
+// is the choice itself; the record names `yad setup` so the change is still attributable.
+export function setupModeFields(root, cur, solo, opts = {}) {
+  const had = !!cur && typeof cur === 'object' && Object.keys(cur).length > 0;
+  const { mode_set: set, ...fields } = modeFields(cur, solo ? 'solo' : 'team', {
+    by: had ? recordActor(root) : null, date: opts.today ?? null, reason: 'yad setup',
+  });
+  return had && set ? { ...fields, mode_set: set } : fields;
+}
+
 function applyActions(actions, { force = false } = {}) {
   let changed = 0;
   for (const a of actions) {
@@ -375,7 +389,9 @@ export async function resolveProfile(root, opts = {}) {
   let solo, team_size;
   if (opts.solo) { solo = true; team_size = 1; }
   else if (opts.team != null) { team_size = Math.max(1, parseInt(opts.team, 10) || 1); solo = team_size <= 1; }
-  else if (typeof hub?.solo === 'boolean') { solo = hub.solo; team_size = prev.team_size ?? (solo ? 1 : 2); }
+  // Either spelling carries forward: the older `review_gate.solo: true` also waives the gates, and asking again
+  // would default a Product with a roster to team and switch solo off with nobody choosing it (E10).
+  else if (typeof hub?.solo === 'boolean' || hub?.review_gate?.solo === true) { solo = modeOf(hub) === 'solo'; team_size = prev.team_size ?? (solo ? 1 : 2); }
   else {
     // Default from any existing roster: a Product already carrying reviewers is a team; otherwise solo.
     const rosterN = Array.isArray(hub?.roster) ? hub.roster.length : 0;
@@ -555,7 +571,7 @@ export async function runSetup(root, opts = {}) {
       platform: enabled ? platform : null, git_url,
       ...(onNewShape ? { ledger: enabled ? 'verified' : 'local' } : {}),
       bridge_enabled: enabled, bridge: enabled,
-      default_branch, roster, solo, profile: { codebase, repo_layout, team_size },
+      default_branch, roster, ...setupModeFields(root, cur, solo, opts), profile: { codebase, repo_layout, team_size },
     });
     if (!roster.length && Array.isArray(cur.roster) && cur.roster.length) {
       info(`kept existing roster (${cur.roster.length} member(s)) — reconfigure collected none`);
@@ -574,8 +590,11 @@ export async function runSetup(root, opts = {}) {
     const backfillUrl = (cur.platform && !cur.git_url)
       ? ((run('git', ['remote', 'get-url', 'origin'], { cwd: root }).stdout || '').trim() || null)
       : null;
-    if (cur.solo !== solo || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
-      writeProductConfig(root, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), solo, profile: { codebase, repo_layout, team_size } });
+    const mode = setupModeFields(root, cur, solo, opts);
+    const modeMoved = Object.keys(mode).some((k) => JSON.stringify(cur[k]) !== JSON.stringify(mode[k]));
+    if (modeMoved || JSON.stringify(cur.profile || {}) !== JSON.stringify({ codebase, repo_layout, team_size }) || backfillUrl) {
+      writeProductConfig(root, { ...cur, ...(backfillUrl ? { git_url: backfillUrl } : {}), ...mode, profile: { codebase, repo_layout, team_size } });
+      if (mode.mode_set) info(`mode: ${mode.mode_set.from} → ${mode.mode_set.to} (recorded as mode_set)`);
       if (backfillUrl) info(`backfilled hub git_url from origin: ${backfillUrl}`);
       else info(`recorded profile: ${solo ? 'solo' : `team(${team_size})`}, ${codebase}, ${repo_layout}`);
     }

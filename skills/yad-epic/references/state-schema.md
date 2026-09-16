@@ -303,6 +303,7 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 | `hash` | The artifact hash the step closed on — the one approvals bind to. |
 | `mergedBy` | The platform login that merged the PR, when the platform reports it. |
 | `run` | Build lanes only: the `uid` of the trust-log run that moved past the step. |
+| `waived` | `solo` on a **review** step that passed while solo mode waived its approvals (E10). Absent when the gate counted approvals, and never on the author step it closes. |
 
 | `via` | Written by | When |
 |---|---|---|
@@ -545,7 +546,7 @@ artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `re
 | `locked` | `true` \| `false` | Seeded `true` on every Shape step. Since E34 it decides nothing about the dial on a step the catalogue knows: an author step may be set to `auto` (for the whole project, in `.sdlc/automation.json`), and a review gate is `human` because it is a gate. It is still read as a gate on a step id the catalogue does not know. |
 | `status` | one of the **step states** below | Where the step stands. |
 | `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
-| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
+| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
 | `risk_tags` | subset of `contract`, `auth`, `payments` | Drives review escalation (build plan §4), and sets the step's reported approver count: `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). |
 
 ## `approvals.json`

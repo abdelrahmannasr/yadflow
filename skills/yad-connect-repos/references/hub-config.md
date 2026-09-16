@@ -24,6 +24,9 @@ login to an SDLC name + role. It is a single object for the Product itself — t
   "bridge": true,                                             // older still. Same rule
   "gate_sync_version": "4.0.0",                              // OPTIONAL exact pin for the wired gate-sync job; an exact release of the wired fragment's major (4.x.y in this release), prereleases included (4.1.0-rc.1) — anything else, a 3.x pin included, is skipped. Omitted => the .sdlc/cli-version.json stamp if that qualifies, else floating on that major
   "review": { "requireEngagement": false },                   // Review Companion: false (soft) counts bare approves but nudges; true counts only verified-engagement approvals
+  "solo": false,                                              // SOLO MODE, and the one that decides: true waives the approval requirement on every review gate (the merge + resolved threads still gate). Set by `yad setup --solo` / `--team <n>` or `yad mode`
+  "mode": "team",                                             // the roadmap's name for the same switch (E10): "solo" | "team", written beside `solo` by `yad mode` and `yad setup`. NOT read by the gates this major — `yad doctor` warns `mode:disagree` when it contradicts `solo`. Not the ledger switch: "verified mode" elsewhere means `ledger`
+  "mode_set": { "from": "solo", "to": "team", "by": "al", "date": "2026-09-15", "reason": null }, // the last change of mode (E10): who, when, why. `yad mode solo` requires the reason
   "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
   "roster": [
     { "login": "abdelrahmannasr", "name": "alice", "email": "alice@example.com",
