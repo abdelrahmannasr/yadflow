@@ -302,7 +302,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Run `yad-architecture` with the architect lens. It authors `architecture.md` and the **locked** `contract.md` — the shared cross-repo surface (endpoints, events, data-models) that every code repo must honor.' },
           { kind: 'p', text: 'It then hash-locks the contract surface into `.sdlc/contract-lock.json`. From here on, any code change that touches that surface must declare it and re-lock — otherwise CI fails and routes back to this gate.' },
-          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver who is not the author — holds the gate for now; the other 2 are printed as a shortfall and never block. Changing the locked surface invalidates existing approvals.' },
+          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver, who should not be the author — holds the gate for now; the other 2 are printed as a shortfall and never block. Changing the locked surface invalidates existing approvals.' },
         ],
         commands: [{ cmd: 'run yad-architecture' }],
         produces: ['epics/EP-<slug>/architecture.md', 'epics/EP-<slug>/contract.md (locked)', '.sdlc/contract-lock.json'],
@@ -328,7 +328,7 @@ export const MODULES: Module[] = [
         summary: 'Author ui-design.md and DESIGN.md; materialize screens if a design tool is connected.',
         body: [
           { kind: 'p', text: 'Run `yad-ui` with the ux-designer lens to author `ui-design.md` and `DESIGN.md`. If a design tool is connected, it also materializes the actual screens (mobile/web) in the tool and records the screen→frame map; otherwise it stays markdown-only.' },
-          { kind: 'p', text: 'The UI review uses the base count: 1 approver who is not the author.' },
+          { kind: 'p', text: 'The UI review uses the base count: 1 approver, who should not be the author.' },
         ],
         commands: [{ cmd: 'run yad-ui' }],
         produces: ['epics/EP-<slug>/ui-design.md', 'epics/EP-<slug>/DESIGN.md'],
@@ -341,7 +341,7 @@ export const MODULES: Module[] = [
         summary: 'Repo-tagged stories with stable IDs — reaching ready-for-build.',
         body: [
           { kind: 'p', text: 'Run `yad-stories` with the pm lens to break the approved epic into user stories, one file per story, each tagged with the repos that must implement it. Stories get zero-padded `EP-<slug>-S0N` IDs.' },
-          { kind: 'p', text: 'The stories review is an ordinary count gate: 1 approver who is not the author. The repos any story touches label the review PR (`domain:<repo>`) but add no approvals.' },
+          { kind: 'p', text: 'The stories review is an ordinary count gate: 1 approver, who should not be the author. The repos any story touches label the review PR (`domain:<repo>`) but add no approvals.' },
           { kind: 'callout', tone: 'key', text: 'When the stories gate passes, the epic state reaches `currentStep: ready-for-build`. You can start building now.' },
         ],
         commands: [{ cmd: 'run yad-stories' }],
@@ -446,7 +446,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Every review uses the same **count** rule. It names no person and no role — yadflow keeps no list of people. Anyone with access to the repo can approve, and the platform records who did.' },
           { kind: 'list', items: [
-            '**Base (enforced)** — at least 1 distinct approver who is not the author (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), all comment threads resolved, and the review PR merged.',
+            '**Base (enforced)** — at least 1 distinct approver, who should not be the author (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), all comment threads resolved, and the review PR merged.',
             '**Risk step (advisory)** — +2 when the step is tagged `contract`, +1 when it is tagged `auth` or `payments`. The highest tag counts, never the sum.',
             '**Architecture + contract** — the count asks for 3 approvers (base 1 + contract risk 2). The surface is hash-locked.',
             '**Epic, UI, stories, test-cases** — the base count: 1 approver. Stories touching several repos add no approvals.',
@@ -561,7 +561,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'AI review (advisory) → engineer review (human) → merge.',
         body: [
-          { kind: 'p', text: 'Finally, `yad-engineer-review`: an AI review (CodeRabbit) runs first as an **advisory** pass — never the authority. Then a human engineer approves, under the same count rule: 1 approver who is not the author, with high risk or a contract surface raising the advisory count. yadflow requests no reviewers — ask them on the PR itself.' },
+          { kind: 'p', text: 'Finally, `yad-engineer-review`: an AI review (CodeRabbit) runs first as an **advisory** pass — never the authority. Then a human engineer approves, under the same count rule: 1 approver, who should not be the author, with high risk or a contract surface raising the advisory count. yadflow requests no reviewers — ask them on the PR itself.' },
           { kind: 'p', text: 'On merge, the ship is recorded in `build-log.json` and the story moves to `in-build` → `shipped`. The epic → story → task → PR → merge-commit chain stays traceable both ways.' },
           { kind: 'callout', tone: 'key', text: 'A story tagged for multiple repos runs the whole Build in each repo independently, all from the one locked contract.' },
         ],

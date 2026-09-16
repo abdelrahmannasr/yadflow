@@ -116,7 +116,7 @@ Build by hand"** below.
     opens**; if that was not what you wanted, close it and re-run against the right base, because
     CodeRabbit decides eligibility at open time and retargeting does not bring it back. The PR's CI now also
     runs the `pr-title` and `pr-template` gates; `yad-pr-template repo:<repo> action: route` prints the
-    required reviewers from the Impact & Risk block.
+    approval count and the touched domains from the Impact & Risk block (no reviewers are requested).
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
     ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**
@@ -215,7 +215,7 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 ![Review gate loop — author, open, comment, approve, advance](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/review-loop.svg)
 
 **local** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
-`reviews/<artifact>--<date>--comments.md`), `approve` (name + role → `.sdlc/approvals.json`), and
+`reviews/<artifact>--<date>--comments.md`), `approve` (the reviewer's platform login → `.sdlc/approvals.json`), and
 `advance` (moves **only if** the rule is satisfied, else it names the missing approval).
 
 **PR-driven** — when the Product is on a platform, the **`yad gate`** CLI runs the same gate over a PR/MR:
@@ -301,7 +301,7 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    / **pr-template** (profile-aware `code`|`hub`, so they also run on the Product). They fail closed
    on a bad base ref.
 4. **PR/MR template + risk routing** — `yad-pr-template` drops the platform-matched template with an
-   Impact & Risk block; `high` risk (or a contract/auth/payments surface) raises the approval count
+   Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2
    (`risk-route.sh` prints it and the touched domains to ask), the same arithmetic as the gate.
 5. **AI review → engineer review → merge** — `yad-engineer-review`: CodeRabbit is an advisory first pass
    (never the authority); a human engineer approves (one approver holds the merge; risk raises the reported count); on

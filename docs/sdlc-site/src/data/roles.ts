@@ -82,7 +82,7 @@ export const ROLES: RoleConfig[] = [
     shortLabel: 'Reviewer',
     icon: 'rate_review',
     color: '#ca6f1e',
-    description: 'Comments and approves at every gate — anyone with access to the repo. A gate needs 1 approver who is not the author; contract/auth/payments raise the full count, which is advisory for now.',
+    description: 'Comments and approves at every gate — anyone with access to the repo. A gate needs 1 approver, who should not be the author; contract/auth/payments raise the full count, which is advisory for now.',
     sectionIds: ['review-gate', 'gated-flow', 'contract-lock', 'glossary'],
     relevantPathIds: [3, 4],
   },

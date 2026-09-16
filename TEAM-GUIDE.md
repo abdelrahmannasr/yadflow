@@ -256,7 +256,7 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 ```text
 yad-connect-repos action: detect-hub                              # records the Product's platform in .sdlc/hub.json
 yad-pr-template     repo:hub action: wire                         # Product's Shape PR/MR body template
-yad-checks          repo:hub action: wire                         # Product-flavored gates (owner-set / contract-locked / approvals-present)
+yad-checks          repo:hub action: wire                         # Product gates: commit-message, pr-title, pr-template, ledger-guard, verified-commits
 yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
@@ -348,7 +348,7 @@ commit, and refuses an epic that already has a chain.
 | 1 | `yad-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
 | 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(contract: count 3)* |
 | 3 *(optional)* | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review — skip N/A for a UI-less epic with `yad skip <epic> ui-design --reason …`, or `yad defer` it to design later (add `--debt` if it is owed back — `yad next` reminds you until it is paid) |
-| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
+| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review |
 | 5 *(parallel)* | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
 
 Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discovery pass; skip it
@@ -372,17 +372,17 @@ advances; only `advance` moves forward, and only when the rule is met:
 flowchart LR
     o["open<br/>show artifact"] --> c["comment<br/>reviewers leave notes"]
     c -->|owner addresses,<br/>edits in place| c
-    c --> ap["approve<br/>name + role"]
+    c --> ap["approve<br/>platform login"]
     ap --> adv{"advance?<br/>rule met?"}
-    adv -->|no — tells you<br/>who's missing| o
+    adv -->|no — tells you<br/>what's missing| o
     adv -->|yes| nxt(["next step"])
 ```
 
 - `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the Product
   is on a platform (step 3d2), this also opens a review **PR/MR on the Product** for the artifact.
-- `action: approve` (name + role) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
+- `action: approve` (the reviewer's platform login) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
   the Product PR and you run `action: sync` to pull that platform state into the ledger.
-- `action: advance` — moves forward **only if** the rule is met; otherwise it tells you who's still missing.
+- `action: advance` — moves forward **only if** the rule is met; otherwise it tells you what is still missing.
   (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
 - With the Product's gate-sync CI wired (step 3d2), `sync` runs **automatically when the review PR/MR is
   merged** and commits the ledger to the Product's default branch — the same predicate, just triggered by
@@ -409,7 +409,7 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    pattern gates commit-message / pr-title / pr-template.
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
-   to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
+   to print the approval count and the touched domains (no reviewers are requested — ask them on the PR). The PR is based on the repo's **own default branch** (resolved:
    registry `default_branch` → the Product's `default_branch`, for a PR on the Product itself → the platform → `origin/HEAD` →
    `main`), not a hardcoded `main`. If it warns that your base is not the platform default, that is
    **advisory — nothing is blocked and the PR is already open.** Intended (stacked PR, release branch)?

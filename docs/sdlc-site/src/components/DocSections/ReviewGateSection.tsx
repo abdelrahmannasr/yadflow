@@ -8,8 +8,8 @@ const REVIEWS = [
     method: 'BASE',
     path: 'every review (enforced)',
     description:
-      'The rule that holds every gate: at least 1 distinct approver who is not the author (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), every comment thread resolved, and the review PR/MR merged. There are no roles and no stored list of people — anyone with access to the repo can approve, and the approval is recorded under their platform login.',
-    middleware: ['1 approver, not the author', 'all threads resolved', 'PR merged → advance currentStep'],
+      'The rule that holds every gate: at least 1 distinct approver, who should not be the author (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), every comment thread resolved, and the review PR/MR merged. There are no roles and no stored list of people — anyone with access to the repo can approve, and the approval is recorded under their platform login.',
+    middleware: ['1 approver (should not be the author)', 'all threads resolved', 'PR merged → advance currentStep'],
     category: 'base',
   },
   {

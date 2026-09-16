@@ -143,8 +143,8 @@ feat/<story-id>-<task-id>-<short-slug>
 fork a second branch for the same task.
 
 When you open the PR/MR, fill the template's **Story / task** and **Impact & Risk** blocks
-(`yad-pr-template` installs it). `high` risk (or a touched contract / auth / payments surface) raises
-the approval count the same way `yad-review-gate` does — only one approval holds the merge for now, and
+(`yad-pr-template` installs it). `high` risk adds 1 to the approval count and a touched contract surface
+adds 2, the same arithmetic `yad-review-gate` uses — only one approval holds the merge for now, and
 the rest is advisory. Run `bash checks/risk-route.sh <description>` to see the count and the touched
 domains, then ask reviewers who know them.
 

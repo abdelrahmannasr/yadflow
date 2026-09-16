@@ -4,7 +4,7 @@ flowchart LR
     c -->|owner addresses,<br/>edits in place| c
     c --> ap["approve<br/>+ resolve threads"]
     ap --> adv{"rule met,<br/>threads resolved,<br/>merged?"}
-    adv -->|no — names who's missing| o
+    adv -->|no — says what's missing| o
     adv -->|yes| nxt(["next step"])
 
     o -.companion.-> pr["🤝 pair review<br/>(yad-pair-review)"]

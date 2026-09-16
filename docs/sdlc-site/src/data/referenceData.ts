@@ -27,8 +27,8 @@ export interface DecisionBranch {
 export const DECISION_TREE: DecisionBranch[] = [
   {
     condition: 'Every review (analysis, epic, UI, test-cases, architecture, stories)',
-    result: 'base: 1 approver who is not the author (enforced)',
-    detail: 'The base is what holds the gate: at least 1 distinct approver who is not the author, every comment thread resolved, and the review PR/MR merged. On a platform you cannot approve your own PR. There are no roles and no stored list of people: anyone with access to the repo can approve, and the platform records who did (their login).',
+    result: 'base: 1 approver, who should not be the author (enforced)',
+    detail: 'The base is what holds the gate: at least 1 distinct approver, who should not be the author, every comment thread resolved, and the review PR/MR merged. yadflow does not compare the approver with the author: GitHub never lets you approve your own PR, and GitLab stops it only when its approval settings say so. There are no roles and no stored list of people: anyone with access to the repo can approve, and the platform records who did (their login).',
     visibleTo: ALL,
   },
   {

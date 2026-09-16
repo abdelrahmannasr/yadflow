@@ -108,7 +108,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   skipped: assigns the `EP-<slug>` ID and seeds `.sdlc/` state.
 - **`yad-architecture`** — Shape step 3. With the architect, author `architecture.md` and the
   locked `contract.md` (the shared cross-repo surface), then hash-lock the contract surface into
-  `.sdlc/contract-lock.json`. Reads `epic.md`; escalates on the contract risk tag.
+  `.sdlc/contract-lock.json`. Reads `epic.md`; its review carries the `contract` risk tag, so the reported approval count is 3.
 - **`yad-ui`** — Shape step 5. With the ux-designer, author `ui-design.md` and `DESIGN.md`,
   driving Impeccable as harness slash-commands (document/extract/craft) when installed, or authoring
   directly when not. When a design tool is connected (`yad-connect-design`), also **materializes the
@@ -175,7 +175,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting
   `ledger-guard` reject it in CI twenty minutes later (#171).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
-  an Impact & Risk block; high risk (or a contract/auth/payments surface) raises the approval count.
+  an Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2.
   Includes `risk-route.sh` plus the `pr-title.sh` / `pr-template.sh` gate scripts.
 - **`yad-commit`** — build helper. Commit ONE staged atomic change by the conventions (Conventional
   subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file

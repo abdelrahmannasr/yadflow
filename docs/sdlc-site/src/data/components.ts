@@ -40,7 +40,7 @@ export const COMPONENTS: SystemComponent[] = [
     color: "#1e8449",
     position: { x: 28, y: 38 },
     description:
-      "The recorded approvals ledger — each approval under the approver's platform login (no role). A gate needs 1 distinct approver who is not the author; the step's full count (base 1 + risk step) is reported beside it. Hash-bound so a changed artifact drops them.",
+      "The recorded approvals ledger — each approval under the approver's platform login (no role). A gate needs 1 distinct approver, who should not be the author; the step's full count (base 1 + risk step) is reported beside it. Hash-bound so a changed artifact drops them.",
   },
   {
     id: "contract-lock",

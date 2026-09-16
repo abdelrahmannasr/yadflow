@@ -145,7 +145,7 @@ const setupSteps: FlowStep[] = [
 
 // ── Phase 2 — Shape (author → review gate, repeated) ───────────────────
 
-// Reusable review-gate step factory — the one gate, reused for all five reviews.
+// Reusable review-gate step factory — the one gate, reused for every Shape review.
 function gateStep(
   idSuffix: string,
   artifact: string,
@@ -193,7 +193,7 @@ const discoverySteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "purpose.md · scope.md · mvp.md · roadmap.md · stack.md · repos.md (+ market.md · risks.md)", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
   },
-  gateStep("foundation", "the Foundation sections", "1 approver who is not the author (base)", "#1e8449"),
+  gateStep("foundation", "the Foundation sections", "1 approver, who should not be the author (base)", "#1e8449"),
 ];
 
 // ── Phase 3 — Shape (author → review gate, repeated per epic) ───────────
@@ -217,7 +217,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "analysis.md · state.json" },
   },
-  gateStep("analysis", "analysis.md", "1 approver who is not the author (base)", "#1e8449"),
+  gateStep("analysis", "analysis.md", "1 approver, who should not be the author (base)", "#1e8449"),
   {
     id: "epic",
     title: "Author Epic",
@@ -235,7 +235,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "epic.md · state.json" },
   },
-  gateStep("epic", "epic.md", "1 approver who is not the author (base)", "#1e8449"),
+  gateStep("epic", "epic.md", "1 approver, who should not be the author (base)", "#1e8449"),
   {
     id: "architecture",
     title: "Author Architecture + Contract",
@@ -272,7 +272,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "ui-design.md · DESIGN.md · design-links.json" },
   },
-  gateStep("ui", "ui-design.md", "1 approver who is not the author (base)", "#1e8449"),
+  gateStep("ui", "ui-design.md", "1 approver, who should not be the author (base)", "#1e8449"),
   {
     id: "stories",
     title: "Author Stories",
@@ -290,7 +290,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "stories/*.md · state.json" },
   },
-  gateStep("stories", "stories/", "1 approver who is not the author (base); touched repos only label the PR", "#1e8449"),
+  gateStep("stories", "stories/", "1 approver, who should not be the author (base); touched repos only label the PR", "#1e8449"),
   {
     id: "test-cases",
     title: "Author Test Cases (parallel)",
@@ -308,7 +308,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "test-cases.md · test-links.json", notifications: "review never moves currentStep off ready-for-build" },
   },
-  gateStep("test-cases", "test-cases.md", "1 approver who is not the author (base)", "#1e8449"),
+  gateStep("test-cases", "test-cases.md", "1 approver, who should not be the author (base)", "#1e8449"),
   {
     id: "review-companion",
     title: "Review Companion (rides every gate)",
@@ -421,7 +421,7 @@ const buildSteps: FlowStep[] = [
     id: "engineer-review",
     title: "Engineer Review & Merge (Step E)",
     description:
-      "Wire an advisory AI first-pass (CodeRabbit, never the authority), record the human engineer review (the same count: 1 approver who is not the author, with high risk / contract raising the advisory count), and on merge record the ship in build-log.json.",
+      "Wire an advisory AI first-pass (CodeRabbit, never the authority), record the human engineer review (the same count: 1 approver, who should not be the author, with high risk / contract raising the advisory count), and on merge record the ship in build-log.json.",
     actor: "engineer",
     status: "merged",
     stepState: "build-log.json",
