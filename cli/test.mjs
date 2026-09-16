@@ -840,6 +840,35 @@ test('update leaves a user-authored file at an old wired path alone', async () =
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+// `--ide-targets` is a PRE-ANSWER for CI/scripts, like `--solo` and `--greenfield` beside it. It
+// exists because of what the E11 default change did to a non-interactive run: `ask` returns the
+// default under SDLC_NONINTERACTIVE, `ideTargets` was reachable only programmatically, and the
+// default went from one directory to two — so a scripted setup would have written a second full copy
+// of the skills with no way on the command line to decline.
+test('yad setup --ide-targets: a scripted run can choose its agent directories (E11)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-idetargets-'));
+  const yadBin = path.join(ROOT, 'bin/yad.mjs');
+  const setup = (args) => spawnSync(process.execPath, [yadBin, 'setup', '--solo', '--greenfield', '--monorepo', ...args], {
+    cwd: T, encoding: 'utf8', env: { ...GIT_ENV, SDLC_NONINTERACTIVE: '1', YAD_NO_UPDATE_NOTIFIER: '1' },
+  });
+  try {
+    git(T, 'init', '-q');
+    git(T, 'config', 'user.email', 'a@b.c');
+    git(T, 'config', 'user.name', 'a');
+
+    // An unsupported target FAILS, and fails before anything is written — never a silent fall back to
+    // the default, which would install the very directories the caller was trying to avoid.
+    const bad = setup(['--ide-targets', '.nope']);
+    assert.match(bad.stdout + bad.stderr, /unsupported IDE target/);
+    assert.ok(!fs.existsSync(path.join(T, '.claude')), 'nothing installed on a bad target');
+
+    setup(['--ide-targets', '.claude']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(T, '.sdlc/cli-version.json'), 'utf8')).ideTargets, ['.claude']);
+    assert.ok(fs.existsSync(path.join(T, '.claude/skills/yad-epic/SKILL.md')));
+    assert.ok(!fs.existsSync(path.join(T, '.agents')), 'the two-directory default is declinable');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
 test('CLI --version matches manifest', () => {
   const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json')));
   const out = execFileSync('node', [path.join(ROOT, 'bin/yad.mjs'), '--version']).toString().trim();

@@ -269,7 +269,7 @@ ${c.bold('Environment')}
   YAD_NO_UPDATE_NOTIFIER=1   Silence the "update available" notice (also off in CI)
   YAD_NO_REPORT=1            Never offer to file a bug report after a failure`;
 
-const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path']);
+const VALUE_FLAGS = new Set(['--dir', '--type', '--message', '--task', '--ai', '--risk', '--repo', '--platform', '--base', '--title', '--scope', '--branch', '--pr', '--epic', '--name', '--email', '--roles', '--team', '--body', '--out', '--since', '--until', '--member', '--format', '--reason', '--profile', '--parent', '--inherits', '--to', '--retro-ship', '--merge-commit', '--path', '--ide-targets']);
 
 function parseArgs(argv) {
   const o = { _: [], dir: process.cwd(), fix: false, force: false, scope: 'all' };
@@ -343,6 +343,14 @@ async function main() {
         today, force: o.force,
         solo: o.solo, team: o.team, greenfield: o.greenfield, brownfield: o.brownfield,
         monorepo: o.monorepo, separate: o.separate, tools: o.tools,
+        // The agent directories to install into, as a pre-answer for CI/scripts exactly like `--solo`
+        // above (E11). Until this flag existed, `ideTargets` was reachable only programmatically: a
+        // non-interactive run took `ask`'s default and had NO way to choose. That was survivable while
+        // the default was one directory; it stopped being survivable when the default became two,
+        // because a scripted setup would write a second full copy of the skills with no way to say no.
+        // `o['ide-targets']`, not `o.ideTargets`: VALUE_FLAGS strips the leading `--` and nothing else,
+        // so a hyphenated flag keeps its hyphen as the key (`--retro-ship` is read the same way below).
+        ideTargets: o['ide-targets'] === undefined ? undefined : String(o['ide-targets']).split(',').map((t) => t.trim()).filter(Boolean),
       });
       break;
     case 'check':

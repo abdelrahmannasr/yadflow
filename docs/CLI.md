@@ -160,7 +160,8 @@ branch the rest so you only answer what your situation needs. Each step prints i
 does / why / what to enter / what skipping means), and the step count adapts.
 
 0. **Profile** — the three questions above, plus "configure optional tools now?". Pre-answer for
-   CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`.
+   CI/scripts with `--solo`/`--team <n>`, `--greenfield`/`--brownfield`, `--monorepo`/`--separate`, `--tools`,
+   and `--ide-targets <a,b>` for step 2's directories (an unsupported name fails before anything is written).
 1. **Preflight** — confirm the Product is a git repo (offers `git init`); check `git`/`node`/`npx`.
 2. **Install the module** — copy the `yad-*` skills into the agent skill dirs you pick, and copy the
    module config to `.sdlc/config.yaml`. The prompt names the agents that read each directory:
