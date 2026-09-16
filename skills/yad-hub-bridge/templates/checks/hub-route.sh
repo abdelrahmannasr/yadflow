@@ -4,7 +4,8 @@
 # as the same sum the gate prints: base 1, plus a risk step from the tags — `contract` +2, `auth` or
 # `payments` +1, the largest and never the sum. Only the base holds the gate until the capacity cap
 # lands; the risk step is advisory. There are no roles and no named owners: yadflow keeps no list of
-# people (E62), so the touched repos are printed as a hint for whom to ask. Advisory: it ROUTES the human
+# people (E62), so when a risk tag raises the count the touched repos are printed as a hint for whom to
+# ask (with no risk step it prints the base line alone). Advisory: it ROUTES the human
 # review; it does not approve or merge.
 set -euo pipefail
 
@@ -27,13 +28,15 @@ echo "Repos touched: ${repos:-unspecified}"
 step=0
 tier=""
 why=""
-case "$risk_tags" in *auth*) step=1; tier=high; why="risk tag: auth" ;; esac
-case "$risk_tags" in *payments*) step=1; tier=high; why="${why:+$why, }risk tag: payments" ;; esac
-case "$risk_tags" in *contract*) step=2; tier=contract; why="${why:+$why, }risk tag: contract" ;; esac
+# Whole tags only, as the gate reads them (`gateRuleFor`): `oauth` or `contracts` is not a risk tag.
+tags=" $(printf '%s' "$risk_tags" | tr ',;' '  ' | tr -s '[:space:]' ' ') "
+case "$tags" in *" auth "*) step=1; tier=high; why="risk tag: auth" ;; esac
+case "$tags" in *" payments "*) step=1; tier=high; why="${why:+$why, }risk tag: payments" ;; esac
+case "$tags" in *" contract "*) step=2; tier=contract; why="${why:+$why, }risk tag: contract" ;; esac
 
 if [ "$step" -gt 0 ]; then
   echo "ROUTE: $((1 + step)) approvers = base 1 + ${tier} risk ${step} (${why})"
-  echo "       Only the base holds the gate until the capacity cap: 1 approval from someone other than the author."
+  echo "       Only the base holds the gate until the capacity cap: 1 approval (the platform decides whether the author may give it)."
   echo "       The risk step is advisory. Ask reviewers who know the touched repos:"
   case "$repos" in
     ""|*"<"*|*"…"*|*"|"*)

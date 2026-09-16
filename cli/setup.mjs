@@ -371,7 +371,7 @@ export async function runSetup(root, opts = {}) {
     : [
       'Your hub is this repo on GitHub/GitLab; reviewers approve artifacts there.',
       'yad keeps no list of people: anyone with access to the repo can approve, and the platform records who did.',
-      'A gate needs one approval from someone other than the author.',
+      'A gate needs one approval, which should not come from the author (GitHub blocks self-approval; GitLab only if its settings do).',
       'It also reports how many people it would like: 3 on a contract review, 2 where auth or payments is touched, 1 elsewhere. That extra number is advisory for now.',
     ]);
   const productPath = productConfigPath(root);

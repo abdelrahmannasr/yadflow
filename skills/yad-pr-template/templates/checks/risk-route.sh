@@ -3,8 +3,9 @@
 # many approvers the change asks for, as the same sum the review gate prints: base 1, plus a risk step —
 # `high` risk +1, a touched contract surface +2, the larger of the two and never their sum. Only the base
 # holds a merge until the capacity cap lands; the risk step is advisory. There are no roles and no named
-# owners: yadflow keeps no list of people (E62), so the touched domains are printed as a hint for whom to
-# ask. Advisory: it ROUTES the human review; it does not approve or merge.
+# owners: yadflow keeps no list of people (E62), so when a risk step raises the count the touched domains
+# are printed as a hint for whom to ask (with no risk step it prints the base line alone). Advisory: it
+# ROUTES the human review; it does not approve or merge.
 set -euo pipefail
 
 BODY="${1:?usage: risk-route.sh <pr-description-file>}"
@@ -34,7 +35,7 @@ if [ "$contract" = "yes" ]; then step=2; tier=contract; why="${why:+$why, }contr
 
 if [ "$step" -gt 0 ]; then
   echo "ROUTE: $((1 + step)) approvers = base 1 + ${tier} risk ${step} (${why})"
-  echo "       Only the base holds the merge until the capacity cap: 1 approval from someone other than the author."
+  echo "       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do)."
   echo "       The risk step is advisory. Ask reviewers who know the touched domains:"
   case "$domains" in
     ""|*"<"*|*"…"*|*"|"*)

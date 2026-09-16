@@ -1421,6 +1421,8 @@ test('hub-route: prints the gate count from the risk tags — no roles, and stor
   let r = run(['- Artifact: `stories/`', '- **Risk tags:** none', '- **Domains / repos touched:** backend, mobile']);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/, 'the stories review is an ordinary count gate');
+  r = run(['- **Risk tags:** oauth, contracts', '- **Domains / repos touched:** backend']);
+  assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/, 'whole tags only, as the gate reads them — `oauth` is not `auth`');
   r = run(['- **Risk tags:** auth, payments', '- **Domains / repos touched:** backend']);
   assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk tag: auth, risk tag: payments\)/, 'two high tags are one step');
   r = run(['- **Risk tags:** contract, auth', '- **Domains / repos touched:** backend, mobile']);
