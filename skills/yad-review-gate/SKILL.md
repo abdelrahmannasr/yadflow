@@ -39,9 +39,9 @@ Read `.sdlc/state.json`. Find the `review+approve` step whose `artifact` matches
 step named `currentStep` if it is a review step). Read `.sdlc/approvals.json`. Read `epic.md` for the
 epic's `repos` (the **touched domains**). Determine the **count** for this step. It counts people, not
 roles — there are no roles, and yadflow keeps no list of people:
-- **Base (enforced):** at least **1 distinct approver**. On a platform that person cannot be the author
-  (you cannot approve your own PR). On a local ledger nothing checks that, so do not record the
-  author's own approval.
+- **Base (enforced):** at least **1 distinct approver**, who should not be the author. The engine does
+  not check that: GitHub stops you approving your own PR, GitLab does only when the project's approval
+  settings say so, and on a local ledger nothing does — so do not record the author's own approval.
 - **Full count (advisory):** `needed = base 1 + risk step`. The risk step comes from the step's
   `risk_tags`: `contract` +2, `auth`/`payments` +1 (the "high" tier). Take the highest tag, never the
   sum. The risk step is ADVISORY until the capacity cap ships (E72): the roadmap's rule caps the count

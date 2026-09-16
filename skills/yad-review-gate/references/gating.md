@@ -16,9 +16,10 @@ unchanged).
 
 The count is the whole rule. It counts people, not roles:
 
-`needed = base + risk step`, where `base` is `1` — one human approval, which on a platform is necessarily
-not the author, since you cannot approve your own PR; on a local-only ledger nothing enforces that half,
-so do not record the author's own approval — and the **risk step** comes from the step's own
+`needed = base + risk step`, where `base` is `1` — one human approval from someone other than the author.
+The engine never compares the approver with the author: GitHub stops you approving your own PR, GitLab
+does only when the project's approval settings say so, and on a local-only ledger nothing does — so do
+not record the author's own approval — and the **risk step** comes from the step's own
 `risk_tags`:
 
 | Tags on the step | Risk | Risk step | `needed` |

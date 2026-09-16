@@ -397,7 +397,8 @@ merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "
   `.sdlc/contract-lock.json` (reuse the recipe in
   `../yad-architecture/references/contract-format.md`).
 - **approvals-present** — an epic at `ready-for-build` has the approvals the gate rule requires recorded
-  in `.sdlc/approvals.json`: at least 1 approver who is not the author (the same predicate
+  in `.sdlc/approvals.json`: at least 1 approver (the author is not checked here — the platform's own
+  rules stop self-approval on GitHub, and on GitLab when its settings say so; the same predicate
   `yad-review-gate` enforces; the risk step of the full count is reported beside it and gates nothing
   until the capacity cap).
 

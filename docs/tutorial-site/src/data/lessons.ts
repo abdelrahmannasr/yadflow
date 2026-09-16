@@ -446,7 +446,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Every review uses the same **count** rule. It names no person and no role — yadflow keeps no list of people. Anyone with access to the repo can approve, and the platform records who did.' },
           { kind: 'list', items: [
-            '**Base (enforced)** — at least 1 distinct approver who is not the author (on GitHub or GitLab you cannot approve your own PR), all comment threads resolved, and the review PR merged.',
+            '**Base (enforced)** — at least 1 distinct approver who is not the author (GitHub never lets you approve your own PR; GitLab only stops it when its approval settings say so), all comment threads resolved, and the review PR merged.',
             '**Risk step (advisory)** — +2 when the step is tagged `contract`, +1 when it is tagged `auth` or `payments`. The highest tag counts, never the sum.',
             '**Architecture + contract** — the count asks for 3 approvers (base 1 + contract risk 2). The surface is hash-locked.',
             '**Epic, UI, stories, test-cases** — the base count: 1 approver. Stories touching several repos add no approvals.',

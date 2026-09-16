@@ -114,8 +114,9 @@ Product platform / no `gh`/`glab`, the gate degrades to local with no error.
 
 **One approval rule, and no roles.** yadflow keeps no list of people (the roster was removed in E62):
 anyone with access to the repo can approve, and each approval is recorded under the approver's platform
-login. A step asks for `base + risk step` **distinct approvers**. The base is 1 — one human approval,
-which on GitHub or GitLab is necessarily not the author, since you cannot approve your own PR. The risk
+login. A step asks for `base + risk step` **distinct approvers**. The base is 1 — one human approval from
+someone other than the author. yadflow does not compare the two: GitHub never lets you approve your own
+PR, and GitLab stops it only when the project's approval settings say so. The risk
 step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the highest
 tag and never the sum. So an ordinary step asks for 1 approver and the architecture+contract gate asks for 3.
 
@@ -183,7 +184,10 @@ does / why / what to enter / what skipping means), and the step count adapts.
    (`.sdlc/cli-version.json`) is missing or unreadable falls back to `.claude` alone — a recovery
    restores the minimum, it does not enrol you in a newer default.
 3. **Product platform** — detect GitHub/GitLab from the remote → `.sdlc/hub.json`. No people are
-   collected: anyone with access approves on the platform. Solo reviews by merging their own PR.
+   collected: anyone with access approves on the platform. Solo reviews by merging their own PR. A
+   re-run on a Product with no solo/team mode recorded asks with **team** as the default — solo waives
+   every approval, so it is never what a scripted re-run falls into. (`yad roster` was removed; typing
+   it prints where the people model went.)
 4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).
    Configure now, or **defer with one prompt** → all recorded as `none` (connect later with the
    `yad-connect-*` skills; the MCPs/CLIs are confirmed there).

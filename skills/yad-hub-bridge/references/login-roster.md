@@ -29,7 +29,8 @@ There is no lookup step: the login the platform reports is the name written. The
 
 **Local ledger (no platform).** The `yad-review-gate` skill writes the same shapes by hand. `approver` /
 `commenter` is the reviewer's platform login, or the name they give when there is no platform. The gate
-needs 1 distinct approver who is not the artifact's author.
+needs 1 distinct approver; nothing checks that it is not the artifact's author, so do not record the
+author's own approval.
 
 ## Older records
 

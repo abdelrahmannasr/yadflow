@@ -487,15 +487,17 @@ defects keep escaping at**, so you fix the stage, not just the symptom).
 ## 8. Who approves what (the gate rules)
 
 There are no roles. yadflow keeps no list of people, so a gate counts **distinct people who approved**,
-not owners or reviewers. Anyone with access to the repo can approve, and the platform stops you
-approving your own PR.
+not owners or reviewers. Anyone with access to the repo can approve. yadflow does not check that the
+approver is not the author: GitHub never lets you approve your own PR, and GitLab stops it only when the
+project's approval settings say so.
 
 - **What holds a gate:** one approval from someone other than the author (the **base**), plus every
   comment thread resolved and the review PR merged.
 - **What the gate also reports:** the full **approval count** — `base 1 + risk step`. A `contract` tag
   adds 2 and an `auth` or `payments` tag adds 1; a step with several tags takes the largest, never the
-  sum. `yad gate sync`, `yad gate status` and the review-PR body print it, for example
-  `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`. The risk
+  sum. `yad gate sync` and `yad gate status` print it, for example
+  `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`, and the
+  review-PR body says `Approvals needed: 1 (enforced) · full count 3 approvers = …`. The risk
   step does **not** hold the gate yet. It starts to once the engine can count how many people are
   active, so a small team is never asked for more approvers than it has.
 
@@ -507,7 +509,7 @@ approving your own PR.
 | **Stories** | 1 approver | 1 |
 | **Engineer review at ship** | a human engineer — **always, never automated** | — |
 
-Solo mode (`yad mode solo`) waives the approval, and the merge still decides.
+Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge still decides.
 
 ---
 

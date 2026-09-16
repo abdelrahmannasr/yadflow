@@ -45,8 +45,8 @@ or the remote is unreachable, the verified ledger stops and the gate falls back 
 
 Opening the review PR/MR **requests no reviewers**. yadflow keeps no list of people to pick them from
 (E62), so the command prints `no reviewers were requested — ask them on the PR itself`, and the author
-asks people on the PR. (E68 will later suggest reviewers from history.) The CLI (`createPr` in
-`cli/platform.mjs`) assigns the opener and adds the touched-domain labels; an agent opening a PR by hand
+asks people on the PR. (E68 will later suggest reviewers from history.) `yad gate open` assigns the opener and adds the touched-domain labels (`domain:<repo>`); `yad open-pr`
+assigns the opener and adds no labels. An agent opening a PR by hand
 uses:
 
 **GitHub:**
