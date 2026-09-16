@@ -16,7 +16,7 @@ export type StakeholderView =
 // Message kinds flowing on the canvas. Repurposed for the SDLC:
 // write = an artifact written to the ledger; gate = a review/approval act;
 // event = a state transition; job = an automated run; notification = a routed
-// signal (reviewers / domain owners); cleanup = a revoke / halt.
+// signal (to the people asked to review); cleanup = a revoke / halt.
 export type MessageType = "write" | "gate" | "event" | "job" | "notification" | "cleanup";
 
 // The yadflow lenses that drive a step.
@@ -99,6 +99,6 @@ export const MESSAGE_COLORS: Record<MessageType, string> = {
   gate: "#ca6f1e",         // gate orange — a human review act
   event: "#1e8449",        // sentinel green — a state transition
   job: "#b7950b",          // artifact gold — an automated run
-  notification: "#566573", // routed signal to reviewers / owners
+  notification: "#566573", // routed signal to reviewers
   cleanup: "#c0392b",      // revoke / halt
 };

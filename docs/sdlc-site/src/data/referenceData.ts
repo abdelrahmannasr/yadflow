@@ -26,27 +26,27 @@ export interface DecisionBranch {
 
 export const DECISION_TREE: DecisionBranch[] = [
   {
-    condition: 'Base review (epic, UI, analysis, test-cases)',
-    result: 'owner + 1 reviewer',
-    detail: 'The default gate rule: the artifact owner plus one non-owner reviewer must approve before the step advances.',
-    visibleTo: ALL,
-  },
-  {
-    condition: 'Every review, reported beside the rule above',
-    result: 'asks for base + risk step distinct approvers',
-    detail: 'A count that names no person, role or step: base is 1 (one human approval, which on a platform cannot be the author since you cannot approve your own PR), plus 2 when the step is tagged contract or 1 when it is tagged auth/payments — the highest tag, never the sum. It counts people, so one person holding two roles is one approver. Advisory for now: the full rule caps it at the number of active people, and an uncapped count would make a two-person team unable to pass its architecture gate.',
+    condition: 'Every review (analysis, epic, UI, test-cases, architecture, stories)',
+    result: 'base: 1 approver who is not the author (enforced)',
+    detail: 'The base is what holds the gate: at least 1 distinct approver who is not the author, every comment thread resolved, and the review PR/MR merged. On a platform you cannot approve your own PR. There are no roles and no stored list of people: anyone with access to the repo can approve, and the platform records who did (their login).',
     visibleTo: ALL,
   },
   {
     condition: 'risk_tags include contract / auth / payments',
-    result: 'escalate to domain owners',
-    detail: 'Architecture+contract escalates: base rule PLUS a domain owner for every repo in epic.repos. The count asks for 3 distinct approvers (1 + 2) and reports a shortfall without blocking. The contract-surface hash must still match contract-lock.json.',
+    result: 'full count = base 1 + risk step (advisory)',
+    detail: 'The risk step is +2 for a contract tag and +1 for auth or payments — the highest tag, never the sum. It counts people, not roles. The risk step is advisory for now: the gate prints the full count and the shortfall (for example "1 short") but holds only on the base. The capacity cap (a later roadmap row) caps the count at the number of active people; without that cap a two-person team could never pass its architecture gate.',
     visibleTo: ALL,
   },
   {
-    condition: 'Per-repo review (stories)',
-    result: 'base + a domain owner per touched repo',
-    detail: 'Each repo that appears in any story.repos contributes its engineer as a required reviewer.',
+    condition: 'Architecture + contract review',
+    result: 'count asks 3 = base 1 + contract risk 2',
+    detail: 'The base (1 approver) is enforced; the other 2 are reported as a shortfall, not blocking. The contract-surface hash must still match contract-lock.json. The review PR is labelled domain:<repo> for each repo in epic.repos, as a hint for whom to ask.',
+    visibleTo: ALL,
+  },
+  {
+    condition: 'Stories review',
+    result: 'an ordinary count gate',
+    detail: 'The same count as every other review. The repos that any story touches only label the review PR (domain:<repo>); they add no approvals.',
     visibleTo: ALL,
   },
 ];
@@ -152,7 +152,7 @@ export const CHECK_GATES: CheckGate[] = [
     name: 'verified-commits',
     queue: 'yad-checks',
     timing: 'on every commit',
-    description: 'Commits are platform-Verified (signed) and authored by a roster-known author.',
+    description: 'Every commit carries a platform-Verified signature. There is no author allowlist: write access to the repository decides who may author a commit.',
     triggeredBy: 'push / PR sync',
     visibleTo: ALL,
   },
@@ -317,7 +317,6 @@ export const CLI_COMMANDS: CliCommand[] = [
   { constant: 'HOOK', value: 'yad hook ledger-guard', target: 'setup', category: 'setup', description: 'Harness-invoked, never typed: refuses an agent\'s edit to the CI-owned gate ledger in verified mode and names the command that owns the transition (yad gate open) — the local half of the ledger-guard CI gate (#171). Reads a tool-call payload on stdin (or --path); exit 0 allows, exit 2 denies with the reason on stderr, and --format cursor answers with a JSON verdict on stdout instead. A no-op with a local ledger, and fails open. Wired into .claude/settings.json (and .cursor/hooks.json, via hooks/ledger-guard-cursor.sh) by setup / check --fix; YAD_HOOK_DISABLE=1 skips it.', visibleTo: ALL },
   { constant: 'SYNC_STATUS', value: 'yad sync-status', target: 'setup', category: 'setup', description: 'Reconcile each artifact’s frontmatter status (draft → in-review → approved) with .sdlc/state.json — all epics, or one (yad sync-status <epic>); --dry-run to preview. Advance-only; locked/in-build/shipped are left alone. Runs automatically after a local gate open/sync.', visibleTo: ALL },
   { constant: 'REPORT', value: 'yad report', target: 'setup', category: 'setup', description: 'When a flow breaks, file a bug in the upstream yadflow repo (the yad-report skill). Sends only a safe allowlist — versions, tool booleans, the platform kind (github / gitlab / local), the error code and a scrubbed message, command and flag NAMES — never paths, URLs, names, IDs or flag values. Searches open issues first and shows the exact payload before posting. Offered after an unexpected failure (interactive only; YAD_NO_REPORT=1 turns it off).', visibleTo: ALL },
-  { constant: 'ROSTER', value: 'yad roster', target: 'setup', category: 'setup', description: 'Manage the reviewer roster + per-repo roles any time: list / add (repo-driven walk) / grant / revoke / remove. Domain-owner grants sync repos.json.', visibleTo: ALL },
   { constant: 'GATE', value: 'yad gate open|sync', target: 'setup', category: 'front', description: 'Drive the Shape review PR/MR; sync approvals into the ledger and auto-advance on merge. A step that closes records how: when, on which PR and merge commit, and who merged it (closed, E18).', visibleTo: ALL },
   { constant: 'COMMIT', value: 'yad commit', target: 'build', category: 'build', description: 'Commit one staged atomic change by the conventions (subject + trailers + ≤3-file guard).', visibleTo: BUILD },
   { constant: 'OPEN_PR', value: 'yad open-pr', target: 'build', category: 'build', description: 'Open a code-repo task PR/MR from the committed platform template, based on the repo\'s RESOLVED default branch (repos.json default_branch → the platform → origin/HEAD → main; --base overrides) — never a hardcoded main. Warns when the base is not the platform default, because CodeRabbit skips auto-review there and retargeting later does not undo it (#168).', visibleTo: BUILD },

@@ -14,7 +14,7 @@ flowchart LR
       cdes["yad-connect-design<br/>design.json · Figma-first, pluggable"]
       ctest["yad-connect-testing<br/>testing.json · Playwright-first, pluggable"]
       clearn["yad-connect-learning<br/>learning.json · DeepTutor-first, pluggable"]
-      phub["optional: Product on a platform<br/>detect-hub · roster"]
+      phub["optional: Product on a platform<br/>detect-hub · no people stored"]
       inst --> wire --> conn --> sync --> cdes --> ctest --> clearn --> phub
     end
 
@@ -31,10 +31,10 @@ flowchart LR
       st["yad-stories<br/>repo-tagged stories/EP-&lt;slug&gt;-S0N.md"]:::artifact
       tc["yad-test-cases<br/>test-cases.md + automation tests<br/>(parallel · non-blocking)"]:::artifact
       gAn{{"gate · analysis"}}:::gated
-      gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
-      gAr{{"gate · architecture<br/>escalated: + repo domain owners"}}:::gated
+      gEp{{"gate · epic<br/>base: 1 approver, not the author"}}:::gated
+      gAr{{"gate · architecture<br/>count 3 = base 1 + contract risk 2<br/>base enforced · risk step advisory"}}:::gated
       gUi{{"gate · UI · base"}}:::gated
-      gSt{{"gate · stories<br/>per-repo domain owners"}}:::gated
+      gSt{{"gate · stories · base"}}:::gated
       gTc{{"gate · test cases · base"}}:::gated
       rfb(["currentStep: ready-for-build"]):::sentinel
       an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> rfb
@@ -47,7 +47,7 @@ flowchart LR
       im["yad-implement<br/>1 task = 1 branch = 1 commit"]:::earns
       shp["yad-ship<br/>yad-commit + yad-open-pr"]
       ck["yad-checks<br/>spec-link · contract-check · build/test/lint<br/>verified-commits · commit-message · pr-title · pr-template<br/>lineage-check · epic-open · reconcile-debt<br/>yad-update-guard (push-on-default)"]:::earns
-      prm["yad-pr-template route<br/>required reviewers"]
+      prm["yad-pr-template route<br/>approval count + touched domains"]
       air["yad-engineer-review<br/>AI review (advisory)"]
       eng{{"engineer review<br/>human · never automated"}}:::locked
       merged(["merge → build-log.json"]):::sentinel

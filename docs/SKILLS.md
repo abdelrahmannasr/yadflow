@@ -89,7 +89,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   section still holding only its template makes `yad gate open` and `yad gate sync` warn "Foundation not
   written yet", and `yad doctor` reports it (`foundation:unwritten`) once the review has opened or
   passed — a warning, never a refusal. It is
-  gated by the same review gate (base rule: owner + 1 reviewer); on approval it terminates at
+  gated by the same review gate (one approver holds it); on approval it terminates at
   `foundation-done` (no Build). The roadmap puts that approval "before feature work begins" — in this
   release that is **reported by `yad next`, not enforced**. Its `roadmap.md` is the menu of features —
   each `yad-epic` reads it for product context (reference-only; the Foundation never auto-seeds epics).
@@ -131,9 +131,10 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
 ## The review gate (cross-cutting — used by every review)
 
 - **`yad-review-gate`** — The reusable team review + approve gate. Shares an authored artifact, records
-  reviewer comments and approvals as files, enforces the **owner + 1 reviewer** rule (escalating to
-  domain owners on contract/auth/payments), and advances the epic state **only** when approval is
-  recorded.
+  reviewer comments and approvals as files (each under the reviewer's platform login — there are no
+  roles), holds the gate until **one person other than the author** approves, reports the full approval
+  count (a `contract` tag asks 3, `auth`/`payments` 2 — advisory until the capacity cap), and advances the
+  epic state **only** when approval is recorded.
 - **`yad-review-companion`** — The fun, easy, transparent layer on top of the gate (front **and**
   Build). Generates a 60-sec AI **trailer** of what changed + where the risk is, deals swipe-through
   review **cards**, and runs a grounded **chat** where a reviewer's questions become the record. Records
@@ -164,7 +165,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   contract surface.
 - **`yad-checks`** — Step C, the production-safety gates. Wire and run the CI gates: **spec-link**
   (every change links a real story/spec), **contract-check** (a contract-surface diff without a
-  re-locked contract FAILS), **build/test/lint**, **verified-commits** (signed + roster-known authors),
+  re-locked contract FAILS), **build/test/lint**, **verified-commits** (every commit platform-signed),
   and the **pattern gates** — **commit-message** (Conventional subject + trailer order), **pr-title**,
   and **pr-template** (the PR/MR body uses the template). Also wires **yad-update-guard** — a
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
@@ -174,20 +175,20 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   refuses an agent the CI-owned ledger write up front and names `yad gate open`, rather than letting
   `ledger-guard` reject it in CI twenty minutes later (#171).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
-  an Impact & Risk block; high risk (or a contract/auth/payments surface) routes the review to domain
-  owners. Includes `risk-route.sh` plus the `pr-title.sh` / `pr-template.sh` gate scripts.
+  an Impact & Risk block; high risk (or a contract/auth/payments surface) raises the approval count.
+  Includes `risk-route.sh` plus the `pr-title.sh` / `pr-template.sh` gate scripts.
 - **`yad-commit`** — build helper. Commit ONE staged atomic change by the conventions (Conventional
   subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file
   atomic guard). Drives `yad commit`.
 - **`yad-open-pr`** — build helper. Open a code-repo task PR/MR from the committed template: push the
-  branch, prefill the body, auto-assign the repo-scoped roster. Bases the PR on the repo's **resolved
+  branch, prefill the body, assign the committer (no reviewers are requested). Bases the PR on the repo's **resolved
   default branch** (`repos.json` → the platform → `origin/HEAD` → `main`; `--base` overrides), and
   warns when the base is not the platform default — a mis-based PR silently gets no AI first pass.
   Drives `yad open-pr`.
 - **`yad-ship`** — build helper. Commit **and** open the task PR/MR in one step (`yad commit` then
   `yad open-pr`; the PR step runs only if the commit lands). Drives `yad ship`.
 - **`yad-engineer-review`** — Step E. AI review (CodeRabbit, advisory) → engineer review (the human gate,
-  owner + 1 reviewer with the same escalation) → on merge, record the ship in the epic build-log and
+  one approver holds the merge, with the same reported count) → on merge, record the ship in the epic build-log and
   update the story state so the epic → story → task → PR chain stays traceable.
 - **`yad-backfill`** — Step G. Generate specs for already-built features in an existing repo so new work
   doesn't break them: pack one feature at a time with Repomix, write a DRAFT spec, require human approval

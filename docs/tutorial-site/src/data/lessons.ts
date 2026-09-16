@@ -178,7 +178,7 @@ export const MODULES: Module[] = [
         summary: 'npx yadflow setup walks a short profile interview, then installs.',
         body: [
           { kind: 'p', text: 'From your Product repo (an empty git repo is fine — the first epic creates its own files), run the guided wizard. It opens with a short profile interview — solo or team? greenfield or brownfield? monorepo or separate repos? — and branches the rest so you only answer what your situation needs.' },
-          { kind: 'p', text: 'It installs the skills into your IDE skill directories, detects your Product platform (GitHub/GitLab) from the remote, and sets up the reviewer roster.' },
+          { kind: 'p', text: 'It installs the skills into your IDE skill directories, and detects your Product platform (GitHub/GitLab) from the remote. It does not ask for reviewers, roles or commit emails: yadflow keeps no list of people. Anyone with access to the repo can review, and the platform records who approved.' },
           { kind: 'callout', tone: 'info', text: 'Re-run `npx yadflow check --fix` after any workflow update — it reports what is missing / drifted / stale and reconciles only what changed. It never re-asks for what you already answered.' },
         ],
         commands: [
@@ -213,7 +213,7 @@ export const MODULES: Module[] = [
           { kind: 'callout', tone: 'info', text: 'It clones/fetches as **you** — your own SSH key or git credential helper, GitHub or GitLab, no stored tokens. Greenfield with no code yet? Skip it; the brain just proceeds.' },
         ],
         commands: [
-          { cmd: 'yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>' },
+          { cmd: 'yad-connect-repos action: connect repo:<repo> path:<path-or-git_url>' },
           { cmd: 'yad repo list', note: 'show connected repos as fresh / stale' },
           { cmd: 'yad repo refresh <repo>', note: 're-pack a repo whose code has moved' },
           { cmd: 'yad repo refresh <repo> --push', note: 'publish the refreshed code-maps and .sdlc/repos.json to the Product default branch (chore(hub) audit commit)' },
@@ -302,7 +302,7 @@ export const MODULES: Module[] = [
         body: [
           { kind: 'p', text: 'Run `yad-architecture` with the architect lens. It authors `architecture.md` and the **locked** `contract.md` — the shared cross-repo surface (endpoints, events, data-models) that every code repo must honor.' },
           { kind: 'p', text: 'It then hash-locks the contract surface into `.sdlc/contract-lock.json`. From here on, any code change that touches that surface must declare it and re-lock — otherwise CI fails and routes back to this gate.' },
-          { kind: 'callout', tone: 'key', text: 'The architecture review is **escalated**: it needs the base approvals plus a domain owner for every repo in the epic. The engine also reports an advisory approver count of 3 for the step (base 1 + contract 2), which never blocks. Changing the locked surface invalidates existing approvals.' },
+          { kind: 'callout', tone: 'key', text: 'The architecture review carries the **contract** risk tag, so its count asks for 3 approvers (base 1 + contract risk 2). Only the base — 1 approver who is not the author — holds the gate for now; the other 2 are printed as a shortfall and never block. Changing the locked surface invalidates existing approvals.' },
         ],
         commands: [{ cmd: 'run yad-architecture' }],
         produces: ['epics/EP-<slug>/architecture.md', 'epics/EP-<slug>/contract.md (locked)', '.sdlc/contract-lock.json'],
@@ -328,7 +328,7 @@ export const MODULES: Module[] = [
         summary: 'Author ui-design.md and DESIGN.md; materialize screens if a design tool is connected.',
         body: [
           { kind: 'p', text: 'Run `yad-ui` with the ux-designer lens to author `ui-design.md` and `DESIGN.md`. If a design tool is connected, it also materializes the actual screens (mobile/web) in the tool and records the screen→frame map; otherwise it stays markdown-only.' },
-          { kind: 'p', text: 'The UI review uses the base rule (owner + 1 reviewer).' },
+          { kind: 'p', text: 'The UI review uses the base count: 1 approver who is not the author.' },
         ],
         commands: [{ cmd: 'run yad-ui' }],
         produces: ['epics/EP-<slug>/ui-design.md', 'epics/EP-<slug>/DESIGN.md'],
@@ -341,7 +341,7 @@ export const MODULES: Module[] = [
         summary: 'Repo-tagged stories with stable IDs — reaching ready-for-build.',
         body: [
           { kind: 'p', text: 'Run `yad-stories` with the pm lens to break the approved epic into user stories, one file per story, each tagged with the repos that must implement it. Stories get zero-padded `EP-<slug>-S0N` IDs.' },
-          { kind: 'p', text: 'The stories review is **per-repo**: base rule plus a domain owner for every repo any story touches.' },
+          { kind: 'p', text: 'The stories review is an ordinary count gate: 1 approver who is not the author. The repos any story touches label the review PR (`domain:<repo>`) but add no approvals.' },
           { kind: 'callout', tone: 'key', text: 'When the stories gate passes, the epic state reaches `currentStep: ready-for-build`. You can start building now.' },
         ],
         commands: [{ cmd: 'run yad-stories' }],
@@ -395,15 +395,15 @@ export const MODULES: Module[] = [
           { kind: 'p', text: 'Every Shape review is the same loop, run with `yad-review-gate`. Commenting never advances the step; only `advance` moves it forward, and only when the rule is met.' },
           { kind: 'steps', items: [
             'open — present the artifact; reviewers leave comments.',
-            'comment — the owner addresses notes, editing in place. (This never advances.)',
-            'approve — a reviewer approves with name + role, recorded in approvals.json.',
-            'advance — moves forward only if the rule is satisfied; otherwise it names who is still missing.',
+            'comment — the author addresses notes, editing in place. (This never advances.)',
+            'approve — a reviewer approves under their platform login (no role), recorded in approvals.json.',
+            'advance — moves forward only if the rule is satisfied; otherwise it says what is still missing.',
           ] },
           { kind: 'callout', tone: 'warn', text: 'Approvals are revoked when the reviewed artifact actually changes (it is re-hashed) — so a late edit gives reviewers a fresh pass instead of sneaking through. The status line at the top of the file does not count: yadflow changes it itself after the review.' },
         ],
         commands: [
           { cmd: 'yad-review-gate action: open' },
-          { cmd: 'yad-review-gate action: approve', note: 'name + role → approvals.json' },
+          { cmd: 'yad-review-gate action: approve', note: 'platform login → approvals.json' },
           { cmd: 'yad-review-gate action: advance', note: 'moves only if the rule is met' },
         ],
         quiz: [
@@ -442,28 +442,29 @@ export const MODULES: Module[] = [
         title: 'Who approves what',
         duration: '4 min',
         level: 'intermediate',
-        summary: 'The base rule and its escalations.',
+        summary: 'The approval count: a base and a risk step.',
         body: [
-          { kind: 'p', text: 'The base rule is **owner + 1 reviewer**, with escalation on risky surfaces (contract, auth, payments):' },
+          { kind: 'p', text: 'Every review uses the same **count** rule. It names no person and no role — yadflow keeps no list of people. Anyone with access to the repo can approve, and the platform records who did.' },
           { kind: 'list', items: [
-            '**Epic, UI** — owner + 1 reviewer.',
-            '**Architecture + contract** — base, plus a domain owner for every repo in the epic. The surface is hash-locked.',
-            '**Stories** — base, plus a domain owner for every repo any story touches.',
+            '**Base (enforced)** — at least 1 distinct approver who is not the author (on GitHub or GitLab you cannot approve your own PR), all comment threads resolved, and the review PR merged.',
+            '**Risk step (advisory)** — +2 when the step is tagged `contract`, +1 when it is tagged `auth` or `payments`. The highest tag counts, never the sum.',
+            '**Architecture + contract** — the count asks for 3 approvers (base 1 + contract risk 2). The surface is hash-locked.',
+            '**Epic, UI, stories, test-cases** — the base count: 1 approver. Stories touching several repos add no approvals.',
             '**Engineer review at ship** — a human engineer, always, never automated.',
           ] },
-          { kind: 'p', text: 'A count is reported on every step beside the rule above: the step asks for **base + risk step distinct approvers**. Base is 1 (one human approval; on GitHub or GitLab that cannot be the author, since you cannot approve your own PR), plus 2 when the step is tagged `contract` or 1 when it is tagged `auth`/`payments` — the highest tag, never the sum. It counts people rather than roles, so one person holding two roles is one approver, and the architecture gate asks for 3. It is advisory for now: the full rule caps it at the number of active people, and an uncapped count would leave a two-person team unable to pass that gate.' },
+          { kind: 'p', text: 'The full count is **base 1 + risk step**, and it counts people rather than roles. Only the base holds a gate for now; `yad gate sync` prints the rest as a shortfall, for example `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`. The risk step starts to hold gates when the capacity cap lands (a later roadmap row): that cap limits the count to the number of active people, so a two-person team is never stuck on a gate it cannot pass. Solo mode still waives approvals: the merge plus resolved threads advance the step.' },
         ],
         quiz: [
           {
-            q: 'The architecture review escalates beyond the base rule. What does it add?',
+            q: 'The architecture review carries the contract risk tag. What does its approval count ask for?',
             options: [
-              'Nothing — it uses the base rule',
-              'A domain owner for every repo in the epic',
+              'Nothing extra — 1 approver, the same as every step',
+              '3 approvers (base 1 + contract risk 2); only the base is enforced for now',
               'Approval from the CEO',
               'A second AI review',
             ],
             answer: 1,
-            explain: 'Because it locks the shared contract, architecture needs a domain owner per repo on top of owner + reviewer.',
+            explain: 'A contract tag adds a risk step of 2 to the base of 1. The gate holds on the base and prints the other 2 as a shortfall until the capacity cap lands.',
           },
         ],
       },
@@ -533,7 +534,7 @@ export const MODULES: Module[] = [
             '**spec-link** — every change links a real story/spec.',
             '**contract-check** — a contract-surface change without a declared, re-locked contract FAILS and routes back to the architecture gate.',
             '**build / test / lint** — the usual.',
-            '**verified-commits** — every commit is signed with a platform-Verified key and authored by a roster-known email.',
+            '**verified-commits** — every commit is signed with a platform-Verified key. There is no author allowlist: write access to the repository decides who may author.',
             '**pattern gates** — commit-message, pr-title, and pr-template conventions.',
           ] },
           { kind: 'callout', tone: 'info', text: 'These exist already in Yadflow — wiring them is a one-time setup step. This is the "preventing bad AI code from reaching the PR" wall.' },
@@ -560,7 +561,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'AI review (advisory) → engineer review (human) → merge.',
         body: [
-          { kind: 'p', text: 'Finally, `yad-engineer-review`: an AI review (CodeRabbit) runs first as an **advisory** pass — never the authority. Then a human engineer approves (owner + 1 reviewer, escalating to domain owners).' },
+          { kind: 'p', text: 'Finally, `yad-engineer-review`: an AI review (CodeRabbit) runs first as an **advisory** pass — never the authority. Then a human engineer approves, under the same count rule: 1 approver who is not the author, with high risk or a contract surface raising the advisory count. yadflow requests no reviewers — ask them on the PR itself.' },
           { kind: 'p', text: 'On merge, the ship is recorded in `build-log.json` and the story moves to `in-build` → `shipped`. The epic → story → task → PR → merge-commit chain stays traceable both ways.' },
           { kind: 'callout', tone: 'key', text: 'A story tagged for multiple repos runs the whole Build in each repo independently, all from the one locked contract.' },
         ],
@@ -630,7 +631,7 @@ export const MODULES: Module[] = [
           { kind: 'list', items: [
             '**defect-fix** — re-author stories (a regression story) + test-cases; inherit the rest.',
             '**behavioral change, surface unchanged** — re-author stories + test-cases (+ UI if visible); inherit architecture/contract.',
-            '**contract-surface change** — re-author architecture (it re-locks and re-routes the escalated review) + stories + test-cases.',
+            '**contract-surface change** — re-author architecture (it re-locks and re-runs the contract-risk review) + stories + test-cases.',
           ] },
           { kind: 'p', text: 'Then you author and gate only the re-authored artifacts, and build + ship the change-epic\'s story the normal way. A defect\'s regression test is the durable memory of the bug.' },
         ],

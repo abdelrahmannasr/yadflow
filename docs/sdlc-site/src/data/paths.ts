@@ -127,19 +127,19 @@ const setupSteps: FlowStep[] = [
   },
   {
     id: "detect-hub",
-    title: "Detect Hub & Roster",
+    title: "Detect Hub",
     description:
-      "Put the Product on a platform: detect GitHub/GitLab from the remote and record reviewers (login → name + per-repo roles) into hub.json. Manage the roster any time with `yad roster` (list / add / grant / revoke / remove). With a verified ledger, the Shape review runs through a real PR/MR.",
+      "Put the Product on a platform: detect GitHub/GitLab from the remote into hub.json. yadflow stores no list of people — repository access decides who can review, and the platform records who approved (their login). With a verified ledger, the Shape review runs through a real PR/MR.",
     actor: "system",
     status: "connected",
     stepState: ".sdlc/hub.json",
     trigger: "yad-connect-repos action: detect-hub",
-    handler: "yad-connect-repos (detect-hub) / yad roster",
+    handler: "yad-connect-repos (detect-hub)",
     activeComponents: ["product-hub", "platform", "repos-json"],
     messages: [
-      { id: "dh-1", from: "platform", to: "product-hub", label: "detect platform + roster", type: "write", color: "#7d3c98", delay: 0, duration: 800 },
+      { id: "dh-1", from: "platform", to: "product-hub", label: "detect platform", type: "write", color: "#7d3c98", delay: 0, duration: 800 },
     ],
-    sideEffects: { jobs: ".sdlc/hub.json (platform + reviewer roster)" },
+    sideEffects: { jobs: ".sdlc/hub.json (platform; no people stored)" },
   },
 ];
 
@@ -156,7 +156,7 @@ function gateStep(
     id: `gate-${idSuffix}`,
     title: `Team Review Gate · ${artifact}`,
     description:
-      `The reusable team review + approve gate. Shares the ${artifact} for review, records comments and approvals as files, enforces ${rule}, and advances state ONLY when approval is recorded. When the Product is on a platform, yad-hub-bridge opens the review PR/MR and pulls its comments and approvals back into the file ledger.`,
+      `The reusable team review + approve gate. Shares the ${artifact} for review, records comments and approvals as files, applies the count rule (${rule}), and advances state ONLY when approval is recorded. When the Product is on a platform, yad-hub-bridge opens the review PR/MR and pulls its comments and approvals back into the file ledger.`,
     actor: "reviewer",
     status: "in-review",
     stepState: "reviews/*.md · approvals.json · hub-prs.json",
@@ -168,7 +168,7 @@ function gateStep(
       { id: `g${idSuffix}-2`, from: "platform", to: "approvals-json", label: "record approval", type: "gate", color: ruleColor, delay: 800, duration: 700 },
       { id: `g${idSuffix}-3`, from: "approvals-json", to: "state-json", label: "advance currentStep", type: "event", color: "#1e8449", delay: 1600, duration: 700 },
     ],
-    sideEffects: { jobs: rule, notifications: "owner + reviewer (escalates on contract/auth/payments)" },
+    sideEffects: { jobs: rule, notifications: "no reviewers requested — ask them on the PR; contract/auth/payments raise the advisory count" },
   };
 }
 
@@ -193,7 +193,7 @@ const discoverySteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "purpose.md · scope.md · mvp.md · roadmap.md · stack.md · repos.md (+ market.md · risks.md)", notifications: "roadmap.md is reference-only — never auto-seeds epics" },
   },
-  gateStep("foundation", "the Foundation sections", "owner + 1 reviewer (base rule)", "#1e8449"),
+  gateStep("foundation", "the Foundation sections", "1 approver who is not the author (base)", "#1e8449"),
 ];
 
 // ── Phase 3 — Shape (author → review gate, repeated per epic) ───────────
@@ -217,7 +217,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "analysis.md · state.json" },
   },
-  gateStep("analysis", "analysis.md", "owner + 1 reviewer", "#1e8449"),
+  gateStep("analysis", "analysis.md", "1 approver who is not the author (base)", "#1e8449"),
   {
     id: "epic",
     title: "Author Epic",
@@ -235,12 +235,12 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "epic.md · state.json" },
   },
-  gateStep("epic", "epic.md", "owner + 1 reviewer (base rule)", "#1e8449"),
+  gateStep("epic", "epic.md", "1 approver who is not the author (base)", "#1e8449"),
   {
     id: "architecture",
     title: "Author Architecture + Contract",
     description:
-      "Shape step 3: with the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the CONTRACT-SURFACE into contract-lock.json. Escalates on the contract risk tag.",
+      "Shape step 3: with the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the CONTRACT-SURFACE into contract-lock.json. Carries the contract risk tag, so its review count asks for 3 approvers (base 1 + contract risk 2).",
     actor: "architect",
     status: "draft",
     stepState: "architecture.md · contract.md",
@@ -254,7 +254,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "architecture.md · contract.md · contract-lock.json" },
   },
-  gateStep("architecture", "architecture.md", "escalated: base + a domain owner per repo (contract); advisory count asks 3", "#ca6f1e"),
+  gateStep("architecture", "architecture.md", "count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory", "#ca6f1e"),
   {
     id: "ui",
     title: "Author UI Design",
@@ -272,7 +272,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "ui-design.md · DESIGN.md · design-links.json" },
   },
-  gateStep("ui", "ui-design.md", "owner + 1 reviewer (base rule)", "#1e8449"),
+  gateStep("ui", "ui-design.md", "1 approver who is not the author (base)", "#1e8449"),
   {
     id: "stories",
     title: "Author Stories",
@@ -290,7 +290,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "stories/*.md · state.json" },
   },
-  gateStep("stories", "stories/", "per-repo: base + a domain owner for every touched repo", "#ca6f1e"),
+  gateStep("stories", "stories/", "1 approver who is not the author (base); touched repos only label the PR", "#1e8449"),
   {
     id: "test-cases",
     title: "Author Test Cases (parallel)",
@@ -308,7 +308,7 @@ const frontSteps: FlowStep[] = [
     ],
     sideEffects: { jobs: "test-cases.md · test-links.json", notifications: "review never moves currentStep off ready-for-build" },
   },
-  gateStep("test-cases", "test-cases.md", "owner + 1 reviewer (base rule)", "#1e8449"),
+  gateStep("test-cases", "test-cases.md", "1 approver who is not the author (base)", "#1e8449"),
   {
     id: "review-companion",
     title: "Review Companion (rides every gate)",
@@ -387,7 +387,7 @@ const buildSteps: FlowStep[] = [
     id: "pr-template",
     title: "PR/MR Template (Step D)",
     description:
-      "Detect the repo's platform and commit the matching PR/MR template with an Impact & Risk block. High risk (or a contract/auth/payments surface) routes the review to domain owners — the same yad-review-gate escalation.",
+      "Detect the repo's platform and commit the matching PR/MR template with an Impact & Risk block. High risk adds 1 to the approval count and a contract surface adds 2 — the same count as yad-review-gate; risk-route.sh prints it and lists the touched domains as a hint for whom to ask.",
     actor: "dev",
     status: "pr-ready",
     stepState: "pull_request_template.md",
@@ -396,7 +396,7 @@ const buildSteps: FlowStep[] = [
     activeComponents: ["code-repos", "platform"],
     messages: [
       { id: "pt-1", from: "dev", to: "code-repos", label: "commit PR/MR template + risk-route.sh", type: "write", color: "#2471a3", delay: 0, duration: 800 },
-      { id: "pt-2", from: "code-repos", to: "platform", label: "open task PR (roster auto-assigned)", type: "notification", color: "#566573", delay: 900, duration: 700 },
+      { id: "pt-2", from: "code-repos", to: "platform", label: "open task PR (no reviewers requested)", type: "notification", color: "#566573", delay: 900, duration: 700 },
     ],
     sideEffects: { jobs: "PR/MR template · risk-route.sh · pr-title.sh · pr-template.sh" },
   },
@@ -421,7 +421,7 @@ const buildSteps: FlowStep[] = [
     id: "engineer-review",
     title: "Engineer Review & Merge (Step E)",
     description:
-      "Wire an advisory AI first-pass (CodeRabbit, never the authority), record the human engineer review (owner + 1 reviewer, escalating on high risk / contract / auth / payments), and on merge record the ship in build-log.json.",
+      "Wire an advisory AI first-pass (CodeRabbit, never the authority), record the human engineer review (the same count: 1 approver who is not the author, with high risk / contract raising the advisory count), and on merge record the ship in build-log.json.",
     actor: "engineer",
     status: "merged",
     stepState: "build-log.json",
