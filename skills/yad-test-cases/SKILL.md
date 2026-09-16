@@ -9,7 +9,7 @@ description: 'Shape step 9 of the gated SDLC — a PARALLEL, non-blocking track.
 test cases that cover the stories' acceptance criteria — **and**, when a testing tool is connected, the
 **actual automation tests** inside the connected code repo(s), linked back from the artifact. This is a
 **Shape step**: human-authored with AI assist, **never auto-advances**. When the test cases are
-drafted, control passes to `yad-review-gate` (base rule: owner + 1 reviewer).
+drafted, control passes to `yad-review-gate` (base rule: 1 distinct approver, who should not be the author).
 
 **This step does NOT block Build.** It opens when the **stories** gate passes — at which point
 the epic is already `ready-for-build`, so implementation (`yad-spec` → `yad-implement` → …) can start
@@ -43,8 +43,8 @@ it passes. The check is track-aware: it keys off the `test-cases` step's predece
 `currentStep` (this is a parallel track — `currentStep` stays at `ready-for-build`).
 
 This passes once the `test-cases` step is runnable — its predecessor `stories-review` is `done` (so the
-step has opened to `in_progress`) and `test-cases` is not already `done`. While it is still `blocked`,
-the stories review has not passed.
+step has opened to `in_progress`) and `test-cases` is not already `done`. While it is still `todo` (or
+`blocked`, in a file written before shape 7), the stories review has not passed.
 
 ### Step 1b — Open the authoring branch
 Open the test-cases authoring branch `test-cases/EP-<slug>` per the shared procedure
@@ -167,7 +167,7 @@ degraded (`testing: none`), do **not** write `test-links.json`.
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
@@ -181,9 +181,9 @@ own code repo, not here) — then hand off to `yad-review-gate`.
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
-refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
-and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+**With a platform** the `review/EP-<slug>/test-cases` branch must already be **on origin** — the command
+refuses and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(or run `yad open-pr` from that branch: it pushes the branch, then delegates).
 
 Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
 through the gate.
@@ -192,7 +192,7 @@ through the gate.
 Report: the path to `test-cases.md`, the connected testing tool and what it produced (e.g. "Playwright —
 6 tests generated", the suite path + `test-links.json` path, or "no testing tool — artifacts-only"), that
 Build may already be underway in parallel, and that the next action is **review** via
-`yad-review-gate` (base rule: owner + 1 reviewer). **Never record approval here.** Shape steps do not
+`yad-review-gate` (base rule: 1 distinct approver, who should not be the author). **Never record approval here.** Shape steps do not
 auto-advance. When the Product has a platform, the gate opens a review
 PR on the Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments
 into the ledger; otherwise the review is recorded local.

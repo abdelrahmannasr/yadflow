@@ -26,7 +26,7 @@ and never gates.
 
 | Step (skill) | Outputs / sideEffects |
 |--------------|------------------------|
-| `yad-connect-repos` | `repos.json`, `code-context/<repo>/pack.md` + `code-map.md` (+ `detect-hub`/`roster` → `hub.json`) |
+| `yad-connect-repos` | `repos.json`, `code-context/<repo>/pack.md` + `code-map.md` (+ `detect-hub` → `hub.json`) |
 | `yad-connect-design` | `design.json` |
 | `yad-connect-testing` | `testing.json` |
 | `yad-connect-learning` | `learning.json` |
@@ -70,9 +70,9 @@ The gated authoring chain + the reusable review gate (10 steps, or 12 with the o
 |--------------|------|------------------------|
 | `yad-analysis` *(optional)* | → `analysis-review` | `analysis.md`, seeds `state.json` |
 | `yad-epic` | → `epic-review` | `epic.md`, seeds `state.json` |
-| `yad-architecture` | → `architecture-review` (escalates on contract) | `architecture.md`, `contract.md`, `contract-lock.json` |
+| `yad-architecture` | → `architecture-review` (contract tag raises the count) | `architecture.md`, `contract.md`, `contract-lock.json` |
 | `yad-ui` | → `ui-design-review` | `ui-design.md`, `DESIGN.md`, `design-links.json` |
-| `yad-stories` | → `stories-review` (per-repo routing) | `stories/EP-<slug>-S0N.md` |
+| `yad-stories` | → `stories-review` (labelled with every touched repo) | `stories/EP-<slug>-S0N.md` |
 | `yad-test-cases` | → `test-cases-review` (parallel, non-blocking) | `test-cases.md`, `test-links.json` |
 | `yad-review-gate` | the shared gate | `reviews/*.md`, `approvals.json`, `comments.json` |
 | `yad-review-companion` | the fun/visible review layer (trailer/cards/chat + engagement) | `approvals.json` `engagement`, platform trailer/cards |
@@ -142,7 +142,7 @@ The eight yadflow lenses, each to its relevant phase sections + paths:
 |------|----------------------------|
 | analyst | Setup intent, the Foundation (the Product level), analysis step, Shape discovery |
 | pm | the Foundation (purpose/scope/MVP/roadmap), epic, stories; the Shape gates |
-| architect | architecture + the locked contract; escalation |
+| architect | architecture + the locked contract; the contract risk step |
 | ux | UI design, design tool connection, the design system |
 | dev | Build: spec → implement, the per-repo loop |
 | tester | test-cases (parallel track), the testing tool, checks |

@@ -1,15 +1,16 @@
 ---
 name: yad-pr-template
-description: 'Build Step D of the gated SDLC. Detect a code repo''s platform and commit the matching PR/MR template — .github/pull_request_template.md (GitHub) or .gitlab/merge_request_templates/Default.md (GitLab). The template carries an Impact & Risk block; a high risk level (or a touched contract/auth/payments surface) routes the review to domain owners, reusing yad-review-gate''s escalation. Includes risk-route.sh to print the required reviewers from a PR body. Never auto-advances. Use when the user says "add the PR template" or "set up the MR template" for a repo.'
+description: 'Build Step D of the gated SDLC. Detect a code repo''s platform and commit the matching PR/MR template — .github/pull_request_template.md (GitHub) or .gitlab/merge_request_templates/Default.md (GitLab). The template carries an Impact & Risk block; a high risk level (or a touched contract surface) raises the approver count, the same count yad-review-gate prints. Includes risk-route.sh to print that count from a PR body. Never auto-advances. Use when the user says "add the PR template" or "set up the MR template" for a repo.'
 ---
 
 # SDLC — PR/MR Template (Build Step D)
 
 **Goal:** Commit the platform-correct PR/MR template into a code repo so every PR/MR carries an
 **Impact & Risk** block and a checklist tied to the check gates. A **high** risk level (or a touched
-contract/auth/payments surface) **routes the review to domain owners** — the same escalation
-`yad-review-gate` applies on the Shape gates (owner + 1 reviewer, plus one domain-owner per
-touched domain). This step **never auto-advances**; it sets up the template and the routing helper.
+contract surface) **raises the approver count** — the same count `yad-review-gate` prints on
+the Shape gates: base 1 (someone other than the author, enforced) plus a risk step (`high` +1, contract
++2, advisory until the capacity cap). This step **never auto-advances**; it sets up the template and the
+routing helper.
 
 ## Conventions
 
@@ -25,7 +26,8 @@ touched domain). This step **never auto-advances**; it sets up the template and 
     `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
     `templates/hub/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The Product body carries no `Task:` trailer
-    (Product PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s `hub-route.sh`.
+    (Product PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s
+    `templates/checks/hub-route.sh`, run from the skill (nothing installs it into the Product's `checks/`).
 - **GitLab reads a truncated description.** The `pr-template` gate is fed
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
   that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use
@@ -33,14 +35,15 @@ touched domain). This step **never auto-advances**; it sets up the template and 
   `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (front-half)`
   / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
   Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
-- **Installed templates are yad-managed.** `yad update` rewrites them on upgrade. An edit yad can
+- **Installed code-repo templates are yad-managed.** `yad update` rewrites them on upgrade (the Product
+  variants under `templates/hub/` are copied by hand in Step 2 and are not managed). An edit yad can
   prove — the file's sha differs from the one it recorded when it wrote the template — is reported as
   `modified` and left alone; a copy it has no record of is replaced after a `.yad-orig` backup (see
   `docs/CLI.md` → *Managed files*). Either way, put knowledge that must survive an upgrade in an ADR
   under `docs/`, not in the template.
 - The Impact & Risk block reuses the conventions of earlier steps: the `Task: <story>-<task>` trailer
   (`yad-implement`), the contract surface (`yad-architecture` / contract-check), and the
-  domain-owner escalation (`yad-review-gate`).
+  approver count (`yad-review-gate`).
 - **PR/MR title.** One atomic task = one branch = one PR/MR, so the title **defaults to that task's
   commit subject** and follows the same Conventional Commits style — `<type>: <lowercase imperative
   description, no trailing period>`, proper nouns/acronyms keep their case (`config.yaml`
@@ -51,7 +54,7 @@ touched domain). This step **never auto-advances**; it sets up the template and 
 ## Inputs
 
 - `repo`   — the code repo to add the template to (one of an epic's repos), or `hub` for the Product.
-- `action` — `wire` (commit the matching template + helper) | `route` (print required reviewers from a
+- `action` — `wire` (commit the matching template + helper) | `route` (print the approver count from a
   PR body). Default `wire`.
 - `body`   — for `route`: a file holding the PR/MR description to evaluate.
 
@@ -68,24 +71,31 @@ Copy from this skill's `templates/`:
 - GitLab → `templates/gitlab/merge_request_templates/Default.md` to
   `<repo>/.gitlab/merge_request_templates/Default.md`.
 - **`repo: hub`** → use the `templates/hub/<platform>/…` variants, installed into `{project-root}`'s own
-  `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) is installed by `yad-hub-bridge`.
+  `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) stays in `yad-hub-bridge`'s
+  `templates/checks/`; neither this skill nor `yad setup` / `yad check --fix` installs it.
 Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also
 install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`). If the target already has a
 non-SDLC PR/MR template, do not clobber it — back it up / ask. Commit the template on the repo's default
 branch (shared infrastructure, not a task diff).
 
-### Step 3 — `route` (show who must review)
+### Step 3 — `route` (show how many approvers)
 Run `bash checks/risk-route.sh <body>` to parse the PR description's Impact & Risk block and print the
-required reviewers:
-- **low | medium** risk → base rule: owner + 1 reviewer.
-- **high** risk (or a contract/auth/payments surface touched) → base rule **plus** one domain-owner
-  approval per touched domain — identical to `yad-review-gate`'s escalation. The actual approvals are
-  recorded by the engineer review (Step E), via `yad-review-gate`.
+approver count:
+- **low | medium** risk → `ROUTE: 1 approver = base 1 (no risk step).`
+- **high** risk → `ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)`.
+- a **contract surface** touched → `ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface
+  touched)`. With `high` too, the larger step (contract) wins, never the sum.
 
-When the PR/MR is actually opened with `yad open-pr`, these reviewers are **requested automatically**
-from the repo-scoped roster (everyone with `reviewer`/`domain-owner` for the repo, minus the committer),
-and the **committer is set as the assignee**. `risk-route.sh` remains the advisory printout of who the
-gate will require.
+When the count is raised, the script adds that only the base holds the merge until the capacity cap
+(1 approval from someone other than the author), that the risk step is advisory, and lists the touched
+domains as a hint for whom to ask. The actual approvals are recorded by the engineer review (Step E),
+via `yad-review-gate`.
+
+When the PR/MR is actually opened with `yad open-pr`, **no reviewers are requested** — it prints `no
+reviewers were requested — ask them on the PR itself`. The **assignee** is the person opening it: `@me`
+on GitHub (resolved by `gh`), and on GitLab the login `glab` reports (no assignee is passed when that
+lookup fails). yadflow keeps no list of people; a later roadmap row (E68) will suggest reviewers from
+history, and CODEOWNERS is a hint only.
 
 ### Step 4 — Stop (no auto-advance)
 Report what was committed (or the routing result). The template and routing are advisory inputs to the
@@ -94,10 +104,10 @@ human review (Step E); they do not approve or merge. Do not touch the epic's `.s
 ## Hard rules (build plan §D, Cross-cutting)
 
 - **Drop only the matching template** for the detected platform.
-- **High risk routes to domain owners** — the same escalation as the gate; never a separate rule.
+- **High risk raises the approver count** — the same count as the gate; never a separate rule.
 - **Nothing auto-advances.** The template sets up review; the human owns the merge.
 
 ## Reference
 - The Impact & Risk block, the risk levels, and the routing rule: `references/risk-routing.md`.
-- The escalation this reuses: `../yad-review-gate/SKILL.md` and its `references/gating.md`.
+- The approver count this reuses: `../yad-review-gate/SKILL.md` and its `references/gating.md`.
 - The check gates the checklist references: `../yad-checks/references/check-gates.md`.

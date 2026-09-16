@@ -83,7 +83,7 @@ In one pass it produces:
 - **38 workflow skills** installed into your AI assistant — Claude Code, Codex CLI, Cursor,
   Gemini CLI, GitHub Copilot, Zencoder and opencode. See
   [which agent reads which directory](#which-ai-agents-are-supported).
-- **`.sdlc/` config** — the Product, connected repos, reviewer roster, and tool connections
+- **`.sdlc/` config** — the Product, connected repos, and tool connections
   (design, testing, learning), all as plain JSON you can read and diff.
 - **CI gates**, wired into every connected repo and the Product as **GitHub Actions or GitLab CI** —
   spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, and the

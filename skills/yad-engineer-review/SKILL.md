@@ -1,6 +1,6 @@
 ---
 name: yad-engineer-review
-description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (owner + 1 reviewer, escalating to domain owners on high risk / contract / auth / payments — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
+description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (1 distinct approver, who should not be the author; high risk / contract raise the full count, advisory until the capacity cap — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
 ---
 
 # SDLC — Engineer Review & Merge (Build Step E)
@@ -15,24 +15,25 @@ then **ship** — merge, record the ship, and update the story state. This is th
 
 - `{project-root}` resolves from the project working directory — the **product** repo (the source of
   truth: it holds the story and the build ledger).
-- Code repos are separate git repos under `{project-root}/demo-repos/<repo>/`.
+- Code repos are separate git repos under `{project-root}/demo-repos/<repo>/` (or the registry `path` in
+  `.sdlc/repos.json`).
 - The build ledger uses **shard-then-fold** storage: each ship is its own shard file
   `{project-root}/epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json`, so concurrent shippers never
   conflict; readers UNION the folded `build-log.json` with every loose shard, and `yad tidy up` folds
   finished shards back into `build-log.json`. It — like the trust log and build-state — is committed by
   `yad checkpoint` (see Step 3), not by hand.
-- The engineer-review rule reuses `yad-review-gate`: base = at least one `owner` AND one distinct
-  `reviewer`; **escalated** (the PR's Impact & Risk is `high`, or it touches contract/auth/payments) =
-  base PLUS one `domain-owner` per touched domain — the same routing `yad-pr-template`'s
-  `risk-route.sh` prints.
+- The engineer-review rule reuses `yad-review-gate`'s count: `needed = base 1 + risk step` distinct
+  approvers. The PR's Impact & Risk block sets the risk step: `high` risk +1, a touched contract surface
+  +2 (the larger, never the sum). Only the base (1 distinct approver, who should not be the author) holds the merge; the
+  risk step is advisory until the capacity cap (E72). This is what `yad-pr-template`'s `risk-route.sh`
+  prints. The real merge protection is the platform's branch protection.
 - AI review wiring: `templates/.coderabbit.yaml` → `<repo>/.coderabbit.yaml`.
 
 ## Inputs
 
 - `epic` / `story` / `task` / `repo` — the PR under review (the task branch `feat/<story>-<task>-…`).
 - `action` — `ai-review` | `approve` | `ship` (default `ai-review`).
-- For `approve`: the reviewer `name` and `role` (`owner` | `reviewer` | `domain-owner`), and for a
-  domain owner the `domain`.
+- For `approve`: the reviewer's platform login. No role and no domain.
 
 ## On Activation
 
@@ -58,9 +59,12 @@ never gates. When a pair session backs the approve, you may set `companion.pair:
 
 ### Step 2 — `approve` (the engineer review — the human gate)
 A human engineer reads the diff **against the spec** (`specs/<story>/`) and the acceptance criteria,
-and records an approval. Determine the rule from the PR's Impact & Risk block (run
-`../yad-pr-template/templates/checks/risk-route.sh` on the PR body): base, or escalated to a
-domain-owner per touched domain. Record each approval; re-evaluate whether the rule is satisfied.
+and records an approval. Determine the count from the PR's Impact & Risk block (run
+`../yad-pr-template/templates/checks/risk-route.sh` on the PR body). It prints e.g.
+`ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface touched)`, says only the base holds the
+merge until the capacity cap, and lists the touched domains as a hint for whom to ask. With no risk it
+prints `ROUTE: 1 approver = base 1 (no risk step).` Record each approval; re-evaluate whether the base
+is met, and report any shortfall against the full count without blocking on it.
 Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
 approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
@@ -83,7 +87,7 @@ engineer-review rule is satisfied (Step 2). Then:
   ```json
   { "story": "<story>", "task": "<task>", "repo": "<repo>", "branch": "feat/<story>-<task>-…",
     "pr": "<url|#>", "mergeCommit": "<sha>", "gates": ["spec-link","contract-check","build-test-lint"],
-    "ai_review": "coderabbit (advisory)", "engineer_review": [{"approver":"<name>","role":"<role>","domain":"<opt>","engagement":"<verified|none>"}],
+    "ai_review": "coderabbit (advisory)", "engineer_review": [{"approver":"<platform login>","engagement":"<verified|none>"}],
     "companion": {"trailer":true,"cards":true,"chat":false}, "risk": "<low|medium|high>", "shippedAt": "<YYYY-MM-DD>" }
   ```
 - **Update the story state** — when **every** task in `specs/<story>/tasks.md` has a ship record, set
@@ -114,11 +118,12 @@ stays as it was (`ready-for-build`). Build is recorded in `build-log.json` + the
 ## Hard rules (build plan §E, Cross-cutting)
 
 - **AI review is advisory, never the authority.** Only a human engineer approval counts toward the gate.
-- **High risk routes to domain owners** — the same escalation as `yad-review-gate` / `risk-route.sh`.
+- **High risk raises the count** — the same count as `yad-review-gate` / `risk-route.sh`. Only the base
+  holds the merge until the capacity cap; there are no domain owners to route to.
 - **Ship only after gates + engineer review.** No gate skipped; the human owns the merge.
 - **Nothing auto-advances.** Step E records human decisions in files; it never machine-advances.
 
 ## Reference
 - The build ledger + story-state rules: `references/ship-and-record.md`.
-- The escalation reused: `../yad-review-gate/SKILL.md`; the routing helper: `../yad-pr-template/`.
+- The count reused: `../yad-review-gate/SKILL.md`; the routing helper: `../yad-pr-template/`.
 - The gates that must pass first: `../yad-checks/references/check-gates.md`.

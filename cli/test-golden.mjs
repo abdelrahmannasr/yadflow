@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { runNext } from './next.mjs';
 import { collectDoctor } from './doctor.mjs';
 import { loadLedger, gatePredicate, artifactHash, acceptedHashes, optionalStepsFor } from './epic-state.mjs';
-import { touchedDomains, loadProduct, isSolo, requireEngagement } from './gate.mjs';
+import { loadProduct, isSolo, requireEngagement } from './gate.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const FIXTURE = path.join(ROOT, 'cli', 'fixtures', 'golden-v3');
@@ -38,12 +38,11 @@ export const EXPECTED = path.join(ROOT, 'cli', 'fixtures', 'golden-v3.expected.j
 // Sections of `yad doctor --json` that describe the PROJECT rather than the machine it runs on.
 const FROZEN_SECTIONS = new Set(['epics', 'threads']);
 
-// gate.mjs hardcodes one required reviewer for every gate (`defaultReviewers`, gate.mjs). Mirrored
-// here rather than exported, so a change to that constant shows up as a snapshot diff to explain.
-// This is the ROSTER-ERA rule's number, which E62 retires with the roster. E7's per-step count has no
-// mirror here on purpose: it is derived from the step's own recorded risk tags, so the snapshot records
-// the engine's answer for each frozen step rather than this test's opinion of it.
-const DEFAULT_REVIEWERS = 1;
+// E7's per-step count has no mirror here on purpose: it is derived from the step's own recorded risk
+// tags, so the snapshot records the engine's answer for each frozen step rather than this test's
+// opinion of it. The roster-era inputs this used to pass (`defaultReviewers`, `touchedDomains`) went
+// with the role rule in E62. The frozen project still carries its roster and the roles on its
+// approvals; the engine no longer reads either, and the snapshot proves pass/fail did not move.
 
 const sha256 = (buf) => `sha256:${createHash('sha256').update(buf).digest('hex')}`;
 
@@ -120,8 +119,6 @@ export async function collectGolden(root) {
         approvals: ledger.approvals,
         currentHash: artifactHash(epicDir, step.artifact),
         acceptedHashes: acceptedHashes(epicDir, step.artifact),
-        touchedDomains: touchedDomains(epicDir, step),
-        defaultReviewers: DEFAULT_REVIEWERS,
         threadsResolved: true,
         merged: true,
         solo,

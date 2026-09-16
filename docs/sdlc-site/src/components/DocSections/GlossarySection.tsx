@@ -13,8 +13,9 @@ const TERM_GROUPS = [
   {
     phase: 'Gates & roles',
     steps: [
-      'Review gate — the reusable owner + 1 reviewer approval, escalating on contract/auth/payments, with a per-step approver count reported beside it.',
-      'Domain owner — the engineer who owns a repo; a required reviewer when their repo is touched.',
+      'Review gate — the reusable team approval: 1 approver, who should not be the author (the base), all threads resolved, and the review PR/MR merged. Anyone with access to the repo can approve; yadflow keeps no list of people.',
+      'Approval count — how many distinct people a step asks to approve: base 1 + risk step. Only the base is enforced for now; the gate prints the rest as a shortfall.',
+      'Risk step — what a step\'s risk tags add to the count: contract +2, auth or payments +1, the highest tag and never the sum. Advisory until the capacity cap lands.',
       'Engineer review — the human merge gate; advisory AI first-pass, never the authority. Permanently human.',
       'Lens — the role a step is authored through (analyst, pm, architect, ux, dev, tester, reviewer, engineer).',
     ],

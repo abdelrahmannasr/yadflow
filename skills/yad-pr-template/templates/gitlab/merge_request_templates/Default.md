@@ -16,12 +16,12 @@
 <!-- Fill every field. risk-route.sh + the engineer review read this block. -->
 - **Domains / repos touched:** <backend | mobile | …>
 - **Contract surface touched:** no <!-- yes => needs Contract-Change + a re-locked contract (contract-check) -->
-- **Risk level:** low <!-- low | medium | high — high (or a contract/auth/payments surface) routes to domain owners -->
+- **Risk level:** low <!-- low | medium | high — high (or a touched contract surface) raises the advisory approver count -->
 - **Rollback plan:** <how to revert if this misbehaves>
 
-> **Routing:** `low`/`medium` → base rule (owner + 1 reviewer). `high` (or a touched
-> contract/auth/payments surface) → **plus one domain-owner approval per touched domain**, the same
-> escalation `yad-review-gate` applies. Run `bash checks/risk-route.sh <this-description>` to list them.
+> **Routing:** the merge needs **1 approval, which should not be the author’s own**. `high` risk adds 1
+> and a touched contract surface adds 2 to the count (the larger, never the sum); that step is advisory
+> until the capacity cap. Run `bash checks/risk-route.sh <this-description>` to print the count.
 
 ## Testing
 <!-- How the acceptance criteria were exercised. Tests must exercise behavior, not just pass. -->
@@ -31,6 +31,6 @@
 - [ ] No contract-surface change without `Contract-Change: yes` + a re-locked contract (contract-check gate)
 - [ ] Lint, build, and tests pass (build/test/lint gate)
 - [ ] Diff stays inside the files the task's spec declared (≤3 where possible)
-- [ ] Impact & Risk filled; `high` risk adds the required domain-owner reviewers
+- [ ] Impact & Risk filled; for `high` risk, ask reviewers who know the touched domains
 
 /assign me

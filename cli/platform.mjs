@@ -42,160 +42,77 @@ export function platformReady(platform) {
   return !!cli && has(cli);
 }
 
-// ---- roster role model (per-scope map, with legacy back-compat) ---------------------------------
-// A roster entry's roles live in a per-scope map: `roles: { hub: ["owner","reviewer"], <repo>: [...] }`.
-// `rolesForScope` normalizes the three shapes a roster entry can take on disk:
-//   1. new object map     — `entry.roles = { hub: [...], backend: [...] }`
-//   2. flat array variant — `entry.roles = ["owner","reviewer"]` (treated as Product roles)
-//   3. legacy single role — `entry.role = "owner"` (a Product role; pre per-scope schema)
-// The legacy `repos.json` `domain_owner` field is handled separately by resolveLogin's fallback.
-// The product-level scope has two spellings. `hub` is what every existing roster on disk says;
-// `product` is what shape 3 renames it to. Asking for either finds either, for one major.
+// ---- who is running this command ------------------------------------------------------------
+// The platform login of whoever runs this command, asked of the platform's own CLI (`gh api user`,
+// `glab api user`) rather than looked up in a stored list (E62). A list is a claim that goes stale; the
+// CLI's answer is who is actually logged in. It is what a record's `by` names and what a commit subject
+// shows as `@login`.
 //
-// Without this the rename is a silent data loss: `yad migrate` moves the key to `product`, every
-// caller here still asks for `hub`, the lookup returns nothing, and every reviewer quietly stops
-// holding a product-level role — so the gate can no longer find its required approvers and no
-// message anywhere says why. The migration and the reader have to move together or not at all.
-// `hub` FIRST, deliberately: it is the authoritative spelling this major, exactly as `hub.json` is
-// the authoritative filename. Preferring `product` looked consistent with the rename and broke
-// revoking a role — the writers below all touch `hub`, so deleting it left `product` behind and the
-// person stayed a required approver. A scope with two names has to be READ from the same one the
-// writers maintain, or the two halves quietly disagree.
+// Best effort, and never a gate: null when there is no platform, the CLI is missing or logged out, the
+// network is down, the answer does not look like a login, or `YAD_PLATFORM_LOGIN=0` turns the lookup
+// off (offline work, and the test suite, which must never ask the developer's real account). Callers
+// then fall back to git `user.name` — see `actorName`. On CI the job token usually cannot read `/user`,
+// so the fallback is the bot's git name, exactly what it was before.
 //
-// Known limit, inherited not introduced: a connected repo literally named `hub` already shared a key
-// with the product scope in this flat map, and `product` now joins it. Naming a repo either word
-// gives its members the product-level roles. The scope map wants nesting to fix that properly; it is
-// not something this rename can repair.
-export const PRODUCT_SCOPES = ['hub', 'product'];
-export const isProductScope = (scope) => PRODUCT_SCOPES.includes(scope);
-const scopeKeys = (scope) => (isProductScope(scope) ? PRODUCT_SCOPES : [scope]);
-
-// Write a scope's roles under EVERY spelling it has, so a reader on either name sees the same answer.
-export function setScopeRoles(roles, scope, list) {
-  for (const k of scopeKeys(scope)) roles[k] = [...list];
-  return roles;
-}
-
-// …and remove it from every spelling. Deleting one name only is how a revoke becomes a no-op.
-export function deleteScopeRoles(roles, scope) {
-  for (const k of scopeKeys(scope)) delete roles[k];
-  return roles;
-}
-
-export function rolesForScope(entry, scope) {
-  if (!entry) return [];
-  const r = entry.roles;
-  const keys = scopeKeys(scope);
-  if (r && typeof r === 'object' && !Array.isArray(r)) {
-    for (const k of keys) if (Array.isArray(r[k])) return r[k];
-    return [];
-  }
-  const isProduct = isProductScope(scope);
-  if (Array.isArray(r)) return isProduct ? r : [];
-  if (typeof entry.role === 'string' && entry.role) return isProduct ? [entry.role] : [];
-  return [];
-}
-
-// True when the entry holds any of `wanted` roles across any of `scopes`.
-export function hasAnyRole(entry, scopes = [], wanted = []) {
-  for (const scope of scopes) {
-    for (const role of rolesForScope(entry, scope)) {
-      if (wanted.includes(role)) return true;
-    }
-  }
-  return false;
-}
-
-// Platform logins to auto-request as reviewers for the given scopes: everyone holding a `reviewer`
-// or `domain-owner` role in any scope, minus `excludeLogin` (you don't review your own PR), deduped.
-// `repos` (the registry) is consulted so a repo whose domain ownership lives ONLY in the legacy
-// `repos.json` `domain_owner`/`domain_owners` field — not the roster roles map — is still requested
-// as a reviewer for any scope that is its repo name. Without this the read side credits that login as
-// a domain-owner (resolveLogin's legacy fallback) but the open side never asks them, so an escalated
-// gate becomes structurally unsatisfiable through platform routing (BUG-1).
-export function reviewersForScopes(roster = [], scopes = [], { excludeLogin = null, repos = [] } = {}) {
-  const out = [];
-  const add = (login) => { if (login && login !== excludeLogin && !out.includes(login)) out.push(login); };
-  for (const entry of roster) {
-    if (hasAnyRole(entry, scopes, ['reviewer', 'domain-owner'])) add(entry.login);
-  }
-  for (const scope of scopes) {
-    const repo = repos.find((r) => r.name === scope);
-    if (!repo) continue;
-    const names = repo.domain_owners || (repo.domain_owner ? [repo.domain_owner] : []);
-    for (const name of names) add(roster.find((r) => r.name === name)?.login);
-  }
-  return out;
-}
-
-// The committer/PR-opener's platform login, resolved from local git identity through the roster.
-// Match on commit email first (the stable key), then fall back to name/login. null when unresolved.
-export function resolveCommitterLogin(cwd, roster = []) {
-  const email = (run('git', ['config', 'user.email'], { cwd }).stdout || '').trim().toLowerCase();
-  const name = (run('git', ['config', 'user.name'], { cwd }).stdout || '').trim();
-  if (email) {
-    const byEmail = roster.find((r) => (r.email || '').toLowerCase() === email);
-    if (byEmail) return byEmail.login || null;
-  }
-  if (name) {
-    const byName = roster.find((r) => r.name === name || r.login === name);
-    if (byName) return byName.login || null;
-  }
-  return null;
-}
-
-// Does this platform login exist on the Product? Warn-only (never throws): `checked:false` when the CLI
-// is absent/unauthenticated so callers can distinguish "not a user" from "couldn't check".
-export function validateLogin(platform, login) {
+// Asked once per platform and directory per process: a command that writes several records pays for
+// one call. The timeout keeps a hung network from holding a command that only wanted a name.
+//
+// ON GITHUB THE HOST IS PASSED. `gh api` asks github.com unless told otherwise, so someone logged in to
+// both github.com and a GitHub Enterprise server would be recorded under the wrong account. `host` is the
+// caller's (the Product's `git_url`), else the directory's origin remote. `glab api` already resolves the
+// host from the repo.
+const LOGIN_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]*(\[bot\])?$/; // GitLab allows a leading underscore
+const loginCache = new Map();
+export function platformLogin(cwd, platform, { runner = run, env = process.env, host } = {}) {
+  if (env.YAD_PLATFORM_LOGIN === '0') return null;
   const cli = cliFor(platform);
-  if (!cli || !has(cli) || !login) return { ok: false, exists: false, checked: false };
+  if (!cli) return null;
+  const ghHost = platform === 'github'
+    ? (host || hostFromGitUrl(runner('git', ['remote', 'get-url', 'origin'], { cwd }).stdout) || null)
+    : null;
+  const key = `${platform}\0${cwd}\0${ghHost || ''}`;
+  if (runner === run && loginCache.has(key)) return loginCache.get(key);
+  let login = null;
   if (platform === 'github') {
-    const r = run('gh', ['api', `users/${login}`]);
-    return { ok: r.ok, exists: r.ok, checked: true };
+    const r = runner('gh', ['api', ...(ghHost ? ['--hostname', ghHost] : []), 'user', '--jq', '.login'], { cwd, timeout: 10000 });
+    if (r.ok) login = r.stdout.trim();
+  } else {
+    const r = runner('glab', ['api', 'user'], { cwd, timeout: 10000 });
+    if (r.ok) { try { login = String(JSON.parse(r.stdout).username || ''); } catch { /* not JSON — no login */ } }
   }
-  // gitlab: users?username=<login> returns an array; empty array => no such user.
-  const r = run('glab', ['api', `users?username=${encodeURIComponent(login)}`]);
-  if (!r.ok) return { ok: false, exists: false, checked: true };
-  let exists = false;
-  try { exists = Array.isArray(JSON.parse(r.stdout)) && JSON.parse(r.stdout).length > 0; } catch { /* malformed JSON -> exists stays false */ }
-  return { ok: exists, exists, checked: true };
+  if (!login || !LOGIN_RE.test(login)) login = null;
+  if (runner === run) loginCache.set(key, login);
+  return login;
 }
 
-// ---- login -> yad identity (roster + derived domain-owner) -------------------------------------
-// Returns the records this login's APPROVED review contributes. Roles are read from the per-scope
-// map: Product roles plus, for each touched domain, that repo's scoped roles (domain-owner carries the
-// `domain` tag). The legacy `repos.json` `domain_owner === name` mapping is kept as a fallback so
-// pre per-scope projects still resolve domain owners.
-export function resolveLogin(login, roster = [], repos = [], touchedDomains = []) {
-  const entry = roster.find((r) => r.login === login);
-  if (!entry) return [{ name: login, role: 'reviewer', unverified: true }];
-  const records = [];
-  const push = (rec) => {
-    if (!records.some((x) => x.name === rec.name && x.role === rec.role && x.domain === rec.domain)) records.push(rec);
-  };
-  for (const role of rolesForScope(entry, 'hub')) push({ name: entry.name, role });
-  for (const d of touchedDomains) {
-    for (const role of rolesForScope(entry, d)) {
-      push(role === 'domain-owner' ? { name: entry.name, role, domain: d } : { name: entry.name, role });
-    }
-    // Legacy fallback: a repo whose domain_owner / domain_owners[] includes this name confers
-    // domain-owner for that domain. Both spellings are honored — symmetric with reviewersForScopes,
-    // which REQUESTS from both, so a person routed as a domain owner is also credited as one.
-    const legacy = repos.find((repo) => repo.name === d
-      && (repo.domain_owner === entry.name || (Array.isArray(repo.domain_owners) && repo.domain_owners.includes(entry.name))));
-    if (legacy) push({ name: entry.name, role: 'domain-owner', domain: d });
+// Who wrote a record: the platform login, else git `user.name`, else null. Attribution is a nicety on
+// the audit trail and never blocks the command that writes it.
+export function actorName(cwd, platform, opts = {}) {
+  return platformLogin(cwd, platform, opts)
+    || ((opts.runner || run)('git', ['config', 'user.name'], { cwd }).stdout || '').trim()
+    || null;
+}
+
+// The roster names `legacyLogins` (cli/gate.mjs) leaves out because two logins share them, each with the
+// logins that share it. An older record under such a
+// name could be either person, so it is never matched by name — only as `upsertBridge` matches a record
+// no name can place (an exact submission time, or an open step's one-to-one).
+export function ambiguousLegacyNames(hub) {
+  const logins = new Map();
+  for (const e of Array.isArray(hub?.roster) ? hub.roster : []) {
+    if (!e || typeof e.name !== 'string' || !e.name || typeof e.login !== 'string' || !e.login) continue;
+    if (!logins.has(e.name)) logins.set(e.name, new Set());
+    logins.get(e.name).add(e.login);
   }
-  // An identity-only entry (no roles map and no legacy `role`) still contributes a base reviewer
-  // record so an approval from a known person is never silently dropped. An entry that DOES declare
-  // roles but none apply to these scopes contributes nothing here (it is scoped elsewhere).
-  const hasNoRoleInfo = !entry.role && !(entry.roles && (Array.isArray(entry.roles) ? entry.roles.length : Object.keys(entry.roles).length));
-  if (!records.length && hasNoRoleInfo) push({ name: entry.name, role: 'reviewer' });
-  return records;
+  return new Map([...logins].filter(([, set]) => set.size > 1));
 }
 
 // Normalized PR reviews -> approval records (only APPROVED states count). `submittedAt` rides along
 // so the gate can tell a fresh re-approval from a stale one (revoke-on-change).
-export function mapApprovers(reviews = [], { roster, repos, touchedDomains, headOid } = {}) {
+// The record names the PLATFORM LOGIN that approved (E62). There is no stored list to look it up in and
+// no role to give it: the platform's record of who approved is the evidence, and the gate counts
+// people, not roles. A review with no login cannot be told apart from another one, so it is not counted.
+export function mapApprovers(reviews = [], { headOid } = {}) {
   const out = [];
   for (const r of reviews) {
     if (r.state !== 'APPROVED') continue;
@@ -213,9 +130,8 @@ export function mapApprovers(reviews = [], { roster, repos, touchedDomains, head
     // engagement rides in the APPROVE review body (`<!-- yad:engagement verified -->`); a bare UI
     // click has no marker → 'none'. Gameable by design (it makes review quality visible, not provable).
     const engagement = parseEngagement(r.body);
-    for (const rec of resolveLogin(r.login, roster, repos, touchedDomains)) {
-      out.push({ ...rec, submittedAt: r.submittedAt || null, engagement });
-    }
+    if (!r.login) continue;
+    out.push({ name: r.login, submittedAt: r.submittedAt || null, engagement });
   }
   return out;
 }
@@ -516,9 +432,11 @@ export function resolveBaseBranch(platform, {
 }
 
 // ---- create a PR/MR -----------------------------------------------------------------------------
-// `assignees` = the committer/PR-opener (always set, so the PR is owned by whoever pushed it);
-// `reviewers` = the scope's reviewers + domain-owners (computed by reviewersForScopes). On GitHub an
-// empty assignee list falls back to `@me` so the opener still self-assigns even without a roster.
+// `assignees` = the committer/PR-opener on GitLab (empty when `glab` cannot say who is logged in);
+// GitHub callers pass none and get `@me`, so the PR is owned by whoever pushed it;
+// `reviewers` = logins to request. No caller passes any since E62 removed the roster that chose them;
+// the parameter stays for E68, which suggests reviewers from history. On GitHub an empty assignee list
+// falls back to `@me` so the opener still self-assigns when the platform login is unknown.
 // Pure argv builder for the create command — exported so the reviewer/assignee/label wiring is
 // unit-testable without shelling out. gh always self-assigns (@me) when no assignee resolved.
 export function buildPrArgs(platform, { title, body, base, head, reviewers = [], labels = [], assignees = [] } = {}) {
@@ -635,7 +553,7 @@ export function createPr(platform, opts = {}) {
   let mentioned = []; let dropped = [];
   if (rest.length && iid) {
     const ats = rest.map((m) => `@${m}`).join(' ');
-    const note = run('glab', ['mr', 'note', iid, '-m', `Review requested (owner + reviewer rule): ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
+    const note = run('glab', ['mr', 'note', iid, '-m', `Review requested: ${ats} — please review and approve/comment on this MR (this drives the gate).`], { cwd: opts.cwd });
     if (note.ok) mentioned = rest; else dropped = rest;
   } else if (rest.length) {
     dropped = rest; // could not parse the IID to post the note

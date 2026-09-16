@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Product review routing — the Shape analogue of yad-pr-template's risk-route.sh. Reads a Product review
-# PR/MR description's "Impact & Risk (front-half)" block and prints the required reviewers, reusing
-# yad-review-gate's rule: base = owner + 1 reviewer; if a risk tag (contract|auth|payments) is set OR
-# the artifact is the stories set, ALSO a domain-owner per touched repo. Advisory: it ROUTES the human
+# PR/MR description's "Impact & Risk (front-half)" block and prints how many approvers the gate asks for,
+# as the same sum the gate prints: base 1, plus a risk step from the tags — `contract` +2, `auth` or
+# `payments` +1, the largest and never the sum. Only the base holds the gate until the capacity cap
+# lands; the risk step is advisory. There are no roles and no named owners: yadflow keeps no list of
+# people (E62), so when a risk tag raises the count the touched repos are printed as a hint for whom to
+# ask (with no risk step it prints the base line alone). Advisory: it ROUTES the human
 # review; it does not approve or merge.
 set -euo pipefail
 
@@ -18,33 +21,32 @@ value_of() {
 
 risk_tags="$(printf '%s' "$(value_of 'Risk tags:')" | tr 'A-Z' 'a-z')"
 repos="$(value_of 'Domains.*touched:')"
-artifact="$(value_of 'Artifact:')"
 
 echo "Risk tags: ${risk_tags:-none}"
 echo "Repos touched: ${repos:-unspecified}"
 
-escalate=no
+step=0
+tier=""
 why=""
-case "$risk_tags" in
-  *contract*) escalate=yes; why="risk tag: contract" ;;
-esac
-case "$risk_tags" in *auth*) escalate=yes; why="${why:+$why, }risk tag: auth" ;; esac
-case "$risk_tags" in *payments*) escalate=yes; why="${why:+$why, }risk tag: payments" ;; esac
-# The stories review routes per-repo even with no risk tag.
-case "$artifact" in *stories*) escalate=yes; why="${why:+$why, }stories per-repo routing" ;; esac
+# Whole tags only, as the gate reads them (`gateRuleFor`): `oauth` or `contracts` is not a risk tag.
+tags=" $(printf '%s' "$risk_tags" | tr ',;' '  ' | tr -s '[:space:]' ' ') "
+case "$tags" in *" auth "*) step=1; tier=high; why="risk tag: auth" ;; esac
+case "$tags" in *" payments "*) step=1; tier=high; why="${why:+$why, }risk tag: payments" ;; esac
+case "$tags" in *" contract "*) step=2; tier=contract; why="${why:+$why, }risk tag: contract" ;; esac
 
-if [ "$escalate" = "yes" ]; then
-  echo "ROUTE: ESCALATED (${why}) -> owner + 1 reviewer PLUS one domain-owner approval per touched repo"
-  echo "       (same escalation as yad-review-gate; map each repo to its domain_owner in repos.json)."
+if [ "$step" -gt 0 ]; then
+  echo "ROUTE: $((1 + step)) approvers = base 1 + ${tier} risk ${step} (${why})"
+  echo "       Only the base holds the gate until the capacity cap: 1 approval (the platform decides whether the author may give it)."
+  echo "       The risk step is advisory. Ask reviewers who know the touched repos:"
   case "$repos" in
     ""|*"<"*|*"…"*|*"|"*)
-      echo "  (Repos line not filled in — list each touched repo to route the domain owners.)" ;;
+      echo "  (Repos line not filled in — list each touched repo so the right reviewers can be asked.)" ;;
     *)
       printf '%s\n' "$repos" | tr ',' '\n' | while IFS= read -r r; do
         r="$(printf '%s' "$r" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [ -n "$r" ] && echo "  - domain-owner: $r"
+        [ -n "$r" ] && echo "  - $r"
       done ;;
   esac
 else
-  echo "ROUTE: base rule -> owner + 1 reviewer (no domain-owner escalation)."
+  echo "ROUTE: 1 approver = base 1 (no risk step)."
 fi

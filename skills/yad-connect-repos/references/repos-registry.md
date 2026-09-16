@@ -21,8 +21,6 @@ not under any `epics/EP-<slug>/.sdlc/`.
       "path": "demo-repos/backend",              // path to the code repo, rel. to {project-root} (or absolute)
       "git_url": "git@github.com:org/backend.git", // optional remote; SSH or HTTPS; GitHub or GitLab; null if local-only
       "platform": "github",                       // github | gitlab (from the URL host); null when local-only
-      "domain_owners": ["carol", "dave"],         // engineers who own this repo's domain (review routing); a repo may have several
-      "domain_owner": "carol",                    // legacy single-owner mirror = domain_owners[0] (kept for back-compat readers)
       "default_branch": "main",
       "connectedAt": "2026-06-08",                // first connect (YYYY-MM-DD)
       "lastSyncedAt": "2026-06-08",               // last connect/refresh
@@ -37,6 +35,9 @@ not under any `epics/EP-<slug>/.sdlc/`.
 
 ## Rules
 
+- **No owners.** An entry names no people (E62). `connect` writes no `domain_owner`/`domain_owners`. An
+  entry an older release wrote with them keeps them; nothing reads them, nothing deletes them, and
+  `yad doctor` warns `people:domain-owners-unused`.
 - **`name`** is the join key. It MUST match the names used in epic/story `repos:` tags so the Shape
   phases can map `epic.repos` → registry entries → code-maps. Keep it stable.
 - **Auth is never stored.** No tokens, passwords, or PATs in the registry. `git_url` is a plain remote;

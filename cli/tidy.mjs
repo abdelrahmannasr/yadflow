@@ -11,7 +11,7 @@ import path from 'node:path';
 import { c, log, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
 import { productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { resolveCommitterLogin } from './platform.mjs';
+import { platformLogin } from './platform.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch } from './hubcommit.mjs';
 import { foldTrust, foldBuild } from './ledger.mjs';
@@ -70,7 +70,7 @@ export async function runTidy(root, opts = {}) {
   }
   if (!folded) { info('nothing to tidy — no finished shards to fold'); return { folded: 0 }; }
 
-  const author = checkpointAuthor(resolveCommitterLogin(root, hub?.roster || []), git('config', 'user.name').stdout);
+  const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
   const label = touched.length === 1 ? touched[0] : `${touched.length} epics`;
   const message = `chore(hub): tidy Build ledgers — ${label} by ${author} [skip ci]`;
 

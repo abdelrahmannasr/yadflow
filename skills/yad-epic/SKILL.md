@@ -203,8 +203,9 @@ Notes:
 - **Then advance the authoring step.** The seed leaves `epic` open, which is truthful: the command runs
   before the artifact exists. Closing it is Step 5b's job, and on the local path `yad gate open` does it
   — so after writing `epic.md`, take Step 5b.
-- `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
-  (build plan §4): the contract review needs domain owners, not just owner + 1. The catalogue sets it;
+- `architecture-review` carries `risk_tags: ["contract"]` by default (build plan §4): the tag raises
+  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the gate until
+  the capacity cap (E72); the risk step is advisory and reported as a shortfall. The catalogue sets it;
   there is nothing to type.
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — at which point the epic is already `ready-for-build`, so Build
@@ -228,7 +229,7 @@ written. This is the step that closes the authoring step and opens its gate.)*
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
@@ -255,7 +256,7 @@ unmodified (the `yad-analysis` path), commit `epic.md` alone. Then hand off to `
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/EP-<slug>/epic.md` branch must already be **on origin** — the command refuses
+**With a platform** the `review/EP-<slug>/epic` branch must already be **on origin** — the command refuses
 and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
 (`yad open-pr` does both, then delegates).
 

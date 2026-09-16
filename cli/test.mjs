@@ -10,6 +10,11 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+// E62: a record's `by` asks `gh`/`glab` who is logged in. The suite must never ask the developer's real
+// account — the answer would differ per machine — so the lookup is off for every test in this file and
+// every CLI it spawns. The lookup's own tests pass `env` explicitly.
+process.env.YAD_PLATFORM_LOGIN = '0';
 // Strip ambient git identity env: GIT_AUTHOR_*/GIT_COMMITTER_* override repo-level `git config`,
 // and semantic-release exports them during `npm publish` (prepublishOnly runs this suite) — test
 // commits must carry the identity each test sets, not the publisher's.
@@ -1310,9 +1315,10 @@ test('fillHubTemplate: the generated review-PR body carries every section the Pr
   assert.match(b, /^## Impact & Risk \(front-half\)$/m);
   assert.match(b, /^## Checklist$/m);
   assert.match(b, /Risk tags:/);
-  // E7 (rule 6): the body says what the count asks of this step, labelled advisory so nobody reads it
-  // as the requirement. Pinned here because without it the line can be deleted with a green suite.
-  assert.match(b, /- \*\*Approver count \(advisory, not yet enforced\):\*\* 3 approvers = base 1 \+ contract risk 2$/m);
+  // E7 (rule 6): the body says what the count asks of this step, and which half of it holds the gate
+  // (E62: the base; the risk step is advisory until the cap), so nobody reads the full number as the
+  // requirement. Pinned here because without it the line can be deleted with a green suite.
+  assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 3 approvers = base 1 \+ contract risk 2 \(the risk step is advisory until the capacity cap\)$/m);
 });
 
 test('fillHubTemplate: an untagged step states the count too — the floor is still a number', () => {
@@ -1320,7 +1326,8 @@ test('fillHubTemplate: an untagged step states the count too — the floor is st
     epic: 'EP-demo', artifact: 'epic.md', step: { id: 'epic-review', risk_tags: [] },
     owner: 'alice', domains: ['backend'],
   });
-  assert.match(b, /- \*\*Approver count \(advisory, not yet enforced\):\*\* 1 approver = base 1$/m);
+  // No risk step, so nothing is advisory and the line says so by not mentioning it.
+  assert.match(b, /- \*\*Approvals needed:\*\* 1 \(enforced\) · full count 1 approver = base 1$/m);
 });
 
 test('fillHubTemplate: the generated body passes the real pr-template hub gate (#103 regression)', () => {
@@ -1468,11 +1475,51 @@ test('gateOpen: opens the PR against the head override, not its recomputed per-s
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain labels (BUG-1/BUG-3)', async () => {
+test('gateOpen: re-opening a review on a new PR stamps the OLD number on older approvals first, so a re-approval can go live (E62 review)', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+    const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ ...hub, platform: 'gitlab' }));
+    // approvals recorded before PR provenance existed: no `pr`, bound to content that has since changed
+    fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
+      { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-06-01', engagement: 'none' },
+    ]));
+    // The group path holds a number too: the PR number is read from its own segment, never the first number.
+    const creator = () => ({ ok: true, url: 'https://gitlab.example/123/p/-/merge_requests/9' });
+    await captureConsole(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture.md', creator, hasBranch: () => true }));
+    const stamped = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+    assert.equal(stamped[0].pr, 7, 'the approval is stamped with the PR it came from, before the pointer moves');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'))[0].number, 9);
+    // the same person approves again on #9 (GitLab: no submission time) — it is a new review, so it goes live
+    const { gateSync: sync } = await import('./gate.mjs');
+    await captureConsole(() => sync(T, { epic: 'EP-test', today: '2026-09-16',
+      reader: () => ({ ok: true, state: 'opened', merged: false, reviews: [{ login: 'al', state: 'APPROVED' }], threads: [] }) }));
+    const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+    assert.equal(after.find((a) => a.approver === 'al').artifactHash, artifactHash(ep, 'architecture.md'), 'a re-approval on the new MR is live');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: a new URL with no PR number still stamps the old number before the pointer is overwritten', async () => {
+  const { T, ep } = scaffoldEpic();
+  try {
+    git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+    fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([
+      { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-06-01', engagement: 'none' },
+    ]));
+    await captureConsole(() => gateOpen(T, { epic: 'EP-test', artifact: 'architecture', creator: () => ({ ok: true, url: 'https://github.com/acme/app/pull/new' }), hasBranch: () => true }));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'))[0].pr, 7);
+    const ptrs = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/hub-prs.json'), 'utf8'));
+    assert.equal(ptrs.length, 1, '`architecture` and `architecture.md` are one review — one pointer, not two');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('gateOpen: requests NO reviewers, still labels the touched domain (E62, BUG-3)', async () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-gopen2-'));
   git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  // bob is a Product reviewer (roles map); carol owns backend ONLY via repos.json (no roster role).
+  // A roster with a reviewer and a repos.json domain owner — both left on disk from an older release.
+  // Before E62 both were requested; now neither is read.
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
     platform: 'github', default_branch: 'main',
     roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }, { login: 'ca', name: 'carol' }],
@@ -1488,9 +1535,10 @@ test('gateOpen: requests reviewers (incl. a repos.json domain owner) + domain la
   fs.writeFileSync(path.join(T, 'epics/EP-demo/stories/EP-demo-S01.md'), '---\nrepos: [backend]\n---\n');
   let seen;
   const creator = (_p, opts) => { seen = opts; return { ok: true, url: 'https://x/pr/1' }; };
-  await gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator });
-  assert.deepEqual(seen.reviewers.sort(), ['bo', 'ca']); // carol requested via repos.json (BUG-1)
-  assert.deepEqual(seen.labels, ['domain:backend']);     // escalated step labels the touched domain
+  const { out } = await captureConsole(() => gateOpen(T, { epic: 'EP-demo', artifact: 'stories/', creator }));
+  assert.equal(seen.reviewers, undefined, 'no reviewer is requested — there is no roster to choose them from');
+  assert.match(out, /no reviewers were requested — ask them on the PR itself/, 'and the opener is told so');
+  assert.deepEqual(seen.labels, ['domain:backend']);     // the stories review still labels the touched repos
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -1638,11 +1686,17 @@ const baseStep = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md
 const escStep = { id: 'architecture-review', type: 'review+approve', artifact: 'architecture.md', risk_tags: ['contract'] };
 const appr = (over) => ({ step: 'epic-review', status: 'approved', artifactHash: 'sha256:H1', ...over });
 
-test('gatePredicate: base pass needs owner + 1 reviewer, then merged + resolved', () => {
-  const approvals = [appr({ approver: 'alice', role: 'owner' }), appr({ approver: 'bob', role: 'reviewer' })];
-  const p = gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+test('gatePredicate: a team gate needs one approver, whoever they are, then merged + resolved (E62)', () => {
+  const none = gatePredicate({ step: baseStep, approvals: [], currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(none.passed, false);
+  assert.deepEqual(none.missing, ['1 approval(s)']);
+  // No role anywhere: the roster that gave one is gone, and the gate counts people.
+  const p = gatePredicate({ step: baseStep, approvals: [appr({ approver: 'al' })], currentHash: 'sha256:H1', merged: true, threadsResolved: true });
   assert.equal(p.passed, true);
-  assert.equal(p.rule, 'base');
+  assert.equal(p.rule, 'count');
+  // An approval an older release recorded still carries a role. It counts as the person, not the role.
+  const old = gatePredicate({ step: baseStep, approvals: [appr({ approver: 'bob', role: 'reviewer' })], currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+  assert.equal(old.passed, true, 'a reviewer with no owner beside them passes now — the owner rule is gone');
 });
 
 test('gatePredicate: unresolved comments hold the gate in-review', () => {
@@ -1660,20 +1714,27 @@ test('gatePredicate: an approval against a stale hash is revoked', () => {
   assert.ok(p.missing.some((m) => /revoked/.test(m)));
 });
 
-test('gatePredicate: escalated step needs a domain-owner per touched repo', () => {
-  const approvals = [
-    { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
-    { step: 'architecture-review', status: 'approved', approver: 'bob', role: 'reviewer', artifactHash: 'sha256:C' },
-    { step: 'architecture-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: 'sha256:C' },
-  ];
-  const miss = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true });
-  assert.equal(miss.passed, false);
-  assert.ok(miss.missing.includes('domain-owner for mobile'));
-  assert.equal(miss.rule, 'escalated');
+test('gatePredicate: a contract step holds on the base alone — the risk step is reported, never enforced (E62)', () => {
+  // Until E72 caps it, a contract gate asking for three would lock out a two-person team. So one
+  // approver passes it, and the two it is short are said out loud rather than enforced.
+  const one = [{ step: 'architecture-review', status: 'approved', approver: 'al', artifactHash: 'sha256:C' }];
+  const p = gatePredicate({ step: escStep, approvals: one, currentHash: 'sha256:C', merged: true });
+  assert.equal(p.passed, true);
+  assert.equal(p.rule, 'count');
+  assert.equal(p.gateRule.needed, 3);
+  assert.equal(p.short, 2);
+  assert.deepEqual(p.missing, []);
+  const none = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', merged: true });
+  assert.equal(none.passed, false);
+  assert.deepEqual(none.missing, ['1 approval(s)'], 'the missing line asks for the base, not the full count');
+});
 
-  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'domain-owner', domain: 'mobile', artifactHash: 'sha256:C' });
-  const pass = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true });
-  assert.equal(pass.passed, true);
+test('gatePredicate: a record naming nobody is nobody — it cannot pass a team gate on its own (E62 review)', () => {
+  for (const approvals of [[appr({})], [appr({ approver: '' })], [appr({ approver: '   ' })]]) {
+    const p = gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
+    assert.equal(p.passed, false, JSON.stringify(approvals));
+    assert.equal(p.have, 0);
+  }
 });
 
 test('gatePredicate: solo waives approvals — merged + resolved passes with zero approvals', () => {
@@ -1692,40 +1753,35 @@ test('gatePredicate: solo still requires the merge and resolved threads', () => 
 });
 
 test('gatePredicate: requireEngagement counts only verified approvals (soft default counts both)', () => {
-  const approvals = [
-    appr({ approver: 'alice', role: 'owner', engagement: 'verified' }),
-    appr({ approver: 'bob', role: 'reviewer', engagement: 'none' }),
-  ];
-  // soft (default): the bare reviewer still counts → passes.
+  const approvals = [appr({ approver: 'bob', engagement: 'none' })];
+  // soft (default): the bare approval still counts → passes.
   assert.equal(gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true }).passed, true);
-  // strict: bob's unengaged approval does not count → a reviewer is missing.
+  // strict: bob's unengaged approval does not count → the one approver is missing.
   const strict = gatePredicate({ step: baseStep, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
   assert.equal(strict.passed, false);
-  assert.ok(strict.missing.some((m) => /reviewer/.test(m)));
+  assert.ok(strict.missing.includes('1 approval(s)'));
   assert.ok(strict.missing.some((m) => /verified engagement/.test(m)));
   // once bob's approval is engagement-verified, strict passes.
   const ok = gatePredicate({
     step: baseStep, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true,
-    approvals: [approvals[0], appr({ approver: 'bob', role: 'reviewer', engagement: 'verified' })],
+    approvals: [appr({ approver: 'bob', engagement: 'verified' })],
   });
   assert.equal(ok.passed, true);
 });
 
-test('gatePredicate: solo passes an escalated step without any domain-owner approvals', () => {
-  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend', 'mobile'], merged: true, threadsResolved: true, solo: true });
+test('gatePredicate: solo passes an escalated step with no approvals at all', () => {
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', merged: true, threadsResolved: true, solo: true });
   assert.equal(p.passed, true);
   assert.equal(p.rule, 'solo');
 });
 
-test('gatePredicate: discovery-review is a base-rule gate (owner + 1 reviewer, no escalation)', () => {
+test('gatePredicate: discovery-review is an ordinary count gate (one approver, no risk step)', () => {
   const step = { id: 'discovery-review', type: 'review+approve', artifact: 'discovery/', risk_tags: [] };
-  const approvals = [
-    { step: 'discovery-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:D' },
-    { step: 'discovery-review', status: 'approved', approver: 'bob', role: 'reviewer', artifactHash: 'sha256:D' },
-  ];
+  const approvals = [{ step: 'discovery-review', status: 'approved', approver: 'al', artifactHash: 'sha256:D' }];
   const p = gatePredicate({ step, approvals, currentHash: 'sha256:D', merged: true, threadsResolved: true });
   assert.equal(p.passed, true);
-  assert.equal(p.rule, 'base');
+  assert.equal(p.rule, 'count');
+  assert.equal(p.gateRule.needed, 1);
 });
 
 test('gatePredicate: a SKIPPED step short-circuits — passes with zero approvals (rule: skipped)', () => {
@@ -1802,26 +1858,25 @@ test('gateRuleSum: one sentence of arithmetic, shared by every surface that prin
   assert.equal(gateRuleSum(gateRuleFor({ risk_tags: ['contract'] })), '3 approvers = base 1 + contract risk 2');
 });
 
-test('gatePredicate: the count reports a shortfall the role rule cannot see, and holds nothing', () => {
-  // The role rule is SATISFIED here: alice is both owner and reviewer (the roster gives a person every
-  // role they hold), and carol covers the one touched domain. Two people, though — and the count asks a
-  // contract step for three. THIS is the case that forced the count to ship advisory: a two-person team
-  // passes today and would be deadlocked by an uncapped count, with no escape until E72/E73.
+test('gatePredicate: the count counts people, not records, and its risk step holds nothing', () => {
+  // Three records an older release wrote, from two people: alice once per role the roster gave her.
+  // The count asks a contract step for three. THIS is the case that keeps the risk step advisory: a
+  // two-person team would be deadlocked by an uncapped count, with no escape until E72/E73.
   const approvals = [
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'owner', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'alice', role: 'reviewer', artifactHash: 'sha256:C' },
     { step: 'architecture-review', status: 'approved', approver: 'carol', role: 'domain-owner', domain: 'backend', artifactHash: 'sha256:C' },
   ];
-  const p = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
-  assert.equal(p.passed, true, 'the role rule decides the gate, and it is satisfied');
+  const p = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', merged: true, threadsResolved: true });
+  assert.equal(p.passed, true, 'the base decides the gate, and it is satisfied');
   assert.equal(p.have, 2, 'two distinct people, though three approval records');
   assert.equal(p.gateRule.needed, 3);
   assert.equal(p.short, 1, 'the shortfall is reported — this is the value E72 will enforce on');
-  assert.deepEqual(p.missing, [], 'nothing the count says may hold a gate before the cap exists');
+  assert.deepEqual(p.missing, [], 'nothing the risk step says may hold a gate before the cap exists');
 
-  // A third human clears the shortfall, whatever role they hold.
-  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', role: 'reviewer', artifactHash: 'sha256:C' });
-  const full = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true });
+  // A third human clears the shortfall.
+  approvals.push({ step: 'architecture-review', status: 'approved', approver: 'dave', artifactHash: 'sha256:C' });
+  const full = gatePredicate({ step: escStep, approvals, currentHash: 'sha256:C', merged: true, threadsResolved: true });
   assert.equal(full.have, 3);
   assert.equal(full.short, 0);
 });
@@ -1840,13 +1895,13 @@ test('gatePredicate: a hand-added risk tag raises what the count asks of an ordi
   const untagged = gatePredicate({ step: baseStep, approvals: onePerson, currentHash: 'sha256:H1', merged: true, threadsResolved: true });
   assert.equal(untagged.gateRule.needed, 1);
   assert.equal(untagged.short, 0);
-  // Neither verdict moved — the role rule decides both, and one person holds both roles.
+  // Neither verdict moved — the base decides both, and one person meets it.
   assert.equal(tagged.passed, true);
   assert.equal(untagged.passed, true);
 });
 
 test('gatePredicate: solo reports no shortfall, and still says what team mode would ask', () => {
-  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', touchedDomains: ['backend'], merged: true, threadsResolved: true, solo: true });
+  const p = gatePredicate({ step: escStep, approvals: [], currentHash: 'sha256:C', merged: true, threadsResolved: true, solo: true });
   assert.equal(p.passed, true);
   assert.equal(p.gateRule.needed, 3, 'the rule is a fact about the step, reported even where approvals are waived');
   assert.equal(p.have, 0);
@@ -1871,19 +1926,23 @@ test('gatePredicate: a waived path reports `have: null`, which is not the same a
 
 test('gatePredicate: an engagement-gated approval does not count as an approver either', () => {
   // requireEngagement filters the approvals BEFORE anything counts them, so a bare click cannot make
-  // up the head count any more than it can fill a role.
+  // up the head count.
   const step = { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', risk_tags: ['payments'] };
   const approvals = [
-    appr({ approver: 'alice', role: 'owner', engagement: 'verified' }),
-    appr({ approver: 'bob', role: 'reviewer', engagement: 'none' }),
+    appr({ approver: 'alice', engagement: 'verified' }),
+    appr({ approver: 'bob', engagement: 'none' }),
   ];
   const strict = gatePredicate({ step, approvals, currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
   assert.equal(strict.have, 1);
   assert.equal(strict.gateRule.needed, 2);
   assert.equal(strict.short, 1);
-  // The role rule is what fails here (bob's approval does not count as a reviewer either).
-  assert.equal(strict.passed, false);
-  assert.ok(strict.missing.some((m) => /reviewer/.test(m)));
+  // The base is met by alice alone, so the gate passes — and the risk step's shortfall is reported only.
+  assert.equal(strict.passed, true);
+  // Without alice, bob's bare approval cannot meet the base either.
+  const bare = gatePredicate({ step, approvals: [approvals[1]], currentHash: 'sha256:H1', merged: true, threadsResolved: true, requireEngagement: true });
+  assert.equal(bare.have, 0);
+  assert.equal(bare.passed, false);
+  assert.ok(bare.missing.includes('1 approval(s)'));
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -2713,7 +2772,25 @@ test('resolveProfile: the older review_gate.solo carries forward, so a scripted 
   process.env.SDLC_NONINTERACTIVE = '1';
   try {
     const p = await resolveProfile(T, {});
-    assert.equal(p.solo, true, 'a roster of two would otherwise default the question to team');
+    assert.equal(p.solo, true, 'a configured Product with no mode would otherwise default the question to team');
+  } finally { delete process.env.SDLC_NONINTERACTIVE; fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('resolveProfile: with no mode recorded, a configured Product defaults to TEAM — never solo by accident (E62)', async () => {
+  // The default used to come from the roster's size. Solo waives every approval, so a scripted re-run of
+  // an old Product must not fall into it: an existing hub.json with no mode and no recorded team size is a
+  // team, a recorded team size decides, and only a project with no Product at all starts solo.
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-prof-e62-'));
+  process.env.SDLC_NONINTERACTIVE = '1';
+  try {
+    assert.equal((await resolveProfile(T, {})).solo, true, 'no Product yet → solo');
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'a' }] }));
+    const team = await resolveProfile(T, {});
+    assert.equal(team.solo, false, 'a Product with no mode → team, whatever an old roster says');
+    assert.equal(team.team_size, 2);
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', profile: { team_size: 1 } }));
+    assert.equal((await resolveProfile(T, {})).solo, true, 'a recorded team size of 1 → solo');
   } finally { delete process.env.SDLC_NONINTERACTIVE; fs.rmSync(T, { recursive: true, force: true }); }
 });
 
@@ -2892,9 +2969,9 @@ test('runSetup: re-run backfills a missing git_url without clobbering the roster
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// Regression for #97: a reconfigure that collects no reviewers (solo re-run) must NOT blank a populated
-// roster or drop the top-level verified_authors — both feed the verified-commits gate's allowlist.
-test('buildReconfiguredHub: empty collected roster preserves the existing roster + verified_authors', () => {
+// Regression for #97: a reconfigure must never drop a key it does not collect. Since E62 that includes a
+// `roster` and `verified_authors` an older release wrote: nothing reads them, and nothing deletes them.
+test('buildReconfiguredHub: overlays what this run collected and keeps every other key as it was', () => {
   const cur = {
     platform: 'github',
     verified_authors: ['dev@acme.com'],
@@ -2902,43 +2979,18 @@ test('buildReconfiguredHub: empty collected roster preserves the existing roster
   };
   const next = buildReconfiguredHub(cur, {
     platform: 'github', git_url: 'https://github.com/acme/hub.git', bridge_enabled: true, bridge: true,
-    default_branch: 'main', roster: [], solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 },
+    default_branch: 'main', solo: true, profile: { codebase: 'brownfield', repo_layout: 'separate', team_size: 1 },
   });
   assert.equal(next.git_url, 'https://github.com/acme/hub.git', 'git_url added');
-  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors preserved');
-  assert.equal(next.roster.length, 1, 'populated roster preserved when reconfigure collects none');
-  assert.equal(next.roster[0].login, 'al', 'roster entry untouched');
+  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors left on disk');
+  assert.deepEqual(next.roster, cur.roster, 'an older roster left on disk, untouched');
   assert.equal(next.solo, true, 'reconfigured fields overlaid');
-});
-
-test('buildReconfiguredHub: a non-empty collected roster replaces cur.roster but keeps verified_authors', () => {
-  const cur = {
-    platform: 'github',
-    verified_authors: ['dev@acme.com'],
-    roster: [{ login: 'al', name: 'alice', roles: { hub: ['owner'] } }],
-  };
-  const next = buildReconfiguredHub(cur, {
-    platform: 'github', git_url: null, bridge_enabled: true, bridge: true, default_branch: 'main',
-    roster: [{ login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } }], solo: false,
-    profile: { codebase: 'greenfield', repo_layout: 'monorepo', team_size: 2 },
-  });
-  assert.equal(next.roster.length, 1, 'new roster used');
-  assert.equal(next.roster[0].login, 'bo', 'roster replaced by the reconfigured entries');
-  assert.deepEqual(next.verified_authors, ['dev@acme.com'], 'verified_authors still preserved on replace');
-});
-
-test('buildReconfiguredHub: no existing file produces a plain object with an empty roster', () => {
-  const next = buildReconfiguredHub(null, {
-    platform: 'none', git_url: null, bridge_enabled: false, bridge: false, default_branch: 'main',
-    roster: [], solo: true, profile: { codebase: 'greenfield', repo_layout: 'monorepo', team_size: 1 },
-  });
-  assert.deepEqual(next.roster, [], 'fresh write has an empty roster');
-  assert.equal(next.verified_authors, undefined, 'no verified_authors invented');
-  assert.equal(next.platform, 'none', 'reconfigured fields present');
+  const fresh = buildReconfiguredHub(null, { platform: 'none', solo: true });
+  assert.deepEqual(fresh, { platform: 'none', solo: true }, 'a fresh write invents no roster and no verified_authors');
 });
 
 // Wiring guard: a corrupt hub.json must abort the run (YAD-STATE-001), never fail-open to `{}` and get
-// rewritten with roster/verified_authors stripped — the same silent-loss hole via a parse failure.
+// rewritten with every key it did not collect stripped — the same silent-loss hole via a parse failure.
 test('runSetup: a corrupt hub.json aborts instead of silently rewriting it stripped', async () => {
   const { T } = scaffold();
   const corrupt = '{ this is not valid json';
@@ -3012,7 +3064,9 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done');
   assert.equal(state.currentStep, 'ui-design');
   const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
-  assert.ok(approvals.some((a) => a.role === 'domain-owner' && a.domain === 'backend' && a.source === 'bridge'));
+  // One record per approving LOGIN, with no role: the roster in this fixture is left on disk and not read (E62).
+  assert.deepEqual(approvals.filter((a) => a.source === 'bridge').map((a) => a.approver).sort(), ['al', 'bo', 'ca']);
+  assert.ok(approvals.every((a) => a.role === undefined && a.domain === undefined));
 
   // idempotent: a second identical sync does not duplicate bridge approvals
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval });
@@ -3023,31 +3077,281 @@ test('gate sync: approved + resolved + merged advances the step', async () => {
 
 test('gate sync: the log line says who approved and what the count asks for (E7, rule 6)', async () => {
   const { T } = scaffoldEpic();
-  // Three logins approve the contract step, so the count is met and the role rule passes.
+  // Three logins approve the contract step, so the full count is met.
   const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => fullApproval }));
-  assert.match(out, /rule: escalated/);
-  assert.match(out, /3 approved; count \(advisory\): 3 approvers = base 1 \+ contract risk 2/);
+  assert.match(out, /rule: count/);
+  assert.match(out, /3 approved; count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory/);
   assert.ok(!/short/.test(out), `nothing is short here: ${out}`);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('gate sync: a shortfall is named on the log line, and it still advances the step', async () => {
   const { T, ep } = scaffoldEpic();
-  // TWO people approve a contract step: al as owner, bo as reviewer AND as the repo's domain owner. The
-  // role rule is satisfied, so the gate passes — and the count, which asks three, says how far short it
-  // is. This is the pairing the advisory decision exists for; without it the suffix is unpinned.
-  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({
-    repos: [{ name: 'backend', path: 'demo/backend', domain_owner: 'bob', default_branch: 'main' }],
-  }));
+  // TWO people approve a contract step. The base is met, so the gate passes — and the count, which asks
+  // three, says how far short it is. This is the pairing the advisory risk step exists for; without it
+  // the suffix is unpinned.
   const twoPeople = { ok: true, state: 'merged', merged: true, headOid: 'a', reviews: [
     { login: 'al', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
     { login: 'bo', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' },
   ], threads: [] };
   const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => twoPeople }));
-  assert.match(out, /2 approved; count \(advisory\): 3 approvers = base 1 \+ contract risk 2 — 1 short/);
-  assert.match(out, /gate PASSED/, `the count must not hold the gate: ${out}`);
+  assert.match(out, /2 approved; count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory — 1 short/);
+  assert.match(out, /gate PASSED/, `the risk step must not hold the gate: ${out}`);
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'))).steps.find((x) => x.id === 'architecture-review').status, 'done');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+// ---- the first sync after the E62 upgrade: older records name the roster's name, the platform the login ----
+// Every case the review ran by hand. The roster is still on disk (decision 2), and it is read as a name →
+// login table for this recognition only (`legacyLogins`). Without it, a record is matched only when nothing
+// else could be it.
+async function legacySync({ roster, approvals, reviews, status = 'in_review', merged = false, comments = null, threads = [] }) {
+  const { T, ep } = scaffoldEpic();
+  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+  if (roster === null) delete hub.roster; else if (roster) hub.roster = roster;
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+  const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+  state.steps.find((x) => x.id === 'architecture-review').status = status;
+  if (status === 'done') { state.steps.find((x) => x.id === 'ui-design').status = 'in_progress'; state.currentStep = 'ui-design'; }
+  fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify(state));
+  fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify(typeof approvals === 'function' ? approvals(artifactHash(ep, 'architecture.md')) : approvals));
+  if (comments) fs.writeFileSync(path.join(ep, '.sdlc/comments.json'), JSON.stringify(comments));
+  const cur = artifactHash(ep, 'architecture.md');
+  const read = () => JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+  const sync = (revs = reviews, over = {}) => captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-09-16',
+    reader: () => ({ ok: true, state: merged ? 'MERGED' : 'OPEN', merged, headOid: undefined, reviews: revs, threads, ...over }) }));
+  await sync();
+  return { T, ep, cur, read, sync, done: () => fs.rmSync(T, { recursive: true, force: true }) };
+}
+const legacyAppr = (approver, role, artifactHash, extra = {}) => ({ artifact: 'architecture.md', step: 'architecture-review', approver, role, status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash, approvedAt: '2026-06-01', pr: 7, ...extra });
+const hashesByApprover = (list) => Object.fromEntries(list.filter((a) => a.source === 'bridge').map((a) => [a.approver, a.artifactHash]));
+
+test('E62 upgrade: GitLab, no submission time — the roster map keeps each old approval with its person, never swapped by list order', async () => {
+  // alice approved OLD text; carol approved the current text; the platform lists carol first. Matching by
+  // order handed alice's old fingerprint to carol and bound alice to today's content.
+  const r = await legacySync({ roster: undefined, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'ca', state: 'APPROVED' }, { login: 'al', state: 'APPROVED' }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old', ca: r.cur }, 'alice keeps the fingerprint she approved; carol is current');
+    // carol withdraws: alice's approval of the old text must not pass the gate
+    await r.sync([{ login: 'al', state: 'APPROVED' }], { merged: true, state: 'MERGED' });
+    assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old' });
+    const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review', 'a stale approval holds the gate');
+    // and an unchanged re-sync is byte-identical (the sweep re-reads every 15 minutes)
+    const before = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    await r.sync([{ login: 'al', state: 'APPROVED' }], { merged: true, state: 'MERGED' });
+    assert.equal(fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8'), before);
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: a closed step keeps every person once — no deleted history, no one counted twice', async () => {
+  const approvals = [legacyAppr('alice', 'owner', 'X'), legacyAppr('bob', 'reviewer', 'X')];
+  const r = await legacySync({ roster: undefined, approvals: approvals.map((a) => ({ ...a })), reviews: [{ login: 'bo', state: 'APPROVED' }], status: 'done', merged: true });
+  try {
+    const after = r.read();
+    assert.deepEqual(after.map((a) => a.approver).sort(), ['alice', 'bo'], 'alice (not re-reported) stays as history; bob continues as bo');
+    assert.equal(after.find((a) => a.approver === 'bo').artifactHash, 'X', 'with the fingerprint bob approved');
+    assert.equal(after.find((a) => a.approver === 'alice').role, 'owner', 'the history record is untouched');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: one person with several role records becomes one record, keeping the fingerprint that is not today\'s', async () => {
+  const r = await legacySync({ roster: null, approvals: (cur) => [legacyAppr('al', 'owner', cur), legacyAppr('al', 'domain-owner', 'sha256:old', { domain: 'backend' })], reviews: [{ login: 'al', state: 'APPROVED' }] });
+  try {
+    const after = r.read().filter((a) => a.source === 'bridge');
+    assert.equal(after.length, 1);
+    assert.equal(after[0].artifactHash, 'sha256:old', 'the merge leans stale — a real approval is re-given, never a false pass');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: with the roster deleted, an old record is continued only when nothing else could be it', async () => {
+  // GitLab, one old approver and one approval left unmatched: that is the same review.
+  let r = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'al', state: 'APPROVED' }] });
+  try { assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old' }); } finally { r.done(); }
+  // GitHub, the submission time names the review exactly, even with two people.
+  r = await legacySync({ roster: null,
+    approvals: [legacyAppr('alice', 'owner', 'sha256:a', { approvedAt: '2026-06-01T10:00:00Z' }), legacyAppr('carol', 'reviewer', 'sha256:c', { approvedAt: '2026-06-01T11:00:00Z' })],
+    reviews: [{ login: 'ca', state: 'APPROVED', submittedAt: '2026-06-01T11:00:00Z' }, { login: 'al', state: 'APPROVED', submittedAt: '2026-06-01T10:00:00Z' }] });
+  try { assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:a', ca: 'sha256:c' }); } finally { r.done(); }
+  // GitLab, two of each on a CLOSED step: ambiguous, so nothing is guessed and nothing is added twice.
+  const two = [legacyAppr('alice', 'owner', 'X'), legacyAppr('carol', 'reviewer', 'X')];
+  r = await legacySync({ roster: null, approvals: two.map((a) => ({ ...a })), reviews: [{ login: 'ca', state: 'APPROVED' }, { login: 'al', state: 'APPROVED' }], status: 'done', merged: true });
+  try { assert.deepEqual(r.read().map((a) => a.approver).sort(), ['alice', 'carol'], 'history kept as it was'); } finally { r.done(); }
+});
+
+test('E62 upgrade: an old comment round names the roster name, and the first sync does not open a new round for the same threads', async () => {
+  const r = await legacySync({ roster: undefined, approvals: [],
+    comments: [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'bob', role: 'reviewer', round: 1, count: 1, date: '2026-06-01' }],
+    reviews: [], threads: [{ id: 't1', resolved: false, login: 'bo', body: 'needs a version field' }] });
+  try {
+    const comments = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/comments.json'), 'utf8'));
+    assert.deepEqual(comments.map((cm) => [cm.commenter, cm.round, cm.date]), [['bo', 1, '2026-06-01']], 'same round, same date, now under the login');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: an older fingerprint FORM that is still live is not "stale" — the stale approval is the one kept, with or without the roster', async () => {
+  // Every approval a released yadflow wrote carries a pre-shape-9 fingerprint the gate still accepts. The
+  // first cut compared against today's exact hash, took alice's live-but-old-form print as "stale", gave it
+  // to bob, and passed the gate on bob's stale approval.
+  for (const keepRoster of [true, false]) {
+    const { T, ep } = scaffoldEpic();
+    try {
+      const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json'), 'utf8'));
+      hub.platform = 'gitlab';
+      if (!keepRoster) delete hub.roster;
+      fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify(hub));
+      fs.writeFileSync(path.join(ep, 'epic.md'), '---\nid: EP-test\nowner: alice\nrepos: [backend]\nstatus: approved\n---\n# epic\n');
+      fs.writeFileSync(path.join(ep, '.sdlc/state.json'), JSON.stringify({ epicId: 'EP-test', currentStep: 'epic-review', steps: [
+        { id: 'epic', type: 'author', artifact: 'epic.md', status: 'done', risk_tags: [] },
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'in_review', risk_tags: [] },
+      ] }));
+      const ptr = JSON.stringify([{ step: 'epic-review', artifact: 'epic.md', platform: 'gitlab', number: 5, url: 'http://x/5', branch: 'review/EP-test/epic', lastSyncedAt: null }]);
+      fs.writeFileSync(path.join(ep, '.sdlc/hub-prs.json'), ptr);
+      fs.writeFileSync(path.join(ep, '.sdlc/product-prs.json'), ptr);
+      const { acceptedHashes } = await import('./epic-state.mjs');
+      const accepted = acceptedHashes(ep, 'epic.md');
+      const oldForm = accepted.find((h) => h !== artifactHash(ep, 'epic.md'));
+      assert.ok(oldForm, 'the fixture has an older fingerprint form the gate accepts');
+      const rec = (approver, role, h) => ({ artifact: 'epic.md', step: 'epic-review', approver, role, status: 'approved', date: '2026-06-01', source: 'bridge', artifactHash: h, approvedAt: '2026-06-01', pr: 5 });
+      fs.writeFileSync(path.join(ep, '.sdlc/approvals.json'), JSON.stringify([rec('alice', 'owner', oldForm), rec('bob', 'reviewer', 'sha256:old')]));
+      const { out } = await captureConsole(() => gateSync(T, { epic: 'EP-test', today: '2026-09-16',
+        reader: () => ({ ok: true, state: 'merged', merged: true, reviews: [{ login: 'bo', state: 'APPROVED' }], threads: [] }) }));
+      const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json'), 'utf8'));
+      assert.equal(after.find((a) => a.approver === 'bo')?.artifactHash, 'sha256:old', `bob's approval stays stale (roster ${keepRoster ? 'kept' : 'deleted'})`);
+      assert.doesNotMatch(out, /gate PASSED/, out);
+      const st = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json'), 'utf8'));
+      assert.equal(st.steps.find((x) => x.id === 'epic-review').status, 'in_review');
+    } finally { fs.rmSync(T, { recursive: true, force: true }); }
+  }
+});
+
+test('E62 upgrade: an older `unverified` record already names a login — never translated through a roster name it collides with', async () => {
+  // bob's roster name was `al`; a different person whose login IS `al` approved old content as an unrostered
+  // (unverified) reviewer. Translating that record through the roster gave the outsider bob's current print.
+  const r = await legacySync({ roster: [{ login: 'bob', name: 'al' }],
+    approvals: (cur) => [legacyAppr('al', 'reviewer', 'sha256:old', { unverified: true }), legacyAppr('al', 'owner', cur)],
+    reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bob', state: 'APPROVED' }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old', bob: r.cur });
+    await r.sync([{ login: 'al', state: 'APPROVED' }], { merged: true, state: 'MERGED' });
+    const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review', 'no pass on the outsider\'s approval of old content');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: on a closed step the GitLab one-to-one guess is not made — nobody inherits someone else\'s history', async () => {
+  const r = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'dan', state: 'APPROVED' }], status: 'done', merged: true });
+  try {
+    const after = r.read();
+    assert.deepEqual(after.map((a) => [a.approver, a.date]), [['alice', '2026-06-01']], 'alice stays; dan is not given her record');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: the result does not depend on the order the platform lists reviews, and a re-sync is byte-identical', async () => {
+  const outcomes = [];
+  for (const order of [0, 1]) {
+    const revs = [{ login: 'dan', state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z' }, { login: 'al', state: 'APPROVED', submittedAt: '2026-06-01T10:00:00Z' }];
+    if (order) revs.reverse();
+    const r = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old', { approvedAt: '2026-06-01T10:00:00Z' })], reviews: revs, status: 'done', merged: true });
+    try {
+      const first = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+      await r.sync(revs);
+      assert.equal(fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8'), first, `order ${order}: an unchanged re-sync writes nothing new`);
+      outcomes.push(hashesByApprover(JSON.parse(first)));
+    } finally { r.done(); }
+  }
+  assert.deepEqual(outcomes[0], outcomes[1], 'both orders record the same approvals');
+  assert.equal(outcomes[0].al, 'sha256:old', 'al continues alice by exact submission time');
+});
+
+test('E62 upgrade: a roster name two logins share is never matched by name — no false pass, history kept on a closed step', async () => {
+  // bob's roster name was `al`, and so was the name of the entry whose login is `al`. The older record `al`
+  // could be either person, so neither inherits it by name.
+  const roster = [{ login: 'al', name: 'al' }, { login: 'bob', name: 'al' }];
+  let r = await legacySync({ roster, approvals: [legacyAppr('al', 'owner', 'sha256:old')], reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bob', state: 'APPROVED' }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old', bob: 'sha256:old' }, 'ambiguous on an open step: both must approve again');
+    await r.sync([{ login: 'bob', state: 'APPROVED' }], { merged: true, state: 'MERGED' });
+    const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review');
+  } finally { r.done(); }
+  r = await legacySync({ roster, approvals: [legacyAppr('al', 'owner', 'X')], reviews: [{ login: 'al', state: 'APPROVED' }], status: 'done', merged: true });
+  try {
+    assert.deepEqual(r.read().map((a) => [a.approver, a.role]), [['al', 'owner']], 'closed: the older record stays as it was, and nothing is added twice');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: a roster name equal to ANOTHER entry\'s login is still exact — each record stays with the person it was written for', async () => {
+  // entry {login: bob, name: al} wrote `al`; entry {login: al, name: alice} wrote `alice`.
+  const roster = [{ login: 'bob', name: 'al' }, { login: 'al', name: 'alice' }];
+  const r = await legacySync({ roster, approvals: (cur) => [legacyAppr('al', 'owner', 'sha256:old'), legacyAppr('alice', 'reviewer', cur)],
+    reviews: [{ login: 'al', state: 'APPROVED' }, { login: 'bob', state: 'APPROVED' }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { al: r.cur, bob: 'sha256:old' });
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: two people under one shared name are two groups — continuing one never deletes or restamps the other', async () => {
+  const roster = [{ login: 's1', name: 'sam' }, { login: 's2', name: 'sam' }];
+  const T1 = '2026-06-01T10:00:00Z'; const T2 = '2026-06-02T10:00:00Z';
+  const recs = (cur) => [legacyAppr('sam', 'owner', cur, { approvedAt: T1 }), legacyAppr('sam', 'reviewer', 'sha256:old', { approvedAt: T2, date: '2026-06-02' })];
+  // closed, GitHub: only s1 is re-reported (s2's review was dismissed) — s1 continues T1; s2's record stays
+  let r = await legacySync({ roster, approvals: recs, reviews: [{ login: 's1', state: 'APPROVED', submittedAt: T1 }], status: 'done', merged: true });
+  try {
+    const after = r.read();
+    assert.deepEqual(after.map((a) => [a.approver, a.artifactHash === r.cur ? 'CUR' : a.artifactHash, a.approvedAt]).sort(),
+      [['s1', 'CUR', T1], ['sam', 'sha256:old', T2]], 's1 keeps its own live print; s2\'s history is untouched');
+  } finally { r.done(); }
+  // open, both re-reported: each continues its own record — s1 stays live, s2 stays stale
+  r = await legacySync({ roster, approvals: recs, reviews: [{ login: 's1', state: 'APPROVED', submittedAt: T1 }, { login: 's2', state: 'APPROVED', submittedAt: T2 }] });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { s1: r.cur, s2: 'sha256:old' });
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: a login that merely EQUALS a shared name is not one of the people under it', async () => {
+  const roster = [{ login: 's1', name: 'sam' }, { login: 's2', name: 'sam' }, { login: 'sam', name: 'x' }];
+  let r = await legacySync({ roster, approvals: [legacyAppr('sam', 'owner', 'sha256:old', { approvedAt: '2026-06-01T10:00:00Z' })],
+    reviews: [{ login: 'sam', state: 'APPROVED', submittedAt: '2026-09-09T10:00:00Z' }] });
+  try {
+    assert.equal(r.read().find((a) => a.approver === 'sam' && a.source === 'bridge' && a.role === undefined)?.artifactHash, r.cur, 'person x\'s own new approval is live');
+  } finally { r.done(); }
+  r = await legacySync({ roster, approvals: [legacyAppr('sam', 'owner', 'sha256:old', { approvedAt: '2026-06-01T10:00:00Z' })],
+    reviews: [{ login: 'sam', state: 'APPROVED', submittedAt: '2026-09-09T10:00:00Z' }], status: 'done', merged: true });
+  try {
+    assert.ok(r.read().some((a) => a.approver === 'sam' && a.role === undefined), 'and on a closed step it is recorded, beside the older record');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: an older comment round under a shared name is not "the same round" as a login equal to that name', async () => {
+  const r = await legacySync({ roster: [{ login: 's1', name: 'sam' }, { login: 's2', name: 'sam' }], approvals: [],
+    comments: [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'sam', role: 'reviewer', round: 1, count: 1, date: '2026-06-01' }],
+    reviews: [], threads: [{ id: 't1', resolved: false, login: 'sam', body: 'x' }] });
+  try {
+    const comments = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/comments.json'), 'utf8'));
+    assert.deepEqual(comments.map((cm) => [cm.commenter, cm.round]).sort(), [['sam', 1], ['sam', 2]], 'a new round, the older one kept');
+  } finally { r.done(); }
+});
+
+test('E62 upgrade: an exact submission time beats a roster name someone renamed — no pass on old content', async () => {
+  // `carol` used to be shared by ca and da. The team renamed ca to `caroline`, so the table now says
+  // `carol` → da — but the older record under `carol` was ca's approval of old content.
+  const T = '2026-06-06T10:00:00Z';
+  const r = await legacySync({ roster: [{ login: 'da', name: 'carol' }, { login: 'ca', name: 'caroline' }],
+    approvals: [legacyAppr('carol', 'reviewer', 'sha256:old', { approvedAt: T })],
+    reviews: [{ login: 'ca', state: 'APPROVED', submittedAt: T }], merged: true });
+  try {
+    assert.deepEqual(hashesByApprover(r.read()), { ca: 'sha256:old' }, 'ca continues her own record by its exact time');
+    const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review');
+  } finally { r.done(); }
+});
+
+test('legacyLogins: the roster\'s name → login pairs, and a name given to two logins is left out', async () => {
+  const { legacyLogins } = await import('./gate.mjs');
+  assert.deepEqual([...legacyLogins({ roster: [{ login: 'al', name: 'alice' }, { login: 'x', name: 'sam' }, { login: 'y', name: 'sam' }, { login: 'bo' }, null] })], [['alice', 'al']]);
+  assert.deepEqual([...legacyLogins({ roster: 'oops' })], []);
+  assert.deepEqual([...legacyLogins(null)], []);
 });
 
 test('gate sync: a step whose approvals live elsewhere reports no head count at all', async () => {
@@ -3106,8 +3410,8 @@ test('gate sync: records engagement per approval; a noblock companion thread nev
   const state = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/state.json')));
   assert.equal(state.steps.find((s) => s.id === 'architecture-review').status, 'done'); // noblock thread ignored
   const approvals = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/approvals.json')));
-  assert.equal(approvals.find((a) => a.approver === 'alice').engagement, 'verified');
-  assert.equal(approvals.find((a) => a.approver === 'bob').engagement, 'none');
+  assert.equal(approvals.find((a) => a.approver === 'al').engagement, 'verified');
+  assert.equal(approvals.find((a) => a.approver === 'bo').engagement, 'none');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3193,9 +3497,10 @@ test('review reconcile: stamps engagement onto the matching build-log ship recor
   assert.equal(res.written, true);
   const bl = JSON.parse(fs.readFileSync(path.join(ep, 'build-log.json')));
   const er = bl.ships[0].engineer_review;
-  assert.equal(er.find((e) => e.approver === 'amelia').engagement, 'verified');
-  assert.equal(er.find((e) => e.approver === 'carol').engagement, 'none');
-  assert.equal(er.find((e) => e.approver === 'amelia').role, 'owner');
+  // The platform login, with no role: the roster above is left on disk and never read (E62).
+  assert.equal(er.find((e) => e.approver === 'al').engagement, 'verified');
+  assert.equal(er.find((e) => e.approver === 'ca').engagement, 'none');
+  assert.equal(er.find((e) => e.approver === 'al').role, undefined);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3441,20 +3746,21 @@ test('gate sync: EP-foundation advances through the SAME gate at foundation/ to 
 test('gate sync: an approval on an older commit than the merged head is stale — gate holds (revoke-on-change in code)', async () => {
   const head = 'deadbeefcafe';
   const onHead = (login) => ({ login, state: 'APPROVED', submittedAt: '2026-06-09T00:00:00Z', commit: head });
-  // carol (the backend domain-owner) approved an EARLIER revision; the artifact moved before merge,
-  // so her review sits on an older commit than the merged head → dropped → escalated gate holds.
-  const staleCarol = { ok: true, state: 'MERGED', merged: true, headOid: head,
-    reviews: [onHead('al'), onHead('bo'), { login: 'ca', state: 'APPROVED', submittedAt: '2026-06-08T00:00:00Z', commit: 'oldsha' }],
+  // The only approval is on an EARLIER revision; the artifact moved before merge, so the review sits
+  // on an older commit than the merged head → dropped → no approver is left and the gate holds.
+  const staleOnly = { ok: true, state: 'MERGED', merged: true, headOid: head,
+    reviews: [{ login: 'ca', state: 'APPROVED', submittedAt: '2026-06-08T00:00:00Z', commit: 'oldsha' }],
     threads: [] };
   const s1 = scaffoldEpic();
-  await gateSync(s1.T, { epic: 'EP-test', today: '2026-06-09', reader: () => staleCarol });
+  await gateSync(s1.T, { epic: 'EP-test', today: '2026-06-09', reader: () => staleOnly });
   assert.equal(JSON.parse(fs.readFileSync(path.join(s1.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
-    'in_review', 'stale domain-owner approval is dropped → escalated gate holds');
+    'in_review', 'a stale approval is dropped → the gate holds');
+  assert.ok(!JSON.parse(fs.readFileSync(path.join(s1.ep, '.sdlc/approvals.json'))).some((a) => a.approver === 'ca'), 'and it is not recorded');
   fs.rmSync(s1.T, { recursive: true, force: true });
 
-  // all three approved the merged head → all count → the escalated gate passes.
+  // the same person approved the merged head too → it counts → the gate passes.
   const allHead = { ok: true, state: 'MERGED', merged: true, headOid: head,
-    reviews: [onHead('al'), onHead('bo'), onHead('ca')], threads: [] };
+    reviews: [onHead('ca')], threads: [] };
   const s2 = scaffoldEpic();
   await gateSync(s2.T, { epic: 'EP-test', today: '2026-06-09', reader: () => allHead });
   assert.equal(JSON.parse(fs.readFileSync(path.join(s2.ep, '.sdlc/state.json'))).steps.find((s) => s.id === 'architecture-review').status,
@@ -4071,13 +4377,15 @@ test('gate sync: unresolved comment holds in-review (no advance) and is recorded
   assert.ok(fs.existsSync(path.join(ep, 'reviews/architecture--2026-06-09--comments.md')));
   // ledger (not just the markdown side file) carries the participation record
   const comments = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/comments.json')));
-  const rec = comments.find((cm) => cm.step === 'architecture-review' && cm.commenter === 'bob');
-  assert.ok(rec, 'comments.json has a record for bob');
+  // the commenter is the platform login, with no role (E62)
+  const rec = comments.find((cm) => cm.step === 'architecture-review' && cm.commenter === 'bo');
+  assert.ok(rec, 'comments.json has a record for bo');
   assert.equal(rec.count, 1);
+  assert.equal(rec.role, undefined);
   // re-sync same round does not duplicate
   await gateSync(T, { epic: 'EP-test', today: '2026-06-09', reader: () => withComment });
   const after = JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/comments.json')));
-  assert.equal(after.filter((cm) => cm.commenter === 'bob' && cm.round === rec.round).length, 1);
+  assert.equal(after.filter((cm) => cm.commenter === 'bo' && cm.round === rec.round).length, 1);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4357,10 +4665,10 @@ test('gate status says what the gate will ask for, and counts it the way the gat
     return lines.find((l) => l.includes('architecture-review') && l.includes('approval'));
   };
 
-  // The contract step's count, stated as arithmetic and labelled advisory — the roster rule alone would
-  // never print a number, and a number with no label would read as the requirement.
+  // The contract step's count, stated as arithmetic and labelled with which half holds the gate — a
+  // number with no label would read as the requirement.
   const line = await statusLines();
-  assert.match(line, /count \(advisory\): 3 approvers = base 1 \+ contract risk 2 — 1 short/);
+  assert.match(line, /count: 3 approvers = base 1 \+ contract risk 2 — base enforced, risk step advisory — 1 short/);
   assert.match(line, /from 2 people/);
 
   // With requireEngagement on, the predicate drops a bare approval BEFORE counting people. The status
@@ -4395,7 +4703,7 @@ test('gate status: a waived step says where its approvals live, and an unjustifi
   setStep({ inherited: true, inheritedFrom: 'EP-parent' });
   const inherited = await statusLine('architecture-review');
   assert.match(inherited, /inherited from EP-parent/);
-  assert.ok(!/count \(advisory\)/.test(inherited), `a waived step asks for nothing: ${inherited}`);
+  assert.ok(!/count:/.test(inherited), `a waived step asks for nothing: ${inherited}`);
 
   // A hand-edited `skipped: true` on a step this epic's route does NOT mark optional must not read as
   // waived here, because `gatePredicate` refuses to honour it either — two read-only views of one ledger
@@ -4403,7 +4711,7 @@ test('gate status: a waived step says where its approvals live, and an unjustifi
   setStep({ inherited: false, inheritedFrom: null, skipped: true });
   const forged = await statusLine('architecture-review');
   assert.ok(!/skipped/.test(forged), `an unjustified skip is not a waiver: ${forged}`);
-  assert.match(forged, /count \(advisory\): 3 approvers/);
+  assert.match(forged, /count: 3 approvers/);
 
   // A status this release cannot name is printed as itself and MARKED, never renamed to something it
   // is not — the line is the one view people read to see where a gate stands, and quietly calling an
@@ -4526,7 +4834,7 @@ test('repo sync switches a local-only repo (no remote) to its default branch', a
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerRepo: only real git repos may enter the registry
 // ---------------------------------------------------------------------------------------------
-const { registerRepo, registerDesign, registerTesting, registerLearning, addRepoRoles } = await import('./setup.mjs');
+const { registerRepo, registerDesign, registerTesting, registerLearning } = await import('./setup.mjs');
 
 test('registerRepo rejects a missing path and a non-git directory — nothing written', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg-'));
@@ -4630,7 +4938,7 @@ test('registerRepo records a real repo; an unknown platform answer falls back to
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('registerRepo records multiple domain_owners, keeping domain_owner as the first', () => {
+test('registerRepo records no domain owners — people are not stored (E62)', () => {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-reg3-'));
   const real = path.join(T, 'real');
   fs.mkdirSync(real);
@@ -4639,8 +4947,8 @@ test('registerRepo records multiple domain_owners, keeping domain_owner as the f
   git(real, 'add', '-A');
   git(real, '-c', 'user.email=a@b.c', '-c', 'user.name=x', 'commit', '-q', '-m', 'init');
   const repo = registerRepo(T, { repos: [] }, { name: 'real', rpath: 'real', platform: 'github', domain_owners: ['carol', 'dave'], today: '2026-06-14' });
-  assert.deepEqual(repo.domain_owners, ['carol', 'dave']);
-  assert.equal(repo.domain_owner, 'carol', 'legacy single field mirrors the first owner');
+  assert.equal(repo.domain_owners, undefined, 'an owner passed in by an older caller is not written');
+  assert.equal(repo.domain_owner, undefined);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -4655,139 +4963,6 @@ test('registerRepo with pack:false (greenfield) leaves syncedHead null and reads
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('addRepoRoles grants per-repo roles into the roster map and warns on unknown names', () => {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roles-'));
-  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
-    platform: 'github', roster: [
-      { login: 'ca', name: 'carol', roles: { hub: ['reviewer'] } },
-      { login: 'al', name: 'alice', role: 'owner' }, // legacy entry gets migrated to a map
-    ],
-  }));
-  addRepoRoles(T, 'backend', { 'domain-owner': ['carol', 'ghost'], owner: ['alice'] });
-  const hub = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
-  const carol = hub.roster.find((r) => r.name === 'carol');
-  const alice = hub.roster.find((r) => r.name === 'alice');
-  assert.deepEqual(carol.roles.backend, ['domain-owner']);
-  assert.deepEqual(carol.roles.hub, ['reviewer'], 'existing hub roles preserved');
-  assert.deepEqual(alice.roles, { hub: ['owner'], product: ['owner'], backend: ['owner'] }, 'legacy role migrated into the map, under both spellings of the product scope');
-  // idempotent: re-granting the same role does not duplicate
-  addRepoRoles(T, 'backend', { 'domain-owner': ['carol'] });
-  const again = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
-  assert.deepEqual(again.roster.find((r) => r.name === 'carol').roles.backend, ['domain-owner']);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-// ---------------------------------------------------------------------------------------------
-// `yad roster` — manage the roster + per-repo roles at any time (repo-driven, repos.json sync)
-// ---------------------------------------------------------------------------------------------
-const { parseRolesSpec, upsertRosterEntry, removeRepoRole, setRepoDomainOwners } = await import('./setup.mjs');
-const { runRoster } = await import('./roster.mjs');
-
-// A temp root with a hub.json (platform null so login validation is skipped) and a repos.json.
-function rosterRoot(roster = [], repos = []) {
-  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roster-'));
-  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, bridge_enabled: false, default_branch: 'main', roster }));
-  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos }));
-  return T;
-}
-const readHub = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/hub.json')));
-const readRepos = (T) => JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json')));
-
-test('parseRolesSpec parses a multi-scope spec and dedupes', () => {
-  assert.deepEqual(parseRolesSpec('hub=owner,reviewer backend=domain-owner'),
-    { hub: ['owner', 'reviewer'], backend: ['domain-owner'] });
-  assert.deepEqual(parseRolesSpec('hub=reviewer,reviewer'), { hub: ['reviewer'] }, 'dedupes within a scope');
-  assert.deepEqual(parseRolesSpec('garbage no-equals'), {}, 'malformed tokens are skipped');
-  assert.deepEqual(parseRolesSpec(''), {});
-});
-
-test('upsertRosterEntry inserts a new member and upserts by login, merging roles without dropping scopes', () => {
-  const T = rosterRoot();
-  upsertRosterEntry(T, { login: 'gl-abd', name: 'abdulrahman', email: 'a@b.c', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] }, platform: 'none' });
-  let e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.equal(e.name, 'abdulrahman');
-  assert.equal(e.email, 'a@b.c');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'] });
-  // upsert by login: add a dashboard scope; hub + backend must survive
-  upsertRosterEntry(T, { login: 'gl-abd', roles: { dashboard: ['domain-owner'] }, platform: 'none' });
-  e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
-  assert.equal(readHub(T).roster.length, 1, 'upsert, not duplicate');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('setRepoDomainOwners adds/removes a name and mirrors domain_owner; no-op for an unregistered repo', () => {
-  const T = rosterRoot([], [{ name: 'backend', domain_owner: '', domain_owners: [] }]);
-  assert.equal(setRepoDomainOwners(T, 'backend', 'abdulrahman', { add: true }), true);
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['abdulrahman']);
-  assert.equal(readRepos(T).repos[0].domain_owner, 'abdulrahman', 'legacy field mirrors the first owner');
-  setRepoDomainOwners(T, 'backend', 'ayman', { add: true });
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['abdulrahman', 'ayman']);
-  setRepoDomainOwners(T, 'backend', 'abdulrahman', { add: false });
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['ayman']);
-  assert.equal(readRepos(T).repos[0].domain_owner, 'ayman', 'mirror follows the removal');
-  assert.equal(setRepoDomainOwners(T, 'ghost', 'x', { add: true }), false, 'unregistered repo is a no-op');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster grant writes the roles map AND syncs repos.json domain_owners; revoke reverts both', async () => {
-  const T = rosterRoot(
-    [{ login: 'ay', name: 'ayman', roles: { hub: ['reviewer'] } }],
-    [{ name: 'backend', domain_owner: '', domain_owners: [] }],
-  );
-  await runRoster(T, { action: 'grant', args: ['ayman', 'backend', 'domain-owner'] });
-  assert.deepEqual(readHub(T).roster[0].roles.backend, ['domain-owner']);
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, ['ayman'], 'repos.json kept in sync');
-  await runRoster(T, { action: 'revoke', args: ['ayman', 'backend', 'domain-owner'] });
-  assert.equal(readHub(T).roster[0].roles.backend, undefined, 'empty scope key removed');
-  assert.deepEqual(readRepos(T).repos[0].domain_owners, [], 'repos.json reverted');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster grant refuses a name that is not in the roster', async () => {
-  const T = rosterRoot([], [{ name: 'backend', domain_owners: [] }]);
-  const prev = process.exitCode;
-  await runRoster(T, { action: 'grant', args: ['ghost', 'backend', 'domain-owner'] });
-  assert.equal(process.exitCode, 1, 'sets a failing exit code');
-  assert.deepEqual(readHub(T).roster, [], 'nothing written');
-  process.exitCode = prev;
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster add --roles (scripted) upserts and mirrors domain-owner scopes into repos.json', async () => {
-  const T = rosterRoot([], [{ name: 'backend', domain_owners: [] }, { name: 'dashboard', domain_owners: [] }]);
-  await runRoster(T, { action: 'add', args: ['gl-abd'], name: 'abdulrahman', email: 'a@b.c',
-    roles: 'hub=owner,reviewer backend=domain-owner dashboard=domain-owner' });
-  const e = readHub(T).roster.find((r) => r.login === 'gl-abd');
-  assert.deepEqual(e.roles, { hub: ['owner', 'reviewer'], product: ['owner', 'reviewer'], backend: ['domain-owner'], dashboard: ['domain-owner'] });
-  assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'backend').domain_owners, ['abdulrahman']);
-  assert.deepEqual(readRepos(T).repos.find((r) => r.name === 'dashboard').domain_owners, ['abdulrahman']);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('removeRepoRole drops one role and empties the scope key; runRoster remove deletes by login', async () => {
-  const T = rosterRoot([{ login: 'ca', name: 'carol', roles: { hub: ['reviewer'], backend: ['domain-owner', 'reviewer'] } }],
-    [{ name: 'backend', domain_owners: ['carol'] }]);
-  removeRepoRole(T, 'carol', 'backend', ['reviewer']);
-  assert.deepEqual(readHub(T).roster[0].roles.backend, ['domain-owner'], 'only the named role is removed');
-  removeRepoRole(T, 'carol', 'backend', ['domain-owner']);
-  assert.equal(readHub(T).roster[0].roles.backend, undefined, 'empty scope key deleted');
-  await runRoster(T, { action: 'remove', args: ['ca'] });
-  assert.deepEqual(readHub(T).roster, [], 'member removed by login');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('runRoster list reports members, repos, and hub<->repos.json domain-owner drift', async () => {
-  const T = rosterRoot([{ login: 'ca', name: 'carol', roles: { hub: ['reviewer'] } }],
-    [{ name: 'backend', domain_owners: ['carol'] }]); // carol owns backend in repos.json but has no roles.backend
-  const summary = await runRoster(T, { action: 'list' });
-  assert.equal(summary.members, 1);
-  assert.equal(summary.repos, 1);
-  assert.equal(summary.drift, 1, 'flags the repos.json-only ownership');
-  fs.rmSync(T, { recursive: true, force: true });
-});
 
 // ---------------------------------------------------------------------------------------------
 // `yad setup` — registerDesign: record the design-tool connection (deterministic half)
@@ -4907,7 +5082,7 @@ test('registerLearning: an unknown tool falls back to the primary; `none` is har
 // ---------------------------------------------------------------------------------------------
 // platform.mjs — pure mapping helpers (no network)
 // ---------------------------------------------------------------------------------------------
-const { detectPlatform, cliFor, hostFromGitUrl, resolveLogin, mapApprovers, rolesForScope, hasAnyRole, reviewersForScopes, resolveCommitterLogin, validateLogin, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
+const { detectPlatform, cliFor, hostFromGitUrl, mapApprovers, platformLogin, actorName, buildPrArgs, prNumberFromUrl } = await import('./platform.mjs');
 
 test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org/repo', () => {
   assert.equal(prNumberFromUrl('https://github.com/org/repo/pull/123'), '123');
@@ -4918,11 +5093,6 @@ test('prNumberFromUrl anchors to the pull/merge_requests path, not a numeric org
   assert.equal(prNumberFromUrl('nonsense'), null);
 });
 
-test('resolveLogin credits a domain owner declared via repos.json domain_owners[] (symmetry)', () => {
-  const roster = [{ login: 'ca', name: 'carol' }];
-  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owners: ['carol', 'bob'] }], ['backend']);
-  assert.ok(recs.some((r) => r.role === 'domain-owner' && r.domain === 'backend'));
-});
 const { parseEngagement, isNoBlock, upsertTrailerBlock, nudgeMessage, engagementBody, noBlock, NOBLOCK_MARK, PAIR_MARK, isPair, pairSessionBody } = await import('./companion.mjs');
 
 test('companion: engagement + noblock markers parse and round-trip', () => {
@@ -5005,87 +5175,18 @@ test('hostFromGitUrl parses https, ssh, and scp-like remotes', () => {
   assert.equal(hostFromGitUrl('not a url'), null);
 });
 
-test('resolveLogin derives a domain-owner record for a touched repo', () => {
-  const roster = [{ login: 'ca', name: 'carol', role: 'reviewer' }];
-  const repos = [{ name: 'backend', domain_owner: 'carol' }];
-  const recs = resolveLogin('ca', roster, repos, ['backend']);
-  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'reviewer']);
-  // unmapped login => flagged plain reviewer, never promoted
-  const unknown = resolveLogin('zz', roster, repos, ['backend']);
-  assert.deepEqual(unknown, [{ name: 'zz', role: 'reviewer', unverified: true }]);
-});
-
 test('mapApprovers only counts APPROVED and carries submittedAt', () => {
   const reviews = [
     { login: 'al', state: 'APPROVED', submittedAt: 't1' },
     { login: 'bo', state: 'CHANGES_REQUESTED', submittedAt: 't2' },
   ];
-  const recs = mapApprovers(reviews, { roster: [{ login: 'al', name: 'alice', role: 'owner' }], repos: [], touchedDomains: [] });
+  const recs = mapApprovers(reviews, {});
   assert.equal(recs.length, 1);
-  assert.equal(recs[0].name, 'alice');
+  assert.equal(recs[0].name, 'al', 'the platform login is the record — there is no roster to rename it (E62)');
+  assert.equal(recs[0].role, undefined);
   assert.equal(recs[0].submittedAt, 't1');
-});
-
-test('rolesForScope normalizes the per-scope map, the flat array, and the legacy single role', () => {
-  assert.deepEqual(rolesForScope({ roles: { hub: ['owner'], backend: ['domain-owner'] } }, 'backend'), ['domain-owner']);
-  assert.deepEqual(rolesForScope({ roles: { hub: ['owner'] } }, 'frontend'), []);
-  assert.deepEqual(rolesForScope({ roles: ['reviewer'] }, 'hub'), ['reviewer']); // flat array => hub
-  assert.deepEqual(rolesForScope({ roles: ['reviewer'] }, 'backend'), []);
-  assert.deepEqual(rolesForScope({ role: 'owner' }, 'hub'), ['owner']);          // legacy single role
-  assert.deepEqual(rolesForScope({ role: 'owner' }, 'backend'), []);
-  assert.deepEqual(rolesForScope(null, 'hub'), []);
-});
-
-test('hasAnyRole searches the requested roles across scopes', () => {
-  const e = { roles: { hub: ['reviewer'], backend: ['domain-owner'] } };
-  assert.equal(hasAnyRole(e, ['hub'], ['owner']), false);
-  assert.equal(hasAnyRole(e, ['hub', 'backend'], ['domain-owner']), true);
-  assert.equal(hasAnyRole(e, ['frontend'], ['reviewer']), false);
-});
-
-test('resolveLogin reads per-scope roles (owner+reviewer+domain-owner at once)', () => {
-  const roster = [{ login: 'ca', name: 'carol', roles: { hub: ['owner', 'reviewer'], backend: ['domain-owner'] } }];
-  const recs = resolveLogin('ca', roster, [], ['backend']);
-  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'owner', 'reviewer']);
-  assert.equal(recs.find((r) => r.role === 'domain-owner').domain, 'backend');
-  // a domain not touched contributes no domain-owner record
-  assert.ok(!resolveLogin('ca', roster, [], []).some((r) => r.role === 'domain-owner'));
-  // an entry scoped only to backend contributes nothing to an untouched scope
-  const scoped = [{ login: 'dv', name: 'dave', roles: { backend: ['domain-owner'] } }];
-  assert.deepEqual(resolveLogin('dv', scoped, [], []), []);
-});
-
-test('resolveLogin keeps the legacy repos.json domain_owner fallback', () => {
-  const roster = [{ login: 'ca', name: 'carol', role: 'reviewer' }];
-  const recs = resolveLogin('ca', roster, [{ name: 'backend', domain_owner: 'carol' }], ['backend']);
-  assert.deepEqual(recs.map((r) => r.role).sort(), ['domain-owner', 'reviewer']);
-});
-
-test('reviewersForScopes picks reviewers + domain-owners and excludes the committer', () => {
-  const roster = [
-    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },              // owner-only => not requested
-    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
-    { login: 'ca', name: 'carol', roles: { hub: ['reviewer'], backend: ['domain-owner'] } },
-    { login: 'dv', name: 'dave', roles: { backend: ['domain-owner'] } },
-  ];
-  assert.deepEqual(reviewersForScopes(roster, ['hub'], {}).sort(), ['bo', 'ca']);
-  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { excludeLogin: 'bo' }).sort(), ['ca', 'dv']);
-});
-
-test('reviewersForScopes requests a repos.json-only domain owner (BUG-1 regression)', () => {
-  // carol owns backend ONLY via repos.json domain_owner — no roster role for the backend scope.
-  const roster = [
-    { login: 'al', name: 'alice', roles: { hub: ['owner'] } },
-    { login: 'bo', name: 'bob', roles: { hub: ['reviewer'] } },
-    { login: 'ca', name: 'carol' },                       // identity only, no roles map
-  ];
-  const repos = [{ name: 'backend', domain_owner: 'carol' }];
-  // Without repos: carol is never requested (the bug). With repos: she is.
-  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], {}).sort(), ['bo']);
-  assert.deepEqual(reviewersForScopes(roster, ['hub', 'backend'], { repos }).sort(), ['bo', 'ca']);
-  // domain_owners[] (plural) is honored too, and excludeLogin still applies.
-  const repos2 = [{ name: 'backend', domain_owners: ['carol', 'bob'] }];
-  assert.deepEqual(reviewersForScopes(roster, ['backend'], { repos: repos2, excludeLogin: 'bo' }).sort(), ['ca']);
+  // An approval with no login cannot be told apart from another one, so it is not a person to count.
+  assert.equal(mapApprovers([{ state: 'APPROVED', submittedAt: 't3' }], {}).length, 0);
 });
 
 test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {
@@ -5097,19 +5198,38 @@ test('buildPrArgs caps GitLab to a single reviewer field (BUG-2)', () => {
   assert.equal(gh[gh.indexOf('--reviewer') + 1], 'bo,ca');
 });
 
-test('resolveCommitterLogin maps git identity through the roster', () => {
-  const { backend } = scaffold();
-  git(backend, 'config', 'user.email', 'a@b.c');
-  git(backend, 'config', 'user.name', 'x');
-  const roster = [{ login: 'xx', name: 'x', email: 'a@b.c' }, { login: 'yy', name: 'y' }];
-  assert.equal(resolveCommitterLogin(backend, roster), 'xx');           // by email
-  assert.equal(resolveCommitterLogin(backend, [{ login: 'zz', name: 'x' }]), 'zz'); // by name
-  assert.equal(resolveCommitterLogin(backend, [{ login: 'no', name: 'other' }]), null);
+test('platformLogin asks the platform CLI who is logged in — never a stored list (E62)', () => {
+  const on = {}; // the lookup is ON here: the suite turns it off in process.env, so pass an env without the switch
+  const calls = [];
+  const fake = (out, ok = true) => (cmd, args) => { calls.push([cmd, ...args]); return { ok, stdout: out, stderr: '' }; };
+  assert.equal(platformLogin('/x', 'github', { runner: fake('octocat\n'), env: on }), 'octocat');
+  assert.deepEqual(calls.pop(), ['gh', 'api', 'user', '--jq', '.login'], 'no resolvable host → gh\'s own default');
+  assert.equal(platformLogin('/x', 'gitlab', { runner: fake('{"username":"tanuki","id":1}'), env: on }), 'tanuki');
+  assert.deepEqual(calls.pop(), ['glab', 'api', 'user']);
+  assert.equal(platformLogin('/x', 'github', { runner: fake('octocat', false), env: on }), null, 'logged out / offline → no login');
+  assert.equal(platformLogin('/x', 'gitlab', { runner: fake('not json'), env: on }), null);
+  assert.equal(platformLogin('/x', 'github', { runner: fake('two words'), env: on }), null, 'an answer that is not a login is not recorded');
+  assert.equal(platformLogin('/x', 'github', { runner: fake('github-actions[bot]'), env: on }), 'github-actions[bot]');
+  assert.equal(platformLogin('/x', 'gitlab', { runner: fake('{"username":"_tanuki"}'), env: on }), '_tanuki', 'GitLab allows a leading underscore');
+  // GitHub is asked on the repo's own host, so an Enterprise account is not recorded as a github.com one.
+  calls.length = 0;
+  const ghe = (cmd, args) => { calls.push([cmd, ...args]); return cmd === 'git' ? { ok: true, stdout: 'git@ghe.corp.io:team/app.git' } : { ok: true, stdout: 'corp-octo' }; };
+  assert.equal(platformLogin('/x', 'github', { runner: ghe, env: on }), 'corp-octo');
+  assert.deepEqual(calls.pop(), ['gh', 'api', '--hostname', 'ghe.corp.io', 'user', '--jq', '.login']);
+  assert.deepEqual(platformLogin('/x', 'github', { runner: ghe, env: on, host: 'given.io' }) && calls.pop(), ['gh', 'api', '--hostname', 'given.io', 'user', '--jq', '.login'], 'a caller-given host wins');
+  calls.length = 0;
+  assert.equal(platformLogin('/x', null, { runner: fake('octocat'), env: on }), null, 'no platform → nothing to ask');
+  assert.equal(platformLogin('/x', 'github', { runner: fake('octocat'), env: { YAD_PLATFORM_LOGIN: '0' } }), null, 'the switch turns it off');
+  assert.deepEqual(calls, [], 'and neither asks anything');
 });
 
-test('validateLogin returns checked:false when the platform CLI is unknown', () => {
-  assert.deepEqual(validateLogin(null, 'someone'), { ok: false, exists: false, checked: false });
-  assert.deepEqual(validateLogin('github', ''), { ok: false, exists: false, checked: false });
+test('actorName: the platform login, else git user.name, else null', () => {
+  const on = {};
+  const runner = (login, name) => (cmd) => (cmd === 'git' ? { ok: !!name, stdout: name || '' } : { ok: !!login, stdout: login || '' });
+  assert.equal(actorName('/x', 'github', { runner: runner('octocat', 'Octo Cat'), env: on }), 'octocat');
+  assert.equal(actorName('/x', 'github', { runner: runner(null, 'Octo Cat'), env: on }), 'Octo Cat');
+  assert.equal(actorName('/x', null, { runner: runner('octocat', 'Octo Cat'), env: on }), 'Octo Cat', 'no platform → git name');
+  assert.equal(actorName('/x', 'github', { runner: runner(null, ''), env: on }), null);
 });
 
 test('buildPrArgs wires reviewers + assignees for gh and glab', () => {
@@ -8370,9 +8490,13 @@ test('gate ci pre-merge: never writes approvals.json for the legacy-PR backfill'
   // reading `done` with zero live approvals (issue #156). Without the stamp, gateSync's own backfill
   // would write `pr: 9` first, the proof would never fire, and 'sha256:old' would survive.
   const stamped = JSON.parse(git(ci, 'show', 'HEAD:epics/EP-test/.sdlc/approvals.json').toString());
-  const alice = stamped.find((a) => a.approver === 'alice');
-  assert.ok(alice, 'the legacy approval survived the merge-phase sync');
-  assert.notEqual(alice.artifactHash, 'sha256:old', 'the deferred stamp still re-binds the legacy approval at merge');
+  // The approval now arrives under the LOGIN (`al`), which nothing on disk names — the older record says
+  // `alice`, the roster's name for them (E62). It came from #7, so it is not the same review as the one on
+  // #9 and is not adopted: the new record binds to the merged content, and the open step drops the old one.
+  const al = stamped.find((a) => a.approver === 'al');
+  assert.ok(al, 'the approval arriving on the replacement PR is recorded');
+  assert.notEqual(al.artifactHash, 'sha256:old', 'a review on a new PR binds to the merged content, never the pre-edit hash');
+  assert.ok(!stamped.some((a) => a.approver === 'alice' && a.source === 'bridge'), 'the older record from #7 is replaced, not kept beside it');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -8597,58 +8721,43 @@ test('check --fix wires the Product gate-sync CI only when the ledger is verifie
 });
 
 // ---------------------------------------------------------------------------------------------
-// verified-commits gate — author allowlist generation + the bash gate itself
+// verified-commits gate — signatures only; the author allowlist went with the roster (E62)
 // ---------------------------------------------------------------------------------------------
-const { verifiedAuthorEmails } = await import('./plan.mjs');
-
-test('verifiedAuthorEmails: roster emails + verified_authors, lower-cased, deduped, sorted', () => {
-  const hub = {
-    roster: [
-      { login: 'al', name: 'alice', role: 'owner', email: 'Alice@Corp.io' },
-      { login: 'bo', name: 'bob', role: 'reviewer', emails: ['bob@corp.io', 'bob@users.noreply.github.com'] },
-      { login: 'ca', name: 'carol', role: 'reviewer' }, // no email — contributes nothing
-    ],
-    verified_authors: ['dev@corp.io', 'alice@corp.io'], // dupe of the roster email
-  };
-  assert.deepEqual(verifiedAuthorEmails(hub), [
-    'alice@corp.io', 'bob@corp.io', 'bob@users.noreply.github.com', 'dev@corp.io',
-  ]);
-  assert.deepEqual(verifiedAuthorEmails({ roster: [{ login: 'x', name: 'x', role: 'owner' }] }), []);
-  assert.deepEqual(verifiedAuthorEmails(null), []);
-});
-
-test('check --fix generates .sdlc/verified-authors in hub + repos only when emails exist', async () => {
+test('check --fix wires the verified-commits gate and generates NO author allowlist, whatever hub.json lists (E62)', async () => {
   const { T } = scaffold();
-  // no hub.json / no emails -> no allowlist anywhere
-  await reconcile(T, { fix: true });
-  assert.ok(!fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'no emails => no hub allowlist');
-
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({
     platform: 'github', bridge_enabled: true,
     roster: [{ login: 'al', name: 'alice', role: 'owner', email: 'alice@corp.io' }],
     verified_authors: ['dev@corp.io'],
   }));
   await reconcile(T, { fix: true });
-  for (const f of ['.sdlc/verified-authors', 'demo/backend/.sdlc/verified-authors', 'demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/yad-verified-commits.yml']) {
+  for (const f of ['demo/backend/checks/verified-commits.sh', 'checks/verified-commits.sh', '.github/workflows/yad-verified-commits.yml']) {
     assert.ok(fs.existsSync(path.join(T, f)), `expected ${f}`);
   }
-  const list = fs.readFileSync(path.join(T, '.sdlc/verified-authors'), 'utf8');
-  assert.match(list, /alice@corp\.io\ndev@corp\.io\n$/);
-  assert.equal(list, fs.readFileSync(path.join(T, 'demo/backend/.sdlc/verified-authors'), 'utf8'), 'repo copy identical');
-
-  const again = await reconcile(T, { fix: false });
-  assert.equal(again.counts.missing, 0);
+  assert.ok(!fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'no Product allowlist');
+  assert.ok(!fs.existsSync(path.join(T, 'demo/backend/.sdlc/verified-authors')), 'no repo allowlist');
+  // One an older release generated is left where it is — and doctor names it, with the hub.json list.
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
+  const again = await reconcile(T, { fix: true });
+  assert.ok(fs.existsSync(path.join(T, '.sdlc/verified-authors')), 'check --fix never deletes it');
   assert.equal(again.counts.outdated, 0);
-
-  // a hand-edited allowlist is drift-corrected back from hub.json
-  fs.appendFileSync(path.join(T, '.sdlc/verified-authors'), 'rogue@evil.io\n');
-  const drift = await reconcile(T, { fix: false });
-  assert.equal(drift.counts.outdated, 1, 'hand edit shows as outdated');
+  // collectDoctor, not doctorOn: that helper is declared further down, beside an import this test may run before.
+  const { collectDoctor } = await import('./doctor.mjs');
+  const d = collectDoctor(T).checks.find((x) => x.id === 'people:verified-authors-unused');
+  assert.equal(d?.status, 'warn');
+  assert.match(d.message, /`verified_authors` in .*hub\.json/);
+  assert.match(d.message, /\.sdlc\/verified-authors in the Product/);
+  // An older wired gate script still enforces the list — named, because a local-ledger Product keeps it.
+  assert.ok(!collectDoctor(T).checks.some((x) => x.id === 'people:allowlist-gate-stale'), 'the refreshed script is not flagged');
+  fs.appendFileSync(path.join(T, 'checks/verified-commits.sh'), '\nALLOWLIST="${SDLC_VERIFIED_AUTHORS:-.sdlc/verified-authors}"\n');
+  const stale = collectDoctor(T).checks.find((x) => x.id === 'people:allowlist-gate-stale');
+  assert.equal(stale?.status, 'warn');
+  assert.match(stale.message, /checks\/verified-commits\.sh in the Product is an older copy that still enforces the author list/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 // The gate script itself, against a real temp repo. No origin remote => the signature check is
-// SKIPPED with a warning, so this exercises the author-allowlist half hermetically.
+// SKIPPED with a warning, so these run hermetically.
 const GATE = path.join(ROOT, 'skills/yad-checks/templates/checks/verified-commits.sh');
 function scaffoldGateRepo() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-vc-'));
@@ -8660,8 +8769,6 @@ function scaffoldGateRepo() {
   git(T, 'commit', '-q', '-m', 'seed');
   git(T, 'branch', '-q', '-M', 'main');
   git(T, 'checkout', '-q', '-b', 'feature');
-  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
   return T;
 }
 const runGate = (cwd, env = {}) => {
@@ -8673,34 +8780,23 @@ const runGate = (cwd, env = {}) => {
   }
 };
 
-test('verified-commits gate: allowlisted author passes; unknown author fails', () => {
+test('verified-commits gate: any author passes — there is no author list; an old one is named, not read (E62)', () => {
   const T = scaffoldGateRepo();
   fs.writeFileSync(path.join(T, 'b.txt'), '2');
   git(T, 'add', '-A');
-  git(T, 'commit', '-q', '-m', 'by alice'); // .sdlc + b.txt authored by alice@corp.io
+  git(T, '-c', 'user.email=anyone@anywhere.io', '-c', 'user.name=zz', 'commit', '-q', '-m', 'by someone with write access');
   let r = runGate(T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /known identity/);
   assert.match(r.out, /signature verification SKIPPED/);
+  assert.doesNotMatch(r.out, /allowlist|known identity|unverified user/, 'nothing about authors is checked or claimed');
+  assert.doesNotMatch(r.out, /no longer read/, 'and nothing to say when no old list exists');
 
-  fs.writeFileSync(path.join(T, 'c.txt'), '3');
-  git(T, 'add', '-A');
-  git(T, '-c', 'user.email=mallory@evil.io', '-c', 'user.name=mallory', 'commit', '-q', '-m', 'by mallory');
+  // An allowlist an older release generated, NOT naming this author: still a pass, and said out loud.
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\nalice@corp.io\n');
   r = runGate(T);
-  assert.equal(r.code, 1, 'unknown author must fail the gate');
-  assert.match(r.out, /mallory@evil\.io.*unverified user/);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('verified-commits gate: missing allowlist warns (not enforced); empty range passes', () => {
-  const T = scaffoldGateRepo();
-  fs.rmSync(path.join(T, '.sdlc/verified-authors'));
-  fs.writeFileSync(path.join(T, 'b.txt'), '2');
-  git(T, 'add', '-A');
-  git(T, '-c', 'user.email=anyone@anywhere.io', '-c', 'user.name=zz', 'commit', '-q', '-m', 'x');
-  let r = runGate(T);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /author allowlist NOT enforced/);
+  assert.match(r.out, /\.sdlc\/verified-authors is no longer read — write access to the repo decides who can author/);
 
   git(T, 'checkout', '-q', 'main');
   r = runGate(T);
@@ -8709,48 +8805,12 @@ test('verified-commits gate: missing allowlist warns (not enforced); empty range
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('verified-commits gate: the gate-sync bot is allowlist-waived (signature still governs)', () => {
-  const T = scaffoldGateRepo(); // allowlist has alice@corp.io only; no remote → signature skipped
-  fs.mkdirSync(path.join(T, 'epics/EP-x/.sdlc'), { recursive: true });
-  fs.writeFileSync(path.join(T, 'epics/EP-x/.sdlc/state.json'), '{}\n');
-  git(T, 'add', '-A');
-  // bot author NOT in the allowlist — passes anyway because the bot is waived.
-  git(T, '-c', 'user.name=yad-gate-sync[bot]', '-c', 'user.email=yad-gate-sync[bot]@users.noreply.github.com',
-    'commit', '-q', '-m', 'chore(gate): sync [skip ci]');
-  const r = runGate(T);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /gate-sync bot — allowlist waived/);
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('verified-commits gate: a merge commit is allowlist-waived (author = merger, not a roster human)', () => {
-  // The push-on-default yad-update-guard sees merge commits (the PR-triggered gates never do). A merge
-  // commit is authored by whoever pressed merge — often a platform noreply, not an allowlisted email —
-  // so it must be waived (signature still governs), else every routine PR merge reddens the branch.
-  const T = scaffoldGateRepo(); // on `feature`, allowlist = alice@corp.io only, no remote → sig skipped
-  git(T, 'checkout', '-q', '-b', 'topic');
-  fs.writeFileSync(path.join(T, 'd.txt'), '4');
-  git(T, 'add', '-A');
-  git(T, 'commit', '-q', '-m', 'feat: work on topic'); // alice-authored, allowlisted
-  git(T, 'checkout', '-q', 'main');
-  // a real 2-parent merge commit authored by a NON-allowlisted merger
-  git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub',
-    'merge', '-q', '--no-ff', '-m', 'Merge pull request #1 from topic', 'topic');
-  // runGate diffs main..HEAD, but here HEAD IS main — check the pushed range from the pre-merge tip.
-  const preMerge = git(T, 'rev-parse', 'HEAD^1').toString().trim();
-  const out = (() => { try { return execFileSync('bash', [GATE, preMerge], { cwd: T, stdio: 'pipe' }).toString(); }
-    catch (e) { return (e.stdout || '').toString() + `\nEXIT ${e.status}`; } })();
-  assert.match(out, /merge commit — allowlist waived/, out);
-  assert.doesNotMatch(out, /unverified user/, 'the merger email must NOT fail the allowlist');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
 test('verified-commits gate: an unsigned content-free merge is signature-waived; an evil merge fails (issue #138)', () => {
   // Self-hosted GitLab does not sign UI-created merge commits (the signature API returns 404). A merge
   // that introduces NO content of its own carries nothing an unverified author could smuggle in past
   // the per-parent checks, so the gate waives the signature (WARN) instead of blocking every merge.
   // An evil merge (content in neither parent) still requires a verified signature and fails closed.
-  const T = scaffoldGateRepo(); // on `feature`; allowlist = alice@corp.io
+  const T = scaffoldGateRepo(); // on `feature`
   // A shimmed `glab` that always fails simulates the 404/no-signature response hermetically (no
   // network). CI_* are cleared so the gate takes the glab path even when the suite runs in GitLab CI.
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bin-'));
@@ -8765,10 +8825,10 @@ test('verified-commits gate: an unsigned content-free merge is signature-waived;
   git(T, 'checkout', '-q', '-b', 'topic');
   fs.writeFileSync(path.join(T, 'd.txt'), '4');
   git(T, 'add', '-A');
-  git(T, 'commit', '-q', '-m', 'feat: topic work'); // alice-authored, allowlisted, unsigned
+  git(T, 'commit', '-q', '-m', 'feat: topic work'); // alice-authored, unsigned
   git(T, 'checkout', '-q', 'main');
   const base = git(T, 'rev-parse', 'HEAD').toString().trim(); // pre-merge main tip
-  // A trivial (clean auto) merge by a NON-allowlisted merger, unsigned.
+  // A trivial (clean auto) merge by the platform's merger identity, unsigned.
   git(T, '-c', 'user.email=web-flow@github.com', '-c', 'user.name=GitHub',
     'merge', '-q', '--no-ff', '-m', 'Merge topic', 'topic');
   const mergeSha = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
@@ -8790,6 +8850,31 @@ test('verified-commits gate: an unsigned content-free merge is signature-waived;
   fs.rmSync(T, { recursive: true, force: true });
 });
 
+test('verified-commits gate: the signature is now the whole gate — a Verified commit passes, an unverified one fails (E62 review)', () => {
+  const T = scaffoldGateRepo();
+  fs.writeFileSync(path.join(T, 'b.txt'), '2');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'signed one');
+  const good = git(T, 'rev-parse', 'HEAD').toString().trim();
+  fs.writeFileSync(path.join(T, 'c.txt'), '3');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'unsigned one');
+  const bad = git(T, 'rev-parse', '--short', 'HEAD').toString().trim();
+  // A shimmed `gh` that marks exactly one commit Verified — no network.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-bin-'));
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/usr/bin/env bash\ncase "$*" in *${good}*) echo true ;; *) echo false ;; esac\n`);
+  fs.chmodSync(path.join(bin, 'gh'), 0o755);
+  try {
+    const r = runGate(T, { SDLC_PLATFORM: 'github', PATH: `${bin}:${process.env.PATH}` });
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /PASS \[verified-commits\]: \w+ signature verified by github/);
+    assert.match(r.out, new RegExp(`FAIL \\[verified-commits\\]: ${bad} signature missing/unverified`));
+  } finally {
+    fs.rmSync(bin, { recursive: true, force: true });
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
 test('verified-commits gate: unresolvable base fails closed', () => {
   const T = scaffoldGateRepo();
   try {
@@ -8802,19 +8887,14 @@ test('verified-commits gate: unresolvable base fails closed', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('verified-commits gate: unknown SDLC_PLATFORM override fails closed; CRLF allowlist tolerated', () => {
+test('verified-commits gate: unknown SDLC_PLATFORM override fails closed', () => {
   const T = scaffoldGateRepo();
   fs.writeFileSync(path.join(T, 'b.txt'), '2');
   git(T, 'add', '-A');
   git(T, 'commit', '-q', '-m', 'by alice');
-  let r = runGate(T, { SDLC_PLATFORM: 'bogus' });
+  const r = runGate(T, { SDLC_PLATFORM: 'bogus' });
   assert.equal(r.code, 1, 'unknown platform must fail closed');
   assert.match(r.out, /unknown platform 'bogus'/);
-  // CRLF + padded allowlist still matches
-  fs.writeFileSync(path.join(T, '.sdlc/verified-authors'), '# generated\r\n  ALICE@corp.io  \r\n');
-  r = runGate(T);
-  assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /known identity/);
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -9589,44 +9669,6 @@ test('doctor shape: a project this engine wrote is on this engine shape, and say
 
 // Two names for one file only stay in step because the engine writes both. Anything else touching
 // one of them — a person, a script, a half-finished merge — makes the other silently ignored.
-// The product-level scope has two spellings. Readers and WRITERS must use the same one, or a role
-// can be granted and never revoked — a governance control that stops working because someone ran
-// the upgrade command. These are the cases that were broken.
-test('roster: a role on a MIGRATED entry can actually be revoked', () => {
-  const { T } = scaffold();
-  const productPath = path.join(T, '.sdlc/hub.json');
-  // exactly what `yad migrate` leaves behind: the same list under both spellings
-  fs.writeFileSync(productPath, JSON.stringify({ platform: 'none', roster: [
-    { login: 'alice', name: 'Alice', roles: { product: ['owner', 'reviewer'], hub: ['owner', 'reviewer'] } },
-  ] }, null, 2) + '\n');
-  removeRepoRole(T, 'Alice', 'hub', ['owner', 'reviewer']);
-  const entry = JSON.parse(fs.readFileSync(productPath, 'utf8')).roster[0];
-  assert.deepEqual(rolesForScope(entry, 'hub'), [], 'gone under the old spelling');
-  assert.deepEqual(rolesForScope(entry, 'product'), [], 'and under the new one — otherwise they are still an approver');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('roster: a grant on a MIGRATED entry lands under both spellings', () => {
-  const { T } = scaffold();
-  const productPath = path.join(T, '.sdlc/hub.json');
-  fs.writeFileSync(productPath, JSON.stringify({ platform: 'none', roster: [
-    { login: 'alice', name: 'Alice', roles: { product: ['reviewer'], hub: ['reviewer'] } },
-  ] }, null, 2) + '\n');
-  upsertRosterEntry(T, { login: 'alice', name: 'Alice', roles: { hub: ['owner'] }, platform: 'none' });
-  const entry = JSON.parse(fs.readFileSync(productPath, 'utf8')).roster[0];
-  assert.deepEqual(rolesForScope(entry, 'hub').sort(), ['owner', 'reviewer']);
-  assert.deepEqual(rolesForScope(entry, 'product').sort(), ['owner', 'reviewer'], 'the two spellings never diverge');
-  fs.rmSync(T, { recursive: true, force: true });
-});
-
-test('roster: when the two spellings disagree, the OLD one wins — the one every writer maintains', () => {
-  // Pins the tie-break. Flipping the preference used to leave the whole suite green, which is how a
-  // reader/writer mismatch got in.
-  const entry = { roles: { hub: ['owner'], product: ['reviewer'] } };
-  assert.deepEqual(rolesForScope(entry, 'hub'), ['owner']);
-  assert.deepEqual(rolesForScope(entry, 'product'), ['owner'], 'asking by either name gives the authoritative answer');
-});
-
 test('doctor mirror: two copies of the settings that disagree are reported, not left silent', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
@@ -10041,13 +10083,14 @@ test('errors: readJSONStrict throws a YadError with code + hint on corrupt JSON'
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('doctor: non-array hub.roster fails (matches the gate shape check)', async () => {
+test('doctor and the gate: a malformed roster no longer fails anything — nothing reads it (E62)', async () => {
   const { T } = scaffold();
   await reconcile(T, { fix: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: 'oops' }));
   const r = await doctorOn(T);
-  assert.ok(!r.ok);
-  assert.ok(r.checks.some((x) => x.id === 'hub' && x.status === 'fail' && /roster/.test(x.message)));
+  assert.ok(!r.checks.some((x) => x.id === 'hub' && x.status === 'fail'), 'the hub check does not fail on a key nothing reads');
+  const { loadProduct } = await import('./gate.mjs');
+  assert.doesNotThrow(() => loadProduct(T), 'the gate loads the Product');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10100,6 +10143,43 @@ test('doctor: hub with a platform but no git_url warns YAD-CFG-005 (not a mislea
   const r = await doctorOn(T);
   assert.ok(r.checks.some((x) => x.id === 'hub-git-url' && x.status === 'warn' && /YAD-CFG-005/.test(x.message)), 'missing git_url must warn YAD-CFG-005');
   assert.equal(r.failed, 0, 'the warning must never be a failure');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor: roster data an older release wrote is named as unused — empty keys stay quiet (E62)', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  // The scaffold names a domain owner; start from a registry with no people in it at all.
+  const repos = JSON.parse(fs.readFileSync(path.join(T, '.sdlc/repos.json'), 'utf8'));
+  repos.repos = repos.repos.map((r) => { const c = { ...r }; delete c.domain_owner; delete c.domain_owners; return c; });
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify(repos));
+  const quiet = await doctorOn(T);
+  assert.ok(!quiet.checks.some((x) => x.id.startsWith('people:')), 'nothing to say about a project with no people data');
+  // What an older solo setup wrote for every repo and the Product: empty keys, which say nothing.
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: repos.repos.map((r) => ({ ...r, domain_owner: '', domain_owners: [] })) }));
+  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id.startsWith('people:')), 'empty lists are silent');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'bob', name: 'al' }, { login: 'al', name: 'alice' }, { login: 'x', name: 'sam' }, { login: 'y', name: 'sam' }] }));
+  const amb = (await doctorOn(T)).checks.find((x) => x.id === 'people:roster-ambiguous');
+  assert.equal(amb?.status, 'warn');
+  assert.match(amb.message, /roster name\(s\) sam are given to more than one login/, 'only a name held twice — a name equal to another entry\'s login is exact');
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'al', name: 'al' }, { login: 'bo', name: 'bob' }, { login: 'bob', name: 'bobby' }] }));
+  assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'people:roster-ambiguous'), 'no name held twice → clear');
+  for (const empty of ['', {}, null]) {
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: empty }));
+    assert.ok(!(await doctorOn(T)).checks.some((x) => x.id === 'people:roster-unused'), `roster ${JSON.stringify(empty)} says nothing`);
+  }
+  fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: null, roster: [{ login: 'al', name: 'alice', role: 'owner' }] }));
+  fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: repos.repos.map((r) => ({ ...r, domain_owner: 'alice' })) }));
+  const r = await doctorOn(T);
+  const roster = r.checks.find((x) => x.id === 'people:roster-unused');
+  const owners = r.checks.find((x) => x.id === 'people:domain-owners-unused');
+  assert.equal(roster?.status, 'warn');
+  assert.match(roster.message, /no longer decides who approves/);
+  assert.match(roster.hint, /keep it until every review with older approvals is closed/);
+  assert.equal(owners?.status, 'warn');
+  assert.match(owners.message, new RegExp(repos.repos[0].name));
+  assert.ok(!r.checks.some((x) => x.id === 'people:roster-unused' && x.status === 'fail'), 'a warning, never a failure');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -10941,10 +11021,12 @@ test('report: non-interactive never posts — hands back a prefilled URL', async
 });
 
 // ---- yad usage (derived team-member behavior report) --------------------------------------------
-const { buildModel, renderHtml, renderMarkdown, deriveEvents } = await import('./usage.mjs');
+const usageMod = await import('./usage.mjs');
+const { buildModel, renderHtml, renderMarkdown, deriveEvents, loginFromEmail } = usageMod;
 
-// Scaffold a Product dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
-// []). `dormant` is in the roster with no activity so we can assert it surfaces at zero.
+// Scaffold a Product dir with one epic's ledgers (no git repo — git-authored events degrade to []). It
+// still carries a roster, left on disk from an older release: `dormant` is listed there with no
+// activity, and the report must not invent a row for them from it (E62).
 function usageFixture() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -10974,15 +11056,18 @@ function usageFixture() {
   return T;
 }
 
-test('usage: attributes ledger events to roster members; dormant member surfaces at zero', () => {
+test('usage: people come from activity — the name each ledger records, never a roster (E62)', () => {
   const T = usageFixture();
   const model = buildModel(T, {});
   const by = Object.fromEntries(model.members.map((m) => [m.name, m]));
-  assert.equal(by.alice.counts.approved, 2, 'alice has both approvals all-time');
-  assert.equal(by.bob.counts.commented, 1, 'bob commented once');
-  assert.equal(by.bob.counts.shipped, 1, 'bob has one engineer-review ship');
-  assert.equal(by.dormant.total, 0, 'dormant member is present with zero activity');
-  assert.ok(by.dormant.flags.includes('dormant'), 'dormant flag raised');
+  // The fixture's records are older ones (they carry a role), so they are read through the roster's
+  // name → login table, exactly as `yad gate sync` reads them: alice is `al`, bob is `bo`.
+  assert.equal(by.al.counts.approved, 2, 'alice (al) has both approvals all-time');
+  assert.equal(by.bo.counts.commented, 1, 'bob (bo) commented once');
+  assert.equal(by.bo.counts.shipped, 1, 'bob (bo) has one engineer-review ship');
+  assert.equal(by.dormant, undefined, 'a name only the old roster lists is not a row');
+  assert.deepEqual(model.members.map((m) => m.name), ['al', 'bo']);
+  assert.ok(model.members.every((m) => m.role === undefined && m.rostered === undefined), 'no roster-derived fields');
   assert.equal(model.totals.approved, 2);
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -10990,16 +11075,16 @@ test('usage: attributes ledger events to roster members; dormant member surfaces
 test('usage: --since/--until window trims out-of-range events', () => {
   const T = usageFixture();
   const jan = buildModel(T, { since: '2026-01-01', until: '2026-01-31' });
-  const alice = jan.members.find((m) => m.name === 'alice');
+  const alice = jan.members.find((m) => m.name === 'al');
   assert.equal(alice.counts.approved, 1, 'only the January approval is in range (May excluded)');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('usage: --member filters to one person', () => {
   const T = usageFixture();
-  const model = buildModel(T, { member: 'alice' });
+  const model = buildModel(T, { member: 'al' });
   assert.equal(model.members.length, 1);
-  assert.equal(model.members[0].name, 'alice');
+  assert.equal(model.members[0].name, 'al');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -11051,20 +11136,82 @@ test('usage: deriveEvents degrades to [] when the Product is not a git repo', ()
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-nogit-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [] }));
-  const events = deriveEvents(T, { byNameOrLogin: () => null, byGitAuthor: () => null }, {});
+  const events = deriveEvents(T, {});
   assert.deepEqual(events, [], 'no epics, no git — empty stream, no throw');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// --- review-follow-up fixes: reviewer-any-scope, corrupt-ledger warn, --out mkdir, --member totals ---
-const { isReviewerAnywhere, runUsage } = await import('./usage.mjs');
+// --- review-follow-up fixes: corrupt-ledger warn, --out mkdir, --member totals ---
+const { runUsage } = await import('./usage.mjs');
 
-test('usage: isReviewerAnywhere detects repo-scoped, hub-scoped, and legacy reviewer roles', () => {
-  assert.equal(isReviewerAnywhere({ roles: { backend: ['reviewer'] } }), true, 'repo-scoped reviewer');
-  assert.equal(isReviewerAnywhere({ roles: { hub: ['reviewer'] } }), true, 'hub-scoped reviewer');
-  assert.equal(isReviewerAnywhere({ role: 'reviewer' }), true, 'legacy flat role');
-  assert.equal(isReviewerAnywhere({ roles: { backend: ['domain-owner'] }, role: 'owner' }), false, 'owner/domain-owner only');
-  assert.equal(isReviewerAnywhere(null), false, 'no entry');
+test('usage: a noreply commit address joins a git author to their platform login, and nothing else does', () => {
+  assert.equal(loginFromEmail('12345+octocat@users.noreply.github.com'), 'octocat');
+  assert.equal(loginFromEmail('octocat@users.noreply.github.com'), 'octocat');
+  assert.equal(loginFromEmail('12345-tanuki@users.noreply.gitlab.com'), 'tanuki');
+  assert.equal(loginFromEmail('octocat@example.com'), null, 'an ordinary address says nothing about a login');
+  assert.equal(loginFromEmail(''), null);
+});
+
+test('usage: an older record under a roster name that is ANOTHER person\'s login stays with its own person (E62 simulation)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-alias-'));
+  try {
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [{ login: 'bob', name: 'al' }, { login: 'al', name: 'alice' }] }));
+    const ep = path.join(T, 'epics/EP-x/.sdlc');
+    fs.mkdirSync(ep, { recursive: true });
+    fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([
+      { artifact: 'epic.md', step: 'epic-review', approver: 'al', role: 'owner', status: 'approved', date: '2026-06-01' },   // bob's, under his roster name
+      { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-09-16' }, // alice's, re-synced under her login
+      { artifact: 'epic.md', step: 'epic-review', approver: 'zed', role: 'reviewer', unverified: true, status: 'approved', date: '2026-06-01' },
+    ]));
+    const by = Object.fromEntries(buildModel(T, {}).members.map((m) => [m.name, m.counts.approved]));
+    assert.deepEqual(by, { al: 1, bob: 1, zed: 1 });
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('usage: logins join case-insensitively and are shown as written', () => {
+  const { analyze } = usageMod;
+  const model = analyze([
+    { ts: '2026-01-01', actor: 'OctoCat', login: null, action: 'approved', epic: 'EP-x' },
+    { ts: '2026-01-02', actor: 'octocat', login: 'octocat', action: 'authored', epic: 'EP-x' },
+  ]);
+  assert.equal(model.members.length, 1);
+  assert.equal(model.members[0].name, 'OctoCat');
+  assert.equal(model.members[0].total, 2);
+  assert.equal(loginFromEmail('9+OctoCat@users.noreply.github.com'), 'OctoCat');
+});
+
+test('usage: no-review-participation is raised only on a row known by login — a bare git name cannot see its own approvals (E62 review)', () => {
+  const { analyze } = usageMod;
+  const model = analyze([
+    { ts: '2026-01-01', actor: 'Alice Smith', login: null, action: 'authored', epic: 'EP-x' },
+    { ts: '2026-01-02', actor: 'bo', login: 'bo', action: 'authored', epic: 'EP-x' },
+  ]);
+  const by = Object.fromEntries(model.members.map((m) => [m.name, m.flags]));
+  assert.deepEqual(by['Alice Smith'], [], 'her approvals may sit on a login row — no claim is made');
+  assert.deepEqual(by.bo, ['no-review-participation']);
+});
+
+test('usage: a noreply commit lands on the same row as that login\'s approvals', () => {
+  const T = usageFixture();
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.name', 'Al Ice');
+  git(T, 'config', 'user.email', '99+al@users.noreply.github.com');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '# x\n');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'author the epic', '--date', '2026-01-09T00:00:00Z');
+  const ap = path.join(T, 'epics/EP-x/.sdlc/approvals.json');
+  fs.writeFileSync(ap, JSON.stringify([...JSON.parse(fs.readFileSync(ap, 'utf8')),
+    { artifact: 'stories/', step: 'stories-review', approver: 'al', status: 'approved', date: '2026-05-21' }]));
+  const model = buildModel(T, {});
+  const al = model.members.find((m) => m.name === 'al');
+  assert.ok(al, 'the commit is attributed to the login, not the git name');
+  assert.equal(al.login, 'al');
+  assert.equal(al.counts.authored, 1);
+  assert.equal(al.counts.approved, 3, 'the new login-named approval plus alice\'s two older ones, read through the roster');
+  assert.ok(!model.members.some((m) => m.name === 'Al Ice'), 'no second row under the git name');
+  assert.ok(!JSON.stringify(model).includes('noreply'), 'the address itself is never emitted');
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('usage: a corrupt ledger warns and is skipped, never throws or under-counts other ledgers', () => {
@@ -11073,7 +11220,7 @@ test('usage: a corrupt ledger warns and is skipped, never throws or under-counts
   let model;
   assert.doesNotThrow(() => { model = buildModel(T, {}); }, 'one corrupt ledger does not abort the view');
   // approvals are gone (the file was unreadable) but comments/ships from the other ledgers survive.
-  const bob = model.members.find((m) => m.name === 'bob');
+  const bob = model.members.find((m) => m.name === 'bo');
   assert.equal(bob.counts.commented, 1, 'the intact comments ledger still counts');
   assert.equal(bob.counts.shipped, 1, 'the intact build-log still counts');
   fs.rmSync(T, { recursive: true, force: true });
@@ -11089,25 +11236,20 @@ test('usage: runUsage --out creates missing parent directories', () => {
 
 test('usage: --member recomputes totals to the shown member only', () => {
   const T = usageFixture();
-  const model = buildModel(T, { member: 'alice' });
+  const model = buildModel(T, { member: 'al' });
   assert.equal(model.members.length, 1);
   assert.equal(model.totals.approved, 2, "totals reflect only alice's approvals");
   assert.equal(model.totals.commented, 0, "bob's comment is excluded from the filtered totals");
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// --- CodeRabbit PR#98 follow-ups: legacy array roles + Markdown cell escaping ---
+// --- CodeRabbit PR#98 follow-up: Markdown cell escaping ---
 const { renderMarkdown: renderMd } = await import('./usage.mjs');
-
-test('usage: isReviewerAnywhere handles the legacy hub-scope roles array (rolesForScope shape)', () => {
-  assert.equal(isReviewerAnywhere({ roles: ['reviewer'] }), true, 'roles: ["reviewer"] is a hub reviewer');
-  assert.equal(isReviewerAnywhere({ roles: ['owner'] }), false, 'roles: ["owner"] is not a reviewer');
-});
 
 test('usage: renderMarkdown escapes pipes/newlines so table structure survives hostile names', () => {
   const model = {
     window: { since: null, until: null }, generatedFrom: 'derived',
-    members: [{ name: 'a|b\nc', login: 'x|y', role: 'rev|iewer', rostered: true, counts: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 }, total: 0, firstActive: null, lastActive: null, epics: [], flags: ['dor|mant'], timeline: [] }],
+    members: [{ name: 'a|b\nc', login: 'x|y', counts: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 }, total: 0, firstActive: null, lastActive: null, epics: [], flags: ['no-review|participation'], timeline: [] }],
     totals: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 },
     hygiene: [{ epic: 'EP-a|b', story: 'S0\n1', task: 'T|1', repo: 'back|end', shippedAt: '2026-01-01' }],
   };
@@ -11128,8 +11270,8 @@ const {
 } = await import('./checkpoint.mjs');
 const { productGit } = await import('./hubcommit.mjs');
 
-// A Product (carries .sdlc/hub.json with a roster) on the default branch, with a seed commit so HEAD
-// exists. The roster email matches the git identity so resolveCommitterLogin yields @abdelrahmannasr.
+// A Product on the default branch, with a seed commit so HEAD exists. The roster it carries is left on
+// disk and never read (E62); with the platform lookup off in this suite the subject names the git user.
 function productForCheckpoint() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-ckpt-'));
   git(T, 'init', '-q');
@@ -11200,7 +11342,7 @@ test('runCheckpoint commits ONLY the Build ledgers with a chore(hub) audit subje
   writeBuildLedgers(T, 'EP-checkout', 'EP-checkout-S03');
   await grab(() => runCheckpoint(T, {}));
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by @abdelrahmannasr [skip ci]');
+  assert.equal(subject, 'chore(hub): sync Build state — EP-checkout/EP-checkout-S03 by abdelrahman [skip ci]');
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.length && files.every((f) => /\.sdlc\/(trust-log\.json|build-log\.json|build-state\/)/.test(f)), `only Build: ${files.join()}`);
   assert.ok(!files.some((f) => f.endsWith('state.json')), 'Shape state.json must not be committed');
@@ -11347,7 +11489,7 @@ test('runCheckpoint carries the story status flip (approved → shipped) alongsi
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.deepEqual(files, ['epics/EP-a/stories/EP-a-S01.md'], 'the story flip rides in the checkpoint commit');
   const subject = git(T, 'log', '-1', '--format=%s').toString().trim();
-  assert.match(subject, /^chore\(hub\): sync Build state — EP-a\/EP-a-S01 by @abdelrahmannasr \[skip ci\]$/);
+  assert.match(subject, /^chore\(hub\): sync Build state — EP-a\/EP-a-S01 by abdelrahman \[skip ci\]$/);
   assert.equal(git(T, 'status', '--porcelain').toString().trim(), '', 'nothing left uncommitted — no raw git-to-main needed');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
@@ -12156,7 +12298,7 @@ test('runTidy folds ONLY a shipped story\'s shards, leaves in-progress loose, co
   assert.equal(JSON.parse(fs.readFileSync(path.join(ep, '.sdlc/build-log.json'))).ships.length, 1, 'S01 ship folded in');
   // the union reader still sees BOTH the folded S01 and the loose S02
   assert.equal(readTrustRuns(ep).length, 2, 'union: folded S01 + loose S02');
-  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy Build ledgers — EP-demo by @abdelrahmannasr [skip ci]');
+  assert.equal(git(T, 'log', '-1', '--format=%s').toString().trim(), 'chore(hub): tidy Build ledgers — EP-demo by abdelrahman [skip ci]');
   const out = await grab(() => runTidy(T, {}));
   assert.match(out, /nothing to tidy/);
   assert.ok(!process.exitCode);
@@ -12300,7 +12442,7 @@ test('runCheckpoint commits trust-log/ + build-log/ shard files (allowlist widen
   const files = git(T, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').toString().trim().split('\n').filter(Boolean);
   assert.ok(files.includes('epics/EP-demo/.sdlc/trust-log/EP-demo-S01-be-checks-a1.json'), 'trust shard committed');
   assert.ok(files.includes('epics/EP-demo/.sdlc/build-log/EP-demo-S01-T01-be.json'), 'build shard committed');
-  assert.match(git(T, 'log', '-1', '--format=%s').toString(), /EP-demo\/EP-demo-S01 by @abdelrahmannasr/, 'subject label derived from the shard filename');
+  assert.match(git(T, 'log', '-1', '--format=%s').toString(), /EP-demo\/EP-demo-S01 by abdelrahman/, 'subject label derived from the shard filename');
   process.exitCode = prev;
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -15068,6 +15210,20 @@ test('yad epic new --stub: refuses the two things a stub can never be', async ()
   // …and `--stub --type feature` is not a contradiction, it is the default said out loud.
   const ok2 = await epicNewOn({ slug: 'x', stub: true, type: 'feature' });
   try { assert.equal(ok2.failed, false, ok2.out); } finally { cleanTmp(ok2.T); }
+});
+
+test('CLI: `yad roster` was removed, and says where the people model went instead of "unknown command" (E62)', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-roster-gone-'));
+  try {
+    for (const args of [['roster'], ['roster', 'add', 'al', '--roles', 'hub=owner']]) {
+      const r = yadRun(T, ...args);
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /yad roster was removed — yadflow keeps no list of people/);
+      assert.match(r.out, /one approval \(not the author's own\) from anyone with access/);
+      assert.match(r.out, /Keep an existing `roster` in hub\.json until every review with older approvals is closed/);
+    }
+    assert.ok(!fs.existsSync(path.join(T, '.sdlc')), 'and it writes nothing');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('CLI: `--stub` reaches the command through the arg parser', () => {

@@ -84,11 +84,11 @@ flowchart TD
       st["yad-stories<br/>repo-tagged stories"]:::artifact
       tc["yad-test-cases<br/>test-cases.md + automation tests"]:::artifact
       gAn{{"gate · analysis"}}:::gated
-      gEp{{"gate · epic<br/>base: owner + reviewer"}}:::gated
-      gAr{{"gate · architecture<br/>escalated: + repo owners"}}:::gated
-      gUi{{"gate · UI · base"}}:::gated
-      gSt{{"gate · stories<br/>per-repo owners"}}:::gated
-      gTc{{"gate · test cases · base"}}:::gated
+      gEp{{"gate · epic<br/>1 approver"}}:::gated
+      gAr{{"gate · architecture<br/>1 approver · count asks 3"}}:::gated
+      gUi{{"gate · UI · 1 approver"}}:::gated
+      gSt{{"gate · stories<br/>1 approver"}}:::gated
+      gTc{{"gate · test cases · 1 approver"}}:::gated
       rfb(["ready-for-build"]):::sentinel
       an --> gAn --> ep --> gEp --> ar --> gAr --> ui --> gUi --> st --> gSt --> tc --> gTc --> rfb
     end
@@ -255,16 +255,16 @@ yad-pr-template     repo:<repo> action: wire   # installs the PR/MR template + r
 
 ```text
 yad-connect-repos action: detect-hub                              # records the Product's platform in .sdlc/hub.json
-yad roster add <gh-login> --name <yad-name> --roles "hub=owner,reviewer"   # once per reviewer (then the add walk asks per connected repo; or `yad roster grant <name> <repo> domain-owner`)
 yad-pr-template     repo:hub action: wire                         # Product's Shape PR/MR body template
-yad-checks          repo:hub action: wire                         # Product-flavored gates (owner-set / contract-locked / approvals-present)
+yad-checks          repo:hub action: wire                         # Product gates: commit-message, pr-title, pr-template, ledger-guard, verified-commits
 yad-hub-bridge      action: wire                                  # merge-time gate sync (CI runs `yad gate ci` when a review PR/MR is merged)
 ```
 
-The roster maps each reviewer's GitHub/GitLab **login** to their SDLC **name + role**; domain-owners are
-derived from each repo's `domain_owner` in `repos.json` (not retyped). With the Product on a platform, the
-Shape gate opens a review PR per artifact and `yad-review-gate action: sync` pulls approvals/
-comments back. No platform (or `bridge_enabled: false`)? The gate just runs local — skip d2.
+There is no list of reviewers to set up. yadflow keeps no roster: anyone with access to the Product repo
+can approve, and the platform records who did — each approval is stored under the approver's
+GitHub/GitLab **login**. A review PR requests no reviewers, so ask them on the PR itself. With the
+Product on a platform, the Shape gate opens a review PR per artifact and `yad-review-gate action: sync`
+pulls approvals/comments back. No platform (or `bridge_enabled: false`)? The gate just runs local — skip d2.
 
 With the gate-sync CI wired, you usually don't run `sync` at all: the **merge** of a review PR triggers
 it in the Product's CI, and the ledger update is committed straight to the Product's default branch (`git pull`
@@ -281,7 +281,7 @@ reorder every 15 minutes; the workaround there is to disable the schedule.
 Product, run once per code repo — and again any time you add a new one:
 
 ```text
-yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>
+yad-connect-repos action: connect repo:<repo> path:<path-or-git_url>
 ```
 
 This registers the repo in `.sdlc/repos.json` and caches an AI-readable picture of it (a Repomix pack +
@@ -346,9 +346,9 @@ commit, and refuses an epic that already has a chain.
 |---|----------|-------------|-----------------|
 | 0 *(optional)* | `yad-analysis` | `analysis.md` — the analyst's discovery brief (assigns the `EP-<slug>` ID, seeds state) | analysis review |
 | 1 | `yad-epic` | `epic.md` (reads `analysis.md` when present; otherwise assigns the `EP-<slug>` ID and seeds state itself) | epic review |
-| 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(escalated)* |
+| 2 | `yad-architecture` | `architecture.md` + the **locked** `contract.md` | architecture review *(contract: count 3)* |
 | 3 *(optional)* | `yad-ui` | `ui-design.md` + `DESIGN.md` | UI review — skip N/A for a UI-less epic with `yad skip <epic> ui-design --reason …`, or `yad defer` it to design later (add `--debt` if it is owed back — `yad next` reminds you until it is paid) |
-| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review *(per-repo)* |
+| 4 | `yad-stories` | one file per story, `stories/EP-<slug>-S0N.md`, each tagged with the repos it touches | stories review |
 | 5 *(parallel)* | `yad-test-cases` | `test-cases.md` covering the stories (+ the automation tests when a testing tool is connected) | test-cases review |
 
 Step 0 is **optional**: run `yad-analysis` first for a dedicated, gated discovery pass; skip it
@@ -372,17 +372,17 @@ advances; only `advance` moves forward, and only when the rule is met:
 flowchart LR
     o["open<br/>show artifact"] --> c["comment<br/>reviewers leave notes"]
     c -->|owner addresses,<br/>edits in place| c
-    c --> ap["approve<br/>name + role"]
+    c --> ap["approve<br/>platform login"]
     ap --> adv{"advance?<br/>rule met?"}
-    adv -->|no — tells you<br/>who's missing| o
+    adv -->|no — tells you<br/>what's missing| o
     adv -->|yes| nxt(["next step"])
 ```
 
 - `action: open` — show the artifact; reviewers leave comments. *Commenting never advances.* If the Product
   is on a platform (step 3d2), this also opens a review **PR/MR on the Product** for the artifact.
-- `action: approve` (name + role) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
+- `action: approve` (the reviewer's platform login) — recorded in `.sdlc/approvals.json`. *Or* reviewers approve/comment on
   the Product PR and you run `action: sync` to pull that platform state into the ledger.
-- `action: advance` — moves forward **only if** the rule is met; otherwise it tells you who's still missing.
+- `action: advance` — moves forward **only if** the rule is met; otherwise it tells you what is still missing.
   (Merging the review PR does **not** advance — `advance` does; the file ledger stays the source of truth.)
 - With the Product's gate-sync CI wired (step 3d2), `sync` runs **automatically when the review PR/MR is
   merged** and commits the ledger to the Product's default branch — the same predicate, just triggered by
@@ -405,11 +405,11 @@ From a `ready-for-build` story, do this **inside each code repo the story is tag
    AI tool that helped (chosen from `config.yaml` `build.ai_coauthor.allowed`).
 3. **Check** — `yad-checks repo:<repo> action: run` → the gates must pass: spec-link,
    contract-check, build/test/lint, verified-commits (every commit signed with a
-   platform-Verified key and authored by a roster-known email — on the Product and every repo), and the
+   platform-Verified key — on the Product and every repo; write access decides who can author), and the
    pattern gates commit-message / pr-title / pr-template.
 4. **Open the PR/MR** (the template is already wired) with `yad open-pr` — or do steps 2-pre + 4 in one
    step with **`yad-ship`** (commit + open PR/MR) — then run `yad-pr-template repo:<repo> action: route`
-   to print the required reviewers. The PR is based on the repo's **own default branch** (resolved:
+   to print the approval count and the touched domains (no reviewers are requested — ask them on the PR). The PR is based on the repo's **own default branch** (resolved:
    registry `default_branch` → the Product's `default_branch`, for a PR on the Product itself → the platform → `origin/HEAD` →
    `main`), not a hardcoded `main`. If it warns that your base is not the platform default, that is
    **advisory — nothing is blocked and the PR is already open.** Intended (stacked PR, release branch)?
@@ -459,7 +459,7 @@ is fully shipped and a new change must go in its own threaded epic.
      the rest.
    - **behavioral change, surface unchanged** — re-author `stories` + `test-cases` (+ `ui-design` if
      visible); inherit `architecture`/`contract`.
-   - **contract-surface change** — re-author `architecture` (it **re-locks** + re-routes the escalated
+   - **contract-surface change** — re-author `architecture` (it **re-locks** + goes back through the
      contract review) + `stories` + `test-cases`.
    It seeds the new `EP-<slug>` (threaded, with the inherited steps pre-approved) and stops.
 2. **Author + gate only what changed.** Run `yad-stories` / `yad-test-cases` (and `yad-architecture` for a
@@ -486,18 +486,30 @@ defects keep escaping at**, so you fix the stage, not just the symptom).
 
 ## 8. Who approves what (the gate rules)
 
-The base rule is **owner + 1 reviewer**, with escalation on risky surfaces (`contract`, `auth`,
-`payments`). The engine also reports a per-step **approver count** — `base 1 + risk step`, so 3 distinct
-people on a `contract` step — which `yad gate sync`, `yad gate status` and the generated review-PR body
-print, and which does not hold a gate until the capacity cap ships:
+There are no roles. yadflow keeps no list of people, so a gate counts **distinct people who approved**,
+not owners or reviewers. Anyone with access to the repo can approve. yadflow does not check that the
+approver is not the author: GitHub never lets you approve your own PR, and GitLab stops it only when the
+project's approval settings say so.
 
-| Review | Who must approve |
-|--------|------------------|
-| Epic | owner + 1 reviewer |
-| UI | owner + 1 reviewer |
-| **Architecture + contract** | owner + 1 reviewer **+ a domain owner for every repo in the epic** (the advisory count asks for 3 distinct people and blocks nothing). The contract surface is hash-locked — changing it invalidates approvals. |
-| **Stories** | owner + 1 reviewer **+ the engineer for each touched repo** |
-| **Engineer review at ship** | a human engineer — **always, never automated** |
+- **What holds a gate:** one approval from someone other than the author (the **base**), plus every
+  comment thread resolved and the review PR merged.
+- **What the gate also reports:** the full **approval count** — `base 1 + risk step`. A `contract` tag
+  adds 2 and an `auth` or `payments` tag adds 1; a step with several tags takes the largest, never the
+  sum. `yad gate sync` and `yad gate status` print it, for example
+  `count: 3 approvers = base 1 + contract risk 2 — base enforced, risk step advisory — 1 short`, and the
+  review-PR body says `Approvals needed: 1 (enforced) · full count 3 approvers = …`. The risk
+  step does **not** hold the gate yet. It starts to once the engine can count how many people are
+  active, so a small team is never asked for more approvers than it has.
+
+| Review | Holds the gate | Full count (reported) |
+|--------|----------------|-----------------------|
+| Epic | 1 approver | 1 |
+| UI | 1 approver | 1 |
+| **Architecture + contract** | 1 approver | **3** (base 1 + contract risk 2). The contract surface is hash-locked — changing it invalidates approvals. |
+| **Stories** | 1 approver | 1 |
+| **Engineer review at ship** | a human engineer — **always, never automated** | — |
+
+Solo mode (`yad mode solo --reason "<why>"`) waives the approval, and the merge still decides.
 
 ---
 
@@ -517,11 +529,12 @@ print, and which does not hold a gate until the capacity cap ships:
   recorded with who, when and why, and a gate that passes in solo mode says `waived: "solo"`.
 - **See how the team uses the flow (for a team lead / EM):** `yad usage` builds a per-member
   adoption & behavior report — who *authored / commented / approved / shipped*, in order, with factual
-  workflow-hygiene flags (e.g. a ship with no recorded engineer review, a dormant member). It is
+  workflow-hygiene flags (e.g. a ship with no recorded engineer review). It is
   **derived and read-only** — reconstructed from the ledgers + git history already in the repo, hooking
   no commands and writing no tracked state. Write it anywhere: `yad usage --out report.html --all` (or
   `--since/--until`, `--member <name>`, `--format json|md`). No emails or comment bodies are ever
-  included. (To attribute *authored* artifacts to a member, give them an `email` in the roster.)
+  included. People are listed as the ledgers and git name them, so someone whose git name differs from
+  their platform login may appear twice — unless they commit with their GitHub/GitLab noreply address.
 - **Start an epic from the CLI:** `yad epic new <slug>` seeds its lifecycle — the step chain from a
   profile, plus empty approval and comment ledgers and the `reviews/` folder. `--type feature|chore`; a
   change, defect or hotfix threads off an existing epic, so `yad-change` seeds those instead.
@@ -614,7 +627,7 @@ descriptions of all 38 skills are in [`docs/SKILLS.md`](docs/SKILLS.md).
 | `yad-checks` | Wire / run the CI gates (spec-link, contract-check, build/test/lint, verified-commits, commit-message, pr-title, pr-template). |
 | `yad-pr-template` | Install the platform PR/MR template + risk routing + the pr-title/pr-template gate scripts. |
 | `yad-commit` | Commit one staged atomic change by the conventions (`--ai` co-author footer, atomic guard). |
-| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, roster auto-assign), based on the repo's **resolved default branch** — `--base` overrides, and a non-default base warns (it costs the AI first pass). |
+| `yad-open-pr` | Open a code-repo task PR/MR from the committed template (push, prefill, assign the committer — no reviewers are requested), based on the repo's **resolved default branch** — `--base` overrides, and a non-default base warns (it costs the AI first pass). |
 | `yad-ship` | Commit **and** open the task PR/MR in one step. |
 | `yad-engineer-review` | AI review → engineer review → merge + record. |
 | `yad-backfill` | Spec already-built / legacy code so new work doesn't break it. |

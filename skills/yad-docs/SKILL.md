@@ -85,9 +85,11 @@ Copy the shell from `templates/app/` **verbatim**, then:
    timestamps inside the data files** — so regenerating an unchanged input yields a byte-identical file
    (the staleness hash depends on it). Data must satisfy `src/data/types.ts`
    (`FlowPath`/`FlowStep`/`AnimatedMessage`/`SystemComponent`/`StakeholderView`, etc.).
-2. **Derive stakeholder roles** (`roles.ts`) from the Product roster roles (`.sdlc/hub.json`) ∩ the yadflow
-   lens set (analyst / pm / architect / ux / dev / tester / reviewer / engineer) ∩ the stories' `repos:`
-   tags — each role → its relevant doc `sectionIds` + `relevantPathIds` (`references/data-mapping.md`).
+2. **Derive stakeholder roles** (`roles.ts`) from the yadflow lens set (analyst / pm / architect / ux /
+   dev / tester / reviewer / engineer), kept only where the epic's artifacts give that lens something to
+   read (which steps have artifacts, and the stories' `repos:` tags). No people or roles are read from
+   `.sdlc/hub.json` — yadflow keeps no list of people. Each role → its relevant doc `sectionIds` +
+   `relevantPathIds` (`references/data-mapping.md`).
 3. **Theme the `:root` block of `src/index.css`** from the design tokens, by the 4-tier priority in
    `references/theme-map.md`: **DESIGN.md → design.json/design-links.json palette → code-map tokens →
    default theme** (stamp `theme: default` in the manifest when it falls through to the shell default).

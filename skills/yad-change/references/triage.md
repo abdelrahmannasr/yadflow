@@ -28,7 +28,7 @@ test keeps it equal to what the engine really writes. The child's chain is alway
 `profile`: 10 steps under a `classic` parent, 4 under a `chore` one (no `architecture`/`ui-design` rows to
 inherit and no pointer-lock — see "Short-lane parent" in `../SKILL.md` Step 5).
 
-For a **defect-fix** off a `classic` parent, inheriting epic/architecture/ui-design and re-authoring
+For a **defect-fix** off a `classic` parent, inheriting epic/architecture/contract/ui-design and re-authoring
 stories+test-cases:
 
 ```json
@@ -87,7 +87,7 @@ the surface physically cannot drift.
 **To CHANGE the surface instead:** do not inherit `architecture`. Then `yad-architecture` re-authors
 `contract.md` in the change-epic between fresh `CONTRACT-SURFACE` markers, computes a **new** hash, and
 writes a real (non-pointer) `contract-lock.json`. `architecture-review` carries `risk_tags: ["contract"]`
-→ the escalated domain-owner review. This is the same re-lock-invalidates-approvals behaviour Shape already has, relocated from "edit the locked file" to "author a contract-surface change-epic".
+→ the contract-risk review (full approver count 3; only the base 1 is enforced until the capacity cap, E72). This is the same re-lock-invalidates-approvals behaviour Shape already has, relocated from "edit the locked file" to "author a contract-surface change-epic".
 
 ## Genesis migration (one-time, per feature)
 
@@ -108,8 +108,9 @@ a root — migration just makes the `thread` cache explicit and lets `yad thread
 
 ## Concurrent changes on one feature (forward-only resolution)
 
-Two change-epics threaded off the same tip that re-author the same artifact are a **fork**: the resolver
-sees two non-inherited owners of one base at the same depth, and `yad doctor` / `yad reconcile` warn.
+Two change-epics threaded off the same tip that re-author the same artifact are a **fork**. Nothing
+detects it today: the current-truth resolver silently picks one owner (the sibling whose epic id sorts last),
+and neither `yad doctor` nor `yad reconcile` warns. Look for two siblings in `yad thread` before threading.
 Resolution is forward-only — the second to merge **re-parents** onto the first (set `parent` to the new
 tip) and re-inherits; no artifact is mutated, no lock conflicts. The contract is the natural
 serialization point: only one re-lock can win, and `contract-check`'s pinned-hash fidelity check fails

@@ -1,5 +1,5 @@
 # yad-managed: yad-checks
-# SDLC check gates (Phase 3 build plan §C). The three gates run on every PR and must pass before
+# SDLC check gates (Phase 3 build plan §C). The gates below run on every PR and must pass before
 # merge. They are CI-agnostic bash in checks/ — this workflow just invokes them with the PR base.
 # This workflow file is OWNED by yad-checks (the marker on line 1 identifies it). It runs
 # independently of any other workflow in .github/workflows/, so wiring never edits a foreign workflow.
@@ -120,7 +120,7 @@ jobs:
           body="$(mktemp)"; printf '%s' "$PR_BODY" > "$body"
           bash checks/pr-template.sh --profile code "$body"
 
-  # No unverified commits from unverified users: platform-Verified signature + allowlisted author.
+  # No unverified commits: a platform-Verified signature on every commit (write access decides who authors).
   # Reads the commit range, not the title/body — skip it on a bare `edited` event.
   verified-commits:
     runs-on: ubuntu-latest

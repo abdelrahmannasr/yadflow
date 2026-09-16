@@ -10,10 +10,14 @@ ship. Shipping records the merge and updates the story state so the whole chain 
    gate. Where CodeRabbit can't run (no remote), an equivalent AI first-pass is run by hand and its
    notes captured.
 2. **Engineer review (the authority).** A human reads the diff against the spec and the acceptance
-   criteria and records an approval. The rule is `yad-review-gate`'s:
-   - **base:** at least one `owner` AND one distinct `reviewer`.
-   - **escalated:** when the PR's Impact & Risk is `high`, or it touches contract/auth/payments — base
-     PLUS one `domain-owner` per touched domain (exactly what `risk-route.sh` prints).
+   criteria and records an approval. The rule is `yad-review-gate`'s count, in distinct approvers:
+   - **base (enforced):** 1 distinct approver, who should not be the author. This holds the merge.
+   - **full count (advisory):** base 1 + a risk step from the PR's Impact & Risk block — `high` risk
+     +1, a touched contract surface +2 (the larger, never the sum). Exactly what `risk-route.sh` prints.
+     The risk step holds nothing until the capacity cap (E72). The touched domains it lists are a hint
+     for whom to ask.
+
+   The actual merge protection is the platform's branch protection.
 
 ## The build ledger — shard-then-fold (`epics/<epic>/.sdlc/build-log/` → `build-log.json`)
 
@@ -48,8 +52,8 @@ without the `{ epic, ships }` wrapper):
       "gates": ["spec-link", "contract-check", "build-test-lint"],
       "ai_review": "coderabbit (advisory)",
       "engineer_review": [
-        { "approver": "amelia", "role": "owner", "engagement": "verified" },
-        { "approver": "carol", "role": "reviewer", "engagement": "none" }
+        { "approver": "amelia-dev", "engagement": "verified" },
+        { "approver": "carol-k", "engagement": "none" }
       ],
       "companion": { "trailer": true, "cards": true, "chat": false },
       "risk": "low",
@@ -121,7 +125,8 @@ writing the same ledger at once would otherwise both read "no ship yet" and both
 empty directory (`build-log.json.lock`), so git never sees it; one held by a process that died is
 reclaimed after 30s, and a live one reports `YAD-STATE-006` rather than writing over the other's work.
 
-**Engagement (the Review Companion).** Each `engineer_review` entry carries `engagement: verified | none`
+**Engagement (the Review Companion).** Each `engineer_review` entry names the approver by platform login
+(no role or domain) and carries `engagement: verified | none`
 — `verified` when the engineer reviewed through the [companion](../../yad-review-companion/SKILL.md)
 (`yad review trailer/context/nudge`, a real trailer/cards/chat session over the diff), `none` for a bare
 approve. The optional `companion` block records which faces ran. It is **soft by default** (both count;
@@ -156,6 +161,7 @@ trailer → story → epic). Resolve that ship by the union rule, not from `buil
 
 1. The three **check gates** pass (Step C) — re-run them on the PR branch if unsure.
 2. The **AI review** has run (advisory; findings surfaced to the engineer).
-3. The **engineer review** rule is satisfied (base or escalated per the Impact & Risk block).
+3. The **engineer review** base is met (1 distinct approver); any shortfall against the full count from
+   the Impact & Risk block is reported, not blocking.
 
 Only then does the human merge and `yad-engineer-review` record it. Nothing auto-advances.

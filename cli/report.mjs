@@ -4,7 +4,7 @@
 // PRIVACY IS THE POINT: the issue posts to a PUBLIC repo, so this module is allowlist-first. It
 // assembles ONLY a known-safe set of fields (version, node/os, tool booleans, platform enum, error
 // code/hint, a path-scrubbed message, and command + flag NAMES) and actively strips everything else —
-// no absolute paths, hostnames, git URLs, repo names, roster logins/emails, epic/story IDs, branch
+// no absolute paths, hostnames, git URLs, repo names, logins/emails, epic/story IDs, branch
 // names, or flag values ever leave the machine. The user sees the exact payload and confirms before
 // anything is posted. See memory: no-private-data-in-reports.
 import { c, log, info, ok, warn, note, ask, askYesNo, has, readJSON, run } from './lib.mjs';
@@ -38,10 +38,12 @@ export function scrub(s = '') {
 }
 
 // The verbs `yad` understands (top-level commands + their sub-actions). Anything NOT in this set —
-// roster logins, repo names, roles, epic IDs, filenames, and every flag VALUE — is dropped, so the
+// logins, repo names, roles, epic IDs, filenames, and every flag VALUE — is dropped, so the
 // reported command carries only structure, never data.
 const SAFE_VERBS = new Set([
   'setup', 'check', 'update', 'doctor', 'report', 'sync-status', 'next', 'gate', 'review', 'commit',
+  // `roster` (and its `add`/`grant`/`revoke`/`remove`) stays: the command was removed in E62 but still
+  // answers with a notice, and a report about that notice must keep its structure.
   'open-pr', 'ship', 'repo', 'roster', 'docs', 'thread', 'reconcile',
   'open', 'sync', 'comments', 'status', 'walkthrough', 'trailer', 'ci', 'context', 'chat', 'cards',
   'nudge', 'list', 'add', 'grant', 'revoke', 'remove', 'build', 'deploy', 'refresh', 'wire',

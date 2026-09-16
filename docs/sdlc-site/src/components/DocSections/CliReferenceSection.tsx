@@ -44,7 +44,7 @@ const FLAGS = [
   { risk: '--dir <path>', mitigation: 'target a project other than the cwd', level: 'low' },
   { risk: '--ai <claude|copilot|cursor|coderabbit|none>', mitigation: 'per-commit Co-Authored-By footer (the human still owns the commit)', level: 'low' },
   { risk: '--contract-change', mitigation: 'mark a diff that touches the locked contract surface (routes back to architecture)', level: 'high' },
-  { risk: '--risk <low|medium|high>', mitigation: 'high (or contract/auth/payments) routes the review to domain owners', level: 'medium' },
+  { risk: '--risk <low|medium|high>', mitigation: 'filled into the PR body\'s Risk level; high (or a contract surface) raises the approval count — risk-route.sh prints it; the extra approvers are advisory', level: 'medium' },
 ];
 
 const LEVEL_COLORS: Record<string, string> = { high: '#ca6f1e', medium: '#b7950b', low: '#1e8449' };

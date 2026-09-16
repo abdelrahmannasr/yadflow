@@ -29,15 +29,14 @@ no clone needed.
 | `npx yadflow check --fix` | Reconcile: fill what is missing **and** update what changed — touches nothing already correct, and never overwrites a managed file reported as `modified`. |
 | `npx yadflow update` | Apply drift only (alias for `check --fix --scope=changed`). Also migrates a pre-2.0 install in place: `sdlc-*` skill copies and marker-owned `sdlc-*.yml` CI files are replaced by their `yad-*` names (a same-named file *you* authored is never touched), **and** purges any skill removed in a later release that a prior install left behind. A gate script or CI file a newer release **adds** to a repo's wiring is installed on every repo that is already wired (reported as `new`); a wired file you deleted on purpose stays deleted (the provenance record proves yad wrote it — on a repo wired before that record existed, 3.16.0, the first update re-adds such a file once; delete it again and it is recorded and stays gone), and a repo with none of its wiring is left for `yad check --fix`. A managed file you edited is reported and **left alone**; `--overwrite-local` replaces it after saving a `<file>.yad-orig` backup. |
 | `npx yadflow update --push` | Everything `update` does, **then commits each repo's applied changes and pushes them straight to the default branch** of the Product and every connected repo — one `chore(yad-update): sync SDLC install to yadflow vX.Y.Z` commit per repo, so a version upgrade "just lands" instead of leaving dirty trees to hand-commit across N repos. Stages an **explicit per-repo allowlist** (never `git add -A`); commits **only on each repo's default branch** (a repo on a feature branch is **skipped with a warning**, never disrupted; `--allow-branch` overrides). No PR/MR — so the `pull_request`/`merge_request` gate suite never fires; the push-on-default-branch **`yad-update-guard`** workflow/fragment runs **only** `verified-commits` + `commit-message` over it (deliberately **no** `[skip ci]`). Prints an announce banner first — **announce the team & pause merges until it completes**. Also spelled `check --fix --push`. |
-| `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads, **each epic's `contract-lock.json` still matches its surface**, and **no completed review gate is left holding no approval (fail) or only stale ones (warn)** — solo mode waives the first, since approval is waived there by design. Exit 1 on any failure; `--json` for CI and bug reports. |
+| `npx yadflow doctor [--json]` | Environment + state health: tools on PATH and platform auth, config files parse and point at real repos, every epic ledger loads, **each epic's `contract-lock.json` still matches its surface**, and **no completed review gate is left holding no approval (fail) or only stale ones (warn)** — solo mode waives the first, since approval is waived there by design. It also **warns** when people data an older release wrote is still on disk and no longer decides anything — a `roster` (`people:roster-unused`; keep it until reviews with older approvals are closed, since the first sync uses its name → login pairs to recognise them; `people:roster-ambiguous` names a roster name given to two logins; `people:allowlist-gate-stale` names an older `checks/verified-commits.sh` that still enforces the author list), repo `domain_owner(s)` (`people:domain-owners-unused`) or an author allowlist (`people:verified-authors-unused`); it never deletes them. Exit 1 on any failure; `--json` for CI and bug reports. |
 | `npx yadflow migrate [--apply] [--json]` | **Move this project's state files onto the shape this yadflow expects.** Prints a table of what *would* change and writes nothing until `--apply`, which copies every file it rewrites to `<file>.yad-orig` first. Safe to run twice — the second run reports there is nothing to do. A file newer than this engine, or one that does not parse, is reported and never touched (exit 1). In `verified` mode the CI-owned gate ledger is skipped and named: CI stamps it on its next sync. See [file shape](#file-shape-schemaversion). |
 | `yad report [-m <text>]` | **Self issue reporter.** File a bug in the yadflow repo with **auto-scrubbed** diagnostics — only the yadflow/node/os version, tool present+authenticated booleans, the Product platform enum, the error code/hint, a path-scrubbed message, and the failing command + flag *names*. Never posts paths, hostnames, git URLs, repo names, logins, epic IDs, branch names, or flag values. Searches open issues first (dedupe), shows the exact payload, and asks before posting; files via an authenticated `gh`/`glab` or a prefilled `issues/new` URL. Also **offered automatically** after an unexpected failure (interactive only). `YAD_NO_REPORT=1` (or `SDLC_NONINTERACTIVE`) disables it. |
-| `yad roster list` / `yad roster add <login>` | Manage the reviewer roster + per-repo roles **any time** (not just at setup). `add` upserts a member then walks each connected repo asking for their role; `grant`/`revoke <name> <repo> <role>` and `remove <login>` round it out. A `domain-owner` grant keeps `repos.json` `domain_owners` in sync. |
-| `yad usage` | **Team-member usage & behavior report (for an EM/team-lead).** Reconstructs each roster member's audit trail — *authored / commented / approved / shipped*, in order — entirely from data **already in git** (the approval/comment/ship ledgers + git authorship), then renders it as a portable **HTML** report (also `--format json\|md`). Derived and **read-only**: it hooks no commands and writes no tracked state (rebuildable any time, like `yad-status`). Flags: `--out <path>` (default `./usage-report.html`), `--since <YYYY-MM-DD> --until <YYYY-MM-DD>` or `--all`, `--member <name>`, `--repos` (include connected-repo commits). Surfaces factual **workflow-hygiene** flags (e.g. a ship with no recorded engineer review, a dormant roster member) — never a judgmental score. Emits **no emails, commit messages, or comment bodies**. (Attributing git-authored artifacts needs a member's `email` in the roster; ledger events attribute by name regardless.) |
+| `yad usage` | **Team-member usage & behavior report (for an EM/team-lead).** Reconstructs each contributor's audit trail — *authored / commented / approved / shipped*, in order — entirely from data **already in git** (the approval/comment/ship ledgers + git authorship), then renders it as a portable **HTML** report (also `--format json\|md`). Derived and **read-only**: it hooks no commands and writes no tracked state (rebuildable any time, like `yad-status`). Flags: `--out <path>` (default `./usage-report.html`), `--since <YYYY-MM-DD> --until <YYYY-MM-DD>` or `--all`, `--member <name>`, `--repos` (include connected-repo commits). Surfaces factual **workflow-hygiene** flags (e.g. a ship with no recorded engineer review) — never a judgmental score. Emits **no emails, commit messages, or comment bodies**. People come from activity, not from a stored list: a ledger event is attributed to the name it records (an older record under a roster name is read through the roster's name → login table, as `yad gate sync` reads it), and a git commit to its author — or to the login a GitHub/GitLab noreply address carries, which joins it to that login's approvals. Someone whose git name differs from their login may appear twice. |
 | `yad gate open <epic> <artifact>` | Open the Shape **review PR/MR** for an artifact and mark the step `in_review` (in verified mode CI owns the ledger, so it only opens the PR). The `review/<epic>/<artifact>` branch must already be **on origin** — it does not create or push one; `yad open-pr`, run from the branch, pushes it and then delegates here. For an epic's **first** gate, cut that branch from the authoring branch (`epic/…`, `change/…`) so the PR/MR carries the `.sdlc/` **seed**: no CI path can create a ledger, so `ledger-guard` exempts a new epic's ledger there — creation, not mutation (#162) — and it lands on the default branch at merge. |
 | `yad gate sync <epic> [artifact] [--pr <n>]` | Pull the PR/MR's reviews + comment threads into the file ledger; **auto-advance** the step when approvals are satisfied, all threads are resolved, and the PR is merged. With no PR recorded in the ledger (the normal bridge case, where CI records it only at merge) it resolves the PR from the `review/<epic>/<artifact>` branch; `--pr <n>` names one outright and overrides a stale recorded pointer, after confirming the number really is that branch's PR. In **verified mode this stays advisory** — the writing recovery is `yad gate ci … --merged`. |
 | `yad gate comments <epic> [artifact]` | Fetch the unresolved review comments to address (then reply on the PR; reviewers resolve their threads). |
-| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, that step's advisory approver count, and how a closed step closed (when, on which PR, and who merged it). |
+| `yad gate status <epic>` | Show each review step, its recorded approvals, how many distinct people they came from, that step's approval count (the base holds the gate; a risk step is advisory), and how a closed step closed (when, on which PR, and who merged it). |
 | `yad gate repair <epic>` | Close an authoring step left stranded behind a review gate that already passed (`YAD-STATE-005`). Writes only `state.json`. `--push` commits it to the default branch with a `chore(gate): repair…[skip ci]` audit-trail message (`--allow-branch` to override the default-branch guard, `--dry-run` to preview). |
 | `yad gate ci [--branch <head>] [--pr <n>]` | The CI entry the Product workflow calls **at merge** (and from its scheduled reconcile — nothing fires pre-merge, where the platform PR/MR holds the review state): derive the epic/artifact from the `review/EP-*` branch, run the same sync, and commit **only the ledger** to the Product default branch. **One exception, once:** on a verified Product it also moves an old-spelling product level (`epics/EP-discovery/` → `foundation/`, shape 8) after its jobs, under the commit subject `chore(gate): move the product level to foundation/ (shape 8)` — only on the default branch, only once the product level's own review has passed, never from a checkout with uncommitted changes under either folder, and not while the checks committed in the repo predate the Foundation (docs/migrations/shape-8.md). A later merge of a `review/EP-discovery/*` branch finds the moved ledger in `foundation/`. The wired jobs always name a branch: they discover merged reviews through the platform API and call `--branch <ref> --pr <n> --merged` per review. With no `--branch` it falls back to a local sweep of the review PRs *already recorded in the ledger* whose step is not yet `done` — it does no platform discovery of its own, so a review the ledger never saw is only reachable by naming it. **Idempotent down to the bytes:** the ledgers are written in a canonical order, so re-syncing an already-`done` step (what the 15-minute sweep does for a week after every merge) produces a byte-identical file and commits nothing. Before the #163 fix the re-sync re-appended each step's approvals at the tail, so a sweep over N merged reviews rotated `approvals.json` and committed the reorder on every pass — an unbounded commit loop (#163). |
 | `yad commit --type <t> -m <subject>` | Commit by the SDLC convention — Conventional subject, `Task`/`Contract-Change`/`Co-Authored-By` trailers, atomic-file guard. |
@@ -113,22 +112,25 @@ frontmatter `status:` line is not part of that hash: the gate flips it to `appro
 flips a story to `in-build`, and neither is an edit ([shape 9](migrations/shape-9.md)). With no
 Product platform / no `gh`/`glab`, the gate degrades to local with no error.
 
-**Two approval rules: one holds the gate, one is reported.** The rule that holds it is the roster rule —
-owner + 1 reviewer, plus a domain-owner per touched repo on an escalated step. Beside it sits a count
-that names no person, role or step: a step asks for `base + risk step` **distinct approvers**, where base
-is 1 — one human approval, which on GitHub or GitLab is necessarily not the author, since you cannot
-approve your own PR — and the risk step comes from the step's own risk tags —
-`contract` +2, `auth`/`payments` +1, nothing +0, the highest tag and never the sum. So an ordinary step
-asks for 1 approver and the architecture+contract gate asks for 3. One person holding two roles satisfies
-two roles but is one approver, which is the gap the count makes visible.
+**One approval rule, and no roles.** yadflow keeps no list of people (the roster was removed in E62):
+anyone with access to the repo can approve, and each approval is recorded under the approver's platform
+login. A step asks for `base + risk step` **distinct approvers**. The base is 1 — one human approval from
+someone other than the author. yadflow does not compare the two: GitHub never lets you approve your own
+PR, and GitLab stops it only when the project's approval settings say so. The risk
+step comes from the step's own risk tags — `contract` +2, `auth`/`payments` +1, nothing +0, the highest
+tag and never the sum. So an ordinary step asks for 1 approver and the architecture+contract gate asks for 3.
 
-The count is **advisory** until the capacity cap ships: the full rule caps it at the number of active
-people, and an uncapped count would make a two-person team's architecture gate unpassable. Three surfaces
-print the same arithmetic, each in its own sentence — `yad gate sync` (`2 approved; count (advisory): 3
-approvers = base 1 + contract risk 2 — 1 short`), `yad gate status` (the same sum after the distinct-people
-count) and the generated review-PR body (`Approver count (advisory, not yet enforced)`). `yad gate review
---json` carries the same rule as an object under `step.gateRule`. So the number is visible long before it
-bites.
+**Only the base holds the gate** until the capacity cap ships. The full rule caps the count at the number
+of active people, and an uncapped count would make a two-person team's architecture gate unpassable. So a
+gate passes with one approver, and the rest of the count is reported as a shortfall. Three surfaces
+print the same arithmetic — `yad gate sync` (`2 approved; count: 3 approvers = base 1 + contract risk 2 —
+base enforced, risk step advisory — 1 short`), `yad gate status` (the same sum after the distinct-people
+count) and the generated review-PR body (`Approvals needed: 1 (enforced) · full count …`). `yad gate review
+--json` carries the rule as an object under `step.gateRule`.
+
+Review PRs request no reviewers — ask them on the PR itself. A record's `by` (who wrote a skip, a
+deferral or a closing record) is the login `gh api user` / `glab api user` reports, else your git
+`user.name`; set `YAD_PLATFORM_LOGIN=0` to skip the lookup (for example offline).
 
 **Solo mode.** A lone developer can't approve their own PR on GitHub, so an approval requirement would
 deadlock them. Opt in (`yad setup --solo`, recorded as `solo: true` in `.sdlc/hub.json`) and the gate
@@ -181,13 +183,17 @@ does / why / what to enter / what skipping means), and the step count adapts.
    overrides all of it. A project whose stamp
    (`.sdlc/cli-version.json`) is missing or unreadable falls back to `.claude` alone — a recovery
    restores the minimum, it does not enrol you in a newer default.
-3. **Product platform & roster** — detect GitHub/GitLab from the remote; record reviewers → `.sdlc/hub.json`.
-   **Solo skips the roster** (you review by merging your own PR). Edit the roster any time with `yad roster`.
+3. **Product platform** — detect GitHub/GitLab from the remote → `.sdlc/hub.json`. No people are
+   collected: anyone with access approves on the platform. Solo reviews by merging their own PR. A
+   re-run on a Product with no solo/team mode recorded asks with **team** as the default (unless a recorded
+   `profile.team_size` of 1 says solo) — solo waives
+   every approval, so it is never what a scripted re-run falls into. (`yad roster` was removed; typing
+   it prints where the people model went.)
 4. **Optional tools** — design (Figma/pencil), testing (Playwright/cypress/pytest/maestro), learning (DeepTutor).
    Configure now, or **defer with one prompt** → all recorded as `none` (connect later with the
    `yad-connect-*` skills; the MCPs/CLIs are confirmed there).
-5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo and
-   skips domain-owner prompts; **greenfield** skips the Repomix pack (run `yad repo refresh` once it has code).
+5. **Connect code repos** — register repos into `.sdlc/repos.json`. **Monorepo** connects one repo;
+   **greenfield** skips the Repomix pack (run `yad repo refresh` once it has code).
 6. **Wire each repo** — CI gates and PR/MR template, recording each written file's sha in that repo's
    `.sdlc/managed.json` so a later `update` can tell a stale copy from one you edited
    ([managed files](#managed-files-what-yad-owns-and-what-you-edited)).
@@ -825,7 +831,7 @@ Three checks verify that what the ledger *claims* is still true of the files on 
 Filing a bug? The fastest path is **`yad report`** — it files the issue for you in the yadflow repo
 with **auto-scrubbed** diagnostics (versions, tool present+authenticated booleans, the Product platform
 enum, the error code/hint, a path-scrubbed message, and the failing command + flag *names* only). It
-never posts absolute paths, hostnames, git URLs, repo names, roster logins/emails, epic IDs, branch
+never posts absolute paths, hostnames, git URLs, repo names, logins/emails, epic IDs, branch
 names, or flag values; it shows you the exact payload and asks before posting to the public repo, and
 searches for duplicates first. After an unexpected failure the CLI also **offers** to run it for you —
 set `YAD_NO_REPORT=1` to opt out. Prefer a hand-written issue? Attach `yad doctor --json` (names,

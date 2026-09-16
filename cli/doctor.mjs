@@ -13,7 +13,7 @@ import { ADVANCE_VALUES, isGateStep, killSwitchOn, loadAutomation, stepDef as ca
 import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
-import { cliFor, validateLogin, hostFromGitUrl } from './platform.mjs';
+import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 
 const MIN_NODE = 18;
 
@@ -78,7 +78,7 @@ export function projectChecks(checks, root) {
   // hub.json: parse + shape
   let hub = null;
   if (!exists(productPath)) {
-    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform + roster');
+    check(checks, 'hub', 'project', 'warn', `${PROJECT_FILES.hubConfig} absent — local gate`, 'run `yad setup` to configure a platform');
   } else {
     let hubBroken = false;
     try {
@@ -90,10 +90,31 @@ export function projectChecks(checks, root) {
     if (hubBroken) { /* reported above */ }
     else if (typeof hub !== 'object' || Array.isArray(hub) || hub === null) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig} has the wrong shape [YAD-STATE-002]`, 'expected a JSON object');
     else if (![null, undefined, 'github', 'gitlab'].includes(hub.platform)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: unknown platform '${hub.platform}' [YAD-CFG-001]`, 'expected github, gitlab, or null');
-    // Mirror gate.mjs's roster shape check so doctor never reports "ok" on a Product the gate would reject.
-    else if (hub.roster !== undefined && !Array.isArray(hub.roster)) check(checks, 'hub', 'project', 'fail', `${PROJECT_FILES.hubConfig}: \`roster\` must be an array [YAD-STATE-002]`, 'fix the file or re-run `yad setup`');
     else {
-      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}, ${(hub.roster || []).length} reviewer(s)`);
+      check(checks, 'hub', 'project', 'ok', `hub: ${hub.platform || 'local'}`);
+      // E62 removed the roster. A list an older release wrote is kept on disk and decides nothing — its
+      // name → login pairs only let the first sync recognise older approvals (`legacyLogins`) — so say so
+      // — a team that still edits it would otherwise believe it decides something. An empty list (what a
+      // solo setup used to write) says nothing about people and is left quiet.
+      const r = hub.roster;
+      const listed = Array.isArray(r) ? r.length > 0 : (r && typeof r === 'object' ? Object.keys(r).length > 0 : !!r);
+      if (listed) {
+        check(checks, 'people:roster-unused', 'project', 'warn',
+          `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
+          'keep it until every review with older approvals is closed (the first sync uses its name → login pairs to recognise them), then delete the `roster` key');
+        // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
+        // older record means. Named here, because on an open review that approval may then have to be given
+        // again. (A name equal to ANOTHER entry's login is exact — a record under a name was written from
+        // that entry, and an unlisted login was written `unverified` — so it is not warned about.) The hint
+        // does NOT say "rename it": renaming one entry hands every older record under the name to whoever
+        // keeps it, which can put someone's approval of old content on a person who never gave it.
+        const unclear = [...ambiguousLegacyNames(hub).keys()];
+        if (unclear.length) {
+          check(checks, 'people:roster-ambiguous', 'project', 'warn',
+            `${PROJECT_FILES.hubConfig} roster name(s) ${unclear.join(', ')} are given to more than one login — an older approval under that name cannot be recognised by name`,
+            'leave the roster as it is: an older approval under that name is matched only when its submission time says whose it is, and otherwise may need to be given again on a new PR. Renaming an entry hands those records to whoever keeps the name — only do it if you know whose approval each one was');
+        }
+      }
       if (isSolo(hub)) check(checks, 'solo', 'project', 'ok', 'mode: solo — approval waived; the PR merge + resolved threads gate the step');
       // E10 writes `mode: solo|team` beside `solo`, and `solo` is still the one read. A hand edit can leave
       // the two saying different things; name that, and say which one the gates follow. Silent on a file
@@ -132,15 +153,6 @@ export function projectChecks(checks, root) {
         else if (!run(cli, ['auth', 'status', '--hostname', host]).ok) check(checks, 'platform-cli', 'project', 'warn', `${cli} present but not authenticated for ${host} [YAD-ENV-002]`, `run \`${cli} auth login --hostname ${host}\``);
         else {
           check(checks, 'platform-cli', 'project', 'ok', `${cli} present and authenticated`);
-          // Re-validate each roster login against the Product (warn-only). Skips when a login is already
-          // flagged unverified by setup; reports any that no longer resolve.
-          const bad = [];
-          for (const e of hub.roster || []) {
-            const v = validateLogin(hub.platform, e.login);
-            if (v.checked && !v.exists) bad.push(e.login);
-          }
-          if (bad.length) check(checks, 'roster', 'project', 'warn', `roster login(s) not found on ${hub.platform}: ${bad.join(', ')}`, 'fix the login or re-run `yad setup` (they cannot satisfy a gate)');
-          else check(checks, 'roster', 'project', 'ok', `roster: ${(hub.roster || []).length} member(s) validated on ${hub.platform}`);
           // GitLab API reachability: the gate reads MR state via `glab api …` (approvals, discussions).
           // A present+authenticated glab whose token lacks api scope would still break readPrGitLab, so
           // probe a cheap api call (warn-only) to surface it before a sync silently holds the gate.
@@ -387,6 +399,40 @@ export function projectChecks(checks, root) {
       else check(checks, `repo:${repo.name}`, 'project', 'ok', `${repo.name}: git repo, context fresh`);
     }
     if (!registry.repos.length) check(checks, 'repos', 'project', 'warn', 'no code repos registered', 'run `yad setup` to connect one');
+    // Per-repo owners went with the roster (E62). Named only where a repo actually lists someone: every
+    // repo an older setup connected carries an EMPTY `domain_owner`, which says nothing.
+    const owned = registry.repos.filter((r) => (Array.isArray(r.domain_owners) && r.domain_owners.length) || (typeof r.domain_owner === 'string' && r.domain_owner));
+    if (owned.length) {
+      check(checks, 'people:domain-owners-unused', 'project', 'warn',
+        `${PROJECT_FILES.reposRegistry} names domain owners that nothing reads any more: ${owned.map((r) => r.name).join(', ')}`,
+        'delete `domain_owner` / `domain_owners` when convenient; request reviewers on the PR itself');
+    }
+    // The verified-commits author allowlist went with the roster too (E62): the gate checks signatures
+    // only, and write access decides who can author. Name what an older release left — the free-form
+    // list in hub.json and every generated file — so nobody maintains a list that no longer protects.
+    const allowFiles = [
+      { where: 'the Product', file: path.join(root, '.sdlc', 'verified-authors') },
+      ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), '.sdlc', 'verified-authors') })),
+    ].filter((x) => exists(x.file)).map((x) => x.where);
+    const listedAuthors = hub && typeof hub === 'object' && Array.isArray(hub.verified_authors) && hub.verified_authors.length > 0;
+    if (allowFiles.length || listedAuthors) {
+      const what = [listedAuthors ? `\`verified_authors\` in ${PROJECT_FILES.hubConfig}` : null, allowFiles.length ? `.sdlc/verified-authors in ${allowFiles.join(', ')}` : null].filter(Boolean).join(' and ');
+      check(checks, 'people:verified-authors-unused', 'project', 'warn',
+        `${what} — the verified-commits gate no longer reads an author list; it checks signatures only`,
+        'delete them when convenient; write access to the repo decides who can author a commit');
+    }
+    // A wired `verified-commits.sh` from before E62 still ENFORCES the author list. On a verified ledger
+    // `yad check --fix` refreshes it; on a local ledger the Product's CI files are not managed, so an older
+    // copy stays and keeps failing commits from unlisted authors (E62 upgrade simulation). Named, not fixed.
+    const oldGates = [
+      { where: 'the Product', file: path.join(root, 'checks', 'verified-commits.sh') },
+      ...registry.repos.filter((r) => r.path).map((r) => ({ where: r.name, file: path.join(path.resolve(root, r.path), 'checks', 'verified-commits.sh') })),
+    ].filter((x) => exists(x.file) && /SDLC_VERIFIED_AUTHORS|ALLOWLIST=/.test(fs.readFileSync(x.file, 'utf8'))).map((x) => x.where);
+    if (oldGates.length) {
+      check(checks, 'people:allowlist-gate-stale', 'project', 'warn',
+        `checks/verified-commits.sh in ${oldGates.join(', ')} is an older copy that still enforces the author list`,
+        'run `yad check --fix` (it refreshes the gate on a verified ledger and on code repos); on a local-ledger Product, copy skills/yad-checks/templates/checks/verified-commits.sh over it');
+    }
   }
 
   ciTagsChecks(checks, root, hub, registry);

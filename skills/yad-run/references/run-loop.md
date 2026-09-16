@@ -52,15 +52,15 @@ while step is a Build step (not engineer-review):
         # simply not started. `reason` is the halt cause you already have in hand.
         bs.step.status = "blocked"
         bs.step.record = { reason: "<check FAIL | scope overrun | contract touch | ambiguous>",
-                           by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>" }
+                           by: "<platform login, else git user.name, or null>", date: "<YYYY-MM-DD>" }
         persist; checkpoint; STOP and report the human action needed
     elif eff == "auto":
         bs.step.status = "done"
-        bs.step.closed = { by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>", via: "auto", run: uid }
+        bs.step.closed = { by: "<platform login, else git user.name, or null>", date: "<YYYY-MM-DD>", via: "auto", run: uid }
         advance bs.currentStep to next; persist; checkpoint; continue  # Step B advance
     else:  # "human"
         bs.step.status = "done"
-        bs.step.closed = { by: "<the login the run ran as, or null>", date: "<YYYY-MM-DD>", via: "human", run: uid }
+        bs.step.closed = { by: "<platform login, else git user.name, or null>", date: "<YYYY-MM-DD>", via: "human", run: uid }
         persist; checkpoint; STOP and report "waiting for human at <next>"
 
 # reached engineer-review: always stop, hand to yad-engineer-review (human gate, finalizes the verdict)
@@ -69,6 +69,8 @@ while step is a Build step (not engineer-review):
 `closed` is the step's **closing record** (E18): who wrote it, when, and how the lane moved past the
 step. `via: "auto"` means the dial let the run go on by itself; `via: "human"` means it stopped for a
 person. `run` is the `uid` of the trust-log shard this run wrote, so the record points at the evidence.
+`by` is the login `gh api user` / `glab api user` reports, else git `user.name`, else `null`
+(`YAD_PLATFORM_LOGIN=0` turns the lookup off).
 Write it only when you write `done`, and never over a `closed` already on the step.
 
 `ranBy` is `machine` when the *previous* step's effective dial caused this step to run without a human
@@ -82,7 +84,7 @@ way `git gc` folds loose objects later (`yad tidy up` folds finished shards into
 `trust-log.json` / `build-log.json`) — plus any story `status:` flip (→ in-build/shipped) once that
 story has a build-log ship (#112) — as one
 `chore(hub): sync Build state — <epic>/<story> by @<login> [skip ci]`
-audit-trail commit, on the default branch only,
+audit-trail commit (`@<login>` when the platform login is known, else the git `user.name`, else `unknown`), on the default branch only,
 staging *only* those files by an explicit allowlist (never a Shape gate file — so `ledger-guard`
 never trips). It is idempotent (a no-op when nothing changed), so calling it after every transition —
 including a halt — is safe and keeps the shared trust evidence current for CI, teammates, and

@@ -15,7 +15,7 @@ const GATE_GROUPS = [
     layer: 'Security gate',
     items: [
       { control: 'verified-commits — commits are platform-Verified (signed)' },
-      { control: 'verified-commits — and authored by a roster-known author' },
+      { control: 'verified-commits — no author allowlist: write access to the repository decides who may author' },
     ],
   },
   {

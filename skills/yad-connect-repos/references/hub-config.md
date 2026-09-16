@@ -1,8 +1,8 @@
-# Product config — schema, detection, and the reviewer roster
+# Product config — schema, detection, and who is recorded
 
 The Product config is the Product's record of **its own** platform (so the Shape review/comment/
-approval cycle can run through a real PR/MR on the Product) and the **reviewer roster** that maps a platform
-login to an SDLC name + role. It is a single object for the Product itself — the sibling of the per-repo
+approval cycle can run through a real PR/MR on the Product). It holds **no list of people** — no roster,
+no roles, no commit emails (E62). It is a single object for the Product itself — the sibling of the per-repo
 `repos.json` registry (see `repos-registry.md`), kept separate so it never pollutes that array.
 
 ## Location
@@ -15,7 +15,7 @@ login to an SDLC name + role. It is a single object for the Product itself — t
 
 ```json
 {
-  "schemaVersion": 2,                                         // the file's shape. Absent means 1 (rule 1). `yad migrate` moves it; see docs/migrations/shape-2.md
+  "schemaVersion": 10,                                        // the file's shape. Absent means 1 (rule 1). `yad migrate` moves it; see docs/migrations/shape-2.md
   "platform": "github",                                       // github | gitlab (from the Product's own remote host); null when local-only
   "git_url": "https://github.com/abdelrahmannasr/yadflow.git", // REQUIRED when platform is non-null (scopes auth + opens PRs); yad doctor warns YAD-CFG-005 if absent
   "default_branch": "main",
@@ -27,46 +27,36 @@ login to an SDLC name + role. It is a single object for the Product itself — t
   "solo": false,                                              // SOLO MODE, and the one that decides: true waives the approval requirement on every review gate (the merge + resolved threads still gate). Set by `yad setup --solo` / `--team <n>` or `yad mode`
   "mode": "team",                                             // the roadmap's name for the same switch (E10): "solo" | "team", written beside `solo` by `yad mode` and `yad setup`. NOT read by the gates this major — `yad doctor` warns `mode:disagree` when it contradicts `solo`. Not the ledger switch: "verified mode" elsewhere means `ledger`
   "mode_set": { "from": "solo", "to": "team", "by": "al", "date": "2026-09-15", "reason": null }, // the last change of mode (E10): who, when, why. `yad mode solo` requires the reason
-  "detectedAt": "2026-06-08",                                 // last detect-hub run (YYYY-MM-DD)
-  "roster": [
-    { "login": "abdelrahmannasr", "name": "alice", "email": "alice@example.com",
-      "roles": { "hub": ["owner", "reviewer"] } },
-    { "login": "carol-gh", "name": "carol", "email": "carol@example.com",
-      "roles": { "hub": ["reviewer"], "backend": ["domain-owner", "owner"], "payments": ["reviewer"] } }
-  ]
+  "detectedAt": "2026-06-08"                                  // last detect-hub run (YYYY-MM-DD)
 }
 ```
 
-## The roster — login → name → per-scope roles
+## People — no roster (E62)
 
-The roster is how a platform identity (a GitHub/GitLab **login**) becomes an SDLC **name + role(s)** in
-the file ledger (`approvals.json` / `comments.json`). Roles are the same three the gate uses:
-`owner | reviewer | domain-owner`. Populate and edit it any time with the **`yad roster`** CLI command
-(`list` / `add` / `grant` / `revoke` / `remove`) — `add` walks the connected repos asking for each
-one's role, and a `domain-owner` grant keeps `repos.json` `domain_owners` in sync.
+yadflow keeps **no stored list of people**. A list is a claim that goes stale; the platform already knows
+who is logged in and who has access.
 
-- **`login`** — the platform username whose PR review / approval is being mapped.
-- **`name`** — the SDLC name written into the ledger (the same names used across `approvals.json`,
-  `comments.json`, and `epic.md` `owner`). Keep it stable.
-- **`email`** — the commit email; drives the **committer → login** reverse lookup that auto-assigns PRs.
-- **`roles`** — a **per-scope map**: scope (`hub`, or a connected repo name) → the roles held there. A
-  person can be **owner + reviewer + domain-owner at once** and across scopes; a repo gets **several**
-  people per role by appearing in several entries' maps. Validated against the Product during `yad setup` /
-  `yad doctor`; a login that does not resolve is flagged `unverified` (warn-only, never blocks).
+- **Who a record names.** A record's `by` is the platform login that `gh api user` / `glab api user`
+  reports, else git `user.name` (no platform, CLI missing or logged out, no network).
+  `YAD_PLATFORM_LOGIN=0` turns the lookup off.
+- **Approvals.** Each approval records the platform login that gave it as `approver`, with no `role` and
+  no `domain`. A team gate needs at least **1 approval from someone other than the author**, plus
+  resolved threads and a merged PR. The full count is `base 1 + risk step` (`contract` +2, `auth` /
+  `payments` +1, the largest and never the sum); the risk step is advisory until the capacity cap. Solo
+  mode still waives the approval.
+- **Reviewers.** Nothing requests reviewers on a PR/MR. Ask them on the PR/MR itself. A later roadmap row
+  (E68) will suggest reviewers from history; CODEOWNERS is a hint only.
 
-**Back-compat:** readers also accept a flat array `"roles": ["owner","reviewer"]` (treated as `hub`
-roles) and the legacy single `"role": "owner"` (a `hub` role).
-
-**`domain-owner` may also be DERIVED from `repos.json`.** A roster entry whose `name` equals a repo's
-`domain_owner`/`domain_owners` in `repos.json` is treated as that repo's domain-owner **when that repo is
-a touched domain for the step under review** — kept as a fallback so pre per-scope projects still resolve.
-New setups write the grant directly into the person's `roles[<repo>]` map.
-
-- **Unmapped login fallback.** A login absent from the roster maps to `name: <login>`, `role: reviewer`,
-  and is flagged `<!-- unverified login: <login> -->` in the review record (mirrors the code-map
-  `unverified` convention). An unmapped login is **never** auto-promoted to `owner` or `domain-owner` —
-  it stays a plain reviewer until a human adds it to the roster, so a stranger cannot satisfy the
-  owner/domain-owner requirement.
+**Legacy data an older release wrote.** A `roster` array (with `login`/`name`/`email`/`roles`, or the
+older `role`) and a `verified_authors` list may still sit in this file. Nothing adds them, and nothing
+deletes them (`yad migrate`'s shape-3 step still adds a `product` role key beside `hub` in an old roster, so
+an older project upgrades the same way it always did). `verified_authors` decides nothing — only `yad doctor`
+reads it, to warn. The roster is read for one thing only: its `name` →
+`login` pairs let the first sync after the upgrade recognise who an older approval names
+(`../../yad-hub-bridge/references/login-roster.md` → "Older records"). `yad doctor` warns
+`people:roster-unused` and `people:verified-authors-unused` so nobody edits them believing they decide
+something. Delete `verified_authors` when convenient; keep `roster` until every review with older
+approvals is closed.
 
 ## Detection
 
@@ -111,7 +101,8 @@ read the artifact. Applies to both the Shape gate and the Build engineer review.
 
 ## Git tracking
 
-Commit `hub.json` — it is small, reviewable, and carries no secrets (logins and names only, never tokens).
+Commit `hub.json` — it is small, reviewable, and carries no secrets or tokens. The only people data in it is the login or git name in `mode_set.by`, plus
+whatever an older `roster` still lists.
 This mirrors how `repos.json` and the per-epic `.sdlc/` state are committed.
 
 ## Greenfield

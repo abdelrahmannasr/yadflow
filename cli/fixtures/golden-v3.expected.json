@@ -136,7 +136,7 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "base",
+      "rule": "count",
       "gateRule": {
         "base": 1,
         "riskStep": 0,
@@ -155,7 +155,7 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "escalated",
+      "rule": "count",
       "gateRule": {
         "base": 1,
         "riskStep": 2,
@@ -174,7 +174,7 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "base",
+      "rule": "count",
       "gateRule": {
         "base": 1,
         "riskStep": 0,
@@ -193,7 +193,7 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "per-repo",
+      "rule": "count",
       "gateRule": {
         "base": 1,
         "riskStep": 0,
@@ -271,7 +271,7 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "per-repo",
+      "rule": "count",
       "gateRule": {
         "base": 1,
         "riskStep": 0,
@@ -290,7 +290,7 @@
       "staleDropped": 0,
       "passed": true,
       "missing": [],
-      "rule": "base",
+      "rule": "count",
       "gateRule": {
         "base": 1,
         "riskStep": 0,

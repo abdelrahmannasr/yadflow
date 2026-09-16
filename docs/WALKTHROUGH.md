@@ -32,7 +32,7 @@ own yet, so that choice is recorded, not acted on.
 ## 0 — One-time setup
 
 > **Shortcut:** `npx yadflow setup` runs the guided wizard interactively — module install, Product
-> detection + roster, connect a design/testing/learning tool (each optional), connect repos, wire each
+> detection, connect a design/testing/learning tool (each optional), connect repos, wire each
 > repo. Run `… check --fix` any time afterwards to reconcile. The manual steps below are the
 > long-hand equivalent and still work.
 
@@ -48,7 +48,7 @@ own yet, so that choice is recorded, not acted on.
    *merges* with any existing CI, never clobbers), `yad-pr-template repo:<repo> action: wire` (PR/MR
    template + risk routing).
 5. **Connect each code repo to the Product** (so the Shape phases see what's already built):
-   `yad-connect-repos action: connect repo:<repo> path:<path-or-git_url> domain_owner:<who>`. It
+   `yad-connect-repos action: connect repo:<repo> path:<path-or-git_url>`. It
    registers the repo in `.sdlc/repos.json` and caches a Repomix pack + a lightweight **code-map**
    (existing endpoints/events/data-models/modules, secret-scanned). Clones/fetches as the **local user**
    (SSH or credential helper; GitHub or GitLab; no stored tokens). Re-run for any new repo. Freshness is a
@@ -62,10 +62,10 @@ own yet, so that choice is recorded, not acted on.
    `testing.json`, lets `yad-test-cases` implement automation), `yad-connect-learning action: connect`
    (DeepTutor-first → `learning.json`, powers the cross-cutting learning layer).
 7. **(Optional) Put the Product on a platform** so the Shape review runs through real PRs:
-   `yad-connect-repos action: detect-hub`, then `yad roster add <login>` once per reviewer (login →
-   SDLC name + per-repo roles — the `add` walk asks for each connected repo's role; `yad roster grant`
-   sets one directly), and `yad-pr-template repo:hub action: wire` /
-   `yad-checks repo:hub action: wire`. With no Product platform the Shape gate runs local.
+   `yad-connect-repos action: detect-hub`, then `yad-pr-template repo:hub action: wire` /
+   `yad-checks repo:hub action: wire`. There are no reviewers to register: anyone with access to the
+   Product repo can approve, and each approval is recorded under their platform login. With no Product
+   platform the Shape gate runs local.
 8. **Conventions:** commits and PR/MR titles follow Conventional Commits (lowercase after the type), the
    human author owns each commit with an optional per-commit `Co-Authored-By` AI trailer — see
    [`CONTRIBUTING.md`](../CONTRIBUTING.md).
@@ -80,18 +80,18 @@ threads are resolved. Details: **"Run all of Shape by hand"** below.
 
 0. *(optional, once per product)* `yad foundation new` then `yad-discovery` → the **Foundation** in
    `foundation/` (`purpose.md`, `scope.md`, `mvp.md`, `roadmap.md`, `stack.md`, `repos.md`, plus
-   optional `market.md` and `risks.md`) under the fixed id `EP-foundation` → review (base rule) →
+   optional `market.md` and `risks.md`) under the fixed id `EP-foundation` → review (1 approver) →
    `currentStep: foundation-done`. The six required sections must exist to review, and the gate warns
    when a section still holds only its template headings (greenfield: the skill asks for each section
    in turn); its `roadmap.md`
    then frames each epic below (read once it is approved; `yad foundation status` shows which features are started, read from the
    epic ledgers — the roadmap's Status column is not edited by hand).
-6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (base rule).
-7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (**escalated**: contract).
-8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (base rule).
-9. `yad-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (**per-repo**).
+6. `yad-epic` → `epic.md` (assigns `EP-<slug>`, seeds state) → review (1 approver).
+7. `yad-architecture` → `architecture.md` + locked `contract.md` → review (1 approver; the `contract` tag makes the reported count 3).
+8. `yad-ui` → `ui-design.md` + `DESIGN.md` → review (1 approver).
+9. `yad-stories` → repo-tagged `stories/EP-<slug>-S0N.md` → review (1 approver; the PR is labelled with each touched repo).
    → `state.json` reaches `currentStep: ready-for-build` — **Build can start now.**
-10. `yad-test-cases` → `test-cases.md` (+ automation tests when a testing tool is connected) → review (base rule).
+10. `yad-test-cases` → `test-cases.md` (+ automation tests when a testing tool is connected) → review (1 approver).
     **Parallel, non-blocking:** opens when the stories gate passes and runs alongside Build; its
     review never moves `currentStep` off `ready-for-build`.
 
@@ -105,7 +105,7 @@ Build by hand"** below.
     (repeat per task). Commit by convention with **`yad commit --type <t> -m <subject> [--ai <tool>]`**
     (Task/Contract-Change/Co-Authored-By trailers, atomic-file guard).
 12. `yad-checks repo:<repo> action: run` → spec-link, contract-check, build/test/lint, verified-commits
-    (platform-Verified signature + roster-allowlisted author), and commit-message must pass. (The
+    (a platform-Verified signature on every commit), and commit-message must pass. (The
     `pr-title` / `pr-template` gates need the PR title + body, so they run in CI once the PR exists —
     step 13.)
 13. Open the PR/MR from the wired template with **`yad open-pr --repo <repo> [--risk <level>]`** (or do
@@ -116,7 +116,7 @@ Build by hand"** below.
     opens**; if that was not what you wanted, close it and re-run against the right base, because
     CodeRabbit decides eligibility at open time and retargeting does not bring it back. The PR's CI now also
     runs the `pr-title` and `pr-template` gates; `yad-pr-template repo:<repo> action: route` prints the
-    required reviewers from the Impact & Risk block.
+    approval count and the touched domains from the Impact & Risk block (no reviewers are requested).
 14. `yad-engineer-review` → `ai-review` (advisory) → `approve` (the human engineer gate) → `ship` (merge,
     record in `build-log.json`, update story status to `in-build`/`shipped`). The machine-written
     ledgers (`build-log.json`, `trust-log.json`, `build-state/`) are committed by **`yad checkpoint --push`**
@@ -215,7 +215,7 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
 ![Review gate loop — author, open, comment, approve, advance](https://raw.githubusercontent.com/abdelrahmannasr/yadflow/main/docs/diagrams/review-loop.svg)
 
 **local** — invoke **`yad-review-gate`** with `open` (present the artifact; reviewers comment in
-`reviews/<artifact>--<date>--comments.md`), `approve` (name + role → `.sdlc/approvals.json`), and
+`reviews/<artifact>--<date>--comments.md`), `approve` (the reviewer's platform login → `.sdlc/approvals.json`), and
 `advance` (moves **only if** the rule is satisfied, else it names the missing approval).
 
 **PR-driven** — when the Product is on a platform, the **`yad gate`** CLI runs the same gate over a PR/MR:
@@ -229,19 +229,17 @@ accumulate, and the step moves forward only when the rule is met. **local** ends
   approvals (counting only the non-stale ones). The file ledger stays the source of truth; with no
   platform / no CLI it degrades to local.
 
-**The gate rule, by review.** The roster rule (roles) below is what holds a gate. Beside it the engine
-reports a **count** — `base + risk step` distinct approvers, base 1, plus 2 for a `contract` tag or 1 for
-`auth`/`payments` — and `yad gate sync`, `yad gate status` and the generated review-PR body print that
-arithmetic. The count is advisory until
-the capacity cap ships, because an uncapped count would make a two-person team's architecture gate
-unpassable.
-- **Base** (epic, UI): `owner + 1 reviewer`; the count asks for 1.
-- **Escalated** (architecture+contract — `risk_tags: ["contract"]`): base **plus a domain owner for
-  every repo in `epic.repos`**; the count asks for **3 distinct approvers** (base 1 + contract 2) and
-  reports a shortfall without blocking. The contract-surface hash must still match
-  `.sdlc/contract-lock.json` (a changed surface invalidates approvals).
-- **Per-repo** (stories): base **plus a domain owner (the repo's engineer) for every repo that appears
-  in any story's `repos`**.
+**The gate rule, by review.** There are no roles: a gate counts **distinct people who approved**. The
+engine computes a **count** — `base + risk step` distinct approvers, base 1, plus 2 for a `contract` tag
+or 1 for `auth`/`payments` — and `yad gate sync`, `yad gate status` and the generated review-PR body print
+that arithmetic. **Only the base holds the gate** until the capacity cap ships, because an uncapped count
+would make a two-person team's architecture gate unpassable; the rest is reported as a shortfall.
+- **Epic, UI, stories, test cases:** 1 approver; the count asks for 1.
+- **Architecture+contract** (`risk_tags: ["contract"]`): 1 approver holds it; the count asks for **3
+  distinct approvers** (base 1 + contract 2) and reports the shortfall without blocking. The
+  contract-surface hash must still match `.sdlc/contract-lock.json` (a changed surface invalidates
+  approvals).
+- Review PRs request no reviewers — ask the people who know the touched repos on the PR itself.
 
 ### Check status anytime
 
@@ -251,14 +249,15 @@ contract lock, story repo tags, and which approvals the active gate still needs.
 ## Worked example (already in this repo)
 
 `epics/EP-checkout/` shows the **whole Shape** walked end to end:
-- `epic.md` authored + approved (epic gate, base rule) — 2026-06-04.
+- `epic.md` authored + approved (epic gate) — 2026-06-04.
 - `architecture.md` + `contract.md` authored; contract surface hash-locked in
-  `.sdlc/contract-lock.json`. Architecture gate **escalated** (contract, payments): owner *alice* + reviewer
-  *bob* + domain owners *carol* (backend) and *dave* (mobile).
-- `ui-design.md` + `DESIGN.md` authored (Impeccable not installed → graceful fallback). UI gate base
-  rule (alice + bob).
-- Five repo-tagged stories `stories/EP-checkout-S01..S05.md`. Stories gate **per-repo**: base
-  rule + a domain owner for each touched repo (carol/backend, dave/mobile).
+  `.sdlc/contract-lock.json`. Architecture gate (contract, payments): approved by *alice*, *bob*, *carol*
+  and *dave* — 4 people, so even the full count of 3 is met. (These approvals were recorded before E62
+  and still carry the roles the roster gave them; nothing reads those fields now.)
+- `ui-design.md` + `DESIGN.md` authored (Impeccable not installed → graceful fallback). UI gate approved
+  by alice + bob.
+- Five repo-tagged stories `stories/EP-checkout-S01..S05.md`. Stories gate approved by alice, bob,
+  carol and dave; the review PR is labelled with each touched repo (backend, mobile).
 - `state.json` now reads `currentStep: ready-for-build`, every Shape step `done` — the Phase 3
   handoff point.
 
@@ -302,10 +301,10 @@ the product repo. Code repos are **separate git repos** under `demo-repos/<repo>
    / **pr-template** (profile-aware `code`|`hub`, so they also run on the Product). They fail closed
    on a bad base ref.
 4. **PR/MR template + risk routing** — `yad-pr-template` drops the platform-matched template with an
-   Impact & Risk block; `high` risk (or a contract/auth/payments surface) routes the review to domain
-   owners (`risk-route.sh`), the same escalation as the gate.
+   Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2
+   (`risk-route.sh` prints it and the touched domains to ask), the same arithmetic as the gate.
 5. **AI review → engineer review → merge** — `yad-engineer-review`: CodeRabbit is an advisory first pass
-   (never the authority); a human engineer approves (owner + 1 reviewer, escalating to domain owners); on
+   (never the authority); a human engineer approves (one approver holds the merge; risk raises the reported count); on
    merge the ship is recorded in the build ledger — as a shard under `.sdlc/build-log/`, which readers
    union with the folded `.sdlc/build-log.json` and `yad tidy up` later folds in — and the story state
    becomes `in-build` → `shipped`. The epic → story → task → PR → mergeCommit chain is traceable both ways.

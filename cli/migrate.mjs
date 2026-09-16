@@ -83,15 +83,17 @@ export const MIGRATIONS = [
     // Two things move, and only one of them is visible in this function.
     //
     // The KEY, here: a roster entry's product-level roles gain a `product` spelling ALONGSIDE the
-    // `hub` one. Both are kept, and `rolesForScope` (cli/platform.mjs) answers to either.
+    // `hub` one. Both are kept.
     //
     // Adding rather than replacing, for the same reason as `ledger` beside `bridge_enabled` and
-    // `product.json` beside `hub.json`. Replacing looked tidier and was a silent data loss: every
-    // caller asks `rolesForScope(entry, 'hub')`, an older CLI knows only `hub`, and `yad setup`
-    // writes `hub` when it adds a member. Move the key out from under them and a reviewer quietly
-    // stops holding a product-level role — the gate can no longer find its required approvers, and
-    // nothing anywhere says why. The old spelling goes in the major that makes `product` the one
-    // that is read.
+    // `product.json` beside `hub.json`: when this step shipped, every caller asked for the `hub`
+    // spelling, an older CLI knew only `hub`, and `yad setup` wrote `hub` when it added a member, so
+    // moving the key would have quietly stripped reviewers of their roles.
+    //
+    // E62 removed the roster: it decides nothing, and `yad doctor` names one as unused. The step still
+    // runs, unchanged, so a shape-2 file reaches shape 3 exactly as it always did — a migration that
+    // changed with the reader would rewrite an old project differently depending on which release ran
+    // it.
     //
     // The FILE NAME is not renamed here, because a migration step transforms an object and cannot
     // move a file. It happens on WRITE: `writeProductConfig` (cli/lib.mjs) writes `.sdlc/product.json`

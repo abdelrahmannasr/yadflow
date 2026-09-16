@@ -1,12 +1,12 @@
 ---
 name: yad-open-pr
-description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Auto-assigns from the Product roster: assignee = the committer, reviewers = the repo''s reviewers + domain-owners. High risk / contract surface routes to domain owners (risk-route.sh). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
+description: 'Build helper of the gated SDLC. Open a code-repo task PR/MR from the committed platform template — detect GitHub/GitLab, push the current task branch, and create the PR/MR with the template body prefilled (Summary / Story-task / Impact & Risk) and the title defaulting to the commit subject. Assigns the PR/MR to the logged-in gh/glab login and requests no reviewers (ask them on the PR itself). High risk / contract surface raises the approver count (risk-route.sh prints it). Drives the `yad open-pr` CLI; never merges. Use when the user says "open the PR", "open the MR", or "raise the merge request".'
 ---
 
 # SDLC — Open Task PR/MR (Build helper)
 
 **Goal:** Open the PR/MR for the current task branch from the repo's committed PR/MR template
-(installed by `yad-pr-template`, Step D), with the body prefilled and the right reviewers requested.
+(installed by `yad-pr-template`, Step D), with the body prefilled and the assignee set.
 This is the standalone open-PR step; it **never merges** — the engineer review (`yad-engineer-review`,
 Step E) owns the merge. Distinct from `yad gate open`, which opens a Shape artifact-review PR on
 the Product.
@@ -19,8 +19,9 @@ the Product.
 - **Title** — defaults to the last commit subject (one atomic task = one branch = one PR/MR), so it
   follows the same Conventional-Commits style and passes the `pr-title` gate. Override with `--title`.
 - **Body** — the committed template (`.github/pull_request_template.md` /
-  `.gitlab/merge_request_templates/Default.md`) with `Task:`, `Risk level:`, `Contract surface
-  touched:`, and `Domains` prefilled; the rest is left for the author. This satisfies the `pr-template`
+  `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit), the story/task id and
+  its `specs/` path, `Risk level:`, `Contract surface touched:`, and `Domains` (the repo name when
+  `--repo` is passed) prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate.
 - **Stage-aware on the Product** — `open-pr` mirrors the `--head` split the Product gates apply:
   - a **`review/EP-*/<artifact>`** branch is a Shape artifact-review PR → it **delegates to
@@ -41,18 +42,20 @@ the Product.
   auto-review eligibility from the base at PR-**open** time, and retargeting afterwards does not undo
   the skip. Hardcoding `main` here is the same bug the check gates already refuse to make (see
   `../yad-checks/references/check-gates.md`).
-- **Auto-assign** — from the Product roster scoped to this repo: assignee = the committer (resolved from
-  the local git identity), reviewers = the repo's `reviewer`/`domain-owner` logins minus the committer.
-  Degrades cleanly when there is no roster.
-- **Routing** — `low`/`medium` → base rule (owner + 1 reviewer); `high` (or a touched
-  contract/auth/payments surface) → plus one domain-owner per touched domain. `bash
-  checks/risk-route.sh <body>` prints the required reviewers.
+- **Assignee** — the person opening it: `@me` on GitHub (`gh` resolves it on the repo's own host), and
+  on GitLab the login `glab` reports (no assignee is passed when that lookup fails). **No reviewers are
+  requested** (E62): yadflow keeps no list of people. The CLI prints `no
+  reviewers were requested — ask them on the PR itself`. A later roadmap row (E68) will suggest reviewers
+  from history; CODEOWNERS is a hint only.
+- **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk
+  adds 1 and a touched contract surface adds 2 (the larger, never the sum); that risk step is advisory
+  until the capacity cap. `bash checks/risk-route.sh <body>` prints the count.
 
 ## Inputs
 
 - `repo`           — target a registered repo by name (optional; else the current dir).
 - `risk`           — `low|medium|high` (default `low`); prefilled into the body.
-- `contractChange` — flag; marks the contract surface touched and triggers escalation.
+- `contractChange` — flag; marks the contract surface touched and raises the approver count.
 - `base`           — override the PR/MR base (optional; defaults to the repo's own default branch —
   see **Base branch** above). Only pass it deliberately: a non-default base loses the AI first pass.
 - `platform` / `title` — optional overrides.
@@ -69,8 +72,8 @@ Run from the repo root:
 yad open-pr [--repo <name>] [--risk <level>] [--contract-change] [--title "<subject>"]
 ```
 The CLI pushes the branch (sets upstream, the user's own auth), fills the template, and creates the
-PR/MR with the auto-assigned assignee + reviewers. It prints the base it resolved and where that came
-from.
+PR/MR with the assignee set and no reviewers requested. It prints the base it resolved and where that
+came from.
 
 The non-default-base warning is **advisory — it does not block, and the PR/MR is already open by the
 time you read it.** If the base was intended (a stacked PR, a release branch), carry on. If it was
@@ -78,9 +81,10 @@ not, do **not** just retarget the open PR — that leaves the AI first pass skip
 cause (the repo's `default_branch`, or drop the wrong `--base`), and re-run `yad open-pr` so the PR
 is *created* against the right base.
 
-### Step 3 — Route the review (if escalated)
-On `high` risk or a contract touch, run `bash checks/risk-route.sh <pr-body>` to print the required
-domain-owner reviewers — the same escalation `yad-engineer-review` enforces.
+### Step 3 — Route the review (if the count is raised)
+On `high` risk or a contract touch, the CLI prints a hint to run `bash checks/risk-route.sh "<pr body>"`
+to see how many approvers it asks for — the same count the engineer review (`yad-engineer-review`) uses. It lists the
+touched domains as a hint for whom to ask; request those reviewers on the PR/MR yourself.
 
 ### Step 3b — Post the review trailer (optional, recommended)
 Make the reviewer's job easy: generate the 60-sec briefing and post it to the new PR/MR so it greets
@@ -93,8 +97,8 @@ The full fun-review flow (cards + grounded chat + engagement) is driven by the
 design — companion comments carry `<!-- yad:noblock -->`.
 
 ### Step 4 — Stop (no merge)
-Report the PR/MR URL and the requested reviewers. The PR now runs the check gates (Step C); the human
-engineer review and merge happen in `yad-engineer-review` (Step E).
+Report the PR/MR URL and that no reviewers were requested. The PR now runs the check gates (Step C);
+the human engineer review and merge happen in `yad-engineer-review` (Step E).
 
 ## Hard rules
 
@@ -102,7 +106,7 @@ engineer review and merge happen in `yad-engineer-review` (Step E).
 - **The base is the repo's default branch** unless you deliberately chose otherwise with `--base`.
   Never hardcode `main`, and never ignore the non-default-base warning silently.
 - **Title follows the commit subject** — Conventional-Commits style, so the `pr-title` gate passes.
-- **High risk routes to domain owners** — the same escalation as the gate; never a separate rule.
+- **High risk raises the approver count** — the same count as the gate; never a separate rule.
 - **Opening a PR never merges.** The human owns the merge in Step E.
 
 ## Reference

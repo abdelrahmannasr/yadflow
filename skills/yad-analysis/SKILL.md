@@ -85,7 +85,7 @@ Foundation's `roadmap.md` has a row for this feature, prefer that row's **propos
 
 ### Step 4 — Open the authoring branch
 Open the analysis authoring branch `analysis/EP-<slug>` per the shared procedure
-(`references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
+(`../yad-epic/references/state-schema.md` → "Authoring branches"): git-safe (skip with a note if `{project-root}`
 is not a git work tree), check out the branch if it exists, else create it from the Product's default
 branch. Author and commit `analysis.md` on it. This is **distinct** from the verified ledger's `review/…` branch.
 
@@ -132,7 +132,7 @@ yad epic new EP-<slug> --profile spike --type <feature|chore>   # a timeboxed in
 That writes `{project-root}/epics/EP-<slug>/.sdlc/state.json`, the empty `approvals.json` and
 `comments.json`, and the `reviews/` directory. With `--profile analysis-first` the chain is the full
 **12-step** route (`analysis` before `epic`). Every step is `advance: human` and locked; `analysis` is
-open and the rest are blocked. The chain comes from the step catalogue and the lifecycle profile in
+open and the rest are `todo`. The chain comes from the step catalogue and the lifecycle profile in
 the engine (`../yad-epic/references/state-schema.md`), so there is one definition of it and no copy
 here to drift from it.
 
@@ -155,10 +155,11 @@ Notes:
 - **Then advance the authoring step.** The seed leaves `analysis` open, which is truthful: the command
   runs before the artifact exists. Closing it is Step 6b's job, and on the local path `yad gate open`
   does it — so after writing `analysis.md`, take Step 6b.
-- `analysis-review` carries no `risk_tags` — it is the **base** rule (owner + 1 reviewer). The catalogue
-  sets that; there is nothing to type.
-- `architecture-review` carries `risk_tags: ["contract"]` so the gate escalates it by default
-  (build plan §4): the contract review needs domain owners, not just owner + 1.
+- `analysis-review` carries no `risk_tags` — it is the **base** rule (1 distinct approver, who
+  should not be the author). The catalogue sets that; there is nothing to type.
+- `architecture-review` carries `risk_tags: ["contract"]` by default (build plan §4): the tag raises
+  the step's full approver count to 3 (base 1 + contract risk 2). Only the base holds the gate until
+  the capacity cap (E72); the risk step is advisory and reported as a shortfall.
 - `test-cases` / `test-cases-review` are a **parallel, non-blocking track**: they seed `todo` and open
   when `stories-review` passes — the epic is already `ready-for-build` by then, so Build
   runs alongside the tester (see `../yad-epic/references/state-schema.md`).
@@ -195,7 +196,7 @@ and moves `currentStep` to the gate — the same transition, from the one functi
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/EP-<slug>/analysis.md` branch must already be **on origin** — the command refuses
+**With a platform** the `review/EP-<slug>/analysis` branch must already be **on origin** — the command refuses
 and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
 (`yad open-pr` does both, then delegates).
 
@@ -204,7 +205,7 @@ reviewers approve, through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: epic ID, the path to `analysis.md`, and that the next action is **review** via
-`yad-review-gate` (base rule: owner + 1 reviewer). **Never mark the analysis-review step approved
+`yad-review-gate` (base rule: 1 distinct approver, who should not be the author). **Never mark the analysis-review step approved
 here** — only real reviewers do that through the gate. Shape steps do not auto-advance. When the
 analysis gate passes, control moves to `yad-epic`, which reads `analysis.md` as input. When the
 Product has a platform, the gate opens a review PR on the Product (via `yad-hub-bridge`) and

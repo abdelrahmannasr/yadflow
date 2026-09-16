@@ -19,7 +19,7 @@ import { sequenceDiff } from './walkthrough.mjs';
 
 const NUDGE_CMD = 'yad review chat';
 
-// Resolve the target code repo: --repo <name> from the registry (platform + path + roles), else cwd.
+// Resolve the target code repo: --repo <name> from the registry (platform + path), else cwd.
 // An explicit --repo that is NOT in the registry is an error — never silently fall through to cwd (that
 // would operate on the wrong repo). Returns { error } in that case for the caller to surface.
 function resolveRepo(root, { repo, dir }) {
@@ -149,22 +149,18 @@ export async function reviewReconcile(root, { epic, repo, dir, pr, reader = read
   const { repoRoot, meta } = rr;
   const platform = platformOf(root, repoRoot, meta);
   if (!platform) { fail('could not detect platform (github/gitlab)'); process.exitCode = 1; return; }
-  const hub = readJSON(productConfigPath(root), { roster: [] });
-  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
-  const domain = meta?.name ? [meta.name] : [];
   const pull = reader(platform, pr, { cwd: repoRoot });
   if (!pull.ok) { fail(`could not read PR #${pr}: ${pull.reason}`); process.exitCode = 1; return; }
 
-  // Map platform approvals → engineer_review entries, deduped by (approver, role, domain), carrying the
-  // engagement signal read from the approve body/note.
-  const recs = mapApprovers(pull.reviews, { roster: hub.roster || [], repos: registry.repos || [], touchedDomains: domain, headOid: pull.headOid });
+  // Map platform approvals → engineer_review entries, one per approving login (E62: no roster, so no
+  // role or domain to attach), carrying the engagement signal read from the approve body/note.
+  const recs = mapApprovers(pull.reviews, { headOid: pull.headOid });
   const seen = new Set();
   const engineerReview = [];
   for (const r of recs) {
-    const key = `${r.name}|${r.role}|${r.domain || ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    engineerReview.push({ approver: r.name, role: r.role, ...(r.domain ? { domain: r.domain } : {}), engagement: r.engagement === 'verified' ? 'verified' : 'none' });
+    if (seen.has(r.name)) continue;
+    seen.add(r.name);
+    engineerReview.push({ approver: r.name, engagement: r.engagement === 'verified' ? 'verified' : 'none' });
   }
 
   // Match by exact PR number — never substring (`--pr 5` must not match a ship recorded against #15).

@@ -19,7 +19,7 @@ import path from 'node:path';
 import { c, ok, info, fail, hand, exists, pushWithRebase } from './lib.mjs';
 import { PROJECT_FILES , productConfigPath } from './manifest.mjs';
 import { loadProduct } from './gate.mjs';
-import { resolveCommitterLogin } from './platform.mjs';
+import { platformLogin } from './platform.mjs';
 import { productGit, resolveDefaultBranch, guardDefaultBranch, preflightGuardReadiness } from './hubcommit.mjs';
 import { ensurePackIgnored, PACK_IGNORE_BLOCK } from './setup.mjs';
 import { checkpointAuthor } from './checkpoint.mjs';
@@ -209,12 +209,12 @@ export async function publishCodeContext(root, { push = false, allowBranch = fal
   }
 
   // Only relevant when we are about to push a commit straight to the default branch: warn (never block)
-  // if signing/allowlisting would make the yad-update-guard reject it. Gated on `push` and deferred to
+  // if unsigned commits would make the yad-update-guard reject it. Gated on `push` and deferred to
   // here so it isn't noise on a guard-refused branch or a nothing-to-commit run.
   if (push) preflightGuardReadiness(root);
 
   const { label, basenames } = summarizeCodeContext(fileset);
-  const author = checkpointAuthor(resolveCommitterLogin(root, hub?.roster || []), git('config', 'user.name').stdout);
+  const author = checkpointAuthor(platformLogin(root, hub?.platform), git('config', 'user.name').stdout);
   const message = buildCodeMapMessage({ label, author, basenames });
 
   // Untrack the packs by holding their bytes and removing the files across the --only commit, then

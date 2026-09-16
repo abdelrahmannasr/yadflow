@@ -1,14 +1,13 @@
 # yad-managed: yad-checks
 # yad-update-guard — integrity gate for DIRECT pushes to the default branch.
 #
-# `yad update --push` commits the applied SDLC drift (skills, gate scripts, CI wiring, verified-
-# authors) and pushes it straight to the default branch with NO pull request — so the pull_request
+# `yad update --push` commits the applied SDLC drift (skills, gate scripts, CI wiring) and pushes it
+# straight to the default branch with NO pull request — so the pull_request
 # gate suite never fires. This workflow is the "skipped from CI EXCEPT verified-commits + the pattern
 # gate" contract: on every push to the default branch it runs ONLY those two gates over the pushed
 # range. It is not scoped to yad-update commits on purpose — ANY direct-to-main commit (a hotfix, a
 # force-push) then gets signature + subject-format checked, which is a strictly-good invariant. A
-# normal PR merge sails through: a GitHub merge/squash commit is platform-Verified, verified-commits.sh
-# waives the allowlist for merge commits (whose author is whoever clicked merge), and commit-message.sh
+# normal PR merge sails through: a GitHub merge/squash commit is platform-Verified, and commit-message.sh
 # skips merges. CAVEAT: a *rebase-merge* recreates the PR commits WITHOUT GitHub's signature, so they
 # lose the Verified badge and fail the signature check on the direct push — teams using rebase-merge
 # should sign their commits or not wire this guard.

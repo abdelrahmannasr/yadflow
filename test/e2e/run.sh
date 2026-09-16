@@ -70,7 +70,8 @@ git init -q "$BACKEND" && git_id "$BACKEND"
 ( cd "$BACKEND" && echo '{}' > package.json && git add -A && git commit -qm "init backend" && git branch -qM main )
 HEAD_BACKEND="$(git -C "$BACKEND" rev-parse HEAD)"
 
-# Pre-seed Product config + registry so the non-interactive setup keeps them (roster drives the gate).
+# Pre-seed Product config + registry so the non-interactive setup keeps them. The roster, emails and
+# domain_owner are what an older release wrote: left on disk, never read (E62).
 mkdir -p "$HUB/.sdlc"
 cat > "$HUB/.sdlc/hub.json" <<EOF
 {"platform":"github","bridge_enabled":true,"bridge":true,"default_branch":"main","roster":[
@@ -90,7 +91,8 @@ jassert "$HUB/.sdlc/hub.json" 'j.solo === false && j.profile.codebase === "brown
 [ -f "$HUB/.claude/skills/yad-epic/SKILL.md" ] || die "skills not installed"
 [ -f "$BACKEND/checks/spec-link.sh" ] || die "code repo not wired with check gates"
 [ -x "$BACKEND/checks/spec-link.sh" ] || die "spec-link.sh not executable"
-grep -q "alice@corp.io" "$HUB/.sdlc/verified-authors" || die "verified-authors not generated from roster"
+# No author allowlist is generated any more: the verified-commits gate checks signatures only (E62).
+[ ! -f "$HUB/.sdlc/verified-authors" ] || die "verified-authors must not be generated — the roster that fed it is gone"
 
 say "setup recorded the pluggable tool connections (design + testing)"
 jassert "$HUB/.sdlc/design.json" 'j.tool === "figma" && j.auth === "user" && j.source === null'
@@ -135,7 +137,10 @@ jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").stat
 say "CI --merged advances on the default branch: step done + artifact status approved"
 yad gate ci --branch review/EP-e2e/epic --pr 7 --merged --no-push --dir "$HUB" || die "gate ci (merge) failed"
 jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").status === "done" && j.currentStep === "ready-for-build"'
-jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "Alice" && a.role === "owner" && a.status === "approved")'
+# The platform login, with no role: the roster seeded above is left on disk and never read (E62).
+jassert "$EPIC/.sdlc/approvals.json" 'j.some(a => a.approver === "alice" && a.role === undefined && a.status === "approved")'
+# The closing record names the login the platform CLI reports for whoever ran the merge sync (E62).
+jassert "$EPIC/.sdlc/state.json" 'j.steps.find(s => s.id === "epic-review").closed.by === "octo-ci"'
 fa_status "$EPIC/epic.md" approved
 yad gate status EP-e2e --dir "$HUB" >/dev/null || die "gate status failed"
 

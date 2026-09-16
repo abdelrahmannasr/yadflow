@@ -1,6 +1,6 @@
 ---
 name: yad-architecture
-description: 'Shape step 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (which escalates on the contract risk tag). Use when the user says "author the architecture" or after the epic gate passes.'
+description: 'Shape step 3 of the gated SDLC. With the architect, author architecture.md and the locked contract.md (the shared cross-repo surface), then hash-lock the contract surface into .sdlc/contract-lock.json. Reads epic.md as input. Never auto-advances — hands off to the team review gate (the contract risk tag raises its advisory approver count). Use when the user says "author the architecture" or after the epic gate passes.'
 ---
 
 # SDLC — Author Architecture + Contract (Shape step 3)
@@ -8,8 +8,8 @@ description: 'Shape step 3 of the gated SDLC. With the architect, author archite
 **Goal:** Produce a human-authored, AI-assisted `architecture.md` and the **locked** `contract.md`
 for an approved epic, then record a hash-lock of the contract surface so a later contract-check can
 detect drift. This is a **Shape step**: human-authored with AI assist, **never auto-advances**.
-When both artifacts are drafted, control passes to `yad-review-gate`, which **escalates** this review
-by default (the architecture step carries `risk_tags: ["contract"]`).
+When both artifacts are drafted, control passes to `yad-review-gate`. The architecture step carries
+`risk_tags: ["contract"]` by default, which raises the review's (advisory) approver count.
 
 This skill enforces the build plan's core rules: all state lives in files; the contract holds only the
 shared cross-repo surface at charter altitude; Shape steps stay locked to `advance: human`.
@@ -182,7 +182,7 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
@@ -195,20 +195,20 @@ is pushed around the gate. Commit the artifact set — **`architecture.md`, `con
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
-refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
-and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+**With a platform** the `review/EP-<slug>/architecture` branch must already be **on origin** — the command
+refuses and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(or run `yad open-pr` from that branch: it pushes the branch, then delegates).
 
 Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
 through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
-and that the next action is **review** via `yad-review-gate`. Note that this review **escalates**
-(risk tag `contract`): it needs owner + 1 reviewer **plus a domain owner for each touched repo**. The
-engine also reports an approver count for the step — 3 distinct people (base 1 + contract risk 2) — which
-is advisory today: it is printed wherever the gate reports itself, written to no file, and a shortfall
-never holds the gate.
+and that the next action is **review** via `yad-review-gate`. The gate needs 1 distinct approver (the base), who
+should not be the author. Because of the risk tag `contract`, the engine also reports a full approver count
+for the step — 3 distinct people (base 1 + contract risk 2) — which is advisory until the capacity cap
+(E72): it is printed wherever the gate reports itself, written to no file, and a shortfall never holds
+the gate. The review PR requests no reviewers; the team asks them on the PR itself.
 **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate
 opens a review PR on the Product (via `yad-hub-bridge`, labelled per touched repo) and
 `yad-review-gate action: sync` pulls platform approvals/comments into the ledger; a contract re-lock
