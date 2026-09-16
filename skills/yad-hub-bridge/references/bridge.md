@@ -29,7 +29,7 @@ gh api repos/{owner}/{repo}/pulls/{n}/comments        # inline review comments
 ```
 glab mr view <n>
 glab api projects/:id/merge_requests/:iid/approvals     # approved_by[].user.username
-glab api projects/:id/merge_requests/:iid/notes          # discussion notes (comments)
+glab api projects/:id/merge_requests/:iid/discussions    # discussions + their notes (comments, resolvable threads)
 ```
 
 All commands run as the **local user**; the verified ledger stores no tokens. If the CLI is missing/unauthenticated
@@ -61,9 +61,10 @@ glab mr create --title "review: <artifact> (<epic>)" --description <body> \
   --target-branch <default> --source-branch <branch> --assignee <login> --label domain:<repo> --yes
 ```
 
-The assignee is the login `gh api user` / `glab api user` reports; on GitHub, with no login, it is
-`@me`. The `domain:<repo>` labels are the touched domains — for `stories-review` the union of every
-story's `repos`, for a step with a risk tag the epic's `repos`. They are a hint for whom to ask and add no
+The assignee is `@me` on GitHub (`gh` resolves it on the repo's host) and the login `glab api user`
+reports on GitLab (none when that lookup fails). The `domain:<repo>` labels are the touched domains —
+for `stories-review` the union of every story's `repos`, for a step tagged `contract`, `auth` or
+`payments` the epic's `repos`, and none otherwise. They are a hint for whom to ask and add no
 approvals.
 
 ## Who a record names
@@ -80,16 +81,18 @@ repository access decides who may approve. A review with no login is not counted
   append a duplicate. An older record that still carries `role`/`domain` (and may name the person by
   their old roster name) is recognised as `login-roster.md` → "Older records" describes (the roster's
   name → login pairs first; never by list order), and replaced by one login-named record that keeps its
-  `artifactHash` and dates.
+  `artifactHash` and dates — unless the platform shows a newer review (a later submission time, or a
+  different PR/MR), which, as for any approval, binds to the current content.
 - **On an OPEN step**, remove any bridge approval whose platform review was dismissed/revoked: the
   platform is the live source of truth while the review is in flight.
 - **On a step already `done`**, the record is only added to or refreshed in place — an approval the
   platform no longer reports is **kept**. Those approvals are the audit record of *why* the gate
   passed; an approval reset, or a degraded-but-successful read would otherwise erase
   them and leave the step `done` with zero approvals.
-- Key synced comments on the platform comment id so the same comment is not appended twice. Comment
-  rounds are recorded for an **open** step only, so re-visiting a merged review does not append a new
-  round per pass.
+- Record synced comments as one `comments.json` record per `(step, commenter, round)` with a `count`
+  (there is no per-comment id). A new round is opened only when the commenters or their counts change;
+  an unchanged re-read rewrites the latest round in place, keeping its date. Comment rounds are recorded
+  for an **open** step only, so re-visiting a merged review does not append a new round per pass.
 - Update the step's `hub-prs.json` `lastSyncedAt` when the sync **learned something** — every sync on
   an open step, and on a closed one only when the approval record actually changed (a re-opened review
   that was re-approved). An identical re-sync leaves it alone, so the ledger does not churn.
@@ -103,7 +106,7 @@ repository access decides who may approve. A review with no login is not counted
   every hop commits and pushes, and the pass ends where it began — an unbounded commit loop with zero
   semantic change. That is issue #163: ~1,800 bot commits/day on the Product that reported it. Sorting is
   what makes the "nothing staged → nothing to commit" guard in `gate ci` actually hold.
-- Running `sync` twice with no platform change is a no-op on the ledger — byte-identical, including
+- Running `sync` twice on the same day with no platform change is a no-op on the ledger — byte-identical, including
   `comments.json` and the dated `reviews/*.md` side files.
 
 **Upgrading past #163.** The first sweep on a yadflow carrying the fix writes one canonicalizing
@@ -116,10 +119,11 @@ deliberate act: `yad update` (which re-stamps `.sdlc/cli-version.json`), or a `g
 
 ## Contract re-lock invalidates prior platform approvals too
 
-For the **architecture+contract** review, the gate already drops approvals when the contract-surface hash
-no longer matches `.sdlc/contract-lock.json`. The verified ledger extends this to platform-sourced approvals:
-`sync` discards bridge `approved` records for the architecture step dated **before** the new lock, and
-posts a comment on the review PR noting "contract re-locked — re-approval required". The count
+For the **architecture+contract** review, an approval's `artifactHash` is the contract-surface hash.
+When the surface changes and is re-locked, a bridge approval recorded against the old hash no longer
+matches, so the gate stops counting it (it shows as stale in `yad gate status`) — exactly as for a
+manual approval. Nothing is deleted by date and no comment is posted on the PR; the reviewer approves
+again, and a genuinely newer review (a later submission time, or a new PR/MR) binds to the new hash. The count
 (`risk_tags: ["contract"]` → 3 approvers, base 1 enforced, risk step advisory) is unchanged.
 
 ## CHANGES_REQUESTED & unresolved threads hold the gate
@@ -131,7 +135,7 @@ comments, replies, the reviewer **resolves** their thread, then `sync` runs agai
 
 ## Merge advances; an artifact change revokes approvals
 
-- **Merge → advance.** When the base count is met (1 distinct approver), every thread is resolved, **and the review
+- **Merge → advance.** When the base count is met (1 distinct approver; solo mode waives it), every thread is resolved, **and the review
   PR/MR is merged**, `sync` marks the step `done` and unblocks the next step. The merge is the human
   approval act — there is no separate machine advance. (`yad gate sync` performs this deterministically.)
 - **Revoke on artifact change (checked at merge).** Path B reconciles at merge, so an approval given
@@ -232,15 +236,15 @@ commit — the advance plus the `draft → approved` status flip — lands on th
 `[skip ci]`.
 
 **The ledger is CI-owned (verified mode only).** Humans never commit gate-state files: the `ledger-guard`
-check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,hub-prs}
+check (yad-checks) FAILs any commit on a review PR that touches `.sdlc/{state,approvals,comments,product-prs,hub-prs}
 .json` or `reviews/*.md` (`.sdlc/contract-lock.json` is artifact-side and allowed). "verified mode" there
 means the same thing it means everywhere else — a `platform` **and** the verified ledger flag, `isVerifiedLedger`'s
 predicate. The gate used to enable itself on the flag alone, which let a platform-less Product reject the
 human's ledger write while the CLI still expected one (#186). Under Path B **no
 CI commit lands in a review PR at all**, so the only ledger change the guard can see there is a human
 edit — which it rejects, with one carve-out for a new epic's seed (below). (The `verified-commits`
-gate still vets every commit's platform-Verified signature — there is no author allowlist;
-its gate-bot exemption is now vestigial in-PR because CI no longer commits there.) `yad gate open`
+gate still vets every commit's platform-Verified signature — there is no author allowlist, and so no
+gate-bot exemption either.) `yad gate open`
 opens the PR only; local `yad gate sync` is advisory in verified mode (writes nothing). After a merge,
 everyone `git checkout <default> && git pull`. (with a local ledger, humans own the ledger locally and
 these guards are no-ops.)

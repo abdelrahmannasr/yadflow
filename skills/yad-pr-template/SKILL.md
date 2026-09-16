@@ -7,7 +7,7 @@ description: 'Build Step D of the gated SDLC. Detect a code repo''s platform and
 
 **Goal:** Commit the platform-correct PR/MR template into a code repo so every PR/MR carries an
 **Impact & Risk** block and a checklist tied to the check gates. A **high** risk level (or a touched
-contract/auth/payments surface) **raises the approver count** — the same count `yad-review-gate` prints on
+contract surface) **raises the approver count** — the same count `yad-review-gate` prints on
 the Shape gates: base 1 (someone other than the author, enforced) plus a risk step (`high` +1, contract
 +2, advisory until the capacity cap). This step **never auto-advances**; it sets up the template and the
 routing helper.
@@ -26,7 +26,8 @@ routing helper.
     `templates/hub/github/pull_request_template.md` → `{project-root}/.github/pull_request_template.md`;
     `templates/hub/gitlab/merge_request_templates/Default.md` →
     `{project-root}/.gitlab/merge_request_templates/Default.md`. The Product body carries no `Task:` trailer
-    (Product PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s `hub-route.sh`.
+    (Product PRs change artifacts, not code); its routing helper is `yad-hub-bridge`'s
+    `templates/checks/hub-route.sh`, run from the skill (nothing installs it into the Product's `checks/`).
 - **GitLab reads a truncated description.** The `pr-template` gate is fed
   `$CI_MERGE_REQUEST_DESCRIPTION`, which GitLab cuts at **2700 characters** — a required section below
   that cutoff is invisible to the gate even though the MR shows it, and the failure reads "does not use
@@ -34,7 +35,8 @@ routing helper.
   `## Impact & Risk` / `## Checklist` (hub: `## Artifact under review` / `## Impact & Risk (front-half)`
   / `## Checklist`) early, so a truncated body still passes. Long narrative goes **after** them.
   Sections may be reordered freely; deleting one fails the gate. GitHub is unaffected.
-- **Installed templates are yad-managed.** `yad update` rewrites them on upgrade. An edit yad can
+- **Installed code-repo templates are yad-managed.** `yad update` rewrites them on upgrade (the Product
+  variants under `templates/hub/` are copied by hand in Step 2 and are not managed). An edit yad can
   prove — the file's sha differs from the one it recorded when it wrote the template — is reported as
   `modified` and left alone; a copy it has no record of is replaced after a `.yad-orig` backup (see
   `docs/CLI.md` → *Managed files*). Either way, put knowledge that must survive an upgrade in an ADR
@@ -69,7 +71,8 @@ Copy from this skill's `templates/`:
 - GitLab → `templates/gitlab/merge_request_templates/Default.md` to
   `<repo>/.gitlab/merge_request_templates/Default.md`.
 - **`repo: hub`** → use the `templates/hub/<platform>/…` variants, installed into `{project-root}`'s own
-  `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) is installed by `yad-hub-bridge`.
+  `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) stays in `yad-hub-bridge`'s
+  `templates/checks/`; neither this skill nor `yad setup` / `yad check --fix` installs it.
 Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also
 install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`). If the target already has a
 non-SDLC PR/MR template, do not clobber it — back it up / ask. Commit the template on the repo's default
@@ -89,9 +92,10 @@ domains as a hint for whom to ask. The actual approvals are recorded by the engi
 via `yad-review-gate`.
 
 When the PR/MR is actually opened with `yad open-pr`, **no reviewers are requested** — it prints `no
-reviewers were requested — ask them on the PR itself`. The **assignee** is the login `gh`/`glab`
-reports as logged in (`gh` self-assigns `@me` when that is unknown). yadflow keeps no list of people; a
-later roadmap row (E68) will suggest reviewers from history, and CODEOWNERS is a hint only.
+reviewers were requested — ask them on the PR itself`. The **assignee** is the person opening it: `@me`
+on GitHub (resolved by `gh`), and on GitLab the login `glab` reports (no assignee is passed when that
+lookup fails). yadflow keeps no list of people; a later roadmap row (E68) will suggest reviewers from
+history, and CODEOWNERS is a hint only.
 
 ### Step 4 — Stop (no auto-advance)
 Report what was committed (or the routing result). The template and routing are advisory inputs to the

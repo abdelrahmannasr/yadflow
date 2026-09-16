@@ -6,7 +6,7 @@ in files on disk. Nothing hidden."). No database, no browser storage.
 ## Every file states its shape — `schemaVersion`
 
 Each JSON **object** the CLI writes under a `.sdlc/` directory carries a `"schemaVersion"` as its
-first key, holding the shape this release writes — **6** today. It says what shape the file is in, so
+first key, holding the shape this release writes — **10** today. It says what shape the file is in, so
 a future release can recognise an older file and upgrade it instead of guessing.
 
 **When you author one of these files by hand, include the key**, exactly as the examples below show.
@@ -28,8 +28,8 @@ Three rules go with it, and they are permanent (`docs/roadmap-idea-1.md`, Part 2
 1. **A file with no version counts as version 1.** Nothing has to be rewritten to be readable. Files
    written before the stamp existed are read as shape 1, and get the key the next time the engine
    writes them.
-2. **The four list files never carry it.** `approvals.json`, `comments.json`, `hub-prs.json` and
-   `reconcile-debt.json` are JSON arrays at the top level, and an array cannot hold a key. Rule 1
+2. **The list files never carry it.** `approvals.json`, `comments.json`, `hub-prs.json` (also written
+   as `product-prs.json`) and `reconcile-debt.json` are JSON arrays at the top level, and an array cannot hold a key. Rule 1
    covers them: no version means version 1.
 3. **`schemaVersion` is not the CLI version.** `.sdlc/cli-version.json` records which release of the
    `yad` CLI set the project up, and changes on every release. `schemaVersion` describes the file's
@@ -46,13 +46,24 @@ The per-epic state machine.
 | `type` | The work-item type — `feature` \| `change` \| `defect` \| `hotfix` \| `chore` — copied from `epic.md`. Shape 5 on. **Not the same field as `steps[].type`**, which is `author` \| `review+approve`, and not the same as the top-level `kind` a stub or the discovery front-zero carries. |
 | `profile` | The lifecycle route this chain came from — `classic` \| `analysis-first` \| `chore` \| `spike` \| `discovery` \| `foundation`. Shape 6 on (`foundation` from shape 8). See "Lifecycle profiles" below. |
 | `currentStep` | `id` of the step the workflow is waiting on right now. |
-| `steps[]` | Ordered list of every Shape step step. |
+| `steps[]` | Ordered list of every Shape step. |
 
 Each `steps[]` entry:
 
 | Field | Values | Meaning |
 |-------|--------|---------|
 | `id` | `analysis`, `analysis-review`, `epic`, `epic-review`, `architecture`, `architecture-review`, `ui-design`, `ui-design-review`, `stories`, `stories-review`, `test-cases`, `test-cases-review` | Step identity. |
+| `type` | `author` \| `review+approve` | Authoring step or a team review gate. |
+| `artifact` | filename or folder | The file/folder this step produces or gates. |
+| `assistance` | `none` \| `review` \| `heavy` | Dial 1 (driver) — who does the work. **The name the engine reads.** |
+| `driver` | `human` \| `pair` \| `agent` | Dial 1, shape-4 name, written beside `assistance`: `human`=`none`, `pair`=`review`, `agent`=`heavy`. |
+| `automation` | `human_approve` \| `machine_advance` | Dial 2 (advance) — who moves it forward. **The name the engine reads.** |
+| `advance` | `human` \| `auto` | Dial 2, shape-4 name, written beside `automation`: `human`=`human_approve`, `auto`=`machine_advance`. A review step is NEVER `auto`. |
+| `locked` | `true` \| `false` | Seeded `true` on every Shape step. Since E34 it decides nothing about the dial on a step the catalogue knows: an author step may be set to `auto` (for the whole project, in `.sdlc/automation.json`), and a review gate is `human` because it is a gate. It is still read as a gate on a step id the catalogue does not know. |
+| `status` | one of the **step states** below | Where the step stands. |
+| `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
+| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
+| `risk_tags` | subset of `contract`, `auth`, `payments` | Sets the step's full approver count (build plan §4): `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). Only the base is enforced until the capacity cap (E72); the risk step is advisory and reported as a shortfall. A team gate reports `rule: "count"`. A step with one of these tags has its review PR name and label the epic's `repos`. |
 
 ### The step catalogue
 
@@ -113,9 +124,9 @@ marked N/A that this epic's route does not mark optional. An id the catalogue do
 
 ### Lifecycle profiles
 
-A **profile** is a named, ordered chain of catalogue steps — the route an epic takes. Five are
-defined, in `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`, E5). The first three are routes the skills
-already seeded by hand; the two short lanes (E40) are new:
+A **profile** is a named, ordered chain of catalogue steps — the route an epic takes. Six are
+defined, in `LIFECYCLE_PROFILES` (`cli/epic-state.mjs`, E5). `classic`, `analysis-first` and `discovery`
+are routes the skills already seeded by hand; the two short lanes (E40) and `foundation` (E75) came later:
 
 | Profile | Steps | Seeded by |
 |---|---|---|
@@ -143,11 +154,11 @@ decides it from the step id, and a second copy of that rule sitting unread in th
 free to drift.
 
 **Each epic records its route in `state.json` as `profile`** (shape 6). The value is one of `classic`,
-`analysis-first`, `chore`, `spike` and `discovery`. `yad epic new` writes it when it seeds the chain,
+`analysis-first`, `chore`, `spike`, `discovery` and `foundation`. `yad epic new` writes it when it seeds the chain,
 the seeding skills write it in their templates, and `yad migrate` fills it in for an epic that predates
 the field by reading the chain that epic already carries.
 
-**`yad migrate` only ever writes one of the first three.** It answers a question about the past, and
+**`yad migrate` only ever writes `classic`, `analysis-first` or `discovery`.** It answers a question about the past, and
 the matching rule picks the SHORTEST route a chain fits — so a chain built only from `epic`,
 `epic-review`, `stories` and `stories-review` reads as `chore` now and read as `classic` before. No
 chain yadflow has ever seeded is affected, because every shipped seed carries `architecture` and no
@@ -248,8 +259,8 @@ authoring step. Before E17b the seeds recorded the gate directly, because a skil
 had already written the artifact; a chain seeded that way is still perfectly valid and nothing rewrites
 it.
 
-`analysis-review`, `ui-design-review`, and `test-cases-review` carry no `risk_tags` (base rule:
-1 approver who is not the author, and a full approver count of 1).
+Every other review gate — `analysis-review`, `epic-review`, `ui-design-review`, `stories-review` and
+`test-cases-review` — carries no `risk_tags`: it needs 1 approval, and its full approver count is 1.
 
 ### The step states (shape 7)
 
@@ -295,7 +306,7 @@ step is *not* done, and `blocked` is read by whether it has one, so the two neve
 
 | Field | Meaning |
 |---|---|
-| `by` | Who **wrote** the record, as on every record: the local git identity, or CI's on a verified Product. Best-effort, may be `null`. |
+| `by` | Who **wrote** the record, as on every record: the platform login `gh`/`glab` reports, else git `user.name` (on CI, usually the bot's git name). Best-effort, may be `null`. |
 | `date` | When the step closed: the merge date for a merge, otherwise the day the command ran. |
 | `via` | How it closed — see the table below. |
 | `pr` | The review PR/MR number, when there is one. |
@@ -527,27 +538,16 @@ The shared procedure (run once the `EP-<slug>` is known):
 3. Author and commit the step's artifact(s) on that branch. The verified ledger's `review/…` branch is created
    separately at review time and is untouched by this step.
 
-**How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once, by hand, on the
-**entry** step's authoring branch (`analysis/…`, `epic/…`, `change/…`, `foundation/…`, or `discovery/…` for
-a product level still in its old spelling) — no CLI or CI
-path creates one (`yad gate ci` only *advances* an existing chain, at merge, on the default branch).
+**How the seed reaches the default branch.** The `.sdlc/` ledger is seeded once — by `yad epic new`
+(or `yad foundation new` for the Product level) — on the **entry** step's authoring branch (`analysis/…`,
+`epic/…`, `change/…`, `foundation/…`, or `discovery/…` for a product level still in its old spelling).
+No CI path creates one (`yad gate ci` only *advances* an existing chain, at merge, on the default branch).
 So for the **first** gate of an epic, cut `review/EP-<slug>/<artifact-base>` from that authoring
 branch: the review PR/MR then carries the seed alongside the artifact, and the ledger lands on the
 default branch when it merges. In verified mode `ledger-guard` exempts exactly this case — **creation,
 not mutation** (#162) — so no direct push to a protected default branch is needed. For every **later**
 gate the ledger is already on the default branch: cut the review branch from there, commit the
-artifact only, and leave `.sdlc/{state,approvals,comments,hub-prs}.json` and `reviews/*.md` to CI.
-| `type` | `author` \| `review+approve` | Authoring step or a team review gate. |
-| `artifact` | filename or folder | The file/folder this step produces or gates. |
-| `assistance` | `none` \| `review` \| `heavy` | Dial 1 (driver) — who does the work. **The name the engine reads.** |
-| `driver` | `human` \| `pair` \| `agent` | Dial 1, shape-4 name, written beside `assistance`: `human`=`none`, `pair`=`review`, `agent`=`heavy`. |
-| `automation` | `human_approve` \| `machine_advance` | Dial 2 (advance) — who moves it forward. **The name the engine reads.** |
-| `advance` | `human` \| `auto` | Dial 2, shape-4 name, written beside `automation`: `human`=`human_approve`, `auto`=`machine_advance`. A review step is NEVER `auto`. |
-| `locked` | `true` \| `false` | Seeded `true` on every Shape step. Since E34 it decides nothing about the dial on a step the catalogue knows: an author step may be set to `auto` (for the whole project, in `.sdlc/automation.json`), and a review gate is `human` because it is a gate. It is still read as a gate on a step id the catalogue does not know. |
-| `status` | one of the **step states** below | Where the step stands. |
-| `record` | `{ reason, by, date, link? }` | Present on a `skipped`, `deferred`, `satisfied` or `blocked` step: WHY it is in that state. |
-| `closed` | `{ by, date, via, pr?, commit?, hash?, mergedBy?, run?, waived? }` | Present on a `done` step that closed from this release on: HOW it closed (E18). See "Closing records" below. |
-| `risk_tags` | subset of `contract`, `auth`, `payments` | Sets the step's full approver count (build plan §4): `contract` +2, `auth`/`payments` +1 on top of a base of 1 (the highest tag, never the sum). Only the base is enforced until the capacity cap (E72); the risk step is advisory and reported as a shortfall. A team gate reports `rule: "count"`. A step with one of these tags has its review PR name and label the epic's `repos`. |
+artifact only, and leave `.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` and `reviews/*.md` to CI.
 
 ## `approvals.json`
 Append-only ledger (an array). Each entry:
@@ -556,7 +556,8 @@ Append-only ledger (an array). Each entry:
 { "artifact": "epic.md", "step": "epic-review", "approver": "<platform login>", "status": "approved", "date": "<YYYY-MM-DD>", "source": "<bridge, optional>" }
 ```
 
-`approver` is the platform login. The gate counts distinct approvers and checks no role. An older entry
+`approver` is the platform login (on a Product with no platform, the name the reviewer gave). The gate
+counts distinct approvers and checks no role. An entry with an empty `approver` counts as nobody. An older entry
 may still carry `role` and `domain` fields from the removed roster. They are left on disk, and the gate
 never reads them (the dated `approved.md` still prints them as recorded).
 
@@ -569,7 +570,7 @@ rather than *who approved*:
 | Field | Meaning |
 |-------|---------|
 | `artifactHash` | the content fingerprint the approval is bound to (`sha256:…`). The gate drops any approval whose hash ≠ the artifact's current one — this is revoke-on-change. For architecture it is the locked contract surface, for stories the whole `stories/` set. Every file is fingerprinted without its frontmatter `status:` line, which the gate and Build rewrite after review (shape 9); a hash an older release recorded over the whole file is still accepted. |
-| `approvedAt` | when the platform says the review was submitted. Used to tell a genuine re-approval from the same review read again; **absent on GitLab**, which exposes no per-approval timestamp. |
+| `approvedAt` | when the platform says the review was submitted. Used to tell a genuine re-approval from the same review read again. GitLab exposes no per-approval timestamp, so there it holds the day the sync first recorded the approval. |
 | `pr` | the PR/MR number the approval arrived on. The second proof of a genuine re-approval, and the only one available on GitLab: a re-opened review is always a new PR, so an approval on a different number cannot be the old one re-read. Records written before this field existed are stamped once, from the `hub-prs.json` pointer they were recorded against. |
 | `engagement` | `verified` when the approval carried the companion's engagement marker, else `none`. Advisory unless `hub.review.requireEngagement` is on. |
 
@@ -579,13 +580,13 @@ unchanged re-sync so that re-reading a review never churns the ledger.
 ## `comments.json`
 Append-only ledger (an array), the machine-readable counterpart to the `reviews/*--comments.md` markdown
 ("who reviewed/commented", as `approvals.json` is "who approved"). Written by `yad-review-gate`'s
-`comment` action; feeds the `approved.md` participation list, not the gate predicate. Each entry:
+`comment` action and by `yad gate sync`; feeds the `approved.md` participation list, not the gate predicate. Each entry:
 
 ```json
 { "artifact": "epic.md", "step": "epic-review", "commenter": "<platform login>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
 ```
 
-`commenter` is the platform login. An older entry may still carry `role` and `domain`; the gate never reads them.
+`commenter` is the platform login (on a Product with no platform, the name the reviewer gave). An older entry may still carry `role` and `domain`; the gate never reads them.
 
 ## `hub-prs.json`
 Present only when the Shape review runs through the platform bridge. Per review step, the review
@@ -594,6 +595,10 @@ PR/MR opened on the Product (sibling of `approvals.json`, so the locked `state.j
 ```json
 { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab", "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": "<YYYY-MM-DD or null>" }
 ```
+
+The same array is written under two names: `product-prs.json` (the name from shape 3) and `hub-prs.json`
+(the old name, kept for one major). `yad gate sync` may add `nudged`, the logins it has already asked to
+use the review companion, so it never asks them twice.
 
 ## `design-links.json`
 Present only when the `ui-design` step materialized the design in a connected design tool
@@ -629,9 +634,9 @@ and `<artifact-base>` is the artifact without extension (e.g. `epic`, `architect
 
 ## Dial defaults & locks
 - Every step defaults to `automation: human_approve` / `advance: human` (build plan §2).
-- The five authoring Shape steps and their reviews are `locked: true` — the engine refuses to set
-  them to `advance: auto` in this version (build plan §1, §8.7). Only back states (build pipeline,
-  steps 9–14) may move toward machine-advance in a later iteration.
+- Every Shape step is seeded `locked: true`. A review gate is never `advance: auto`. Since E34 a feature
+  Shape author step may be set to `auto` project-wide in `.sdlc/automation.json`, but that is recorded,
+  not acted on (see the kill switch section above). A Build step's dial lives on its lane in `build-state`.
 
 ---
 
@@ -646,7 +651,7 @@ whether to advance on its own. Two new files under `.sdlc/` do this.
 > **`yad checkpoint`** — the Build analogue of the Shape `yad gate ci` sync. It lands them as
 > one `chore(hub): sync Build state — <epic>/<story> by @<login>` audit-trail commit, on the
 > default branch, staging **only** these three ledgers by an explicit allowlist (never a Shape
-> gate file — `state/approvals/comments/hub-prs.json`, `reviews/*.md` — so `ledger-guard` never trips).
+> gate file — `state/approvals/comments/product-prs/hub-prs.json`, `reviews/*.md` — so `ledger-guard` never trips).
 > Teammates don't review these machine writes; the commit exists so CI, `yad status`, and other
 > machines always see current trust evidence.
 

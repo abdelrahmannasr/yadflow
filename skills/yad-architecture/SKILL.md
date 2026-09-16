@@ -182,7 +182,7 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
@@ -195,17 +195,17 @@ is pushed around the gate. Commit the artifact set — **`architecture.md`, `con
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
-refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
-and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+**With a platform** the `review/EP-<slug>/architecture` branch must already be **on origin** — the command
+refuses and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(or run `yad open-pr` from that branch: it pushes the branch, then delegates).
 
 Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
 through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the paths to `architecture.md`, `contract.md`, and `contract-lock.json`; the contract hash;
-and that the next action is **review** via `yad-review-gate`. The gate passes with 1 approver who is not
-the author (the base). Because of the risk tag `contract`, the engine also reports a full approver count
+and that the next action is **review** via `yad-review-gate`. The gate needs 1 distinct approver (the base), who
+should not be the author. Because of the risk tag `contract`, the engine also reports a full approver count
 for the step — 3 distinct people (base 1 + contract risk 2) — which is advisory until the capacity cap
 (E72): it is printed wherever the gate reports itself, written to no file, and a shortfall never holds
 the gate. The review PR requests no reviewers; the team asks them on the PR itself.

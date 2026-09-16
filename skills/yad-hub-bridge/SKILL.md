@@ -47,9 +47,10 @@ Read `.sdlc/hub.json` for the platform, `epics/<epic>/epic.md` for `repos` + `ow
 author), and the matching `review+approve` step's `risk_tags` from `.sdlc/state.json`. Compute the
 **count** with `route` (below) — the same rule `yad-review-gate` enforces: `needed = base 1 + risk step`
 distinct approvers, where `contract` adds 2 and `auth`/`payments` add 1 (the highest tag, never the sum).
-Only the base (1 approver who is not the author) holds the gate; the risk step is advisory until the
+Only the base (1 distinct approver, who should not be the author) holds the gate; the risk step is advisory until the
 capacity cap (E72). Compute the **touched domains** too: the union of story `repos` for
-`stories-review`, the epic's `repos` for a step with a risk tag. They become `domain:<repo>` labels and
+`stories-review`, the epic's `repos` for a step tagged `contract`, `auth` or `payments`, none otherwise.
+They become `domain:<repo>` labels and
 are a hint for whom to ask. There is no roster to turn them into people.
 
 ### Step 2 — `open` (create the review PR/MR)
@@ -61,8 +62,9 @@ are a hint for whom to ask. There is no roster to turn them into people.
    exempts it (see step 4).
 2. Open the PR/MR with `gh`/`glab` using the Product body template (`yad-pr-template` `templates/hub/…`),
    filled with the epic, artifact, gate step, owner, `epic.repos`, and the step's risk tags.
-3. **Request no reviewers.** Assign the login `gh`/`glab` reports as logged in (`gh` falls back to
-   `@me`), and add a `domain:<repo>` label per touched repo. `yad gate open` prints
+3. **Request no reviewers.** Assign the person opening it — `@me` on GitHub (`gh` resolves it), the
+   login `glab api user` reports on GitLab (no assignee when that lookup fails) — and add a
+   `domain:<repo>` label per touched repo. `yad gate open` prints
    `no reviewers were requested — ask them on the PR itself`; the author asks people on the PR. (E68 will later suggest
    reviewers from history.)
 4. **Do not write the ledger.** CI is the sole writer and writes only at merge. During review nothing
@@ -73,7 +75,7 @@ are a hint for whom to ask. There is no roster to turn them into people.
    { "step": "<review step id>", "artifact": "<artifact>", "platform": "github|gitlab",
      "number": <n>, "url": "<pr/mr url>", "branch": "review/EP-<slug>/<artifact-base>", "lastSyncedAt": null }
    ```
-   A human commit touching the gate-state files (`.sdlc/{state,approvals,comments,hub-prs}.json` or
+   A human commit touching the gate-state files (`.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
    `reviews/*.md`; `.sdlc/contract-lock.json` is artifact-side and allowed) on a review PR is rejected
    by the `ledger-guard` check. (The `yad gate open` CLI behaves the same: in verified mode it opens the
    PR only and writes no ledger.) The **one** exception is a brand-new epic's **seed** — no CI path can
@@ -86,7 +88,8 @@ are a hint for whom to ask. There is no roster to turn them into people.
 Compute and print the count as above. Use `templates/checks/hub-route.sh <body>` to parse a PR/MR
 body's Impact & Risk block when given one; it prints e.g. `ROUTE: 3 approvers = base 1 + contract risk 2
 (risk tag: contract)`, says only the base holds the gate, and lists the touched repos as a hint for whom
-to ask (`ROUTE: 1 approver = base 1 (no risk step).` with no risk tag). Otherwise derive from
+to ask. With no `contract`/`auth`/`payments` tag it prints `ROUTE: 1 approver = base 1 (no risk step).`
+and no repo list. Otherwise derive from
 `epic.repos` + the step's `risk_tags`. Stories do not route per repo. Advisory only — it routes the
 human review, it does not approve.
 
@@ -154,7 +157,8 @@ default branch. (local mode keeps `yad gate sync` as the local writer.)
   is the source of truth** and the gate predicate (in `yad-review-gate`) is unchanged.
 - **the verified ledger never approves on a reviewer's behalf.** Reviewers approve/merge with their own auth. The
   step advances when a human **merges** the approved, fully-resolved review PR (the merge is that human
-  act) — `yad gate sync` records the approvals + resolution + merged state and advances; unresolved
+  act) — `yad gate ci` at merge (or `yad gate sync` with a local ledger) records the approvals +
+  resolution + merged state and advances; unresolved
   comments or a changed artifact hold it `in_review`. The mechanical sync is the `yad gate` CLI.
 - **CI never approves and never merges.** The wired workflow only runs `gate ci` — the same sync +
   unchanged predicate. It does **nothing pre-merge** (the platform PR/MR holds the review state); at

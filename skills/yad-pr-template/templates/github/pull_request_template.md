@@ -12,10 +12,10 @@
 <!-- Fill every field. risk-route.sh + the engineer review read this block. -->
 - **Domains / repos touched:** <backend | mobile | …>
 - **Contract surface touched:** no <!-- yes => needs Contract-Change + a re-locked contract (contract-check) -->
-- **Risk level:** low <!-- low | medium | high — high (or a contract/auth/payments surface) raises the advisory approver count -->
+- **Risk level:** low <!-- low | medium | high — high (or a touched contract surface) raises the advisory approver count -->
 - **Rollback plan:** <how to revert if this misbehaves>
 
-> **Routing:** the merge needs **1 approval from someone other than the author**. `high` risk adds 1
+> **Routing:** the merge needs **1 approval, which should not be the author’s own**. `high` risk adds 1
 > and a touched contract surface adds 2 to the count (the larger, never the sum); that step is advisory
 > until the capacity cap. Run `bash checks/risk-route.sh <this-description>` to print the count.
 

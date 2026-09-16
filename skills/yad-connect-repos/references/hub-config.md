@@ -15,7 +15,7 @@ no roles, no commit emails (E62). It is a single object for the Product itself �
 
 ```json
 {
-  "schemaVersion": 2,                                         // the file's shape. Absent means 1 (rule 1). `yad migrate` moves it; see docs/migrations/shape-2.md
+  "schemaVersion": 10,                                        // the file's shape. Absent means 1 (rule 1). `yad migrate` moves it; see docs/migrations/shape-2.md
   "platform": "github",                                       // github | gitlab (from the Product's own remote host); null when local-only
   "git_url": "https://github.com/abdelrahmannasr/yadflow.git", // REQUIRED when platform is non-null (scopes auth + opens PRs); yad doctor warns YAD-CFG-005 if absent
   "default_branch": "main",
@@ -48,8 +48,10 @@ who is logged in and who has access.
   (E68) will suggest reviewers from history; CODEOWNERS is a hint only.
 
 **Legacy data an older release wrote.** A `roster` array (with `login`/`name`/`email`/`roles`, or the
-older `role`) and a `verified_authors` list may still sit in this file. Nothing writes them, and nothing
-deletes them. `verified_authors` is never read. The roster is read for one thing only: its `name` →
+older `role`) and a `verified_authors` list may still sit in this file. Nothing adds them, and nothing
+deletes them (`yad migrate`'s shape-3 step still adds a `product` role key beside `hub` in an old roster, so
+an older project upgrades the same way it always did). `verified_authors` decides nothing — only `yad doctor`
+reads it, to warn. The roster is read for one thing only: its `name` →
 `login` pairs let the first sync after the upgrade recognise who an older approval names
 (`../../yad-hub-bridge/references/login-roster.md` → "Older records"). `yad doctor` warns
 `people:roster-unused` and `people:verified-authors-unused` so nobody edits them believing they decide
@@ -99,7 +101,8 @@ read the artifact. Applies to both the Shape gate and the Build engineer review.
 
 ## Git tracking
 
-Commit `hub.json` — it is small, reviewable, and carries no secrets (at most a login in `mode_set.by`, never tokens).
+Commit `hub.json` — it is small, reviewable, and carries no secrets or tokens. The only people data in it is the login or git name in `mode_set.by`, plus
+whatever an older `roster` still lists.
 This mirrors how `repos.json` and the per-epic `.sdlc/` state are committed.
 
 ## Greenfield

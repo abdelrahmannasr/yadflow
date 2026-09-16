@@ -19,8 +19,9 @@ the Product.
 - **Title** — defaults to the last commit subject (one atomic task = one branch = one PR/MR), so it
   follows the same Conventional-Commits style and passes the `pr-title` gate. Override with `--title`.
 - **Body** — the committed template (`.github/pull_request_template.md` /
-  `.gitlab/merge_request_templates/Default.md`) with `Task:`, `Risk level:`, `Contract surface
-  touched:`, and `Domains` prefilled; the rest is left for the author. This satisfies the `pr-template`
+  `.gitlab/merge_request_templates/Default.md`) with the Summary (from the commit), the story/task id and
+  its `specs/` path, `Risk level:`, `Contract surface touched:`, and `Domains` (the repo name when
+  `--repo` is passed) prefilled; the rest is left for the author. This satisfies the `pr-template`
   gate.
 - **Stage-aware on the Product** — `open-pr` mirrors the `--head` split the Product gates apply:
   - a **`review/EP-*/<artifact>`** branch is a Shape artifact-review PR → it **delegates to
@@ -41,8 +42,9 @@ the Product.
   auto-review eligibility from the base at PR-**open** time, and retargeting afterwards does not undo
   the skip. Hardcoding `main` here is the same bug the check gates already refuse to make (see
   `../yad-checks/references/check-gates.md`).
-- **Assignee** — the login `gh`/`glab` reports as logged in (`gh` self-assigns `@me` when that is
-  unknown). **No reviewers are requested** (E62): yadflow keeps no list of people. The CLI prints `no
+- **Assignee** — the person opening it: `@me` on GitHub (`gh` resolves it on the repo's own host), and
+  on GitLab the login `glab` reports (no assignee is passed when that lookup fails). **No reviewers are
+  requested** (E62): yadflow keeps no list of people. The CLI prints `no
   reviewers were requested — ask them on the PR itself`. A later roadmap row (E68) will suggest reviewers
   from history; CODEOWNERS is a hint only.
 - **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk

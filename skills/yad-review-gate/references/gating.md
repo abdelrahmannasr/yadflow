@@ -50,7 +50,7 @@ advisory" part appears only when the step has a risk step:
 - `yad gate status`: `; count: <sum>` with the same suffix, after the distinct-people count.
 - the generated review-PR body: `- **Approvals needed:** 1 (enforced) · full count 3 approvers = base 1 + contract risk 2 (the risk step is advisory until the capacity cap)`
 
-`yad gate review --json` carries the rule as an object under `step.gateRule` instead of a sentence.
+`yad gate review` prints JSON, and it carries the rule as an object under `step.gateRule` instead of a sentence.
 
 Solo mode waives approvals entirely, exactly as before, and reports no shortfall. The merge and the
 resolved threads still advance the step, and the review step's closing record carries `waived: "solo"`
@@ -61,7 +61,7 @@ resolved threads still advance the step, and the review step's closing record ca
 bare UI click. By **default (soft)** both count: a bare approve still passes the gate but is recorded
 `none` and draws a friendly public @-mention nudge, so review *quality* is visible without blocking
 anyone. When `hub.review.requireEngagement: true`, only `verified` approvals are counted toward the
-approvers above; when that leaves the gate short, it adds a line naming the approvals that did not count (a determined faker
+approvers above; when that leaves the gate short, it adds a line saying how many approvals did not count (a determined faker
 can still run an empty session — the signal is **gameable by design**; it raises the cost of a
 rubber-stamp and makes laziness visible, it does not prove a human read the artifact). Philosophy:
 *visible, not impossible.*
@@ -83,6 +83,11 @@ An approval round is invalidated if the authored artifact was edited after the n
 record's date/round. When that happens, drop back to `comment` — reviewers must re-approve the new
 content. This prevents "approve, then quietly change it" (build plan §5 spirit).
 
+The engine checks this by content, not by date. A bridge approval records `artifactHash`, the
+fingerprint of what was approved. When the artifact's fingerprint no longer matches, the approval is
+counted as revoked: it stays on disk, it no longer counts, and the gate reports `N approval(s) revoked —
+artifact changed; re-approve`. An approval recorded with no `artifactHash` is never treated as stale.
+
 For the architecture+contract review there is a second, content-based staleness check: recompute the
 SHA-256 of the contract-surface block and compare it to `.sdlc/contract-lock.json`. A mismatch means
 the locked surface changed even if the file's mtime looks fine — approvals are stale, re-lock and
@@ -92,8 +97,7 @@ drifted from its lock — run it rather than recomputing by hand.
 
 ## Worked example — epic gate
 
-1. `action: open` → `reviews/epic--2026-06-04--comments.md` seeded; step `epic-review` set
-   `in_review`; `currentStep = epic-review`.
+1. `action: open` → step `epic-review` set `in_review`; `currentStep = epic-review`.
 2. Reviewer *bob* leaves comments → captured in the comments file; the author *alice* (pm-assisted)
    edits `epic.md`.
 3. Predicate before any approval: `|approvers|=0` → **fails**. Gate reports "missing: 1 approval(s)".
@@ -124,26 +128,27 @@ not "resolve to pass" — it ignores them). A reviewer's *genuine* concern is po
 marker and blocks normally, exactly as a `CHANGES_REQUESTED` or any unresolved human thread does.
 
 ## Platform-backed input (the verified ledger)
-When the Product has a platform (`.sdlc/hub.json`) and the ledger is verified, reviewers can approve/comment
-on a real PR/MR instead of (or as well as) the skill recording it directly. `action: sync`
-(`yad-hub-bridge`) reads that platform state with the reviewer's own `gh`/`glab` and writes the **same**
+When the Product has a platform (`.sdlc/hub.json`), reviewers can approve/comment
+on a real PR/MR instead of (or as well as) the skill recording it directly. The sync reads that platform
+state with the local user's own `gh`/`glab` and writes the **same**
 `approvals.json` / `comments.json` / `reviews/*.md` records the manual path writes — bridge approvals
-tagged `"source": "bridge"`. **The predicate above is unchanged**: it counts distinct approvers
-regardless of how they were recorded.
+tagged `"source": "bridge"`. With a local ledger `yad gate sync` writes them; with a verified ledger
+`yad gate ci` writes them at merge, and a local `yad gate sync` only prints. **The predicate above is
+unchanged**: it counts distinct approvers regardless of how they were recorded.
 
 - The `approver` / `commenter` is the platform login that reviewed. There is no lookup and no role.
-- On PR/MR open the assignee is the login `gh`/`glab` reports as logged in (`gh` falls back to `@me`).
+- On PR/MR open the assignee is whoever opens it: `@me` on GitHub, and the login `glab` reports on GitLab.
   **No reviewers are requested** — the command prints `no reviewers were requested — ask them on the
   PR itself`. `domain:<repo>` labels for the touched domains are still applied. See
   `../yad-hub-bridge/references/login-roster.md`.
-- `sync` is idempotent (upsert by `(step, approver)`, one record per person; key comments on comment
-  id) and never touches **manual** approvals. An older bridge record that carries `role`/`domain` is
+- `sync` is idempotent (upsert by `(step, approver)`, one record per person; comment records by
+  `(step, commenter, round)`, an unchanged round rewritten in place) and never touches **manual** approvals. An older bridge record that carries `role`/`domain` is
   recognised as `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced
   by one login-named record that keeps its fingerprint. A revoked approval is superseded **while the step is open**; once
   the step is `done` its approvals are kept as the record of why it passed, and a re-sync only re-binds
   new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").
-- The architecture+contract staleness rule applies to bridge approvals too: a re-lock discards bridge
-  approvals dated before the new lock.
+- The architecture+contract staleness rule applies to bridge approvals too: a re-lock changes the
+  surface fingerprint, so bridge approvals of the old surface stop counting (they stay on disk as revoked).
 - No platform / no CLI → the gate runs local with no error. Detail: `../yad-hub-bridge/references/bridge.md`.
 
 ## Why this shape

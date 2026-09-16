@@ -40,8 +40,8 @@ As a <role>, I want <capability>, so that <outcome>.
 
 ## Review (the stories gate)
 
-The stories gate is an ordinary count gate. It passes with at least 1 distinct approver who is not the
-author, resolved threads, and a merged review PR. It is **not** routed per repo: no repo needs its own
+The stories gate is an ordinary count gate. It passes with at least 1 distinct approver (who should not
+be the author) and, with a platform, resolved threads and a merged review PR. It is **not** routed per repo: no repo needs its own
 sign-off, and no role is checked. The union of every story's `repos` still names the touched repos, and
 the review PR carries a `domain:<repo>` label for each. The review PR requests no reviewers; the team
 asks them on the PR itself.

@@ -72,7 +72,7 @@ The gated authoring chain + the reusable review gate (10 steps, or 12 with the o
 | `yad-epic` | → `epic-review` | `epic.md`, seeds `state.json` |
 | `yad-architecture` | → `architecture-review` (contract tag raises the count) | `architecture.md`, `contract.md`, `contract-lock.json` |
 | `yad-ui` | → `ui-design-review` | `ui-design.md`, `DESIGN.md`, `design-links.json` |
-| `yad-stories` | → `stories-review` (per-repo routing) | `stories/EP-<slug>-S0N.md` |
+| `yad-stories` | → `stories-review` (labelled with every touched repo) | `stories/EP-<slug>-S0N.md` |
 | `yad-test-cases` | → `test-cases-review` (parallel, non-blocking) | `test-cases.md`, `test-links.json` |
 | `yad-review-gate` | the shared gate | `reviews/*.md`, `approvals.json`, `comments.json` |
 | `yad-review-companion` | the fun/visible review layer (trailer/cards/chat + engagement) | `approvals.json` `engagement`, platform trailer/cards |

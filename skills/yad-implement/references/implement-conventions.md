@@ -89,8 +89,8 @@ The **locked contract surface** is the cross-repo agreement in `epics/<epic>/con
   change; no trailer.
 - **Changing the contract** (exceptional) — altering the agreed shape itself (new field crossing repos,
   changed status enum, new shared endpoint). This is **not** an implementation decision. Stop, go back
-  to the **architecture gate**, amend and re-lock `contract.md` (which sends that review round again, with the
-  count its contract `risk_tags` raise), and only then implement — recording `Contract-Change: yes` so the §C
+  to the **architecture gate**, amend and re-lock `contract.md` (which sends that review round again; its contract `risk_tags`
+  raise the full approver count, which is advisory until the capacity cap, E72), and only then implement — recording `Contract-Change: yes` so the §C
   contract-check finds the matching, already-updated contract.
 
 This keeps the contract singular and owned upstream: a code repo can never widen the shared surface

@@ -9,7 +9,7 @@ description: 'Shape step 5 of the gated SDLC. With the ux-designer, author ui-de
 architecture **and**, when a design tool is connected, the **actual feature design** — the mobile
 screens and/or web pages — inside that tool (e.g. Figma), linked back from the artifacts. This is a
 **Shape step**: human-authored with AI assist, **never auto-advances**. When the UI is drafted, control
-passes to `yad-review-gate` (base rule: 1 approver who is not the author).
+passes to `yad-review-gate` (base rule: 1 distinct approver, who should not be the author).
 
 UI work is shaped by **Impeccable**, invoked as **harness slash-commands** (not a subprocess CLI) per
 the Phase 0 deviation. If Impeccable is not installed, the `ux-designer` lens authors the same outputs
@@ -187,7 +187,7 @@ Keep the `## Design (<tool>)` section of `ui-design.md` in step with this file. 
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
@@ -202,9 +202,9 @@ finished stories, and opening its review leaves `currentStep` where it is — th
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
-refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
-and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+**With a platform** the `review/EP-<slug>/ui-design` branch must already be **on origin** — the command
+refuses and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(or run `yad open-pr` from that branch: it pushes the branch, then delegates).
 
 Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
 through the gate.
@@ -213,7 +213,7 @@ through the gate.
 Report: the paths to `ui-design.md` and `DESIGN.md`, whether Impeccable was used, the connected design
 tool and what it produced (e.g. "Figma — 4 screens generated", the file URL + `design-links.json` path,
 or "no design tool — markdown-only"), and that the next action is **review** via `yad-review-gate` (base
-rule: 1 approver who is not the author). **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review PR on the
+rule: 1 distinct approver, who should not be the author). **Never record approval here.** Shape steps do not auto-advance. When the Product has a platform, the gate opens a review PR on the
 Product (via `yad-hub-bridge`) and `yad-review-gate action: sync` pulls platform approvals/comments into
 the ledger; otherwise the review is recorded local.
 

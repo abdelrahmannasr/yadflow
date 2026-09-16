@@ -41,7 +41,7 @@ Print, in this order:
 1. **Header:** render the type noun from the `epic.md` frontmatter work-item type. Two names carry it,
    `kind:` and `type:`; read `kind:` first, then `type:`. **Change request** (`change`),
    **Defect** (`defect`), **Hotfix** (`hotfix`), **Chore** (`chore`), or **Epic** (`feature`, and the default when neither is
-   absent) — followed by `epicId`, then `status` from `epic.md` frontmatter, `currentStep`, and `repos`
+   present) — followed by `epicId`, then `status` from `epic.md` frontmatter, `currentStep`, and `repos`
    (the touched domains). Example: `Defect EP-checkout-queue-filter — draft @ stories`. A bug is a defect
    (type `defect`) — there is no separate noun. This is presentation only; the artifact is still an epic.
 2. **Steps table** — for every Shape step in `steps[]` order, however many there are: `id`, `type`,
@@ -50,8 +50,8 @@ Print, in this order:
    read `profile` from `state.json`: `classic` is 10 steps, `analysis-first` 12, and the short lanes
    `chore` 4 and `spike` 6 (E40). On `classic` the gating chain is `[analysis → analysis-review →]
    epic → epic-review → architecture → architecture-review → ui-design → ui-design-review → stories →
-   stories-review` → **`ready-for-build`** (the bracketed `analysis` prefix is present only when
-   `yad-analysis` seeded it). A short lane runs `epic → epic-review → stories → stories-review` →
+   stories-review` → **`ready-for-build`** (the bracketed `analysis` prefix is not on `classic`: it is
+   what makes `analysis-first`, the route `yad-analysis` seeds). A short lane runs `epic → epic-review → stories → stories-review` →
    **`ready-for-build`**, with `analysis` in front on `spike`, and has no architecture, UI-design or
    test-case rows at all — render what `steps[]` holds and never a step it lacks.
    `test-cases → test-cases-review` is a **parallel, non-blocking track**: it opens when `stories-review`
@@ -97,21 +97,26 @@ Print, in this order:
 
    Apply the same predicate `yad-review-gate` uses (restated here so this skill is
    self-contained). From the `approved` records in `approvals.json` for the current step:
-   - `approvers` = the distinct `approver` values. There are no roles; a `role` or `domain` an older
-     record carries is legacy data, and nothing reads it.
-   - **Pass (team mode):** `|approvers| >= 1` — the base. Solo mode waives approvals entirely.
-   - **The full count, reported on every step:** `needed = base 1 + risk step` — plus `2` when the
+   - `approvers` = the distinct, non-empty `approver` values of the approvals that are not stale (below).
+     A record that names nobody counts as nobody. When `requireEngagement` is on in the Product config,
+     only approvals with `engagement: verified` count. There are no roles; a `role` or `domain` an older
+     record carries is legacy data, and it counts for nothing.
+   - **Pass (team mode):** `|approvers| >= 1` — the base — plus, with a platform, resolved review threads and a merged
+     review PR/MR. Solo mode waives approvals entirely.
+   - **The full count, reported on every step that is not inherited, skipped or deferred:** `needed = base 1 + risk step` — plus `2` when the
      step's `risk_tags` carry `contract`, or `1` when they carry `auth`/`payments` (the highest tag,
      never the sum). The risk step is ADVISORY — it never decides whether the gate would pass, because
      the full rule caps it at the number of active people and that cap (E72) does not exist yet.
      `yad gate status` prints the sum and the shortfall (`; count: 3 approvers = base 1 + contract risk 2
      — base enforced, risk step advisory — 1 short`) — read both from there rather than recomputing
-     them, and say "short N" rather than "blocked" when it is short.
+     them, and say "short N" rather than "blocked" when it is short. In solo mode it prints no shortfall.
    - Touched domains (`epic.repos` for a step with a risk tag; the union of every story's `repos` for
      `stories-review`) only label the review. They add no approvals.
-   - Approvals are **stale** (gate fails) if the artifact was edited after the newest `approved`
-     record. For `architecture-review`, also flag staleness if the contract-surface hash no longer
-     matches `.sdlc/contract-lock.json`.
+   - An approval is **stale** (it no longer counts) when the `artifactHash` it recorded no longer
+     matches the artifact's current fingerprint — the content changed after that person approved. For
+     `architecture-review` the fingerprint is the contract surface in `contract.md`. An approval with no
+     `artifactHash` is never stale. `yad gate status` prints the stale count. For `architecture-review`,
+     also flag when the contract-surface hash no longer matches `.sdlc/contract-lock.json`.
 4. **Contract lock** — if `.sdlc/contract-lock.json` exists, show the locked hash and `lockedAt`
    (and, when at/after `architecture-review`, whether the current surface still matches it).
 5. **Stories** — if `stories/` has files, list each story `id` and its `repos` tags.

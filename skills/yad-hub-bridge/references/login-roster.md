@@ -28,8 +28,8 @@ There is no lookup step: the login the platform reports is the name written. The
 `approver` values, so the same person is one approver however many records name them.
 
 **Local ledger (no platform).** The `yad-review-gate` skill writes the same shapes by hand. `approver` /
-`commenter` is the reviewer's platform login, or the name they give when there is no platform. The gate
-needs 1 distinct approver; nothing checks that it is not the artifact's author, so do not record the
+`commenter` is the reviewer's platform login, or the name they give when there is no platform. A team
+gate needs 1 distinct approver (solo mode waives it); nothing checks that it is not the artifact's author, so do not record the
 author's own approval.
 
 ## Older records
@@ -49,21 +49,23 @@ so it continues that record instead of treating the approval as new:
    time (GitHub), or — on an open step only — exactly one unmatched approval against exactly one
    unmatched older approver of that PR (GitLab, which has no submission time). People are never matched
    by list order, and the result is the same whatever order the platform lists reviews in.
-3. The continued record keeps the fingerprint and dates it carried. When one person's older records
+3. The continued record keeps the fingerprint and dates it carried, unless the platform shows a newer
+   review (a later submission time, or a different PR/MR). When one person's older records
    disagree, the **stale** one is kept — stale meaning outside the fingerprints the gate accepts for the
    artifact (`acceptedHashes`), not merely different from today's hash.
 4. **Still ambiguous:** on a closed step nothing is added (its record is history, and a second entry would
    count one person twice); on an open step the approval is recorded against a stale fingerprint from
-   those older records, so it must be given again on a new review.
+   those older records, so it must be given again on a new review. If none of those older records is
+   stale, there is nothing stale to bind to, and the approval is recorded against the current content.
 
 Comment rounds use the same name → login pairs, so the first sync does not open a new round for
-unchanged threads. **Keep the roster until every review with older approvals is closed**; delete it after.
+unchanged threads. Without the roster (or for a name two logins share) that sync may open one new round. **Keep the roster until every review with older approvals is closed**; delete it after.
 
 ## Who wrote a record (`by`)
 
-Skip, defer, closing records and mode changes carry a `by`. It is:
+Skip, defer, closing records, kill-switch flips and mode changes carry a `by`. It is:
 
-1. the login `gh api user` (GitHub) or `glab api user` (GitLab) reports, else
+1. the login `gh api user` (GitHub, asked on the repo's own host) or `glab api user` (GitLab) reports, else
 2. git `user.name`, else `null`.
 
 `YAD_PLATFORM_LOGIN=0` turns the platform lookup off (offline work, tests). The lookup is best effort and
@@ -74,21 +76,24 @@ else the git name.
 
 `yad gate open` (review PRs) and `yad open-pr` (task PRs):
 
-- **Assignee** = the login `gh`/`glab` reports as logged in. On GitHub it falls back to `@me`.
+- **Assignee** = the person opening it: `@me` on GitHub (`gh` resolves it), the login `glab api user`
+  reports on GitLab (no assignee when that lookup fails).
 - **Reviewers: none are requested.** The command prints
   `no reviewers were requested — ask them on the PR itself`. E68 will later suggest reviewers from
   history.
-- **Labels:** a `domain:<repo>` label per touched domain is still applied — for `stories-review` the
-  union of every story's `repos`, for a step with a risk tag the epic's `repos`. The labels are a hint
-  for whom to ask; they add no approvals.
+- **Labels (`yad gate open` only):** a `domain:<repo>` label per touched domain is still applied — for
+  `stories-review` the union of every story's `repos`, for a step tagged `contract`, `auth` or
+  `payments` the epic's `repos`. The labels are a hint for whom to ask; they add no approvals.
+  `yad open-pr` adds no labels.
 
 ## Legacy data `yad doctor` reports
 
-Nothing reads these any more. `yad doctor` warns so the team can delete them:
+None of these decides anything any more. `yad doctor` warns so the team can delete them:
 
 | Warning | What is left on disk |
 |---|---|
-| `people:roster-unused` | a non-empty `roster` in `.sdlc/hub.json` |
+| `people:roster-unused` | a non-empty `roster` in `.sdlc/hub.json` — still read for its name → login pairs only (see "Older records"), so keep it until older reviews close |
+| `people:roster-ambiguous` | a roster name given to more than one login (only checked when the roster is non-empty) |
 | `people:domain-owners-unused` | a repo in `.sdlc/repos.json` that lists `domain_owner` / `domain_owners` |
 | `people:verified-authors-unused` | a `verified_authors` list in `.sdlc/hub.json`, or a `.sdlc/verified-authors` file in the Product or a connected repo |
 

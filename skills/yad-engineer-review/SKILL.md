@@ -1,6 +1,6 @@
 ---
 name: yad-engineer-review
-description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (1 distinct approver who is not the author; high risk / contract raise the full count, advisory until the capacity cap — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
+description: 'Build Step E of the gated SDLC — AI review, engineer review, then merge. Wire an advisory AI first-pass (CodeRabbit) on the PR/MR; record the human engineer review with the same advance-human discipline as the Shape gates (1 distinct approver, who should not be the author; high risk / contract raise the full count, advisory until the capacity cap — the Step D routing); and on merge, record the ship in the epic build-log and update the story state so the epic → story → task → PR chain is traceable. Never auto-advances — the human owns the merge. Use when the user says "record the engineer review", "merge this task", or "wire the AI review". (To commit + open the PR/MR, use yad-ship.)'
 ---
 
 # SDLC — Engineer Review & Merge (Build Step E)
@@ -15,7 +15,8 @@ then **ship** — merge, record the ship, and update the story state. This is th
 
 - `{project-root}` resolves from the project working directory — the **product** repo (the source of
   truth: it holds the story and the build ledger).
-- Code repos are separate git repos under `{project-root}/demo-repos/<repo>/`.
+- Code repos are separate git repos under `{project-root}/demo-repos/<repo>/` (or the registry `path` in
+  `.sdlc/repos.json`).
 - The build ledger uses **shard-then-fold** storage: each ship is its own shard file
   `{project-root}/epics/<epic>/.sdlc/build-log/<story>-<task>-<repo>.json`, so concurrent shippers never
   conflict; readers UNION the folded `build-log.json` with every loose shard, and `yad tidy up` folds
@@ -23,7 +24,7 @@ then **ship** — merge, record the ship, and update the story state. This is th
   `yad checkpoint` (see Step 3), not by hand.
 - The engineer-review rule reuses `yad-review-gate`'s count: `needed = base 1 + risk step` distinct
   approvers. The PR's Impact & Risk block sets the risk step: `high` risk +1, a touched contract surface
-  +2 (the larger, never the sum). Only the base (1 approver who is not the author) holds the merge; the
+  +2 (the larger, never the sum). Only the base (1 distinct approver, who should not be the author) holds the merge; the
   risk step is advisory until the capacity cap (E72). This is what `yad-pr-template`'s `risk-route.sh`
   prints. The real merge protection is the platform's branch protection.
 - AI review wiring: `templates/.coderabbit.yaml` → `<repo>/.coderabbit.yaml`.

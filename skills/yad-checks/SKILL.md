@@ -77,9 +77,9 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
     no CI path can create a ledger (`gate ci` only *advances* an existing chain, at merge, on the
     default branch), so an epic whose `.sdlc/state.json` is absent from the base ref may be created by
     a human on its first review PR/MR — **creation, not mutation** (#162). Once the ledger is on the
-    default branch the guard is absolute again. Runs in `yad-hub-checks`
-    alongside `verified-commits` (which requires the bot's signature like any other commit's). See
-    `yad-hub-bridge`.
+    default branch the guard is absolute again. Runs in `yad-hub-checks`; `verified-commits` runs beside
+    it in its own `yad-verified-commits` workflow (and requires the bot's signature like any other
+    commit's). See `yad-hub-bridge`.
   - `templates/hooks/ledger-guard.sh` → **Product-only** agent guardrail, active **only in verified mode**
     (the same `isVerifiedLedger` predicate). Not a CI gate: it is a **harness hook** that refuses an agent's
     edit to the CI-owned ledger at the moment it is attempted and names `yad gate open` instead — the

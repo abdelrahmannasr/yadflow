@@ -8,7 +8,7 @@ description: 'Shape step 7 of the gated SDLC. With the pm, break the approved ep
 **Goal:** Break an approved epic into human-authored, AI-assisted user stories, each with a stable
 `EP-<slug>-S0N` ID and a `repos` tag listing which repos must implement it. This is a **Shape step**:
 human-authored with AI assist, **never auto-advances**. When the stories are drafted, control passes
-to `yad-review-gate`, an ordinary count gate: at least 1 approver who is not the author. The stories'
+to `yad-review-gate`, an ordinary count gate: at least 1 distinct approver, who should not be the author. The stories'
 `repos` tags still say which repos a story touches, and the review PR is labelled with those repos.
 
 There is **no `sm` agent** (Phase 0 Deviation 1): the `pm` lens breaks down the epic; the `pm` or
@@ -116,7 +116,7 @@ As a <role>, I want <capability>, so that <outcome>.
 **verified mode** is `platform` set AND `ledger: "verified"` — or, on a project that has not run `yad migrate` yet, `bridge_enabled` (or legacy `bridge`) `true`. `ledger` wins whenever it is present.
 
 **verified mode — do NOT write `state.json`.** The ledger is CI-owned: the `ledger-guard` check rejects
-any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,hub-prs}.json` or
+any non-bot commit touching `epics/*/.sdlc/{state,approvals,comments,product-prs,hub-prs}.json` or
 `epics/*/reviews/*.md`, `yad gate open` deliberately skips this write for the same reason, and
 `yad gate ci --merged` performs the whole transition when the review PR merges. Making the edit here
 fails the gate if it rides the review PR, and desynchronises the ledger CI is about to rewrite if it
@@ -129,17 +129,17 @@ under `.sdlc/` — then hand off to `yad-review-gate`.
 `yad-review-gate action: open` runs that command; hand off to it rather than editing the ledger here.
 
 **With no platform configured** it writes the ledger and simply opens no PR, so this works offline.
-**With a platform** the `review/<epic>/<artifact>` branch must already be **on origin** — the command
-refuses and writes nothing otherwise, which is why Step 6 cuts that branch from the authoring branch
-and pushes it (`yad open-pr` does both, then delegates). Cut and push it before handing off.
+**With a platform** the `review/EP-<slug>/stories` branch must already be **on origin** — the command
+refuses and writes nothing otherwise. Cut it from the authoring branch and push it before handing off
+(or run `yad open-pr` from that branch: it pushes the branch, then delegates).
 
 Do **not** hand-edit `state.json`, and do **not** touch `approvals.json` — only real reviewers approve,
 through the gate.
 
 ### Step 7 — Stop at the gate (do NOT advance)
 Report: the story IDs created, the repos each touches, and that the next action is **review** via
-`yad-review-gate`. This review is an ordinary count gate: it passes with at least 1 approver who is not
-the author, with resolved threads and a merged review PR. It is not routed per repo, and it requests no
+`yad-review-gate`. This review is an ordinary count gate: it passes with at least 1 distinct approver (who
+should not be the author) and, with a platform, resolved threads and a merged review PR. It is not routed per repo, and it requests no
 reviewers — the team asks them on the review PR itself. When this gate
 passes the epic becomes **`ready-for-build`** — Build can start **and** the parallel
 **`test-cases`** track opens for the tester (`yad-test-cases`); the two run at the same time. **Never record

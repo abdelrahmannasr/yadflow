@@ -66,7 +66,8 @@ Written by `yad-test-cases` Step 4b. Absent when the step ran artifacts-only (`t
 
 ## Review routing (the test-cases gate)
 
-The test-cases gate uses the **base rule**: at least 1 distinct approver who is not the author. The
-step carries no risk tags, so its full count is also 1. The natural reviewer is the test architect /
-QA owner, but the gate names no role — any approver who is not the author counts. The review PR requests
-no reviewers; the team asks them on the PR itself.
+The test-cases gate uses the **base rule**: at least 1 distinct approver, who should not be the author.
+The step carries no risk tags, so its full count is also 1. The natural reviewer is the test architect /
+QA owner, but the gate names no role — any approver counts. yadflow does not itself check that the
+approver is not the author (see `yad-review-gate`). The review PR requests no reviewers; the team asks
+them on the PR itself.

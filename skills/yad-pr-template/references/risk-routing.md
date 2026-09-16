@@ -14,8 +14,8 @@ the same count `yad-review-gate` prints on the Shape gates.
 - **Rollback plan:** <how to revert>
 ```
 
-- **Domains / repos touched** — the domains this change affects. `risk-route.sh` lists them as a hint
-  for whom to ask. yadflow keeps no list of people, so no names come from it.
+- **Domains / repos touched** — the domains this change affects. When the count is raised,
+  `risk-route.sh` lists them as a hint for whom to ask. yadflow keeps no list of people, so no names come from it.
 - **Contract surface touched** — `yes` means the diff changes the shared contract surface. That path is
   governed by `contract-check` (needs `Contract-Change: yes` + a re-locked contract) AND it raises the
   approver count (contract is a `yad-review-gate` risk tag).
@@ -33,9 +33,9 @@ The count is `base 1 + risk step`:
 | contract surface touched | +2 | 3 |
 
 `high` risk and a touched contract surface together take the **larger** step (contract, +2), never the
-sum. Approvers are counted as distinct people, and the base is someone other than the author.
+sum. Approvers are counted as distinct people, and the base approver should not be the author.
 
-**Only the base is enforced.** A merge needs 1 approval from someone other than the author. The risk step
+**Only the base is enforced.** A merge needs 1 approval (GitHub blocks self-approval; GitLab only if its settings do). The risk step
 is **advisory** until the capacity cap (roadmap E72) lands. There are no roles: no owner, no reviewer, no
 domain owner. This is `yad-review-gate`'s rule (`references/gating.md`) applied at the code-review
 boundary. The **approvals are recorded by the engineer review (Step E) through `yad-review-gate`** — the
@@ -51,7 +51,7 @@ Risk level: high
 Contract surface touched: no
 Domains touched: backend, mobile
 ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)
-       Only the base holds the merge until the capacity cap: 1 approval from someone other than the author.
+       Only the base holds the merge until the capacity cap: 1 approval (GitHub blocks self-approval; GitLab only if its settings do).
        The risk step is advisory. Ask reviewers who know the touched domains:
   - backend
   - mobile

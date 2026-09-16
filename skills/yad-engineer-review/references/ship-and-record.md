@@ -11,7 +11,7 @@ ship. Shipping records the merge and updates the story state so the whole chain 
    notes captured.
 2. **Engineer review (the authority).** A human reads the diff against the spec and the acceptance
    criteria and records an approval. The rule is `yad-review-gate`'s count, in distinct approvers:
-   - **base (enforced):** 1 approver who is not the author. This holds the merge.
+   - **base (enforced):** 1 distinct approver, who should not be the author. This holds the merge.
    - **full count (advisory):** base 1 + a risk step from the PR's Impact & Risk block — `high` risk
      +1, a touched contract surface +2 (the larger, never the sum). Exactly what `risk-route.sh` prints.
      The risk step holds nothing until the capacity cap (E72). The touched domains it lists are a hint

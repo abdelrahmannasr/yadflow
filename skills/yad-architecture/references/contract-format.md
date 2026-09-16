@@ -1,8 +1,8 @@
 # Contract surface — format, altitude, and hash-lock
 
 The `contract.md` produced at Shape step 3 is the **single source of truth for the shared cross-repo
-surface** of an epic. Phase 3's contract-check (not built yet) fails a PR when a repo drifts from this
-surface. To make that check possible, the surface is delimited and hash-locked now.
+surface** of an epic. The contract-check gate (`yad-checks`) fails a code-repo PR that changes its copy of
+this surface without a `Contract-Change: yes` trailer and a re-locked contract. To make that check possible, the surface is delimited and hash-locked now.
 
 ## What goes in the surface (altitude rule)
 
@@ -64,7 +64,7 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 
 - The `architecture-review` step carries `risk_tags: ["contract"]`. The tag sets the step's approver
   count — 3 distinct people (base 1 + contract risk 2). `yad-review-gate` enforces only the base (1
-  approver who is not the author) until the capacity cap ships (E72); the risk step is reported as a
+  distinct approver, who should not be the author) until the capacity cap ships (E72); the risk step is reported as a
   shortfall and does not hold the gate. No per-repo or role approval is required. The review PR names
   and labels the epic's `repos`.
 - **Staleness:** if the surface block is edited after approvals are recorded, the recomputed hash will
@@ -74,4 +74,4 @@ awk '/CONTRACT-SURFACE:BEGIN/{f=1;next} /CONTRACT-SURFACE:END/{f=0} f' \
 ## Why a hash (vs structured diff)
 
 A hash is the smallest representation that proves "did the agreed surface change?" — which is all Shape needs. A field-by-field structured diff is a Phase 3 concern (it tells you *what* drifted in
-a failing PR); the lock established here is what that future check compares against.
+a failing PR); the lock established here is what the contract-check compares against.

@@ -8,12 +8,12 @@
 # There is no author allowlist. It used to be `.sdlc/verified-authors`, generated from the Product
 # roster's emails; yadflow removed the roster (E62) and keeps no list of people. Who may author a commit
 # is who has write access to the repository — the platform's own answer, which never goes stale — and
-# the signature proves the commit came from that account. A `.sdlc/verified-authors` file an older
+# the signature proves which platform account made the commit. A `.sdlc/verified-authors` file an older
 # release generated is no longer read, and the gate says so when it finds one.
 #
 # Merge-commit signature exemption: a merge that introduces NO content of its own (its combined diff
 # is empty — no conflict-resolution / evil-merge hunks) is signature-waived, because every change it
-# carries already lives in its individually author+signature-checked parents. This unblocks self-hosted
+# carries already lives in its individually signature-checked parents. This unblocks self-hosted
 # GitLab, which does not sign UI-created merge commits (the signature API returns 404). A merge that
 # DOES introduce content of its own still requires a verified signature (fail-closed).
 #
@@ -116,7 +116,7 @@ signature_verified() {
 # 0 when a merge commit introduced NO content of its own. The combined diff (--cc) lists only hunks
 # that differ from ALL parents, so empty output means every change lives in an individually-checked
 # parent — there is no conflict-resolution or evil-merge content unique to the merge commit, hence
-# nothing an unverified author could smuggle in past the per-parent author+signature checks.
+# nothing an unsigned change could smuggle in past the per-parent signature checks.
 merge_introduces_no_content() {
   # `local` on its own line: `local out=$(...)` would mask the substitution's exit status (local
   # always returns 0). A git error (e.g. a parent tree missing in a shallow clone) must fail closed —

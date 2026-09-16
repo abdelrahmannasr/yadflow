@@ -158,8 +158,8 @@ No unsigned commits reach merge — on the Product and on every connected repo. 
   Read via `gh api repos/{owner}/{repo}/commits/<sha>` (GitHub) or the commits/signature API (GitLab).
 
 **There is no author allowlist** (E62). yadflow keeps no list of people: write access to the repo
-decides who can author, and the signature proves the commit came from that account. `yad check --fix`
-and `yad setup` no longer generate `.sdlc/verified-authors`, and nothing reads it or hub.json's
+decides who can author, and the signature proves which platform account made the commit. `yad check --fix`
+and `yad setup` no longer generate `.sdlc/verified-authors`, and no gate reads it or hub.json's
 `verified_authors` any more (`SDLC_VERIFIED_AUTHORS` is gone too). When an old `.sdlc/verified-authors`
 file is still on disk, the gate prints:
 
@@ -391,7 +391,10 @@ that already had its own pipeline keeps it and still gains the gates.
 The Product is itself a repo on a platform (recorded in `.sdlc/hub.json` by
 `yad-connect-repos action: detect-hub`). `wire repo: hub` targets `{project-root}` and uses the same
 merge-not-clobber logic, with a **Product-flavored gate set** appropriate to a "thinking" repo (it has no
-`specs/` or `package.json` build):
+`specs/` or `package.json` build). **What yadflow wires today** (`PRODUCT_WIRING`): `commit-message`,
+`pr-title`, `pr-template` and `ledger-guard` in `yad-hub-checks`, `verified-commits` in its own workflow,
+and the `yad-update-guard`. The three below are **not shipped** — they are scripts a team writes itself if
+it wants them:
 - **owner-set** — every `epic.md` (and forward artifact) under `epics/EP-*/` carries an `owner`.
 - **contract-locked** — where an epic has a `contract.md`, its surface hash matches
   `.sdlc/contract-lock.json` (reuse the recipe in
@@ -575,8 +578,9 @@ The settings file is the team's, so the rules around that one entry are delibera
 - **Both halves land together.** The script and the entry ride `yad update` as one: applying the
   entry without the script it points at would fire a missing command on every file edit.
 
-`.claude` is the only IDE target wired: it is the only one with a defined hook protocol. Other
-targets get the script, and the contract above is what they would wire by hand.
+`.claude` and `.cursor` are the only IDE targets wired (`.cursor` through its own wrapper, above): they
+are the only ones with a hook protocol yadflow has read. Other targets get the script, and the contract
+above is what they would wire by hand.
 
 `yad doctor` reports the guard on a verified Product, and distinguishes the three states that matter — it
 reads the same persisted `ideTargets` the wiring reads, so every gap it names is one the command it
