@@ -1,6 +1,6 @@
 // `yad usage` — the team-member adoption & behavior report.
 //
-// DERIVED, READ-ONLY, NO NEW SOURCE OF TRUTH. This command reconstructs each roster member's audit
+// DERIVED, READ-ONLY, NO NEW SOURCE OF TRUTH. This command reconstructs each contributor's audit
 // trail entirely from data ALREADY in git — the approval/comment/ship ledgers + git authorship — and
 // renders it as a portable report (HTML by default) to a location the caller chooses. It writes no
 // tracked state, hooks no commands, and stores nothing that cannot be rebuilt from the repos. This
@@ -11,20 +11,28 @@
 // explainable hygiene flags. It NEVER emits emails, commit messages, or free-text comment bodies. It is
 // a workflow-hygiene / adoption view for an EM, not a judgmental scorecard (see memory:
 // no-private-data-in-reports).
+//
+// PEOPLE COME FROM ACTIVITY, NOT FROM A LIST (E62). Before the roster was removed this report seeded every
+// member from it — so someone with no activity showed as `dormant` — and used it to join a person's
+// ledger name, git name and login into one row. With no stored list, a person is whoever did something:
+// the name a ledger records (the platform login since E62; the roster's name in older records) or the
+// git author. One join survives because it is evidence rather than a claim: a GitHub or GitLab noreply
+// commit address carries the login, so those commits land on the same row as that login's approvals.
+// A person whose git name, older ledger name and login all differ appears on more than one row, and the
+// report says so rather than guessing.
 import fs from 'node:fs';
 import path from 'node:path';
 import { c, log, ok, note, readJSON, run } from './lib.mjs';
-import { PROJECT_FILES, epicFiles , productConfigPath } from './manifest.mjs';
+import { PROJECT_FILES, epicFiles } from './manifest.mjs';
 import { readShips } from './ledger.mjs';
 import { epicRoot, FOUNDATION_DIR, FOUNDATION_EPIC, FOUNDATION_FILES } from './epic-state.mjs';
-import { rolesForScope } from './platform.mjs';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Ledger read for the report. A MISSING file is normal (the epic hasn't reached that gate) and yields
 // `def` silently; a file that EXISTS but fails to parse is surfaced to stderr and skipped — NOT thrown,
 // since one corrupt ledger must not abort the whole derived view, but a silent under-count must never
-// masquerade as "no activity" (an active reviewer wrongly shown dormant). Mirrors the `readJSONStrict`
+// masquerade as "no activity" (an active reviewer wrongly left off the report). Mirrors the `readJSONStrict`
 // hazard note in lib.mjs, softened to warn-and-continue for this read-only aggregation.
 function readLedger(p, def) {
   if (!fs.existsSync(p)) return def;
@@ -45,38 +53,17 @@ const ARTIFACT_FILES = new Set([
   'epic.md', 'analysis.md', 'architecture.md', 'contract.md', 'ui-design.md', 'DESIGN.md', 'test-cases.md',
 ]);
 
-// ---- roster / attribution ----------------------------------------------------------------------
+// ---- attribution -------------------------------------------------------------------------------
 
-function loadRoster(root) {
-  const hub = readJSON(productConfigPath(root), null);
-  return hub && Array.isArray(hub.roster) ? hub.roster : [];
-}
-
-// A member's Product-scope role label (supports both the per-scope `roles` map and the legacy flat `role`).
-function rosterRole(m) {
-  const scoped = rolesForScope(m, 'hub');
-  if (scoped.length) return scoped.join(', ');
-  return m.role || '';
-}
-
-// Resolve a display name / login / git-author identity to a canonical roster member (or null when the
-// person is not in the roster — we still attribute the event to the raw name so nothing is dropped).
-function makeResolver(roster) {
-  const byEmail = new Map();
-  const byName = new Map();
-  const byLogin = new Map();
-  for (const m of roster) {
-    if (m.email) byEmail.set(m.email.toLowerCase(), m);
-    if (m.name) byName.set(m.name, m);
-    if (m.login) byLogin.set(m.login, m);
-  }
-  return {
-    // Ledgers store the roster `name` (approver/commenter) — map back to the full entry when possible.
-    byNameOrLogin: (s) => (s == null ? null : byName.get(s) || byLogin.get(s) || null),
-    // git authorship maps by commit email first (the reliable key), then by author name == roster name.
-    byGitAuthor: (name, email) =>
-      byEmail.get((email || '').toLowerCase()) || byName.get(name) || byLogin.get(name) || null,
-  };
+// The platform login a noreply commit address carries — `12345+octocat@users.noreply.github.com`,
+// `octocat@users.noreply.github.com`, `12345-tanuki@users.noreply.gitlab.com` — else null. The address
+// itself is never emitted; only the login, which the ledgers already record.
+export function loginFromEmail(email) {
+  const e = String(email || '').toLowerCase();
+  const gh = e.match(/^(?:\d+\+)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)@users\.noreply\.github\.com$/);
+  if (gh) return gh[1];
+  const gl = e.match(/^\d+-([a-z0-9._-]+)@users\.noreply\.gitlab\.com$/);
+  return gl ? gl[1] : null;
 }
 
 // ---- epic enumeration --------------------------------------------------------------------------
@@ -100,18 +87,17 @@ const inWindow = (date, since, until) => !!date && (!since || date >= since) && 
 
 // ---- event derivation --------------------------------------------------------------------------
 
-// Ledger-sourced events for one epic: approvals, comments, and ship engineer-reviews. Each carries the
-// roster `name` already, so attribution is direct.
-function ledgerEvents(root, epic, resolver) {
+// Ledger-sourced events for one epic: approvals, comments, and ship engineer-reviews, attributed to the
+// name the ledger records — as recorded, with nothing to translate it through.
+function ledgerEvents(root, epic) {
   const f = epicFiles(epicRoot(root, epic));
   const events = [];
   const emit = (rawName, action, date, extra = {}) => {
     if (!rawName || !date) return;
-    const m = resolver.byNameOrLogin(rawName);
-    events.push({ ts: date, actor: m ? m.name || m.login : rawName, login: m ? m.login || null : null, rostered: !!m, action, epic, ...extra });
+    events.push({ ts: date, actor: rawName, login: null, action, epic, ...extra });
   };
-  for (const a of readLedger(f.approvals, []) || []) emit(a.approver, 'approved', a.date, { artifact: a.artifact, role: a.role });
-  for (const cm of readLedger(f.comments, []) || []) emit(cm.commenter, 'commented', cm.date, { artifact: cm.artifact, role: cm.role });
+  for (const a of readLedger(f.approvals, []) || []) emit(a.approver, 'approved', a.date, { artifact: a.artifact });
+  for (const cm of readLedger(f.comments, []) || []) emit(cm.commenter, 'commented', cm.date, { artifact: cm.artifact });
   for (const s of readShips(epicRoot(root, epic))) {
     for (const er of s.engineer_review || []) emit(er.approver, 'shipped', s.shippedAt, { story: s.story, task: s.task, repo: s.repo, risk: s.risk });
   }
@@ -149,16 +135,16 @@ const GIT_PRETTY = '--pretty=format:\x01%an%x00%ae%x00%ad';
 
 // git-sourced "authored" events: who committed which epic artifact, when. Degrades to [] when the Product
 // is not a git repo (e.g. a test fixture dir), so the command never depends on git being present.
-function gitAuthoredEvents(root, resolver) {
+function gitAuthoredEvents(root) {
   const r = run('git', ['-C', root, 'log', '--no-merges', '--date=short', GIT_PRETTY, '--name-only', '--', 'epics', FOUNDATION_DIR]);
   if (!r.ok || !r.stdout) return [];
   const events = [];
   for (const cm of parseGitLog(r.stdout)) {
-    const m = resolver.byGitAuthor(cm.an, cm.ae);
+    const login = loginFromEmail(cm.ae);
     for (const rel of cm.files) {
       if (!isArtifactPath(rel)) continue;
       events.push({
-        ts: cm.ad, actor: m ? m.name || m.login : cm.an, login: m ? m.login || null : null, rostered: !!m,
+        ts: cm.ad, actor: login || cm.an, login,
         action: 'authored', epic: rel.startsWith(`${FOUNDATION_DIR}/`) ? FOUNDATION_EPIC : rel.split('/')[1],
         artifact: rel.split('/').pop().replace(/\.md$/, ''),
       });
@@ -167,8 +153,9 @@ function gitAuthoredEvents(root, resolver) {
   return events;
 }
 
-// Optional (`--repos`): code commits in each connected code repo, attributed by author → roster.
-function repoCommitEvents(root, resolver) {
+// Optional (`--repos`): code commits in each connected code repo, attributed to the git author (or the
+// login a noreply address carries).
+function repoCommitEvents(root) {
   const reg = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const events = [];
   for (const repo of reg?.repos || []) {
@@ -177,18 +164,18 @@ function repoCommitEvents(root, resolver) {
     const r = run('git', ['-C', abs, 'log', '--no-merges', '--date=short', GIT_PRETTY]);
     if (!r.ok || !r.stdout) continue;
     for (const cm of parseGitLog(r.stdout)) {
-      const m = resolver.byGitAuthor(cm.an, cm.ae);
-      events.push({ ts: cm.ad, actor: m ? m.name || m.login : cm.an, login: m ? m.login || null : null, rostered: !!m, action: 'committed', repo: repo.name });
+      const login = loginFromEmail(cm.ae);
+      events.push({ ts: cm.ad, actor: login || cm.an, login, action: 'committed', repo: repo.name });
     }
   }
   return events;
 }
 
 // The full, window-filtered event stream. Deterministic: sorted by (date, action, epic/repo, actor).
-export function deriveEvents(root, resolver, { since, until, repos = false } = {}) {
-  const events = [...gitAuthoredEvents(root, resolver)];
-  for (const epic of listEpics(root)) events.push(...ledgerEvents(root, epic, resolver));
-  if (repos) events.push(...repoCommitEvents(root, resolver));
+export function deriveEvents(root, { since, until, repos = false } = {}) {
+  const events = [...gitAuthoredEvents(root)];
+  for (const epic of listEpics(root)) events.push(...ledgerEvents(root, epic));
+  if (repos) events.push(...repoCommitEvents(root));
   return events
     .filter((e) => inWindow(e.ts, since, until))
     .sort((a, b) =>
@@ -201,18 +188,19 @@ export function deriveEvents(root, resolver, { since, until, repos = false } = {
 const zeroCounts = () => Object.fromEntries(ACTIONS.map((a) => [a, 0]));
 
 // Per-member rollup + explainable hygiene flags + team totals. `window` echoes the requested range.
-export function analyze(events, roster, window = { since: null, until: null }) {
+// Everyone here did something in range: there is no stored list to seed an inactive person from (E62).
+export function analyze(events, window = { since: null, until: null }) {
   const members = new Map();
-  const seed = (key, name, login, role, rostered, isReviewer = false) => {
+  const seed = (key, name, login) => {
     if (!members.has(key)) {
-      members.set(key, { key, name, login: login || null, role: role || '', rostered, isReviewer, counts: zeroCounts(), total: 0, firstActive: null, lastActive: null, epics: new Set(), timeline: [] });
+      members.set(key, { key, name, login: login || null, counts: zeroCounts(), total: 0, firstActive: null, lastActive: null, epics: new Set(), timeline: [] });
     }
-    return members.get(key);
+    const m = members.get(key);
+    if (login && !m.login) m.login = login;
+    return m;
   };
-  // Seed every roster member first so dormant members appear at zero, not missing.
-  for (const m of roster) seed(m.login || m.name, m.name || m.login, m.login || null, rosterRole(m), true, isReviewerAnywhere(m));
   for (const e of events) {
-    const m = seed(e.login || e.actor, e.actor, e.login, '', e.rostered);
+    const m = seed(e.login || e.actor, e.actor, e.login);
     m.counts[e.action] = (m.counts[e.action] || 0) + 1;
     m.total += 1;
     if (e.epic) m.epics.add(e.epic);
@@ -221,7 +209,7 @@ export function analyze(events, roster, window = { since: null, until: null }) {
     m.timeline.push({ ts: e.ts, action: e.action, epic: e.epic || null, repo: e.repo || null, artifact: e.artifact || null });
   }
   const list = [...members.values()].map((m) => ({
-    name: m.name, login: m.login, role: m.role, rostered: m.rostered,
+    name: m.name, login: m.login,
     counts: m.counts, total: m.total, firstActive: m.firstActive, lastActive: m.lastActive,
     epics: [...m.epics].sort(), flags: memberFlags(m), timeline: m.timeline,
   }));
@@ -231,22 +219,13 @@ export function analyze(events, roster, window = { since: null, until: null }) {
   return { window, generatedFrom: 'derived', members: list, totals };
 }
 
-// Is this roster entry a reviewer in ANY scope? Reviewer roles are usually repo-scoped
-// (`roles: { backend: ['reviewer'] }`), not Product-scoped, so a Product-only check would miss most of them.
-export function isReviewerAnywhere(entry) {
-  if (!entry) return false;
-  if ((entry.role || '') === 'reviewer') return true;                            // legacy flat role
-  if (Array.isArray(entry.roles)) return entry.roles.includes('reviewer');       // legacy hub-scope array (rolesForScope shape)
-  return Object.values(entry.roles || {}).some((list) => Array.isArray(list) && list.includes('reviewer'));
-}
-
-// Factual, per-member flags — each is a plain derivation, never a score.
+// Factual, per-member flags — each is a plain derivation, never a score. The two that needed a stored
+// list went with the roster (E62): `dormant` (listed, no activity) and `reviewer-not-reviewing` (holds a
+// reviewer role, never reviews).
 function memberFlags(m) {
   const flags = [];
-  if (m.rostered && m.total === 0) flags.push('dormant');                       // in the roster, no activity in range
   const reviews = m.counts.commented + m.counts.approved;
   if (m.total > 0 && m.counts.authored > 0 && reviews === 0) flags.push('no-review-participation'); // authors but never reviews
-  if (m.total > 0 && m.isReviewer && reviews === 0) flags.push('reviewer-not-reviewing');            // a reviewer (any scope) who never reviews
   return flags;
 }
 
@@ -288,7 +267,7 @@ export function renderHtml(model, today = '') {
   const memberCard = (m) => `
     <section class="member${m.total === 0 ? ' idle' : ''}">
       <header>
-        <h3>${esc(m.name)} ${m.login ? `<span class="login">@${esc(m.login)}</span>` : ''} ${m.role ? `<span class="role">${esc(m.role)}</span>` : ''}${m.rostered ? '' : ' <span class="role">off-roster</span>'}</h3>
+        <h3>${esc(m.name)} ${m.login && m.login !== m.name ? `<span class="login">@${esc(m.login)}</span>` : ''}</h3>
         <div class="flags">${m.flags.map(flagChip).join(' ')}</div>
       </header>
       ${bar(m)}
@@ -315,12 +294,10 @@ h1{font-size:22px;margin:0 0 4px}.sub{color:var(--dim);margin:0 0 24px}
 .member{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin:0 0 14px}
 .member.idle{opacity:.6}.member header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 h3{margin:0;font-size:15px}.login{color:var(--dim);font-weight:400;font-size:13px}
-.role{color:var(--accent);font-size:11px;border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:4px}
 .bar{height:6px;background:var(--line);border-radius:4px;margin:10px 0;overflow:hidden}.bar span{display:block;height:100%;background:var(--accent)}
 table.counts{border-collapse:collapse;font-size:12px;margin:6px 0}table.counts th{color:var(--dim);text-align:left;font-weight:500;padding:2px 14px 2px 0}table.counts td{padding:2px 14px 2px 0}
 .meta{color:var(--dim);font-size:12px;margin:6px 0 0}
 .flags{display:flex;gap:6px;flex-wrap:wrap}.flag{font-size:11px;border-radius:6px;padding:1px 8px;background:#3a2a12;color:#ffcf7a;border:1px solid #5a3f14}
-.flag-dormant{background:#2a2f3a;color:#9aa7bd;border-color:#39414f}
 details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12px}
 ul.timeline{list-style:none;padding:8px 0 0;margin:0;font-size:12px}ul.timeline li{padding:2px 0;border-top:1px solid var(--line)}
 time{color:var(--dim);font-variant-numeric:tabular-nums;margin-right:6px}
@@ -332,18 +309,18 @@ footer{color:var(--dim);font-size:12px;margin-top:28px;border-top:1px solid var(
 <div class="totals">${ACTIONS.map((a) => `<div>${a}<b>${model.totals[a]}</b></div>`).join('')}</div>
 ${model.members.map(memberCard).join('')}
 ${hygiene}
-<footer>Derived, read-only view — reconstructed from git history and the SDLC ledgers. Regenerate any time with <code>yad usage</code>. No emails, commit messages, or comment bodies are included.</footer>
+<footer>Derived, read-only view — reconstructed from git history and the SDLC ledgers. Regenerate any time with <code>yad usage</code>. No emails, commit messages, or comment bodies are included. People are listed as the ledgers and git name them: someone whose git name differs from their platform login may appear twice.</footer>
 </div></body></html>\n`;
 }
 
 // A compact Markdown variant for quick reads / pasting into a PR. Dynamic values are sanitized so a
-// name/role/repo containing `|` or a newline can't corrupt the table or list structure.
+// name/repo containing `|` or a newline can't corrupt the table or list structure.
 export function renderMarkdown(model, today = '') {
   const mdCell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
   const mdText = (s) => String(s ?? '').replace(/\r?\n/g, ' ');
-  const L = [`# Team usage & behavior report`, ``, `- Range: **${rangeLabel(model.window)}**${today ? ` · generated ${today}` : ''}`, `- Members: ${model.members.length}`, `- Totals: ${ACTIONS.map((a) => `${a} ${model.totals[a]}`).join(' · ')}`, ``, `| member | role | ${ACTIONS.join(' | ')} | total | flags |`, `|---|---|${ACTIONS.map(() => '--:').join('|')}|--:|---|`];
+  const L = [`# Team usage & behavior report`, ``, `- Range: **${rangeLabel(model.window)}**${today ? ` · generated ${today}` : ''}`, `- Members: ${model.members.length}`, `- Totals: ${ACTIONS.map((a) => `${a} ${model.totals[a]}`).join(' · ')}`, ``, `| member | ${ACTIONS.join(' | ')} | total | flags |`, `|---|${ACTIONS.map(() => '--:').join('|')}|--:|---|`];
   for (const m of model.members) {
-    L.push(`| ${mdCell(`${m.name}${m.login ? ` (@${m.login})` : ''}`)} | ${mdCell(m.role || '—')} | ${ACTIONS.map((a) => m.counts[a]).join(' | ')} | ${m.total} | ${mdCell(m.flags.join(', ') || '—')} |`);
+    L.push(`| ${mdCell(`${m.name}${m.login && m.login !== m.name ? ` (@${m.login})` : ''}`)} | ${ACTIONS.map((a) => m.counts[a]).join(' | ')} | ${m.total} | ${mdCell(m.flags.join(', ') || '—')} |`);
   }
   L.push('', '## Workflow hygiene');
   if (model.hygiene?.length) {
@@ -352,17 +329,15 @@ export function renderMarkdown(model, today = '') {
   } else {
     L.push('No ship-without-review gaps in range. ✓');
   }
-  L.push('', '_Derived, read-only — reconstructed from git + the SDLC ledgers; no emails/comment bodies._', '');
+  L.push('', '_Derived, read-only — reconstructed from git + the SDLC ledgers; no emails/comment bodies. People are listed as the ledgers and git name them, so one person may appear twice._', '');
   return L.join('\n');
 }
 
 // ---- CLI entry ---------------------------------------------------------------------------------
 
 export function buildModel(root, { since, until, repos = false, member } = {}) {
-  const roster = loadRoster(root);
-  const resolver = makeResolver(roster);
-  const events = deriveEvents(root, resolver, { since, until, repos });
-  const model = analyze(events, roster, { since: since || null, until: until || null });
+  const events = deriveEvents(root, { since, until, repos });
+  const model = analyze(events, { since: since || null, until: until || null });
   model.hygiene = shipHygiene(root, { since, until });
   if (member) {
     model.members = model.members.filter((m) => m.name === member || m.login === member);

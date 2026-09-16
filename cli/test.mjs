@@ -10921,10 +10921,11 @@ test('report: non-interactive never posts — hands back a prefilled URL', async
 });
 
 // ---- yad usage (derived team-member behavior report) --------------------------------------------
-const { buildModel, renderHtml, renderMarkdown, deriveEvents } = await import('./usage.mjs');
+const { buildModel, renderHtml, renderMarkdown, deriveEvents, loginFromEmail } = await import('./usage.mjs');
 
-// Scaffold a Product dir with a roster + one epic's ledgers (no git repo — git-authored events degrade to
-// []). `dormant` is in the roster with no activity so we can assert it surfaces at zero.
+// Scaffold a Product dir with one epic's ledgers (no git repo — git-authored events degrade to []). It
+// still carries a roster, left on disk from an older release: `dormant` is listed there with no
+// activity, and the report must not invent a row for them from it (E62).
 function usageFixture() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
@@ -10954,15 +10955,16 @@ function usageFixture() {
   return T;
 }
 
-test('usage: attributes ledger events to roster members; dormant member surfaces at zero', () => {
+test('usage: people come from activity — the name each ledger records, never a roster (E62)', () => {
   const T = usageFixture();
   const model = buildModel(T, {});
   const by = Object.fromEntries(model.members.map((m) => [m.name, m]));
   assert.equal(by.alice.counts.approved, 2, 'alice has both approvals all-time');
   assert.equal(by.bob.counts.commented, 1, 'bob commented once');
   assert.equal(by.bob.counts.shipped, 1, 'bob has one engineer-review ship');
-  assert.equal(by.dormant.total, 0, 'dormant member is present with zero activity');
-  assert.ok(by.dormant.flags.includes('dormant'), 'dormant flag raised');
+  assert.equal(by.dormant, undefined, 'a name only the old roster lists is not a row');
+  assert.deepEqual(model.members.map((m) => m.name), ['alice', 'bob']);
+  assert.ok(model.members.every((m) => m.role === undefined && m.rostered === undefined), 'no roster-derived fields');
   assert.equal(model.totals.approved, 2);
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -11031,20 +11033,42 @@ test('usage: deriveEvents degrades to [] when the Product is not a git repo', ()
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-usage-nogit-'));
   fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/hub.json'), JSON.stringify({ platform: 'github', roster: [] }));
-  const events = deriveEvents(T, { byNameOrLogin: () => null, byGitAuthor: () => null }, {});
+  const events = deriveEvents(T, {});
   assert.deepEqual(events, [], 'no epics, no git — empty stream, no throw');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// --- review-follow-up fixes: reviewer-any-scope, corrupt-ledger warn, --out mkdir, --member totals ---
-const { isReviewerAnywhere, runUsage } = await import('./usage.mjs');
+// --- review-follow-up fixes: corrupt-ledger warn, --out mkdir, --member totals ---
+const { runUsage } = await import('./usage.mjs');
 
-test('usage: isReviewerAnywhere detects repo-scoped, hub-scoped, and legacy reviewer roles', () => {
-  assert.equal(isReviewerAnywhere({ roles: { backend: ['reviewer'] } }), true, 'repo-scoped reviewer');
-  assert.equal(isReviewerAnywhere({ roles: { hub: ['reviewer'] } }), true, 'hub-scoped reviewer');
-  assert.equal(isReviewerAnywhere({ role: 'reviewer' }), true, 'legacy flat role');
-  assert.equal(isReviewerAnywhere({ roles: { backend: ['domain-owner'] }, role: 'owner' }), false, 'owner/domain-owner only');
-  assert.equal(isReviewerAnywhere(null), false, 'no entry');
+test('usage: a noreply commit address joins a git author to their platform login, and nothing else does', () => {
+  assert.equal(loginFromEmail('12345+octocat@users.noreply.github.com'), 'octocat');
+  assert.equal(loginFromEmail('octocat@users.noreply.github.com'), 'octocat');
+  assert.equal(loginFromEmail('12345-tanuki@users.noreply.gitlab.com'), 'tanuki');
+  assert.equal(loginFromEmail('octocat@example.com'), null, 'an ordinary address says nothing about a login');
+  assert.equal(loginFromEmail(''), null);
+});
+
+test('usage: a noreply commit lands on the same row as that login\'s approvals', () => {
+  const T = usageFixture();
+  git(T, 'init', '-q');
+  git(T, 'config', 'user.name', 'Al Ice');
+  git(T, 'config', 'user.email', '99+al@users.noreply.github.com');
+  fs.writeFileSync(path.join(T, 'epics/EP-x/epic.md'), '# x\n');
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'author the epic', '--date', '2026-01-09T00:00:00Z');
+  const ap = path.join(T, 'epics/EP-x/.sdlc/approvals.json');
+  fs.writeFileSync(ap, JSON.stringify([...JSON.parse(fs.readFileSync(ap, 'utf8')),
+    { artifact: 'stories/', step: 'stories-review', approver: 'al', status: 'approved', date: '2026-05-21' }]));
+  const model = buildModel(T, {});
+  const al = model.members.find((m) => m.name === 'al');
+  assert.ok(al, 'the commit is attributed to the login, not the git name');
+  assert.equal(al.login, 'al');
+  assert.equal(al.counts.authored, 1);
+  assert.equal(al.counts.approved, 1);
+  assert.ok(!model.members.some((m) => m.name === 'Al Ice'), 'no second row under the git name');
+  assert.ok(!JSON.stringify(model).includes('noreply'), 'the address itself is never emitted');
+  fs.rmSync(T, { recursive: true, force: true });
 });
 
 test('usage: a corrupt ledger warns and is skipped, never throws or under-counts other ledgers', () => {
@@ -11076,18 +11100,13 @@ test('usage: --member recomputes totals to the shown member only', () => {
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-// --- CodeRabbit PR#98 follow-ups: legacy array roles + Markdown cell escaping ---
+// --- CodeRabbit PR#98 follow-up: Markdown cell escaping ---
 const { renderMarkdown: renderMd } = await import('./usage.mjs');
-
-test('usage: isReviewerAnywhere handles the legacy hub-scope roles array (rolesForScope shape)', () => {
-  assert.equal(isReviewerAnywhere({ roles: ['reviewer'] }), true, 'roles: ["reviewer"] is a hub reviewer');
-  assert.equal(isReviewerAnywhere({ roles: ['owner'] }), false, 'roles: ["owner"] is not a reviewer');
-});
 
 test('usage: renderMarkdown escapes pipes/newlines so table structure survives hostile names', () => {
   const model = {
     window: { since: null, until: null }, generatedFrom: 'derived',
-    members: [{ name: 'a|b\nc', login: 'x|y', role: 'rev|iewer', rostered: true, counts: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 }, total: 0, firstActive: null, lastActive: null, epics: [], flags: ['dor|mant'], timeline: [] }],
+    members: [{ name: 'a|b\nc', login: 'x|y', counts: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 }, total: 0, firstActive: null, lastActive: null, epics: [], flags: ['no-review|participation'], timeline: [] }],
     totals: { authored: 0, commented: 0, approved: 0, shipped: 0, committed: 0 },
     hygiene: [{ epic: 'EP-a|b', story: 'S0\n1', task: 'T|1', repo: 'back|end', shippedAt: '2026-01-01' }],
   };
