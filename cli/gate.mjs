@@ -203,9 +203,11 @@ export function legacyLogins(hub) {
 // TODAY's content — an approval of the old text read as approval of the edited one, the hole #156 is
 // about — and on a closed step it listed one person twice. `aliases` is the roster's own name → login
 // table (`legacyLogins`), read for this recognition ONLY; it decides nothing about the gate. With it the
-// match is exact. Without it (the roster was deleted) an older record is matched only when nothing else
-// could be it: the same submission time on GitHub, or the single unmatched approval against the single
-// unmatched older approver of this PR on GitLab. Guessing by order is how two people's fingerprints got
+// match is exact — unless the roster itself is ambiguous (a name held twice is dropped by `legacyLogins`;
+// a name equal to another entry's login `yad doctor` warns about). Without it (the roster was deleted) an
+// older record is matched only when nothing else could be it: the same submission time on GitHub, or, on
+// an OPEN step, the single unmatched approval against the single unmatched older approver of this PR on
+// GitLab. A record an older release marked `unverified` names a login already and is never translated. Guessing by order is how two people's fingerprints got
 // swapped. Where it stays ambiguous, a closed step adds nothing (its record is history, and a second
 // entry for the same review would count one person twice), and an open step records the approval
 // against a STALE fingerprint from those older records when one exists — the approval must be given
@@ -214,7 +216,9 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   const live = accepted ?? (curHash ? [curHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
   const isLegacy = (a) => a.role !== undefined || a.domain !== undefined;
-  const personOf = (a) => (isLegacy(a) && aliases.has(a.approver) ? aliases.get(a.approver) : a.approver);
+  // An `unverified` record already names a LOGIN — an older release wrote one for a reviewer the roster did
+  // not list — so it is never translated through the roster's names, where it could collide with a name.
+  const personOf = (a) => (isLegacy(a) && !a.unverified && aliases.has(a.approver) ? aliases.get(a.approver) : a.approver);
   const bridge = approvals.filter((a) => a.step === stepId && a.source === 'bridge');
   const groups = new Map();   // person -> their records
   for (const a of bridge) {
@@ -232,22 +236,32 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // Older approvers nobody could name: legacy records with no alias, recorded against THIS review (a
   // record with no `pr` predates PR provenance and is taken as the pointer's, as `stampLegacyPr` does).
   const orphans = prNumber == null ? [] : [...groups.keys()].filter((k) => !seen.has(k)
-    && groups.get(k).every((a) => isLegacy(a) && !aliases.has(a.approver) && (a.pr == null || a.pr === prNumber)));
+    && groups.get(k).every((a) => isLegacy(a) && !a.unverified && !aliases.has(a.approver) && (a.pr == null || a.pr === prNumber)));
   const unmatched = recs.filter((r) => !matchOf.has(r));
-  const ambiguous = new Set();
+  // Every approval is judged against the SAME set of older approvers, and only then are the matches taken:
+  // deciding them one at a time made the result depend on the order the platform lists reviews, so an
+  // unchanged re-sync could add a record the first sync had dropped. A CLOSED step continues an older
+  // record only on an exact submission time — the GitLab one-to-one guess there could hand one person's
+  // history to another. Two approvals that would continue the same older record continue neither.
+  const picks = new Map();
   for (const r of unmatched) {
+    if (closed && !r.submittedAt) continue;
     const candidates = r.submittedAt
-      ? orphans.filter((k) => !replaced.has(k) && groups.get(k).some((a) => a.approvedAt === r.submittedAt))
+      ? orphans.filter((k) => groups.get(k).some((a) => a.approvedAt === r.submittedAt))
       : (unmatched.length === 1 && orphans.length === 1 ? orphans : []);
     const rivals = r.submittedAt ? unmatched.filter((x) => x.submittedAt === r.submittedAt).length : unmatched.length;
-    if (candidates.length === 1 && rivals === 1) {
-      matchOf.set(r, repOf(groups.get(candidates[0])));
-      replaced.add(candidates[0]);
-    } else if (orphans.some((k) => !replaced.has(k))) {
-      ambiguous.add(r);
-    }
+    if (candidates.length === 1 && rivals === 1) picks.set(r, candidates[0]);
   }
-  const staleOrphan = orphans.filter((k) => !replaced.has(k)).flatMap((k) => groups.get(k)).find(stale) || null;
+  const claims = new Map();
+  for (const k of picks.values()) claims.set(k, (claims.get(k) || 0) + 1);
+  for (const [r, k] of picks) {
+    if (claims.get(k) > 1) { picks.delete(r); continue; }
+    matchOf.set(r, repOf(groups.get(k)));
+    replaced.add(k);
+  }
+  const unclaimed = orphans.filter((k) => !replaced.has(k));
+  const ambiguous = new Set(unclaimed.length ? unmatched.filter((r) => !picks.has(r)) : []);
+  const staleOrphan = unclaimed.flatMap((k) => groups.get(k)).find(stale) || null;
   const kept = approvals.filter((a) => {
     if (!(a.step === stepId && a.source === 'bridge')) return true;
     if (replaced.has(personOf(a))) return false;
