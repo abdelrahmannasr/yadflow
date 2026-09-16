@@ -220,13 +220,13 @@ export function projectChecks(checks, root) {
       ? ` — no pre-edit hook protocol on ${noProtocol.join(', ')}, so an agent using ${noProtocol.length > 1 ? 'those' : 'that'} directory is guarded by CI only`
       : '';
     if (unreadable.length) {
-      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]`,
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard cannot be wired — ${unreadable.join(', ')} does not parse [YAD-STATE-001]${alsoUnguarded}`,
         'fix the JSON by hand, then run `yad check --fix` — yad never rewrites a settings file it cannot parse, so nothing else can clear this');
     } else if (unwired.length) {
       check(checks, 'hooks', 'project', 'warn', `agent ledger guard not wired: ${unwired.join(', ')}${alsoUnguarded}`,
         'run `yad check --fix` — until then an agent can hand-edit the CI-owned ledger and only find out when the review PR/MR fails');
     } else if (broken.length) {
-      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}`,
+      check(checks, 'hooks', 'project', 'warn', `agent ledger guard installed but its matcher no longer selects file edits: ${broken.join(', ')}${alsoUnguarded}`,
         'restore the matcher named beside each file — as it stands the hook is wired but never fires');
     } else {
       check(checks, 'hooks', 'project', 'ok', `agent ledger guard wired (hooks/ledger-guard.sh)${alsoUnguarded}`);

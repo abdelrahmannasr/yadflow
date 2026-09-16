@@ -285,10 +285,16 @@ function readPayload() {
 // an allow, is invalid JSON. So the exit protocol under Cursor would have blocked EVERY file write in
 // a verified project: fail-CLOSED on everything, the one outcome this guard's whole design forbids.
 //
+// The field names are Cursor's documented permission-hook schema — `permission`, `user_message`,
+// `agent_message`, all snake_case. Getting that wrong is quiet in the worst way: an off-schema
+// response still BLOCKS, so the write is refused and the test suite is happy, while the text naming
+// `yad gate open` is discarded and the agent is told only "no". Speaking at edit time instead of
+// leaving it to CI is worth doing only because of that text.
+//
 // The allow response is a fixed literal with nothing interpolated into it, because a malformed allow
-// is a block. The deny response carries the reason, and if that extra field were ever rejected as
-// off-schema the response is invalid — which blocks, which is what a deny wanted anyway. Both
-// failure directions are therefore safe, and they are safe in opposite ways on purpose.
+// is a block. The deny response carries the reason, and if a field were ever rejected as off-schema
+// the response is invalid — which blocks, which is what a deny wanted anyway. Both failure
+// directions are therefore safe, and they are safe in opposite ways on purpose.
 //
 // A deny exits 0, not 2: the JSON is the authoritative answer and exit 0 is what tells Cursor to read
 // it. Exit 2 would also block, but it is documented as the code for "no JSON to read", so it would
@@ -297,7 +303,10 @@ function readPayload() {
 // logs it, so it is never only in a channel we cannot confirm.
 export const HOOK_FORMATS = ['exit', 'cursor'];
 const CURSOR_ALLOW = '{"permission":"allow"}';
-const cursorDeny = (message) => JSON.stringify({ permission: 'deny', agentMessage: message });
+// `user_message` is what the person sees in the client, `agent_message` what the model reads. The
+// same text serves both: the person needs to know why their agent stopped, and the reason already
+// names the command rather than just refusing.
+const cursorDeny = (message) => JSON.stringify({ permission: 'deny', user_message: message, agent_message: message });
 
 // The `yad hook ledger-guard` entry point. `paths` (from `--path`) is additive to the payload, so
 // a harness with no JSON contract can call the guard directly.

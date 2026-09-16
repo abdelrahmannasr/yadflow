@@ -535,9 +535,20 @@ test('a project with a broken stamp recovers to .claude alone, not to the fresh-
     fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), '{ "ideTargets": "junk" }');
     assert.deepEqual(ideTargetStateFor(T).targets, ['.claude']);
     assert.notDeepEqual(ideTargetStateFor(T).targets, [...DEFAULT_IDE_TARGETS]);
-    // A directory already present still wins over the fallback — that is detection, not a default.
-    fs.mkdirSync(path.join(T, '.cursor'), { recursive: true });
+    // A bare `.cursor/` is NOT a target. It is an ordinary sight in a repo that uses Cursor for rules
+    // alone, and detecting on the directory meant that merely ADDING `.cursor` to the supported list
+    // enrolled every such project: no stamp, so this fallback runs, and the next `yad check --fix`
+    // writes 38 skill folders and a hooks.json for a team that never asked.
+    fs.mkdirSync(path.join(T, '.cursor/rules'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.claude'], 'a rules-only .cursor/ is not an install target');
+    // The install container is what makes it one — a directory yad already installs into.
+    fs.mkdirSync(path.join(T, '.cursor/skills'), { recursive: true });
     assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor']);
+    // Same rule for opencode, whose container is `commands/`, not `skills/`.
+    fs.mkdirSync(path.join(T, '.opencode'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor'], 'a bare .opencode/ is not a target either');
+    fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
+    assert.deepEqual(ideTargetStateFor(T).targets, ['.cursor', '.opencode']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 test('moduleActions: an uninstalled skill and the module config are "new"; nothing goes to _bmad (E3)', () => {
@@ -588,8 +599,15 @@ test('ideTargetStateFor: normalizes order/deduplication and safely falls back fr
   assert.deepEqual(mixed.repaired, [{ from: '.cluade', to: '.claude' }]);
   assert.equal(mixed.needsRepair, true);
 
+  // A BARE `.opencode/` is not a detected target: detection looks for the install container, so a
+  // directory a team keeps for their own reasons is never mistaken for an install of ours (E11).
   fs.mkdirSync(path.join(T, '.opencode'), { recursive: true });
   fs.writeFileSync(path.join(T, '.sdlc/cli-version.json'), JSON.stringify({ ideTargets: '../escape' }));
+  const bare = ideTargetStateFor(T);
+  assert.equal(bare.shapeValid, false);
+  assert.deepEqual(bare.targets, ['.claude'], 'a bare .opencode/ falls back to the recovery target');
+
+  fs.mkdirSync(path.join(T, '.opencode/commands'), { recursive: true });
   const malformed = ideTargetStateFor(T);
   assert.equal(malformed.shapeValid, false);
   assert.deepEqual(malformed.targets, ['.opencode'], 'wrong-shaped state falls back to a detected supported root');
@@ -2709,9 +2727,10 @@ test('selectIdeTargets: interactive input re-prompts, then trims and deduplicate
   // The menu names the AGENTS, not just the directories: `.agents` says nothing to a Codex user.
   assert.match(menu, /\.agents = .*Codex CLI/);
   assert.match(menu, /\.cursor = .*Cursor/);
-  // A directory already present is offered back instead — detection beats the default, so nobody is
-  // talked into a target they did not choose.
-  fs.mkdirSync(path.join(T, '.zencoder'), { recursive: true });
+  // An EXISTING INSTALL is offered back instead — detection beats the default, so nobody is talked
+  // into a target they did not choose. It takes the install container, not a bare directory: plenty of
+  // repos keep a `.cursor/` for rules alone and have never installed a skill in their lives.
+  fs.mkdirSync(path.join(T, '.zencoder/skills'), { recursive: true });
   await selectIdeTargets(T, undefined, async (_p, def) => { offered = def; return '.zencoder'; });
   assert.equal(offered, '.zencoder');
   fs.rmSync(T, { recursive: true, force: true });
@@ -13521,7 +13540,13 @@ test('yad hook ledger-guard honours its stdin/exit-code contract', () => {
     const jsonDeny = runHook('{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}', ['--format', 'cursor']);
     const verdict = JSON.parse(jsonDeny.stdout);
     assert.equal(verdict.permission, 'deny');
-    assert.match(verdict.agentMessage, /yad gate open EP-a/, 'the command that owns the transition reaches the model');
+    // Cursor's documented schema is snake_case: `permission`, `user_message`, `agent_message`. A
+    // camelCase field is off-schema, and an off-schema response still BLOCKS — so the write is refused
+    // and a test that only checks "a deny denies" passes, while the text naming the command the agent
+    // should run is silently discarded. That text is the only reason to speak at edit time at all.
+    assert.deepEqual(Object.keys(verdict).sort(), ['agent_message', 'permission', 'user_message']);
+    assert.match(verdict.agent_message, /yad gate open EP-a/, 'the command that owns the transition reaches the model');
+    assert.match(verdict.user_message, /yad gate open EP-a/, 'and the person sees why their agent stopped');
     // A deny EXITS 0: the JSON is the authoritative answer and exit 0 is what tells Cursor to read it.
     // Exit 2 blocks too, but is documented as "no JSON to read" — it would throw the reason away.
     assert.equal(jsonDeny.code, 0);
@@ -13764,9 +13789,14 @@ test('hookMatcherFires tests each harness against ITS OWN tool names', () => {
     entry.hooks.preToolUse[0].matcher = matcher;
     assert.equal(hookMatcherFires(entry, CURSOR), fires, matcher);
   }
-  const blank = JSON.parse(JSON.stringify(armed));
-  blank.hooks.preToolUse[0].matcher = '';
-  assert.equal(hookMatcherFires(blank, CURSOR), true, 'an empty matcher matches every tool');
+  for (const all of ['', '*']) {
+    const wide = JSON.parse(JSON.stringify(armed));
+    wide.hooks.preToolUse[0].matcher = all;
+    // Cursor documents BOTH as match-all. `*` is not a valid regex on its own — `new RegExp('*')`
+    // throws — so testing it as one reported a correctly configured project as an installed-but-dead
+    // guard, a warning the team could only clear by breaking their own config.
+    assert.equal(hookMatcherFires(wide, CURSOR), true, `matcher ${JSON.stringify(all)} matches every tool`);
+  }
   // Reading a Cursor file with Claude's adapter finds nothing: the event key alone rules it out.
   assert.equal(hookMatcherFires(armed), false, "Claude's adapter does not read Cursor's event");
 });

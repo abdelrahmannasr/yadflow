@@ -453,7 +453,12 @@ permission answer on stdout, whatever happens:
 | | stdout | exit |
 |---|---|---|
 | allow | `{"permission":"allow"}` | 0 |
-| deny | `{"permission":"deny","agentMessage":"<reason>"}` | 0 |
+| deny | `{"permission":"deny","user_message":"<reason>","agent_message":"<reason>"}` | 0 |
+
+The field names are Cursor's documented permission-hook schema, all snake_case. Getting that wrong is
+quiet in the worst way: an off-schema response still blocks, so the write is refused and any test that
+checks "a deny denies" passes — while the text naming `yad gate open` is discarded and the agent is
+told only "no".
 
 The allow response is a fixed literal with nothing interpolated into it, because a malformed *allow*
 is a block. The deny response carries the reason, and if that field were ever rejected as off-schema
@@ -466,7 +471,10 @@ Cursor logs it.
 
 The wrapper takes **no arguments**, and every fail-open branch of the shared script (no `yad` on
 PATH, an install it cannot resolve) is converted into an explicit `allow` answer rather than the
-empty stdout that would block.
+empty stdout that would block. **Exit 2 is converted into a deny**, not an allow: `ledger-guard.sh`
+resolves `yad` from the Product's own `node_modules/yadflow` before `PATH`, so a project pinned to a
+yadflow older than `--format` answers in the exit protocol — exit 2 with empty stdout — and treating
+that as "no verdict" would turn a real refusal into a permitted write.
 
 The two commands are spelled differently on purpose. Claude Code runs the string through a shell, so
 its entry uses `$CLAUDE_PROJECT_DIR` and is quoted against a project path containing a space. Cursor

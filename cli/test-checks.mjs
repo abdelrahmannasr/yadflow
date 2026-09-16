@@ -2239,11 +2239,16 @@ test('gate-sync pin: a skipped pin and a floating major both say so on stderr, a
 const HOOK = path.join(ROOT, 'skills/yad-checks/templates/hooks/ledger-guard.sh');
 
 // A Product laid out the way the wrapper expects, with `hooks/` beside a fake install.
+const HOOK_CURSOR = path.join(ROOT, 'skills/yad-checks/templates/hooks/ledger-guard-cursor.sh');
+
 function scaffoldHookHub() {
   const T = fs.mkdtempSync(path.join(os.tmpdir(), 'yad-wrapper-'));
   fs.mkdirSync(path.join(T, 'hooks'), { recursive: true });
-  fs.copyFileSync(HOOK, path.join(T, 'hooks/ledger-guard.sh'));
-  fs.chmodSync(path.join(T, 'hooks/ledger-guard.sh'), 0o755);
+  for (const src of [HOOK, HOOK_CURSOR]) {
+    const dest = path.join(T, 'hooks', path.basename(src));
+    fs.copyFileSync(src, dest);
+    fs.chmodSync(dest, 0o755);
+  }
   return T;
 }
 // A stand-in `yad` that exits with whatever code the test wants, and records that it ran.
@@ -2284,6 +2289,74 @@ test('ledger-guard wrapper: only an explicit deny blocks', () => {
     const argvBin = path.join(T, 'argvbin');
     runHookWrapper(T, { YAD_BIN: fakeYad(argvBin, 'yad-argv', 0) });
     assert.equal(fs.readFileSync(path.join(argvBin, 'argv.txt'), 'utf8').trim(), 'hook ledger-guard');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- hooks/ledger-guard-cursor.sh (the Cursor permission-protocol adapter, E11) ----------
+// Cursor's `preToolUse` is a PERMISSION hook: invalid JSON or an off-schema response BLOCKS. The
+// shared wrapper above prints NOTHING when it allows, and empty stdout is invalid JSON — so wiring it
+// into Cursor directly would have blocked every file write in a verified project. This adapter's one
+// load-bearing rule is therefore the mirror of the other's: a permission answer on stdout, ALWAYS.
+const runCursorWrapper = (T, env = {}) => {
+  const r = spawnSync('bash', [path.join(T, 'hooks/ledger-guard-cursor.sh')], {
+    input: '{"tool_input":{"file_path":"epics/EP-a/.sdlc/state.json"}}',
+    encoding: 'utf8', cwd: T,
+    env: { ...GIT_ENV, PATH: '/usr/bin:/bin', CURSOR_PROJECT_DIR: T, ...env },
+  });
+  return { code: r.status, err: r.stderr || '', out: (r.stdout || '').trim() };
+};
+// A stand-in `yad` that prints what the test wants on stdout and exits with the given code.
+function fakeYadOut(dir, name, code, stdout = '') {
+  fs.mkdirSync(dir, { recursive: true });
+  const p = path.join(dir, name);
+  fs.writeFileSync(p, `#!/usr/bin/env bash\ncat > /dev/null\n${stdout ? `printf '%s\\n' '${stdout}'` : ':'}\nexit ${code}\n`);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+
+test('cursor adapter: every path answers with a permission verdict on stdout', () => {
+  const T = scaffoldHookHub();
+  const bin = path.join(T, 'bin');
+  const verdict = (r) => { assert.doesNotThrow(() => JSON.parse(r.out), `not JSON: ${JSON.stringify(r.out)}`); return JSON.parse(r.out); };
+  try {
+    // The normal pair: whatever `yad hook ledger-guard --format cursor` prints is passed straight out.
+    const allow = runCursorWrapper(T, { YAD_BIN: fakeYadOut(bin, 'y-allow', 0, '{"permission":"allow"}') });
+    assert.equal(verdict(allow).permission, 'allow');
+    assert.equal(allow.code, 0);
+    const deny = runCursorWrapper(T, { YAD_BIN: fakeYadOut(bin, 'y-deny', 0, '{"permission":"deny","agent_message":"x"}') });
+    assert.equal(verdict(deny).permission, 'deny');
+    assert.equal(deny.code, 0, 'a deny exits 0 — the JSON is the authoritative answer');
+
+    // EXIT 2 WITH EMPTY STDOUT IS A DENY, and this is an ordinary case, not a corner one:
+    // `ledger-guard.sh` resolves `yad` from the Product's own node_modules BEFORE PATH, so a project
+    // pinned to a yadflow older than `--format` parses the flag, ignores it, and answers in the exit
+    // protocol. Reading that as "no verdict" would turn a real refusal into a permitted write.
+    const old = runCursorWrapper(T, { YAD_BIN: fakeYadOut(bin, 'y-old', 2) });
+    const parsed = verdict(old);
+    assert.equal(parsed.permission, 'deny');
+    assert.deepEqual(Object.keys(parsed).sort(), ['agent_message', 'permission', 'user_message'], "Cursor's schema is snake_case");
+    assert.match(parsed.agent_message, /yad gate open/, 'the agent is still told what to do instead');
+    assert.equal(old.code, 0);
+
+    // Every fail-open branch of the shared script reaches Cursor as an explicit ALLOW, never as the
+    // empty stdout that would block. Nothing to find at all:
+    const nothing = runCursorWrapper(T);
+    assert.equal(verdict(nothing).permission, 'allow');
+    assert.match(nothing.err, /no `yad` on PATH/, 'and the reason still reaches the log');
+    // A crash, and an exit code that is not the documented deny:
+    for (const code of [1, 127]) {
+      const r = runCursorWrapper(T, { YAD_BIN: fakeYadOut(bin, `y-${code}`, code) });
+      assert.equal(verdict(r).permission, 'allow', `exit ${code} allows`);
+    }
+    // Garbage on stdout is not passed through as a verdict — an off-schema response BLOCKS, so
+    // forwarding it would fail closed on a write the guard never judged.
+    const junk = runCursorWrapper(T, { YAD_BIN: fakeYadOut(bin, 'y-junk', 0, 'not json at all') });
+    assert.equal(verdict(junk).permission, 'allow');
+    // The shared script missing entirely — the adapter must not die with empty stdout.
+    fs.rmSync(path.join(T, 'hooks/ledger-guard.sh'));
+    const gone = runCursorWrapper(T, { YAD_BIN: fakeYadOut(bin, 'y-gone', 0, '{"permission":"allow"}') });
+    assert.equal(verdict(gone).permission, 'allow');
+    assert.match(gone.err, /missing or not executable/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 

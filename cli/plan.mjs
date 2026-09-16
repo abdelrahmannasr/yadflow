@@ -8,7 +8,7 @@ import {
   asset, exists, copyDir, copyFile, dirMatches, sameContent, readJSON, readJSONStrict, writeJSON, fileSha, warn,
 } from './lib.mjs';
 import {
-  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
+  VERSION, SKILLS, IDE_TARGETS, IDE_OPENCODE_DIR, IDE_OPENCODE_TARGET, IDE_RECOVERY_TARGET, MODULE_CONFIG, wiringFor, PRODUCT_WIRING, PROJECT_FILES, isVerifiedLedger,
   HOOK_WIRING, HOOK_ADAPTERS, CLAUDE_HOOK_ADAPTER,
   LEGACY_SKILLS, REMOVED_SKILLS, LEGACY_MARKER, LEGACY_REPO_FILES, LEGACY_PRODUCT_FILES, MANAGED_LEDGER, BACKUP_SUFFIX,
   productConfigPath,
@@ -130,7 +130,11 @@ const lstatIfPresent = (full) => {
   try {
     return fs.lstatSync(full);
   } catch (e) {
-    if (e?.code === 'ENOENT') return null;
+    // ENOTDIR means an ANCESTOR of this path is not a directory — `.agents` is a file, so
+    // `.agents/skills` cannot exist. That is "absent", exactly like ENOENT, and the caller that cares
+    // about the broken `.agents` itself reports it properly. Rethrowing turned an unsafe-target case
+    // that `assertSafeIdeContainers` handles into a crash.
+    if (e?.code === 'ENOENT' || e?.code === 'ENOTDIR') return null;
     throw e;
   }
 };
@@ -209,13 +213,31 @@ export function safeIdeTargetsFor(root, input) {
 // Fallback discovery must not promote a supported-looking file/symlink into an install target.
 // Keep unsafe entries for diagnostics, while returning only real IDE directories with safe install
 // containers. Unexpected filesystem errors remain fatal instead of being mistaken for bad input.
+//
+// THE DIRECTORY IS NOT ENOUGH — the INSTALL CONTAINER has to be there (E11). `.cursor/` is an ordinary
+// sight in a repo that uses Cursor for rules alone, and `.claude/` in one that only ever set
+// permissions. Detecting on the bare directory meant that adding `.cursor` to the supported list
+// silently enrolled every such project: no `ideTargets` in the stamp, so this fallback runs, `.cursor`
+// is "detected", and the next `yad check --fix` writes 38 skill folders into `.cursor/skills/`, adds
+// `.cursor/hooks.json`, and stamps the target permanently — for a team that never asked. Requiring
+// `<ide>/skills/` (or `.opencode/commands/`) means detection finds only a directory yad already
+// installs into, which is the question this function was always trying to answer.
+const hasInstallContainer = (root, ide) => {
+  const container = ide === IDE_OPENCODE_TARGET ? IDE_OPENCODE_DIR : path.join(ide, 'skills');
+  return !!lstatIfPresent(path.join(root, container));
+};
+
 export function detectedIdeTargetStateFor(root) {
   const targets = [];
   const unsafe = [];
   for (const ide of IDE_TARGETS) {
     if (!lstatIfPresent(path.join(root, ide))) continue;
     try {
+      // Safety FIRST, and the container second. An `.agents` that is a file or a symlink is a finding
+      // this function must report, not something to quietly skip because no `skills/` could be found
+      // underneath it — the diagnostic is the whole reason `unsafe` exists.
       assertSafeIdeContainers(root, ide);
+      if (!hasInstallContainer(root, ide)) continue;
       targets.push(ide);
     } catch (e) {
       if (e?.code !== IDE_TARGET_ERROR_CODE) throw e;
@@ -581,10 +603,14 @@ export function hookMatcherFires(settings, adapter = CLAUDE_HOOK_ADAPTER) {
   const tools = adapter.matcher.split('|');
   for (const entry of entries) {
     if (!entryIsOurs(adapter, entry)) continue;
+    // Both harnesses document an empty matcher as matching every tool; Cursor documents `*` the same
+    // way. `*` is NOT a valid regex on its own (`new RegExp('*')` throws "Nothing to repeat"), so
+    // testing it as one would drop into the catch below and report a correctly configured project as
+    // an installed-but-dead guard — a warning the team can only clear by breaking their own config.
+    if (!entry.matcher || entry.matcher === '*') return true;
     let re;
-    try { re = new RegExp(entry.matcher ?? ''); } catch { continue; }
-    // An empty matcher matches every tool name in both harnesses, so it is armed, not blank.
-    if (!entry.matcher || tools.some((t) => re.test(t))) return true;
+    try { re = new RegExp(entry.matcher); } catch { continue; }
+    if (tools.some((t) => re.test(t))) return true;
   }
   return false;
 }
