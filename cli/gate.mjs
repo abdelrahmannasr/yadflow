@@ -252,8 +252,10 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // second, it is the same review whatever name the roster now gives it. The name table can be wrong —
   // a team that renamed one of two people sharing a name hands the older records to whoever kept it,
   // and trusting the name then dropped the right record and passed the gate on an approval of old content
-  // (E62 upgrade simulation). Only older (role-bearing) groups are matched this way.
-  const legacyGroup = (k) => groups.get(k).every((a) => isLegacy(a) && !a.unverified);
+  // (E62 upgrade simulation). Only older groups are matched this way: role-bearing records, and records
+  // `stampLegacyLogins` moved onto a login through that same name table, which keep the name in
+  // `rosterName` (E64) so that stamping them does not take this correction away.
+  const legacyGroup = (k) => groups.get(k).every((a) => (isLegacy(a) && !a.unverified) || a.rosterName !== undefined);
   for (const r of recs) {
     if (!r.submittedAt || recs.some((x) => x !== r && x.submittedAt === r.submittedAt)) continue;
     const byTime = [...groups.keys()].filter((k) => !replaced.has(k) && legacyGroup(k)
@@ -369,6 +371,86 @@ export function stampLegacyPr(approvals, stepId, prNumber) {
     n++;
   }
   return n;
+}
+
+// Record the platform login on every older approval and comment record the roster can place (E64), so no
+// later sync needs the roster at all. E62's handoff: without this, a roster deleted before the first sync
+// after the upgrade left an open review's older approvals matchable only when nothing else could be them.
+//
+// An older record is one an older release wrote with a `role` or `domain`, naming the person by the
+// roster's `name`. It is stamped exactly as `upsertBridge` rewrites a record it continues: `approver` /
+// `commenter` becomes the login, and `role`, `domain` and `unverified` are removed — a role left on a
+// login-named record would make the next sync look its login up as a roster name, which can be another
+// person's. The dated `reviews/*--approved.md` keeps the roles.
+//
+// It stamps only what the name table places for certain, and leaves the rest for `upsertBridge` to judge
+// with the platform's evidence in hand:
+//   - an `unverified` record already names a login, and a name two logins share (`clashed`) or a name the
+//     roster does not hold is not in `aliases` — none is touched;
+//   - ONE RECORD PER PERSON, BUT ONLY FOR ONE REVIEW. An older release wrote one record per role, so one
+//     approval can be several records, and they carry the same `approvedAt`. Records for one login on one
+//     step that DISAGREE on `approvedAt` are different reviews — or two people a renamed roster now gives
+//     one name — and merging them would delete one. That group is left as it is (`unplaced`).
+//     When records for one review disagree on the fingerprint, the stale one (outside `acceptedHashes`)
+//     is kept, as E62 does;
+//   - a stamped approval keeps the roster name it had in `rosterName`. `upsertBridge` still lets an exact
+//     submission time beat that name, as it did while the record carried a role — so a renamed shared name
+//     stamped onto the wrong login is corrected by the platform's time, not locked in;
+//   - a comment round where two records would name one login is left as it is: which count is right is
+//     not knowable, and the cost of leaving it is one extra round.
+// Pure: returns new arrays and the counts; `acceptedFor(artifact)` gives that artifact's live fingerprints.
+// `unplaced` counts older records the roster was still needed for and the stamp could not place.
+export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { aliases = new Map(), clashed = new Map(), acceptedFor = () => [] } = {}) {
+  const isOld = (x) => x.role !== undefined || x.domain !== undefined;
+  const accepted = new Map();
+  const live = (artifact) => { if (!accepted.has(artifact)) accepted.set(artifact, acceptedFor(artifact) || []); return accepted.get(artifact); };
+  let stamped = 0;
+  let unplaced = 0;
+
+  const groups = new Map();
+  approvals.forEach((a, i) => {
+    const old = isOld(a) && !a.unverified;
+    if (old && !aliases.has(a.approver)) { if (clashed.has(a.approver)) unplaced++; return; }
+    const login = old ? aliases.get(a.approver) : (isOld(a) ? null : a.approver);
+    if (login == null) return;
+    const k = JSON.stringify([a.step, a.artifact, a.source ?? null, login]);
+    if (!groups.has(k)) groups.set(k, { login, list: [] });
+    groups.get(k).list.push({ a, i, old });
+  });
+  const out = approvals.slice();
+  const drop = new Set();
+  for (const { login, list } of groups.values()) {
+    const olds = list.filter((x) => x.old);
+    if (!olds.length) continue;
+    if (new Set(list.map((x) => x.a.approvedAt ?? null)).size > 1) { unplaced += olds.length; continue; }
+    const rep = list.find((x) => !!x.a.artifactHash && isStaleHash(x.a.artifactHash, live(x.a.artifact)))
+      || list.find((x) => !x.old) || olds[0];
+    const { role, domain, unverified, ...rest } = rep.a; // eslint-disable-line no-unused-vars
+    out[rep.i] = { ...rest, approver: login, rosterName: rep.old ? rep.a.approver : (rep.a.rosterName ?? olds[0].a.approver) };
+    for (const x of list) if (x !== rep) drop.add(x.i);
+    stamped += olds.length;
+  }
+
+  const rounds = new Map();
+  comments.forEach((cm, i) => {
+    const old = isOld(cm);
+    if (old && !aliases.has(cm.commenter)) { if (clashed.has(cm.commenter)) unplaced++; return; }
+    const login = old ? aliases.get(cm.commenter) : cm.commenter;
+    const k = JSON.stringify([cm.step, cm.round ?? null, login]);
+    if (!rounds.has(k)) rounds.set(k, { login, list: [] });
+    rounds.get(k).list.push({ cm, i, old });
+  });
+  const cOut = comments.slice();
+  for (const { login, list } of rounds.values()) {
+    const olds = list.filter((x) => x.old);
+    if (!olds.length) continue;
+    if (list.length > 1) { unplaced += olds.length; continue; }
+    const { role, domain, ...rest } = olds[0].cm; // eslint-disable-line no-unused-vars
+    cOut[olds[0].i] = { ...rest, commenter: login };
+    stamped++;
+  }
+
+  return { approvals: out.filter((_, i) => !drop.has(i)), comments: cOut, stamped, unplaced };
 }
 
 function writeComments(epicDir, base, today, blocking) {
@@ -499,6 +581,12 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
+  // E64: record the login on every older record the roster can place, every step of this epic, before
+  // anything reads them — so no later sync needs the roster. In memory like everything here: a read-only
+  // run writes nothing, and the writer path below persists it with the rest.
+  const stampedOld = stampLegacyLogins({ approvals, comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(epicDir, a) });
+  approvals = stampedOld.approvals;
+  comments = stampedOld.comments;
   // Migration (see stampLegacyPr): an approval written before PR provenance existed carries no `pr`,
   // so it can never be told apart from one arriving on a replacement PR — and on GitLab, with no
   // submittedAt either, the other proof is unavailable too. The pointer recorded here IS the PR those
@@ -663,6 +751,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   approvals = canonicalApprovals(approvals);
   comments = canonicalComments(comments);
   hubPrs = canonicalHubPrs(hubPrs);
+  if (stampedOld.stamped) info(`${epic}: recorded the platform login on ${stampedOld.stamped} older approval/comment record(s) that named a roster name`);
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
   writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
@@ -796,8 +885,38 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     if (!jobs.length) info('no open review PRs to sync');
   }
 
+  // E64: the login stamp, over EVERY epic — including one with no open review, which the job list above
+  // never reaches. It is a write in its own right, so it can be the reason this run commits, exactly as
+  // the product-level move is. Only on a merge run — the merge event, and the wired reconcile, which
+  // re-runs it for every recently merged review — never pre-merge (Path B), and not on a bare `yad gate ci`
+  // with no branch, which leaves what it synced uncommitted for the operator (below) and would otherwise
+  // commit that along with the stamp. An epic whose ledger holds uncommitted changes is skipped: the commit
+  // below stages the whole `.sdlc`, and must not carry a person's edit along with the stamp.
+  const stampedEpics = new Map(); // epic -> how many records were stamped
+  if (merged) {
+    const aliases = legacyLogins(hub);
+    const clashed = ambiguousLegacyNames(hub);
+    for (const e of aliases.size ? epicIds(root) : []) {
+      const dirty = git('status', '--porcelain', '--untracked-files=all', '--', path.join(epicRel(e), '.sdlc'));
+      if (!dirty.ok || String(dirty.stdout || '').trim() !== '') continue;
+      const dir = epicRoot(root, e);
+      let led;
+      try { led = loadLedger(dir); } catch { continue; } // the jobs below name an unreadable ledger
+      if (!led.state) continue;
+      const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(dir, a) });
+      if (!st.stamped) continue;
+      const approvalsNow = canonicalApprovals(st.approvals);
+      const commentsNow = canonicalComments(st.comments);
+      if (JSON.stringify(approvalsNow) !== JSON.stringify(canonicalApprovals(led.approvals))) writeJSON(led.files.approvals, approvalsNow);
+      if (JSON.stringify(commentsNow) !== JSON.stringify(canonicalComments(led.comments))) writeJSON(led.files.comments, commentsNow);
+      stampedEpics.set(e, st.stamped);
+      info(`${e}: recorded the platform login on ${st.stamped} older approval/comment record(s) that named a roster name`);
+    }
+  }
+
   let synced = 0;
   const touched = new Set();
+  const failedEpics = new Set();
   const advancedEpics = new Set(); // epics whose step actually passed this run (merge OR a swept merge)
   const statusFiles = new Map();   // epic -> the artifact files syncStatuses rewrote (staging allowlist)
   for (const job of jobs) {
@@ -877,7 +996,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       process.exitCode = 1;
       failed = true;
     }
-    if (failed) continue; // a failed epic's partial state must not be committed by this run
+    if (failed) { failedEpics.add(job.epic); continue; } // a failed epic's partial state must not be committed by this run
     touched.add(job.epic);
   }
   // The product-level move runs AFTER the jobs, so an event for `review/EP-discovery/…` resolved and
@@ -886,6 +1005,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const moved = (merged || !branch)
     ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
     : null;
+  for (const e of stampedEpics.keys()) if (!failedEpics.has(e)) touched.add(e);
+  const stampedCount = [...stampedEpics].filter(([e]) => !failedEpics.has(e)).reduce((n, [, k]) => n + k, 0);
   if (!touched.size && !moved) return { synced };
 
   // Path B: CI never writes the ledger to the review branch. A held step that did not advance is
@@ -958,7 +1079,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const subject = moved
     ? `chore(gate): move the product level to ${FOUNDATION_DIR}/ (shape 8) [skip ci]`
     : `chore(gate): ${sync} [skip ci]`;
-  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []));
+  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
+    ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []));
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced };
