@@ -39,6 +39,11 @@ roster `name` instead of their login. The gate never counts a role; the records 
 
 On the first sync after the upgrade, `yad gate sync` recognises the person such a bridge record names,
 so it continues that record instead of treating the approval as new:
+0. **An exact submission time comes first (GitHub).** When exactly one older record holds the second a
+   review was submitted, that review continues it, whatever name the roster now gives it. The name table
+   can be wrong — renaming one of two people who shared a name hands the older records to whoever kept
+   it. GitLab has no submission time, so there a rename can still put an older approval on the wrong
+   person: **do not rename a shared roster name while reviews with older approvals are open.**
 1. **With the roster still on disk** — the roster's `name` → `login` pairs make the match exact. This is
    the ONLY thing the roster is read for; it decides nothing about the gate. A name equal to another
    entry's login is still exact (the older record under a name was written from that entry). The one
@@ -53,6 +58,10 @@ so it continues that record instead of treating the approval as new:
    review (a later submission time, or a different PR/MR). When one person's older records
    disagree, the **stale** one is kept — stale meaning outside the fingerprints the gate accepts for the
    artifact (`acceptedHashes`), not merely different from today's hash.
+   A continued record is rewritten under the login and drops `role`, `domain` and `unverified`: they
+   count for nothing, and a `role` left on a login-named record would make the next sync read it as an
+   older record and look its login up as a roster name — which can be another person's. The dated
+   `reviews/<artifact>--<date>--approved.md` keeps the roles as they were.
 4. **Still ambiguous:** on a closed step nothing is added (its record is history, and a second entry would
    count one person twice); on an open step the approval is recorded against a stale fingerprint from
    those older records, so it must be given again on a new review. If none of those older records is
@@ -96,6 +105,7 @@ None of these decides anything any more. `yad doctor` warns so the team can dele
 | `people:roster-ambiguous` | a roster name given to more than one login (only checked when the roster is non-empty) |
 | `people:domain-owners-unused` | a repo in `.sdlc/repos.json` that lists `domain_owner` / `domain_owners` |
 | `people:verified-authors-unused` | a `verified_authors` list in `.sdlc/hub.json`, or a `.sdlc/verified-authors` file in the Product or a connected repo |
+| `people:allowlist-gate-stale` | an older `checks/verified-commits.sh` that still enforces the author list (a local-ledger Product's CI files are not refreshed by `yad check --fix`) |
 
 `yad roster` is removed (typing it prints a notice and exits 1), and `yad setup` collects no reviewers,
 roles, repo owners or commit emails. The verified-commits gate checks platform-Verified signatures only.
