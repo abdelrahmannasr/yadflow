@@ -15,6 +15,8 @@ import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
 import { legacyLogins, stampLegacyLogins } from './gate.mjs';
+import { checkRepo } from './riskmap-command.mjs';
+import { RISK_MAP_FILE } from './riskmap.mjs';
 
 const MIN_NODE = 18;
 
@@ -1804,6 +1806,40 @@ export function shapeChecks(checks, root, { plan: injected = null } = {}) {
 // Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
 // `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
 // on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
+// The risk map of each connected code repo (E65): one line per directory giving it a level, no names.
+// Advisory like the PR check — a stale map warns and never fails doctor, because nothing counts the map
+// until E66. A repo that is not on disk, or not a git repo, is the repos check's to report, not this one's.
+export function riskMapChecks(checks, root) {
+  const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
+  const repos = Array.isArray(registry?.repos) ? registry.repos : [];
+  for (const repo of repos) {
+    if (!repo || typeof repo.name !== 'string' || typeof repo.path !== 'string' || !repo.path) continue;
+    const repoRoot = path.resolve(root, repo.path);
+    if (!exists(repoRoot) || !gitHead(repoRoot)) continue;
+    const r = checkRepo(repoRoot);
+    if (!r.git) continue;
+    const id = `risk-map:${repo.name}`;
+    if (!r.map) {
+      check(checks, id, 'risk-map', 'ok', `${repo.name}: no ${RISK_MAP_FILE} yet — no directory has a risk level (\`yad risk-map draft ${repo.name}\` starts one)`);
+      continue;
+    }
+    if (!r.findings.length) { check(checks, id, 'risk-map', 'ok', `${repo.name}: every directory has a confirmed level`); continue; }
+    const groups = [];
+    for (const f of r.findings) {
+      let g = groups.find((x) => x.code === f.code);
+      if (!g) { g = { code: f.code, targets: [] }; groups.push(g); }
+      if (f.target) g.targets.push(f.target);
+    }
+    const said = groups.map((g) => {
+      const shown = g.targets.slice(0, 3).join(', ') + (g.targets.length > 3 ? ` +${g.targets.length - 3} more` : '');
+      return `${g.code}${shown ? ` (${shown})` : ''}`;
+    }).join('; ');
+    check(checks, id, 'risk-map', 'warn', `${repo.name}: ${RISK_MAP_FILE} is out of date — ${said}`,
+      `\`yad risk-map check ${repo.name}\` lists each one; fix the map in ${repo.name} through a PR (advisory — it blocks nothing)`,
+      { findings: r.findings });
+  }
+}
+
 export function threadChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
@@ -1839,6 +1875,7 @@ export function collectDoctor(root) {
   const checks = [];
   envChecks(checks);
   projectChecks(checks, root);
+  riskMapChecks(checks, root);
   foundationChecks(checks, root);
   shapeChecks(checks, root);
   mirrorChecks(checks, root);

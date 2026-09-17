@@ -192,6 +192,10 @@ ${c.bold('Build helpers')}
   yad repo refresh [name] [--push]     Re-pack a stale repo (a human decision). --push commits the
                        refreshed code-maps + registry as a chore(hub): sync code-context … [skip ci]
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
+  yad risk-map check [repo] [--json]   Warn where a code repo's .sdlc/risk-map (a risk level per
+                                       directory, no names) has gone stale — advisory, never blocks
+  yad risk-map draft [repo] [--dry-run] Add an 'unset' line for every directory the map does not cover;
+                                       never changes a line (the yad-connect-repos skill classifies them)
 
 ${c.bold('Feature threads (post-lock change management)')}
   yad thread                           List every feature thread (genesis → changes → defects)
@@ -547,6 +551,11 @@ async function main() {
     case 'repo': {
       const [, action, name] = o._;
       await commands.runRepo(o.dir, { action: action || 'list', name, today, push: o.push, allowBranch: o.allowBranch });
+      break;
+    }
+    case 'risk-map': {
+      const [, action, name] = o._;
+      await commands.runRiskMap(o.dir, { action: action || 'check', name, json: o.json, dryRun: o.dryRun });
       break;
     }
     case 'roster':

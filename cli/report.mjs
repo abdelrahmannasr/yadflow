@@ -47,6 +47,7 @@ const SAFE_VERBS = new Set([
   'open-pr', 'ship', 'repo', 'roster', 'docs', 'thread', 'reconcile',
   'open', 'sync', 'comments', 'status', 'walkthrough', 'trailer', 'ci', 'context', 'chat', 'cards',
   'nudge', 'list', 'add', 'grant', 'revoke', 'remove', 'build', 'deploy', 'refresh', 'wire',
+  'risk-map', 'draft',
 ]);
 
 // Reduce an argv to a safe command line: the leading verb chain (at most `command subcommand`, and
