@@ -3375,7 +3375,7 @@ test('E64 stampLegacyLogins: one review\'s role records become one login record 
   assert.equal(al.length, 1, 'one record per person');
   assert.deepEqual([al[0].artifactHash, al[0].rosterName, 'role' in al[0], 'domain' in al[0], al[0].date], ['sha256:old', 'alice', false, false, '2026-06-01'], 'the stale print is kept (outside acceptedHashes)');
   assert.ok(first.approvals.some((a) => a.approver === 'dan'), 'a record the roster cannot place is left alone');
-  assert.deepEqual(first.comments, [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'bo', round: 1, count: 2, date: '2026-06-01' }]);
+  assert.deepEqual(first.comments, [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'bo', round: 1, count: 2, date: '2026-06-01', rosterName: 'bob' }]);
   assert.deepEqual(approvals[0].approver, 'alice', 'pure: the input is not mutated');
   const again = stampLegacyLogins({ approvals: first.approvals, comments: first.comments }, { aliases, acceptedFor: () => ['sha256:live'] });
   assert.deepEqual([again.stamped, again.approvals, again.comments], [0, first.approvals, first.comments]);
@@ -8679,6 +8679,51 @@ test('E64 review: stampLegacyLogins leaves an entry it cannot read exactly as it
   const comments = [null, { step: 'x', commenter: '', role: 'reviewer', round: 1 }];
   const r = stampLegacyLogins({ approvals, comments }, { aliases: new Map([['alice', 'al'], ['', 'z']]), acceptedFor: () => { throw new Error('must not be asked'); } });
   assert.deepEqual([r.stamped, r.approvals, r.comments], [0, approvals, comments]);
+});
+
+test('E64 second review: live fingerprints that cannot be computed leave the group as it is, never a guess', async () => {
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const approvals = [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: '.' }, legacyAppr('bob', 'reviewer', 'sha256:b')];
+  const r = stampLegacyLogins({ approvals }, { aliases: new Map([['alice', 'al'], ['bob', 'bo']]),
+    acceptedFor: (a) => { if (a === '.') throw new Error('EISDIR'); return []; } });
+  assert.deepEqual([r.stamped, r.unplaced, r.approvals[0].approver, r.approvals[1].approver], [1, 1, 'alice', 'bo']);
+  // An empty artifact is not a record the stamp can read at all.
+  const empty = stampLegacyLogins({ approvals: [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: '' }] }, { aliases: new Map([['alice', 'al']]), acceptedFor: () => { throw new Error('must not be asked'); } });
+  assert.deepEqual([empty.stamped, empty.unplaced], [0, 0]);
+});
+
+test('E64 second review: a malformed older record in the merged review\'s OWN epic does not stop that merge', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const f = path.join(ci, 'epics/EP-test/.sdlc/approvals.json');
+    for (const artifact of ['', '.', 'reviews']) {
+      fs.writeFileSync(f, JSON.stringify([{ ...legacyAppr('bob', 'reviewer', 'sha256:e'), artifact, step: 'epic-review' }]));
+      git(ci, 'add', '-A');
+      git(ci, 'commit', '-q', '--allow-empty', '-m', `malformed ${artifact || 'empty'}`);
+      const st = path.join(ci, 'epics/EP-test/.sdlc/state.json');
+      const before = fs.readFileSync(st, 'utf8');
+      await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+      assert.equal(JSON.parse(fs.readFileSync(st, 'utf8')).steps.find((x) => x.id === 'architecture-review').status, 'done', `artifact ${JSON.stringify(artifact)}`);
+      fs.writeFileSync(st, before);
+      git(ci, 'add', '-A');
+      git(ci, 'commit', '-q', '--allow-empty', '-m', 'reset');
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 second review: one review\'s role records, one written before PR provenance, merge on the FIRST write', async () => {
+  // The login stamp ran before the `pr` backfill, so the records disagreed on `pr` and merged only on the next
+  // write — an unchanged re-sync that was not byte-identical.
+  const t = '2026-06-01T10:00:00Z';
+  const noPr = legacyAppr('alice', 'domain-owner', 'sha256:old', { domain: 'backend', approvedAt: t });
+  delete noPr.pr;
+  const r = await legacySync({ roster: undefined, status: 'done', merged: true, reviews: [], approvals: [legacyAppr('alice', 'owner', 'sha256:old', { approvedAt: t }), noPr] });
+  try {
+    const first = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    assert.deepEqual(JSON.parse(first).map((a) => [a.approver, a.pr, a.rosterName]), [['al', 7, 'alice']]);
+    await r.sync([]);
+    assert.equal(fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8'), first);
+  } finally { r.done(); }
 });
 
 test('E64 review: doctor does not throw on an approvals.json holding a null entry, roster or not', async () => {

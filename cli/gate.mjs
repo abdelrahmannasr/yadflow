@@ -416,7 +416,7 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
 
   const groups = new Map();
   approvals.forEach((a, i) => {
-    if (!readable(a, 'approver') || typeof a.step !== 'string' || typeof a.artifact !== 'string') return;
+    if (!readable(a, 'approver') || typeof a.step !== 'string' || !readable(a, 'artifact')) return;
     const old = isOld(a) && !a.unverified;
     if (old && !aliases.has(a.approver)) { if (clashed.has(a.approver)) unplaced++; return; }
     const login = old ? aliases.get(a.approver) : (isOld(a) ? null : a.approver);
@@ -433,8 +433,12 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
     const oneReview = list.length === 1
       || (list.every((x) => hasTime(x.a.approvedAt)) && new Set(list.map((x) => `${x.a.approvedAt}|${x.a.pr ?? ''}`)).size === 1);
     if (!oneReview) { unplaced += olds.length; continue; }
-    const rep = list.find((x) => !!x.a.artifactHash && isStaleHash(x.a.artifactHash, live(x.a.artifact)))
-      || list.find((x) => !x.old) || olds[0];
+    // Which fingerprints are live cannot always be computed from a hand-edited record (an `artifact` naming a
+    // folder throws). Then which record is stale is unknown, and choosing one could keep the live print, so
+    // the group is left as it is (E64 review).
+    let staleRec;
+    try { staleRec = list.find((x) => !!x.a.artifactHash && isStaleHash(x.a.artifactHash, live(x.a.artifact))); } catch { unplaced += olds.length; continue; }
+    const rep = staleRec || list.find((x) => !x.old) || olds[0];
     const { role, domain, unverified, ...rest } = rep.a; // eslint-disable-line no-unused-vars
     out[rep.i] = { ...rest, approver: login, rosterName: rep.old ? rep.a.approver : (rep.a.rosterName ?? olds[0].a.approver) };
     for (const x of list) if (x !== rep) drop.add(x.i);
@@ -457,7 +461,7 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
     if (!olds.length) continue;
     if (list.length > 1) { unplaced += olds.length; continue; }
     const { role, domain, ...rest } = olds[0].cm; // eslint-disable-line no-unused-vars
-    cOut[olds[0].i] = { ...rest, commenter: login };
+    cOut[olds[0].i] = { ...rest, commenter: login, rosterName: olds[0].cm.commenter };
     stamped++;
   }
 
@@ -592,12 +596,6 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   if (!ledger.state) { fail(`no epic state at ${epicDir}/.sdlc/state.json`); process.exitCode = 1; return { synced: 0 }; }
 
   let { approvals, comments, hubPrs, state } = ledger;
-  // E64: record the login on every older record the roster can place, every step of this epic, before
-  // anything reads them — so no later sync needs the roster. In memory like everything here: a read-only
-  // run writes nothing, and the writer path below persists it with the rest.
-  const stampedOld = stampLegacyLogins({ approvals, comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(epicDir, a) });
-  approvals = stampedOld.approvals;
-  comments = stampedOld.comments;
   // Migration (see stampLegacyPr): an approval written before PR provenance existed carries no `pr`,
   // so it can never be told apart from one arriving on a replacement PR — and on GitLab, with no
   // submittedAt either, the other proof is unavailable too. The pointer recorded here IS the PR those
@@ -606,6 +604,19 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const s = p.number != null ? findReviewStep(state, p.artifact) : null;
     if (s) stampLegacyPr(approvals, s.id, p.number);
   }
+  // E64: record the login on every older record the roster can place, every step of this epic, before
+  // anything else reads them — after the `pr` backfill above, so one review's role records agree on `pr` and
+  // merge on this write rather than the next. In memory like everything here: a read-only run writes
+  // nothing, and the writer path below persists it with the rest. A failure here is named and the sync goes
+  // on with the records as they were: the stamp must never stop a merge.
+  let stampedOld = { approvals, comments, stamped: 0 };
+  try {
+    stampedOld = stampLegacyLogins({ approvals, comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(epicDir, a) });
+  } catch (e) {
+    warn(`${epic}: older records not stamped — ${e.message}`);
+  }
+  approvals = stampedOld.approvals;
+  comments = stampedOld.comments;
   const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
   // Advance in CHAIN order, never in ledger order. `advanceState` opens the step that FOLLOWS the one
   // it closes, so syncing two passing gates out of chain order rewinds the epic: closing
