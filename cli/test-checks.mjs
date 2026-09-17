@@ -2835,7 +2835,7 @@ test('risk-map check: an unresolvable base still checks the map\'s own lines, an
   commit(T, 'chore: map', { '.sdlc/risk-map': 'src/ high maybe\nsrc/a/ low confirmed # by @alice\n', 'src/a/x.js': 'x' });
   const r = runGate(RISK_MAP, T, ['origin/nowhere']);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /base ref 'origin\/nowhere' not found — checking the map's own lines only/);
+  assert.match(r.out, /base ref 'origin\/nowhere' not found, or shares no history with HEAD .* checking the map's own lines only/);
   assert.deepEqual(warnings(r.out), ['header', 'unreadable line 1', 'names line 2']);
   fs.rmSync(T, { recursive: true, force: true });
 });
@@ -2911,7 +2911,7 @@ test('risk-map check: bash and cli/riskmap.mjs report the same findings, in the 
     const r = runGate(RISK_MAP, T);
     assert.equal(r.code, 0, `map #${i}: ${r.out}`);
     const files = git(T, 'ls-files', '-z').toString().split('\0').filter(Boolean);
-    const changed = git(T, 'diff', '--name-only', '-z', '--diff-filter=ACMR', 'main...HEAD').toString().split('\0').filter(Boolean);
+    const changed = git(T, 'diff', '--name-only', '-z', '--diff-filter=ACMRT', 'main...HEAD').toString().split('\0').filter(Boolean);
     const js = riskMapFindings(parseRiskMap(map), { files, changed }).map((f) => (f.target ? `${f.code} ${f.target}` : f.code));
     assert.deepEqual(warnings(r.out), js, `map #${i} — bash and JS disagree`);
     // And one change that touches a subset, so the "only what this change touches" half is compared too.
@@ -2970,5 +2970,38 @@ test('risk-map check: outside a git repo it still exits 0', () => {
   const r = runGate(RISK_MAP, T, ['main'], { GIT_CEILING_DIRECTORIES: path.dirname(T) });
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /not inside a git repo/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: a base with no shared history (a shallow clone) exits 0 and checks the map\'s own lines', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  for (let i = 0; i < 4; i++) commit(T, `feat: ${i}`, { 'src/a.js': String(i) });
+  const C = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-shallow-'));
+  execFileSync('git', ['clone', '-q', '--depth', '2', '--no-single-branch', `file://${T}`, C], { stdio: 'pipe', env: GIT_ENV });
+  git(C, 'checkout', '-q', 'feature');
+  const r = runGate(RISK_MAP, C, ['origin/main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /shares no history with HEAD/);
+  fs.rmSync(T, { recursive: true, force: true });
+  fs.rmSync(C, { recursive: true, force: true });
+});
+
+test('risk-map check: deleting the map warns among many deletions, and when it is renamed away', () => {
+  const T = scaffoldRepo();
+  const many = Object.fromEntries(Array.from({ length: 1500 }, (_, i) => [`.sdlc/old/f-${String(i).padStart(5, '0')}-with-a-longer-name.txt`, 'x']));
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', ...many });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'rm', '-q', '-r', '.sdlc');
+  git(T, 'commit', '-q', '-m', 'chore: drop .sdlc');
+  let r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(warnings(r.out), ['map-edited .sdlc/risk-map'], 'a pipe cut short by grep -q once lost this');
+  git(T, 'reset', '-q', '--hard', 'main');
+  git(T, 'mv', '.sdlc/risk-map', '.sdlc/risk-map.old');
+  git(T, 'commit', '-q', '-m', 'chore: rename the map away');
+  r = runGate(RISK_MAP, T);
+  assert.deepEqual(warnings(r.out), ['map-edited .sdlc/risk-map'], 'a rename away is a delete of the map');
   fs.rmSync(T, { recursive: true, force: true });
 });

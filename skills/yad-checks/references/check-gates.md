@@ -348,9 +348,12 @@ The change is `git diff --name-only -z --diff-filter=ACMR <base>...HEAD` — **t
 where the branch left the base, so commits the base gained since are never blamed on this change (the
 blocking gates use two dots; this one only warns about what the change touches). A deleted file is never
 asked about. The repo is `git ls-files -z`. Both lists are read NUL-separated, so a path holding `"`, `\`
-or a tab arrives as it is, never quoted by git. An unresolvable base is a note, not a failure: the map's
-own lines are still checked. A repo with no map gets one note and passes — **unless this change deleted
-the map**, which warns `map-edited`. Outside a git repo it prints a note and exits 0. **The map file is not wired** — it is the
+or a tab arrives as it is, never quoted by git. A base that does not resolve, or shares no history with HEAD (a shallow clone), is a note, not a failure:
+the map's own lines are still checked. A repo with no map gets one note and passes — **unless this change deleted
+the map**, which warns `map-edited` (a rename away from `.sdlc/risk-map` counts as a delete). Outside a git repo it
+prints a note and exits 0. **Known limit:** a path holding a newline reads differently here than in
+`yad risk-map check` — git's NUL-separated list has to become lines for macOS awk — and such a directory
+cannot have a line anyway. **The map file is not wired** — it is the
 team's, so `yad update` never owns or overwrites it; only the check is.
 
 ## CI wiring (both platforms)

@@ -50,7 +50,11 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 base_ok=0
-git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null && base_ok=1
+# A usable base resolves AND shares history with HEAD: the three-dot range below needs a merge base,
+# which a shallow clone (a host GIT_DEPTH) or unrelated history does not have — git would exit 128.
+if git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null && git merge-base "$BASE" HEAD >/dev/null 2>&1; then
+  base_ok=1
+fi
 # The change is measured from where this branch left the base (three dots), not against the base's
 # tip: when the base has moved on, a two-dot range would blame this change for the base's own commits
 # (the risk map's warnings are about what THIS change touches).
@@ -58,10 +62,11 @@ RANGE="${BASE}...HEAD"
 
 if [ ! -f "$MAP" ]; then
   # Deleting the map is the largest edit to it there is, so it is said, not passed over as "no map".
-  # Read into a variable first: `grep -q` quitting early would SIGPIPE `tr`, and pipefail would read that as no match.
+  # Asked of git by path, with no pipe to cut short: limited to the map's own path, a rename away from it
+  # reads as a delete too, since its new name is outside the pathspec.
   deleted=""
-  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only -z --diff-filter=D "$RANGE" | tr '\0' '\n')"
-  if printf '%s\n' "$deleted" | grep -qx "$MAP"; then
+  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only --diff-filter=D "$RANGE" -- "$MAP")"
+  if [ -n "$deleted" ]; then
     echo "WARN [risk-map] map-edited ${MAP}: this change deletes the risk map, which decides how much review later changes need"
     echo "PASS [risk-map]: 1 warning(s) — advisory, never blocks a merge."
     exit 0
@@ -81,9 +86,10 @@ git ls-files -z | tr '\0' '\n' > "$tmp/files"
 # The base is advisory here, so an unresolvable one does not fail the check the way it fails the
 # blocking gates: the map's own lines are still checked, and the per-change warnings are skipped.
 if [ "$base_ok" = 1 ]; then
-  git diff --name-only -z --diff-filter=ACMR "$RANGE" | tr '\0' '\n' > "$tmp/changed"
+  # T: a file replaced by a symlink (or back) is an edit too — the map included.
+  git diff --name-only -z --diff-filter=ACMRT "$RANGE" | tr '\0' '\n' > "$tmp/changed"
 else
-  echo "note [risk-map]: base ref '${BASE}' not found — checking the map's own lines only, not this change."
+  echo "note [risk-map]: base ref '${BASE}' not found, or shares no history with HEAD (a shallow clone?) — checking the map's own lines only, not this change."
   : > "$tmp/changed"
 fi
 
@@ -98,7 +104,7 @@ function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 function validdir(d,   body, n, segs, k) {
   if (d == "./") return 1
   if (d !~ /\/$/ || substr(d, 1, 1) == "/" || substr(d, 1, 1) == "#" || index(d, "//")) return 0
-  if (index(d, "*") || index(d, "?") || index(d, "[") || index(d, "\\") || index(d, " ") || index(d, "\t")) return 0
+  if (index(d, "*") || index(d, "?") || index(d, "[") || index(d, "\\") || index(d, " ") || index(d, "\t") || index(d, "\r")) return 0
   body = substr(d, 1, length(d) - 1)
   n = split(body, segs, "/")
   for (k = 1; k <= n; k++) if (segs[k] == "." || segs[k] == "..") return 0

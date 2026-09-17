@@ -17655,3 +17655,20 @@ test('yad risk-map: a repo whose file list is larger than 1 MiB is still read', 
     assert.equal(files.length, 16000);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('risk map: a directory whose name holds a newline or CR is unwritable, and a leading space survives the file list', async () => {
+  const { draftRiskMap, parseRiskMap } = await import('./riskmap.mjs');
+  const { repoFiles } = await import('./riskmap-command.mjs');
+  const d = draftRiskMap(null, ['a\nb/x.js', 'c\rd/y.js', 'src/z.js']);
+  assert.deepEqual(d.unwritable, ['a\nb/', 'c\rd/']);
+  assert.deepEqual(parseRiskMap(d.text).problems, [], 'no line split in two');
+  assert.equal(draftRiskMap(d.text, ['a\nb/x.js', 'c\rd/y.js', 'src/z.js']).text, d.text);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-space-'));
+  try {
+    git(T, 'init', '-q');
+    fs.mkdirSync(path.join(T, ' notes'));
+    fs.writeFileSync(path.join(T, ' notes/a.md'), 'x');
+    fs.writeFileSync(path.join(T, 'b.md'), 'x');
+    assert.deepEqual(repoFiles(T).sort(), [' notes/a.md', 'b.md'], 'the first path in the list keeps its leading space');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

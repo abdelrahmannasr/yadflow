@@ -7,6 +7,7 @@
 //
 // `check` is the local twin of `checks/risk-map-check.sh`, over the whole repo instead of one change.
 // It is advisory like the CI check: it prints warnings and never sets a failing exit code for them.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -17,9 +18,10 @@ import { draftRiskMap, parseRiskMap, RISK_MAP_FILE, riskMapFindings } from './ri
 // Every file in a code repo, as the map sees it: tracked files plus new files git does not ignore, so a
 // directory someone has just created is asked about before it is committed. null when it is not a git repo.
 export function repoFiles(repoRoot) {
-  // A large repo's list is many megabytes; spawnSync's default 1 MiB buffer would fail it as "not a git repo".
-  const r = run('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repoRoot, maxBuffer: 1 << 30 });
-  if (!r.ok) return null;
+  // Not `run`: it trims stdout, and ` notes/a.md` sorts first, so its leading space would be lost. And a
+  // large repo's list is many megabytes; spawnSync's default 1 MiB buffer would fail it as "not a git repo".
+  const r = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  if (r.status !== 0) return null;
   return [...new Set(r.stdout.split('\0').filter(Boolean))];
 }
 

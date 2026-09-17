@@ -47,11 +47,11 @@ const namesSomeone = (line) => line.split(/[ \t]+/).some((w) => /^@[A-Za-z0-9_-]
 const versionText = (digits) => digits.replace(/^0+(?=.)/, '');
 
 // A directory as a line may name it: `./`, or one or more segments each ending in `/`. No leading `/`,
-// no `.` or `..` segment, no glob characters (it is a directory, not a pattern), no backslash, no space
-// or tab (they split fields), and no leading `#` (that line is a comment).
+// no `.` or `..` segment, no glob characters (it is a directory, not a pattern), no backslash, no space,
+// tab, CR or newline (they split fields or lines), and no leading `#` (that line is a comment).
 export function validDir(dir) {
   if (dir === './') return true;
-  if (dir.startsWith('#') || !/^([^/*?[\\ \t]+\/)+$/.test(dir)) return false;
+  if (dir.startsWith('#') || !/^([^/*?[\\ \t\r\n]+\/)+$/.test(dir)) return false;
   return !dir.slice(0, -1).split('/').some((seg) => seg === '.' || seg === '..');
 }
 
