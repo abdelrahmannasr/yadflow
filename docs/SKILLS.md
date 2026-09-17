@@ -19,7 +19,9 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into
   `.sdlc/repos.json`, then caches an AI-readable picture of each — a compressed Repomix pack and a
   lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Idempotent and
-  refreshable; staleness tracked by HEAD sha.
+  refreshable; staleness tracked by HEAD sha. Also drafts each code repo's **risk map**
+  (`.sdlc/risk-map`, in the code repo): one line per directory saying `high`, `medium` or `low`, no names.
+  The AI reads the code — not folder names — and marks each level `guessed`; a person confirms it in a PR.
 - **`yad-sync-repos`** — Brings every connected repo up to date in one shot: switches each repo in
   `.sdlc/repos.json` to its `default_branch` and fast-forwards it from origin (local-user git, no stored
   tokens). A working-tree-only maintenance op — never a gate, never writes the registry. A dirty repo is
@@ -167,7 +169,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   (every change links a real story/spec), **contract-check** (a contract-surface diff without a
   re-locked contract FAILS), **build/test/lint**, **verified-commits** (every commit platform-signed),
   and the **pattern gates** — **commit-message** (Conventional subject + trailer order), **pr-title**,
-  and **pr-template** (the PR/MR body uses the template). Also wires **yad-update-guard** — a
+  and **pr-template** (the PR/MR body uses the template), plus the advisory **risk-map** check (warns,
+  never fails, when the repo's `.sdlc/risk-map` is stale for the change). Also wires **yad-update-guard** — a
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
   with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
   both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also

@@ -24,6 +24,7 @@ const FACTS = [
   'A connector is never a gated state — it never touches epic state, approvals, or the contract lock.',
   'Staleness for code repos is tracked by HEAD sha and is a human decision: yad repo list / yad repo refresh.',
   'yad repo refresh --push publishes the refreshed code-maps + registry to the Product default branch as a chore(hub): sync code-context [skip ci] audit commit.',
+  'Connecting or refreshing a repo also drafts its risk map, .sdlc/risk-map in the code repo: the AI reads the code and marks each directory high, medium or low as guessed; a person confirms each level in a PR. No names, and yad update never touches the file.',
 ];
 
 export function ConnectorsSection() {
