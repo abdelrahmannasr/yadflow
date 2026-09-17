@@ -93,7 +93,10 @@ else
   : > "$tmp/changed"
 fi
 
-awk -v mapf="$MAP" -v filesf="$tmp/files" -v changedf="$tmp/changed" '
+# LC_ALL=C: read bytes, not characters. A UTF-8-aware awk (macOS 26's) otherwise treats some non-ASCII
+# whitespace differently from mawk and older awks, and from cli/riskmap.mjs, where only a space or a tab
+# ever separates fields. Paths still compare exactly: bytes against bytes on both sides.
+LC_ALL=C awk -v mapf="$MAP" -v filesf="$tmp/files" -v changedf="$tmp/changed" '
 function problem(code, target, msg) { np++; pc[np] = code; pt[np] = target; pm[np] = msg }
 function warn(code, target, msg) {
   nw++
