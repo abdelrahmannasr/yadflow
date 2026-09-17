@@ -179,8 +179,8 @@ via the local user's `gh`/`glab`. For each:
 **Idempotent:** upsert bridge approvals by `(step, approver)` — one record per person. An older record
 that still carries `role`/`domain` and names a person by their old roster name is recognised as
 `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced by one
-login-named record that keeps its fingerprint. Every gate write also records the login on the older
-records the roster can place, on every step (same reference → "Recording the login on older records").
+login-named record that keeps its fingerprint. Every sync write (`yad gate sync`, `yad gate ci`) also
+records the login on the older records the roster can place for certain, on every step (same reference → "Recording the login on older records").
 A bridge approval records the platform's evidence — `approvedAt`, and on GitHub `commit`, `url` and
 `reviewId` — for the record only; the gate decides on the login and the fingerprint. Supersede revoked ones
 **while the step is open** (a step already `done` keeps its approvals — they are the record of why it

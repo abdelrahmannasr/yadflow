@@ -83,8 +83,9 @@ repository access decides who may approve. A review with no login is not counted
   name → login pairs first; never by list order), and replaced by one login-named record that keeps its
   `artifactHash` and dates — unless the platform shows a newer review (a later submission time, with a
   time on both sides, or a different PR/MR), which, as for any approval, binds to the current content.
-  Every gate write also records the login on the older records the roster can place, on every step of
-  the epic, so no later sync needs the roster (`login-roster.md` → "Recording the login on older
+  Every sync write (`yad gate sync`, `yad gate ci`) also records the login on the older records the
+  roster can place for certain, on every step of the epic; only the records it cannot place still need the
+  roster on a later sync (`login-roster.md` → "Recording the login on older
   records").
 - A bridge approval records the platform's evidence when it is given: `approvedAt` (GitHub's submission
   time, GitLab's `approved_at`), and on GitHub the review's `commit`, `url` and `reviewId`. They are

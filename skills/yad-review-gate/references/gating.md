@@ -147,8 +147,9 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - `sync` is idempotent (upsert by `(step, approver)`, one record per person; comment records by
   `(step, commenter, round)`, an unchanged round rewritten in place) and never touches **manual** approvals. An older bridge record that carries `role`/`domain` is
   recognised as `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced
-  by one login-named record that keeps its fingerprint. Every gate write also records the login on the
-  older records the roster can place, so no later sync needs the roster. A bridge approval records the
+  by one login-named record that keeps its fingerprint. Every sync write (`yad gate sync`, `yad gate ci`)
+  also records the login on the older records the roster can place for certain; only those it cannot
+  place still need the roster on a later sync. A bridge approval records the
   platform's evidence (`approvedAt`, and on GitHub `commit`, `url`, `reviewId`) — for the record only. A revoked approval is superseded **while the step is open**; once
   the step is `done` its approvals are kept as the record of why it passed, and a re-sync only re-binds
   new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").

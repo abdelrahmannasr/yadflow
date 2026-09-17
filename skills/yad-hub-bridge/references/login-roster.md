@@ -80,8 +80,9 @@ unchanged threads. Without the roster (or for a name two logins share) that sync
 
 ## Recording the login on older records (E64)
 
-The steps above need the roster. So, while it is still on disk, every gate write records the login on
-each older record the roster can place — and after that no sync needs the roster.
+The steps above need the roster. So, while it is still on disk, every sync write (`yad gate sync`,
+`yad gate ci`) records the login on each older record the roster can place for certain. After that, only
+the records it could not place (below) still need the roster.
 
 - **What changes on a record.** `approver` / `commenter` becomes the login, and `role`, `domain` and
   `unverified` are removed, exactly as step 3 rewrites a continued record. An approval keeps the name it
@@ -103,8 +104,8 @@ each older record the roster can place — and after that no sync needs the rost
   verified Product, `yad gate ci` does it on every merge run — the merge event and the scheduled reconcile
   that re-runs it — for **every** epic, including one with no open review, and commits it with the rest.
   It never writes before a merge; it skips an epic with uncommitted changes under `.sdlc` or `reviews`;
-  a run whose sync fails leaves no stamp behind; and an epic whose ledger it cannot read is named and
-  skipped without stopping the merged review. `yad gate sync <epic>` writes the stamp even when the epic
+  a run whose sync fails leaves no stamp behind; and a record it cannot read, or an epic whose stamp fails, is left as it
+  is and named, in any epic — the merged review's own included — without stopping that merge. `yad gate sync <epic>` writes the stamp even when the epic
   has no review PR on file. A Product with no platform never needs it: nothing there matches logins.
 - **When the roster can go.** `yad doctor`'s `people:roster-unused` says so: how many older records still
   wait for a gate write (and in which epics), or that none do. Records it cannot place (a shared name,

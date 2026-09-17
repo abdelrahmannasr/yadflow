@@ -559,9 +559,11 @@ Append-only ledger (an array). Each entry:
 `approver` is the platform login (on a Product with no platform, the name the reviewer gave). The gate
 counts distinct approvers and checks no role. An entry with an empty `approver` counts as nobody. An older entry
 may still carry `role` and `domain` fields from the removed roster, and name the person by the roster's
-name. The gate never reads the role. While the roster is on disk, the next gate write records the login
-on such an entry, removes `role` and `domain`, and keeps the old name in `rosterName` (E64 — see
-`yad-hub-bridge/references/login-roster.md`); the dated `approved.md` still prints the roles as recorded.
+name. The gate never reads the role. While the roster is on disk, the next sync write (`yad gate sync`,
+`yad gate ci`) records the login on such an entry when the roster places it for certain, removes `role`
+and `domain`, and keeps the old name in `rosterName` (E64). Some entries are left as they are — a name two
+logins share, or several records that do not prove they are one review (most GitLab role records); see
+`yad-hub-bridge/references/login-roster.md`. The dated `approved.md` still prints the roles as recorded.
 
 `source: "bridge"` marks an approval synced from a Product review PR/MR by `yad-review-gate action: sync`
 (via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`, except for the
@@ -592,7 +594,7 @@ Append-only ledger (an array), the machine-readable counterpart to the `reviews/
 { "artifact": "epic.md", "step": "epic-review", "commenter": "<platform login>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
 ```
 
-`commenter` is the platform login (on a Product with no platform, the name the reviewer gave). An older entry may still carry `role` and `domain`; the gate never reads them, and the next gate write records the login on it while the roster is on disk (E64).
+`commenter` is the platform login (on a Product with no platform, the name the reviewer gave). An older entry may still carry `role` and `domain`; the gate never reads them, and while the roster is on disk the next sync write records the login on it, keeping the old name in `rosterName` — unless two records in one round would then name the same login (E64).
 
 ## `hub-prs.json`
 Present only when the Shape review runs through the platform bridge. Per review step, the review
