@@ -531,7 +531,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'The production-safety gates that must pass before merge.',
         body: [
-          { kind: 'p', text: 'The check gates protect production. They run in CI (GitHub Actions and GitLab CI) and must pass before merge:' },
+          { kind: 'p', text: 'The check gates protect production. They run in CI (GitHub Actions and GitLab CI) and, except the advisory risk-map check, must pass before merge:' },
           { kind: 'list', items: [
             '**spec-link** — every change links a real story/spec.',
             '**contract-check** — a contract-surface change without a declared, re-locked contract FAILS and routes back to the architecture gate.',

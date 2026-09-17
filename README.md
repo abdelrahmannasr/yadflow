@@ -86,8 +86,9 @@ In one pass it produces:
 - **`.sdlc/` config** — the Product, connected repos, and tool connections
   (design, testing, learning), all as plain JSON you can read and diff.
 - **CI gates**, wired into every connected repo and the Product as **GitHub Actions or GitLab CI** —
-  spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, and the
-  push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
+  spec-link, contract-check, verified-commits, build/test/lint, the feature-thread gates, the advisory
+  risk-map check (warns when a code repo's `.sdlc/risk-map` — a risk level per directory, no names — is
+  stale), and the push-on-main **`yad-update-guard`** (which re-checks any direct-to-default commit — e.g. from
   `yad update --push` — with just `verified-commits` + `commit-message`), shipped as CI-agnostic bash
   under `checks/`.
 - **An agent guardrail** on a verified Product — `hooks/ledger-guard.sh`, a harness hook that refuses an
