@@ -768,6 +768,7 @@ const BASE_TAKING_GATES = [
   'skills/yad-checks/templates/checks/epic-open.sh',
   'skills/yad-checks/templates/checks/reconcile-debt-check.sh',
   'skills/yad-checks/templates/checks/commit-message.sh',
+  'skills/yad-checks/templates/checks/risk-map-check.sh',
   'skills/yad-checks/templates/checks/ledger-guard.sh',
   'skills/yad-checks/templates/checks/verified-commits.sh',
   'skills/yad-backfill/templates/checks/backfill-check.sh',
@@ -2773,4 +2774,153 @@ test('ledger-guard: the mirror — an EP-discovery ledger added beside an on-bas
     assert.match(r.out, /epics\/EP-discovery\/\.sdlc\/state\.json/);
     assert.doesNotMatch(r.out, /new epic, its seed is exempt/);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---------- risk-map-check.sh (E65) ----------
+// The PR check for a code repo's `.sdlc/risk-map`. Warnings only — it exits 0 on every map, readable or
+// not. Its rules have a twin in cli/riskmap.mjs; the last test runs both over the same repos.
+const RISK_MAP = path.join(CHECKS, 'risk-map-check.sh');
+const MAP_OK = '# yad-risk-map v1\n./ low confirmed\n.sdlc/ low confirmed\nsrc/ low confirmed\nsrc/payments/ high confirmed\n';
+const warnings = (out) => out.split('\n').filter((l) => l.startsWith('WARN [risk-map] '))
+  .map((l) => l.slice('WARN [risk-map] '.length).replace(/:.*$/, ''));
+
+test('risk-map check: a repo with no map gets one note and passes', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: x', { 'src/a.js': 'x' });
+  const r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /has no \.sdlc\/risk-map/);
+  assert.deepEqual(warnings(r.out), []);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: asks only about what THIS change touches, and never fails', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': `${MAP_OK}docs/ unset\nsrc/catalog/ low guessed\n`, 'docs/a.md': 'x', 'src/catalog/list.js': 'x', 'src/payments/charge.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  // A change inside a confirmed directory: nothing to say.
+  commit(T, 'feat: charge', { 'src/payments/charge.js': 'y' });
+  let r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(warnings(r.out), []);
+  assert.match(r.out, /every file this change touches has a confirmed level/);
+  // A new top-level directory, a guessed line and an unset line touched, and the map edited.
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: more', {
+    'tools/x.sh': 'x', 'src/catalog/list.js': 'y', 'docs/a.md': 'y',
+    '.sdlc/risk-map': `${MAP_OK}docs/ unset\nsrc/catalog/ low guessed\n# edited\n`,
+  });
+  r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, 'advisory: a stale map never blocks a merge');
+  assert.deepEqual(warnings(r.out), ['unset docs/', 'guessed src/catalog/', 'uncovered tools/', 'map-edited .sdlc/risk-map']);
+  assert.match(r.out, /4 warning\(s\) — advisory/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: a deleted directory leaves a dead line, and a deleted file is not asked about', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': `${MAP_OK}legacy/ medium confirmed\n`, 'legacy/old.js': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'rm', '-q', 'legacy/old.js', 'a.txt');
+  git(T, 'commit', '-q', '-m', 'chore: drop legacy');
+  const r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  // Dead lines come in map order: `./` lost its only root file, `src/payments/` never had one.
+  assert.deepEqual(warnings(r.out), ['dead ./', 'dead src/payments/', 'dead legacy/']);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: an unresolvable base still checks the map\'s own lines, and passes', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': 'src/ high maybe\nsrc/a/ low confirmed # by @alice\n', 'src/a/x.js': 'x' });
+  const r = runGate(RISK_MAP, T, ['origin/nowhere']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /base ref 'origin\/nowhere' not found — checking the map's own lines only/);
+  assert.deepEqual(warnings(r.out), ['header', 'unreadable line 1', 'names line 2']);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: a map written for a newer version is not read, and says so', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': '# yad-risk-map v2\nnot: a line\n', 'src/a.js': 'x' });
+  const r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(warnings(r.out), ['version v2']);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: bash and cli/riskmap.mjs report the same findings, in the same order', async () => {
+  const { parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
+  const MAPS = [
+    '',
+    '\n\n',
+    MAP_OK,
+    '# yad-risk-map v1\n',
+    '# yad-risk-map v3\nsrc/ high confirmed\n',
+    'src/ low confirmed\n',
+    '   # yad-risk-map v1\nsrc/ low confirmed\n',
+    '#yad-risk-map   v1  \r\nsrc/  high\tconfirmed  # ok\r\n./ low guessed\r\n',
+    [
+      '# yad-risk-map v1',
+      '# owner @alice',
+      'src/payments/ high confirmed # ask @bob',
+      'src/catalog/ low guessed',
+      'c#/ low confirmed#glued',
+      'docs/ unset',
+      'docs/\tunset\tguessed',
+      'lib/ unset confirmed',
+      'lib/ unset maybe',
+      'bad high confirmed',
+      '/abs/ high confirmed',
+      'a/../b/ high confirmed',
+      './x/ high confirmed',
+      'a//b/ high confirmed',
+      'glob/**/ high confirmed',
+      'back\\slash/ high confirmed',
+      'src/ High confirmed',
+      'src/ high',
+      'one',
+      'a/ b/ c/ d/',
+      'gone/ medium confirmed',
+      'deep/er/ high guessed',
+      '.github/ high confirmed',
+      'user@corp.io/ low confirmed',
+    ].join('\n'),
+  ];
+  const TREE = {
+    'README.md': 'x', 'src/index.js': 'x', 'src/payments/charge.js': 'x', 'src/payments/refunds/r.js': 'x',
+    'src/catalog/list.js': 'x', 'src/new/thing.js': 'x', 'c#/x.cs': 'x', 'docs/a.md': 'x', 'deep/er/x.js': 'x',
+    'deep/other/y.js': 'x', 'deep/z.js': 'x', 'tools/bin/run.sh': 'x', '.github/workflows/ci.yml': 'x', 'weird name/a b.txt': 'x',
+  };
+  for (const [i, map] of MAPS.entries()) {
+    const T = scaffoldRepo();
+    git(T, 'rm', '-q', 'a.txt');
+    git(T, 'commit', '-q', '-m', 'chore: empty base');
+    git(T, 'branch', '-q', '-f', 'main');
+    commit(T, 'feat: tree', { ...TREE, '.sdlc/risk-map': map });
+    const r = runGate(RISK_MAP, T);
+    assert.equal(r.code, 0, `map #${i}: ${r.out}`);
+    const files = git(T, '-c', 'core.quotePath=false', 'ls-files').toString().split('\n').filter(Boolean);
+    const changed = git(T, '-c', 'core.quotePath=false', 'diff', '--name-only', '--diff-filter=ACMR', 'main..HEAD').toString().split('\n').filter(Boolean);
+    const js = riskMapFindings(parseRiskMap(map), { files, changed }).map((f) => (f.target ? `${f.code} ${f.target}` : f.code));
+    assert.deepEqual(warnings(r.out), js, `map #${i} — bash and JS disagree`);
+    // And one change that touches a subset, so the "only what this change touches" half is compared too.
+    git(T, 'branch', '-q', '-f', 'main');
+    commit(T, 'feat: some', { 'src/catalog/list.js': 'y', 'deep/z.js': 'y', 'tools/bin/run.sh': 'y' });
+    const r2 = runGate(RISK_MAP, T);
+    const changed2 = ['deep/z.js', 'src/catalog/list.js', 'tools/bin/run.sh'];
+    const js2 = riskMapFindings(parseRiskMap(map), { files, changed: changed2 }).map((f) => (f.target ? `${f.code} ${f.target}` : f.code));
+    assert.deepEqual(warnings(r2.out), js2, `map #${i}, partial change — bash and JS disagree`);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('risk-map check is wired on both platforms, and the map it reads never is', async () => {
+  const { REPO_WIRING } = await import('./manifest.mjs');
+  assert.ok(REPO_WIRING.common.some((w) => w.dest === 'checks/risk-map-check.sh' && w.exec));
+  const all = Object.values(REPO_WIRING).flat();
+  assert.ok(!all.some((w) => /risk-map$/.test(w.dest)), 'the map is the team\'s file — `yad update` must never own it');
+  for (const f of ['skills/yad-checks/templates/github/yad-checks.yml', 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml']) {
+    assert.match(fs.readFileSync(path.join(ROOT, f), 'utf8'), /bash checks\/risk-map-check\.sh "origin\//, f);
+  }
 });

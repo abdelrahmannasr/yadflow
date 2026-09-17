@@ -29,6 +29,16 @@ jobs:
         with: { fetch-depth: 0 }
       - run: bash checks/contract-check.sh "origin/${{ github.base_ref }}"
 
+  # E65 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings only: the
+  # script always exits 0, so a stale map never blocks a merge.
+  risk-map:
+    runs-on: ubuntu-latest
+    if: github.event.action != 'edited'
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: bash checks/risk-map-check.sh "origin/${{ github.base_ref }}"
+
   build-test-lint:
     runs-on: ubuntu-latest
     if: github.event.action != 'edited'
