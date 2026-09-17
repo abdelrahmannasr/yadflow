@@ -730,7 +730,8 @@ docs/           unset
 **How a map is made.** `yad risk-map draft <repo>` adds an `unset` line for every directory no line
 covers — on a new map, each top-level directory (and `./` for the root files).
 The `yad-connect-repos` skill then has your AI agent read the code — not the folder names — and fill
-each `unset` line with a level, a one-line reason and `guessed`. It never rewrites a `confirmed` line.
+each `unset` line with a level, a one-line reason and `guessed` (one exception: `.sdlc/` is `high`
+because it holds the map). It never rewrites a `confirmed` line.
 With no AI agent, a person fills the lines in.
 
 **How it stays true.** `checks/risk-map-check.sh` runs on every PR (both CI templates) and warns when the

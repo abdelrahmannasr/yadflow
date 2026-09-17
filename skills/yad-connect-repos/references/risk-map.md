@@ -33,7 +33,7 @@ docs/           unset
 
 The rules are code: `cli/riskmap.mjs`, with a bash twin in `checks/risk-map-check.sh`.
 
-## Rubric — read the CODE, not the folder name
+## Rubric — read the CODE, not the folder name (one exception, below)
 
 Decide from what the code in the directory **does**: the calls it makes, the data it writes, the
 libraries it imports. A folder called `utils/` can move money; a folder called `payments/` can hold only
@@ -41,14 +41,17 @@ display text. Use the pack and the code-map first, and open the files themselves
 
 | Level | The code in the directory… |
 |---|---|
-| `high` | moves money or bills anyone; handles login, sessions, tokens, permissions, secrets or keys; deletes stored data or changes its shape (migrations); reads or writes personal data (identity, contact, health, payment details); builds, deploys or releases (CI workflows, deploy scripts, infrastructure); **`.sdlc/`**, which holds this map — a change to it decides how much review every later change needs |
+| `high` | moves money or bills anyone; handles login, sessions, tokens, permissions, secrets or keys; deletes stored data or changes its shape (migrations); reads or writes personal data (identity, contact, health, payment details); builds, deploys or releases (CI workflows, deploy scripts, infrastructure); and `.sdlc/` — see the exception below the table |
 | `medium` | writes to a database, a queue or an outside service in ordinary ways; serves a public API or event others depend on; is a shared library most of the code imports; sets build or dependency configuration |
 | `low` | only reads and shows data; styling and UI text; documentation; tests, fixtures and examples; developer tooling that never ships |
 
 - **When unsure between two levels, choose the higher one** and say what you could not tell in the reason.
 - **Split a directory when its parts differ.** If `src/` holds `payments/` (`high`) and `catalog/` (`low`),
   write a line for each part, and keep a line for `src/` itself for the files directly in it.
-- **`.sdlc/` is the one directory judged by what it holds, not by what its code does** (the user's decision, 2026-09-17). A `yad update` PR touches it too, so those PRs ask for the extra approver as well — accepted, because they rewrite the gate scripts a repo runs.
+- **The one exception: `.sdlc/` is `high`**, judged by what it HOLDS — this map, which decides how much
+  review every later change needs — not by what its code does (the user's decision, 2026-09-17). A
+  `yad update` PR touches that folder too, so those PRs ask for the extra approver as well; accepted,
+  because they rewrite the gate scripts the repo runs.
 - **The reason is one line, taken from the code**: a file and what it does (`charge.js calls the card
   processor`). Never a name, a secret, a customer value or an address.
 

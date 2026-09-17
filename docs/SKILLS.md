@@ -22,6 +22,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   refreshable; staleness tracked by HEAD sha. Also drafts each code repo's **risk map**
   (`.sdlc/risk-map`, in the code repo): one line per directory saying `high`, `medium` or `low`, no names.
   The AI reads the code — not folder names — and marks each level `guessed`; a person confirms it in a PR.
+  One exception: `.sdlc/` is `high`, because it holds the map.
 - **`yad-sync-repos`** — Brings every connected repo up to date in one shot: switches each repo in
   `.sdlc/repos.json` to its `default_branch` and fast-forwards it from origin (local-user git, no stored
   tokens). A working-tree-only maintenance op — never a gate, never writes the registry. A dirty repo is
