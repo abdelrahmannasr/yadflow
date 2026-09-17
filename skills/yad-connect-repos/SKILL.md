@@ -1,6 +1,6 @@
 ---
 name: yad-connect-repos
-description: 'Connects code repos to the Product so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product default branch as a chore(hub): sync code-context [skip ci] audit commit. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
+description: 'Connects code repos to the Product so the front/"brain" phases are code-aware. Registers N code repos (GitHub or GitLab, local-user auth, no stored tokens) into the project-wide .sdlc/repos.json, then caches an AI-readable picture of each — a compressed Repomix pack and a lightweight code-map (existing endpoints/events/data-models/modules), secret-scanned. Run at one-time setup or any time a new repo is added. Reusable, idempotent, refreshable; staleness is tracked by HEAD sha. `yad repo refresh --push` publishes the refreshed code-maps + registry to the Product default branch as a chore(hub): sync code-context [skip ci] audit commit. Also drafts each code repo's risk map (.sdlc/risk-map — a level per directory, no names), classified by reading the code and marked guessed for a person to confirm. Use when the user says "connect a repo", "connect the code repos", "refresh the code context", "list connected repos", or "push the code-map refresh".'
 ---
 
 # SDLC — Connect Code Repos (make the brain code-aware)
@@ -11,7 +11,8 @@ stories that contradict or duplicate what is built. This skill **connects** code
 code → product half is the existing `link.md` back-pointer each spec carries).
 
 This is **setup/maintenance**, not a gated Shape step — it never touches `.sdlc/state.json` or any
-epic's approvals. It only writes the project-wide registry and the per-repo context cache.
+epic's approvals. It writes the project-wide registry, the per-repo context cache, and — in the code
+repo itself — a draft of that repo's risk map (Step 3b), which the team commits there through a PR.
 
 ## Conventions
 
@@ -90,6 +91,27 @@ module layout**. Mark anything unclear `<!-- unverified: ... -->`; never fill ga
 behaviour. This is the cheap artifact every Shape phase loads by default (the full pack is read only
 when a phase needs depth).
 
+### Step 3b — Draft the risk map (a level per directory, from the code)
+Each code repo keeps `.sdlc/risk-map` **in the code repo**: one line per directory saying `high`, `medium`
+or `low`, and **no names** (E65). Format, rubric and edit rules: `references/risk-map.md`.
+
+1. Run `yad risk-map draft <repo>`. It adds an `unset` line for every directory no line covers and never
+   changes a line that is already there.
+2. For every `unset` line, **read the code in that directory** — the pack, the code-map, and the files
+   themselves when those do not say — and decide the level by the rubric. Judge by what the code does,
+   never by the folder's name. Write the level, `guessed`, and a one-line reason from the code
+   (`src/payments/  high  guessed  # charge.js calls the card processor`). When unsure between two levels,
+   choose the higher one. When a directory's parts differ, add a deeper line for each part.
+3. A `guessed` line may be re-levelled if the code says otherwise. **Never edit, re-level or delete a
+   `confirmed` line**: when the code now contradicts one, report it as a suggestion for a person. Never
+   mark anything `confirmed` — only a person does that. Write no name, secret or customer value.
+4. Run `yad risk-map check <repo>` and report what is left.
+5. Tell the person to review every `guessed` line, change the right ones to `confirmed`, and commit
+   `.sdlc/risk-map` **in the code repo, through a PR**. Its `risk-map` check warns on that PR that the map
+   was edited — expected, and advisory.
+
+With no AI agent available, stop after step 1 and tell the person the `unset` lines are theirs to fill.
+
 ### Step 4 — Record the repo in the registry
 Upsert the repo into `{project-root}/.sdlc/repos.json` (create the file if absent). Record the current
 HEAD sha as `syncedHead` (this drives staleness):
@@ -123,7 +145,7 @@ the Shape phases will now load this repo's code-map. Nothing auto-advances; this
 
 ## Other actions
 
-- **`refresh`** — re-run Steps 2–4 for an already-connected repo (after its code moves). Updates
+- **`refresh`** — re-run Steps 2–4 (including Step 3b) for an already-connected repo (after its code moves). A new directory gets an `unset` line and a guess; a `confirmed` line is only ever suggested against. Updates
   `syncedHead` + `lastSyncedAt`. Same machinery as `connect`. Once the AI has regenerated the
   `code-map.md` (Step 3), publish it to the Product with **`yad repo refresh <repo> --push`**: it
   commits the tracked code-maps + `.sdlc/repos.json` (never the gitignored `pack.md`) as one
@@ -198,9 +220,12 @@ it does not silently re-pack. Refreshing the cache is a human decision. Document
 - **Describe what exists; never invent.** The code-map records built behaviour, not a design.
 - **Setup, not a gate.** Never touch `.sdlc/state.json`, approvals, or the contract lock from here.
 - **Idempotent + refreshable.** `connect`/`refresh` are safe to re-run; staleness is HEAD-sha based.
+- **The risk map holds no names, and the agent never confirms.** It fills `unset`, may re-level `guessed`,
+  and only suggests against `confirmed`.
 
 ## Reference
 - Registry schema + freshness rule: `references/repos-registry.md`.
+- The risk map — format, rubric, what the agent may change: `references/risk-map.md`.
 - Product config (the review bridge): `references/hub-config.md`.
 - Repomix command, secret-scan, degrade path, the code-map prompt, and live on-demand:
   `references/code-context.md`.
