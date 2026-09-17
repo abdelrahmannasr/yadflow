@@ -14,6 +14,7 @@ import { loadDebt } from './thread.mjs';
 import { readShips } from './ledger.mjs';
 import { gitHead, insideWorkspace } from './setup.mjs';
 import { cliFor, hostFromGitUrl, ambiguousLegacyNames } from './platform.mjs';
+import { legacyLogins, stampLegacyLogins } from './gate.mjs';
 
 const MIN_NODE = 18;
 
@@ -99,9 +100,31 @@ export function projectChecks(checks, root) {
       const r = hub.roster;
       const listed = Array.isArray(r) ? r.length > 0 : (r && typeof r === 'object' ? Object.keys(r).length > 0 : !!r);
       if (listed) {
+        // When it can go (E64): once every older record it can place names the login. Counted with the same
+        // stamp the gate writes, so this says exactly what the next gate write would still change.
+        let waiting = 0;
+        let unplaced = 0;
+        const waitingIn = [];
+        const aliases = legacyLogins(hub);
+        const clashed = ambiguousLegacyNames(hub);
+        for (const e of epicIds(root)) {
+          try {
+            const led = loadLedger(epicRoot(root, e));
+            const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed });
+            if (st.stamped) { waiting += st.stamped; waitingIn.push(e); }
+            unplaced += st.unplaced;
+          } catch { /* an unreadable ledger is reported by its own check */ }
+        }
+        const when = !hub.platform
+          ? 'nothing reads it on a Product with no platform — delete the `roster` key'
+          : waiting
+            ? `keep it for now: ${waiting} older approval/comment record(s) in ${waitingIn.join(', ')} still name people by roster name. The next gate write records their logins — ${isVerifiedLedger(hub) ? 'CI\'s run on the next merged review' : '`yad gate sync <epic>`'} — then delete the \`roster\` key`
+            : unplaced
+              ? `every older record it can place names its login now; ${unplaced} it cannot place (a name two logins share, or records that disagree about which review they are) are matched by submission time or given again on a new review — delete the \`roster\` key once those reviews are closed`
+              : 'no older record needs it any more — delete the `roster` key';
         check(checks, 'people:roster-unused', 'project', 'warn',
           `${PROJECT_FILES.hubConfig} has a \`roster\` that no longer decides who approves — a gate needs one approval (not the author's own) from anyone with access`,
-          'keep it until every review with older approvals is closed (the first sync uses its name → login pairs to recognise them), then delete the `roster` key');
+          when);
         // Those pairs are exact only when the roster is: a name two logins share cannot say which person an
         // older record means. Named here, because on an open review that approval may then have to be given
         // again. (A name equal to ANOTHER entry's login is exact — a record under a name was written from

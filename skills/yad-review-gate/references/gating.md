@@ -87,6 +87,9 @@ The engine checks this by content, not by date. A bridge approval records `artif
 fingerprint of what was approved. When the artifact's fingerprint no longer matches, the approval is
 counted as revoked: it stays on disk, it no longer counts, and the gate reports `N approval(s) revoked —
 artifact changed; re-approve`. An approval recorded with no `artifactHash` is never treated as stale.
+A hand-written approval (the `approve` action, on a Product with no platform) carries no fingerprint and
+no platform evidence, so an edit to the artifact does **not** revoke it: after a real change, remove the
+old approval and record it again once the reviewer has seen the new content.
 
 For the architecture+contract review there is a second, content-based staleness check: recompute the
 SHA-256 of the contract-surface block and compare it to `.sdlc/contract-lock.json`. A mismatch means
@@ -144,7 +147,10 @@ unchanged**: it counts distinct approvers regardless of how they were recorded.
 - `sync` is idempotent (upsert by `(step, approver)`, one record per person; comment records by
   `(step, commenter, round)`, an unchanged round rewritten in place) and never touches **manual** approvals. An older bridge record that carries `role`/`domain` is
   recognised as `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced
-  by one login-named record that keeps its fingerprint. A revoked approval is superseded **while the step is open**; once
+  by one login-named record that keeps its fingerprint. Every sync write (`yad gate sync`, `yad gate ci`)
+  also records the login on the older records the roster can place for certain; only those it cannot
+  place still need the roster on a later sync. A bridge approval records the
+  platform's evidence (`approvedAt`, and on GitHub `commit`, `url`, `reviewId`) — for the record only. A revoked approval is superseded **while the step is open**; once
   the step is `done` its approvals are kept as the record of why it passed, and a re-sync only re-binds
   new ones (see `../yad-hub-bridge/references/bridge.md` → "Idempotent re-sync").
 - The architecture+contract staleness rule applies to bridge approvals too: a re-lock changes the

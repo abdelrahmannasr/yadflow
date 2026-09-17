@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase,
+  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject,
   writeMirrored,
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
@@ -215,6 +215,11 @@ export function legacyLogins(hub) {
 function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNumber = null, closed = false, aliases = new Map(), clashed = new Map(), accepted = null }) {
   const live = accepted ?? (curHash ? [curHash] : []);
   const stale = (a) => !!a.artifactHash && isStaleHash(a.artifactHash, live);
+  // A submission TIME, not a date. Every GitLab record written before E64 read `approved_at` holds the
+  // day it was synced (`today`), and as text `2026-09-15T10:00:00Z` sorts after `2026-09-15` — so a
+  // date-only value compared as a time made the first E64 sync read every same-day GitLab approval as a
+  // newer review and bind it to today's content (#156). A date is "time unknown".
+  const hasTime = (t) => typeof t === 'string' && t.includes('T') && !Number.isNaN(Date.parse(t));
   const isLegacy = (a) => a.role !== undefined || a.domain !== undefined;
   // An `unverified` record already names a LOGIN — an older release wrote one for a reviewer the roster did
   // not list — so it is never translated through the roster's names, where it could collide with a name.
@@ -247,8 +252,10 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // second, it is the same review whatever name the roster now gives it. The name table can be wrong —
   // a team that renamed one of two people sharing a name hands the older records to whoever kept it,
   // and trusting the name then dropped the right record and passed the gate on an approval of old content
-  // (E62 upgrade simulation). Only older (role-bearing) groups are matched this way.
-  const legacyGroup = (k) => groups.get(k).every((a) => isLegacy(a) && !a.unverified);
+  // (E62 upgrade simulation). Only older groups are matched this way: role-bearing records, and records
+  // `stampLegacyLogins` moved onto a login through that same name table, which keep the name in
+  // `rosterName` (E64) so that stamping them does not take this correction away.
+  const legacyGroup = (k) => groups.get(k).every((a) => (isLegacy(a) && !a.unverified) || a.rosterName !== undefined);
   for (const r of recs) {
     if (!r.submittedAt || recs.some((x) => x !== r && x.submittedAt === r.submittedAt)) continue;
     const byTime = [...groups.keys()].filter((k) => !replaced.has(k) && legacyGroup(k)
@@ -271,12 +278,15 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // history to another. Two approvals that would continue the same older record continue neither.
   const picks = new Map();
   for (const r of unmatched) {
-    if (closed && !r.submittedAt) continue;
     const mine = orphans.filter((k) => eligible(k, r));
-    const candidates = r.submittedAt
+    // Match by time only when the older records hold one to match. A GitLab record from before E64 holds a
+    // date, so an approval that now carries `approved_at` still takes the one-to-one rule against it.
+    const byTimeOnly = !!r.submittedAt && mine.some((k) => groups.get(k).some((a) => hasTime(a.approvedAt)));
+    if (closed && !byTimeOnly) continue;
+    const candidates = byTimeOnly
       ? mine.filter((k) => groups.get(k).some((a) => a.approvedAt === r.submittedAt))
       : (mine.length === 1 ? mine : []);
-    const rivals = r.submittedAt
+    const rivals = byTimeOnly
       ? unmatched.filter((x) => x.submittedAt === r.submittedAt && candidates.some((k) => eligible(k, x))).length
       : unmatched.filter((x) => candidates.some((k) => eligible(k, x))).length;
     if (candidates.length === 1 && rivals === 1) picks.set(r, candidates[0]);
@@ -312,16 +322,19 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       // We only adopt the new hash when the platform PROVES a genuinely newer review. Otherwise —
       // the same review read again — we KEEP the hash they originally approved, so a later artifact
       // change still revokes the approval. Two independent proofs, because one platform lacks each:
-      //   - a later submittedAt (GitHub; GitLab approvals carry no timestamp at all), or
+      //   - a later submission TIME on both sides (GitHub always; GitLab when it sends `approved_at` and the
+      //     record already holds a time — a date-only record is "time unknown", see `hasTime`), or
       //   - a DIFFERENT PR/MR than the one this approval was recorded against. A re-opened review is
       //     always a new PR, so an approval arriving on it cannot be the old one read again. Without
       //     this, a GitLab re-review after a re-lock re-recorded the pre-edit hash and stayed
       //     permanently stale — the step read `done` with zero live approvals (issue #156).
-      const newerReview = r.submittedAt && was.approvedAt && r.submittedAt > was.approvedAt;
+      const newerReview = hasTime(r.submittedAt) && hasTime(was.approvedAt) && Date.parse(r.submittedAt) > Date.parse(was.approvedAt);
       const newerPr = prNumber != null && was.pr != null && was.pr !== prNumber;
       if (!newerReview && !newerPr) {
         artHash = was.artifactHash ?? curHash;
-        approvedAt = was.approvedAt ?? approvedAt;
+        // A record holding only a date takes the platform's time once (E64) and keeps its fingerprint: the
+        // time is evidence of when, the fingerprint is what the gate decides on. Then it is byte-stable.
+        approvedAt = !hasTime(was.approvedAt) && hasTime(r.submittedAt) ? r.submittedAt : (was.approvedAt ?? approvedAt);
         // Same review, re-read: keep the date it was RECORDED too, so re-syncing an unchanged
         // approval is a byte-identical no-op instead of a daily one-line ledger commit.
         recordedOn = was.date ?? recordedOn;
@@ -332,6 +345,10 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
       status: 'approved', date: recordedOn, source: 'bridge',
       artifactHash: artHash, approvedAt,
       ...(prNumber != null ? { pr: prNumber } : {}),
+      // The platform's evidence for this review, when it gave any (E64, see mapApprovers). Audit only.
+      ...(r.commit ? { commit: r.commit } : {}),
+      ...(r.url ? { url: r.url } : {}),
+      ...(r.reviewId ? { reviewId: r.reviewId } : {}),
       engagement: r.engagement === 'verified' ? 'verified' : 'none',
     });
   }
@@ -354,6 +371,101 @@ export function stampLegacyPr(approvals, stepId, prNumber) {
     n++;
   }
   return n;
+}
+
+// Record the platform login on every older approval and comment record the roster can place (E64), so no
+// later sync needs the roster at all. E62's handoff: without this, a roster deleted before the first sync
+// after the upgrade left an open review's older approvals matchable only when nothing else could be them.
+//
+// An older record is one an older release wrote with a `role` or `domain`, naming the person by the
+// roster's `name`. It is stamped exactly as `upsertBridge` rewrites a record it continues: `approver` /
+// `commenter` becomes the login, and `role`, `domain` and `unverified` are removed — a role left on a
+// login-named record would make the next sync look its login up as a roster name, which can be another
+// person's. The dated `reviews/*--approved.md` keeps the roles.
+//
+// It stamps only what the name table places for certain, and leaves the rest for `upsertBridge` to judge
+// with the platform's evidence in hand:
+//   - an `unverified` record already names a login, and a name two logins share (`clashed`) or a name the
+//     roster does not hold is not in `aliases` — none is touched;
+//   - ONE RECORD PER PERSON, BUT ONLY FOR ONE REVIEW. An older release wrote one record per role, so one
+//     approval can be several records. Several records for one login on one step are merged only when they
+//     provably are one review: every one holds the same submission TIME and the same `pr`. Anything less is
+//     not proof — a GitLab record from before E64 holds the day it was synced, so two people a renamed
+//     roster now gives one name, synced the same day, look identical; a hand-written record holds no time at
+//     all. Merging those deleted one person's approval and passed a gate on the other's approval of old
+//     content (E64 upgrade simulation). Such a group is left as it is (`unplaced`). When records for one
+//     review disagree on the fingerprint, the stale one (outside `acceptedHashes`) is kept, as E62 does;
+//   - a stamped approval keeps the roster name it had in `rosterName`. `upsertBridge` still lets an exact
+//     submission time beat that name, as it did while the record carried a role — so a renamed shared name
+//     stamped onto the wrong login is corrected by the platform's time, not locked in;
+//   - a comment round where two records would name one login is left as it is: which count is right is
+//     not knowable, and the cost of leaving it is one extra round.
+// Pure: returns new arrays and the counts; `acceptedFor(artifact)` gives that artifact's live fingerprints.
+// `unplaced` counts older records the roster was still needed for and the stamp could not place.
+export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { aliases = new Map(), clashed = new Map(), acceptedFor = () => [] } = {}) {
+  const isOld = (x) => x.role !== undefined || x.domain !== undefined;
+  // A ledger is a list a person can edit, so an entry may be anything. One this cannot read is left exactly
+  // as it is: the stamp runs over every epic on a merge run, and a bad record in an epic nobody is syncing
+  // must not stop the review that merged (E64 review).
+  const readable = (x, who) => isPlainObject(x) && typeof x[who] === 'string' && x[who] !== '';
+  const hasTime = (t) => typeof t === 'string' && t.includes('T') && !Number.isNaN(Date.parse(t));
+  const accepted = new Map();
+  const live = (artifact) => { if (!accepted.has(artifact)) accepted.set(artifact, acceptedFor(artifact) || []); return accepted.get(artifact); };
+  let stamped = 0;
+  let unplaced = 0;
+
+  const groups = new Map();
+  approvals.forEach((a, i) => {
+    if (!readable(a, 'approver') || typeof a.step !== 'string' || !readable(a, 'artifact')) return;
+    const old = isOld(a) && !a.unverified;
+    if (old && !aliases.has(a.approver)) { if (clashed.has(a.approver)) unplaced++; return; }
+    const login = old ? aliases.get(a.approver) : (isOld(a) ? null : a.approver);
+    if (login == null) return;
+    const k = JSON.stringify([a.step, a.artifact, a.source ?? null, login]);
+    if (!groups.has(k)) groups.set(k, { login, list: [] });
+    groups.get(k).list.push({ a, i, old });
+  });
+  const out = approvals.slice();
+  const drop = new Set();
+  for (const { login, list } of groups.values()) {
+    const olds = list.filter((x) => x.old);
+    if (!olds.length) continue;
+    const oneReview = list.length === 1
+      || (list.every((x) => hasTime(x.a.approvedAt)) && new Set(list.map((x) => `${x.a.approvedAt}|${x.a.pr ?? ''}`)).size === 1);
+    if (!oneReview) { unplaced += olds.length; continue; }
+    // Which fingerprints are live cannot always be computed from a hand-edited record (an `artifact` naming a
+    // folder throws). Then which record is stale is unknown, and choosing one could keep the live print, so
+    // the group is left as it is (E64 review).
+    let staleRec;
+    try { staleRec = list.find((x) => !!x.a.artifactHash && isStaleHash(x.a.artifactHash, live(x.a.artifact))); } catch { unplaced += olds.length; continue; }
+    const rep = staleRec || list.find((x) => !x.old) || olds[0];
+    const { role, domain, unverified, ...rest } = rep.a; // eslint-disable-line no-unused-vars
+    out[rep.i] = { ...rest, approver: login, rosterName: rep.old ? rep.a.approver : (rep.a.rosterName ?? olds[0].a.approver) };
+    for (const x of list) if (x !== rep) drop.add(x.i);
+    stamped += olds.length;
+  }
+
+  const rounds = new Map();
+  comments.forEach((cm, i) => {
+    if (!readable(cm, 'commenter')) return;
+    const old = isOld(cm);
+    if (old && !aliases.has(cm.commenter)) { if (clashed.has(cm.commenter)) unplaced++; return; }
+    const login = old ? aliases.get(cm.commenter) : cm.commenter;
+    const k = JSON.stringify([cm.step, cm.round ?? null, login]);
+    if (!rounds.has(k)) rounds.set(k, { login, list: [] });
+    rounds.get(k).list.push({ cm, i, old });
+  });
+  const cOut = comments.slice();
+  for (const { login, list } of rounds.values()) {
+    const olds = list.filter((x) => x.old);
+    if (!olds.length) continue;
+    if (list.length > 1) { unplaced += olds.length; continue; }
+    const { role, domain, ...rest } = olds[0].cm; // eslint-disable-line no-unused-vars
+    cOut[olds[0].i] = { ...rest, commenter: login, rosterName: olds[0].cm.commenter };
+    stamped++;
+  }
+
+  return { approvals: out.filter((_, i) => !drop.has(i)), comments: cOut, stamped, unplaced };
 }
 
 function writeComments(epicDir, base, today, blocking) {
@@ -492,6 +604,19 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
     const s = p.number != null ? findReviewStep(state, p.artifact) : null;
     if (s) stampLegacyPr(approvals, s.id, p.number);
   }
+  // E64: record the login on every older record the roster can place, every step of this epic, before
+  // anything else reads them — after the `pr` backfill above, so one review's role records agree on `pr` and
+  // merge on this write rather than the next. In memory like everything here: a read-only run writes
+  // nothing, and the writer path below persists it with the rest. A failure here is named and the sync goes
+  // on with the records as they were: the stamp must never stop a merge.
+  let stampedOld = { approvals, comments, stamped: 0 };
+  try {
+    stampedOld = stampLegacyLogins({ approvals, comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(epicDir, a) });
+  } catch (e) {
+    warn(`${epic}: older records not stamped — ${e.message}`);
+  }
+  approvals = stampedOld.approvals;
+  comments = stampedOld.comments;
   const resolved = resolveTargets(hubPrs, { epic, artifact, state, platform, number, finder, branchOf, cwd: root });
   // Advance in CHAIN order, never in ledger order. `advanceState` opens the step that FOLLOWS the one
   // it closes, so syncing two passing gates out of chain order rewinds the epic: closing
@@ -507,6 +632,13 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   };
   const targets = [...resolved.targets].sort((a, b) => stepIndex(a) - stepIndex(b));
   if (!targets.length) {
+    // The stamp still lands (E64): an epic with no review PR on file is exactly one no later sync would
+    // write, so `yad doctor`'s "run `yad gate sync <epic>`" would otherwise repeat for ever.
+    if (stampedOld.stamped && !readOnly) {
+      writeJSON(ledger.files.approvals, canonicalApprovals(approvals));
+      writeJSON(ledger.files.comments, canonicalComments(comments));
+      info(`${epic}: recorded the platform login on ${stampedOld.stamped} older approval/comment record(s) that named a roster name`);
+    }
     warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);
     hand(`run \`yad gate open ${epic} ${artifact || '<artifact>'}\`, or name the PR: \`yad gate sync ${epic} ${artifact || '<artifact>'} --pr <n>\``);
     return { synced: 0 };
@@ -648,6 +780,7 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   approvals = canonicalApprovals(approvals);
   comments = canonicalComments(comments);
   hubPrs = canonicalHubPrs(hubPrs);
+  if (stampedOld.stamped) info(`${epic}: recorded the platform login on ${stampedOld.stamped} older approval/comment record(s) that named a roster name`);
   writeJSON(ledger.files.approvals, approvals);
   writeJSON(ledger.files.comments, comments);
   writeMirrored(ledger.files.productPrs, ledger.files.hubPrs, hubPrs);
@@ -783,6 +916,7 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
 
   let synced = 0;
   const touched = new Set();
+  const failedEpics = new Set();
   const advancedEpics = new Set(); // epics whose step actually passed this run (merge OR a swept merge)
   const statusFiles = new Map();   // epic -> the artifact files syncStatuses rewrote (staging allowlist)
   for (const job of jobs) {
@@ -862,12 +996,46 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
       process.exitCode = 1;
       failed = true;
     }
-    if (failed) continue; // a failed epic's partial state must not be committed by this run
+    if (failed) { failedEpics.add(job.epic); continue; } // a failed epic's partial state must not be committed by this run
     touched.add(job.epic);
   }
   // The product-level move runs AFTER the jobs, so an event for `review/EP-discovery/…` resolved and
   // advanced its ledger in the old folder first, and only on the DEFAULT branch — a merge run or a sweep,
   // never a review head, where CI writes nothing (Path B).
+  // E64: the login stamp for every OTHER epic — one with no open review, which the job list never reaches.
+  // An epic this run synced was already stamped by `gateSync`, and a failed one is left alone. It is a
+  // write in its own right, so it can be the reason this run commits, exactly as the product-level move is.
+  // It runs after the jobs, so a job that throws leaves no stamp behind uncommitted. Only on a `--merged`
+  // run — the merge event, and the wired reconcile that re-runs it — never pre-merge (Path B). An epic with
+  // uncommitted changes under `.sdlc` or `reviews` is skipped: the commit below stages both, and must not
+  // carry a person's edit along with the stamp. One epic's unreadable ledger is named and skipped; it does
+  // not stop the review that merged.
+  let stampedCount = 0;
+  if (merged) {
+    const aliases = legacyLogins(hub);
+    const clashed = ambiguousLegacyNames(hub);
+    for (const e of aliases.size ? epicIds(root) : []) {
+      if (touched.has(e) || failedEpics.has(e)) continue;
+      const dirty = git('status', '--porcelain', '--untracked-files=all', '--', path.join(epicRel(e), '.sdlc'), path.join(epicRel(e), 'reviews'));
+      if (!dirty.ok || String(dirty.stdout || '').trim() !== '') continue;
+      const dir = epicRoot(root, e);
+      try {
+        const led = loadLedger(dir);
+        if (!led.state) continue;
+        const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(dir, a) });
+        if (!st.stamped) continue;
+        const approvalsNow = canonicalApprovals(st.approvals);
+        const commentsNow = canonicalComments(st.comments);
+        if (JSON.stringify(approvalsNow) !== JSON.stringify(canonicalApprovals(led.approvals))) writeJSON(led.files.approvals, approvalsNow);
+        if (JSON.stringify(commentsNow) !== JSON.stringify(canonicalComments(led.comments))) writeJSON(led.files.comments, commentsNow);
+        touched.add(e);
+        stampedCount += st.stamped;
+        info(`${e}: recorded the platform login on ${st.stamped} older approval/comment record(s) that named a roster name`);
+      } catch (err) {
+        warn(`${e}: older records not stamped — ${err.message}`);
+      }
+    }
+  }
   const moved = (merged || !branch)
     ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
     : null;
@@ -943,7 +1111,8 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   const subject = moved
     ? `chore(gate): move the product level to ${FOUNDATION_DIR}/ (shape 8) [skip ci]`
     : `chore(gate): ${sync} [skip ci]`;
-  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []));
+  const cm = git('commit', '-m', subject, ...(moved && touched.size ? ['-m', `Also: ${sync}.`] : []),
+    ...(stampedCount ? ['-m', `Also: recorded the platform login on ${stampedCount} older approval/comment record(s) (E64).`] : []));
   if (!cm.ok) { fail(`commit failed: ${cm.stderr || cm.stdout}`); process.exitCode = 1; return { synced }; }
   ok(`committed gate update: ${c.dim(subject)}`);
   if (!push) return { synced };
@@ -1208,7 +1377,8 @@ export async function gateOpen(root, { epic, artifact, head, creator = createPr,
     // A re-opened review replaces the pointer. Stamp the OLD number on this step's approvals that predate
     // PR provenance first, exactly as `gateCi` does at merge: once the pointer names the new PR, the next
     // sync would stamp THAT number on them, so an approval given again on the new PR could never be told
-    // from a re-read of the old one and, on GitLab (no submission time), would stay stale for good.
+    // from a re-read of the old one and, on GitLab (whose older records hold no submission time), would stay
+    // stale for good.
     const previous = (ledger.hubPrs || []).find((x) => x.artifact === artifact)?.number ?? null;
     // Also when the new URL carries no number: the old pointer is about to be overwritten either way.
     if (previous != null && previous !== opened && stampLegacyPr(ledger.approvals, step.id, previous)) {

@@ -558,20 +558,28 @@ Append-only ledger (an array). Each entry:
 
 `approver` is the platform login (on a Product with no platform, the name the reviewer gave). The gate
 counts distinct approvers and checks no role. An entry with an empty `approver` counts as nobody. An older entry
-may still carry `role` and `domain` fields from the removed roster. They are left on disk, and the gate
-never reads them (the dated `approved.md` still prints them as recorded).
+may still carry `role` and `domain` fields from the removed roster, and name the person by the roster's
+name. The gate never reads the role. While the roster is on disk, the next sync write (`yad gate sync`,
+`yad gate ci`) records the login on such an entry when the roster places it for certain, removes `role`
+and `domain`, and keeps the old name in `rosterName` (E64). Some entries are left as they are — a name two
+logins share, or several records that do not prove they are one review (most GitLab role records); see
+`yad-hub-bridge/references/login-roster.md`. The dated `approved.md` still prints the roles as recorded.
 
 `source: "bridge"` marks an approval synced from a Product review PR/MR by `yad-review-gate action: sync`
-(via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`.
+(via `yad-hub-bridge`). Manual approvals omit `source` and are never altered by `sync`, except for the
+login recorded on an older entry (above). A manual approval has no `artifactHash`, so an edit to the
+artifact does not revoke it.
 
-A **bridge** approval carries four more fields, all written by `sync` and all about *what was approved*
+A **bridge** approval carries more fields, all written by `sync` and all about *what was approved*
 rather than *who approved*:
 
 | Field | Meaning |
 |-------|---------|
 | `artifactHash` | the content fingerprint the approval is bound to (`sha256:…`). The gate drops any approval whose hash ≠ the artifact's current one — this is revoke-on-change. For architecture it is the locked contract surface, for stories the whole `stories/` set. Every file is fingerprinted without its frontmatter `status:` line, which the gate and Build rewrite after review (shape 9); a hash an older release recorded over the whole file is still accepted. |
-| `approvedAt` | when the platform says the review was submitted. Used to tell a genuine re-approval from the same review read again. GitLab exposes no per-approval timestamp, so there it holds the day the sync first recorded the approval. |
+| `approvedAt` | when the platform says the review was submitted: GitHub's submission time, or GitLab's `approved_at`. Used to tell a genuine re-approval from the same review read again, which needs a time on both sides. A GitLab instance that does not send `approved_at`, and every GitLab record written before E64, hold the day the sync first recorded the approval — a date, which is read as "time unknown" and never compared with a time. Such a record takes the platform's time the next time the same approval is read, and keeps its `artifactHash`. |
 | `pr` | the PR/MR number the approval arrived on. The second proof of a genuine re-approval, and the only one available on GitLab: a re-opened review is always a new PR, so an approval on a different number cannot be the old one re-read. Records written before this field existed are stamped once, from the `hub-prs.json` pointer they were recorded against. |
+| `commit`, `url`, `reviewId` | the platform's evidence for the review (E64): the commit it was given on, its link, and its node id. GitHub only, and only when the read gave them — never written `null`. An MR approval on GitLab is not tied to a commit, so none is recorded there. For the record only; the gate never reads them. |
+| `rosterName` | on an older entry whose login was recorded from the roster (E64), the name it had. The gate lets an exact submission time move such an entry to the person who really submitted that review. |
 | `engagement` | `verified` when the approval carried the companion's engagement marker, else `none`. Advisory unless `hub.review.requireEngagement` is on. |
 
 `date` is when the sync **recorded** the approval, not when it was given — it is preserved across an
@@ -586,7 +594,7 @@ Append-only ledger (an array), the machine-readable counterpart to the `reviews/
 { "artifact": "epic.md", "step": "epic-review", "commenter": "<platform login>", "round": <n>, "count": <comments this round>, "date": "<YYYY-MM-DD>" }
 ```
 
-`commenter` is the platform login (on a Product with no platform, the name the reviewer gave). An older entry may still carry `role` and `domain`; the gate never reads them.
+`commenter` is the platform login (on a Product with no platform, the name the reviewer gave). An older entry may still carry `role` and `domain`; the gate never reads them, and while the roster is on disk the next sync write records the login on it, keeping the old name in `rosterName` — unless two records in one round would then name the same login (E64).
 
 ## `hub-prs.json`
 Present only when the Shape review runs through the platform bridge. Per review step, the review

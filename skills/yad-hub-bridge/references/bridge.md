@@ -81,8 +81,17 @@ repository access decides who may approve. A review with no login is not counted
   append a duplicate. An older record that still carries `role`/`domain` (and may name the person by
   their old roster name) is recognised as `login-roster.md` → "Older records" describes (the roster's
   name → login pairs first; never by list order), and replaced by one login-named record that keeps its
-  `artifactHash` and dates — unless the platform shows a newer review (a later submission time, or a
-  different PR/MR), which, as for any approval, binds to the current content.
+  `artifactHash` and dates — unless the platform shows a newer review (a later submission time, with a
+  time on both sides, or a different PR/MR), which, as for any approval, binds to the current content.
+  Every sync write (`yad gate sync`, `yad gate ci`) also records the login on the older records the
+  roster can place for certain, on every step of the epic; only the records it cannot place still need the
+  roster on a later sync (`login-roster.md` → "Recording the login on older
+  records").
+- A bridge approval records the platform's evidence when it is given: `approvedAt` (GitHub's submission
+  time, GitLab's `approved_at`), and on GitHub the review's `commit`, `url` and `reviewId`. They are
+  audit only — the gate decides on the login and the fingerprint. A stored `approvedAt` that is only a
+  date (every GitLab record from before this) is "time unknown": it keeps its fingerprint and takes the
+  platform's time once.
 - **On an OPEN step**, remove any bridge approval whose platform review was dismissed/revoked: the
   platform is the live source of truth while the review is in flight.
 - **On a step already `done`**, the record is only added to or refreshed in place — an approval the

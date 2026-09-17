@@ -3149,9 +3149,12 @@ test('E62 upgrade: a closed step keeps every person once — no deleted history,
   const r = await legacySync({ roster: undefined, approvals: approvals.map((a) => ({ ...a })), reviews: [{ login: 'bo', state: 'APPROVED' }], status: 'done', merged: true });
   try {
     const after = r.read();
-    assert.deepEqual(after.map((a) => a.approver).sort(), ['alice', 'bo'], 'alice (not re-reported) stays as history; bob continues as bo');
+    assert.deepEqual(after.map((a) => a.approver).sort(), ['al', 'bo'], 'alice (not re-reported) stays as history; bob continues as bo');
     assert.equal(after.find((a) => a.approver === 'bo').artifactHash, 'X', 'with the fingerprint bob approved');
-    assert.equal(after.find((a) => a.approver === 'alice').role, 'owner', 'the history record is untouched');
+    // E64: the history record is kept, and the roster's name → login pair is recorded on it, so it no longer
+    // needs the roster. Nothing else about it changes.
+    const alice = after.find((a) => a.approver === 'al');
+    assert.deepEqual([alice.role, alice.rosterName, alice.artifactHash, alice.date, alice.approvedAt], [undefined, 'alice', 'X', '2026-06-01', '2026-06-01']);
   } finally { r.done(); }
 });
 
@@ -3352,6 +3355,133 @@ test('legacyLogins: the roster\'s name → login pairs, and a name given to two 
   assert.deepEqual([...legacyLogins({ roster: [{ login: 'al', name: 'alice' }, { login: 'x', name: 'sam' }, { login: 'y', name: 'sam' }, { login: 'bo' }, null] })], [['alice', 'al']]);
   assert.deepEqual([...legacyLogins({ roster: 'oops' })], []);
   assert.deepEqual([...legacyLogins(null)], []);
+});
+
+// ---- E64: the login stamp — E62's handoff, so no later sync needs the roster ----
+test('E64 stampLegacyLogins: one review\'s role records become one login record (stale kept), comments too; a second pass changes nothing', async () => {
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const aliases = new Map([['alice', 'al'], ['bob', 'bo']]);
+  const approvals = [
+    // One GitHub review, written once per role: the same submission time and PR on both.
+    legacyAppr('alice', 'owner', 'sha256:live', { approvedAt: '2026-06-01T10:00:00Z' }),
+    legacyAppr('alice', 'domain-owner', 'sha256:old', { domain: 'backend', approvedAt: '2026-06-01T10:00:00Z' }),
+    { artifact: 'architecture.md', step: 'architecture-review', approver: 'dan', status: 'approved', date: '2026-06-01' }, // a hand record naming nobody the roster knows
+  ];
+  const comments = [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'bob', role: 'reviewer', round: 1, count: 2, date: '2026-06-01' }];
+  const first = stampLegacyLogins({ approvals, comments }, { aliases, acceptedFor: () => ['sha256:live'] });
+  assert.equal(first.stamped, 3);
+  assert.equal(first.unplaced, 0);
+  const al = first.approvals.filter((a) => a.approver === 'al');
+  assert.equal(al.length, 1, 'one record per person');
+  assert.deepEqual([al[0].artifactHash, al[0].rosterName, 'role' in al[0], 'domain' in al[0], al[0].date], ['sha256:old', 'alice', false, false, '2026-06-01'], 'the stale print is kept (outside acceptedHashes)');
+  assert.ok(first.approvals.some((a) => a.approver === 'dan'), 'a record the roster cannot place is left alone');
+  assert.deepEqual(first.comments, [{ artifact: 'architecture.md', step: 'architecture-review', commenter: 'bo', round: 1, count: 2, date: '2026-06-01', rosterName: 'bob' }]);
+  assert.deepEqual(approvals[0].approver, 'alice', 'pure: the input is not mutated');
+  const again = stampLegacyLogins({ approvals: first.approvals, comments: first.comments }, { aliases, acceptedFor: () => ['sha256:live'] });
+  assert.deepEqual([again.stamped, again.approvals, again.comments], [0, first.approvals, first.comments]);
+});
+
+test('E64 stampLegacyLogins: leaves what the name table cannot place for certain — unverified, a shared name, records that disagree on the review, a crowded comment round', async () => {
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const aliases = new Map([['sam', 'x'], ['al', 'bob']]);
+  const clashed = new Map([['kim', new Set(['k1', 'k2'])]]);
+  const approvals = [
+    legacyAppr('al', 'reviewer', 'sha256:o', { unverified: true }),                         // already a login
+    legacyAppr('kim', 'owner', 'sha256:k'),                                                    // two logins share it
+    legacyAppr('sam', 'owner', 'sha256:a', { approvedAt: '2026-06-01T10:00:00Z' }),            // two reviews under one
+    legacyAppr('sam', 'reviewer', 'sha256:b', { approvedAt: '2026-06-02T09:00:00Z' }),         //   name: maybe two people
+  ];
+  const comments = [
+    { step: 'architecture-review', commenter: 'sam', role: 'reviewer', round: 2, count: 1 },
+    { step: 'architecture-review', commenter: 'x', round: 2, count: 3 },
+  ];
+  const r = stampLegacyLogins({ approvals, comments }, { aliases, clashed });
+  assert.equal(r.stamped, 0);
+  assert.deepEqual(r.approvals, approvals);
+  assert.deepEqual(r.comments, comments);
+  assert.equal(r.unplaced, 4, 'the shared name (1), the disagreeing pair (2) and the crowded round (1) — the unverified record needs no roster');
+});
+
+test('E64 handoff: stamped while the roster exists, then the roster is deleted — GitLab still keeps each old approval with its person', async () => {
+  // Without the stamp and without a roster, two approvals against one older approver is ambiguous: both are
+  // bound to the stale print and must be given again. With the stamp, the old record already names `al`.
+  const approvals = [legacyAppr('alice', 'owner', 'sha256:old')];
+  const reviews = [{ login: 'ca', state: 'APPROVED' }, { login: 'al', state: 'APPROVED' }];
+  const bare = await legacySync({ roster: null, approvals: approvals.map((a) => ({ ...a })), reviews });
+  try { assert.deepEqual(hashesByApprover(bare.read()), { al: 'sha256:old', ca: 'sha256:old' }, 'the E62 fail-closed baseline'); } finally { bare.done(); }
+
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const stamped = stampLegacyLogins({ approvals: approvals.map((a) => ({ ...a })) }, { aliases: new Map([['alice', 'al']]) }).approvals;
+  const r = await legacySync({ roster: null, approvals: stamped, reviews });
+  try { assert.deepEqual(hashesByApprover(r.read()), { al: 'sha256:old', ca: r.cur }); } finally { r.done(); }
+});
+
+test('E64: a shared name renamed before the stamp lands on the wrong login — the exact GitHub time still hands it back', async () => {
+  // `sam` was two people (x and y); the team renamed y's entry, so the table says sam → x. y's older approval
+  // of OLD content is stamped onto x. Its `rosterName` keeps it matchable by time, so y's review — submitted
+  // at that exact second — continues it, stale, instead of being bound to today's content.
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const t = '2026-06-01T10:00:00Z';
+  const stamped = stampLegacyLogins({ approvals: [legacyAppr('sam', 'reviewer', 'sha256:old', { approvedAt: t })] }, { aliases: new Map([['sam', 'x']]) }).approvals;
+  assert.equal(stamped[0].approver, 'x');
+  const r = await legacySync({ roster: null, approvals: stamped, reviews: [{ login: 'y', state: 'APPROVED', submittedAt: t }] });
+  try { assert.deepEqual(hashesByApprover(r.read()), { y: 'sha256:old' }); } finally { r.done(); }
+});
+
+test('E64: gate sync stamps every step of the epic it writes, not only the one it syncs', async () => {
+  const r = await legacySync({ roster: undefined, reviews: [{ login: 'al', state: 'APPROVED' }],
+    approvals: [legacyAppr('alice', 'owner', 'sha256:old'), { ...legacyAppr('bob', 'reviewer', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }],
+    comments: [{ artifact: 'epic.md', step: 'epic-review', commenter: 'carol', role: 'reviewer', round: 1, count: 1, date: '2026-06-01' }] });
+  try {
+    assert.deepEqual(r.read().map((a) => [a.step, a.approver, a.role]).sort(), [['architecture-review', 'al', undefined], ['epic-review', 'bo', undefined]]);
+    const comments = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/comments.json'), 'utf8'));
+    assert.deepEqual(comments.map((cm) => [cm.commenter, cm.role]), [['ca', undefined]]);
+  } finally { r.done(); }
+});
+
+// ---- E64: approvals record the platform's evidence; GitLab's approval time is read ----
+test('E64: a GitHub approval records the review\'s commit, url and id; a read that gave none leaves the keys off', async () => {
+  const r = await legacySync({ roster: null, approvals: [], reviews: [
+    { login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T10:00:00Z', commit: 'abc123', url: 'https://github.com/o/r/pull/7#pullrequestreview-1', id: 'PRR_kw1' },
+    { login: 'bo', state: 'APPROVED', submittedAt: '2026-09-16T11:00:00Z' },
+  ] });
+  try {
+    const [al, bo] = r.read();
+    assert.deepEqual([al.approver, al.commit, al.url, al.reviewId, al.approvedAt], ['al', 'abc123', 'https://github.com/o/r/pull/7#pullrequestreview-1', 'PRR_kw1', '2026-09-16T10:00:00Z']);
+    assert.equal(bo.approver, 'bo');
+    for (const k of ['commit', 'url', 'reviewId']) assert.equal(k in bo, false, `no ${k} key when the platform gave none — never null`);
+  } finally { r.done(); }
+});
+
+test('E64 trap: a GitLab record holding only a DATE is "time unknown" — the first read of approved_at keeps its fingerprint and takes the time once', async () => {
+  // As text, `2026-09-16T10:00:00Z` sorts after `2026-09-16`. Compared that way, every same-day GitLab approval
+  // read as a newer review on the first E64 sync and was bound to today's content (#156).
+  const rec = { artifact: 'architecture.md', step: 'architecture-review', approver: 'al', status: 'approved', date: '2026-09-16', source: 'bridge', artifactHash: 'sha256:old', approvedAt: '2026-09-16', pr: 7, engagement: 'none' };
+  const revs = [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T10:00:00.000Z' }];
+  const r = await legacySync({ roster: null, approvals: [rec], reviews: revs });
+  try {
+    const [after] = r.read();
+    assert.equal(after.artifactHash, 'sha256:old', 'the approval of old content stays stale');
+    assert.equal(after.approvedAt, '2026-09-16T10:00:00.000Z', 'the platform time is adopted as evidence');
+    const first = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    await r.sync(revs);
+    assert.equal(fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8'), first, 'then an unchanged re-sync is byte-identical');
+    // A genuinely later approval (GitLab: unapprove, then approve again) is now provably newer.
+    await r.sync([{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-17T08:00:00.000Z' }]);
+    assert.equal(r.read()[0].artifactHash, r.cur, 'a later time on both sides is a real re-approval');
+  } finally { r.done(); }
+});
+
+test('E64: with approved_at read, the no-roster GitLab one-to-one rule still continues a pre-E64 record that holds only a date', async () => {
+  const r = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T09:00:00Z' }] });
+  try {
+    const [al] = r.read();
+    // Continued, not merely bound to a stale print: it keeps the date it was first recorded on.
+    assert.deepEqual([al.approver, al.artifactHash, al.date, al.approvedAt], ['al', 'sha256:old', '2026-06-01', '2026-09-16T09:00:00Z']);
+  } finally { r.done(); }
+  // …and on a CLOSED step it still guesses nothing: history stays as it was.
+  const c = await legacySync({ roster: null, approvals: [legacyAppr('alice', 'owner', 'sha256:old')], reviews: [{ login: 'dan', state: 'APPROVED', submittedAt: '2026-09-16T09:00:00Z' }], status: 'done', merged: true });
+  try { assert.deepEqual(c.read().map((a) => [a.approver, a.artifactHash]), [['alice', 'sha256:old']], 'alice stays; dan is not given her record'); } finally { c.done(); }
 });
 
 test('gate sync: a step whose approvals live elsewhere reports no head count at all', async () => {
@@ -7860,6 +7990,38 @@ test('readPr (GitLab): merge_user, then the older merged_by; merge_commit_sha, t
   assert.deepEqual([open.merged, open.mergedAt, open.mergedBy, open.mergeCommit], [false, null, null, null]);
 });
 
+test('readPr (GitHub): the review read carries each review\'s id and url beside its commit, and mapApprovers keeps them (E64)', async () => {
+  const { readPr } = await import('./platform.mjs');
+  const q = 'gh api graphql -f query=query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){latestReviews';
+  const runner = fakeRunner({
+    'gh pr view 7 --json state': JSON.stringify({ state: 'MERGED', mergedAt: '2026-09-16T12:00:00Z', headRefOid: 'abc' }),
+    'gh repo view --json owner,name': JSON.stringify({ owner: { login: 'o' }, name: 'r' }),
+    [q]: JSON.stringify({ data: { repository: { pullRequest: { latestReviews: { pageInfo: { hasNextPage: false }, nodes: [
+      { id: 'PRR_1', url: 'https://github.com/o/r/pull/7#pullrequestreview-1', author: { login: 'al' }, state: 'APPROVED', submittedAt: '2026-09-16T10:00:00Z', body: '', commit: { oid: 'abc' } },
+    ] } } } } }),
+  });
+  const pr = readPr('github', 7, { runner });
+  assert.ok(runner.calls.some((c) => c.startsWith(q) && c.includes('nodes{id url author{login}')), runner.calls.join('\n'));
+  assert.deepEqual(pr.reviews, [{ login: 'al', state: 'APPROVED', submittedAt: '2026-09-16T10:00:00Z', body: '', commit: 'abc', id: 'PRR_1', url: 'https://github.com/o/r/pull/7#pullrequestreview-1' }]);
+  assert.deepEqual(mapApprovers(pr.reviews, { headOid: pr.headOid }), [{ name: 'al', submittedAt: '2026-09-16T10:00:00Z', engagement: 'none', commit: 'abc', url: 'https://github.com/o/r/pull/7#pullrequestreview-1', reviewId: 'PRR_1' }]);
+});
+
+test('readPr (GitLab): approved_at becomes the approval\'s submission time; an instance that does not send it gives none, and no commit is invented (E64)', async () => {
+  const { readPr } = await import('./platform.mjs');
+  const runner = (approvedBy) => fakeRunner({
+    'glab mr view 3 -F json': JSON.stringify({ iid: 3, state: 'opened', sha: 'head1' }),
+    'glab api projects/:id/merge_requests/3/approvals': JSON.stringify({ approved_by: approvedBy }),
+    'glab api projects/:id/merge_requests/3/discussions': '[]',
+  });
+  const timed = readPr('gitlab', 3, { runner: runner([{ user: { username: 'al' }, approved_at: '2026-09-16T10:00:00.000Z' }, { user: { username: 'bo' } }]) });
+  assert.deepEqual(timed.reviews, [
+    { login: 'al', state: 'APPROVED', body: undefined, submittedAt: '2026-09-16T10:00:00.000Z' },
+    { login: 'bo', state: 'APPROVED', body: undefined },
+  ]);
+  assert.deepEqual(mapApprovers(timed.reviews, { headOid: timed.headOid }).map((r) => [r.name, r.submittedAt, 'commit' in r]),
+    [['al', '2026-09-16T10:00:00.000Z', false], ['bo', null, false]], 'no commit key: the MR head is not the approval\'s commit');
+});
+
 test('yad-review-gate, passing a gate by hand on a Product with no platform, writes the closing records advanceState would (E18 review)', async () => {
   const { CLOSED_VIA } = await import('./epic-state.mjs');
   const skill = fs.readFileSync(new URL('../skills/yad-review-gate/SKILL.md', import.meta.url), 'utf8');
@@ -8411,6 +8573,212 @@ test('gate ci: a merge in solo mode records waived: "solo" too — the path a ve
     assert.equal(review.status, 'done', 'solo passes on the merge with no approval');
     assert.deepEqual([review.closed?.via, review.closed?.waived], ['merge', 'solo']);
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 gate ci: a merge also stamps an epic with no open review and commits it; an epic with uncommitted ledger edits is left alone', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const seed = (id, extra = '') => {
+      const d = path.join(ci, 'epics', id, '.sdlc');
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ epicId: id, currentStep: 'architecture', steps: [
+        { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+      ] }));
+      fs.writeFileSync(path.join(d, 'approvals.json'), JSON.stringify([{ ...legacyAppr('bob', 'reviewer', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }]) + extra);
+      return d;
+    };
+    seed('EP-old');
+    const dirty = seed('EP-dirty');
+    git(ci, 'add', '-A');
+    git(ci, 'commit', '-q', '-m', 'older epics');
+    fs.appendFileSync(path.join(dirty, 'approvals.json'), '\n'); // a person's uncommitted edit
+    const { out } = await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    assert.match(out, /EP-old: recorded the platform login on 1 older approval\/comment record/);
+    const committed = JSON.parse(git(ci, 'show', 'HEAD:epics/EP-old/.sdlc/approvals.json').toString());
+    assert.deepEqual(committed.map((a) => [a.approver, a.rosterName, a.role]), [['bo', 'bob', undefined]]);
+    assert.match(git(ci, 'log', '-1', '--format=%B').toString(), /Also: recorded the platform login on 1 older approval\/comment record\(s\) \(E64\)\./);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dirty, 'approvals.json'), 'utf8'))[0].approver, 'bob', 'the dirty ledger is not stamped');
+    assert.match(git(ci, 'status', '--porcelain', '--', 'epics/EP-dirty').toString(), /approvals\.json/, 'and its edit is still the person\'s, uncommitted');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 gate ci pre-merge: no stamp is written — Path B keeps CI off the ledger until the merge', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const d = path.join(ci, 'epics/EP-old/.sdlc');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ epicId: 'EP-old', currentStep: 'architecture', steps: [
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    ] }));
+    fs.writeFileSync(path.join(d, 'approvals.json'), JSON.stringify([legacyAppr('bob', 'reviewer', 'sha256:e')]));
+    git(ci, 'add', '-A');
+    git(ci, 'commit', '-q', '-m', 'older epic');
+    await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: false, today: '2026-06-09', reader: () => ({ ...fullApproval, state: 'OPEN', merged: false }) }));
+    assert.equal(git(ci, 'status', '--porcelain').toString().trim(), '', 'nothing written');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+// ---- E64 review: each case a reviewer reproduced against the first cut ----
+test('E64 review: a stamp-only epic with a person\'s uncommitted reviews/ file is not stamped, so the file is never committed', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const d = path.join(ci, 'epics/EP-old/.sdlc');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ epicId: 'EP-old', currentStep: 'architecture', steps: [
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    ] }));
+    fs.writeFileSync(path.join(d, 'approvals.json'), JSON.stringify([{ ...legacyAppr('bob', 'reviewer', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }]));
+    git(ci, 'add', '-A'); git(ci, 'commit', '-q', '-m', 'older epic');
+    fs.mkdirSync(path.join(ci, 'epics/EP-old/reviews'), { recursive: true });
+    fs.writeFileSync(path.join(ci, 'epics/EP-old/reviews/my-notes.md'), 'half-written, private\n'); // a person's uncommitted file
+    await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+    const files = git(ci, 'show', '--name-only', '--format=', 'HEAD').toString();
+    assert.ok(!/my-notes\.md/.test(files), `the stamp commit carried a person's uncommitted file:\n${files}`);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 review: an older record with no `artifact` in an unrelated epic does not stop the merged review from advancing', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const d = path.join(ci, 'epics/EP-old/.sdlc');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ epicId: 'EP-old', currentStep: 'architecture', steps: [
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    ] }));
+    const rec = { ...legacyAppr('bob', 'reviewer', 'sha256:e'), step: 'epic-review' }; delete rec.artifact;
+    fs.writeFileSync(path.join(d, 'approvals.json'), JSON.stringify([rec]));
+    git(ci, 'add', '-A'); git(ci, 'commit', '-q', '-m', 'older epic');
+    let threw = null;
+    try { await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval })); } catch (e) { threw = e; }
+    assert.equal(threw, null, `gate ci threw: ${threw?.message}`);
+    const st = JSON.parse(fs.readFileSync(path.join(ci, 'epics/EP-test/.sdlc/state.json'), 'utf8'));
+    assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'done', 'the merged review did not advance');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 review: a merge run whose job throws leaves no other epic\'s stamp behind on the checkout', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const d = path.join(ci, 'epics/EP-old/.sdlc');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ epicId: 'EP-old', currentStep: 'architecture', steps: [
+      { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+    ] }));
+    fs.writeFileSync(path.join(d, 'approvals.json'), JSON.stringify([{ ...legacyAppr('bob', 'reviewer', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }]));
+    git(ci, 'add', '-A'); git(ci, 'commit', '-q', '-m', 'older epic');
+    try { await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => { throw new Error('platform down'); } })); } catch { /* event mode rethrows */ }
+    assert.equal(git(ci, 'status', '--porcelain', '--', 'epics/EP-old').toString().trim(), '', 'EP-old left dirty by a failed run');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 review: stampLegacyLogins leaves an entry it cannot read exactly as it is, and does not throw', async () => {
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const noArtifact = { ...legacyAppr('alice', 'owner', 'sha256:e') };
+  delete noArtifact.artifact;
+  const approvals = [null, 7, noArtifact, { ...legacyAppr('alice', 'owner', 'sha256:e'), approver: 42 }];
+  const comments = [null, { step: 'x', commenter: '', role: 'reviewer', round: 1 }];
+  const r = stampLegacyLogins({ approvals, comments }, { aliases: new Map([['alice', 'al'], ['', 'z']]), acceptedFor: () => { throw new Error('must not be asked'); } });
+  assert.deepEqual([r.stamped, r.approvals, r.comments], [0, approvals, comments]);
+});
+
+test('E64 second review: live fingerprints that cannot be computed leave the group as it is, never a guess', async () => {
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const approvals = [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: '.' }, legacyAppr('bob', 'reviewer', 'sha256:b')];
+  const r = stampLegacyLogins({ approvals }, { aliases: new Map([['alice', 'al'], ['bob', 'bo']]),
+    acceptedFor: (a) => { if (a === '.') throw new Error('EISDIR'); return []; } });
+  assert.deepEqual([r.stamped, r.unplaced, r.approvals[0].approver, r.approvals[1].approver], [1, 1, 'alice', 'bo']);
+  // An empty artifact is not a record the stamp can read at all.
+  const empty = stampLegacyLogins({ approvals: [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: '' }] }, { aliases: new Map([['alice', 'al']]), acceptedFor: () => { throw new Error('must not be asked'); } });
+  assert.deepEqual([empty.stamped, empty.unplaced], [0, 0]);
+});
+
+test('E64 second review: a malformed older record in the merged review\'s OWN epic does not stop that merge', async () => {
+  const { T, ci } = scaffoldCiHub();
+  try {
+    const f = path.join(ci, 'epics/EP-test/.sdlc/approvals.json');
+    for (const artifact of ['', '.', 'reviews']) {
+      fs.writeFileSync(f, JSON.stringify([{ ...legacyAppr('bob', 'reviewer', 'sha256:e'), artifact, step: 'epic-review' }]));
+      git(ci, 'add', '-A');
+      git(ci, 'commit', '-q', '--allow-empty', '-m', `malformed ${artifact || 'empty'}`);
+      const st = path.join(ci, 'epics/EP-test/.sdlc/state.json');
+      const before = fs.readFileSync(st, 'utf8');
+      await captureConsole(() => gateCi(ci, { branch: 'review/EP-test/architecture', pr: 7, merged: true, push: false, today: '2026-06-09', reader: () => fullApproval }));
+      assert.equal(JSON.parse(fs.readFileSync(st, 'utf8')).steps.find((x) => x.id === 'architecture-review').status, 'done', `artifact ${JSON.stringify(artifact)}`);
+      fs.writeFileSync(st, before);
+      git(ci, 'add', '-A');
+      git(ci, 'commit', '-q', '--allow-empty', '-m', 'reset');
+    }
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 second review: one review\'s role records, one written before PR provenance, merge on the FIRST write', async () => {
+  // The login stamp ran before the `pr` backfill, so the records disagreed on `pr` and merged only on the next
+  // write — an unchanged re-sync that was not byte-identical.
+  const t = '2026-06-01T10:00:00Z';
+  const noPr = legacyAppr('alice', 'domain-owner', 'sha256:old', { domain: 'backend', approvedAt: t });
+  delete noPr.pr;
+  const r = await legacySync({ roster: undefined, status: 'done', merged: true, reviews: [], approvals: [legacyAppr('alice', 'owner', 'sha256:old', { approvedAt: t }), noPr] });
+  try {
+    const first = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    assert.deepEqual(JSON.parse(first).map((a) => [a.approver, a.pr, a.rosterName]), [['al', 7, 'alice']]);
+    await r.sync([]);
+    assert.equal(fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8'), first);
+  } finally { r.done(); }
+});
+
+test('E64 review: doctor does not throw on an approvals.json holding a null entry, roster or not', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const ep = path.join(T, 'epics/EP-a/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({ epicId: 'EP-a', currentStep: 'architecture', steps: [
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+  ] }));
+  fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([null]));
+  const hubFile = path.join(T, '.sdlc/hub.json');
+  try {
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [] }));
+    let base = null; try { await doctorOn(T); } catch (e) { base = e; }
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }] }));
+    let withRoster = null; try { await doctorOn(T); } catch (e) { withRoster = e; }
+    assert.deepEqual([base?.message ?? null, withRoster?.message ?? null], [null, null]);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('E64 review: two hand-written approvals from different days (no time on either) are not merged', async () => {
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const older = { artifact: 'epic.md', step: 'epic-review', approver: 'alice', role: 'owner', status: 'approved', date: '2026-05-01' };
+  const newer = { artifact: 'epic.md', step: 'epic-review', approver: 'al', status: 'approved', date: '2026-06-20' };
+  const r = stampLegacyLogins({ approvals: [older, newer] }, { aliases: new Map([['alice', 'al']]) });
+  assert.equal(r.approvals.length, 2, `a hand-written approval was deleted: ${JSON.stringify(r.approvals)}`);
+});
+
+test('E64 review: an epic with no review PR on file is still stamped by gate sync, so doctor\'s advice is not a loop', async () => {
+  const r = await legacySync({ roster: undefined, approvals: [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }], reviews: [] });
+  try {
+    for (const f of ['hub-prs.json', 'product-prs.json']) fs.writeFileSync(path.join(r.ep, '.sdlc', f), '[]');
+    fs.writeFileSync(path.join(r.ep, '.sdlc/approvals.json'), JSON.stringify([{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }]));
+    const before = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    await captureConsole(() => gateSync(r.T, { epic: 'EP-test', today: '2026-09-16', reader: () => fullApproval, finder: () => ({ ok: false, reason: 'none' }) }));
+    const after = fs.readFileSync(path.join(r.ep, '.sdlc/approvals.json'), 'utf8');
+    const hint = (await doctorOn(r.T)).checks.find((x) => x.id === 'people:roster-unused')?.hint;
+    assert.ok(!(after === before && /yad gate sync/.test(hint || '')), `stuck: approvals unchanged by gate sync, and doctor still says: ${hint}`);
+  } finally { r.done(); }
+});
+test('E64 simulation: GitLab, two people a renamed roster gives one name, synced the same day — the stamp does not merge them, and the gate fails closed', async () => {
+  // Every pre-E64 GitLab record holds the sync DATE, so x's and y's records under `sam` looked like one
+  // review. Merged into one x record, y's approval of old content was bound to today's and passed the gate.
+  const { stampLegacyLogins } = await import('./gate.mjs');
+  const older = [legacyAppr('sam', 'owner', 'sha256:old'), legacyAppr('sam', 'reviewer', 'sha256:old')];
+  const st = stampLegacyLogins({ approvals: older.map((a) => ({ ...a })) }, { aliases: new Map([['sam', 'x']]) });
+  assert.deepEqual([st.stamped, st.unplaced, st.approvals], [0, 2, older]);
+  const r = await legacySync({ roster: null, approvals: st.approvals, reviews: [{ login: 'x', state: 'APPROVED' }, { login: 'y', state: 'APPROVED' }], merged: true });
+  try {
+    const recs = r.read();
+    assert.ok(!recs.some((a) => a.artifactHash === r.cur), `no approval of old content is bound to today's: ${JSON.stringify(recs)}`);
+    const state = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+    assert.equal(state.steps.find((x) => x.id === 'architecture-review').status, 'in_review');
+  } finally { r.done(); }
 });
 
 test('gate ci pre-merge: read-only — never pushes the review branch or the default branch (Path B)', async () => {
@@ -10176,11 +10544,39 @@ test('doctor: roster data an older release wrote is named as unused — empty ke
   const owners = r.checks.find((x) => x.id === 'people:domain-owners-unused');
   assert.equal(roster?.status, 'warn');
   assert.match(roster.message, /no longer decides who approves/);
-  assert.match(roster.hint, /keep it until every review with older approvals is closed/);
+  assert.match(roster.hint, /nothing reads it on a Product with no platform/, 'no platform, no login to match — nothing needs it (E64)');
   assert.equal(owners?.status, 'warn');
   assert.match(owners.message, new RegExp(repos.repos[0].name));
   assert.ok(!r.checks.some((x) => x.id === 'people:roster-unused' && x.status === 'fail'), 'a warning, never a failure');
   fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('doctor E64: the roster warning says when it can go — counted with the same stamp the gate writes', async () => {
+  const { T } = scaffold();
+  await reconcile(T, { fix: true });
+  const hubFile = path.join(T, '.sdlc/hub.json');
+  const ep = path.join(T, 'epics/EP-a/.sdlc');
+  fs.mkdirSync(ep, { recursive: true });
+  fs.writeFileSync(path.join(ep, 'state.json'), JSON.stringify({ epicId: 'EP-a', currentStep: 'architecture', steps: [
+    { id: 'epic-review', type: 'review+approve', artifact: 'epic.md', status: 'done', risk_tags: [] },
+  ] }));
+  const older = [{ ...legacyAppr('alice', 'owner', 'sha256:e'), artifact: 'epic.md', step: 'epic-review' }];
+  fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(older));
+  const hint = async () => (await doctorOn(T)).checks.find((x) => x.id === 'people:roster-unused')?.hint;
+  try {
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    assert.match(await hint(), /keep it for now: 1 older approval\/comment record\(s\) in EP-a still name people by roster name\. The next gate write records their logins — `yad gate sync <epic>`/);
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', ledger: 'verified', roster: [{ login: 'al', name: 'alice' }] }));
+    assert.match(await hint(), /CI's run on the next merged review/, 'a verified Product is stamped by CI, not by a person');
+    // After the gate write: nothing waits. A record under a shared name is the one thing left.
+    const { stampLegacyLogins } = await import('./gate.mjs');
+    const stamped = stampLegacyLogins({ approvals: older }, { aliases: new Map([['alice', 'al']]) }).approvals;
+    fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify(stamped));
+    assert.match(await hint(), /no older record needs it any more — delete the `roster` key/);
+    fs.writeFileSync(hubFile, JSON.stringify({ platform: 'github', roster: [{ login: 'al', name: 'alice' }, { login: 'k1', name: 'kim' }, { login: 'k2', name: 'kim' }] }));
+    fs.writeFileSync(path.join(ep, 'approvals.json'), JSON.stringify([...stamped, { ...older[0], approver: 'kim' }]));
+    assert.match(await hint(), /every older record it can place names its login now; 1 it cannot place/);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
 
 test('doctor: hub with git_url present emits no hub-git-url warning', async () => {

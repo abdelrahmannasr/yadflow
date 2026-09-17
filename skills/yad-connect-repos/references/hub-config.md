@@ -52,11 +52,12 @@ older `role`) and a `verified_authors` list may still sit in this file. Nothing 
 deletes them (`yad migrate`'s shape-3 step still adds a `product` role key beside `hub` in an old roster, so
 an older project upgrades the same way it always did). `verified_authors` decides nothing — only `yad doctor`
 reads it, to warn. The roster is read for one thing only: its `name` →
-`login` pairs let the first sync after the upgrade recognise who an older approval names
-(`../../yad-hub-bridge/references/login-roster.md` → "Older records"). `yad doctor` warns
-`people:roster-unused` and `people:verified-authors-unused` so nobody edits them believing they decide
-something. Delete `verified_authors` when convenient; keep `roster` until every review with older
-approvals is closed.
+`login` pairs let a gate write record the login on older approval and comment records
+(`../../yad-hub-bridge/references/login-roster.md` → "Recording the login on older records"). `yad doctor`
+warns `people:roster-unused` and `people:verified-authors-unused` so nobody edits them believing they decide
+something. Delete `verified_authors` when convenient; delete `roster` when `people:roster-unused` says it
+can go — no older record needs it any more, or only records it cannot place are left and their reviews are
+closed.
 
 ## Detection
 
