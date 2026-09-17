@@ -104,7 +104,8 @@ or `low`, and **no names** (E65). Format, rubric and edit rules: `references/ris
    map (see the rubric). Write the level, `guessed`, and a one-line reason from the code
    (`src/payments/  high  guessed  # charge.js calls the card processor`). When unsure between two levels,
    choose the higher one. When a directory's parts differ, add a deeper line for each part.
-3. A `guessed` line may be re-levelled if the code says otherwise. **Never edit, re-level or delete a
+3. A `guessed` line may be re-levelled if the code says otherwise — or, for `.sdlc/`, if it is not `high`
+   (the rubric's one exception). **Never edit, re-level or delete a
    `confirmed` line**: when the code now contradicts one, report it as a suggestion for a person. Never
    mark anything `confirmed` — only a person does that. Write no name, secret or customer value.
 4. Run `yad risk-map check <path>` and report what is left.

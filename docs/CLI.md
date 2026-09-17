@@ -742,7 +742,8 @@ left its base, so the base's own newer commits are never blamed on it. It never 
 
 **What reads the levels.** Nothing counts them yet (E65 only keeps and checks the map). E66 will turn a
 `high` directory into one more required approval, reading the map from the base branch so a PR cannot
-lower its own count; E67 will ask who has committed to those directories.
+lower its own count; E67 will ask who has committed to those directories. A `guessed` level will count there exactly as a
+`confirmed` one does: a level only raises the count, never lowers it.
 
 ## File shape: `schemaVersion`
 
