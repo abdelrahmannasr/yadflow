@@ -44,7 +44,8 @@ template and `risk-route.sh` only *route* (advisory); they never approve or merg
 **The risk map does not change this count yet.** A code repo's `.sdlc/risk-map` (E65) gives each
 directory a level — `high`, `medium`, `low` — and `checks/risk-map-check.sh` warns when it is stale, but
 the count here still comes from the body's `Risk level` and `Contract surface touched`. E66 will add the
-high step for a change that touches a `confirmed` `high` directory, reading the map from the base branch.
+high step for a change that touches a `high` directory, reading the map from the base branch. Whether a
+`guessed` level counts there, or only a `confirmed` one, is an open question in the E66 row.
 
 ## risk-route.sh
 

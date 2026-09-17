@@ -95,8 +95,9 @@ when a phase needs depth).
 Each code repo keeps `.sdlc/risk-map` **in the code repo**: one line per directory saying `high`, `medium`
 or `low`, and **no names** (E65). Format, rubric and edit rules: `references/risk-map.md`.
 
-1. Run `yad risk-map draft <repo>`. It adds an `unset` line for every directory no line covers and never
-   changes a line that is already there.
+1. Run `yad risk-map draft <path>` with the repo's **path**, not its name: on a first `connect` the repo is
+   not in `repos.json` until Step 4, and a name it does not know is refused. It adds an `unset` line for
+   every directory no line covers and never changes a line that is already there.
 2. For every `unset` line, **read the code in that directory** — the pack, the code-map, and the files
    themselves when those do not say — and decide the level by the rubric. Judge by what the code does,
    never by the folder's name. Write the level, `guessed`, and a one-line reason from the code
@@ -105,9 +106,9 @@ or `low`, and **no names** (E65). Format, rubric and edit rules: `references/ris
 3. A `guessed` line may be re-levelled if the code says otherwise. **Never edit, re-level or delete a
    `confirmed` line**: when the code now contradicts one, report it as a suggestion for a person. Never
    mark anything `confirmed` — only a person does that. Write no name, secret or customer value.
-4. Run `yad risk-map check <repo>` and report what is left.
+4. Run `yad risk-map check <path>` and report what is left.
 5. Tell the person to review every `guessed` line, change the right ones to `confirmed`, and commit
-   `.sdlc/risk-map` **in the code repo, through a PR**. Its `risk-map` check warns on that PR that the map
+   `.sdlc/risk-map` **in the code repo, on a new branch, through a PR** — never straight to its default branch. Its `risk-map` check warns on that PR that the map
    was edited — expected, and advisory.
 
 With no AI agent available, stop after step 1 and tell the person the `unset` lines are theirs to fill.

@@ -344,7 +344,7 @@ prints `WARN [risk-map] <code> <target>: …` for:
 | `header` / `version` | no `# yad-risk-map v1` first line (read as v1), or a newer version (nothing is read) |
 | `map-edited` | the change edits the map itself, which decides how much review later changes need |
 
-The change is `git diff --name-only -z --diff-filter=ACMR <base>...HEAD` — **three dots**, measured from
+The change is `git diff --name-only -z --diff-filter=ACMRT <base>...HEAD` (T: a file turned into a symlink is an edit) — **three dots**, measured from
 where the branch left the base, so commits the base gained since are never blamed on this change (the
 blocking gates use two dots; this one only warns about what the change touches). A deleted file is never
 asked about. The repo is `git ls-files -z`. Both lists are read NUL-separated, so a path holding `"`, `\`

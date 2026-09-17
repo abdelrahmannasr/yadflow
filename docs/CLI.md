@@ -727,7 +727,8 @@ docs/           unset
 | `guessed` / `confirmed` | `guessed` was filled in by an AI agent. A person changes it to `confirmed` in a PR; the commit records who. |
 | No `contract` level | The contract surface keeps its own lock, `contract-check` and `Contract-Change` trailer. |
 
-**How a map is made.** `yad risk-map draft <repo>` adds an `unset` line for every top-level directory.
+**How a map is made.** `yad risk-map draft <repo>` adds an `unset` line for every directory no line
+covers — on a new map, each top-level directory (and `./` for the root files).
 The `yad-connect-repos` skill then has your AI agent read the code — not the folder names — and fill
 each `unset` line with a level, a one-line reason and `guessed`. It never rewrites a `confirmed` line.
 With no AI agent, a person fills the lines in.
