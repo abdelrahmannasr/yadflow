@@ -246,7 +246,11 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   const repOf = (list) => list.find(stale) || list[0];
   const seen = new Set(recs.map((r) => r.name));
   const matchOf = new Map();  // rec -> the record it continues
-  const replaced = new Set(); // people whose records a rec replaces
+  const replaced = new Set(); // people some of whose records a rec continues
+  const claimed = new Set();  // the older records a rec continues — per REVIEW, not per person (see below)
+  const claim = (r, k, list) => { matchOf.set(r, repOf(list)); for (const a of list) claimed.add(a); replaced.add(k); };
+  // An older release's record, or one `stampLegacyLogins` moved onto a login through the name table.
+  const olderRec = (a) => (isLegacy(a) && !a.unverified) || a.rosterName !== undefined;
   // AN EXACT SUBMISSION TIME BEATS THE NAME TABLE. On GitHub every review carries the second it was
   // submitted, and an older record kept it as `approvedAt`; when exactly one older group holds that
   // second, it is the same review whatever name the roster now gives it. The name table can be wrong —
@@ -255,7 +259,6 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // (E62 upgrade simulation). Only older groups are matched this way: role-bearing records, and records
   // `stampLegacyLogins` moved onto a login through that same name table, which keep the name in
   // `rosterName` (E64) so that stamping them does not take this correction away.
-  const legacyGroup = (k) => groups.get(k).every((a) => (isLegacy(a) && !a.unverified) || a.rosterName !== undefined);
   //
   // The time claims THE RECORDS OF THAT REVIEW, not the whole name group. Two people an older release wrote
   // under one name sit in one group, each with their own submission time; claiming the group for whichever
@@ -267,14 +270,20 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // (a shared one is skipped above), so no two claim the same records and the platform's order cannot matter.
   for (const r of recs) {
     if (!r.submittedAt || recs.some((x) => x !== r && x.submittedAt === r.submittedAt)) continue;
-    const byTime = [...groups.keys()].filter((k) => legacyGroup(k) && groups.get(k).some((a) => a.approvedAt === r.submittedAt));
-    if (byTime.length === 1) {
-      matchOf.set(r, repOf(groups.get(byTime[0]).filter((a) => a.approvedAt === r.submittedAt)));
-      replaced.add(byTime[0]);
-    }
+    // A group matches on an OLDER record holding that second; the review is then every record of the group
+    // holding it — an older release could write one review twice (under the roster name, and `unverified`
+    // under the login), and leaving one behind kept it as a second person on a closed step.
+    const atTime = (k) => groups.get(k).filter((a) => a.approvedAt === r.submittedAt);
+    const byTime = [...groups.keys()].filter((k) => atTime(k).some(olderRec));
+    if (byTime.length === 1) claim(r, byTime[0], atTime(byTime[0]));
   }
+  // By name, from what no time claimed — and still per review: when some of those records hold this
+  // approval's own time, those are its review; the rest may be another person's under the same name.
   for (const r of recs) {
-    if (!matchOf.has(r) && groups.has(r.name) && !replaced.has(r.name)) { matchOf.set(r, repOf(groups.get(r.name))); replaced.add(r.name); }
+    if (matchOf.has(r) || !groups.has(r.name)) continue;
+    const rest = groups.get(r.name).filter((a) => !claimed.has(a));
+    const own = r.submittedAt ? rest.filter((a) => a.approvedAt === r.submittedAt) : [];
+    if (rest.length) claim(r, r.name, own.length ? own : rest);
   }
   // Older approvers nobody could name: legacy records with no alias, recorded against THIS review (a
   // record with no `pr` predates PR provenance and is taken as the pointer's, as `stampLegacyPr` does).
@@ -308,8 +317,7 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   for (const k of picks.values()) claims.set(k, (claims.get(k) || 0) + 1);
   for (const [r, k] of picks) {
     if (claims.get(k) > 1) { picks.delete(r); continue; }
-    matchOf.set(r, repOf(groups.get(k)));
-    replaced.add(k);
+    claim(r, k, groups.get(k));
   }
   const unclaimed = orphans.filter((k) => !replaced.has(k));
   // Ambiguous: an unmatched approval that one of the older approvers still left could be. Each is bound to
@@ -319,9 +327,11 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   const staleFor = (r) => couldBe(r).flatMap((k) => groups.get(k)).find(stale) || null;
   const kept = approvals.filter((a) => {
     if (!(a.step === stepId && a.source === 'bridge')) return true;
-    if (replaced.has(personOf(a))) return false;
-    // Closed step: keep a prior approval the platform no longer reports. It is history, not state.
-    return closed && !seen.has(personOf(a));
+    if (claimed.has(a)) return false;
+    // Closed step: keep a prior approval the platform no longer reports. It is history, not state. That
+    // includes a record left in a name group some of whose records a review continued: it is another
+    // review — under a shared name, another person's — and dropping the whole group deleted their history.
+    return closed && (!seen.has(personOf(a)) || replaced.has(personOf(a)));
   });
   for (const r of recs) {
     if (closed && ambiguous.has(r)) continue;
