@@ -350,11 +350,11 @@ blocking gates use two dots; this one only warns about what the change touches).
 asked about. The repo is `git ls-files -z`. Both lists are read NUL-separated, so a path holding `"`, `\`
 or a tab arrives as it is, never quoted by git. A base that does not resolve, or shares no history with HEAD (a shallow clone), is a note, not a failure:
 the map's own lines are still checked. A repo with no map gets one note and passes — **unless this change deleted
-the map**, which warns `map-edited`: a rename away from `.sdlc/risk-map`, and the map replaced by a symlink or a folder, count as a delete. Deleting some other file under a *folder* named `.sdlc/risk-map/` does not. Outside a git repo it
+the map**, which warns `map-edited`: a rename away from `.sdlc/risk-map`, and the map replaced by a folder or by a symlink that leads nowhere or to a folder, count as a delete. A symlink to a real file is not — `[ -f ]` follows it, so the check reads the link's target as the map and says `edits`. Deleting some other file under a *folder* named `.sdlc/risk-map/` says nothing at all. Outside a git repo it
 prints a note and exits 0. **Known limits:** a path holding a newline reads differently here than in
 `yad risk-map check` — git's NUL-separated list has to become lines for macOS awk — and such a directory
 cannot have a line anyway. A path whose bytes are not valid UTF-8 differs too: this check compares bytes
-(`LC_ALL=C`), while the CLI decodes each bad byte as U+FFFD. **The map file is not wired** — it is the
+(`LC_ALL=C`), while the CLI decodes bad bytes as U+FFFD. **The map file is not wired** — it is the
 team's, so `yad update` never owns or overwrites it; only the check is.
 
 ## CI wiring (both platforms)
