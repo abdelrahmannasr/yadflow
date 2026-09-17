@@ -194,7 +194,8 @@ ${c.bold('Build helpers')}
                        audit commit and pushes it to the Product default branch (--allow-branch to override)
   yad risk-map check [repo] [--json]   Warn where a code repo's .sdlc/risk-map (a risk level per
                                        directory, no names) has gone stale — advisory, never blocks
-  yad risk-map draft [repo] [--dry-run] Add an 'unset' line for every directory the map does not cover;
+  yad risk-map draft [repo]            Add an 'unset' line for every directory the map does not cover
+                                       (--dry-run prints it);
                                        never changes a line (the yad-connect-repos skill classifies them)
 
 ${c.bold('Feature threads (post-lock change management)')}

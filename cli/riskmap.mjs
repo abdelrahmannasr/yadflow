@@ -20,8 +20,8 @@
 //   docs/           unset
 //   ./              low     confirmed  # the files at the repo root
 //
-//   - Fields split on whitespace, so a path holds none. A comment starts at the first `#` that follows
-//     whitespace, and is stripped before the fields are read — a `#` glued to a word is part of it.
+//   - Fields split on spaces and tabs only, so a path holds neither. A comment starts at the first `#` that
+//     follows a space or tab, and is stripped before the fields are read — a `#` glued to a word is part of it.
 //   - A directory ends in `/` and is written from the repo root. `./` means the files AT the root, not
 //     every file below it: there is no catch-all line, so a new directory can never hide under one.
 //   - The deepest listed directory above a file decides its level.
@@ -125,7 +125,7 @@ export function coverOf(entries, file) {
 // deeper under the current directory; the first directory with none below it is the one to add. A file
 // directly inside a directory that only has deeper lines asks for that directory itself. A directory a
 // line cannot hold (`app/[slug]/`, `my docs/`) asks for its parent instead, which covers it; at the top
-// level there is no parent line, so the name comes back as it is and `writable` says it cannot be written.
+// level there is no parent line, so the name comes back as it is and `validDir` says it cannot be written.
 export function dirToAdd(entries, file) {
   const segs = file.split('/');
   if (segs.length === 1) return './';

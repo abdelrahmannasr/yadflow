@@ -1803,9 +1803,6 @@ export function shapeChecks(checks, root, { plan: injected = null } = {}) {
   }
 }
 
-// Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
-// `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
-// on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
 // The risk map of each connected code repo (E65): one line per directory giving it a level, no names.
 // Advisory like the PR check — a stale map warns and never fails doctor, because nothing counts the map
 // until E66. A repo that is not on disk, or not a git repo, is the repos check's to report, not this one's.
@@ -1840,6 +1837,9 @@ export function riskMapChecks(checks, root) {
   }
 }
 
+// Phase 6 — feature-thread integrity. A change-epic must thread to a real parent and its denormalized
+// `thread` cache must equal the computed root; an open hotfix reconcile-debt is a warn (the next change
+// on that thread is blocked at the gate until it is paid). Pure reporting, like the other sections.
 export function threadChecks(checks, root) {
   const epicsDir = path.join(root, 'epics');
   if (!exists(epicsDir)) return;
