@@ -43,7 +43,29 @@ BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
 [ -n "${1:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [risk-map]: no base given — diffing against '${BASE}'."
 
 MAP=".sdlc/risk-map"
+# Advisory means exit 0 on every input — outside a git repo too, where `set -e` would stop at git.
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "note [risk-map]: not inside a git repo — nothing to check."
+  echo "PASS [risk-map]: advisory — nothing to check."
+  exit 0
+fi
+base_ok=0
+git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null && base_ok=1
+# The change is measured from where this branch left the base (three dots), not against the base's
+# tip: when the base has moved on, a two-dot range would blame this change for the base's own commits
+# (the risk map's warnings are about what THIS change touches).
+RANGE="${BASE}...HEAD"
+
 if [ ! -f "$MAP" ]; then
+  # Deleting the map is the largest edit to it there is, so it is said, not passed over as "no map".
+  # Read into a variable first: `grep -q` quitting early would SIGPIPE `tr`, and pipefail would read that as no match.
+  deleted=""
+  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only -z --diff-filter=D "$RANGE" | tr '\0' '\n')"
+  if printf '%s\n' "$deleted" | grep -qx "$MAP"; then
+    echo "WARN [risk-map] map-edited ${MAP}: this change deletes the risk map, which decides how much review later changes need"
+    echo "PASS [risk-map]: 1 warning(s) — advisory, never blocks a merge."
+    exit 0
+  fi
   echo "note [risk-map]: this repo has no ${MAP} — no directory has a risk level yet."
   echo "  -> From the Product: \`yad risk-map draft <repo>\`, then let yad-connect-repos classify it, and commit it here."
   echo "PASS [risk-map]: advisory — nothing to check."
@@ -52,13 +74,14 @@ fi
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# core.quotePath=false: a path holding a non-ASCII byte is printed as it is, not quoted and escaped, so
-# it compares against the map's directories.
-git -c core.quotePath=false ls-files > "$tmp/files"
+# -z, then NUL to newline: git prints each path exactly as it is, never quoted or escaped (quotePath
+# only stops escaping non-ASCII — a `"`, `\` or tab would still arrive wrapped in quotes). awk reads the
+# lines; macOS awk cannot split records on NUL itself.
+git ls-files -z | tr '\0' '\n' > "$tmp/files"
 # The base is advisory here, so an unresolvable one does not fail the check the way it fails the
 # blocking gates: the map's own lines are still checked, and the per-change warnings are skipped.
-if git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null; then
-  git -c core.quotePath=false diff --name-only --diff-filter=ACMR "${BASE}..HEAD" > "$tmp/changed"
+if [ "$base_ok" = 1 ]; then
+  git diff --name-only -z --diff-filter=ACMR "$RANGE" | tr '\0' '\n' > "$tmp/changed"
 else
   echo "note [risk-map]: base ref '${BASE}' not found — checking the map's own lines only, not this change."
   : > "$tmp/changed"
@@ -74,8 +97,8 @@ function warn(code, target, msg) {
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 function validdir(d,   body, n, segs, k) {
   if (d == "./") return 1
-  if (d !~ /\/$/ || substr(d, 1, 1) == "/" || index(d, "//")) return 0
-  if (index(d, "*") || index(d, "?") || index(d, "[") || index(d, "\\")) return 0
+  if (d !~ /\/$/ || substr(d, 1, 1) == "/" || substr(d, 1, 1) == "#" || index(d, "//")) return 0
+  if (index(d, "*") || index(d, "?") || index(d, "[") || index(d, "\\") || index(d, " ") || index(d, "\t")) return 0
   body = substr(d, 1, length(d) - 1)
   n = split(body, segs, "/")
   for (k = 1; k <= n; k++) if (segs[k] == "." || segs[k] == "..") return 0
@@ -94,6 +117,7 @@ function toadd(f,   n, segs, prefix, k, cand, i, deeper) {
   prefix = ""
   for (k = 1; k < n; k++) {
     cand = prefix segs[k] "/"
+    if (!validdir(cand)) return (prefix != "") ? prefix : cand
     deeper = 0
     for (i = 1; i <= ne; i++) if (ed[i] != cand && substr(ed[i], 1, length(cand)) == cand) { deeper = 1; break }
     if (!deeper) return cand
@@ -108,14 +132,17 @@ FILENAME == mapf {
     seenfirst = 1
     if (line ~ /^#[ \t]*yad-risk-map[ \t]+v[0-9]+[ \t]*$/) {
       header = 1
-      v = line; sub(/^.*v/, "", v); v = trim(v) + 0
-      if (v != 1) unsupported = v
+      # Compared as TEXT, leading zeros dropped: `v0` is not 1, and a huge number prints as written.
+      v = line; sub(/^.*v/, "", v); v = trim(v); sub(/^0+/, "", v); if (v == "") v = "0"
+      if (v != "1") { unsupported = 1; badv = v }
       next
     }
   }
   if (unsupported) next
-  if (line ~ /^@[A-Za-z0-9_-]/ || line ~ /[ \t]@[A-Za-z0-9_-]/)
-    problem("names", "line " FNR, "names a person (`@…`) — the map holds directories and levels only")
+  # A word starting `@x` names a person — `@org/team` too — unless it ends in `/` (a directory: `@types/`).
+  nw2 = split(line, words, /[ \t]+/); named = 0
+  for (k = 1; k <= nw2; k++) if (words[k] ~ /^@[A-Za-z0-9_-]/ && words[k] !~ /\/$/) named = 1
+  if (named) problem("names", "line " FNR, "names a person (`@…`) — the map holds directories and levels only")
   if (line ~ /^[ \t]*#/) next
   body = line
   if (match(line, /[ \t]#/)) body = substr(line, 1, RSTART - 1)
@@ -138,7 +165,7 @@ FILENAME == filesf { na++; fa[na] = $0; next }
 FILENAME == changedf { nc++; fc[nc] = $0; next }
 END {
   if (unsupported) {
-    warn("version", "v" unsupported, "written for risk-map v" unsupported "; this release reads v1 — nothing in it was read")
+    warn("version", "v" badv, "written for risk-map v" badv "; this release reads v1 — nothing in it was read")
   } else {
     if (seenfirst && !header) warn("header", "", "no `# yad-risk-map v1` line at the top — read as version 1")
     for (i = 1; i <= np; i++) warn(pc[i], pt[i], pm[i])
@@ -159,7 +186,10 @@ END {
       d = toadd(fc[j])
       if (!(d in asked)) { asked[d] = 1; na2++; ask[na2] = d }
     }
-    for (i = 1; i <= na2; i++) warn("uncovered", ask[i], "no line gives this directory a level")
+    for (i = 1; i <= na2; i++) {
+      if (validdir(ask[i])) warn("uncovered", ask[i], "no line gives this directory a level")
+      else warn("uncovered", ask[i], "no line gives this directory a level, and its name cannot be written in the map (a space, `#`, `*`, `?`, `[` or `\\`) — rename it")
+    }
     for (j = 1; j <= nc; j++) if (fc[j] == ".sdlc/risk-map") { warn("map-edited", ".sdlc/risk-map", "this change edits the risk map, which decides how much review later changes need"); break }
   }
   if (nw) printf "PASS [risk-map]: %d warning(s) — advisory, never blocks a merge. Fix the map in this change.\n", nw

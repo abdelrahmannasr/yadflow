@@ -22,12 +22,13 @@ docs/           unset
 |---|---|
 | Header | The first line is `# yad-risk-map v1`. |
 | One line per directory | `<dir>/ <level> <guessed\|confirmed>`, fields split on spaces or tabs, so a path holds none. |
-| Directory | Written from the repo root, ending in `/`. No leading `/`, no `.` or `..` segment, no `*`, `?`, `[` or `\`. |
+| Directory | Written from the repo root, ending in `/`. No leading `/` or `#`, no `.` or `..` segment, no space, tab, `*`, `?`, `[` or `\`. A directory whose name holds one of those (`app/[slug]/`) cannot have a line of its own: its parent's line covers it. At the top level (`my docs/`) nothing can, and the check says to rename it. |
 | `./` | The files **at** the repo root only — not everything below it. |
 | Which line decides | The deepest listed directory above a file. |
 | Levels | `high`, `medium`, `low`, or `unset` (listed, not classified; its state may be left out). |
 | States | `guessed` (an AI agent filled it in) or `confirmed` (a person checked it). |
 | Comment | Everything from the first `#` that follows a space or tab. |
+| Names | A word starting `@` (`@alice`, `@org/team`) is a name and is warned about. A word ending in `/` (`@types/`) is a directory. |
 | No `contract` | The contract surface keeps its own lock, `contract-check` and `Contract-Change` trailer. |
 
 The rules are code: `cli/riskmap.mjs`, with a bash twin in `checks/risk-map-check.sh`.

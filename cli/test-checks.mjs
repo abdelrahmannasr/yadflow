@@ -2860,6 +2860,13 @@ test('risk-map check: bash and cli/riskmap.mjs report the same findings, in the 
     'src/ low confirmed\n',
     '   # yad-risk-map v1\nsrc/ low confirmed\n',
     '#yad-risk-map   v1  \r\nsrc/  high\tconfirmed  # ok\r\n./ low guessed\r\n',
+    '# yad-risk-map v0\nsrc/ high confirmed\n',          // v0 is not v1 — JS once read it as a version, awk as false
+    '# yad-risk-map v0001\nsrc/ high guessed\n',          // leading zeros: v1
+    `# yad-risk-map v${'9'.repeat(30)}\n`,                 // a huge version prints as written in both
+    '# yad-risk-map v1\n@types/ low confirmed\napp/ medium guessed\napp/api/ high confirmed # ask @org/team\n',
+    '# yad-risk-map v1\nq"uote/ low confirmed\ncaf\u00e9/ high guessed\n',   // a line for a name git would quote: `dead` reads the file list
+    '# yad-risk-map v1\nsrc/ low guessed\u2028\n\fdocs/ low confirmed\nlib/ low confirmed\u00a0\n',   // wider whitespace than space/tab
+    '# yad-risk-map v1\n#tmp/ low confirmed\n',
     [
       '# yad-risk-map v1',
       '# owner @alice',
@@ -2891,6 +2898,9 @@ test('risk-map check: bash and cli/riskmap.mjs report the same findings, in the 
     'README.md': 'x', 'src/index.js': 'x', 'src/payments/charge.js': 'x', 'src/payments/refunds/r.js': 'x',
     'src/catalog/list.js': 'x', 'src/new/thing.js': 'x', 'c#/x.cs': 'x', 'docs/a.md': 'x', 'deep/er/x.js': 'x',
     'deep/other/y.js': 'x', 'deep/z.js': 'x', 'tools/bin/run.sh': 'x', '.github/workflows/ci.yml': 'x', 'weird name/a b.txt': 'x',
+    // Names git would quote without -z, names a map line cannot hold, and a directory that is not a person.
+    'q"uote/x.js': 'x', 'back\\slash/x.js': 'x', 'tab\tdir/x.js': 'x', 'app/[slug]/page.tsx': 'x', 'app/api/r.ts': 'x',
+    '@types/x.d.ts': 'x', '#tmp/x': 'x', 'caf\u00e9/x.js': 'x',
   };
   for (const [i, map] of MAPS.entries()) {
     const T = scaffoldRepo();
@@ -2900,8 +2910,8 @@ test('risk-map check: bash and cli/riskmap.mjs report the same findings, in the 
     commit(T, 'feat: tree', { ...TREE, '.sdlc/risk-map': map });
     const r = runGate(RISK_MAP, T);
     assert.equal(r.code, 0, `map #${i}: ${r.out}`);
-    const files = git(T, '-c', 'core.quotePath=false', 'ls-files').toString().split('\n').filter(Boolean);
-    const changed = git(T, '-c', 'core.quotePath=false', 'diff', '--name-only', '--diff-filter=ACMR', 'main..HEAD').toString().split('\n').filter(Boolean);
+    const files = git(T, 'ls-files', '-z').toString().split('\0').filter(Boolean);
+    const changed = git(T, 'diff', '--name-only', '-z', '--diff-filter=ACMR', 'main...HEAD').toString().split('\0').filter(Boolean);
     const js = riskMapFindings(parseRiskMap(map), { files, changed }).map((f) => (f.target ? `${f.code} ${f.target}` : f.code));
     assert.deepEqual(warnings(r.out), js, `map #${i} — bash and JS disagree`);
     // And one change that touches a subset, so the "only what this change touches" half is compared too.
@@ -2923,4 +2933,42 @@ test('risk-map check is wired on both platforms, and the map it reads never is',
   for (const f of ['skills/yad-checks/templates/github/yad-checks.yml', 'skills/yad-checks/templates/gitlab/yad-checks.gitlab-ci.yml']) {
     assert.match(fs.readFileSync(path.join(ROOT, f), 'utf8'), /bash checks\/risk-map-check\.sh "origin\//, f);
   }
+});
+
+test('risk-map check: a PR that DELETES the map warns, it is not read as "no map"', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'rm', '-q', '.sdlc/risk-map');
+  git(T, 'commit', '-q', '-m', 'chore: drop the map');
+  const r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(warnings(r.out), ['map-edited .sdlc/risk-map']);
+  assert.match(r.out, /deletes the risk map/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: a base that moved on is not blamed on this change (the range starts where the branch left)', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': `${MAP_OK}docs/ low guessed\n`, 'src/a.js': 'x', 'src/payments/c.js': 'x', 'docs/a.md': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  // main moves on: touches a guessed line and edits the map.
+  git(T, 'checkout', '-q', 'main');
+  commit(T, 'docs: more', { 'docs/b.md': 'x', '.sdlc/risk-map': `${MAP_OK}docs/ low guessed\n# main's note\n` });
+  git(T, 'checkout', '-q', 'feature');
+  commit(T, 'feat: src only', { 'src/a.js': 'y' });
+  const r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(warnings(r.out), [], 'only src/ changed on this branch');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: outside a git repo it still exits 0', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-nogit-'));
+  fs.mkdirSync(path.join(T, '.sdlc'));
+  fs.writeFileSync(path.join(T, '.sdlc/risk-map'), MAP_OK);
+  const r = runGate(RISK_MAP, T, ['main'], { GIT_CEILING_DIRECTORIES: path.dirname(T) });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /not inside a git repo/);
+  fs.rmSync(T, { recursive: true, force: true });
 });

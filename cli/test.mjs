@@ -17584,3 +17584,74 @@ test('yad doctor: the risk-map section — no map is a note, a stale map warns a
     assert.ok(!checks.some((x) => x.status === 'fail'));
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+test('risk map: draft never writes a line the map cannot read — a parent line covers such a directory', async () => {
+  const { draftRiskMap, parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
+  // Next.js route folders: `app/[slug]/` cannot be a line, so `app/` is added and covers it.
+  const map = '# yad-risk-map v1\napp/api/ high confirmed\n';
+  const files = ['app/api/r.ts', 'app/[slug]/page.tsx', 'my docs/a.md', '#tmp/x', '@types/x.d.ts', '.sdlc/risk-map'];
+  const d = draftRiskMap(map, files);
+  assert.deepEqual(d.added, ['.sdlc/', '@types/', 'app/']);
+  assert.deepEqual(d.unwritable, ['my docs/', '#tmp/']);
+  const p = parseRiskMap(d.text);
+  assert.deepEqual(p.problems, [], 'every line draft wrote is readable');
+  assert.equal(draftRiskMap(d.text, files).text, d.text, 'and a second draft adds nothing — no line piles up');
+  // What is left is said once, with the reason it cannot be fixed by a line.
+  const left = riskMapFindings(p, { files });
+  assert.deepEqual(left.filter((f) => f.code === 'uncovered').map((f) => f.target), ['my docs/', '#tmp/']);
+  assert.match(left.find((f) => f.target === 'my docs/').message, /rename it/);
+});
+
+test('risk map: `@types/` is a directory, `@org/team` is a name; only spaces and tabs are whitespace', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const p = parseRiskMap('# yad-risk-map v1\n@types/ low confirmed\nsrc/ high confirmed # @org/payments-team\nlib/ low confirmed \n');
+  assert.deepEqual(p.entries.map((e) => e.dir), ['@types/', 'src/']);
+  assert.deepEqual(p.problems.map((x) => `${x.code}:${x.line}`), ['names:3', 'unreadable:4']);
+  assert.equal(parseRiskMap('# yad-risk-map v0\nsrc/ low confirmed\n').supported, false, 'v0 is not v1');
+  assert.equal(parseRiskMap('# yad-risk-map v01\nsrc/ low confirmed\n').entries.length, 1, 'v01 is v1');
+});
+
+test('yad risk-map: an empty or broken registry is refused — the map is never written into the Product', async () => {
+  const { runRiskMap } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-reg-'));
+  const grabRun = async (fn) => {
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(fn);
+    const failed = process.exitCode === 1;
+    process.exitCode = code;
+    return { out, failed };
+  };
+  try {
+    git(T, 'init', '-q');
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    let r = await grabRun(() => runRiskMap(T, { action: 'draft' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /no repos in \.sdlc\/repos\.json/);
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), '{ not json');
+    r = await grabRun(() => runRiskMap(T, { action: 'draft', json: true }));
+    assert.equal(r.failed, true);
+    assert.match(JSON.parse(r.out).error, /does not parse/);
+    assert.equal(fs.existsSync(path.join(T, '.sdlc/risk-map')), false);
+    // With no registry file at all, the directory is the code repo.
+    fs.rmSync(path.join(T, '.sdlc/repos.json'));
+    r = await grabRun(() => runRiskMap(T, { action: 'draft' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(fs.existsSync(path.join(T, '.sdlc/risk-map')), true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad risk-map: a repo whose file list is larger than 1 MiB is still read', async () => {
+  const { repoFiles } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-big-'));
+  try {
+    git(T, 'init', '-q');
+    const dir = path.join(T, 'd'.repeat(60));
+    fs.mkdirSync(dir);
+    for (let i = 0; i < 16000; i++) fs.writeFileSync(path.join(dir, `file-with-a-long-name-${String(i).padStart(6, '0')}.txt`), '');
+    const files = repoFiles(T);
+    assert.ok(files, 'spawnSync\'s default buffer would have failed this as "not a git repo"');
+    assert.equal(files.length, 16000);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

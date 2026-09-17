@@ -36,20 +36,28 @@ const LEVEL_WORDS = [...RISK_LEVELS, 'unset'];
 const STATES = ['guessed', 'confirmed'];
 
 const HEADER = /^#[ \t]*yad-risk-map[ \t]+v([0-9]+)[ \t]*$/;
-// `@alice` at the start of a word. A map holds no people, and CODEOWNERS lines pasted into it look
-// exactly like this. `user@example.com` is not matched: the `@` follows a letter.
-const NAME = /(^|[ \t])@[A-Za-z0-9_-]/;
+// Only spaces and tabs separate or surround fields — never the wider whitespace `String.trim` removes —
+// so this and the awk twin read a form feed or a non-breaking space the same way.
+const trimST = (s) => s.replace(/^[ \t]+|[ \t]+$/g, '');
+// A word starting `@alice` names a person. A map holds no people, and CODEOWNERS lines pasted into it
+// look exactly like this — `@org/team` included. A word ENDING in `/` is a directory (`@types/`), and
+// `user@example.com` is not matched: the `@` does not start the word.
+const namesSomeone = (line) => line.split(/[ \t]+/).some((w) => /^@[A-Za-z0-9_-]/.test(w) && !w.endsWith('/'));
+// The version on a header as written, leading zeros dropped, so `v01` is 1 and `v0` is 0 in both twins.
+const versionText = (digits) => digits.replace(/^0+(?=.)/, '');
 
 // A directory as a line may name it: `./`, or one or more segments each ending in `/`. No leading `/`,
-// no `.` or `..` segment, no glob characters (it is a directory, not a pattern), no backslash.
+// no `.` or `..` segment, no glob characters (it is a directory, not a pattern), no backslash, no space
+// or tab (they split fields), and no leading `#` (that line is a comment).
 export function validDir(dir) {
   if (dir === './') return true;
-  if (!/^([^/*?[\\]+\/)+$/.test(dir)) return false;
+  if (dir.startsWith('#') || !/^([^/*?[\\ \t]+\/)+$/.test(dir)) return false;
   return !dir.slice(0, -1).split('/').some((seg) => seg === '.' || seg === '..');
 }
 
 // Parse the map's text. Never throws. Returns:
-//   version   the number on the header line, or 1 when there is none (rule 1: no version counts as 1)
+//   version   1 — or, when `supported` is false, the header's version as written (digits, leading zeros
+//             dropped: a string, so a huge number prints the same in the awk twin)
 //   header    false when the first non-blank line is not the header
 //   supported false when the header names a version this release cannot read — then `entries` is empty,
 //             because reading a newer file by older rules could invent levels it never said
@@ -70,17 +78,18 @@ export function parseRiskMap(text) {
       const h = HEADER.exec(line);
       if (h) {
         out.header = true;
-        out.version = Number(h[1]);
-        if (out.version !== RISK_MAP_VERSION) { out.supported = false; return out; }
+        out.version = versionText(h[1]);
+        if (out.version !== String(RISK_MAP_VERSION)) { out.supported = false; return out; }
+        out.version = RISK_MAP_VERSION;
         continue;
       }
     }
-    if (NAME.test(line)) out.problems.push({ code: 'names', line: n, message: 'names a person (`@…`) — the map holds directories and levels only' });
+    if (namesSomeone(line)) out.problems.push({ code: 'names', line: n, message: 'names a person (`@…`) — the map holds directories and levels only' });
     if (/^[ \t]*#/.test(line)) continue;
     const hash = /[ \t]#/.exec(line);
     const body = hash ? line.slice(0, hash.index) : line;
-    const reason = hash ? line.slice(hash.index + 2).trim() : '';
-    const f = body.trim().split(/[ \t]+/);
+    const reason = hash ? trimST(line.slice(hash.index + 2)) : '';
+    const f = trimST(body).split(/[ \t]+/);
     const bad = (why) => out.problems.push({ code: 'unreadable', line: n, message: why });
     if (f.length < 2 || f.length > 3) { bad('expected `<dir>/ <level> <guessed|confirmed>`'); continue; }
     const [dir, level, state = null] = f;
@@ -114,13 +123,16 @@ export function coverOf(entries, file) {
 
 // The directory to add for a file no line covers. Walk down from the root while some listed line sits
 // deeper under the current directory; the first directory with none below it is the one to add. A file
-// directly inside a directory that only has deeper lines asks for that directory itself.
+// directly inside a directory that only has deeper lines asks for that directory itself. A directory a
+// line cannot hold (`app/[slug]/`, `my docs/`) asks for its parent instead, which covers it; at the top
+// level there is no parent line, so the name comes back as it is and `writable` says it cannot be written.
 export function dirToAdd(entries, file) {
   const segs = file.split('/');
   if (segs.length === 1) return './';
   let prefix = '';
   for (const seg of segs.slice(0, -1)) {
     const cand = `${prefix}${seg}/`;
+    if (!validDir(cand)) return prefix || cand;
     if (!entries.some((e) => e.dir !== cand && e.dir.startsWith(cand))) return cand;
     prefix = cand;
   }
@@ -160,7 +172,10 @@ export function riskMapFindings(parsed, { files = [], changed = null } = {}) {
     const d = dirToAdd(entries, f);
     if (!asked.includes(d)) asked.push(d);
   }
-  for (const d of asked) out.push({ code: 'uncovered', target: d, message: 'no line gives this directory a level' });
+  for (const d of asked) {
+    out.push({ code: 'uncovered', target: d, message: validDir(d) ? 'no line gives this directory a level'
+      : 'no line gives this directory a level, and its name cannot be written in the map (a space, `#`, `*`, `?`, `[` or `\\`) — rename it' });
+  }
   if (change && changed.includes(RISK_MAP_FILE)) out.push({ code: 'map-edited', target: RISK_MAP_FILE, message: 'this change edits the risk map, which decides how much review later changes need' });
   return out;
 }
@@ -173,23 +188,27 @@ const NEW_MAP_HEAD = [
 ];
 
 // Add an `unset` line for every directory nothing covers, and never change a line already there. Returns
-// { text, added, refused }: `refused` is a reason when the file is written for a newer version (adding
-// to it by older rules is guessing). A missing header is added at the top — it is not an entry.
+// { text, added, unwritable, refused }: `refused` is a reason when the file is written for a newer version
+// (adding to it by older rules is guessing); `unwritable` lists top-level directories whose names a line
+// cannot hold — writing one would be an unreadable line that the next draft adds again. A missing header
+// is added at the top — it is not an entry.
 export function draftRiskMap(existing, files) {
   const text = existing ?? null;
   const parsed = parseRiskMap(text ?? '');
-  if (!parsed.supported) return { text, added: [], refused: `written for risk-map v${parsed.version}; this release reads v${RISK_MAP_VERSION}` };
+  if (!parsed.supported) return { text, added: [], unwritable: [], refused: `written for risk-map v${parsed.version}; this release reads v${RISK_MAP_VERSION}` };
   const all = files.includes(RISK_MAP_FILE) ? files : [...files, RISK_MAP_FILE];
   // Sorted, `./` first, so the same repo drafts the same bytes however git happens to list its files.
-  const added = riskMapFindings(parsed, { files: all }).filter((x) => x.code === 'uncovered').map((x) => x.target)
+  const asked = riskMapFindings(parsed, { files: all }).filter((x) => x.code === 'uncovered').map((x) => x.target);
+  const unwritable = asked.filter((d) => !validDir(d));
+  const added = asked.filter((d) => validDir(d))
     .sort((a, b) => (a === './' ? -1 : b === './' ? 1 : a < b ? -1 : a > b ? 1 : 0));
   const width = Math.max(0, ...added.map((d) => d.length)) + 2;
   const newLines = added.map((d) => `${d.padEnd(width)}unset`);
   if (text === null || /^[ \t\r\n]*$/.test(text)) {
-    return { text: `${[...NEW_MAP_HEAD, '', ...newLines].join('\n')}\n`, added, refused: null };
+    return { text: `${[...NEW_MAP_HEAD, '', ...newLines].join('\n')}\n`, added, unwritable, refused: null };
   }
   let body = text;
   if (!parsed.header) body = `# yad-risk-map v${RISK_MAP_VERSION}\n${body}`;
   if (newLines.length) body = `${body.replace(/\n*$/, '\n')}${newLines.join('\n')}\n`;
-  return { text: body, added, refused: null };
+  return { text: body, added, unwritable, refused: null };
 }

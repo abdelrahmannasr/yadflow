@@ -337,16 +337,20 @@ prints `WARN [risk-map] <code> <target>: …` for:
 
 | Code | When |
 |---|---|
-| `uncovered` | a file this change adds or edits that no line covers — names the directory to add |
+| `uncovered` | a file this change adds or edits that no line covers — names the directory to add. A directory a line cannot hold (`app/[slug]/`) names its parent instead; a top-level one (`my docs/`) says to rename it |
 | `dead` | a line whose directory holds no file (`./`: no file at the root) — on every change, until fixed |
 | `unset` / `guessed` | a line this change touches that has no level yet, or whose level is still a guess |
-| `unreadable` / `names` / `duplicate` | a line that is not `<dir>/ <level> <state>`, names a person, or repeats a directory |
+| `unreadable` / `names` / `duplicate` | a line that is not `<dir>/ <level> <state>`, names a person (a word starting `@`, `@org/team` included — a word ending in `/`, like `@types/`, is a directory), or repeats a directory |
 | `header` / `version` | no `# yad-risk-map v1` first line (read as v1), or a newer version (nothing is read) |
 | `map-edited` | the change edits the map itself, which decides how much review later changes need |
 
-The change is `git diff --name-only --diff-filter=ACMR <base>..HEAD`, so a deleted file is never asked
-about; the repo is `git ls-files`. An unresolvable base is a note, not a failure: the map's own lines are
-still checked. A repo with no map gets one note and passes. **The map file is not wired** — it is the
+The change is `git diff --name-only -z --diff-filter=ACMR <base>...HEAD` — **three dots**, measured from
+where the branch left the base, so commits the base gained since are never blamed on this change (the
+blocking gates use two dots; this one only warns about what the change touches). A deleted file is never
+asked about. The repo is `git ls-files -z`. Both lists are read NUL-separated, so a path holding `"`, `\`
+or a tab arrives as it is, never quoted by git. An unresolvable base is a note, not a failure: the map's
+own lines are still checked. A repo with no map gets one note and passes — **unless this change deleted
+the map**, which warns `map-edited`. Outside a git repo it prints a note and exits 0. **The map file is not wired** — it is the
 team's, so `yad update` never owns or overwrites it; only the check is.
 
 ## CI wiring (both platforms)
