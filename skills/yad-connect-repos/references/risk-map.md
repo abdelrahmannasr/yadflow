@@ -41,13 +41,14 @@ display text. Use the pack and the code-map first, and open the files themselves
 
 | Level | The code in the directory… |
 |---|---|
-| `high` | moves money or bills anyone; handles login, sessions, tokens, permissions, secrets or keys; deletes stored data or changes its shape (migrations); reads or writes personal data (identity, contact, health, payment details); builds, deploys or releases (CI workflows, deploy scripts, infrastructure) |
+| `high` | moves money or bills anyone; handles login, sessions, tokens, permissions, secrets or keys; deletes stored data or changes its shape (migrations); reads or writes personal data (identity, contact, health, payment details); builds, deploys or releases (CI workflows, deploy scripts, infrastructure); **`.sdlc/`**, which holds this map — a change to it decides how much review every later change needs |
 | `medium` | writes to a database, a queue or an outside service in ordinary ways; serves a public API or event others depend on; is a shared library most of the code imports; sets build or dependency configuration |
 | `low` | only reads and shows data; styling and UI text; documentation; tests, fixtures and examples; developer tooling that never ships |
 
 - **When unsure between two levels, choose the higher one** and say what you could not tell in the reason.
 - **Split a directory when its parts differ.** If `src/` holds `payments/` (`high`) and `catalog/` (`low`),
   write a line for each part, and keep a line for `src/` itself for the files directly in it.
+- **`.sdlc/` is the one directory judged by what it holds, not by what its code does** (the user's decision, 2026-09-17). A `yad update` PR touches it too, so those PRs ask for the extra approver as well — accepted, because they rewrite the gate scripts a repo runs.
 - **The reason is one line, taken from the code**: a file and what it does (`charge.js calls the card
   processor`). Never a name, a secret, a customer value or an address.
 
