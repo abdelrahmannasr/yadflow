@@ -137,6 +137,8 @@ Repeat comment→address rounds until reviewers are satisfied. **Commenting neve
 { "artifact": "<artifact>", "step": "<step id>", "approver": "<platform login, or the name given with no platform>", "status": "approved", "date": "<YYYY-MM-DD>", "engagement": "<verified|none>" }
 ```
 One record per person. Write no `role` or `domain`. The approver must not be the artifact's author.
+A hand-written approval has no platform evidence and no `artifactHash`, so an edit to the artifact does not
+revoke it — after a real change, remove it and record it again once the reviewer has seen the new content.
 `engagement` records whether the approval came through the [Review Companion](../yad-review-companion/SKILL.md)
 (a real trailer/cards/chat session = `verified`) or as a bare click (`none`). It is soft by default
 (both count; a bare approve draws a friendly nudge) and only gates when `hub.review.requireEngagement`
@@ -177,7 +179,10 @@ via the local user's `gh`/`glab`. For each:
 **Idempotent:** upsert bridge approvals by `(step, approver)` — one record per person. An older record
 that still carries `role`/`domain` and names a person by their old roster name is recognised as
 `../yad-hub-bridge/references/login-roster.md` → "Older records" describes, and replaced by one
-login-named record that keeps its fingerprint. Supersede revoked ones
+login-named record that keeps its fingerprint. Every gate write also records the login on the older
+records the roster can place, on every step (same reference → "Recording the login on older records").
+A bridge approval records the platform's evidence — `approvedAt`, and on GitHub `commit`, `url` and
+`reviewId` — for the record only; the gate decides on the login and the fingerprint. Supersede revoked ones
 **while the step is open** (a step already `done` keeps its approvals — they are the record of why it
 passed). Comment records are upserted by `(step, commenter, round)`: when the latest round already
 has the same commenters and counts, it is rewritten in place, so re-running `sync` does not duplicate
