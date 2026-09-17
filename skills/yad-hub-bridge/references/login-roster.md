@@ -49,7 +49,9 @@ so it continues that record instead of treating the approval as new:
    review was submitted, that review continues it, whatever name the roster now gives it. It continues the
    records **of that review only** — the ones holding that second — never the whole name: two people an
    older release wrote under one name each keep their own record, and neither reads as the other's newer
-   review. A name already continued this way is not claimed again by an approval with no time. The name table
+   review. A name already continued this way is not claimed again by an approval with no time. A match by
+   name is per review too: when some of the name's records hold the approval's own time, it continues
+   those. On a closed step, a record under that name that no review continued is kept as history. The name table
    can be wrong — renaming one of two people who shared a name hands the older records to whoever kept
    it. Older GitLab records hold only a date, so there a rename can still put an older approval on the
    wrong person: **do not rename a shared roster name while reviews with older approvals are open.**
