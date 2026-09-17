@@ -46,7 +46,10 @@ roster `name` instead of their login. The gate never counts a role; the records 
 On the first sync after the upgrade, `yad gate sync` recognises the person such a bridge record names,
 so it continues that record instead of treating the approval as new:
 0. **An exact submission time comes first (GitHub).** When exactly one older record holds the second a
-   review was submitted, that review continues it, whatever name the roster now gives it. The name table
+   review was submitted, that review continues it, whatever name the roster now gives it. It continues the
+   records **of that review only** — the ones holding that second — never the whole name: two people an
+   older release wrote under one name each keep their own record, and neither reads as the other's newer
+   review. A name already continued this way is not claimed again by an approval with no time. The name table
    can be wrong — renaming one of two people who shared a name hands the older records to whoever kept
    it. Older GitLab records hold only a date, so there a rename can still put an older approval on the
    wrong person: **do not rename a shared roster name while reviews with older approvals are open.**
