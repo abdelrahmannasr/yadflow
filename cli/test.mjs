@@ -3357,6 +3357,42 @@ test('legacyLogins: the roster\'s name → login pairs, and a name given to two 
   assert.deepEqual([...legacyLogins(null)], []);
 });
 
+// ---- E62 matcher, per review: two people who once shared a roster name, both approved content that changed ----
+// Found by E64's upgrade simulation. An older release wrote both under `sam`, each with its own GitHub
+// submission time. The matcher claimed the whole name group for whichever approval matched first and handed
+// back the first stale record, so the other approval read as a newer review and was bound to today's content.
+async function sharedNameSync(roster, order) {
+  const TX = '2026-09-10T11:00:00Z';
+  const TY = '2026-09-10T12:00:00Z';
+  const revs = [{ login: 'x', state: 'APPROVED', submittedAt: TX }, { login: 'y', state: 'APPROVED', submittedAt: TY }];
+  if (order) revs.reverse();
+  return legacySync({ roster, merged: true, reviews: revs,
+    approvals: [legacyAppr('sam', 'reviewer', 'sha256:old', { approvedAt: TX }), legacyAppr('sam', 'owner', 'sha256:old', { approvedAt: TY })] });
+}
+for (const [label, roster] of [['the roster kept after one entry was renamed', [{ login: 'x', name: 'sam' }, { login: 'y', name: 'yan' }]], ['the roster deleted', null]]) {
+  test(`E62 per review: GitHub, two people once named \`sam\` both approved content that changed, ${label} — each keeps their own stale record, whatever the order`, async () => {
+    for (const order of [0, 1]) {
+      const r = await sharedNameSync(roster, order);
+      try {
+        const recs = r.read();
+        assert.deepEqual(recs.map((a) => [a.approver, a.artifactHash, a.approvedAt]).sort(),
+          [['x', 'sha256:old', '2026-09-10T11:00:00Z'], ['y', 'sha256:old', '2026-09-10T12:00:00Z']], `order ${order}: ${JSON.stringify(recs)}`);
+        const st = JSON.parse(fs.readFileSync(path.join(r.ep, '.sdlc/state.json'), 'utf8'));
+        assert.equal(st.steps.find((x) => x.id === 'architecture-review').status, 'in_review', `order ${order}: no pass on approvals of changed content`);
+      } finally { r.done(); }
+    }
+  });
+}
+
+test('E62 per review: a group an exact time already continued is not claimed again by an approval with no time', async () => {
+  // x's review continues the older `sam` record by its exact time. z's approval carries no time (an instance
+  // that sends none), so it could only reach that group as an "orphan" — and was handed x's record too.
+  const TX = '2026-09-10T11:00:00Z';
+  const r = await legacySync({ roster: null, reviews: [{ login: 'x', state: 'APPROVED', submittedAt: TX }, { login: 'z', state: 'APPROVED' }],
+    approvals: [legacyAppr('sam', 'reviewer', 'sha256:old', { approvedAt: TX })] });
+  try { assert.deepEqual(hashesByApprover(r.read()), { x: 'sha256:old', z: r.cur }, 'z is a new approver, not a second owner of x\'s record'); } finally { r.done(); }
+});
+
 // ---- E64: the login stamp — E62's handoff, so no later sync needs the roster ----
 test('E64 stampLegacyLogins: one review\'s role records become one login record (stale kept), comments too; a second pass changes nothing', async () => {
   const { stampLegacyLogins } = await import('./gate.mjs');

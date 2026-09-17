@@ -256,18 +256,31 @@ function upsertBridge(approvals, recs, { stepId, artifact, curHash, today, prNum
   // `stampLegacyLogins` moved onto a login through that same name table, which keep the name in
   // `rosterName` (E64) so that stamping them does not take this correction away.
   const legacyGroup = (k) => groups.get(k).every((a) => (isLegacy(a) && !a.unverified) || a.rosterName !== undefined);
+  //
+  // The time claims THE RECORDS OF THAT REVIEW, not the whole name group. Two people an older release wrote
+  // under one name sit in one group, each with their own submission time; claiming the group for whichever
+  // approval matched first, and continuing from the group's first stale record, handed one person the
+  // other's record — the later time then read as a newer review and both approvals were bound to today's
+  // content, passing a gate on approvals of content that had changed (E64 upgrade simulation). So each
+  // approval continues from the records at its own time, and it does so even when the name matches too, or
+  // the name match would pick from both people's records. A submission time is unique among these approvals
+  // (a shared one is skipped above), so no two claim the same records and the platform's order cannot matter.
   for (const r of recs) {
     if (!r.submittedAt || recs.some((x) => x !== r && x.submittedAt === r.submittedAt)) continue;
-    const byTime = [...groups.keys()].filter((k) => !replaced.has(k) && legacyGroup(k)
-      && groups.get(k).some((a) => a.approvedAt === r.submittedAt));
-    if (byTime.length === 1 && byTime[0] !== r.name) { matchOf.set(r, repOf(groups.get(byTime[0]))); replaced.add(byTime[0]); }
+    const byTime = [...groups.keys()].filter((k) => legacyGroup(k) && groups.get(k).some((a) => a.approvedAt === r.submittedAt));
+    if (byTime.length === 1) {
+      matchOf.set(r, repOf(groups.get(byTime[0]).filter((a) => a.approvedAt === r.submittedAt)));
+      replaced.add(byTime[0]);
+    }
   }
   for (const r of recs) {
     if (!matchOf.has(r) && groups.has(r.name) && !replaced.has(r.name)) { matchOf.set(r, repOf(groups.get(r.name))); replaced.add(r.name); }
   }
   // Older approvers nobody could name: legacy records with no alias, recorded against THIS review (a
   // record with no `pr` predates PR provenance and is taken as the pointer's, as `stampLegacyPr` does).
-  const orphans = prNumber == null ? [] : [...groups.keys()].filter((k) => !seen.has(k)
+  // A group an exact time already continued is not an orphan: claiming it again through the one-to-one or
+  // time rule below handed the same records to a second approval (E64 upgrade simulation).
+  const orphans = prNumber == null ? [] : [...groups.keys()].filter((k) => !seen.has(k) && !replaced.has(k)
     && groups.get(k).every((a) => isLegacy(a) && !a.unverified && !aliases.has(a.approver) && (a.pr == null || a.pr === prNumber)));
   // (a clashed-name group's key starts with NUL, so `seen` never holds it and it is always eligible here)
   const unmatched = recs.filter((r) => !matchOf.has(r));
