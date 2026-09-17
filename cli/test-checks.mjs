@@ -2782,7 +2782,7 @@ test('ledger-guard: the mirror — an EP-discovery ledger added beside an on-bas
 const RISK_MAP = path.join(CHECKS, 'risk-map-check.sh');
 const MAP_OK = '# yad-risk-map v1\n./ low confirmed\n.sdlc/ low confirmed\nsrc/ low confirmed\nsrc/payments/ high confirmed\n';
 const warnings = (out) => out.split('\n').filter((l) => l.startsWith('WARN [risk-map] '))
-  .map((l) => l.slice('WARN [risk-map] '.length).replace(/:.*$/, ''));
+  .map((l) => l.slice('WARN [risk-map] '.length).replace(/:[\s\S]*$/, ''));
 
 test('risk-map check: a repo with no map gets one note and passes', () => {
   const T = scaffoldRepo();
@@ -3003,5 +3003,54 @@ test('risk-map check: deleting the map warns among many deletions, and when it i
   git(T, 'commit', '-q', '-m', 'chore: rename the map away');
   r = runGate(RISK_MAP, T);
   assert.deepEqual(warnings(r.out), ['map-edited .sdlc/risk-map'], 'a rename away is a delete of the map');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map check: only the map itself counts as deleted — not a folder of that name — and a symlink or a move away does', () => {
+  // A folder `.sdlc/risk-map/` deleted: the pathspec matches files under it, but it was never the map.
+  let T = scaffoldRepo();
+  commit(T, 'chore: odd folder', { '.sdlc/risk-map/x': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'rm', '-q', '-r', '.sdlc/risk-map');
+  git(T, 'commit', '-q', '-m', 'chore: drop it');
+  let r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(warnings(r.out), []);
+  fs.rmSync(T, { recursive: true, force: true });
+  // The map replaced by a symlink that points nowhere, and the map moved into such a folder.
+  for (const how of ['symlink', 'move']) {
+    T = scaffoldRepo();
+    commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x' });
+    git(T, 'branch', '-q', '-f', 'main');
+    if (how === 'symlink') {
+      fs.rmSync(path.join(T, '.sdlc/risk-map'));
+      fs.symlinkSync('nowhere', path.join(T, '.sdlc/risk-map'));
+    } else {
+      const content = fs.readFileSync(path.join(T, '.sdlc/risk-map'));
+      fs.rmSync(path.join(T, '.sdlc/risk-map'));
+      fs.mkdirSync(path.join(T, '.sdlc/risk-map'));
+      fs.writeFileSync(path.join(T, '.sdlc/risk-map/x'), content);
+    }
+    git(T, 'add', '-A');
+    git(T, 'commit', '-q', '-m', `chore: ${how}`);
+    r = runGate(RISK_MAP, T);
+    assert.equal(r.code, 0, r.out);
+    assert.deepEqual(warnings(r.out), ['map-edited .sdlc/risk-map'], how);
+    fs.rmSync(T, { recursive: true, force: true });
+  }
+});
+
+test('risk-map check: a path that is not valid UTF-8 never makes it exit non-zero, whatever the locale', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  // A byte 0xFF in a path cannot travel through a JS string, so bash writes it into the index.
+  execFileSync('bash', ['-c', 'blob="$(git hash-object -w --stdin </dev/null)"; git update-index --add --cacheinfo "100644,$blob,$(printf "bad\\377/x")"; git commit -q -m "chore: odd name"'],
+    { cwd: T, stdio: 'pipe', env: GIT_ENV });
+  for (const locale of ['en_US.UTF-8', 'C.UTF-8', 'C']) {
+    const r = runGate(RISK_MAP, T, ['main'], { LANG: locale, LC_ALL: locale });
+    assert.equal(r.code, 0, `${locale}: ${r.out}`);
+    assert.match(r.out, /PASS \[risk-map\]/, locale);
+  }
   fs.rmSync(T, { recursive: true, force: true });
 });

@@ -41,7 +41,7 @@ display text. Use the pack and the code-map first, and open the files themselves
 
 | Level | The code in the directory… |
 |---|---|
-| `high` | moves money or bills anyone; handles login, sessions, tokens, permissions, secrets or keys; deletes stored data or changes its shape (migrations); reads or writes personal data (identity, contact, health, payment details); builds, deploys or releases (CI workflows, deploy scripts, infrastructure); **`.sdlc/` itself**, which holds this map — a change to it decides how much review every later change needs |
+| `high` | moves money or bills anyone; handles login, sessions, tokens, permissions, secrets or keys; deletes stored data or changes its shape (migrations); reads or writes personal data (identity, contact, health, payment details); builds, deploys or releases (CI workflows, deploy scripts, infrastructure) |
 | `medium` | writes to a database, a queue or an outside service in ordinary ways; serves a public API or event others depend on; is a shared library most of the code imports; sets build or dependency configuration |
 | `low` | only reads and shows data; styling and UI text; documentation; tests, fixtures and examples; developer tooling that never ships |
 

@@ -16,6 +16,10 @@
 # The rules have a twin in cli/riskmap.mjs (`yad risk-map check`, `yad doctor`). Change one, change the
 # other: a test runs both over the same repos and compares what they report.
 set -euo pipefail
+# Bytes, not characters, for every tool below: a Mac `tr` in a UTF-8 locale dies on a path that is not
+# valid UTF-8 ("Illegal byte sequence"), which pipefail would turn into a failing exit, and a UTF-8-aware
+# awk (macOS 26's) splits some non-ASCII whitespace differently from mawk, older awks and cli/riskmap.mjs.
+export LC_ALL=C
 
 # --- shared base resolution (byte-identical across the gates; they are standalone by design, so it
 # --- is duplicated, not sourced) ---
@@ -62,15 +66,18 @@ RANGE="${BASE}...HEAD"
 
 if [ ! -f "$MAP" ]; then
   # Deleting the map is the largest edit to it there is, so it is said, not passed over as "no map".
-  # Asked of git by path, with no pipe to cut short: limited to the map's own path, a rename away from it
-  # reads as a delete too, since its new name is outside the pathspec.
+  # Asked of git by path, with no pipe to cut short. --no-renames: a move away (even into a folder the
+  # pathspec also matches, `.sdlc/risk-map/x`) is a delete. T: a map turned into a symlink is gone too.
+  # The exact line is matched, because the pathspec also matches files under a FOLDER of that name.
   deleted=""
-  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only --diff-filter=D "$RANGE" -- "$MAP")"
-  if [ -n "$deleted" ]; then
+  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only --no-renames --diff-filter=DT "$RANGE" -- "$MAP")"
+  nl='
+'
+  case "${nl}${deleted}${nl}" in *"${nl}${MAP}${nl}"*)
     echo "WARN [risk-map] map-edited ${MAP}: this change deletes the risk map, which decides how much review later changes need"
     echo "PASS [risk-map]: 1 warning(s) — advisory, never blocks a merge."
-    exit 0
-  fi
+    exit 0 ;;
+  esac
   echo "note [risk-map]: this repo has no ${MAP} — no directory has a risk level yet."
   echo "  -> From the Product: \`yad risk-map draft <repo>\`, then let yad-connect-repos classify it, and commit it here."
   echo "PASS [risk-map]: advisory — nothing to check."
@@ -93,10 +100,7 @@ else
   : > "$tmp/changed"
 fi
 
-# LC_ALL=C: read bytes, not characters. A UTF-8-aware awk (macOS 26's) otherwise treats some non-ASCII
-# whitespace differently from mawk and older awks, and from cli/riskmap.mjs, where only a space or a tab
-# ever separates fields. Paths still compare exactly: bytes against bytes on both sides.
-LC_ALL=C awk -v mapf="$MAP" -v filesf="$tmp/files" -v changedf="$tmp/changed" '
+awk -v mapf="$MAP" -v filesf="$tmp/files" -v changedf="$tmp/changed" '
 function problem(code, target, msg) { np++; pc[np] = code; pt[np] = target; pm[np] = msg }
 function warn(code, target, msg) {
   nw++
