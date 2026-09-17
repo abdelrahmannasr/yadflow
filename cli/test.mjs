@@ -3427,6 +3427,16 @@ test('E62 per review: one review written twice by an older release (roster name,
   } finally { r.done(); }
 });
 
+test('E62 per review, known cost (user\'s choice): one person\'s older role records at two times stay two records on a closed step', async () => {
+  // Indistinguishable from two people who once shared a name, which is the likelier case, so the leftover is
+  // kept as history. Pinned so a change to it is deliberate: see login-roster.md → "Known cost".
+  const T0 = '2026-09-10T01:00:00Z';
+  const T2 = '2026-09-10T03:00:00Z';
+  const r = await legacySync({ roster: null, status: 'done', merged: true, reviews: [{ login: 'al', state: 'APPROVED', submittedAt: T2 }],
+    approvals: [legacyAppr('alice', 'reviewer', 'sha256:a', { approvedAt: T0 }), legacyAppr('alice', 'owner', 'sha256:b', { approvedAt: T2 })] });
+  try { assert.deepEqual(r.read().map((a) => [a.approver, a.approvedAt]).sort(), [['al', T2], ['alice', T0]]); } finally { r.done(); }
+});
+
 // ---- E64: the login stamp — E62's handoff, so no later sync needs the roster ----
 test('E64 stampLegacyLogins: one review\'s role records become one login record (stale kept), comments too; a second pass changes nothing', async () => {
   const { stampLegacyLogins } = await import('./gate.mjs');
