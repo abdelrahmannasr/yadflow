@@ -108,11 +108,12 @@ export function projectChecks(checks, root) {
         const aliases = legacyLogins(hub);
         const clashed = ambiguousLegacyNames(hub);
         for (const e of epicIds(root)) {
-          let led;
-          try { led = loadLedger(epicRoot(root, e)); } catch { continue; } // an unreadable ledger is reported elsewhere
-          const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed });
-          if (st.stamped) { waiting += st.stamped; waitingIn.push(e); }
-          unplaced += st.unplaced;
+          try {
+            const led = loadLedger(epicRoot(root, e));
+            const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed });
+            if (st.stamped) { waiting += st.stamped; waitingIn.push(e); }
+            unplaced += st.unplaced;
+          } catch { /* an unreadable ledger is reported by its own check */ }
         }
         const when = !hub.platform
           ? 'nothing reads it on a Product with no platform — delete the `roster` key'

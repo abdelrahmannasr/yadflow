@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase,
+  c, log, ok, info, warn, hand, fail, note, readJSON, readJSONStrict, writeJSON, run, pushWithRebase, isPlainObject,
   writeMirrored,
 } from './lib.mjs';
 import { PROJECT_FILES, isVerifiedLedger , productConfigPath } from './manifest.mjs';
@@ -388,11 +388,13 @@ export function stampLegacyPr(approvals, stepId, prNumber) {
 //   - an `unverified` record already names a login, and a name two logins share (`clashed`) or a name the
 //     roster does not hold is not in `aliases` — none is touched;
 //   - ONE RECORD PER PERSON, BUT ONLY FOR ONE REVIEW. An older release wrote one record per role, so one
-//     approval can be several records, and they carry the same `approvedAt`. Records for one login on one
-//     step that DISAGREE on `approvedAt` are different reviews — or two people a renamed roster now gives
-//     one name — and merging them would delete one. That group is left as it is (`unplaced`).
-//     When records for one review disagree on the fingerprint, the stale one (outside `acceptedHashes`)
-//     is kept, as E62 does;
+//     approval can be several records. Several records for one login on one step are merged only when they
+//     provably are one review: every one holds the same submission TIME and the same `pr`. Anything less is
+//     not proof — a GitLab record from before E64 holds the day it was synced, so two people a renamed
+//     roster now gives one name, synced the same day, look identical; a hand-written record holds no time at
+//     all. Merging those deleted one person's approval and passed a gate on the other's approval of old
+//     content (E64 upgrade simulation). Such a group is left as it is (`unplaced`). When records for one
+//     review disagree on the fingerprint, the stale one (outside `acceptedHashes`) is kept, as E62 does;
 //   - a stamped approval keeps the roster name it had in `rosterName`. `upsertBridge` still lets an exact
 //     submission time beat that name, as it did while the record carried a role — so a renamed shared name
 //     stamped onto the wrong login is corrected by the platform's time, not locked in;
@@ -402,6 +404,11 @@ export function stampLegacyPr(approvals, stepId, prNumber) {
 // `unplaced` counts older records the roster was still needed for and the stamp could not place.
 export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { aliases = new Map(), clashed = new Map(), acceptedFor = () => [] } = {}) {
   const isOld = (x) => x.role !== undefined || x.domain !== undefined;
+  // A ledger is a list a person can edit, so an entry may be anything. One this cannot read is left exactly
+  // as it is: the stamp runs over every epic on a merge run, and a bad record in an epic nobody is syncing
+  // must not stop the review that merged (E64 review).
+  const readable = (x, who) => isPlainObject(x) && typeof x[who] === 'string' && x[who] !== '';
+  const hasTime = (t) => typeof t === 'string' && t.includes('T') && !Number.isNaN(Date.parse(t));
   const accepted = new Map();
   const live = (artifact) => { if (!accepted.has(artifact)) accepted.set(artifact, acceptedFor(artifact) || []); return accepted.get(artifact); };
   let stamped = 0;
@@ -409,6 +416,7 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
 
   const groups = new Map();
   approvals.forEach((a, i) => {
+    if (!readable(a, 'approver') || typeof a.step !== 'string' || typeof a.artifact !== 'string') return;
     const old = isOld(a) && !a.unverified;
     if (old && !aliases.has(a.approver)) { if (clashed.has(a.approver)) unplaced++; return; }
     const login = old ? aliases.get(a.approver) : (isOld(a) ? null : a.approver);
@@ -422,7 +430,9 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
   for (const { login, list } of groups.values()) {
     const olds = list.filter((x) => x.old);
     if (!olds.length) continue;
-    if (new Set(list.map((x) => x.a.approvedAt ?? null)).size > 1) { unplaced += olds.length; continue; }
+    const oneReview = list.length === 1
+      || (list.every((x) => hasTime(x.a.approvedAt)) && new Set(list.map((x) => `${x.a.approvedAt}|${x.a.pr ?? ''}`)).size === 1);
+    if (!oneReview) { unplaced += olds.length; continue; }
     const rep = list.find((x) => !!x.a.artifactHash && isStaleHash(x.a.artifactHash, live(x.a.artifact)))
       || list.find((x) => !x.old) || olds[0];
     const { role, domain, unverified, ...rest } = rep.a; // eslint-disable-line no-unused-vars
@@ -433,6 +443,7 @@ export function stampLegacyLogins({ approvals = [], comments = [] } = {}, { alia
 
   const rounds = new Map();
   comments.forEach((cm, i) => {
+    if (!readable(cm, 'commenter')) return;
     const old = isOld(cm);
     if (old && !aliases.has(cm.commenter)) { if (clashed.has(cm.commenter)) unplaced++; return; }
     const login = old ? aliases.get(cm.commenter) : cm.commenter;
@@ -610,6 +621,13 @@ export async function gateSync(root, { epic, artifact, today, reader = readPr, f
   };
   const targets = [...resolved.targets].sort((a, b) => stepIndex(a) - stepIndex(b));
   if (!targets.length) {
+    // The stamp still lands (E64): an epic with no review PR on file is exactly one no later sync would
+    // write, so `yad doctor`'s "run `yad gate sync <epic>`" would otherwise repeat for ever.
+    if (stampedOld.stamped && !readOnly) {
+      writeJSON(ledger.files.approvals, canonicalApprovals(approvals));
+      writeJSON(ledger.files.comments, canonicalComments(comments));
+      info(`${epic}: recorded the platform login on ${stampedOld.stamped} older approval/comment record(s) that named a roster name`);
+    }
     warn(`no review PR recorded for ${epic}${artifact ? ` / ${artifact}` : ''}${resolved.reason ? ` — ${resolved.reason}` : ''}`);
     hand(`run \`yad gate open ${epic} ${artifact || '<artifact>'}\`, or name the PR: \`yad gate sync ${epic} ${artifact || '<artifact>'} --pr <n>\``);
     return { synced: 0 };
@@ -885,35 +903,6 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
     if (!jobs.length) info('no open review PRs to sync');
   }
 
-  // E64: the login stamp, over EVERY epic — including one with no open review, which the job list above
-  // never reaches. It is a write in its own right, so it can be the reason this run commits, exactly as
-  // the product-level move is. Only on a merge run — the merge event, and the wired reconcile, which
-  // re-runs it for every recently merged review — never pre-merge (Path B), and not on a bare `yad gate ci`
-  // with no branch, which leaves what it synced uncommitted for the operator (below) and would otherwise
-  // commit that along with the stamp. An epic whose ledger holds uncommitted changes is skipped: the commit
-  // below stages the whole `.sdlc`, and must not carry a person's edit along with the stamp.
-  const stampedEpics = new Map(); // epic -> how many records were stamped
-  if (merged) {
-    const aliases = legacyLogins(hub);
-    const clashed = ambiguousLegacyNames(hub);
-    for (const e of aliases.size ? epicIds(root) : []) {
-      const dirty = git('status', '--porcelain', '--untracked-files=all', '--', path.join(epicRel(e), '.sdlc'));
-      if (!dirty.ok || String(dirty.stdout || '').trim() !== '') continue;
-      const dir = epicRoot(root, e);
-      let led;
-      try { led = loadLedger(dir); } catch { continue; } // the jobs below name an unreadable ledger
-      if (!led.state) continue;
-      const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(dir, a) });
-      if (!st.stamped) continue;
-      const approvalsNow = canonicalApprovals(st.approvals);
-      const commentsNow = canonicalComments(st.comments);
-      if (JSON.stringify(approvalsNow) !== JSON.stringify(canonicalApprovals(led.approvals))) writeJSON(led.files.approvals, approvalsNow);
-      if (JSON.stringify(commentsNow) !== JSON.stringify(canonicalComments(led.comments))) writeJSON(led.files.comments, commentsNow);
-      stampedEpics.set(e, st.stamped);
-      info(`${e}: recorded the platform login on ${st.stamped} older approval/comment record(s) that named a roster name`);
-    }
-  }
-
   let synced = 0;
   const touched = new Set();
   const failedEpics = new Set();
@@ -1002,11 +991,43 @@ export async function gateCi(root, { branch, pr, merged = false, today, push = t
   // The product-level move runs AFTER the jobs, so an event for `review/EP-discovery/…` resolved and
   // advanced its ledger in the old folder first, and only on the DEFAULT branch — a merge run or a sweep,
   // never a review head, where CI writes nothing (Path B).
+  // E64: the login stamp for every OTHER epic — one with no open review, which the job list never reaches.
+  // An epic this run synced was already stamped by `gateSync`, and a failed one is left alone. It is a
+  // write in its own right, so it can be the reason this run commits, exactly as the product-level move is.
+  // It runs after the jobs, so a job that throws leaves no stamp behind uncommitted. Only on a `--merged`
+  // run — the merge event, and the wired reconcile that re-runs it — never pre-merge (Path B). An epic with
+  // uncommitted changes under `.sdlc` or `reviews` is skipped: the commit below stages both, and must not
+  // carry a person's edit along with the stamp. One epic's unreadable ledger is named and skipped; it does
+  // not stop the review that merged.
+  let stampedCount = 0;
+  if (merged) {
+    const aliases = legacyLogins(hub);
+    const clashed = ambiguousLegacyNames(hub);
+    for (const e of aliases.size ? epicIds(root) : []) {
+      if (touched.has(e) || failedEpics.has(e)) continue;
+      const dirty = git('status', '--porcelain', '--untracked-files=all', '--', path.join(epicRel(e), '.sdlc'), path.join(epicRel(e), 'reviews'));
+      if (!dirty.ok || String(dirty.stdout || '').trim() !== '') continue;
+      const dir = epicRoot(root, e);
+      try {
+        const led = loadLedger(dir);
+        if (!led.state) continue;
+        const st = stampLegacyLogins({ approvals: led.approvals, comments: led.comments }, { aliases, clashed, acceptedFor: (a) => acceptedHashes(dir, a) });
+        if (!st.stamped) continue;
+        const approvalsNow = canonicalApprovals(st.approvals);
+        const commentsNow = canonicalComments(st.comments);
+        if (JSON.stringify(approvalsNow) !== JSON.stringify(canonicalApprovals(led.approvals))) writeJSON(led.files.approvals, approvalsNow);
+        if (JSON.stringify(commentsNow) !== JSON.stringify(canonicalComments(led.comments))) writeJSON(led.files.comments, commentsNow);
+        touched.add(e);
+        stampedCount += st.stamped;
+        info(`${e}: recorded the platform login on ${st.stamped} older approval/comment record(s) that named a roster name`);
+      } catch (err) {
+        warn(`${e}: older records not stamped — ${err.message}`);
+      }
+    }
+  }
   const moved = (merged || !branch)
     ? convertProductLevel(root, hub, { git, defaultBranch, dirty: legacyDirtyBefore })
     : null;
-  for (const e of stampedEpics.keys()) if (!failedEpics.has(e)) touched.add(e);
-  const stampedCount = [...stampedEpics].filter(([e]) => !failedEpics.has(e)).reduce((n, [, k]) => n + k, 0);
   if (!touched.size && !moved) return { synced };
 
   // Path B: CI never writes the ledger to the review branch. A held step that did not advance is

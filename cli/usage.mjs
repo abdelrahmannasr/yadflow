@@ -105,7 +105,9 @@ function ledgerEvents(root, epic, aliases = new Map()) {
   const emit = (rec, rawName, action, date, extra = {}) => {
     if (!rawName || !date) return;
     const older = (rec.role !== undefined || rec.domain !== undefined) && !rec.unverified;
-    const login = older && aliases.has(rawName) ? aliases.get(rawName) : null;
+    // A record whose login a gate write recorded from the roster (E64, `rosterName`) names that login, just
+    // as the name table said before the stamp — so the row stays one known by login.
+    const login = rec.rosterName !== undefined ? rawName : (older && aliases.has(rawName) ? aliases.get(rawName) : null);
     events.push({ ts: date, actor: login || rawName, login, action, epic, ...extra });
   };
   for (const a of readLedger(f.approvals, []) || []) emit(a, a.approver, 'approved', a.date, { artifact: a.artifact });
