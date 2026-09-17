@@ -17332,3 +17332,343 @@ test('doctor: a stale guard is still stale when a comment in it merely mentions 
     assert.equal(checks.find((c) => c.id === 'foundation:guard')?.status, 'warn');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E65: the risk map (.sdlc/risk-map) ------------------------------------------------------------
+// One line per directory giving it a level — high, medium, low, or unset — and no names. The rules are
+// pure (cli/riskmap.mjs), so these pass the map's text and the file list in. Their bash twin,
+// checks/risk-map-check.sh, is compared against them in cli/test-checks.mjs.
+
+test('risk map: a line is `<dir>/ <level> <state>`, a comment starts at the first `#` after whitespace', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const p = parseRiskMap([
+    '# yad-risk-map v1',
+    'src/payments/  high  confirmed  # charge.js calls the card processor',
+    'c#/            low   guessed',            // a `#` glued to a word is part of the path
+    'docs/\tunset',                            // `unset` may leave the state out; tabs split too
+    './  medium  confirmed#not a comment',    // no whitespace before `#`: the state is `confirmed#not`
+    'lib/ low confirmed\r',                    // a CRLF file reads the same
+  ].join('\n'));
+  assert.equal(p.header, true);
+  assert.equal(p.supported, true);
+  assert.deepEqual(p.entries.map((e) => [e.dir, e.level, e.state, e.line]), [
+    ['src/payments/', 'high', 'confirmed', 2],
+    ['c#/', 'low', 'guessed', 3],
+    ['docs/', 'unset', null, 4],
+    ['lib/', 'low', 'confirmed', 6],
+  ]);
+  assert.equal(p.entries[0].reason, 'charge.js calls the card processor');
+  assert.deepEqual(p.problems.map((x) => [x.code, x.line]), [['unreadable', 5]]);
+});
+
+test('risk map: every line it cannot read is named, and the first of a duplicate wins', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const p = parseRiskMap([
+    '# yad-risk-map v1',
+    'src',                         // one field
+    'src/ high confirmed extra',   // four fields
+    'src high confirmed',          // no trailing slash
+    '/src/ high confirmed',        // absolute
+    'src/../x/ high confirmed',    // `..`
+    './src/ high confirmed',       // `.` segment
+    'src/**/ high confirmed',      // a pattern, not a directory
+    'src//x/ high confirmed',      // empty segment
+    'src/ critical confirmed',     // not a level
+    'src/ High confirmed',         // levels are lower-case
+    'src/ high',                   // a level needs a state
+    'src/ high maybe',
+    'src/ unset confirmed',        // nobody confirms "no level"
+    'src/ unset maybe',
+    'src/ low guessed',
+    'src/ high confirmed',         // duplicate
+  ].join('\n'));
+  assert.deepEqual(p.entries.map((e) => e.dir), ['src/']);
+  assert.equal(p.entries[0].level, 'low');
+  assert.deepEqual(p.problems.map((x) => `${x.code}:${x.line}`), [
+    'unreadable:2', 'unreadable:3', 'unreadable:4', 'unreadable:5', 'unreadable:6', 'unreadable:7', 'unreadable:8',
+    'unreadable:9', 'unreadable:10', 'unreadable:11', 'unreadable:12', 'unreadable:13', 'unreadable:14', 'unreadable:15',
+    'duplicate:17',
+  ]);
+  assert.match(p.problems[12].message, /cannot be `confirmed`/);
+});
+
+test('risk map: names are refused in comments too, an e-mail address is not a name', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const p = parseRiskMap([
+    '# yad-risk-map v1',
+    '# payments owned by @alice',
+    'src/ high confirmed # ask @bob',
+    'docs/ low confirmed # written by docs@corp.io',
+    '@carol',
+  ].join('\n'));
+  assert.deepEqual(p.problems.map((x) => `${x.code}:${x.line}`), ['names:2', 'names:3', 'names:5', 'unreadable:5']);
+});
+
+test('risk map: the header — missing reads as v1, a newer version is not read at all', async () => {
+  const { parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
+  const none = parseRiskMap('\n\nsrc/ low confirmed\n');
+  assert.equal(none.header, false);
+  assert.equal(none.version, 1);
+  assert.deepEqual(none.problems.map((x) => x.code), ['header']);
+  assert.equal(none.entries.length, 1);
+  const newer = parseRiskMap('# yad-risk-map v2\nsrc/ high confirmed\n');
+  assert.equal(newer.supported, false);
+  assert.equal(newer.entries.length, 0, 'reading a newer file by older rules could invent levels');
+  assert.deepEqual(riskMapFindings(newer, { files: ['src/a.js'] }).map((f) => [f.code, f.target]), [['version', 'v2']]);
+  assert.deepEqual(parseRiskMap('').problems, [], 'an empty file has no first line to complain about');
+});
+
+test('risk map: the deepest listed directory decides, and `./` covers only the files AT the root', async () => {
+  const { parseRiskMap, coverOf, dirToAdd } = await import('./riskmap.mjs');
+  const { entries } = parseRiskMap('# yad-risk-map v1\nsrc/ low confirmed\nsrc/payments/ high confirmed\n./ low confirmed\n');
+  assert.equal(coverOf(entries, 'src/payments/refunds/r.js').dir, 'src/payments/');
+  assert.equal(coverOf(entries, 'src/catalog/list.js').dir, 'src/');
+  assert.equal(coverOf(entries, 'src/payments').dir, 'src/', 'a FILE named like a listed directory is not inside it');
+  assert.equal(coverOf(entries, 'README.md').dir, './');
+  assert.equal(coverOf(entries, 'docs/a.md'), null, '`./` is not a catch-all — a new directory can never hide under it');
+
+  const deeper = parseRiskMap('# yad-risk-map v1\nsrc/payments/ high confirmed\n').entries;
+  assert.equal(dirToAdd(deeper, 'src/catalog/list.js'), 'src/catalog/', 'a sibling of a listed directory asks for itself');
+  assert.equal(dirToAdd(deeper, 'src/payments2/x.js'), 'src/payments2/');
+  assert.equal(dirToAdd(deeper, 'src/index.js'), 'src/', 'a file beside listed directories asks for their parent');
+  assert.equal(dirToAdd(deeper, 'docs/guide/a.md'), 'docs/', 'nothing listed below: the top-level directory');
+  assert.equal(dirToAdd(deeper, 'Makefile'), './');
+});
+
+test('risk map: findings — dead, unset and guessed only where the change touches, uncovered, map-edited', async () => {
+  const { parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
+  const parsed = parseRiskMap([
+    '# yad-risk-map v1',
+    'src/payments/ high confirmed',
+    'src/catalog/ low guessed',
+    'docs/ unset',
+    'old/ low confirmed',
+    './ low guessed',
+  ].join('\n'));
+  const files = ['README.md', 'src/payments/charge.js', 'src/catalog/list.js', 'docs/a.md', 'tools/x.sh', '.sdlc/risk-map'];
+  const pairs = (fs2) => fs2.map((f) => `${f.code} ${f.target}`);
+  // The whole repo.
+  assert.deepEqual(pairs(riskMapFindings(parsed, { files })), [
+    'dead old/', 'unset docs/', 'guessed src/catalog/', 'guessed ./', 'uncovered tools/', 'uncovered .sdlc/',
+  ], 'a whole-repo check says nothing about editing the map — that is a fact about one change');
+  assert.deepEqual(pairs(riskMapFindings(parsed, { files, changed: ['.sdlc/risk-map'] })), ['dead old/', 'uncovered .sdlc/', 'map-edited .sdlc/risk-map']);
+  // One change: only what it touches is asked about — but a dead line is stale whatever changed.
+  assert.deepEqual(pairs(riskMapFindings(parsed, { files, changed: ['src/payments/charge.js'] })), ['dead old/']);
+  assert.deepEqual(pairs(riskMapFindings(parsed, { files, changed: ['src/catalog/list.js', 'tools/x.sh'] })), [
+    'dead old/', 'guessed src/catalog/', 'uncovered tools/',
+  ]);
+  // A root-files line with no root file is dead too.
+  assert.deepEqual(pairs(riskMapFindings(parseRiskMap('# yad-risk-map v1\n./ low confirmed\n'), { files: ['src/a.js'], changed: [] })), ['dead ./']);
+});
+
+test('risk map: draft adds `unset` for every uncovered directory, sorted, and never changes a line', async () => {
+  const { draftRiskMap, parseRiskMap } = await import('./riskmap.mjs');
+  const files = ['src/payments/charge.js', 'README.md', '.github/workflows/ci.yml', 'docs/a.md'];
+  const fresh = draftRiskMap(null, files);
+  assert.equal(fresh.refused, null);
+  assert.deepEqual(fresh.added, ['./', '.github/', '.sdlc/', 'docs/', 'src/'], 'the map itself lives in `.sdlc/`, so it is asked about');
+  assert.match(fresh.text, /^# yad-risk-map v1\n/);
+  assert.deepEqual(parseRiskMap(fresh.text).problems, []);
+  assert.equal(draftRiskMap(fresh.text, files).text, fresh.text, 'a second draft of the same repo changes nothing');
+
+  // A person classified some lines, with their own spacing and comments. Draft adds, and only adds.
+  const mine = '# yad-risk-map v1\n# our notes\nsrc/payments/   high confirmed   # cards\n./ low confirmed\n';
+  const d = draftRiskMap(mine, [...files, 'src/catalog/list.js']);
+  assert.deepEqual(d.added, ['.github/', '.sdlc/', 'docs/', 'src/catalog/']);
+  assert.ok(d.text.startsWith(mine), 'every existing byte stays where it was');
+  assert.equal(draftRiskMap(mine.replace(/\n$/, ''), files).text.startsWith(`${mine}`), true, 'a missing final newline is added, not doubled');
+
+  // No header: one is put on top, and no entry moves.
+  const bare = 'src/payments/ high confirmed\n';
+  assert.ok(draftRiskMap(bare, files).text.startsWith(`# yad-risk-map v1\n${bare}`));
+  // A newer file is never written over.
+  const v2 = '# yad-risk-map v2\nsrc/ high confirmed\n';
+  const r = draftRiskMap(v2, files);
+  assert.match(r.refused, /v2/);
+  assert.equal(r.text, v2);
+  assert.deepEqual(r.added, []);
+});
+
+test('yad risk-map: draft writes the map into the code repo, check reports it, an unknown repo fails', async () => {
+  const { runRiskMap } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-'));
+  const repo = path.join(T, 'repos/backend');
+  const run = async (fn) => {
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(fn);
+    const failed = process.exitCode === 1;
+    process.exitCode = code;
+    return { out, failed };
+  };
+  try {
+    fs.mkdirSync(path.join(repo, 'src/payments'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'src/payments/charge.js'), 'x');
+    fs.writeFileSync(path.join(repo, 'README.md'), 'x');
+    git(repo, 'init', '-q');
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [{ name: 'backend', path: 'repos/backend' }] }));
+    const map = path.join(repo, '.sdlc/risk-map');
+
+    let r = await run(() => runRiskMap(T, { action: 'check', name: 'backend' }));
+    assert.equal(r.failed, false);
+    assert.match(r.out, /no \.sdlc\/risk-map yet/);
+
+    r = await run(() => runRiskMap(T, { action: 'draft', name: 'backend', dryRun: true }));
+    assert.match(r.out, /would add 3 unset line\(s\): \.\/ \.sdlc\/ src\//);
+    assert.equal(fs.existsSync(map), false, '--dry-run writes nothing');
+
+    r = await run(() => runRiskMap(T, { action: 'draft' }));   // no name: every connected repo
+    assert.equal(r.failed, false, r.out);
+    assert.match(fs.readFileSync(map, 'utf8'), /^src\/\s+unset$/m);
+    assert.match(r.out, /yad-connect-repos/);
+
+    fs.writeFileSync(map, '# yad-risk-map v1\n./ low confirmed\n.sdlc/ low confirmed\nsrc/ high guessed\ngone/ low confirmed\n');
+    r = await run(() => runRiskMap(T, { action: 'check', name: 'backend', json: true }));
+    assert.equal(r.failed, false, 'warnings are advisory — never a failing exit');
+    const out = JSON.parse(r.out);
+    assert.deepEqual(out.repos[0].findings.map((f) => `${f.code} ${f.target}`), ['dead gone/', 'guessed src/']);
+
+    // A path works where a name is not registered.
+    r = await run(() => runRiskMap(T, { action: 'check', name: 'repos/backend' }));
+    assert.match(r.out, /dead.*gone\//);
+
+    r = await run(() => runRiskMap(T, { action: 'check', name: 'nope' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /unknown repo: nope/);
+
+    fs.writeFileSync(map, '# yad-risk-map v9\n');
+    r = await run(() => runRiskMap(T, { action: 'draft', name: 'backend' }));
+    assert.equal(r.failed, true, 'a newer map is refused, loudly');
+    assert.equal(fs.readFileSync(map, 'utf8'), '# yad-risk-map v9\n');
+
+    r = await run(() => runRiskMap(T, { action: 'bogus' }));
+    assert.equal(r.failed, true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad doctor: the risk-map section — no map is a note, a stale map warns and never fails', async () => {
+  const { riskMapChecks } = await import('./doctor.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-doc-'));
+  try {
+    const mk = (name) => {
+      const repo = path.join(T, name);
+      fs.mkdirSync(path.join(repo, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(repo, 'src/a.js'), 'x');
+      git(repo, 'init', '-q');
+      git(repo, 'add', '-A');
+      git(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'seed');
+      return repo;
+    };
+    mk('none');
+    const clean = mk('clean');
+    const stale = mk('stale');
+    fs.mkdirSync(path.join(clean, '.sdlc'));
+    fs.writeFileSync(path.join(clean, '.sdlc/risk-map'), '# yad-risk-map v1\nsrc/ low confirmed\n.sdlc/ low confirmed\n');
+    fs.mkdirSync(path.join(stale, '.sdlc'));
+    fs.writeFileSync(path.join(stale, '.sdlc/risk-map'), '# yad-risk-map v1\nsrc/ high guessed\na/ low confirmed\nb/ low confirmed\nc/ low confirmed\nd/ low confirmed\n');
+    fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [
+      { name: 'none', path: 'none' }, { name: 'clean', path: 'clean' }, { name: 'stale', path: 'stale' },
+      { name: 'absent', path: 'absent' }, { name: 'bad' },
+    ] }));
+    const checks = [];
+    riskMapChecks(checks, T);
+    const by = Object.fromEntries(checks.map((x) => [x.id, x]));
+    assert.deepEqual(Object.keys(by), ['risk-map:none', 'risk-map:clean', 'risk-map:stale'], 'a repo not on disk is the repos check\'s to report');
+    assert.equal(by['risk-map:none'].status, 'ok');
+    assert.match(by['risk-map:none'].message, /yad risk-map draft none/);
+    assert.equal(by['risk-map:clean'].status, 'ok');
+    assert.equal(by['risk-map:stale'].status, 'warn');
+    assert.match(by['risk-map:stale'].message, /dead \(a\/, b\/, c\/ \+1 more\); guessed \(src\/\); uncovered \(\.sdlc\/\)/);
+    assert.equal(by['risk-map:stale'].findings.length, 6);
+    assert.ok(!checks.some((x) => x.status === 'fail'));
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('risk map: draft never writes a line the map cannot read — a parent line covers such a directory', async () => {
+  const { draftRiskMap, parseRiskMap, riskMapFindings } = await import('./riskmap.mjs');
+  // Next.js route folders: `app/[slug]/` cannot be a line, so `app/` is added and covers it.
+  const map = '# yad-risk-map v1\napp/api/ high confirmed\n';
+  const files = ['app/api/r.ts', 'app/[slug]/page.tsx', 'my docs/a.md', '#tmp/x', '@types/x.d.ts', '.sdlc/risk-map'];
+  const d = draftRiskMap(map, files);
+  assert.deepEqual(d.added, ['.sdlc/', '@types/', 'app/']);
+  assert.deepEqual(d.unwritable, ['my docs/', '#tmp/']);
+  const p = parseRiskMap(d.text);
+  assert.deepEqual(p.problems, [], 'every line draft wrote is readable');
+  assert.equal(draftRiskMap(d.text, files).text, d.text, 'and a second draft adds nothing — no line piles up');
+  // What is left is said once, with the reason it cannot be fixed by a line.
+  const left = riskMapFindings(p, { files });
+  assert.deepEqual(left.filter((f) => f.code === 'uncovered').map((f) => f.target), ['my docs/', '#tmp/']);
+  assert.match(left.find((f) => f.target === 'my docs/').message, /rename it/);
+});
+
+test('risk map: `@types/` is a directory, `@org/team` is a name; only spaces and tabs are whitespace', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const p = parseRiskMap('# yad-risk-map v1\n@types/ low confirmed\nsrc/ high confirmed # @org/payments-team\nlib/ low confirmed \n');
+  assert.deepEqual(p.entries.map((e) => e.dir), ['@types/', 'src/']);
+  assert.deepEqual(p.problems.map((x) => `${x.code}:${x.line}`), ['names:3', 'unreadable:4']);
+  assert.equal(parseRiskMap('# yad-risk-map v0\nsrc/ low confirmed\n').supported, false, 'v0 is not v1');
+  assert.equal(parseRiskMap('# yad-risk-map v01\nsrc/ low confirmed\n').entries.length, 1, 'v01 is v1');
+});
+
+test('yad risk-map: an empty or broken registry is refused — the map is never written into the Product', async () => {
+  const { runRiskMap } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-reg-'));
+  const grabRun = async (fn) => {
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    const out = await grab(fn);
+    const failed = process.exitCode === 1;
+    process.exitCode = code;
+    return { out, failed };
+  };
+  try {
+    git(T, 'init', '-q');
+    fs.mkdirSync(path.join(T, '.sdlc'));
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), JSON.stringify({ repos: [] }));
+    let r = await grabRun(() => runRiskMap(T, { action: 'draft' }));
+    assert.equal(r.failed, true);
+    assert.match(r.out, /no repos in \.sdlc\/repos\.json/);
+    fs.writeFileSync(path.join(T, '.sdlc/repos.json'), '{ not json');
+    r = await grabRun(() => runRiskMap(T, { action: 'draft', json: true }));
+    assert.equal(r.failed, true);
+    assert.match(JSON.parse(r.out).error, /does not parse/);
+    assert.equal(fs.existsSync(path.join(T, '.sdlc/risk-map')), false);
+    // With no registry file at all, the directory is the code repo.
+    fs.rmSync(path.join(T, '.sdlc/repos.json'));
+    r = await grabRun(() => runRiskMap(T, { action: 'draft' }));
+    assert.equal(r.failed, false, r.out);
+    assert.equal(fs.existsSync(path.join(T, '.sdlc/risk-map')), true);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('yad risk-map: a repo whose file list is larger than 1 MiB is still read', async () => {
+  const { repoFiles } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-big-'));
+  try {
+    git(T, 'init', '-q');
+    const dir = path.join(T, 'd'.repeat(60));
+    fs.mkdirSync(dir);
+    for (let i = 0; i < 16000; i++) fs.writeFileSync(path.join(dir, `file-with-a-long-name-${String(i).padStart(6, '0')}.txt`), '');
+    const files = repoFiles(T);
+    assert.ok(files, 'spawnSync\'s default buffer would have failed this as "not a git repo"');
+    assert.equal(files.length, 16000);
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});
+
+test('risk map: a directory whose name holds a newline or CR is unwritable, and a leading space survives the file list', async () => {
+  const { draftRiskMap, parseRiskMap } = await import('./riskmap.mjs');
+  const { repoFiles } = await import('./riskmap-command.mjs');
+  const d = draftRiskMap(null, ['a\nb/x.js', 'c\rd/y.js', 'src/z.js']);
+  assert.deepEqual(d.unwritable, ['a\nb/', 'c\rd/']);
+  assert.deepEqual(parseRiskMap(d.text).problems, [], 'no line split in two');
+  assert.equal(draftRiskMap(d.text, ['a\nb/x.js', 'c\rd/y.js', 'src/z.js']).text, d.text);
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e65-space-'));
+  try {
+    git(T, 'init', '-q');
+    fs.mkdirSync(path.join(T, ' notes'));
+    fs.writeFileSync(path.join(T, ' notes/a.md'), 'x');
+    fs.writeFileSync(path.join(T, 'b.md'), 'x');
+    assert.deepEqual(repoFiles(T).sort(), [' notes/a.md', 'b.md'], 'the first path in the list keeps its leading space');
+  } finally { fs.rmSync(T, { recursive: true, force: true }); }
+});

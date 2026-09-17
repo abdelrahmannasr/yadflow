@@ -445,6 +445,8 @@ export const REPO_WIRING = {
     { src: 'skills/yad-checks/templates/checks/reconcile-debt-check.sh', dest: 'checks/reconcile-debt-check.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/verified-commits.sh', dest: 'checks/verified-commits.sh', exec: true },
     { src: 'skills/yad-checks/templates/checks/commit-message.sh', dest: 'checks/commit-message.sh', exec: true },
+    // E65. The CHECK is ours and wired; the map it reads (`.sdlc/risk-map`) is the team's and never is.
+    { src: 'skills/yad-checks/templates/checks/risk-map-check.sh', dest: 'checks/risk-map-check.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/risk-route.sh', dest: 'checks/risk-route.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-title.sh', dest: 'checks/pr-title.sh', exec: true },
     { src: 'skills/yad-pr-template/templates/checks/pr-template.sh', dest: 'checks/pr-template.sh', exec: true },

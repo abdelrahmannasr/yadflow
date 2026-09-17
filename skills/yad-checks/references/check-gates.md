@@ -324,6 +324,38 @@ PR merges pass (merge commits are Verified, or content-free and signature-waived
 recreates the PR commits
 without the platform signature, so a rebase-merge team should sign commits or not wire this guard.
 
+## 10. risk-map (`templates/checks/risk-map-check.sh`) — advisory
+
+Reads the code repo's **risk map**, `.sdlc/risk-map`: one line per directory giving it a level (`high`,
+`medium`, `low`, or `unset`), marked `guessed` (an AI agent filled it) or `confirmed` (a person checked
+it), and **no names** (E65). The format, the rubric and who may change what:
+`../yad-connect-repos/references/risk-map.md`. The rules have a twin in `cli/riskmap.mjs`
+(`yad risk-map check`, `yad doctor`); a test runs both over the same repos and compares the output.
+
+It **always exits 0** — nothing counts the levels until E66, so a stale map must never block a merge. It
+prints `WARN [risk-map] <code> <target>: …` for:
+
+| Code | When |
+|---|---|
+| `uncovered` | a file this change adds or edits that no line covers — names the directory to add. A directory a line cannot hold (`app/[slug]/`) names its parent instead; a top-level one (`my docs/`) says to rename it |
+| `dead` | a line whose directory holds no file (`./`: no file at the root) — on every change, until fixed |
+| `unset` / `guessed` | a line this change touches that has no level yet, or whose level is still a guess |
+| `unreadable` / `names` / `duplicate` | a line that is not `<dir>/ <level> <state>`, names a person (a word starting `@`, `@org/team` included — a word ending in `/`, like `@types/`, is a directory), or repeats a directory |
+| `header` / `version` | no `# yad-risk-map v1` first line (read as v1), or a newer version (nothing is read) |
+| `map-edited` | the change edits the map itself, which decides how much review later changes need |
+
+The change is `git diff --name-only -z --diff-filter=ACMRT <base>...HEAD` (T: a file turned into a symlink is an edit) — **three dots**, measured from
+where the branch left the base, so commits the base gained since are never blamed on this change (the
+blocking gates use two dots; this one only warns about what the change touches). A deleted file is never
+asked about. The repo is `git ls-files -z`. Both lists are read NUL-separated, so a path holding `"`, `\`
+or a tab arrives as it is, never quoted by git. A base that does not resolve, or shares no history with HEAD (a shallow clone), is a note, not a failure:
+the map's own lines are still checked. A repo with no map gets one note and passes — **unless this change deleted
+the map**, which warns `map-edited` (a rename away from `.sdlc/risk-map` counts as a delete). Outside a git repo it
+prints a note and exits 0. **Known limit:** a path holding a newline reads differently here than in
+`yad risk-map check` — git's NUL-separated list has to become lines for macOS awk — and such a directory
+cannot have a line anyway. **The map file is not wired** — it is the
+team's, so `yad update` never owns or overwrites it; only the check is.
+
 ## CI wiring (both platforms)
 
 The gates run identically under either CI; the config just invokes the scripts with the PR/MR base.
@@ -337,8 +369,8 @@ The gates run identically under either CI; the config just invokes the scripts w
   re-runs `pr-title`/`pr-template`, not the whole suite. The pattern jobs
   read the title/body from the event payload: `pr-title` takes `${{ github.event.pull_request.title }}`
   and `pr-template` writes `${{ github.event.pull_request.body }}` to a temp file. All `--profile code`.
-  The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) run as their own jobs with
-  `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout also
+  The Phase 6 thread gates (`lineage-check`, `epic-open`, `reconcile-debt`) and the advisory `risk-map`
+  check run as their own jobs with `fetch-depth: 0`, the same `origin/${{ github.base_ref }}` base. The build/test/lint checkout also
   uses `filter: blob:none`; its installer follows `package.json#packageManager`, and `NX_BASE` /
   `NX_HEAD` carry the exact base/head SHAs so Nx affected commands evaluate the PR rather than a
   stale default. `YAD_NODE_VERSION` is read from GitHub repository variables with `22` as the default.

@@ -47,6 +47,8 @@ no clone needed.
 | `yad tidy up [<epic>] [--push]` | Fold a **shipped story's** finished `trust-log`/`build-log` **shards** back into the single folded ledger file, as one `chore(hub)` commit — the manual "pack it up" companion to the shard-then-fold storage (like `git gc` for its loose objects). Concurrent Build writers each write their own shard file (so parallel stories of one epic never conflict), and readers union the folded file + loose shards; `tidy up` is the on-demand compaction. A fold reads shards, merges them, then deletes them, so it holds the ledger's exclusive lock for that whole span — a ship written or stamped mid-fold can never be folded away without its change, or deleted without being folded (`YAD-STATE-006` if another writer holds it). Default branch only; `--push` lands it on `origin/<default>`; a **no-op** when nothing is foldable. |
 | `yad repo list` / `yad repo refresh [name]` | List connected repos as **fresh / stale**, and re-pack a stale one — staleness is now an explicit human decision, never an automatic skill side-effect. |
 | `yad repo refresh [name] --push` | After the re-pack (and the AI regenerating the code-map), commit the tracked code-maps + `.sdlc/repos.json` as an audit-trail `chore(hub): sync code-context … [skip ci]` commit and push it straight to the Product's **default branch** (`--allow-branch` to override). The code-context analogue of `yad checkpoint`. |
+| `yad risk-map check [repo] [--json]` | Check a code repo's **risk map** (`.sdlc/risk-map`: a risk level per directory, no names — see [The risk map](#the-risk-map-a-level-per-directory)). Warns about a directory no line covers, a line whose directory is gone, a line still `unset` or `guessed`, and a line it cannot read. `repo` is a name from `.sdlc/repos.json` or a path; with none, every connected repo — or the current directory, but only when there is no `repos.json` at all (an empty or unreadable registry is refused, so a map is never written into the Product). **Advisory:** it never sets a failing exit code for a warning. The PR check `checks/risk-map-check.sh` says the same about one change. |
+| `yad risk-map draft [repo] [--dry-run]` | Add an `unset` line for every directory the map does not cover, creating the file when there is none. **Never changes a line that is already there.** A directory whose name a line cannot hold (a space, `#`, `*`, `?`, `[` or `\`) is covered by its parent's line instead, or — at the top level — named as not added. Refuses a map written for a newer version. The levels themselves come from the `yad-connect-repos` skill, which has your AI agent read the code. |
 | `yad repo sync [name]` | Switch every connected repo to its **default branch** and fast-forward it from origin (one or all). Dirty repos are skipped, never overwritten; fast-forward only. |
 | `yad thread [<epic>]` | **Feature threads.** No arg: list every thread. With an epic: show its thread (genesis → changes → defects), the **resolved current-truth** map (which epic owns each artifact now), and any open hotfix debt. `--json` for tooling, where each node carries its work-item `type`, its grouping `theme` and the lifecycle `phase` its current step is in. Read-only. |
 | `yad reconcile [check\|refresh\|wire]` | Sweep threads for **drift / orphans / open hotfix debt** and report which thread drifted and why (mirrors `yad docs sync`; advisory — the CI gates block at merge). |
@@ -700,6 +702,46 @@ a blocker on the step after it either: the chain moves there, and `yad next` sho
 and `yad defer` refuse a
 blocked step for the same reason: setting it aside would lose the record of who it waits on, so clear
 the blocker first.
+
+## The risk map: a level per directory
+
+Each code repo can keep one file, `.sdlc/risk-map`, that says how risky each directory is. It holds
+**levels only — `high`, `medium`, `low` — and never a name**. It is the team's file: `yad update` never
+installs, owns or overwrites it, and it changes only through that repo's PRs.
+
+```
+# yad-risk-map v1
+src/payments/   high    confirmed  # charge.js calls the card processor
+src/catalog/    low     guessed    # read-only product listing
+docs/           unset
+./              low     confirmed  # the files at the repo root
+```
+
+| Rule | Meaning |
+|---|---|
+| One line per directory | `<dir>/ <level> <guessed\|confirmed>`. Fields are split on spaces or tabs, so a path cannot hold one. |
+| Comments | Everything from the first `#` that follows a space or tab. A `#` glued to a word is part of it. |
+| Which line decides | The deepest listed directory above a file. |
+| `./` | The files **at** the repo root only. There is no catch-all line, so a new directory can never hide under one. |
+| `unset` | Listed, not yet classified. Its state column may be left out. |
+| `guessed` / `confirmed` | `guessed` was filled in by an AI agent. A person changes it to `confirmed` in a PR; the commit records who. |
+| No `contract` level | The contract surface keeps its own lock, `contract-check` and `Contract-Change` trailer. |
+
+**How a map is made.** `yad risk-map draft <repo>` adds an `unset` line for every directory no line
+covers — on a new map, each top-level directory (and `./` for the root files).
+The `yad-connect-repos` skill then has your AI agent read the code — not the folder names — and fill
+each `unset` line with a level, a one-line reason and `guessed`. It never rewrites a `confirmed` line.
+With no AI agent, a person fills the lines in.
+
+**How it stays true.** `checks/risk-map-check.sh` runs on every PR (both CI templates) and warns when the
+change adds a directory no line covers, leaves a line whose directory is gone, touches a line still
+`unset` or `guessed`, or edits or deletes the map itself. It measures the change from where the branch
+left its base, so the base's own newer commits are never blamed on it. It never fails the build. `yad risk-map check` and the
+`risk-map` section of `yad doctor` say the same about the whole repo.
+
+**What reads the levels.** Nothing counts them yet (E65 only keeps and checks the map). E66 will turn a
+`high` directory into one more required approval, reading the map from the base branch so a PR cannot
+lower its own count; E67 will ask who has committed to those directories.
 
 ## File shape: `schemaVersion`
 

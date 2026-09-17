@@ -1,6 +1,6 @@
 ---
 name: yad-checks
-description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unsigned commits — every commit carries a platform-Verified signature; write access to the repo decides who can author, on the Product and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
+description: 'Build Step C of the gated SDLC — the production-safety check gates. Wire and run the CI gates on a code repo: spec-link (every change links a real story/spec via its Task trailer), contract-check (a diff that changes the contract surface without a Contract-Change + an updated, re-locked contract FAILS and routes back to the architecture gate), build/test/lint, verified-commits (no unsigned commits — every commit carries a platform-Verified signature; write access to the repo decides who can author, on the Product and every repo), and the Phase 6 feature-thread gates lineage-check / epic-open / reconcile-debt (a change links a real threaded epic; a sealed epic refuses new behaviour; a thread with open hotfix debt is frozen until paid), plus an advisory risk-map check (warns when .sdlc/risk-map is stale). The gates are CI-agnostic bash, invoked by GitHub Actions and GitLab CI. Use when the user says "wire the check gates", "run the gates", "require signed commits", or "set up CI checks" for a repo.'
 ---
 
 # SDLC — Check Gates (Build Step C)
@@ -47,6 +47,11 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
    change-epic (so the Shape artifacts can never go stale).
 7. **reconcile-debt** (Phase 6) — a hotfix that shipped first opens debt; the **next** change on its
    thread **FAILS** until the debt is paid (artifacts updated + a regression test added).
+8. **risk-map** (E65, **advisory — never fails**) — reads the code repo's `.sdlc/risk-map` (one line per
+   directory: `high` / `medium` / `low`, no names) and **warns** when this change adds a directory no line
+   covers, leaves a line whose directory is gone, touches a line still `unset` or `guessed`, or edits the
+   map itself. A repo with no map gets one note. The map is the team's file, never wired; the
+   `yad-connect-repos` skill drafts it. See `references/check-gates.md` §10.
 
 The Phase 6 gates read the owning epic in the **Product** via `specs/<story>/link.md`'s
 `product-repo` path (like contract-check), and degrade to a PASS-with-note when the Product is not reachable
@@ -54,7 +59,7 @@ from CI. See `references/check-gates.md` and `skills/yad-change`.
 
 The gates are **CI-agnostic bash** in `checks/`; thin pipeline configs invoke them on GitHub Actions
 and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the skill or let CI run them;
-**nothing auto-advances**. The gates are blocking in CI, but the human still owns the merge (Step E).
+**nothing auto-advances**. The gates are blocking in CI (all but the advisory risk-map check), but the human still owns the merge (Step E).
 
 ## Conventions
 
@@ -64,7 +69,7 @@ and GitLab CI. This step is **by hand** in Phase 3 — run the gates with the sk
   (`config.yaml` `build.code_repos_root`).
 - Canonical gate sources live in this skill's `templates/` (the source of truth that gets installed
   into each code repo):
-  - `templates/checks/{spec-link,contract-check,package-manager,install-deps,build-test-lint,verified-commits}.sh`
+  - `templates/checks/{spec-link,contract-check,package-manager,install-deps,build-test-lint,verified-commits,risk-map-check}.sh`
   - `templates/checks/ledger-guard.sh` → **Product-only** gate, active **only in verified mode** — hub.json
     carries BOTH a `platform` and `ledger: "verified"` — or, before `yad migrate`, `bridge_enabled`
     (or the legacy `bridge`) true. The same predicate

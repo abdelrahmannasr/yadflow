@@ -43,7 +43,7 @@ const setupSteps: FlowStep[] = [
       { id: "cr-1", from: "code-repos", to: "repos-json", label: "register repo", type: "write", color: "#b7950b", delay: 0, duration: 700 },
       { id: "cr-2", from: "code-repos", to: "product-hub", label: "cache pack.md + code-map.md", type: "write", color: "#2471a3", delay: 800, duration: 800 },
     ],
-    sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md · yad repo refresh --push publishes the code-maps to the Product (chore(hub): sync code-context)" },
+    sideEffects: { jobs: "repos.json · code-context/<repo>/pack.md · code-map.md · yad repo refresh --push publishes the code-maps to the Product (chore(hub): sync code-context) · a draft .sdlc/risk-map in the code repo, classified by the AI from the code as guessed" },
   },
   {
     id: "sync-repos",
@@ -370,7 +370,7 @@ const buildSteps: FlowStep[] = [
     id: "checks",
     title: "Check Gates (Step C)",
     description:
-      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt), and yad-update-guard (push-on-default: re-checks any direct-to-default commit — e.g. from `yad update --push` — with verified-commits + commit-message). Blocking in CI.",
+      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt), the risk-map check (warnings only — a directory with no level, a dead line, an unconfirmed level in the repo's .sdlc/risk-map), and yad-update-guard (push-on-default: re-checks any direct-to-default commit — e.g. from `yad update --push` — with verified-commits + commit-message). Blocking in CI, except the advisory risk-map check.",
     actor: "system",
     status: "checks-passing",
     stepState: "checks/*.sh · yad-checks.yml",
