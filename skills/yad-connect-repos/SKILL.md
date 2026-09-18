@@ -100,12 +100,14 @@ or `low`, and **no names** (E65). Format, rubric and edit rules: `references/ris
    every directory no line covers and never changes a line that is already there.
 2. For every `unset` line, **read the code in that directory** — the pack, the code-map, and the files
    themselves when those do not say — and decide the level by the rubric. Judge by what the code does,
-   never by the folder's name. Write the level, `guessed`, and a one-line reason from the code
+   never by the folder's name — with one exception, `.sdlc/`, which is `high` because it holds the risk
+   map (see the rubric). Write the level, `guessed`, and a one-line reason from the code
    (`src/payments/  high  guessed  # charge.js calls the card processor`). When unsure between two levels,
    choose the higher one. When a directory's parts differ, add a deeper line for each part.
-3. A `guessed` line may be re-levelled if the code says otherwise. **Never edit, re-level or delete a
-   `confirmed` line**: when the code now contradicts one, report it as a suggestion for a person. Never
-   mark anything `confirmed` — only a person does that. Write no name, secret or customer value.
+3. A `guessed` line may be re-levelled if the code says otherwise — except `.sdlc/`, which is raised to
+   `high` if it is not (the rubric's one exception). **Never edit, re-level or delete a `confirmed` line**:
+   when the code now contradicts one, report it as a suggestion for a person. Never mark anything
+   `confirmed` — only a person does that. Write no name, secret or customer value.
 4. Run `yad risk-map check <path>` and report what is left.
 5. Tell the person to review every `guessed` line, change the right ones to `confirmed`, and commit
    `.sdlc/risk-map` **in the code repo, on a new branch, through a PR** — never straight to its default branch. Its `risk-map` check warns on that PR that the map
