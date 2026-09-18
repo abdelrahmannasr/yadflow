@@ -57,8 +57,9 @@ branch, and opening the PR/MR with the template prefilled and the assignee set. 
 requested: it prints `no reviewers were requested — ask them on the PR itself`.
 
 ### Step 3 — Route + stop (no merge)
-On `high` risk or a contract touch, run `bash checks/risk-route.sh "<pr body>"` to see how many
-approvers it asks for; ask reviewers on the PR/MR itself. Report the commit + the PR/MR URL. The PR now
+The open step prints how many approvers the PR asks for — the body's level and the base branch's risk
+map, the larger step winning (E66). When it asks for more than one, `bash checks/risk-route.sh "<pr body>"`
+lists the touched domains to ask; ask reviewers on the PR/MR itself. Report the commit + the PR/MR URL. The PR now
 runs the check gates (Step C); the engineer review and merge are Step E (`yad-engineer-review`).
 
 ## Hard rules

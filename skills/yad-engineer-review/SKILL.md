@@ -23,8 +23,9 @@ then **ship** — merge, record the ship, and update the story state. This is th
   finished shards back into `build-log.json`. It — like the trust log and build-state — is committed by
   `yad checkpoint` (see Step 3), not by hand.
 - The engineer-review rule reuses `yad-review-gate`'s count: `needed = base 1 + risk step` distinct
-  approvers. The PR's Impact & Risk block sets the risk step: `high` risk +1, a touched contract surface
-  +2 (the larger, never the sum). Only the base (1 distinct approver, who should not be the author) holds the merge; the
+  approvers. The risk step comes from the PR's Impact & Risk block — `high` risk +1, a touched contract
+  surface +2 — and from the code repo's risk map on the **base branch**: a change touching a `high`
+  directory +1 (E66). The largest step wins, never the sum. Only the base (1 distinct approver, who should not be the author) holds the merge; the
   risk step is advisory until the capacity cap (E72). This is what `yad-pr-template`'s `risk-route.sh`
   prints. The real merge protection is the platform's branch protection.
 - AI review wiring: `templates/.coderabbit.yaml` → `<repo>/.coderabbit.yaml`.
@@ -59,11 +60,17 @@ never gates. When a pair session backs the approve, you may set `companion.pair:
 
 ### Step 2 — `approve` (the engineer review — the human gate)
 A human engineer reads the diff **against the spec** (`specs/<story>/`) and the acceptance criteria,
-and records an approval. Determine the count from the PR's Impact & Risk block (run
-`../yad-pr-template/templates/checks/risk-route.sh` on the PR body). It prints e.g.
+and records an approval. Determine the count with `bash checks/risk-route.sh <pr-body-file> origin/<base>`,
+run **in the code repo with the PR's branch checked out** — it reads the body's Impact & Risk block and
+the base branch's `.sdlc/risk-map`, and the larger step wins. On the base branch the change is empty and
+the map adds nothing, so check out the PR branch first. (Where the repo has no `checks/`, run
+`../yad-pr-template/templates/checks/risk-route.sh` from the code repo instead; it finds no risk-map check
+and counts the body alone, and says so.) It prints e.g.
 `ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface touched)`, says only the base holds the
 merge until the capacity cap, and lists the touched domains as a hint for whom to ask. With no risk it
-prints `ROUTE: 1 approver = base 1 (no risk step).` Record each approval; re-evaluate whether the base
+prints `ROUTE: 1 approver = base 1 (no risk step).` When the map raises a body that says `low`, it
+names the `high` directories and says the two disagree — tell the engineer, and ask the author to fix the
+body if the body is wrong. Record each approval; re-evaluate whether the base
 is met, and report any shortfall against the full count without blocking on it.
 Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
 approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
@@ -88,7 +95,7 @@ engineer-review rule is satisfied (Step 2). Then:
   { "story": "<story>", "task": "<task>", "repo": "<repo>", "branch": "feat/<story>-<task>-…",
     "pr": "<url|#>", "mergeCommit": "<sha>", "gates": ["spec-link","contract-check","build-test-lint"],
     "ai_review": "coderabbit (advisory)", "engineer_review": [{"approver":"<platform login>","engagement":"<verified|none>"}],
-    "companion": {"trailer":true,"cards":true,"chat":false}, "risk": "<low|medium|high>", "shippedAt": "<YYYY-MM-DD>" }
+    "companion": {"trailer":true,"cards":true,"chat":false}, "risk": "<low|medium|high — the BODY's level>", "shippedAt": "<YYYY-MM-DD>" }
   ```
 - **Update the story state** — when **every** task in `specs/<story>/tasks.md` has a ship record, set
   the story frontmatter `status: shipped`; otherwise `status: in-build`. The chain
@@ -118,8 +125,11 @@ stays as it was (`ready-for-build`). Build is recorded in `build-log.json` + the
 ## Hard rules (build plan §E, Cross-cutting)
 
 - **AI review is advisory, never the authority.** Only a human engineer approval counts toward the gate.
-- **High risk raises the count** — the same count as `yad-review-gate` / `risk-route.sh`. Only the base
-  holds the merge until the capacity cap; there are no domain owners to route to.
+- **High risk raises the count** — the same count as `yad-review-gate` / `risk-route.sh`, and a `high`
+  directory on the base branch's risk map raises it too. Only the base holds the merge until the capacity
+  cap; there are no domain owners to route to.
+- **The ship record's `risk` is the body's level**, as the author wrote it — not the level the map raised
+  it to. The count is worked out live each time and never stored (the user's decision, 2026-09-18).
 - **Ship only after gates + engineer review.** No gate skipped; the human owns the merge.
 - **Nothing auto-advances.** Step E records human decisions in files; it never machine-advances.
 

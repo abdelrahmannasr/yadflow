@@ -13,7 +13,9 @@ ship. Shipping records the merge and updates the story state so the whole chain 
    criteria and records an approval. The rule is `yad-review-gate`'s count, in distinct approvers:
    - **base (enforced):** 1 distinct approver, who should not be the author. This holds the merge.
    - **full count (advisory):** base 1 + a risk step from the PR's Impact & Risk block — `high` risk
-     +1, a touched contract surface +2 (the larger, never the sum). Exactly what `risk-route.sh` prints.
+     +1, a touched contract surface +2 — or from the base branch's risk map, where a change touching a
+     `high` directory adds +1 (E66). The largest step, never the sum. Exactly what `risk-route.sh` prints,
+     run in the code repo on the PR's branch.
      The risk step holds nothing until the capacity cap (E72). The touched domains it lists are a hint
      for whom to ask.
 
