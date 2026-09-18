@@ -75,7 +75,8 @@ export function baseChangeLevel(repoRoot, baseRef) {
     return { base, unknown: `base ref '${baseRef}' not found, or it shares no history with HEAD (a shallow clone?)` };
   }
   // Only a real file is a map: `git show` would print a symlink's target as if it were the text.
-  const entry = git(['ls-tree', baseRef, '--', RISK_MAP_FILE]).stdout || '';
+  // --full-tree: ls-tree reads a path from the current folder, so from a subfolder it would find no map.
+  const entry = git(['ls-tree', '--full-tree', baseRef, '--', RISK_MAP_FILE]).stdout || '';
   if (!entry) return { base, noMap: `'${baseRef}' has no ${RISK_MAP_FILE}` };
   if (!/^100(644|755) blob /.test(entry)) return { base, noMap: `'${baseRef}' holds ${RISK_MAP_FILE}, but not as a file` };
   const text = git(['show', `${baseRef}:${RISK_MAP_FILE}`]);

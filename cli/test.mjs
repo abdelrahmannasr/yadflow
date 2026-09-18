@@ -17796,6 +17796,18 @@ test('escalate by count: no map on the base, a symlink, or an unreadable base â€
   } finally { fs.rmSync(link.T, { recursive: true, force: true }); }
 });
 
+test('escalate by count: from a subfolder of the repo the base map is still read', async () => {
+  const { baseChangeLevel } = await import('./riskmap-command.mjs');
+  const r = repoWithBaseMap(E66_MAP, { 'lib/l.js': 'x' });
+  try {
+    r.put({ 'src/payments/pay.js': 'y' });
+    r.commit('feat: pay');
+    const got = baseChangeLevel(path.join(r.T, 'lib'), 'origin/main');
+    assert.equal(got.noMap, undefined, 'git ls-tree reads a path from the current folder unless told --full-tree');
+    assert.equal(got.level, 'high');
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});
+
 test('escalate by count: open-pr prints the count â€” the larger of body and map, printed only, never written', async () => {
   const { routeCount } = await import('./openpr.mjs');
   const r = repoWithBaseMap(E66_MAP);

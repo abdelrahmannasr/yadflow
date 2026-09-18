@@ -221,8 +221,9 @@ base_level() {
   echo "BASE ${BASE}"
   if [ "$base_ok" != 1 ]; then echo "UNKNOWN base ref '${BASE}' not found, or it shares no history with HEAD (a shallow clone?)"; return; fi
   # Only a real file on the base is a map: a symlink or a folder of that name is not read (git would
-  # print a symlink's target as if it were the map's text).
-  _entry="$(git ls-tree "$BASE" -- "$MAP")" || _entry=""
+  # print a symlink's target as if it were the map's text). --full-tree: ls-tree reads a path from the
+  # current folder, and run from a subfolder it would find no map and quietly count zero.
+  _entry="$(git ls-tree --full-tree "$BASE" -- "$MAP")" || _entry=""
   case "$_entry" in
     "100644 blob "*|"100755 blob "*) ;;
     "") echo "NOMAP '${BASE}' has no ${MAP}"; return ;;

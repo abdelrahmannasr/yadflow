@@ -98,7 +98,7 @@ if [ "$step" -gt 0 ]; then
     *)
       printf '%s\n' "$domains" | tr ',' '\n' | while IFS= read -r d; do
         d="$(printf '%s' "$d" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [ -n "$d" ] && echo "  - $d"
+        if [ -n "$d" ]; then echo "  - $d"; fi   # not `&&`: an empty last item (`a, b,`) would exit 1
       done ;;
   esac
 else

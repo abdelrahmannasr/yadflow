@@ -44,7 +44,7 @@ if [ "$step" -gt 0 ]; then
     *)
       printf '%s\n' "$repos" | tr ',' '\n' | while IFS= read -r r; do
         r="$(printf '%s' "$r" | sed -E 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [ -n "$r" ] && echo "  - $r"
+        if [ -n "$r" ]; then echo "  - $r"; fi   # not `&&`: an empty last item (`a, b,`) would exit 1
       done ;;
   esac
 else

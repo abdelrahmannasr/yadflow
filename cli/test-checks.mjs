@@ -3257,3 +3257,25 @@ test('risk-route: a risk-map check from before E66 is "not counted", never read 
   assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/, 'the body alone is counted, and said to be');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('risk-map count: run from a subfolder it still reads the base map — never a quiet "no map"', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', 'lib/l.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: pay', { 'src/payments/c.js': 'y' });
+  const r = runGate(RISK_MAP, path.join(T, 'lib'), ['--level', 'main']);
+  assert.match(r.out, /^LEVEL high$/m, r.out);
+  assert.doesNotMatch(r.out, /NOMAP/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-route and hub-route: a Domains line ending in a comma still exits 0', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-risk-'));
+  let r = runGate(RISK_ROUTE, T, [body(T, '- Risk level: high\n- Contract surface touched: no\n- Domains touched: auth, billing,\n')]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\n {2}- auth\n {2}- billing\n/);
+  r = runGate(HUB_ROUTE, T, [body(T, '- **Risk tags:** auth\n- **Domains / repos touched:** backend, mobile,\n')]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\n {2}- backend\n {2}- mobile\n/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
