@@ -53,8 +53,9 @@ yad-contract-check:
   script:
     - bash checks/contract-check.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
-# E65 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings only: it never
-# fails the pipeline, so the job needs no allow_failure.
+# E65/E66 — the risk map (.sdlc/risk-map: a risk level per directory, no names). Warnings, and the
+# approver count read from the base branch's map. It never fails the pipeline (the count is reported,
+# not enforced), so the job needs no allow_failure.
 yad-risk-map:
   extends: .sdlc_mr_only
   needs: []

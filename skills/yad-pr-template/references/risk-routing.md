@@ -52,8 +52,9 @@ step a body saying `Risk level: high` adds. The rules:
 - A `guessed` level counts as a `confirmed` one does: a level only raises the count, never lowers it.
 - `medium` is printed and adds nothing. An `unset` line, or a directory no line covers, adds nothing.
 - A deleted or moved file counts where it was.
-- If the map cannot be read (no base, a shallow clone, a newer map version), the output says so and
-  counts the body alone. It never guesses a level.
+- If the map cannot be read (no base, a shallow clone, a newer map version, or a `checks/risk-map-check.sh`
+  older than this count, which `yad update` refreshes), the output says so and counts the body alone. It
+  never guesses a level.
 
 ## risk-route.sh
 

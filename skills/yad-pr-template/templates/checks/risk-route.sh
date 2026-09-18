@@ -50,6 +50,11 @@ else
 fi
 line_of() { printf '%s\n' "$lv" | sed -n "s/^$1 //p" | head -1; }
 dirs_of() { printf '%s\n' "$lv" | awk -v want="$1" '$1 == "DIR" && $3 == want { printf "%s%s%s", sep, $2, ($4 == "guessed") ? " (guessed)" : ""; sep = ", " }'; }
+# A risk-map check from before E66 has no --level mode: it reads the flag as a base and prints warnings,
+# none of the lines above. Reading that as "nothing is high" would be a guess, so it is unknown instead.
+if [ -z "$(line_of UNKNOWN)$(line_of NOMAP)$(line_of LEVEL)" ]; then
+  lv="UNKNOWN checks/risk-map-check.sh cannot count the risk map yet (it predates E66) — update it with \`yad update\`"
+fi
 map_base="$(line_of BASE)"
 map_high=""
 if [ -n "$(line_of UNKNOWN)" ]; then

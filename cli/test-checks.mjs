@@ -3240,3 +3240,20 @@ test('risk-map count: a move out of a high directory counts, and a symlinked map
   assert.match(r.out, /^NOMAP 'main~0' holds \.sdlc\/risk-map, but not as a file$/m, 'git show would print the link target as the map');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('risk-route: a risk-map check from before E66 is "not counted", never read as "nothing is high"', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: pay', { 'src/payments/c.js': 'y' });
+  const route = wiredRoute(T);
+  // The E65 script has no --level: it reads the flag as a base and prints its usual note and PASS.
+  fs.writeFileSync(path.join(T, 'checks/risk-map-check.sh'),
+    'echo "note [risk-map]: base ref \'$1\' not found, or shares no history with HEAD (a shallow clone?) — checking the map\'s own lines only, not this change."\necho "PASS [risk-map]: every file this change touches has a confirmed level."\n');
+  const r = runGate(route, T, [body(T, '- Risk level: low\n- Contract surface touched: no\n'), 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /Risk map: not counted — checks\/risk-map-check\.sh cannot count the risk map yet \(it predates E66\)/);
+  assert.doesNotMatch(r.out, /nothing this change touches is high/);
+  assert.match(r.out, /ROUTE: 1 approver = base 1 \(no risk step\)/, 'the body alone is counted, and said to be');
+  fs.rmSync(T, { recursive: true, force: true });
+});
