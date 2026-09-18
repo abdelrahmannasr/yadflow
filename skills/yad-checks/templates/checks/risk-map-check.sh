@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
-# risk-map check (E65). Reads this repo's `.sdlc/risk-map` — one line per directory giving it a risk
-# level (high / medium / low), no names — and WARNS when the map has gone stale for the change in front
-# of it. It never fails the build: nothing counts the map until E66, and a warning is how a team keeps
-# it true. No AI and no Node: the same map and the same diff give the same output on every run.
+# risk-map check (E65, E66). Reads this repo's `.sdlc/risk-map` — one line per directory giving it a
+# risk level (high / medium / low), no names — and WARNS when the map has gone stale for the change in
+# front of it. It never fails the build: a warning is how a team keeps the map true. No AI and no Node:
+# the same map and the same diff give the same output on every run.
+#
+# It also COUNTS (E66): a change touching a `high` directory adds the high step, +1 approver, printed as
+# a `COUNT [risk-map]:` line. The count reads the map on the BASE branch, never this change's copy, so a
+# change cannot lower its own count by editing the map. It is reported, not enforced: only the base of
+# one approver holds a merge until the capacity cap (E72). A `guessed` level counts as a `confirmed` one;
+# an `unset` line and an uncovered directory add nothing. The change's files for the count include
+# deleted and moved-away files — deleting code in a `high` directory is a `high` change.
+#
+#   risk-map-check.sh [<base>]           the warnings, then the count (CI runs this on every PR)
+#   risk-map-check.sh --level [<base>]   the count only, as machine lines, for checks/risk-route.sh:
+#                                          BASE <ref>
+#                                          UNKNOWN <why>      the level could not be read — not zero
+#                                          NOMAP <why>        the base has no map: nothing adds a step
+#                                          FILES <n>          how many files the change touches
+#                                          LEVEL <high|medium|low|none>
+#                                          DIR <dir> <level> <guessed|confirmed>   one per touched line
 #
 # It warns about:
 #   uncovered   a file this change adds or edits that no line covers — names the directory to add
@@ -43,16 +59,20 @@ resolve_base() {
   printf '%s' origin/main
 }
 
-BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
-[ -n "${1:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [risk-map]: no base given — diffing against '${BASE}'."
+LEVEL_ONLY=0
+if [ "${1:-}" = "--level" ]; then LEVEL_ONLY=1; shift; fi
 
 MAP=".sdlc/risk-map"
 # Advisory means exit 0 on every input — outside a git repo too, where `set -e` would stop at git.
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [ "$LEVEL_ONLY" = 1 ]; then echo "UNKNOWN not inside a git repo"; exit 0; fi
   echo "note [risk-map]: not inside a git repo — nothing to check."
   echo "PASS [risk-map]: advisory — nothing to check."
   exit 0
 fi
+
+BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
+[ "$LEVEL_ONLY" = 1 ] || [ -n "${1:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [risk-map]: no base given — diffing against '${BASE}'."
 base_ok=0
 # A usable base resolves AND shares history with HEAD: the three-dot range below needs a merge base,
 # which a shallow clone (a host GIT_DEPTH) or unrelated history does not have — git would exit 128.
@@ -64,43 +84,13 @@ fi
 # (the risk map's warnings are about what THIS change touches).
 RANGE="${BASE}...HEAD"
 
-if [ ! -f "$MAP" ]; then
-  # Deleting the map is the largest edit to it there is, so it is said, not passed over as "no map".
-  # Asked of git by path, with no pipe to cut short. --no-renames: a move away (even into a folder the
-  # pathspec also matches, `.sdlc/risk-map/x`) is a delete. T: a map turned into a symlink is gone too.
-  # The exact line is matched, because the pathspec also matches files under a FOLDER of that name.
-  deleted=""
-  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only --no-renames --diff-filter=DT "$RANGE" -- "$MAP")"
-  nl='
-'
-  case "${nl}${deleted}${nl}" in *"${nl}${MAP}${nl}"*)
-    echo "WARN [risk-map] map-edited ${MAP}: this change deletes the risk map, which decides how much review later changes need"
-    echo "PASS [risk-map]: 1 warning(s) — advisory, never blocks a merge."
-    exit 0 ;;
-  esac
-  echo "note [risk-map]: this repo has no ${MAP} — no directory has a risk level yet."
-  echo "  -> From the Product: \`yad risk-map draft <repo>\`, then let yad-connect-repos classify it, and commit it here."
-  echo "PASS [risk-map]: advisory — nothing to check."
-  exit 0
-fi
-
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-# -z, then NUL to newline: git prints each path exactly as it is, never quoted or escaped (quotePath
-# only stops escaping non-ASCII — a `"`, `\` or tab would still arrive wrapped in quotes). awk reads the
-# lines; macOS awk cannot split records on NUL itself.
-git ls-files -z | tr '\0' '\n' > "$tmp/files"
-# The base is advisory here, so an unresolvable one does not fail the check the way it fails the
-# blocking gates: the map's own lines are still checked, and the per-change warnings are skipped.
-if [ "$base_ok" = 1 ]; then
-  # T: a file replaced by a symlink (or back) is an edit too — the map included.
-  git diff --name-only -z --diff-filter=ACMRT "$RANGE" | tr '\0' '\n' > "$tmp/changed"
-else
-  echo "note [risk-map]: base ref '${BASE}' not found, or shares no history with HEAD (a shallow clone?) — checking the map's own lines only, not this change."
-  : > "$tmp/changed"
-fi
 
-awk -v mapf="$MAP" -v filesf="$tmp/files" -v changedf="$tmp/changed" '
+# The map's rules, in awk: read by the warnings below over this change's copy of the map, and by the
+# count over the BASE branch's copy (`mode=level`). One program, so the two can never read a line
+# differently. Its twin is cli/riskmap.mjs.
+RISK_MAP_AWK='
 function problem(code, target, msg) { np++; pc[np] = code; pt[np] = target; pm[np] = msg }
 function warn(code, target, msg) {
   nw++
@@ -176,7 +166,21 @@ FILENAME == mapf {
 }
 FILENAME == filesf { na++; fa[na] = $0; next }
 FILENAME == changedf { nc++; fc[nc] = $0; next }
+function rank(l) { return (l == "high") ? 3 : (l == "medium") ? 2 : (l == "low") ? 1 : 0 }
+# E66, the --level mode: the level this change takes from the map (the twin of `changeLevel` in
+# cli/riskmap.mjs). The highest level among the lines that decide the changed files; `unset` and an
+# uncovered file add nothing; `guessed` counts as `confirmed`. Parse problems add nothing either.
+function level_out(   j, k, i, best) {
+  if (unsupported) { print "UNKNOWN the map on the base is written for risk-map v" badv " and this release reads v1"; return }
+  for (j = 1; j <= nc; j++) { k = cover(fc[j]); if (k && el[k] != "unset") lt[k] = 1 }
+  best = ""
+  for (i = 1; i <= ne; i++) if ((i in lt) && rank(el[i]) > rank(best)) best = el[i]
+  print "FILES " (nc + 0)
+  print "LEVEL " ((best == "") ? "none" : best)
+  for (i = 1; i <= ne; i++) if (i in lt) print "DIR " ed[i] " " el[i] " " es[i]
+}
 END {
+  if (mode == "level") { level_out(); exit }
   if (unsupported) {
     warn("version", "v" badv, "written for risk-map v" badv "; this release reads v1 — nothing in it was read")
   } else {
@@ -208,4 +212,82 @@ END {
   if (nw) printf "PASS [risk-map]: %d warning(s) — advisory, never blocks a merge. Fix the map in this change.\n", nw
   else print "PASS [risk-map]: every file this change touches has a confirmed level."
 }
-' "$MAP" "$tmp/files" "$tmp/changed"
+'
+
+# The count's machine lines (see the top of this file). The map comes from the base TIP — the branch
+# this change merges into, which the change cannot edit. The files come from the same three-dot range
+# as the warnings, with every kind of change kept: a deleted or moved-away file counts where it was.
+base_level() {
+  echo "BASE ${BASE}"
+  if [ "$base_ok" != 1 ]; then echo "UNKNOWN base ref '${BASE}' not found, or it shares no history with HEAD (a shallow clone?)"; return; fi
+  # Only a real file on the base is a map: a symlink or a folder of that name is not read (git would
+  # print a symlink's target as if it were the map's text).
+  _entry="$(git ls-tree "$BASE" -- "$MAP")" || _entry=""
+  case "$_entry" in
+    "100644 blob "*|"100755 blob "*) ;;
+    "") echo "NOMAP '${BASE}' has no ${MAP}"; return ;;
+    *) echo "NOMAP '${BASE}' holds ${MAP}, but not as a file"; return ;;
+  esac
+  git show "${BASE}:${MAP}" > "$tmp/basemap"
+  git diff --name-only -z --no-renames "$RANGE" | tr '\0' '\n' > "$tmp/all-changed"
+  awk -v mode=level -v mapf="$tmp/basemap" -v filesf=/dev/null -v changedf="$tmp/all-changed" "$RISK_MAP_AWK" "$tmp/basemap" /dev/null "$tmp/all-changed"
+}
+
+if [ "$LEVEL_ONLY" = 1 ]; then base_level; exit 0; fi
+
+# The count, said on every PR. Reported, never enforced: it is how many approvers the change ASKS for.
+lv="$(base_level)"
+dirs_of() { printf '%s\n' "$lv" | awk -v want="$1" '$1 == "DIR" && $3 == want { printf "%s%s%s", sep, $2, ($4 == "guessed") ? " (guessed)" : ""; sep = ", " }'; }
+case "$lv" in
+  *"
+UNKNOWN "*)
+    echo "note [risk-map]: not counted — $(printf '%s\n' "$lv" | sed -n 's/^UNKNOWN //p'). The count from the map is unknown, not zero." ;;
+  *"
+NOMAP "*)
+    echo "COUNT [risk-map]: 1 approver = base 1 — $(printf '%s\n' "$lv" | sed -n 's/^NOMAP //p'), so no directory adds a step." ;;
+  *)
+    high="$(dirs_of high)"; medium="$(dirs_of medium)"
+    if [ -n "$high" ]; then
+      echo "COUNT [risk-map]: 2 approvers = base 1 + high risk 1 (high on ${BASE}: ${high}) — only the base holds the merge until the capacity cap."
+    else
+      echo "COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on ${BASE}."
+    fi
+    [ -z "$medium" ] || echo "  medium on ${BASE} (reported only, adds nothing): ${medium}"
+    ;;
+esac
+
+if [ ! -f "$MAP" ]; then
+  # Deleting the map is the largest edit to it there is, so it is said, not passed over as "no map".
+  # Asked of git by path, with no pipe to cut short. --no-renames: a move away (even into a folder the
+  # pathspec also matches, `.sdlc/risk-map/x`) is a delete. T: a map turned into a symlink is gone too.
+  # The exact line is matched, because the pathspec also matches files under a FOLDER of that name.
+  deleted=""
+  [ "$base_ok" = 1 ] && deleted="$(git diff --name-only --no-renames --diff-filter=DT "$RANGE" -- "$MAP")"
+  nl='
+'
+  case "${nl}${deleted}${nl}" in *"${nl}${MAP}${nl}"*)
+    echo "WARN [risk-map] map-edited ${MAP}: this change deletes the risk map, which decides how much review later changes need"
+    echo "PASS [risk-map]: 1 warning(s) — advisory, never blocks a merge."
+    exit 0 ;;
+  esac
+  echo "note [risk-map]: this repo has no ${MAP} — no directory has a risk level yet."
+  echo "  -> From the Product: \`yad risk-map draft <repo>\`, then let yad-connect-repos classify it, and commit it here."
+  echo "PASS [risk-map]: advisory — nothing to check."
+  exit 0
+fi
+
+# -z, then NUL to newline: git prints each path exactly as it is, never quoted or escaped (quotePath
+# only stops escaping non-ASCII — a `"`, `\` or tab would still arrive wrapped in quotes). awk reads the
+# lines; macOS awk cannot split records on NUL itself.
+git ls-files -z | tr '\0' '\n' > "$tmp/files"
+# The base is advisory here, so an unresolvable one does not fail the check the way it fails the
+# blocking gates: the map's own lines are still checked, and the per-change warnings are skipped.
+if [ "$base_ok" = 1 ]; then
+  # T: a file replaced by a symlink (or back) is an edit too — the map included.
+  git diff --name-only -z --diff-filter=ACMRT "$RANGE" | tr '\0' '\n' > "$tmp/changed"
+else
+  echo "note [risk-map]: base ref '${BASE}' not found, or shares no history with HEAD (a shallow clone?) — checking the map's own lines only, not this change."
+  : > "$tmp/changed"
+fi
+
+awk -v mapf="$MAP" -v filesf="$tmp/files" -v changedf="$tmp/changed" "$RISK_MAP_AWK" "$MAP" "$tmp/files" "$tmp/changed"

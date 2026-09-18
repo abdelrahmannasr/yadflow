@@ -17672,3 +17672,150 @@ test('risk map: a directory whose name holds a newline or CR is unwritable, and 
     assert.deepEqual(repoFiles(T).sort(), [' notes/a.md', 'b.md'], 'the first path in the list keeps its leading space');
   } finally { fs.rmSync(T, { recursive: true, force: true }); }
 });
+
+// ---- E66: escalate by count — a `high` directory adds the high step ------------------------------
+// The level of one change is the highest level among the map lines that decide its files. The map is
+// read from the BASE branch, so a change cannot lower its own count. Reported, never enforced (E72).
+
+test('escalate by count: the highest touched level wins; guessed counts; unset and uncovered add nothing', async () => {
+  const { parseRiskMap, changeLevel } = await import('./riskmap.mjs');
+  const map = parseRiskMap([
+    '# yad-risk-map v1',
+    'src/ low confirmed',
+    'src/payments/ high guessed # a guess still counts (the user\'s decision, 2026-09-17)',
+    'src/catalog/ medium confirmed',
+    'docs/ unset',
+    './ low confirmed',
+  ].join('\n'));
+  assert.deepEqual(changeLevel(map, ['src/a.js']), { level: 'low', step: 0, dirs: [{ dir: 'src/', level: 'low', state: 'confirmed' }] });
+  const hi = changeLevel(map, ['src/catalog/x.js', 'src/payments/pay.js', 'README.md']);
+  assert.equal(hi.level, 'high');
+  assert.equal(hi.step, 1, 'a guessed high counts exactly as a confirmed one');
+  assert.deepEqual(hi.dirs.map((d) => d.dir), ['src/payments/', 'src/catalog/', './'], 'map order, every touched line with a level');
+  const med = changeLevel(map, ['src/catalog/x.js']);
+  assert.equal(med.level, 'medium');
+  assert.equal(med.step, 0, 'medium is reported only');
+  assert.deepEqual(changeLevel(map, ['docs/a.md', 'tools/x.sh']), { level: null, step: 0, dirs: [] },
+    'an unset line and a directory no line covers are warned about, never counted as high');
+  // The deepest line decides, so an `unset` line under a `high` one takes the file out of the high count:
+  // it is listed and not classified, and the check warns about it until a person or the agent sets it.
+  const split = parseRiskMap('# yad-risk-map v1\nsrc/ high confirmed\nsrc/new/ unset\n');
+  assert.equal(changeLevel(split, ['src/new/a.js']).level, null);
+  assert.equal(changeLevel(split, ['src/a.js']).level, 'high');
+});
+
+test('escalate by count: a map for a newer version is unknown, never read as "nothing is high"', async () => {
+  const { parseRiskMap, changeLevel } = await import('./riskmap.mjs');
+  const got = changeLevel(parseRiskMap('# yad-risk-map v2\nsrc/ high confirmed\n'), ['src/a.js']);
+  assert.equal(got.unsupported, true);
+  assert.equal(got.level, null);
+});
+
+test('escalate by count: the map\'s high step IS the high tier of a Shape risk tag — one sum, two vocabularies', async () => {
+  const { LEVEL_STEP } = await import('./riskmap.mjs');
+  const { gateRuleFor } = await import('./epic-state.mjs');
+  for (const tag of ['auth', 'payments']) {
+    const rule = gateRuleFor({ risk_tags: [tag] });
+    assert.equal(LEVEL_STEP.high, rule.riskStep, `a high directory adds what \`${tag}\` adds`);
+    assert.equal(rule.risk, 'high', 'and both print as the `high` tier');
+  }
+  assert.equal(LEVEL_STEP.medium, 0);
+  assert.equal(LEVEL_STEP.low, 0);
+  // E65's pin, kept: the map's words are not Shape tags, so a step tagged `high` still adds nothing.
+  assert.equal(gateRuleFor({ risk_tags: ['high'] }).riskStep, 0);
+});
+
+// A code repo whose `origin/main` holds a map, and a PR branch off it.
+function repoWithBaseMap(map, files = {}) {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-e66-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  const put = (all) => {
+    for (const [rel, text] of Object.entries(all)) {
+      fs.mkdirSync(path.dirname(path.join(T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(T, rel), text);
+    }
+  };
+  put({ 'README.md': 'x', 'src/payments/pay.js': 'x', 'src/catalog/list.js': 'x', ...files });
+  if (map !== null) put({ '.sdlc/risk-map': map });
+  git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', 'feat: base');
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'update-ref', 'refs/remotes/origin/main', 'main');
+  git(T, 'checkout', '-q', '-b', 'feat/x');
+  return { T, put, commit: (msg) => { git(T, 'add', '-A'); git(T, 'commit', '-q', '-m', msg); } };
+}
+const E66_MAP = '# yad-risk-map v1\n./ low confirmed\nsrc/ low confirmed\nsrc/payments/ high guessed\nsrc/catalog/ medium confirmed\n';
+
+test('escalate by count: the map is read from the BASE — a change that lowers its own map still counts high', async () => {
+  const { baseChangeLevel } = await import('./riskmap-command.mjs');
+  const r = repoWithBaseMap(E66_MAP);
+  try {
+    r.put({ '.sdlc/risk-map': '# yad-risk-map v1\n./ low confirmed\nsrc/ low confirmed\n', 'src/payments/pay.js': 'y' });
+    r.commit('feat: lower my own count');
+    const got = baseChangeLevel(r.T, 'origin/main');
+    assert.equal(got.level, 'high', 'the working tree\'s map says low; the base\'s says high, and the base wins');
+    assert.equal(got.step, 1);
+    assert.deepEqual(got.dirs.filter((d) => d.level === 'high').map((d) => `${d.dir} ${d.state}`), ['src/payments/ guessed']);
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});
+
+test('escalate by count: deleting or moving code out of a high directory is a high change', async () => {
+  const { baseChangeLevel } = await import('./riskmap-command.mjs');
+  const r = repoWithBaseMap(E66_MAP);
+  try {
+    git(r.T, 'mv', 'src/payments/pay.js', 'src/catalog/pay.js');
+    r.commit('refactor: move');
+    const moved = baseChangeLevel(r.T, 'origin/main');
+    assert.equal(moved.level, 'high', 'a rename counts where the file came from, not only where it went');
+    assert.equal(moved.files, 2, 'the move is one delete and one add (--no-renames)');
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});
+
+test('escalate by count: no map on the base, a symlink, or an unreadable base — each is said, none is guessed', async () => {
+  const { baseChangeLevel } = await import('./riskmap-command.mjs');
+  const none = repoWithBaseMap(null);
+  try {
+    none.put({ '.sdlc/risk-map': E66_MAP, 'src/payments/pay.js': 'y' });
+    none.commit('chore: add the map and touch payments');
+    const got = baseChangeLevel(none.T, 'origin/main');
+    assert.match(got.noMap, /has no \.sdlc\/risk-map/, 'the map this change adds counts from the merge on, not in it');
+    assert.equal(got.level, undefined);
+    const unknown = baseChangeLevel(none.T, 'origin/nope');
+    assert.match(unknown.unknown, /not found/);
+  } finally { fs.rmSync(none.T, { recursive: true, force: true }); }
+  const link = repoWithBaseMap(null, { 'elsewhere/map': E66_MAP });
+  try {
+    git(link.T, 'checkout', '-q', 'main');
+    fs.mkdirSync(path.join(link.T, '.sdlc'), { recursive: true });
+    fs.symlinkSync('../elsewhere/map', path.join(link.T, '.sdlc/risk-map'));
+    link.commit('chore: a symlinked map');
+    git(link.T, 'update-ref', 'refs/remotes/origin/main', 'main');
+    git(link.T, 'checkout', '-q', '-B', 'feat/x');
+    link.put({ 'src/payments/pay.js': 'y' });
+    link.commit('feat: touch');
+    assert.match(baseChangeLevel(link.T, 'origin/main').noMap, /not as a file/, 'git show would print the link target as if it were the map');
+  } finally { fs.rmSync(link.T, { recursive: true, force: true }); }
+});
+
+test('escalate by count: open-pr prints the count — the larger of body and map, printed only, never written', async () => {
+  const { routeCount } = await import('./openpr.mjs');
+  const r = repoWithBaseMap(E66_MAP);
+  try {
+    r.put({ 'src/payments/pay.js': 'y' });
+    r.commit('feat: pay');
+    const low = routeCount(r.T, 'main', { risk: 'low' });
+    assert.equal(low.rule.needed, 2, 'the body says low; the base map marks src/payments/ high — the larger counts');
+    const text = low.lines.map(([, l]) => l).join('\n');
+    assert.match(text, /risk map on origin\/main: high — src\/payments\/ \(guessed\)/);
+    assert.match(text, /the body says Risk level: low, but the risk map on origin\/main marks src\/payments\/ \(guessed\) high — the larger counts/);
+    assert.match(text, /asks for 2 approvers = base 1 \+ high risk 1 — base enforced, risk step advisory/);
+    const contract = routeCount(r.T, 'main', { risk: 'low', contractChange: true });
+    assert.equal(contract.rule.needed, 3, 'contract +2 and a high directory +1 take the larger, never the sum');
+    assert.equal(contract.rule.risk, 'contract');
+    const high = routeCount(r.T, 'main', { risk: 'high' });
+    assert.ok(!high.lines.some(([, l]) => /the body says/.test(l)), 'no disagreement to report when the body already says high');
+    const lost = routeCount(r.T, 'nope', { risk: 'high' });
+    assert.equal(lost.rule.needed, 2, 'an unreadable map leaves the body\'s count, never lowers it');
+    assert.match(lost.lines.map(([, l]) => l).join('\n'), /risk map not counted — .*the count below is the body's alone/);
+    assert.equal(git(r.T, 'status', '--porcelain').toString(), '', 'nothing is written');
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});

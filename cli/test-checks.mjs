@@ -3054,3 +3054,189 @@ test('risk-map check: a path that is not valid UTF-8 never makes it exit non-zer
   }
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+// ---------- E66: escalate by count ----------
+// The risk-map check also COUNTS: a change touching a directory the BASE branch's map marks `high` adds
+// the high step. Reported on every PR, never enforced (E72). `--level` is the machine form risk-route.sh
+// reads; cli/riskmap.mjs `changeLevel` is its twin.
+const countLine = (out) => (out.split('\n').find((l) => l.startsWith('COUNT [risk-map]: ')) || '');
+
+test('risk-map count: read from the BASE — a PR that lowers its own map still asks for the extra approver', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: pay, and call payments low', {
+    'src/payments/c.js': 'y',
+    '.sdlc/risk-map': '# yad-risk-map v1\n./ low confirmed\n.sdlc/ low confirmed\nsrc/ low confirmed\n',
+  });
+  const r = runGate(RISK_MAP, T);
+  assert.equal(r.code, 0, r.out);
+  assert.match(countLine(r.out), /^COUNT \[risk-map\]: 2 approvers = base 1 \+ high risk 1 \(high on main: src\/payments\/\) — only the base holds the merge until the capacity cap\.$/);
+  assert.ok(warnings(r.out).includes('map-edited .sdlc/risk-map'), 'E65\'s warnings still read the change\'s own map');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map count: guessed counts, medium is reported only, unset and uncovered add nothing, deletions count', () => {
+  const T = scaffoldRepo();
+  const map = '# yad-risk-map v1\n./ low confirmed\nsrc/ low confirmed\nsrc/payments/ high guessed\nsrc/catalog/ medium confirmed\ndocs/ unset\n';
+  commit(T, 'chore: map', { '.sdlc/risk-map': map, 'src/payments/c.js': 'x', 'src/catalog/l.js': 'x', 'docs/a.md': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'docs: only unset and uncovered', { 'docs/a.md': 'y', 'tools/x.sh': 'x' });
+  let r = runGate(RISK_MAP, T);
+  assert.match(countLine(r.out), /^COUNT \[risk-map\]: 1 approver = base 1 — nothing this change touches is high on main\.$/, 'never counted as high');
+  commit(T, 'feat: catalog', { 'src/catalog/l.js': 'y' });
+  r = runGate(RISK_MAP, T);
+  assert.match(countLine(r.out), /^COUNT \[risk-map\]: 1 approver = base 1/);
+  assert.match(r.out, /\n {2}medium on main \(reported only, adds nothing\): src\/catalog\/\n/);
+  git(T, 'rm', '-q', 'src/payments/c.js');
+  git(T, 'commit', '-q', '-m', 'refactor: drop the charge');
+  r = runGate(RISK_MAP, T);
+  assert.match(countLine(r.out), /2 approvers = base 1 \+ high risk 1 \(high on main: src\/payments\/ \(guessed\)\)/,
+    'a deleted file counts where it was, and a guessed high counts as a confirmed one');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map count: no map on the base, a newer map, and no base — each is said, none is guessed', () => {
+  const T = scaffoldRepo();
+  commit(T, 'feat: add the map and touch payments', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x' });
+  let r = runGate(RISK_MAP, T);
+  assert.match(countLine(r.out), /^COUNT \[risk-map\]: 1 approver = base 1 — 'main' has no \.sdlc\/risk-map, so no directory adds a step\.$/);
+  r = runGate(RISK_MAP, T, ['--level']);
+  assert.equal(r.code, 0, r.out);
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'chore: newer map', { '.sdlc/risk-map': '# yad-risk-map v2\nsrc/ high confirmed\n' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: pay', { 'src/payments/c.js': 'y' });
+  r = runGate(RISK_MAP, T);
+  assert.equal(countLine(r.out), '', 'an unread map gives no count');
+  assert.match(r.out, /note \[risk-map\]: not counted — the map on the base is written for risk-map v2 and this release reads v1\. The count from the map is unknown, not zero\./);
+  r = runGate(RISK_MAP, T, ['origin/nope']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(countLine(r.out), '');
+  assert.match(r.out, /not counted — base ref 'origin\/nope' not found/);
+  // A map deleted by this change is still counted from the base.
+  git(T, 'reset', '-q', '--hard', 'main~1');
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'rm', '-q', '.sdlc/risk-map');
+  commit(T, 'chore: drop the map, touch payments', { 'src/payments/c.js': 'z' });
+  r = runGate(RISK_MAP, T);
+  assert.match(countLine(r.out), /2 approvers = base 1 \+ high risk 1 \(high on main: src\/payments\/\)/, 'deleting the map cannot lower the count');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map count: bash `--level` and cli/riskmap.mjs `changeLevel` agree over the same maps and changes', async () => {
+  const { parseRiskMap, changeLevel } = await import('./riskmap.mjs');
+  const MAPS = [
+    MAP_OK,
+    '# yad-risk-map v1\n./ low confirmed\nsrc/ high guessed\nsrc/catalog/ low confirmed\nsrc/new/ unset\ndeep/ medium confirmed\ndeep/er/ high confirmed\n',
+    '# yad-risk-map v1\nsrc/ medium guessed\nsrc/ high confirmed\n',            // a duplicate: the first line wins in both
+    'src/payments/ high confirmed\nbad line here\n./ low guessed\n',              // no header, an unreadable line
+    '#yad-risk-map   v1  \r\nsrc/  high\tconfirmed  # ok\r\n./ low guessed\r\n',
+    '# yad-risk-map v1\n@types/ high confirmed\nq"uote/ high guessed\ncafé/ medium guessed\n',
+    '# yad-risk-map v3\nsrc/ high confirmed\n',
+  ];
+  const TREE = {
+    'README.md': 'x', 'src/index.js': 'x', 'src/payments/charge.js': 'x', 'src/catalog/list.js': 'x', 'src/new/n.js': 'x',
+    'deep/er/x.js': 'x', 'deep/z.js': 'x', 'tools/t.sh': 'x', '@types/x.d.ts': 'x', 'q"uote/x.js': 'x', 'café/x.js': 'x',
+  };
+  const CHANGES = [
+    { 'src/catalog/list.js': 'y' },
+    { 'src/payments/charge.js': 'y', 'deep/z.js': 'y' },
+    { 'src/new/n.js': 'y', 'tools/t.sh': 'y', 'README.md': 'y' },
+    { 'deep/er/x.js': 'y', '@types/x.d.ts': 'y', 'q"uote/x.js': 'y', 'café/x.js': 'y' },
+  ];
+  const jsLines = (got) => got.unsupported ? ['UNKNOWN'] : [`LEVEL ${got.level || 'none'}`, ...got.dirs.map((d) => `DIR ${d.dir} ${d.level} ${d.state}`)];
+  const bashLines = (out) => out.split('\n').filter((l) => /^(LEVEL|DIR) /.test(l) || /^UNKNOWN /.test(l)).map((l) => (l.startsWith('UNKNOWN') ? 'UNKNOWN' : l));
+  for (const [i, map] of MAPS.entries()) {
+    for (const [j, change] of CHANGES.entries()) {
+      const T = scaffoldRepo();
+      commit(T, 'chore: tree', { ...TREE, '.sdlc/risk-map': map });
+      git(T, 'branch', '-q', '-f', 'main');
+      commit(T, 'feat: change', change);
+      git(T, 'rm', '-q', 'src/index.js');   // and one deletion, which counts
+      git(T, 'commit', '-q', '-m', 'refactor: drop');
+      const r = runGate(RISK_MAP, T, ['--level', 'main']);
+      assert.equal(r.code, 0, r.out);
+      const changed = git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean);
+      assert.deepEqual(bashLines(r.out), jsLines(changeLevel(parseRiskMap(map), changed)), `map #${i}, change #${j} — bash and JS disagree`);
+      assert.match(r.out, new RegExp(`^BASE main\\nFILES ${changed.length}\\n|^BASE main\\nUNKNOWN `), `map #${i}, change #${j}`);
+      fs.rmSync(T, { recursive: true, force: true });
+    }
+  }
+});
+
+// risk-route.sh as a code repo has it: beside risk-map-check.sh in checks/ (both are REPO_WIRING).
+function wiredRoute(T) {
+  fs.mkdirSync(path.join(T, 'checks'), { recursive: true });
+  fs.copyFileSync(RISK_MAP, path.join(T, 'checks/risk-map-check.sh'));
+  fs.copyFileSync(RISK_ROUTE, path.join(T, 'checks/risk-route.sh'));
+  fs.writeFileSync(path.join(T, '.git/info/exclude'), 'checks/\npr-body.md\n');
+  return path.join(T, 'checks/risk-route.sh');
+}
+
+test('risk-route: a high directory on the base map raises a body that says low — the larger counts, and it says so', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: pay', { 'src/payments/c.js': 'y' });
+  const route = wiredRoute(T);
+  const low = body(T, ['- **Risk level:** low', '- **Contract surface touched:** no', '- **Domains / repos touched:** backend'].join('\n'));
+  let r = runGate(route, T, [low, 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\nRisk map \(main\): high — src\/payments\/\n/);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(high on the risk map: src\/payments\/\)/);
+  assert.match(r.out, /The body says Risk level: low, but the risk map on main marks src\/payments\/ high — the larger counts\./);
+  assert.match(r.out, /Only the base holds the merge until the capacity cap/, 'still reported, not enforced');
+  // The skill's own copy has no risk-map-check.sh beside it; run from the code repo, it finds checks/.
+  r = runGate(RISK_ROUTE, T, [low, 'main']);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1/);
+  // Body high + a high directory: one step, not two. Contract + a high directory: the larger, never the sum.
+  r = runGate(route, T, [body(T, '- Risk level: high\n- Contract surface touched: no\n'), 'main']);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk: high, high on the risk map: src\/payments\/\)/);
+  assert.doesNotMatch(r.out, /The body says/);
+  r = runGate(route, T, [body(T, '- Risk level: low\n- Contract surface touched: yes\n'), 'main']);
+  assert.match(r.out, /ROUTE: 3 approvers = base 1 \+ contract risk 2 \(high on the risk map: src\/payments\/, contract surface touched\)/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-route: the body can still raise the count, and an unreadable map never lowers it', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: a', { 'src/a.js': 'y' });
+  const route = wiredRoute(T);
+  const high = body(T, '- Risk level: high\n- Contract surface touched: no\n');
+  let r = runGate(route, T, [high, 'main']);
+  assert.match(r.out, /Risk map \(main\): low — nothing this change touches is high/);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk: high\)/, 'a map that says low does not lower a body that says high');
+  r = runGate(route, T, [high, 'origin/nope']);
+  assert.match(r.out, /Risk map: not counted — base ref 'origin\/nope' not found.*Only the body is counted\./);
+  assert.match(r.out, /ROUTE: 2 approvers = base 1 \+ high risk 1 \(risk: high\)/);
+  // Run on the base branch itself the change is empty: said, not reported as "nothing is high".
+  git(T, 'checkout', '-q', 'main');
+  r = runGate(route, T, [high, 'main']);
+  assert.match(r.out, /this checkout changes no file against main — run it on the PR's branch/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-map count: a move out of a high directory counts, and a symlinked map on the base is not read', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', 'src/a.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  git(T, 'mv', 'src/payments/c.js', 'src/c.js');
+  git(T, 'commit', '-q', '-m', 'refactor: move');
+  let r = runGate(RISK_MAP, T);
+  assert.match(countLine(r.out), /2 approvers = base 1 \+ high risk 1 \(high on main: src\/payments\/\)/, 'a rename counts where the file came from');
+  git(T, 'checkout', '-q', 'main');
+  commit(T, 'chore: map elsewhere', { 'elsewhere/map': MAP_OK });
+  git(T, 'rm', '-q', '.sdlc/risk-map');
+  fs.mkdirSync(path.join(T, '.sdlc'), { recursive: true });
+  fs.symlinkSync('../elsewhere/map', path.join(T, '.sdlc/risk-map'));
+  git(T, 'add', '-A');
+  git(T, 'commit', '-q', '-m', 'chore: symlink the map');
+  git(T, 'checkout', '-q', '-B', 'feature');
+  commit(T, 'feat: pay', { 'src/payments/c.js': 'y' });
+  r = runGate(RISK_MAP, T, ['--level', 'main~0']);
+  assert.match(r.out, /^NOMAP 'main~0' holds \.sdlc\/risk-map, but not as a file$/m, 'git show would print the link target as the map');
+  fs.rmSync(T, { recursive: true, force: true });
+});

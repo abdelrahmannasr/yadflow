@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, run, warn } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { draftRiskMap, parseRiskMap, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
+import { changeLevel, draftRiskMap, parseRiskMap, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
 
 // Every file in a code repo, as the map sees it: tracked files plus new files git does not ignore, so a
 // directory someone has just created is asked about before it is committed. null when it is not a git repo.
@@ -60,6 +60,31 @@ function targets(root, name) {
   if (repos.length) return { list: repos.map((r) => ({ name: r.name, root: path.resolve(root, r.path) })) };
   if (hasRegistry) return { error: `no repos in ${PROJECT_FILES.reposRegistry}`, hint: 'connect one (`yad setup`), or name the path to a code repo' };
   return { list: [{ name: path.basename(path.resolve(root)), root: path.resolve(root) }] };
+}
+
+// E66 — the level the change on HEAD takes from the map on `baseRef` (the twin of
+// `checks/risk-map-check.sh --level`). The map is read from the BASE, never the working tree, so a change
+// cannot lower its own count; the files are every path changed since HEAD left the base (three dots),
+// deletions and moves included. Returns { base, files, level, step, dirs } from `changeLevel`, or
+// { base, noMap: why } when the base holds no map (nothing adds a step), or { base, unknown: why } when
+// the level cannot be read — which a caller must say, never read as zero.
+export function baseChangeLevel(repoRoot, baseRef) {
+  const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 1 << 30 });
+  const base = baseRef;
+  if (git(['rev-parse', '--verify', '--quiet', `${baseRef}^{commit}`]).status !== 0 || git(['merge-base', baseRef, 'HEAD']).status !== 0) {
+    return { base, unknown: `base ref '${baseRef}' not found, or it shares no history with HEAD (a shallow clone?)` };
+  }
+  // Only a real file is a map: `git show` would print a symlink's target as if it were the text.
+  const entry = git(['ls-tree', baseRef, '--', RISK_MAP_FILE]).stdout || '';
+  if (!entry) return { base, noMap: `'${baseRef}' has no ${RISK_MAP_FILE}` };
+  if (!/^100(644|755) blob /.test(entry)) return { base, noMap: `'${baseRef}' holds ${RISK_MAP_FILE}, but not as a file` };
+  const text = git(['show', `${baseRef}:${RISK_MAP_FILE}`]);
+  const diff = git(['diff', '--name-only', '-z', '--no-renames', `${baseRef}...HEAD`]);
+  if (text.status !== 0 || diff.status !== 0) return { base, unknown: `git could not read ${baseRef}` };
+  const files = diff.stdout.split('\0').filter(Boolean);
+  const got = changeLevel(parseRiskMap(text.stdout), files);
+  if (got.unsupported) return { base, unknown: `the map on ${baseRef} is written for a newer risk-map version` };
+  return { base, files: files.length, ...got };
 }
 
 export function checkRepo(repoRoot) {
