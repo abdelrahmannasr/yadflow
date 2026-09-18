@@ -71,6 +71,10 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 0
 fi
 
+# Every path below is from the repo root — the map, the file list, `.sdlc/hub.json` — so a run from a
+# subfolder reads the same repo as CI does, which always runs at the root.
+cd "$(git rev-parse --show-toplevel)"
+
 BASE="${1:-${SDLC_BASE:-$(resolve_base)}}"
 [ "$LEVEL_ONLY" = 1 ] || [ -n "${1:-}" ] || [ -n "${SDLC_BASE:-}" ] || echo "note [risk-map]: no base given — diffing against '${BASE}'."
 base_ok=0
@@ -229,8 +233,12 @@ base_level() {
     "") echo "NOMAP '${BASE}' has no ${MAP}"; return ;;
     *) echo "NOMAP '${BASE}' holds ${MAP}, but not as a file"; return ;;
   esac
-  git show "${BASE}:${MAP}" > "$tmp/basemap"
-  git diff --name-only -z --no-renames "$RANGE" | tr '\0' '\n' > "$tmp/all-changed"
+  # Explicit guards, not `set -e`: the CI count runs this inside `$(...)`, where bash does not stop on a
+  # failing command, and an unread map or a cut-short file list would print a false zero.
+  git show "${BASE}:${MAP}" > "$tmp/basemap" || { echo "UNKNOWN git could not read ${MAP} on '${BASE}'"; return; }
+  if ! git diff --name-only -z --no-renames "$RANGE" | tr '\0' '\n' > "$tmp/all-changed"; then
+    echo "UNKNOWN git could not list the files this change touches"; return
+  fi
   awk -v mode=level -v mapf="$tmp/basemap" -v filesf=/dev/null -v changedf="$tmp/all-changed" "$RISK_MAP_AWK" "$tmp/basemap" /dev/null "$tmp/all-changed"
 }
 

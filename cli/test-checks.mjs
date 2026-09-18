@@ -3279,3 +3279,24 @@ test('risk-route and hub-route: a Domains line ending in a comma still exits 0',
   assert.match(r.out, /\n {2}- backend\n {2}- mobile\n/);
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('risk-map count: a git step that fails is "not counted", never a false zero — and a subfolder run agrees with itself', () => {
+  const T = scaffoldRepo();
+  commit(T, 'chore: map', { '.sdlc/risk-map': MAP_OK, 'src/payments/c.js': 'x', 'lib/l.js': 'x' });
+  git(T, 'branch', '-q', '-f', 'main');
+  commit(T, 'feat: pay', { 'src/payments/c.js': 'y' });
+  // A git that fails on `show` only (a missing blob, a partial clone), in front of the real one.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fakegit-'));
+  const real = execFileSync('bash', ['-c', 'command -v git']).toString().trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env bash\n[ "$1" = show ] && exit 128\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  let r = runGate(RISK_MAP, T, ['main'], { PATH: `${bin}:${process.env.PATH}` });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(countLine(r.out), '', 'no COUNT line from a map that was never read');
+  assert.match(r.out, /not counted — git could not read \.sdlc\/risk-map on 'main'\. The count from the map is unknown, not zero\./);
+  // From a subfolder: the count AND the warnings read the repo from its root.
+  r = runGate(RISK_MAP, path.join(T, 'lib'), ['main']);
+  assert.match(countLine(r.out), /2 approvers = base 1 \+ high risk 1/);
+  assert.doesNotMatch(r.out, /has no \.sdlc\/risk-map/, 'the warnings find the map too');
+  fs.rmSync(bin, { recursive: true, force: true });
+  fs.rmSync(T, { recursive: true, force: true });
+});
