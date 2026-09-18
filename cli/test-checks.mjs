@@ -3288,11 +3288,16 @@ test('risk-map count: a git step that fails is "not counted", never a false zero
   // A git that fails on `show` only (a missing blob, a partial clone), in front of the real one.
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-fakegit-'));
   const real = execFileSync('bash', ['-c', 'command -v git']).toString().trim();
-  fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env bash\n[ "$1" = show ] && exit 128\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  const failOn = (cmd) => fs.writeFileSync(path.join(bin, 'git'), `#!/usr/bin/env bash\n[ "$1" = ${cmd} ] && exit 128\nexec "${real}" "$@"\n`, { mode: 0o755 });
+  failOn('show');
   let r = runGate(RISK_MAP, T, ['main'], { PATH: `${bin}:${process.env.PATH}` });
   assert.equal(r.code, 0, r.out);
   assert.equal(countLine(r.out), '', 'no COUNT line from a map that was never read');
   assert.match(r.out, /not counted — git could not read \.sdlc\/risk-map on 'main'\. The count from the map is unknown, not zero\./);
+  failOn('ls-tree');   // a missing tree fails here first, before `show` — it is not "no map"
+  r = runGate(RISK_MAP, T, ['--level', 'main'], { PATH: `${bin}:${process.env.PATH}` });
+  assert.match(r.out, /^UNKNOWN git could not read the tree of 'main'$/m, r.out);
+  assert.doesNotMatch(r.out, /NOMAP/);
   // From a subfolder: the count AND the warnings read the repo from its root.
   r = runGate(RISK_MAP, path.join(T, 'lib'), ['main']);
   assert.match(countLine(r.out), /2 approvers = base 1 \+ high risk 1/);

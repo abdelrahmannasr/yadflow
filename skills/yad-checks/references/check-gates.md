@@ -385,7 +385,9 @@ body. One awk program serves both the warnings and the count. Its twin is `chang
 script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
 is enforced (E72), not while it is only reported. And, as for the warnings, a path holding a newline is
 split in two here but kept whole by `changeLevel`, so the bash count can read its second half as a file
-at the root; the error can only raise the count, never lower it.
+at the root; the error can only raise the count, never lower it. If git itself fails, each step of the
+count says "not counted"; the E65 warnings half is not guarded the same way, so a failing `git diff` or
+`git ls-files` there can still end the script with git's exit code.
 
 ## CI wiring (both platforms)
 

@@ -227,7 +227,7 @@ base_level() {
   # Only a real file on the base is a map: a symlink or a folder of that name is not read (git would
   # print a symlink's target as if it were the map's text). --full-tree: ls-tree reads a path from the
   # current folder, and run from a subfolder it would find no map and quietly count zero.
-  _entry="$(git ls-tree --full-tree "$BASE" -- "$MAP")" || _entry=""
+  _entry="$(git ls-tree --full-tree "$BASE" -- "$MAP")" || { echo "UNKNOWN git could not read the tree of '${BASE}'"; return; }
   case "$_entry" in
     "100644 blob "*|"100755 blob "*) ;;
     "") echo "NOMAP '${BASE}' has no ${MAP}"; return ;;
