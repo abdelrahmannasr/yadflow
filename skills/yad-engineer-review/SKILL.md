@@ -63,9 +63,10 @@ A human engineer reads the diff **against the spec** (`specs/<story>/`) and the 
 and records an approval. Determine the count with `bash checks/risk-route.sh <pr-body-file> origin/<base>`,
 run **in the code repo with the PR's branch checked out** — it reads the body's Impact & Risk block and
 the base branch's `.sdlc/risk-map`, and the larger step wins. On the base branch the change is empty and
-the map adds nothing, so check out the PR branch first. (Where the repo has no `checks/`, run
-`../yad-pr-template/templates/checks/risk-route.sh` from the code repo instead; it finds no risk-map check
-and counts the body alone, and says so.) It prints e.g.
+the map adds nothing, so check out the PR branch first. If the repo has no `checks/risk-route.sh`, it is
+not wired yet: run `yad update` for it (that installs `checks/risk-route.sh` and
+`checks/risk-map-check.sh` together). Until then, count from the body alone and say that the map was not
+counted. It prints e.g.
 `ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface touched)`, says only the base holds the
 merge until the capacity cap, and lists the touched domains as a hint for whom to ask. With no risk it
 prints `ROUTE: 1 approver = base 1 (no risk step).` When the map raises a body that says `low`, it

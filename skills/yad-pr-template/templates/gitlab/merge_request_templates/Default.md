@@ -21,7 +21,9 @@
 
 > **Routing:** the merge needs **1 approval, which should not be the author’s own**. `high` risk adds 1
 > and a touched contract surface adds 2 to the count (the larger, never the sum); that step is advisory
-> until the capacity cap. Run `bash checks/risk-route.sh <this-description>` to print the count.
+> until the capacity cap. A change to a directory the base branch's `.sdlc/risk-map` marks `high` adds 1
+> too, even when this says `low`. Run `bash checks/risk-route.sh <this-description>` on this branch to
+> print the count.
 
 ## Testing
 <!-- How the acceptance criteria were exercised. Tests must exercise behavior, not just pass. -->

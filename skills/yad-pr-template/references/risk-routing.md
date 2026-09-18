@@ -90,5 +90,6 @@ The CI `risk-map` job prints the map's part on every PR as a `COUNT [risk-map]:`
 the body, so `risk-route.sh` is where the two meet. `yad open-pr` prints the same joined count once the
 PR is open, and leaves the body's level as the author wrote it.
 
-It is **advisory** — not a blocking gate. CI may run it to comment the count; the human review (Step E)
-still owns the merge. No reviewers are requested automatically: ask them on the PR/MR itself.
+It is **advisory** — not a blocking gate, and not a CI job (the user's decision, 2026-09-18): the CI
+`risk-map` job prints the map's half, and the human review (Step E), which runs this script, owns the
+merge. No reviewers are requested automatically: ask them on the PR/MR itself.

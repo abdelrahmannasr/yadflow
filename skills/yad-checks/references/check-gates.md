@@ -374,16 +374,18 @@ COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on
   uncovered.)
 - A `guessed` level counts as a `confirmed` one. `medium` is printed on its own line and adds nothing.
   An `unset` line, and a file no line covers, add nothing.
-- The base has no map: `1 approver = base 1 — '<base>' has no .sdlc/risk-map`. The base does not resolve,
+- The base has no map: `1 approver = base 1 — '<base>' has no .sdlc/risk-map, so no directory adds a step.` The base does not resolve,
   shares no history with HEAD, or holds a map for a newer version: **no COUNT line**, and a note that the
   count is unknown, not zero.
 
 `risk-map-check.sh --level [<base>]` prints the same result as machine lines (`BASE`, `UNKNOWN`, `NOMAP`,
 `FILES`, `LEVEL`, `DIR <dir> <level> <state>`) for `checks/risk-route.sh`, which joins it with the PR
 body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
-`cli/riskmap.mjs`, and a parity test compares the two. **Known limit:** like every check here, the
+`cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
 script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
-is enforced (E72), not while it is only reported.
+is enforced (E72), not while it is only reported. And, as for the warnings, a path holding a newline is
+split in two here but kept whole by `changeLevel`, so the bash count can read its second half as a file
+at the root; the error can only raise the count, never lower it.
 
 ## CI wiring (both platforms)
 
