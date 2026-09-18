@@ -50,7 +50,9 @@ in CI on every PR/MR and must pass before merge (build plan §C). Each is a smal
 8. **risk-map** (E65, **advisory — never fails**) — reads the code repo's `.sdlc/risk-map` (one line per
    directory: `high` / `medium` / `low`, no names) and **warns** when this change adds a directory no line
    covers, leaves a line whose directory is gone, touches a line still `unset` or `guessed`, or edits the
-   map itself. A repo with no map gets one note. The map is the team's file, never wired; the
+   map itself. A repo with no map gets one note. It also prints the **approver count** (E66): a change
+   touching a directory the **base branch's** map marks `high` asks for one more approver — reported,
+   never enforced until the capacity cap. The map is the team's file, never wired; the
    `yad-connect-repos` skill drafts it. See `references/check-gates.md` §10.
 
 The Phase 6 gates read the owning epic in the **Product** via `specs/<story>/link.md`'s

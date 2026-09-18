@@ -10,7 +10,8 @@ import {
   detectPlatform, createPr, platformLogin, resolveBaseBranch,
 } from './platform.mjs';
 import { taskFromBranch } from './commit.mjs';
-import { parseReviewBranch, artifactFromBase } from './epic-state.mjs';
+import { parseReviewBranch, artifactFromBase, gateRuleSum, gateRuleEnforced } from './epic-state.mjs';
+import { baseChangeLevel } from './riskmap-command.mjs';
 import { gateOpen } from './gate.mjs';
 
 // Resolve the target code repo: --repo <name> from the registry, else --dir, else cwd.
@@ -94,6 +95,28 @@ export function templateBody(repoRoot, platform, { task, summary, risk, contract
     out = out.replace(/(## Summary\r?\n)(?:<!--[\s\S]*?-->\r?\n)?/, (_m, g1) => `${g1}${summary}\n`);
   }
   return out;
+}
+
+// E66 — how many approvers this PR asks for, printed once it is open: the body's own level and contract
+// answer (what `--risk` / `--contract-change` put there), and the risk map on the BASE branch — a change
+// touching a `high` directory adds the high step. The largest step wins, so the map can raise what the
+// body says and never lower it. The same sum `checks/risk-route.sh` prints from the PR body. Printed
+// only, never written: the body keeps the author's level (the user's decision, 2026-09-18).
+export function routeCount(repoRoot, baseBranch, opts = {}) {
+  const map = baseChangeLevel(repoRoot, `origin/${baseBranch}`);
+  const high = (map.dirs || []).filter((d) => d.level === 'high').map((d) => `${d.dir}${d.state === 'guessed' ? ' (guessed)' : ''}`);
+  let riskStep = 0;
+  let risk = 'normal';
+  if (opts.risk === 'high' || high.length) { riskStep = 1; risk = 'high'; }
+  if (opts.contractChange) { riskStep = 2; risk = 'contract'; }
+  const rule = { base: 1, riskStep, needed: 1 + riskStep, risk };
+  const lines = [];
+  if (map.unknown) lines.push([info, `risk map not counted — ${map.unknown}; the count below is the body's alone`]);
+  else if (map.noMap) lines.push([info, `risk map: none — ${map.noMap}`]);
+  else if (high.length) lines.push([info, `risk map on ${map.base}: high — ${high.join(', ')}`]);
+  if (high.length && opts.risk !== 'high') lines.push([warn, `the body says Risk level: ${opts.risk || 'low'}, but the risk map on ${map.base} marks ${high.join(', ')} high — the larger counts`]);
+  lines.push([riskStep ? hand : info, `this PR asks for ${gateRuleSum(rule)}${gateRuleEnforced(rule)}; \`bash checks/risk-route.sh "<pr body>" ${map.base}\` prints the same count`]);
+  return { rule, map, lines };
 }
 
 export async function runOpenPr(root, opts = {}) {
@@ -192,6 +215,8 @@ export async function runOpenPr(root, opts = {}) {
   if (!r.ok) { fail(`could not open PR/MR — ${r.reason || 'unknown'}`); process.exitCode = 1; return; }
   ok(`opened ${r.url}`);
   hand('no reviewers were requested — ask them on the PR itself');
-  if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
+  const count = stage === 'code-repo' ? routeCount(repoRoot, baseBranch, opts) : null;
+  if (count) for (const [say, line] of count.lines) say(line);
+  else if (opts.risk === 'high' || opts.contractChange) hand('high risk / contract surface — run `bash checks/risk-route.sh "<pr body>"` to see how many approvers it asks for');
   return { url: r.url };
 }

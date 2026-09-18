@@ -332,8 +332,8 @@ it), and **no names** (E65). The format, the rubric and who may change what:
 `../yad-connect-repos/references/risk-map.md`. The rules have a twin in `cli/riskmap.mjs`
 (`yad risk-map check`, `yad doctor`); a test runs both over the same repos and compares the output.
 
-It **always exits 0** — nothing counts the levels until E66, so a stale map must never block a merge. It
-prints `WARN [risk-map] <code> <target>: …` for:
+It **always exits 0**: the count it prints is reported, never enforced, until the capacity cap (E72), so
+a stale map must never block a merge. It prints `WARN [risk-map] <code> <target>: …` for:
 
 | Code | When |
 |---|---|
@@ -356,6 +356,38 @@ prints a note and exits 0. **Known limits:** a path holding a newline reads diff
 cannot have a line anyway. A path whose bytes are not valid UTF-8 differs too: this check compares bytes
 (`LC_ALL=C`), while the CLI decodes bad bytes as U+FFFD. **The map file is not wired** — it is the
 team's, so `yad update` never owns or overwrites it; only the check is.
+
+**The count (E66).** Before the warnings it prints one line saying how many approvers the change asks for:
+
+```
+COUNT [risk-map]: 2 approvers = base 1 + high risk 1 (high on origin/main: src/payments/ (guessed)) — only the base holds the merge until the capacity cap.
+COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on origin/main.
+```
+
+- The map is read from the **base branch's tip** (`git show <base>:.sdlc/risk-map`), never from the
+  change's copy — so a change cannot lower its own count by editing or deleting the map. The warnings
+  above still read the change's copy, because they are about keeping that copy true.
+- Only a real file on the base is read. A symlink or a folder with that name is treated as no map.
+- The change's files for the count are `git diff --name-only -z --no-renames <base>...HEAD`, **with no
+  filter**: a deleted file, and a file moved away, count where they were. Deleting code in a `high`
+  directory is a `high` change. (The warnings keep `--diff-filter=ACMRT`: a deleted file cannot be
+  uncovered.)
+- A `guessed` level counts as a `confirmed` one. `medium` is printed on its own line and adds nothing.
+  An `unset` line, and a file no line covers, add nothing.
+- The base has no map: `1 approver = base 1 — '<base>' has no .sdlc/risk-map, so no directory adds a step.` The base does not resolve,
+  shares no history with HEAD, or holds a map for a newer version: **no COUNT line**, and a note that the
+  count is unknown, not zero.
+
+`risk-map-check.sh --level [<base>]` prints the same result as machine lines (`BASE`, `UNKNOWN`, `NOMAP`,
+`FILES`, `LEVEL`, `DIR <dir> <level> <state>`) for `checks/risk-route.sh`, which joins it with the PR
+body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
+`cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
+script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
+is enforced (E72), not while it is only reported. And, as for the warnings, a path holding a newline is
+split in two here but kept whole by `changeLevel`, so the bash count can read its second half as a file
+at the root; the error can only raise the count, never lower it. If git itself fails, each step of the
+count says "not counted"; the E65 warnings half is not guarded the same way, so a failing `git diff` or
+`git ls-files` there can still end the script with git's exit code.
 
 ## CI wiring (both platforms)
 

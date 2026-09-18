@@ -48,8 +48,10 @@ the Product.
   reviewers were requested — ask them on the PR itself`. A later roadmap row (E68) will suggest reviewers
   from history; CODEOWNERS is a hint only.
 - **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk
-  adds 1 and a touched contract surface adds 2 (the larger, never the sum); that risk step is advisory
-  until the capacity cap. `bash checks/risk-route.sh <body>` prints the count.
+  adds 1, a touched contract surface adds 2, and a change touching a `high` directory on the base
+  branch's risk map adds 1 (E66) — the larger, never the sum. That risk step is advisory until the
+  capacity cap. The CLI prints the count once the PR is open; `bash checks/risk-route.sh <body>` prints
+  the same count from the PR body.
 
 ## Inputs
 
@@ -82,9 +84,13 @@ cause (the repo's `default_branch`, or drop the wrong `--base`), and re-run `yad
 is *created* against the right base.
 
 ### Step 3 — Route the review (if the count is raised)
-On `high` risk or a contract touch, the CLI prints a hint to run `bash checks/risk-route.sh "<pr body>"`
-to see how many approvers it asks for — the same count the engineer review (`yad-engineer-review`) uses. It lists the
-touched domains as a hint for whom to ask; request those reviewers on the PR/MR yourself.
+Once the PR is open, the CLI prints how many approvers it asks for — the same count the engineer review
+(`yad-engineer-review`) uses. It joins the body's level (`--risk`, `--contract-change`) with the code
+repo's risk map on `origin/<base>`: a change touching a `high` directory adds 1 even when the body says
+`low`, and the CLI warns that the two disagree. It only prints; the body keeps the author's level. If
+the level in the body is wrong, fix the body on the PR. When the map cannot be read (no `origin/<base>`
+fetched, a newer map), it says so and counts the body alone. `bash checks/risk-route.sh "<pr body>"`
+also lists the touched domains as a hint for whom to ask; request those reviewers on the PR/MR yourself.
 
 ### Step 3b — Post the review trailer (optional, recommended)
 Make the reviewer's job easy: generate the 60-sec briefing and post it to the new PR/MR so it greets

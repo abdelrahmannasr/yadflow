@@ -74,17 +74,22 @@ Copy from this skill's `templates/`:
   `.github/`/`.gitlab/`. The Product's routing helper (`hub-route.sh`) stays in `yad-hub-bridge`'s
   `templates/checks/`; neither this skill nor `yad setup` / `yad check --fix` installs it.
 Drop **only the matching** template (drop both only if the repo genuinely uses both). For code repos also
-install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`). If the target already has a
+install `templates/checks/risk-route.sh` to `<repo>/checks/` (`chmod +x`), beside
+`../yad-checks/templates/checks/risk-map-check.sh` — risk-route reads the risk map through it, and
+without it every count says "not counted". `yad update` installs both. If the target already has a
 non-SDLC PR/MR template, do not clobber it — back it up / ask. Commit the template on the repo's default
 branch (shared infrastructure, not a task diff).
 
 ### Step 3 — `route` (show how many approvers)
-Run `bash checks/risk-route.sh <body>` to parse the PR description's Impact & Risk block and print the
-approver count:
+Run `bash checks/risk-route.sh <body> [<base>]` **inside the code repo, on the PR's branch** to parse the
+PR description's Impact & Risk block, read the base branch's risk map, and print the approver count:
 - **low | medium** risk → `ROUTE: 1 approver = base 1 (no risk step).`
 - **high** risk → `ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)`.
 - a **contract surface** touched → `ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface
   touched)`. With `high` too, the larger step (contract) wins, never the sum.
+- a change touching a directory the **base branch's** `.sdlc/risk-map` marks `high` → +1 as well (E66),
+  even when the body says `low`: the larger step wins, and the script says the two disagree. A `guessed`
+  level counts. When the map cannot be read, it says so and counts the body alone.
 
 When the count is raised, the script adds that only the base holds the merge until the capacity cap
 (1 approval from someone other than the author), that the risk step is advisory, and lists the touched
