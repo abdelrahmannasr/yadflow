@@ -17892,3 +17892,41 @@ test('proven history: a shallow clone or a failing git is "not read", never "nob
     fs.rmSync(C, { recursive: true, force: true });
   } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
 });
+
+test('proven history: the JS reader sees a quoted path and a move out, exactly as the bash twin does', async () => {
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const MAP = '# yad-risk-map v1\nsrc/ low confirmed\nsrc/payments/ high confirmed\n';
+  const r = repoWithBaseMap(MAP, { 'src/payments/plain.js': 'x' });
+  const at = (d) => new Date(Date.now() - d * 86400e3).toISOString();
+  const as = (name, email, date, files, msg) => {
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(r.T, rel)), { recursive: true });
+      fs.writeFileSync(path.join(r.T, rel), text);
+    }
+    execFileSync('git', ['add', '-A'], { cwd: r.T, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-q', '-m', msg], {
+      cwd: r.T,
+      stdio: 'pipe',
+      env: { ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_AUTHOR_DATE: at(date), GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email, GIT_COMMITTER_DATE: at(date) },
+    });
+  };
+  try {
+    git(r.T, 'checkout', '-q', 'main');
+    // git quotes this path unless it is asked for NUL-separated output; a quoted path covers no line.
+    // The old commit goes FIRST: git's date-limited walk stops at the first commit older than the
+    // window on a chain, so an old one in the middle would hide everything behind it (a stated limit).
+    as('Mover', 'mover@corp.io', 200, { 'src/payments/moved.js': 'x' }, 'feat: park it');
+    as('Cafe Writer', 'cafe@corp.io', 2, { 'src/payments/café.js': 'x' }, 'feat: odd name');
+    execFileSync('git', ['mv', 'src/payments/moved.js', 'src/moved.js'], { cwd: r.T, stdio: 'pipe' });
+    as('Mover', 'mover@corp.io', 1, {}, 'refactor: move out of payments');
+    git(r.T, 'update-ref', 'refs/remotes/origin/main', 'main');
+    git(r.T, 'checkout', '-q', 'feat/x');
+    git(r.T, 'rebase', '-q', 'main');
+    r.put({ 'src/payments/plain.js': 'y' });
+    r.commit('feat: the change');
+    const got = recentAuthorsFor(r.T, 'origin/main', { entries: parseRiskMap(MAP).entries, changed: ['src/payments/plain.js'] });
+    assert.deepEqual(got.authors.map((a) => a.name), ['Mover', 'Cafe Writer'],
+      'a move OUT of payments is work in payments, and a quoted path never drops its author');
+  } finally { fs.rmSync(r.T, { recursive: true, force: true }); }
+});

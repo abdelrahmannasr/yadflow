@@ -58,7 +58,8 @@ fi
 map_base="$(line_of BASE)"
 map_high=""
 # E67 — the people the check found with recent commits in those `high` directories: `WHO <login|-> <name>`.
-who_list() { printf '%s\n' "$lv" | sed -n 's/^WHO \([^ ]*\) /\1 /p' | awk '{ login = $1; $1 = ""; sub(/^ /, ""); printf "%s%s%s", sep, $0, (login == "-") ? "" : " (@" login ")"; sep = ", " }'; }
+# `$1 = ""` would rebuild the line with one space between fields and squash a name's own spacing.
+who_list() { printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-") ? "" : " (@" login ")"; sep = ", " }'; }
 if [ -n "$(line_of UNKNOWN)" ]; then
   echo "Risk map: not counted — $(line_of UNKNOWN). Only the body is counted."
 elif [ -n "$(line_of NOMAP)" ]; then
@@ -76,6 +77,11 @@ else
   [ -z "$map_medium" ] || echo "  medium (reported only, adds nothing): ${map_medium}"
   if [ -n "$map_high" ]; then
     hist_unknown="$(line_of HISTUNKNOWN)"; who="$(who_list)"
+    # A check older than E67 answers nothing about history: no WHO, and no HISTNONE saying it looked.
+    # Reading that silence as "nobody" would drop the ask — the same mistake as reading a failure as zero.
+    if [ -z "$hist_unknown" ] && [ -z "$who" ] && [ -z "$(printf '%s\n' "$lv" | sed -n 's/^HISTNONE$/x/p')" ]; then
+      hist_unknown="checks/risk-map-check.sh cannot answer this yet (it predates E67) — update it with \`yad update\`"
+    fi
     if [ -n "$hist_unknown" ]; then
       echo "  who has worked there lately: not read — ${hist_unknown}"
     elif [ -n "$who" ]; then
@@ -110,7 +116,7 @@ if [ "$step" -gt 0 ]; then
   if [ -n "$map_high" ] && [ -n "$(who_list)" ]; then
     echo "       This change touches ${map_high}, so it asks for an approval from someone who has"
     echo "       committed there in the last 30 days (its own authors left out):"
-    printf '%s\n' "$lv" | sed -n 's/^WHO \([^ ]*\) /\1 /p' | while IFS= read -r row; do
+    printf '%s\n' "$lv" | sed -n 's/^WHO //p' | while IFS= read -r row; do
       login="${row%% *}"; name="${row#* }"
       if [ "$login" = "-" ]; then echo "  - ${name}"; else echo "  - ${name} (@${login})"; fi
     done

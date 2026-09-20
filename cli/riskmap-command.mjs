@@ -107,7 +107,10 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
   }
   // \x01 starts a commit, \x1f separates its fields: NUL cannot be used, because an awk that reads C
   // strings (the twin's) would cut the line there. --no-merges: a merge commit is nobody's work here.
-  const log = git(['log', baseRef, '--no-merges', `--since=${window}`, '--format=%x01%an%x1f%ae', '--name-only']);
+  // -z: without it git quotes a path holding a non-ASCII byte, a `"`, a `\\` or a tab, and no map line
+  // could ever cover the quoted spelling — the person who wrote it would drop out of the list.
+  // --no-renames: a file moved OUT of a high directory is work in it, counted where it was (E66).
+  const log = git(['log', baseRef, '--no-merges', '--no-renames', `--since=${window}`, '--format=%x01%an%x1f%ae', '--name-only', '-z']);
   const own = git(['log', `${baseRef}..HEAD`, '--no-merges', '--format=%ae']);
   if (log.status !== 0 || own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
   return { authors: recentAuthors(entries, changed, parseGitLog(log.stdout), own.stdout.split('\n').filter(Boolean)) };
@@ -118,7 +121,9 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
 export function parseGitLog(stdout) {
   const commits = [];
   let cur = null;
-  for (const line of String(stdout || '').split('\n')) {
+  // NUL to newline, as the bash twin does: `-z` gives raw paths, and a path holding a newline is the
+  // one case both twins read differently (E65's own known limit).
+  for (const line of String(stdout || '').replace(/\0/g, '\n').split('\n')) {
     if (line.startsWith('\x01')) {
       const [name, email] = line.slice(1).split('\x1f');
       cur = { name, email, files: [] };

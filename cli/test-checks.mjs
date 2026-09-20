@@ -3413,3 +3413,84 @@ test('proven history: bash and cli/riskmap.mjs name the same people, in the same
   }
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('proven history: a path git would quote still counts — and its author is never dropped', () => {
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-histq-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  commitAs(T, { name: 'Seed', email: 'seed@corp.io', date: days(200) }, 'feat: seed', {
+    '.sdlc/risk-map': HIST_MAP, 'src/payments/plain.js': 'x', 'README.md': 'x',
+  });
+  // git prints these three quoted unless it is asked for NUL-separated output: a non-ASCII byte, a
+  // quote, a tab. A quoted path matches no map line, so its author would silently drop out.
+  commitAs(T, { ...ALICE, date: days(2) }, 'feat: odd names', {
+    'src/payments/café.js': 'x', 'src/payments/we"ird.js': 'x', 'src/payments/ta\tb.js': 'x',
+  });
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'pr');
+  commitAs(T, { name: 'Bob', email: 'bob@corp.io', date: days(0) }, 'feat: change', { 'src/payments/plain.js': 'y' });
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.deepEqual(whoLines(r.out), ['alice Alice'], r.out);
+  assert.doesNotMatch(r.out, /^HISTNONE$/m, 'a history that holds someone is never "nobody"');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('proven history: a move OUT of a high directory is work in it, in both twins', async () => {
+  const { parseRiskMap, recentAuthors } = await import('./riskmap.mjs');
+  const { parseGitLog } = await import('./riskmap-command.mjs');
+  const T = historyRepo({ aliceRecent: false });
+  git(T, 'checkout', '-q', 'main');
+  // The file is created LONG ago, so the move is the mover's only commit inside the window: without
+  // --no-renames the log shows only the new path, which no `high` line covers, and they vanish.
+  commitAs(T, { name: 'Mover', email: 'mover@corp.io', date: days(200) }, 'refactor: park it elsewhere', { 'src/payments/moved.js': 'x' });
+  git(T, 'mv', 'src/payments/moved.js', 'src/moved.js');
+  commitAs(T, { name: 'Mover', email: 'mover@corp.io', date: days(1) }, 'refactor: move out of payments');
+  git(T, 'checkout', '-q', 'pr'); git(T, 'rebase', '-q', 'main');
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.deepEqual(whoLines(r.out), ['- Mover'], r.out);
+  const log = git(T, 'log', 'main', '--no-merges', '--no-renames', '--since=30 days ago', '--format=%x01%an%x1f%ae', '--name-only', '-z').toString();
+  const own = git(T, 'log', 'main..HEAD', '--no-merges', '--format=%ae').toString().split('\n').filter(Boolean);
+  const js = recentAuthors(parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
+    git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean),
+    parseGitLog(log), own).map((a) => `${a.login || '-'} ${a.name}`);
+  assert.deepEqual(whoLines(r.out), js, 'bash and JS see the same move');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('proven history: a name keeps its own spacing wherever it is printed', () => {
+  const T = historyRepo({ aliceRecent: false });
+  git(T, 'checkout', '-q', 'main');
+  commitAs(T, { name: 'Ann  Lee', email: 'ann@corp.io', date: days(1) }, 'fix: payments', { 'src/payments/ann.js': 'ann' });
+  git(T, 'checkout', '-q', 'pr'); git(T, 'rebase', '-q', 'main');
+  const level = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.deepEqual(whoLines(level.out), ['- Ann  Lee'], level.out);
+  assert.match(runGate(RISK_MAP, T, ['main']).out, /ask one of these \([^)]*\): Ann {2}Lee\n/);
+  const route = wiredRoute(T);
+  const out = runGate(route, T, [body(T, '- Risk level: low\n- Contract surface touched: no\n'), 'main']).out;
+  assert.match(out, /worked there in the last 30 days: Ann {2}Lee\n/);
+  assert.match(out, /\n {2}- Ann {2}Lee\n/);
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-route: nobody with recent work says so — the check looked, and said it looked (HISTNONE)', () => {
+  const T = historyRepo({ aliceRecent: false });
+  const route = wiredRoute(T);
+  const r = runGate(route, T, [body(T, '- Risk level: low\n- Contract surface touched: no\n'), 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\n {2}nobody else has committed there in the last 30 days\n/, r.out);
+  assert.doesNotMatch(r.out, /not read/, 'the history WAS read; it held nobody');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('risk-route: a risk-map check that predates E67 is "not counted", never read as "nobody worked there"', () => {
+  const T = historyRepo();
+  const route = wiredRoute(T);
+  // An E66-era check: it counts the level but says nothing about history — no WHO, no HISTNONE.
+  const old = fs.readFileSync(path.join(T, 'checks/risk-map-check.sh'), 'utf8')
+    .replace(/^\s*base_history "\$_lv"$/m, '  :');
+  fs.writeFileSync(path.join(T, 'checks/risk-map-check.sh'), old);
+  const r = runGate(route, T, [body(T, '- Risk level: low\n- Contract surface touched: no\n'), 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /who has worked there lately: not read — checks\/risk-map-check\.sh cannot answer this yet \(it predates E67\)/, r.out);
+  assert.doesNotMatch(r.out, /nobody else has committed/);
+  fs.rmSync(T, { recursive: true, force: true });
+});

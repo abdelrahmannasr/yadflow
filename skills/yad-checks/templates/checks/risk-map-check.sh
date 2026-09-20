@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# risk-map check (E65, E66). Reads this repo's `.sdlc/risk-map` — one line per directory giving it a
+# risk-map check (E65, E66, E67). Reads this repo's `.sdlc/risk-map` — one line per directory giving it a
 # risk level (high / medium / low), no names — and WARNS when the map has gone stale for the change in
 # front of it. It never fails the build: a warning is how a team keeps the map true. No AI and no Node:
 # the same map and the same diff give the same output on every run.
@@ -11,6 +11,10 @@
 # an `unset` line and an uncovered directory add nothing. The change's files for the count include
 # deleted and moved-away files — deleting code in a `high` directory is a `high` change.
 #
+# It also names WHO can meet that ask (E67): everyone who committed in a `high` directory the change
+# touches in the last 30 days, from the BASE branch's history, this change's own authors left out. With
+# two `high` directories it is one list — someone who worked in any of them meets the ask.
+#
 #   risk-map-check.sh [<base>]           the warnings, then the count (CI runs this on every PR)
 #   risk-map-check.sh --level [<base>]   the count only, as machine lines, for checks/risk-route.sh:
 #                                          BASE <ref>
@@ -19,6 +23,8 @@
 #                                          FILES <n>          how many files the change touches
 #                                          LEVEL <high|medium|low|none>
 #                                          DIR <dir> <level> <guessed|confirmed>   one per touched line
+#                                          WHO <login|-> <name>   who committed lately in a high one
+#                                          HISTUNKNOWN <why>      that history could not be read
 #
 # It warns about:
 #   uncovered   a file this change adds or edits that no line covers — names the directory to add
@@ -303,14 +309,21 @@ base_history() {
   fi
   # The high directories are a PREFILTER only; the awk pass above decides by the map's cover rule.
   # \001 starts a commit and \037 separates its fields: a NUL would cut the line in an awk that reads
-  # C strings. --no-merges: a merge commit is nobody's work in these directories.
+  # C strings. --no-merges: a merge commit is nobody's work in these directories. -z, then NUL to
+  # newline: without it git QUOTES a path holding a non-ASCII byte, a `"`, a `\` or a tab
+  # (`"src/payments/caf\303\251.js"`), which no map line can ever cover — so the person who wrote it
+  # would silently drop out of the list. --no-renames: a file moved OUT of a high directory is work in
+  # it, counted where it was, exactly as the change's own files are (E66).
   # shellcheck disable=SC2086  # a map directory holds no space or tab (`validdir`), so the split is safe
-  git log "$BASE" --no-merges --since="$HISTORY_WINDOW" --format='%x01%an%x1f%ae' --name-only -- $_high > "$tmp/log" \
+  git log "$BASE" --no-merges --no-renames --since="$HISTORY_WINDOW" --format='%x01%an%x1f%ae' --name-only -z -- $_high | tr '\0' '\n' > "$tmp/log" \
     || { echo "HISTUNKNOWN git could not read the history of '${BASE}'"; return; }
   git log "${BASE}..HEAD" --no-merges --format='%ae' > "$tmp/own" \
     || { echo "HISTUNKNOWN git could not read this change's own authors"; return; }
-  awk -v mode=who -v mapf="$tmp/basemap" -v changedf="$tmp/all-changed" -v logf="$tmp/log" -v exclf="$tmp/own" \
-    "$RISK_MAP_AWK" "$tmp/basemap" "$tmp/all-changed" "$tmp/log" "$tmp/own"
+  # HISTNONE is printed when the history WAS read and held nobody. Without that positive marker a
+  # reader could not tell it from a check too old to answer at all, and would call that "nobody".
+  _who="$(awk -v mode=who -v mapf="$tmp/basemap" -v changedf="$tmp/all-changed" -v logf="$tmp/log" -v exclf="$tmp/own" \
+    "$RISK_MAP_AWK" "$tmp/basemap" "$tmp/all-changed" "$tmp/log" "$tmp/own")"
+  if [ -n "$_who" ]; then printf '%s\n' "$_who"; else echo "HISTNONE"; fi
 }
 
 if [ "$LEVEL_ONLY" = 1 ]; then base_level; exit 0; fi
@@ -335,7 +348,8 @@ NOMAP "*)
     [ -z "$medium" ] || echo "  medium on ${BASE} (reported only, adds nothing): ${medium}"
     # E67 — and who can meet the ask: an approval from someone who has worked there lately.
     if [ -n "$high" ]; then
-      who="$(printf '%s\n' "$lv" | sed -n 's/^WHO \([^ ]*\) /\1 /p' | awk '{ login = $1; $1 = ""; sub(/^ /, ""); printf "%s%s%s", sep, $0, (login == "-") ? "" : " (@" login ")"; sep = ", " }')"
+      # `$1 = ""` would rebuild the line with one space between fields and squash a name's own spacing.
+      who="$(printf '%s\n' "$lv" | sed -n 's/^WHO //p' | awk '{ login = $1; name = $0; sub(/^[^ ]* /, "", name); printf "%s%s%s", sep, name, (login == "-") ? "" : " (@" login ")"; sep = ", " }')"
       unknown_hist="$(printf '%s\n' "$lv" | sed -n 's/^HISTUNKNOWN //p')"
       if [ -n "$unknown_hist" ]; then
         echo "  who has worked there lately: not read — ${unknown_hist}."
