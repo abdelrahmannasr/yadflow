@@ -73,6 +73,29 @@ prints `ROUTE: 1 approver = base 1 (no risk step).` When the map raises a body t
 names the `high` directories and says the two disagree — tell the engineer, and ask the author to fix the
 body if the body is wrong. Record each approval; re-evaluate whether the base
 is met, and report any shortfall against the full count without blocking on it.
+
+**Proven history (E67).** When the change touches a `high` directory, `risk-route.sh` also prints the
+people who have **committed there in the last 30 days**, read from the base branch and with this
+change's own authors left out:
+
+```
+       This change touches src/payments/, so it asks for an approval from someone who has
+       committed there in the last 30 days (its own authors left out):
+  - Alice (@alice)
+```
+
+Report it as an ask, never as a block, and use exactly these three answers:
+
+| What you see | What to report |
+|---|---|
+| A recorded approver's login is one of the `(@login)` names | **met** |
+| The list is there, and no approver matches by login | **short** — name who could meet it |
+| A person is printed with no `(@login)`, or the printer says `not read` (a shallow clone, no history) | **could not confirm** — never "short" |
+
+The third row matters: an approval records a platform login, while git history records a name, and a
+login only comes from a `noreply` address. Different spellings of a name prove nothing either way, so
+say the ask could not be confirmed rather than inventing a shortfall. With nobody printed, there is
+nobody to ask for: the count stands on its own.
 Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
 approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
@@ -127,7 +150,9 @@ stays as it was (`ready-for-build`). Build is recorded in `build-log.json` + the
 
 - **AI review is advisory, never the authority.** Only a human engineer approval counts toward the gate.
 - **High risk raises the count** — the same count as `yad-review-gate` / `risk-route.sh`, and a `high`
-  directory on the base branch's risk map raises it too. Only the base holds the merge until the capacity
+  directory on the base branch's risk map raises it too; that directory also asks for an approver who has
+  worked there in the last 30 days (E67), reported in the same three states as everything else here:
+  met, short, or could not confirm. Only the base holds the merge until the capacity
   cap; there are no domain owners to route to.
 - **The ship record's `risk` is the body's level**, as the author wrote it — not the level the map raised
   it to. The count is worked out live each time and never stored (the user's decision, 2026-09-18).

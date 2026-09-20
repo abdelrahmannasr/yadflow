@@ -87,6 +87,9 @@ PR description's Impact & Risk block, read the base branch's risk map, and print
 - **high** risk → `ROUTE: 2 approvers = base 1 + high risk 1 (risk: high)`.
 - a **contract surface** touched → `ROUTE: 3 approvers = base 1 + contract risk 2 (contract surface
   touched)`. With `high` too, the larger step (contract) wins, never the sum.
+- a change touching a directory the **base branch's** `.sdlc/risk-map` marks `high` also asks for an
+  approval from someone who **committed there in the last 30 days** (E67) — the script names them, from
+  the base branch's history, without this change's own authors; "nobody" and "not read" are said apart.
 - a change touching a directory the **base branch's** `.sdlc/risk-map` marks `high` → +1 as well (E66),
   even when the body says `low`: the larger step wins, and the script says the two disagree. A `guessed`
   level counts. When the map cannot be read, it says so and counts the body alone.

@@ -87,7 +87,9 @@ is *created* against the right base.
 Once the PR is open, the CLI prints how many approvers it asks for — the same count the engineer review
 (`yad-engineer-review`) uses. It joins the body's level (`--risk`, `--contract-change`) with the code
 repo's risk map on `origin/<base>`: a change touching a `high` directory adds 1 even when the body says
-`low`, and the CLI warns that the two disagree. It only prints; the body keeps the author's level. If
+`low`, and the CLI warns that the two disagree. It also names who has **committed in those directories
+in the last 30 days** (E67) — the people who can meet that ask — or says plainly that nobody has, or
+that the history could not be read. It only prints; the body keeps the author's level. If
 the level in the body is wrong, fix the body on the PR. When the map cannot be read (no `origin/<base>`
 fetched, a newer map), it says so and counts the body alone. `bash checks/risk-route.sh "<pr body>"`
 also lists the touched domains as a hint for whom to ask; request those reviewers on the PR/MR yourself.

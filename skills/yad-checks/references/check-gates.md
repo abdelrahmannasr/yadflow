@@ -378,8 +378,33 @@ COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on
   shares no history with HEAD, or holds a map for a newer version: **no COUNT line**, and a note that the
   count is unknown, not zero.
 
+**Who can meet the ask (E67).** Under the count, for each `high` directory, the check names the people
+who have committed there in the last 30 days:
+
+```
+  ask one of these (committed there in the last 30 days, this change's own authors left out): Alice (@alice)
+  nobody else has committed there in the last 30 days — the count above still stands.
+  who has worked there lately: not read — this is a shallow clone — it does not hold the history of those directories.
+```
+
+- The history is the **base branch's** (`git log <base> --since='30 days ago' --no-merges`), so a change
+  cannot add its own; git filters on the **committer** date. The change's own authors are left out,
+  because an approval has to come from someone else, and a robot (`…[bot]`) is never listed.
+- A commit counts for a directory by the map's **cover rule**, not by a path prefix: with
+  `src/payments/ high` and `src/payments/legacy/ low`, work in `legacy/` is not payments history. The
+  `high` directories are handed to `git log` only as a prefilter; the map decides.
+- A person is their git **name**, plus `(@login)` only when the commit address is a platform `noreply`
+  one. No e-mail address is ever printed.
+- A **shallow clone** says "not read", never "nobody": it holds only the newest commits, and reading
+  that as "nobody has worked here" would drop the ask instead of raising it. Wired CI checks out the
+  full history (`fetch-depth: 0`, `GIT_DEPTH: 0`), so this is a local or host-overridden case.
+- **Known limit:** git's date-limited walk stops at the first commit older than the window on a chain,
+  so a repo whose commit dates run out of order (a wrong clock, an imported history) can hide people
+  behind that commit. It under-lists, so the printed people are always real ones.
+
 `risk-map-check.sh --level [<base>]` prints the same result as machine lines (`BASE`, `UNKNOWN`, `NOMAP`,
-`FILES`, `LEVEL`, `DIR <dir> <level> <state>`) for `checks/risk-route.sh`, which joins it with the PR
+`FILES`, `LEVEL`, `DIR <dir> <level> <state>`, `WHO <login|-> <name>`, `HISTUNKNOWN <why>`) for
+`checks/risk-route.sh`, which joins it with the PR
 body. One awk program serves both the warnings and the count. Its twin is `changeLevel` in
 `cli/riskmap.mjs`, and a parity test compares the two. **Known limits:** like every check here, the
 script runs from the PR's own checkout, so a PR can edit the script itself; that matters once the count
