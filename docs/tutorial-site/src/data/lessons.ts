@@ -538,7 +538,7 @@ export const MODULES: Module[] = [
             '**build / test / lint** — the usual.',
             '**verified-commits** — every commit is signed with a platform-Verified key. There is no author allowlist: write access to the repository decides who may author.',
             '**pattern gates** — commit-message, pr-title, and pr-template conventions.',
-            '**risk-map** — warnings only, never a failure: a directory this change adds with no level in `.sdlc/risk-map`, a line whose directory is gone, or a level still `guessed`. It also prints the approver count: a change touching a directory the base branch\'s map marks `high` asks for one more.',
+            '**risk-map** — warnings only, never a failure: a directory this change adds with no level in `.sdlc/risk-map`, a line whose directory is gone, or a level still `guessed`. It also prints the approver count: a change touching a directory the base branch\'s map marks `high` asks for one more, from someone who committed there in the last 30 days.',
           ] },
           { kind: 'callout', tone: 'info', text: 'These exist already in Yadflow — wiring them is a one-time setup step. This is the "preventing bad AI code from reaching the PR" wall.' },
         ],
@@ -564,7 +564,7 @@ export const MODULES: Module[] = [
         level: 'intermediate',
         summary: 'AI review (advisory) → engineer review (human) → merge.',
         body: [
-          { kind: 'p', text: 'Finally, `yad-engineer-review`: an AI review (CodeRabbit) runs first as an **advisory** pass — never the authority. Then a human engineer approves, under the same count rule: 1 approver, who should not be the author, with high risk, a contract surface, or a `high` directory on the base branch\'s risk map raising the advisory count. yadflow requests no reviewers — ask them on the PR itself.' },
+          { kind: 'p', text: 'Finally, `yad-engineer-review`: an AI review (CodeRabbit) runs first as an **advisory** pass — never the authority. Then a human engineer approves, under the same count rule: 1 approver, who should not be the author, with high risk, a contract surface, or a `high` directory on the base branch\'s risk map raising the advisory count — and that directory asking for an approver who has worked there in the last 30 days. yadflow requests no reviewers — ask them on the PR itself.' },
           { kind: 'p', text: 'On merge, the ship is recorded in `build-log.json` and the story moves to `in-build` → `shipped`. The epic → story → task → PR → merge-commit chain stays traceable both ways.' },
           { kind: 'callout', tone: 'key', text: 'A story tagged for multiple repos runs the whole Build in each repo independently, all from the one locked contract.' },
         ],

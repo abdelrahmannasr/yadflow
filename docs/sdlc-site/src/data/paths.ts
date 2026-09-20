@@ -370,7 +370,7 @@ const buildSteps: FlowStep[] = [
     id: "checks",
     title: "Check Gates (Step C)",
     description:
-      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt), the risk-map check (warnings only — a directory with no level, a dead line, an unconfirmed level in the repo's .sdlc/risk-map — plus the approver count: a PR touching a directory the base branch's map marks high asks for one more), and yad-update-guard (push-on-default: re-checks any direct-to-default commit — e.g. from `yad update --push` — with verified-commits + commit-message). Blocking in CI, except the advisory risk-map check.",
+      "Wire and run the CI gates: spec-link, contract-check (a surface change without Contract-Change + a re-lock FAILS), build/test/lint, verified-commits, the pattern gates (commit-message / pr-title / pr-template), the Phase 6 thread gates (lineage-check / epic-open / reconcile-debt), the risk-map check (warnings only — a directory with no level, a dead line, an unconfirmed level in the repo's .sdlc/risk-map — plus the approver count: a PR touching a directory the base branch's map marks high asks for one more, from someone who committed there in the last 30 days), and yad-update-guard (push-on-default: re-checks any direct-to-default commit — e.g. from `yad update --push` — with verified-commits + commit-message). Blocking in CI, except the advisory risk-map check.",
     actor: "system",
     status: "checks-passing",
     stepState: "checks/*.sh · yad-checks.yml",
@@ -387,7 +387,7 @@ const buildSteps: FlowStep[] = [
     id: "pr-template",
     title: "PR/MR Template (Step D)",
     description:
-      "Detect the repo's platform and commit the matching PR/MR template with an Impact & Risk block. High risk adds 1 to the approval count and a contract surface adds 2 — the same count as yad-review-gate; a high directory on the base branch's risk map adds 1 too, the larger step winning. risk-route.sh prints it and lists the touched domains as a hint for whom to ask.",
+      "Detect the repo's platform and commit the matching PR/MR template with an Impact & Risk block. High risk adds 1 to the approval count and a contract surface adds 2 — the same count as yad-review-gate; a high directory on the base branch's risk map adds 1 too, the larger step winning, and asks for an approver who has committed there in the last 30 days. risk-route.sh prints it and lists the touched domains as a hint for whom to ask.",
     actor: "dev",
     status: "pr-ready",
     stepState: "pull_request_template.md",
