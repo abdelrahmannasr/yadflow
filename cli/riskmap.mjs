@@ -188,8 +188,9 @@ export function highTouched(entries, changed) {
 // listed line decides, so each of those directories answers for itself in its own query (git lets an
 // exclude beat a later include, so they cannot share one).
 // `./` is the files AT the root: `:(glob)*` matches a top-level entry only, because `*` never spans `/`.
-// EVERY path is `:(literal)`: a directory name may legally start with `:` (`validDir` allows it), and git
-// reads a leading `:` as pathspec MAGIC — `:weird/` would answer about `weird/`, and `:/` about the whole
+// Every path built FROM A MAP NAME is `:(literal)` (`./` is the exception: it names no directory, and
+// becomes `:(glob)*`). A directory name may legally start with `:` (`validDir` allows it), and git reads
+// a leading `:` as pathspec MAGIC — `:weird/` would answer about `weird/`, and `:/` about the whole
 // repo. A map name must describe a directory to git, never tell git what to do.
 export function pathspecsFor(entries, dir) {
   if (dir === './') return [':(glob)*'];

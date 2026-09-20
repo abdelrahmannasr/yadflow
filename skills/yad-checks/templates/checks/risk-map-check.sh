@@ -328,8 +328,9 @@ base_history() {
     if [ "$_d" = "./" ]; then
       set -- ':(glob)*'
     else
-      # Every path is `:(literal)`: a directory name may legally start with `:`, and git reads that as
-      # pathspec MAGIC — `:weird/` would answer about `weird/`, and `:/` about the whole repo.
+      # Every path built from a MAP NAME is `:(literal)` (`./`, just above, names no directory and is
+      # `:(glob)*`): a name may legally start with `:`, and git reads that as pathspec MAGIC —
+      # `:weird/` would answer about `weird/`, and `:/` about the whole repo.
       set -- ":(literal)${_d}"
       for _e in $_all; do
         case "$_e" in "$_d"?*) set -- "$@" ":(exclude,literal)${_e}" ;; esac
