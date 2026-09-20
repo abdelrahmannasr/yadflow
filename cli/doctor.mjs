@@ -1804,8 +1804,10 @@ export function shapeChecks(checks, root, { plan: injected = null } = {}) {
 }
 
 // The risk map of each connected code repo (E65): one line per directory giving it a level, no names.
-// Advisory like the PR check — a stale map warns and never fails doctor, because nothing counts the map
-// until E66. A repo that is not on disk, or not a git repo, is the repos check's to report, not this one's.
+// Advisory like the PR check — a stale map warns and never fails doctor. Doctor prints no approver count:
+// the count (E66) is a fact about one change, read by the PR check, `checks/risk-route.sh` and `yad open-pr`,
+// and doctor has no change in front of it. A repo that is not on disk, or not a git repo, is the repos
+// check's to report, not this one's.
 export function riskMapChecks(checks, root) {
   const registry = readJSON(path.join(root, PROJECT_FILES.reposRegistry), { repos: [] });
   const repos = Array.isArray(registry?.repos) ? registry.repos : [];

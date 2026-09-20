@@ -4,8 +4,9 @@
 //
 // WHAT IT IS FOR. Part 3's escalation needs to know which code is risky. A hard-coded guess from file
 // names (`RISK_PATTERNS`, cli/walkthrough.mjs) breaks on every naming habit, so the team keeps its own
-// answer, one line per directory. E66 turns a `high` directory into the high step (+1); E67 asks who
-// has committed to it. Until then nothing counts the map: it is read, checked and reported.
+// answer, one line per directory. E66 turns a `high` directory into the high step (+1), read from the
+// map on the BASE branch (`changeLevel`); E67 asks who has committed to it. The step is REPORTED, like
+// every risk step until the capacity cap (E72): only the base of one approver holds a merge.
 //
 // WHO WRITES IT. `yad risk-map draft` adds a line for every directory nothing covers, as `unset`. The
 // `yad-connect-repos` skill has an AI agent read the code and fill each `unset` line with a level, a
@@ -119,6 +120,38 @@ export function coverOf(entries, file) {
     if (e.dir !== './' && file.startsWith(e.dir) && (!best || e.dir.length > best.dir.length)) best = e;
   }
   return best;
+}
+
+// E66 — ESCALATE BY COUNT. The approvals a level adds: `high` is the high step, +1 — the same step and
+// the same tier name `gateRuleFor` gives an `auth` or `payments` tag (cli/epic-state.mjs), so the two
+// vocabularies print one sum (`base 1 + high risk 1`). `medium` is reported only; `low` adds nothing. A
+// test pins `high` to `auth`'s step, so moving one without the other fails.
+export const LEVEL_STEP = { high: 1, medium: 0, low: 0 };
+const LEVEL_RANK = { low: 1, medium: 2, high: 3 };
+
+// The level ONE change takes from a map: the highest level among the lines that decide the files it
+// changes. Pure — the caller reads the map from the BASE branch, so a change cannot lower its own count
+// by editing the map (E66). `changed` should hold every path the change adds, edits, deletes or moves
+// away from: deleting code in a `high` directory is a `high` change. Returns:
+//   level  'high' | 'medium' | 'low', or null when no touched line has a level
+//   step   the approvals that level adds (`LEVEL_STEP`)
+//   dirs   [{ dir, level, state }] for every touched line with a level, in map order
+// Rules the roadmap closed: a `guessed` level counts exactly as a `confirmed` one (it can only ask for
+// one more human, never let a gate pass); an `unset` line and a file no line covers add nothing (they
+// are warned about, never counted as `high`). A map for a newer version was not read, so its level is
+// unknown — `unsupported: true`, which a caller must say, never read as "nothing is high".
+// The twin is the `--level` mode of `checks/risk-map-check.sh`; the parity test compares the two.
+export function changeLevel(parsed, changed = []) {
+  if (!parsed.supported) return { level: null, step: 0, dirs: [], unsupported: true };
+  const touched = new Set();
+  for (const f of changed) {
+    const e = coverOf(parsed.entries, f);
+    if (e && e.level !== 'unset') touched.add(e);
+  }
+  const dirs = parsed.entries.filter((e) => touched.has(e)).map(({ dir, level, state }) => ({ dir, level, state }));
+  let level = null;
+  for (const d of dirs) if (!level || LEVEL_RANK[d.level] > LEVEL_RANK[level]) level = d.level;
+  return { level, step: level ? LEVEL_STEP[level] : 0, dirs };
 }
 
 // The directory to add for a file no line covers. Walk down from the root while some listed line sits

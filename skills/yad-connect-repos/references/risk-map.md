@@ -5,8 +5,11 @@ gives each directory a risk level. It holds **no names** — no people, no roles
 It is the team's file: `yad update` never installs, owns or overwrites it, and it changes only through
 that repo's PRs (E65).
 
-Nothing counts the levels yet. E66 will turn a `high` directory into one more required approval; E67
-will ask who has committed to it. Until then the map is kept, checked and reported.
+**What the levels do (E66).** A change touching a `high` directory asks for one more approver. The count
+reads the map on the **base branch**, so a PR cannot lower its own count, and a `guessed` level counts
+exactly as a `confirmed` one. That is why a guess matters: a `high` guess adds a reviewer to every change
+under that directory until a person confirms or changes it. `medium` and `low` add nothing. The count is
+reported, not enforced, until the capacity cap (E72). E67 will ask who has committed to a `high` directory.
 
 ## Format
 

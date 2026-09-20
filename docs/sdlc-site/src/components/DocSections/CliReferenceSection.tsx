@@ -36,7 +36,7 @@ const GROUPS = [
       'yad ship --type <t> -m <subject> — commit AND open the PR/MR in one step',
       'yad repo list / yad repo refresh [name] — fresh/stale code-context',
       'yad repo refresh [name] --push — publish refreshed code-maps + the registry to the Product default branch (chore(hub): sync code-context [skip ci])',
-      'yad risk-map check|draft [repo] — a code repo\'s .sdlc/risk-map: a risk level per directory (high / medium / low), no names. draft adds unset lines and never changes one; check warns where the map is stale (advisory)',
+      'yad risk-map check|draft [repo] — a code repo\'s .sdlc/risk-map: a risk level per directory (high / medium / low), no names. draft adds unset lines and never changes one; check warns where the map is stale (advisory). A PR touching a directory the base branch\'s map marks high asks for one more approver (reported, not enforced)',
     ],
   },
 ];
@@ -45,7 +45,7 @@ const FLAGS = [
   { risk: '--dir <path>', mitigation: 'target a project other than the cwd', level: 'low' },
   { risk: '--ai <claude|copilot|cursor|coderabbit|none>', mitigation: 'per-commit Co-Authored-By footer (the human still owns the commit)', level: 'low' },
   { risk: '--contract-change', mitigation: 'mark a diff that touches the locked contract surface (routes back to architecture)', level: 'high' },
-  { risk: '--risk <low|medium|high>', mitigation: 'filled into the PR body\'s Risk level; high (or a contract surface) raises the approval count — risk-route.sh prints it; the extra approvers are advisory', level: 'medium' },
+  { risk: '--risk <low|medium|high>', mitigation: 'filled into the PR body\'s Risk level; high (or a contract surface, or a high directory on the base branch\'s risk map) raises the approval count — open-pr and risk-route.sh print it; the extra approvers are advisory', level: 'medium' },
 ];
 
 const LEVEL_COLORS: Record<string, string> = { high: '#ca6f1e', medium: '#b7950b', low: '#1e8449' };

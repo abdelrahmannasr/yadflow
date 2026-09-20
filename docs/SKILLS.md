@@ -171,7 +171,8 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   re-locked contract FAILS), **build/test/lint**, **verified-commits** (every commit platform-signed),
   and the **pattern gates** — **commit-message** (Conventional subject + trailer order), **pr-title**,
   and **pr-template** (the PR/MR body uses the template), plus the advisory **risk-map** check (warns,
-  never fails, when the repo's `.sdlc/risk-map` is stale for the change). Also wires **yad-update-guard** — a
+  never fails, when the repo's `.sdlc/risk-map` is stale for the change, and prints the approver count:
+  a change touching a directory the base branch's map marks `high` asks for one more — E66). Also wires **yad-update-guard** — a
   push-on-default workflow that re-checks any direct-to-default commit (e.g. from `yad update --push`)
   with just **verified-commits** + **commit-message**. Profile-aware (`code`|`hub`), so they run on
   both code repos and the Product. CI-agnostic bash for GitHub Actions and GitLab CI. Also
@@ -180,6 +181,7 @@ for it" table is in the [team guide §11](../TEAM-GUIDE.md).
   `ledger-guard` reject it in CI twenty minutes later (#171).
 - **`yad-pr-template`** — Step D. Detect the repo's platform and commit the matching PR/MR template with
   an Impact & Risk block; `high` risk adds 1 to the approval count and a touched contract surface adds 2.
+  A `high` directory on the base branch's risk map adds 1 too, the larger step winning (E66).
   Includes `risk-route.sh` plus the `pr-title.sh` / `pr-template.sh` gate scripts.
 - **`yad-commit`** — build helper. Commit ONE staged atomic change by the conventions (Conventional
   subject, `Task → Contract-Change → Co-Authored-By` trailers, the `--ai` co-author footer, the ≤3-file
