@@ -17859,7 +17859,9 @@ test('proven history: which directories are asked about, and who drops out of th
   assert.deepEqual(highTouched(entries, ['src/payments/pay.js']).map((e) => e.dir), ['src/payments/']);
   // The deepest listed line decides, so a `low` child is cut out of its parent's query and answers for
   // itself in its own — an exclude beats a later include, so they can never share one query.
-  assert.deepEqual(pathspecsFor(entries, 'src/payments/'), ['src/payments/', ':(exclude)src/payments/legacy/']);
+  // Every path is `:(literal)`: a map may list a directory whose name starts with `:`, and git would
+  // read that as pathspec magic — `:weird/` answers about `weird/`, `:/` about the whole repo.
+  assert.deepEqual(pathspecsFor(entries, 'src/payments/'), [':(literal)src/payments/', ':(exclude,literal)src/payments/legacy/']);
   assert.deepEqual(pathspecsFor(entries, './'), [':(glob)*'], '`./` is the files AT the root');
 
   // WHO drops out of what those queries returned.

@@ -328,9 +328,11 @@ base_history() {
     if [ "$_d" = "./" ]; then
       set -- ':(glob)*'
     else
-      set -- "$_d"
+      # Every path is `:(literal)`: a directory name may legally start with `:`, and git reads that as
+      # pathspec MAGIC — `:weird/` would answer about `weird/`, and `:/` about the whole repo.
+      set -- ":(literal)${_d}"
       for _e in $_all; do
-        case "$_e" in "$_d"?*) set -- "$@" ":(exclude)${_e}" ;; esac
+        case "$_e" in "$_d"?*) set -- "$@" ":(exclude,literal)${_e}" ;; esac
       done
     fi
     git log "$BASE" --no-merges --no-renames --full-history --since="$HISTORY_WINDOW" --format='%an%x1f%ae' -- "$@" >> "$tmp/log" \

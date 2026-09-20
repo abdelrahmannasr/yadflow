@@ -3565,3 +3565,27 @@ test('proven history: `./` is the files AT the root — work in a folder below i
   assert.deepEqual(js.authors.map((a) => a.name), ['Rooter'], 'the JS twin agrees');
   fs.rmSync(T, { recursive: true, force: true });
 });
+
+test('proven history: a directory whose name starts with `:` is a directory, never git pathspec magic', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-histmagic-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  // `:weird/` is a legal map line. Written to git bare, the leading `:` is read as pathspec magic and
+  // git answers about `weird/` instead — naming someone who never worked in the `high` directory.
+  const MAP = '# yad-risk-map v1\n:weird/ high confirmed\nweird/ low confirmed\n';
+  commitAs(T, { name: 'Seed', email: 'seed@corp.io', date: days(200) }, 'feat: seed', {
+    '.sdlc/risk-map': MAP, ':weird/w.js': 'x', 'weird/p.js': 'x',
+  });
+  commitAs(T, { name: 'Colonist', email: 'colon@corp.io', date: days(2) }, 'fix: the odd directory', { ':weird/w.js': 'y' });
+  commitAs(T, { name: 'Plainer', email: 'plain@corp.io', date: days(2) }, 'fix: the plain one', { 'weird/p.js': 'y' });
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'pr');
+  commitAs(T, { name: 'Bob', email: 'bob@corp.io', date: days(0) }, 'feat: change', { ':weird/w.js': 'z' });
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(whoLines(r.out), ['- Colonist'], r.out);
+  const js = recentAuthorsFor(T, 'main', { entries: parseRiskMap(MAP).entries, changed: [':weird/w.js'] });
+  assert.deepEqual(js.authors.map((a) => a.name), ['Colonist'], 'the JS twin agrees');
+  fs.rmSync(T, { recursive: true, force: true });
+});
