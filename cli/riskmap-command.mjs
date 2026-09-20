@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import { c, fail, hand, info, log, ok, readJSONStrict, run, warn } from './lib.mjs';
 import { PROJECT_FILES } from './manifest.mjs';
-import { changeLevel, draftRiskMap, parseRiskMap, recentAuthors, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
+import { changeLevel, draftRiskMap, highTouched, parseRiskMap, pathspecsFor, recentAuthors, RISK_MAP_FILE, riskMapFindings } from './riskmap.mjs';
 
 // Every file in a code repo, as the map sees it: tracked files plus new files git does not ignore, so a
 // directory someone has just created is asked about before it is committed. null when it is not a git repo.
@@ -95,9 +95,13 @@ export function baseChangeLevel(repoRoot, baseRef) {
 export const HISTORY_WINDOW = '30 days ago';
 
 // E67 — the people with recent commits in the `high` directories this change touches, read from the BASE
-// branch's history so a change cannot add its own. `window` is handed to git as written (`--since`), and
-// git filters on the COMMITTER date, so a rebased or squashed commit counts from when it landed.
-// Returns { authors: [{ name, login }] }, or { unknown: why } — never an empty list for a history it
+// branch's history so a change cannot add its own. ONE QUERY PER DIRECTORY, each carrying the pathspecs
+// that describe that directory as the map sees it (`pathspecsFor`), so git applies the cover rule and
+// returns author records only — no file names are read back, which is what let an odd path name the
+// wrong person. `window` is handed to git as written (`--since`), and git filters on the COMMITTER date,
+// so a rebased or squashed commit counts from when it landed.
+// Returns { authors: [{ name, login }] } — the people in map order of the directory they worked in,
+// newest first within each, nobody twice — or { unknown: why }, never an empty list for a history it
 // could not read: a shallow clone holds only the newest commits, and reading that as "nobody has worked
 // here" would drop the ask instead of raising it. The twin is `--level` in checks/risk-map-check.sh.
 export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window = HISTORY_WINDOW } = {}) {
@@ -105,45 +109,23 @@ export function recentAuthorsFor(repoRoot, baseRef, { entries, changed, window =
   if (/true/.test(git(['rev-parse', '--is-shallow-repository']).stdout || '')) {
     return { unknown: 'this is a shallow clone — it does not hold the history of those directories' };
   }
-  // \x01 starts a commit, \x1f separates its fields: NUL cannot be used, because an awk that reads C
-  // strings (the twin's) would cut the line there. --no-merges: a merge commit is nobody's work here.
-  // -z: without it git quotes a path holding a non-ASCII byte, a `"`, a `\\` or a tab, and no map line
-  // could ever cover the quoted spelling — the person who wrote it would drop out of the list.
-  // --no-renames: a file moved OUT of a high directory is work in it, counted where it was (E66).
-  // --full-history changes nothing here (it only matters with a pathspec, which the bash twin uses to
-  // narrow the log); it is passed so both twins ask git the same question.
-  const log = git(['log', baseRef, '--no-merges', '--no-renames', '--full-history', `--since=${window}`, '--format=%x01%an%x1f%ae', '--name-only', '-z']);
   const own = git(['log', `${baseRef}..HEAD`, '--no-merges', '--format=%ae']);
-  if (log.status !== 0 || own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
-  const commits = parseGitLog(log.stdout);
-  if (commits.pathNewline) return { unknown: 'a file name in this history holds a newline — it cannot be read safely' };
-  return { authors: recentAuthors(entries, changed, commits, own.stdout.split('\n').filter(Boolean)) };
-}
-
-// `git log --format=%x01%an%x1f%ae --name-only` into [{ name, email, files }], newest first. A path is
-// every other non-empty line; git prints no path for a commit that changed none.
-// Newline to \x02 first, then NUL to newline — byte for byte what the bash twin does, so both read a
-// path the same way. git separates a commit's header from its paths with a newline, so without the swap
-// a path that HOLDS one would split in two and its second half could be read as a file somewhere else.
-// `pathNewline` says that happened; a caller must then treat the history as unknown, never as a shorter
-// list of people.
-export function parseGitLog(stdout) {
+  if (own.status !== 0) return { unknown: `git could not read the history of '${baseRef}'` };
   const commits = [];
-  let cur = null;
-  let pathNewline = false;
-  for (const line of String(stdout || '').replace(/\n/g, '\x02').replace(/\0/g, '\n').split('\n')) {
-    if (line.startsWith('\x01')) {
-      const [name, email] = line.slice(1).split('\x1f');
-      cur = { name, email, files: [] };
-      commits.push(cur);
-    } else if (line && cur) {
-      const p = line.replace(/^\x02/, '');
-      if (p.includes('\x02')) pathNewline = true;
-      else cur.files.push(p);
+  for (const e of highTouched(entries, changed)) {
+    // --no-merges: a merge commit is nobody's work here. --no-renames: a file moved OUT of the directory
+    // is work in it, counted where it was (E66). --full-history: without it git simplifies a
+    // path-filtered log and hides a side branch whose merge kept the other side.
+    const r = git(['log', baseRef, '--no-merges', '--no-renames', '--full-history', `--since=${window}`,
+      '--format=%an%x1f%ae', '--', ...pathspecsFor(entries, e.dir)]);
+    if (r.status !== 0) return { unknown: `git could not read the history of '${e.dir}' on '${baseRef}'` };
+    for (const line of r.stdout.split('\n')) {
+      if (!line) continue;
+      const [name, email] = line.split('\x1f');
+      commits.push({ name, email });
     }
   }
-  commits.pathNewline = pathNewline;
-  return commits;
+  return { authors: recentAuthors(commits, own.stdout.split('\n').filter(Boolean)) };
 }
 
 export function checkRepo(repoRoot) {

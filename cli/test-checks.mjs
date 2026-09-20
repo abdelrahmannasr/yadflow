@@ -3493,14 +3493,15 @@ test('risk-route: a risk-map check that predates E67 is "not counted", never rea
   fs.rmSync(T, { recursive: true, force: true });
 });
 
-test('proven history: a file name holding a newline is "not read" — it never names someone who was elsewhere', async () => {
+test('proven history: a file name holding a newline names nobody — git applies the map, we never read a path', async () => {
   const { parseRiskMap } = await import('./riskmap.mjs');
   const { recentAuthorsFor } = await import('./riskmap-command.mjs');
   const T = historyRepo({ aliceRecent: false });
   git(T, 'checkout', '-q', 'main');
-  // One file, whose NAME holds a newline, inside the `low` child of a `high` directory. Split on that
-  // newline, its second half reads as `src/payments/ghost.js` — work in the `high` one, by someone who
-  // never touched it.
+  // One file, whose NAME holds a newline, inside the `low` child of a `high` directory. When a list of
+  // file names was read back from git, that name split in two and its second half read as
+  // `src/payments/ghost.js` — work in the `high` directory by someone who never touched it. Now the
+  // query excludes the `low` child itself, so git never offers the name at all.
   const dir = path.join(T, 'src/payments/legacy/oops\nsrc/payments');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'ghost.js'), 'x');
@@ -3509,13 +3510,12 @@ test('proven history: a file name holding a newline is "not read" — it never n
   const r = runGate(RISK_MAP, T, ['--level', 'main']);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(whoLines(r.out), [], r.out);
-  assert.match(r.out, /^HISTUNKNOWN a file name in this history holds a newline/m, r.out);
+  assert.match(r.out, /^HISTNONE$/m, 'the history was read and held nobody — not a refusal, and not a wrong name');
   const js = recentAuthorsFor(T, 'main', {
     entries: parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
     changed: ['src/payments/pay.js'],
   });
-  assert.match(js.unknown, /holds a newline/, 'both twins refuse, rather than disagree');
-  assert.equal(js.authors, undefined);
+  assert.deepEqual(js.authors, [], 'both twins agree, and neither refuses');
   fs.rmSync(T, { recursive: true, force: true });
 });
 
@@ -3539,5 +3539,29 @@ test('proven history: a side branch whose merge kept the other side still counts
     changed: git(T, 'diff', '--name-only', '-z', '--no-renames', 'main...HEAD').toString().split('\0').filter(Boolean),
   });
   assert.deepEqual(js.authors.map((a) => a.name).sort(), ['Mai', 'Sid'], 'the JS reader sees the same');
+  fs.rmSync(T, { recursive: true, force: true });
+});
+
+test('proven history: `./` is the files AT the root — work in a folder below it is not that history', async () => {
+  const { parseRiskMap } = await import('./riskmap.mjs');
+  const { recentAuthorsFor } = await import('./riskmap-command.mjs');
+  const T = fs.mkdtempSync(path.join(os.tmpdir(), 'sdlc-histroot-'));
+  git(T, 'init', '-q'); git(T, 'config', 'user.email', 'a@b.c'); git(T, 'config', 'user.name', 'x');
+  commitAs(T, { name: 'Seed', email: 'seed@corp.io', date: days(200) }, 'feat: seed', {
+    '.sdlc/risk-map': '# yad-risk-map v1\n./ high confirmed\nsrc/ low confirmed\n',
+    'deploy.sh': 'x', 'src/a.js': 'x',
+  });
+  commitAs(T, { name: 'Rooter', email: 'root@corp.io', date: days(2) }, 'chore: the deploy script', { 'deploy.sh': 'y' });
+  commitAs(T, { name: 'Deeper', email: 'deep@corp.io', date: days(2) }, 'feat: inside src', { 'src/a.js': 'y' });
+  git(T, 'branch', '-q', '-M', 'main');
+  git(T, 'checkout', '-q', '-b', 'pr');
+  commitAs(T, { name: 'Bob', email: 'bob@corp.io', date: days(0) }, 'chore: change the root script', { 'deploy.sh': 'z' });
+  const r = runGate(RISK_MAP, T, ['--level', 'main']);
+  assert.deepEqual(whoLines(r.out), ['- Rooter'], r.out);
+  const js = recentAuthorsFor(T, 'main', {
+    entries: parseRiskMap(git(T, 'show', 'main:.sdlc/risk-map').toString()).entries,
+    changed: ['deploy.sh'],
+  });
+  assert.deepEqual(js.authors.map((a) => a.name), ['Rooter'], 'the JS twin agrees');
   fs.rmSync(T, { recursive: true, force: true });
 });

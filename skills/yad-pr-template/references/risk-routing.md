@@ -101,7 +101,8 @@ authors left out (an approval has to come from someone else). A robot is never l
 as their git name, plus `(@login)` only when their commit address is a platform `noreply` one — yadflow
 prints no e-mail addresses. "Recent" is git's `--since`, which uses the **committer** date, so a rebased
 or squashed commit counts from when it landed. Work in a `low` directory *inside* a `high` one is not
-history for the `high` one: the deepest map line decides, as everywhere else.
+history for the `high` one: the deepest map line decides, and git applies that itself — one query per
+directory, excluding the listed directories below it, so no file name is ever read back out of git.
 
 When a change touches more than one `high` directory, the people are printed as ONE list: someone who
 has worked in any of them meets the ask, and the output does not say who worked where.

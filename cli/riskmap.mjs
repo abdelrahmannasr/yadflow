@@ -174,28 +174,37 @@ export function loginFromEmail(email) {
 // the login rule above reject it, so without this it would be listed by name as if it could approve.
 const isBot = (name, email) => /\[bot\]$/i.test(String(name || '').trim()) || /\[bot\]@/i.test(String(email || ''));
 
-// The people whose recent commits are in the `high` directories this change touches.
-//
-// `entries` is the BASE branch's map, `changed` this change's files, `commits` the BASE branch's recent
-// log as [{ name, email, files }] in git's order (newest first), and `excludeEmails` the authors of the
-// change itself — an approval has to come from someone else, so their own recent work never counts.
-//
-// A commit counts for a directory by the map's own cover rule, NOT by a path prefix: with
-// `src/payments/ high` and `src/payments/legacy/ low`, a commit to `legacy/` is not payments history,
-// because the deepest listed line decides (E65).
-//
-// Returns [{ name, login }] — one row per person, in the order git printed their newest commit, deduped
-// by e-mail address. The address itself never leaves this function (nor does `yad` ever print one).
-export function recentAuthors(entries, changed, commits, excludeEmails = []) {
-  const high = new Set();
-  for (const f of changed) { const e = coverOf(entries, f); if (e && e.level === 'high') high.add(e); }
+// The `high` directories this change touches, in map order. One git query runs per directory.
+export function highTouched(entries, changed) {
+  const hit = new Set();
+  for (const f of changed) { const e = coverOf(entries, f); if (e && e.level === 'high') hit.add(e); }
+  return entries.filter((e) => hit.has(e));
+}
+
+// The git pathspecs that mean "this directory, as the MAP sees it". Git then applies the map's cover
+// rule itself, and nothing has to read a list of file names back out of git — which is what made a
+// quoted path, a path holding a newline, or a merge's simplified path list able to name the wrong
+// person. Every listed directory strictly below `dir` is excluded, whatever its level: the deepest
+// listed line decides, so each of those directories answers for itself in its own query (git lets an
+// exclude beat a later include, so they cannot share one).
+// `./` is the files AT the root: `:(glob)*` matches a top-level entry only, because `*` never spans `/`.
+export function pathspecsFor(entries, dir) {
+  if (dir === './') return [':(glob)*'];
+  return [dir, ...entries.filter((e) => e.dir !== dir && e.dir.startsWith(dir)).map((e) => `:(exclude)${e.dir}`)];
+}
+
+// The people to name, from the author records those queries returned: `commits` is [{ name, email }] in
+// the order git printed them (newest first, one run per directory in map order), and `excludeEmails` the
+// authors of the change itself — an approval has to come from someone else, so their own work never
+// counts. A robot is never a person who can approve. Deduped by address; the address itself never leaves
+// this function (nor does `yad` ever print one).
+export function recentAuthors(commits, excludeEmails = []) {
   const skip = new Set(excludeEmails.map((e) => String(e).toLowerCase()));
   const seen = new Set();
   const out = [];
   for (const cm of commits) {
     const key = String(cm.email || '').toLowerCase();
     if (seen.has(key) || skip.has(key) || isBot(cm.name, cm.email)) continue;
-    if (!cm.files.some((f) => high.has(coverOf(entries, f)))) continue;
     seen.add(key);
     out.push({ name: cm.name, login: loginFromEmail(cm.email) });
   }

@@ -17848,29 +17848,32 @@ test('proven history: the login comes only from a noreply address, and it is the
   assert.equal(loginFromEmail('49699333+dependabot[bot]@users.noreply.github.com'), null);
 });
 
-test('proven history: only the high directory counts, by the cover rule; bots, own authors and repeats drop out', async () => {
-  const { parseRiskMap, recentAuthors } = await import('./riskmap.mjs');
+test('proven history: which directories are asked about, and who drops out of the answer', async () => {
+  const { parseRiskMap, recentAuthors, highTouched, pathspecsFor } = await import('./riskmap.mjs');
   const { entries } = parseRiskMap([
-    '# yad-risk-map v1', 'src/ low confirmed', 'src/payments/ high confirmed',
+    '# yad-risk-map v1', './ low confirmed', 'src/ low confirmed', 'src/payments/ high confirmed',
     'src/payments/legacy/ low confirmed', 'src/catalog/ medium confirmed',
   ].join('\n'));
+  // WHICH directories git is asked about — the cover rule, as pathspecs git applies itself.
+  assert.deepEqual(highTouched(entries, ['src/catalog/c.js', 'README.md']), [], 'nothing high: no query at all');
+  assert.deepEqual(highTouched(entries, ['src/payments/pay.js']).map((e) => e.dir), ['src/payments/']);
+  // The deepest listed line decides, so a `low` child is cut out of its parent's query and answers for
+  // itself in its own — an exclude beats a later include, so they can never share one query.
+  assert.deepEqual(pathspecsFor(entries, 'src/payments/'), ['src/payments/', ':(exclude)src/payments/legacy/']);
+  assert.deepEqual(pathspecsFor(entries, './'), [':(glob)*'], '`./` is the files AT the root');
+
+  // WHO drops out of what those queries returned.
   const commits = [
-    { name: 'Bob', email: 'bob@corp.io', files: ['src/payments/pay.js'] },                 // the change's own author
-    { name: 'dependabot[bot]', email: '1+dependabot[bot]@users.noreply.github.com', files: ['src/payments/pay.js'] },
-    { name: 'Alice', email: '12345+alice@users.noreply.github.com', files: ['src/payments/pay.js', 'README.md'] },
-    { name: 'Larry', email: 'larry@corp.io', files: ['src/payments/legacy/old.js'] },       // a `low` line inside a `high` one
-    { name: 'Cathy', email: 'cathy@corp.io', files: ['src/catalog/c.js'] },                 // medium adds nothing
-    { name: 'Alice again', email: 'ALICE@corp.io', files: ['src/payments/pay.js'] },        // a second address is a second row
-    { name: 'Alice', email: '12345+alice@users.noreply.github.com', files: ['src/payments/pay.js'] },  // already listed
-    { name: 'Nobody', email: 'n@corp.io', files: [] },
+    { name: 'Bob', email: 'bob@corp.io' },                                            // the change's own author
+    { name: 'dependabot[bot]', email: '1+dependabot[bot]@users.noreply.github.com' }, // a robot
+    { name: 'Alice', email: '12345+alice@users.noreply.github.com' },
+    { name: 'Alice again', email: 'ALICE@corp.io' },                                  // a second address is a second row
+    { name: 'Alice', email: '12345+alice@users.noreply.github.com' },                 // already listed
   ];
-  const got = recentAuthors(entries, ['src/payments/pay.js'], commits, ['BOB@corp.io']);
-  assert.deepEqual(got, [
+  assert.deepEqual(recentAuthors(commits, ['BOB@corp.io']), [
     { name: 'Alice', login: 'alice' },
     { name: 'Alice again', login: null },
-  ], 'newest first, deduped by address, the change\'s own author left out whatever its case');
-  // Nothing high in the change: nobody is asked for, however much history exists.
-  assert.deepEqual(recentAuthors(entries, ['src/catalog/c.js'], commits, []), []);
+  ], 'git\'s order, deduped by address, the change\'s own author left out whatever its case');
 });
 
 test('proven history: a shallow clone or a failing git is "not read", never "nobody"', async () => {

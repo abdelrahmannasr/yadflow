@@ -13,7 +13,9 @@
 #
 # It also names WHO can meet that ask (E67): everyone who committed in a `high` directory the change
 # touches in the last 30 days, from the BASE branch's history, this change's own authors left out. With
-# two `high` directories it is one list — someone who worked in any of them meets the ask.
+# two `high` directories it is one list — someone who worked in any of them meets the ask. Git is asked
+# one directory at a time, through pathspecs that carry the map's cover rule, and answers with author
+# records only: no file name is ever read back out of git.
 #
 #   risk-map-check.sh [<base>]           the warnings, then the count (CI runs this on every PR)
 #   risk-map-check.sh --level [<base>]   the count only, as machine lines, for checks/risk-route.sh:
@@ -179,14 +181,10 @@ FILENAME == mapf {
   next
 }
 FILENAME == logf {
-  if (substr($0, 1, 1) == "\001") { nl++; split(substr($0, 2), lf, "\037"); lan[nl] = lf[1]; lae[nl] = lf[2]; next }
-  if ($0 == "" || !nl) next
-  # One leading \002 is the separator git puts between a commit header and its first path. A \002 still
-  # inside the line is a newline in the file NAME, which no line of this map could be matched against
-  # safely — the whole history is then unknown, never a shorter list of people.
-  _p = $0; sub(/^\002/, "", _p)
-  if (index(_p, "\002")) { pathnl = 1; next }
-  lfc[nl]++; lfl[nl, lfc[nl]] = _p
+  # Author records only: `<name>\037<address>`, newest first, one run per `high` directory in map order.
+  # No file name is ever read back from git: the pathspecs already applied the cover rule of the map.
+  if ($0 == "") next
+  nl++; split($0, lf, "\037"); lan[nl] = lf[1]; lae[nl] = lf[2]
   next
 }
 FILENAME == exclf { if ($0 != "") excl[tolower($0)] = 1; next }
@@ -213,23 +211,20 @@ function loginof(e,   at, local, domain) {
 }
 # A robot, not a person: an approval can never come from one, and `dependabot[bot]` has no login.
 function isbot(n, e) { return (tolower(trim(n)) ~ /\[bot\]$/ || tolower(e) ~ /\[bot\]@/) }
-# E67, the --level mode`s second pass: who committed lately in the `high` directories this change
-# touches. A commit counts by the map`s COVER rule, not by a path prefix — with `src/payments/ high`
-# and `src/payments/legacy/ low`, work in `legacy/` is not payments history. One row per person, in
-# git`s order (newest first), deduped by address, the change`s own authors left out.
-function who_out(   j, i, k, hit, key) {
-  if (pathnl) { print "HISTUNKNOWN a file name in this history holds a newline — it cannot be read safely"; return }
-  for (j = 1; j <= nc; j++) { k = cover(fc[j]); if (k && el[k] == "high") ht[k] = 1 }
+# E67, the --level mode`s second pass: the people to name, from the author records the per-directory
+# queries returned. One row per person, in the order git printed them, deduped by address, the change`s
+# own authors and every robot left out.
+function who_out(   j, key) {
   for (j = 1; j <= nl; j++) {
     key = tolower(lae[j])
     if ((key in seenau) || (key in excl) || isbot(lan[j], lae[j])) continue
-    hit = 0
-    for (i = 1; i <= lfc[j]; i++) { k = cover(lfl[j, i]); if (k && (k in ht)) { hit = 1; break } }
-    if (!hit) continue
     seenau[key] = 1
     printf "WHO %s %s\n", (loginof(lae[j]) == "") ? "-" : loginof(lae[j]), lan[j]
   }
 }
+# Every directory the base`s map lists, in map order — the shell turns them into the include/exclude
+# pathspecs that make git apply the cover rule.
+function dirs_out(   i) { for (i = 1; i <= ne; i++) print "ENTRY " ed[i] }
 # E66, the --level mode: the level this change takes from the map (the twin of `changeLevel` in
 # cli/riskmap.mjs). The highest level among the lines that decide the changed files; `unset` and an
 # uncovered file add nothing; `guessed` counts as `confirmed`. Parse problems add nothing either.
@@ -245,6 +240,7 @@ function level_out(   j, k, i, best) {
 END {
   if (mode == "level") { level_out(); exit }
   if (mode == "who") { who_out(); exit }
+  if (mode == "dirs") { dirs_out(); exit }
   if (unsupported) {
     warn("version", "v" badv, "written for risk-map v" badv "; this release reads v1 — nothing in it was read")
   } else {
@@ -309,34 +305,43 @@ base_level() {
 # `HISTUNKNOWN <why>` — never silence for a history it could not read: a shallow clone holds only the
 # newest commits, and reading that as "nobody has worked here" would drop the ask instead of raising it.
 base_history() {
-  _high="$(printf '%s\n' "$1" | awk '$1 == "DIR" && $3 == "high" { print $2 }')"
+  _lvl="$1"
+  _high="$(printf '%s\n' "$_lvl" | awk '$1 == "DIR" && $3 == "high" { print $2 }')"
   [ -n "$_high" ] || return 0
   _shallow="$(git rev-parse --is-shallow-repository 2>/dev/null)" || _shallow=""
   if [ "$_shallow" = true ]; then
     echo "HISTUNKNOWN this is a shallow clone — it does not hold the history of those directories"; return
   fi
-  # The high directories narrow the log, and the awk pass decides by the map's cover rule. --full-history
-  # is load-bearing WITH that pathspec: git otherwise simplifies history and drops a side-branch commit
-  # whose merge kept the other side, hiding someone who really did commit in the directory.
-  # \001 starts a commit and \037 separates its fields: a NUL would cut the line in an awk that reads
-  # C strings. --no-merges: a merge commit is nobody's work in these directories. -z, then NUL to
-  # newline: without it git QUOTES a path holding a non-ASCII byte, a `"`, a `\` or a tab
-  # (`"src/payments/caf\303\251.js"`), which no map line can ever cover — so the person who wrote it
-  # would silently drop out of the list. --no-renames: a file moved OUT of a high directory is work in
-  # it, counted where it was, exactly as the change's own files are (E66).
+  # Every directory the base's map lists, so each query can exclude the ones below the one it asks about.
+  _all="$(awk -v mode=dirs -v mapf="$tmp/basemap" "$RISK_MAP_AWK" "$tmp/basemap" | sed -n 's/^ENTRY //p')"
+  : > "$tmp/log"
+  # ONE QUERY PER `high` DIRECTORY, in map order, and git is asked for author records only — no file
+  # name is ever read back. The pathspecs say what the MAP means by that directory: itself, minus every
+  # listed directory below it, because the deepest listed line decides and each of those answers for
+  # itself in its own query (an exclude beats a later include, so they cannot share one query). `./` is
+  # the files AT the root: `:(glob)*` matches a top-level entry only, because `*` never spans `/`.
+  # --no-merges: a merge commit is nobody's work here. --no-renames: a file moved OUT of the directory is
+  # work in it, counted where it was (E66). --full-history: without it git simplifies a path-filtered log
+  # and hides a side branch whose merge kept the other side.
   # shellcheck disable=SC2086  # a map directory holds no space or tab (`validdir`), so the split is safe
-  # \n -> \002 FIRST, then \0 -> \n: git separates a commit's header from its paths with a newline, so
-  # a path that HOLDS a newline would otherwise split into two lines and its second half could be read
-  # as a file in another directory — naming someone who never worked there. After this swap the split
-  # is visible (a \002 left inside a path line) and the history is refused instead.
-  git log "$BASE" --no-merges --no-renames --full-history --since="$HISTORY_WINDOW" --format='%x01%an%x1f%ae' --name-only -z -- $_high | tr '\n' '\002' | tr '\0' '\n' > "$tmp/log" \
-    || { echo "HISTUNKNOWN git could not read the history of '${BASE}'"; return; }
+  for _d in $_high; do
+    if [ "$_d" = "./" ]; then
+      set -- ':(glob)*'
+    else
+      set -- "$_d"
+      for _e in $_all; do
+        case "$_e" in "$_d"?*) set -- "$@" ":(exclude)${_e}" ;; esac
+      done
+    fi
+    git log "$BASE" --no-merges --no-renames --full-history --since="$HISTORY_WINDOW" --format='%an%x1f%ae' -- "$@" >> "$tmp/log" \
+      || { echo "HISTUNKNOWN git could not read the history of '${_d}' on '${BASE}'"; return; }
+  done
   git log "${BASE}..HEAD" --no-merges --format='%ae' > "$tmp/own" \
     || { echo "HISTUNKNOWN git could not read this change's own authors"; return; }
   # HISTNONE is printed when the history WAS read and held nobody. Without that positive marker a
   # reader could not tell it from a check too old to answer at all, and would call that "nobody".
-  _who="$(awk -v mode=who -v mapf="$tmp/basemap" -v changedf="$tmp/all-changed" -v logf="$tmp/log" -v exclf="$tmp/own" \
-    "$RISK_MAP_AWK" "$tmp/basemap" "$tmp/all-changed" "$tmp/log" "$tmp/own")"
+  _who="$(awk -v mode=who -v mapf="$tmp/basemap" -v logf="$tmp/log" -v exclf="$tmp/own" \
+    "$RISK_MAP_AWK" "$tmp/basemap" "$tmp/log" "$tmp/own")"
   if [ -n "$_who" ]; then printf '%s\n' "$_who"; else echo "HISTNONE"; fi
 }
 

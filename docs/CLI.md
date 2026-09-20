@@ -770,7 +770,7 @@ any of them meets the ask.
 | Rule | Why |
 |---|---|
 | The history is the **base branch's**, and this change's own authors are left out. | A change cannot add its own history, and an approval has to come from someone else. |
-| A commit counts by the map's **cover rule**. Work in a `low` directory inside a `high` one is not history for the `high` one. | The deepest map line decides, as everywhere else. |
+| Git itself applies the map's **cover rule**, through one query per `high` directory: work in a `low` directory inside a `high` one is not history for the `high` one. | The deepest map line decides, as everywhere else — and nothing has to read a list of file names back out of git, where an odd name could name the wrong person. |
 | A person is shown as their git **name**, plus `(@login)` only when their commit address is a platform `noreply` one. | yadflow prints no e-mail addresses. A work address names no login. |
 | A robot (`dependabot[bot]`) is never listed. | An approval can never come from one. |
 | Nobody with recent work is said plainly, and the count stands. | A new or dormant directory can never make a change unreviewable. |
