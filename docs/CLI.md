@@ -763,8 +763,9 @@ Three places print it, and none of them writes it anywhere:
 - `yad open-pr` prints the same count once the PR is open. The PR body keeps the level its author gave.
 
 **Who can meet the ask: proven history (E67).** A `high` directory asks for one more approver, and the
-same three places name the people who can be that approver: everyone who has **committed in that
-directory in the last 30 days**.
+same three places name the people who can be that approver: whoever has **committed in one of those
+directories in the last 30 days**. Two `high` directories give one list, not one list each: working in
+any of them meets the ask.
 
 | Rule | Why |
 |---|---|
@@ -778,9 +779,11 @@ directory in the last 30 days**.
 "Recent" is git's `--since`, which uses the **committer** date, so a rebased or squashed commit counts
 from when it landed. Nothing is stored: the query runs each time, and no name reaches a file.
 
-`yad-engineer-review` reports it in three states — **met** when a recorded approver's login is one of the
-named people, **short** when none is, and **could not confirm** when the people have no login to compare
-(an approval records a platform login; git history records a name). It never blocks.
+`yad-engineer-review` reports it in three states, in this order: **met** when a recorded approver's login
+is one of the named people (compared without case); **could not confirm** when the history was not read,
+or when no approver matches and a named person has no login to compare against (an approval records a
+platform login; git history records a name); and **short** only when no approver matches and every named
+person does have a login. It never blocks.
 
 The Shape gate (`yad gate status`, `gate sync`, the review-PR body) does not read the map. It reviews
 Product files, not a code change, so its count still comes from each step's `risk_tags`. `yad doctor`

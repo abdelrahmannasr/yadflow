@@ -378,8 +378,9 @@ COUNT [risk-map]: 1 approver = base 1 — nothing this change touches is high on
   shares no history with HEAD, or holds a map for a newer version: **no COUNT line**, and a note that the
   count is unknown, not zero.
 
-**Who can meet the ask (E67).** Under the count, for each `high` directory, the check names the people
-who have committed there in the last 30 days:
+**Who can meet the ask (E67).** Under the count, the check names the people who have committed in the
+last 30 days in the `high` directories this change touches. With two such directories it is ONE list:
+someone who has worked in any of them meets the ask, and the output never says who worked where.
 
 ```
   ask one of these (committed there in the last 30 days, this change's own authors left out): Alice (@alice)

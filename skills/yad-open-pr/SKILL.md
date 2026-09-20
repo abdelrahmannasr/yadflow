@@ -45,8 +45,9 @@ the Product.
 - **Assignee** — the person opening it: `@me` on GitHub (`gh` resolves it on the repo's own host), and
   on GitLab the login `glab` reports (no assignee is passed when that lookup fails). **No reviewers are
   requested** (E62): yadflow keeps no list of people. The CLI prints `no
-  reviewers were requested — ask them on the PR itself`. A later roadmap row (E68) will suggest reviewers
-  from history; CODEOWNERS is a hint only.
+  reviewers were requested — ask them on the PR itself`. For a `high` directory the CLI already names the people
+  who have worked there lately (E67, Step 3); a later row (E68) will suggest reviewers from history for
+  any directory, with CODEOWNERS as a hint only.
 - **Routing** — the merge needs 1 approval from someone other than the author (the base). `high` risk
   adds 1, a touched contract surface adds 2, and a change touching a `high` directory on the base
   branch's risk map adds 1 (E66) — the larger, never the sum. That risk step is advisory until the

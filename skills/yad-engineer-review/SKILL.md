@@ -86,16 +86,27 @@ change's own authors left out:
 
 Report it as an ask, never as a block, and use exactly these three answers:
 
-| What you see | What to report |
-|---|---|
-| A recorded approver's login is one of the `(@login)` names | **met** |
-| The list is there, and no approver matches by login | **short** — name who could meet it |
-| A person is printed with no `(@login)`, or the printer says `not read` (a shallow clone, no history) | **could not confirm** — never "short" |
+Work down these rows in order and stop at the first that fits — a mixed list, where one person has a
+login and another does not, fits more than one:
 
-The third row matters: an approval records a platform login, while git history records a name, and a
-login only comes from a `noreply` address. Different spellings of a name prove nothing either way, so
-say the ask could not be confirmed rather than inventing a shortfall. With nobody printed, there is
-nobody to ask for: the count stands on its own.
+| In order | What you see | What to report |
+|---|---|---|
+| 1 | A recorded approver's login is one of the `(@login)` names, ignoring upper and lower case | **met** |
+| 2 | The printer says `not read` (a shallow clone, or git could not read the history) | **could not confirm** |
+| 3 | No approver matches, and at least one named person has NO `(@login)` | **could not confirm** — name everyone printed, and say the names could not be compared |
+| 4 | No approver matches, and every named person has a `(@login)` | **short** — name who could meet it |
+
+Rows 2 and 3 matter: an approval records a platform login, while git history records a name, and a login
+only comes from a `noreply` address. Different spellings of a name prove nothing either way, so say the
+ask could not be confirmed rather than inventing a shortfall. Logins are compared without case, because
+a platform login is case-insensitive and the printer shows it as the address wrote it.
+
+With nobody printed at all — `nobody else has committed there in the last 30 days` — there is nobody to
+ask for, and the count stands on its own. That line, and `not read`, are printed higher up in the
+`Risk map (…)` section, not inside the `ROUTE` paragraph above.
+
+**One list, not one per directory.** When a change touches two `high` directories, the people are printed
+as one list: someone who has worked in ANY of them meets the ask. Nothing says which person worked where.
 Record `engagement: verified` when the engineer reviewed through the companion (else `none` for a bare
 approve); `yad review reconcile --epic <id> --repo <r> --pr <n>` stamps it onto the ship record from the
 platform (mutating the ship's shard where it lives, or its folded entry if already tidied). Soft by default (both count; a bare approve draws `yad review nudge`); only gates when
